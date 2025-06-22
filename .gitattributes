@@ -1,1 +1,1 @@
-Sources/SherpaOnnxWrapper/lib/libonnxruntime.a filter=lfs diff=lfs merge=lfs -text
+Sources/SherpaOnnxWrapperC/lib/*.a filter=lfs diff=lfs merge=lfs -text

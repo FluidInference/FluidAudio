@@ -1338,7 +1338,7 @@ class SherpaOnnxOfflineSpeakerDiarizationWrapper {
         return []
     }
 
-    // 4) Now sort them — this won’t be nil if numSegments > 0
+    // 4) Now sort them — this won't be nil if numSegments > 0
     guard let p = SherpaOnnxOfflineSpeakerDiarizationResultSortByStartTime(result) else {
         print("[❌ Diarizer] SortByStartTime returned nil despite numSegments = \(numSegments)")
         SherpaOnnxOfflineSpeakerDiarizationDestroyResult(result)

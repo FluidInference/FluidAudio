@@ -1,5 +1,9 @@
 // swift-tools-version: 5.9
 import PackageDescription
+import Foundation
+
+// Use SwiftPM's built-in package directory resolution
+let packageDir = Context.packageDirectory
 
 let package = Package(
     name: "SeamlessAudioSwift",
@@ -20,17 +24,36 @@ let package = Package(
         .target(
             name: "SeamlessAudioSwift",
             dependencies: ["SherpaOnnxWrapper"],
-            path: "Sources/SeamlessAudioSwift"
+            path: "Sources/SeamlessAudioSwift",
+            linkerSettings: [
+                .unsafeFlags(["-L\(packageDir)/Sources/SherpaOnnxWrapperC/lib"]),
+                .linkedLibrary("onnxruntime"),
+                .linkedLibrary("piper_phonemize"),
+                .linkedLibrary("sherpa-onnx"),
+                .linkedLibrary("sherpa-onnx-c-api"),
+                .linkedLibrary("sherpa-onnx-core"),
+                .linkedLibrary("sherpa-onnx-cxx-api"),
+                .linkedLibrary("sherpa-onnx-fst"),
+                .linkedLibrary("sherpa-onnx-fstfar"),
+                .linkedLibrary("sherpa-onnx-kaldifst-core"),
+                .linkedLibrary("sherpa-onnx-portaudio_static"),
+                .linkedLibrary("ssentencepiece_core"),
+                .linkedLibrary("ucd"),
+                .linkedLibrary("c++")
+            ]
+        ),
+        .target(
+            name: "SherpaOnnxWrapper",
+            dependencies: ["SherpaOnnxWrapperC"],
+            path: "Sources/SherpaOnnxWrapper"
         ),
         .systemLibrary(
-            name: "SherpaOnnxWrapper",
-            path: "Sources/SherpaOnnxWrapper",
-            pkgConfig: "sherpa-onnx"
+            name: "SherpaOnnxWrapperC",
+            path: "Sources/SherpaOnnxWrapperC"
         ),
         .testTarget(
             name: "SeamlessAudioSwiftTests",
-            dependencies: ["SeamlessAudioSwift"],
-            path: "Tests/SeamlessAudioSwiftTests"
+            dependencies: ["SeamlessAudioSwift"]
         ),
     ]
 )
