@@ -66,7 +66,7 @@ for segment in segments {
 - **iOS**: 16.0+
 - **macOS**: 13.0+
 - **Xcode**: 16.0+
-- **Swift**: 6.0+
+- **Swift**: 6.1+
 
 ## Models and Attribution
 
