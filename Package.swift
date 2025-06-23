@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 import Foundation
 
@@ -45,7 +45,8 @@ let package = Package(
         .target(
             name: "SherpaOnnxWrapper",
             dependencies: ["SherpaOnnxWrapperC"],
-            path: "Sources/SherpaOnnxWrapper"
+            path: "Sources/SherpaOnnxWrapper",
+            exclude: ["lib/"]
         ),
         .systemLibrary(
             name: "SherpaOnnxWrapperC",

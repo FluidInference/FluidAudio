@@ -95,7 +95,7 @@ public struct AudioValidationResult: Sendable {
 
 /// Main class for speaker diarization functionality
 @available(macOS 13.0, iOS 16.0, *)
-public final class SpeakerDiarizationManager: Sendable {
+public final class SpeakerDiarizationManager {
     private let logger = Logger(subsystem: "com.speakerkit", category: "SpeakerDiarization")
     private let config: SpeakerDiarizationConfig
 

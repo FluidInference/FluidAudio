@@ -65,8 +65,8 @@ for segment in segments {
 
 - **iOS**: 16.0+
 - **macOS**: 13.0+
-- **Xcode**: 14.0+
-- **Swift**: 5.9+
+- **Xcode**: 16.0+
+- **Swift**: 6.0+
 
 ## Models and Attribution
 
@@ -120,3 +120,12 @@ For questions and support:
 ---
 
 **Note**: This package includes pre-compiled libraries and models. The first build may take longer due to the size of the dependencies.
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
