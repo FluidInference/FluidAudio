@@ -1,0 +1,18 @@
+module SherpaOnnxWrapperC {
+    header "include/c-api.h"
+    export *
+
+    link "onnxruntime"
+    link "piper_phonemize"
+    link "sherpa-onnx"
+    link "sherpa-onnx-c-api"
+    link "sherpa-onnx-core"
+    link "sherpa-onnx-cxx-api"
+    link "sherpa-onnx-fst"
+    link "sherpa-onnx-fstfar"
+    link "sherpa-onnx-kaldifst-core"
+    link "sherpa-onnx-portaudio_static"
+    link "ssentencepiece_core"
+    link "ucd"
+    link "c++"
+}

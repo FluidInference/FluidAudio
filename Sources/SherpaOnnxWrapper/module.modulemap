@@ -1,0 +1,4 @@
+module SherpaOnnxWrapper {
+    header "include/c-api.h"
+    export *
+}
