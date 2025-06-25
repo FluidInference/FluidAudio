@@ -1,9 +1,5 @@
 // swift-tools-version: 6.1
 import PackageDescription
-import Foundation
-
-// Use SwiftPM's built-in package directory resolution
-let packageDir = Context.packageDirectory
 
 let package = Package(
     name: "FluidAudioSwift",
@@ -28,7 +24,10 @@ let package = Package(
         ),
         .testTarget(
             name: "FluidAudioSwiftTests",
-            dependencies: ["FluidAudioSwift"]
+            dependencies: ["FluidAudioSwift"],
+            resources: [
+                .copy("README_BENCHMARKS.md")
+            ]
         ),
     ]
 )

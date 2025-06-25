@@ -9,14 +9,53 @@ on:
 jobs:
   test:
     name: Test Suite
-    runs-on: macos-latest
+    runs-on: macos-latest  # Use latest macOS for Swift 6.1 support
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Select Xcode version
-      run: sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+      run: |
+        # Try to use Xcode 16.x for Swift 6.1 support, fallback to latest available
+        if [ -d "/Applications/Xcode_16.1.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_16.1.app/Contents/Developer
+          echo "Using Xcode 16.1"
+        elif [ -d "/Applications/Xcode_16.0.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer
+          echo "Using Xcode 16.0"
+        elif [ -d "/Applications/Xcode_15.4.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+          echo "Using Xcode 15.4"
+        elif [ -d "/Applications/Xcode_15.3.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_15.3.app/Contents/Developer
+          echo "Using Xcode 15.3"
+        else
+          # Use the latest available
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          echo "Using latest available Xcode"
+        fi
+
+    - name: Install Swift 6.1 if needed
+      run: |
+        SWIFT_VERSION=$(swift --version | head -n1)
+        echo "Current Swift version: $SWIFT_VERSION"
+
+        if [[ "$SWIFT_VERSION" == *"6.1"* ]]; then
+          echo "✅ Swift 6.1 is already available"
+        else
+          echo "⚠️  Swift 6.1 not found, attempting to install via swiftly..."
+          # Install swiftly (Swift toolchain manager)
+          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
+          export PATH="$HOME/.swiftly/bin:$PATH"
+
+          # Install Swift 6.1
+          swiftly install 6.1-release
+          swiftly use 6.1-release
+
+          echo "Swift 6.1 installed via swiftly"
+          swift --version
+        fi
 
     - name: Show Swift version
       run: swift --version
@@ -66,7 +105,35 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Select Xcode version
-      run: sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+      run: |
+        # Try to use Xcode 16.x for Swift 6.1 support, fallback to latest available
+        if [ -d "/Applications/Xcode_16.1.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_16.1.app/Contents/Developer
+        elif [ -d "/Applications/Xcode_16.0.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer
+        elif [ -d "/Applications/Xcode_15.4.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+        elif [ -d "/Applications/Xcode_15.3.app" ]; then
+          sudo xcode-select -s /Applications/Xcode_15.3.app/Contents/Developer
+        else
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+        fi
+
+    - name: Install Swift 6.1 if needed
+      run: |
+        SWIFT_VERSION=$(swift --version | head -n1)
+        echo "Current Swift version: $SWIFT_VERSION"
+
+        if [[ "$SWIFT_VERSION" == *"6.1"* ]]; then
+          echo "✅ Swift 6.1 is already available"
+        else
+          echo "⚠️  Swift 6.1 not found, attempting to install via swiftly..."
+          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
+          export PATH="$HOME/.swiftly/bin:$PATH"
+          swiftly install 6.1-release
+          swiftly use 6.1-release
+          echo "Swift 6.1 installed via swiftly"
+        fi
 
     - name: Build benchmarks
       run: swift build --target FluidAudioSwiftPackageTests
@@ -102,6 +169,22 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Install Swift 6.1 if needed
+      run: |
+        SWIFT_VERSION=$(swift --version | head -n1)
+        echo "Current Swift version: $SWIFT_VERSION"
+
+        if [[ "$SWIFT_VERSION" == *"6.1"* ]]; then
+          echo "✅ Swift 6.1 is already available"
+        else
+          echo "⚠️  Swift 6.1 not found, attempting to install via swiftly..."
+          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
+          export PATH="$HOME/.swiftly/bin:$PATH"
+          swiftly install 6.1-release
+          swiftly use 6.1-release
+          echo "Swift 6.1 installed via swiftly"
+        fi
 
     - name: Check Swift formatting
       run: |
