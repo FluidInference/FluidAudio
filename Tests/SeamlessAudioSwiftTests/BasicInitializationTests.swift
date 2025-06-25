@@ -4,12 +4,6 @@ import XCTest
 final class BasicInitializationTests: XCTestCase {
 
     func testDiarizerFactoryCreatesCorrectBackends() {
-        // Test SherpaOnnx backend
-        let sherpaConfig = DiarizerConfig(backend: .sherpaOnnx)
-        let sherpaManager = DiarizerFactory.createManager(config: sherpaConfig)
-        XCTAssertEqual(sherpaManager.backend, .sherpaOnnx)
-        XCTAssertTrue(sherpaManager is SherpaOnnxDiarizerManager)
-
         // Test CoreML backend
         let coremlConfig = DiarizerConfig(backend: .coreML)
         let coremlManager = DiarizerFactory.createManager(config: coremlConfig)
@@ -18,90 +12,75 @@ final class BasicInitializationTests: XCTestCase {
     }
 
     func testConvenienceFactoryMethods() {
-        // Test SherpaOnnx convenience factory
-        let sherpaManager = DiarizerFactory.createSherpaOnnxManager()
-        XCTAssertEqual(sherpaManager.backend, .sherpaOnnx)
-        XCTAssertFalse(sherpaManager.isAvailable) // Not initialized yet
-
         // Test CoreML convenience factory
         let coremlManager = DiarizerFactory.createCoreMLManager()
         XCTAssertEqual(coremlManager.backend, .coreML)
         XCTAssertFalse(coremlManager.isAvailable) // Not initialized yet
     }
 
-    func testBackwardCompatibilityAliases() {
-        // Test that old type names still work
-        let oldConfig = SpeakerDiarizationConfig()
-        XCTAssertEqual(oldConfig.backend, .sherpaOnnx)
-
-        let oldManager = SpeakerDiarizationManager(config: oldConfig)
-        XCTAssertEqual(oldManager.backend, .sherpaOnnx)
-        XCTAssertFalse(oldManager.isAvailable)
-    }
-
     func testDiarizerBackendEnum() {
         // Test enum cases
-        XCTAssertEqual(DiarizerBackend.sherpaOnnx.rawValue, "sherpa-onnx")
         XCTAssertEqual(DiarizerBackend.coreML.rawValue, "coreml")
 
         // Test all cases
         let allCases = DiarizerBackend.allCases
-        XCTAssertEqual(allCases.count, 2)
-        XCTAssertTrue(allCases.contains(.sherpaOnnx))
+        XCTAssertEqual(allCases.count, 1)
         XCTAssertTrue(allCases.contains(.coreML))
+    }
+
+    func testDiarizerBackendCases() {
+        // Test that all backend cases are available
+        let backends = DiarizerBackend.allCases
+        XCTAssertEqual(backends.count, 1)
+        XCTAssertTrue(backends.contains(.coreML))
+
+        // Test raw values
+        XCTAssertEqual(DiarizerBackend.coreML.rawValue, "coreml")
     }
 }
 
-// MARK: - Cross-Backend Tests
+// MARK: - CoreML Backend Tests
 
 @available(macOS 13.0, iOS 16.0, *)
-final class CrossBackendDiarizerTests: XCTestCase {
+final class CoreMLDiarizerTests: XCTestCase {
 
-    /// Test both SherpaOnnx and CoreML backends with the same test logic
-    func testBothBackendsInitialization() {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
+    func testCoreMLInitialization() {
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
-
-            XCTAssertEqual(manager.backend, backend, "Backend should match for \(backend)")
-            XCTAssertFalse(manager.isAvailable, "Manager should not be available before initialization for \(backend)")
-        }
+        XCTAssertEqual(manager.backend, .coreML, "Backend should be CoreML")
+        XCTAssertFalse(manager.isAvailable, "Manager should not be available before initialization")
     }
 
-    func testBothBackendsNotInitializedErrors() async {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
+    func testCoreMLNotInitializedErrors() async {
         let testSamples = Array(repeating: Float(0.5), count: 16000)
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
+        // Test segmentation fails when not initialized
+        do {
+            _ = try await manager.performSegmentation(testSamples, sampleRate: 16000)
+            XCTFail("Should have thrown notInitialized error")
+        } catch DiarizerError.notInitialized {
+            // Expected error
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
 
-            // Test segmentation fails when not initialized
-            do {
-                _ = try await manager.performSegmentation(testSamples, sampleRate: 16000)
-                XCTFail("Should have thrown notInitialized error for \(backend)")
-            } catch DiarizerError.notInitialized {
-                // Expected error
-            } catch {
-                XCTFail("Unexpected error for \(backend): \(error)")
-            }
-
-            // Test embedding extraction fails when not initialized
-            do {
-                _ = try await manager.extractEmbedding(from: testSamples)
-                XCTFail("Should have thrown notInitialized error for \(backend)")
-            } catch DiarizerError.notInitialized {
-                // Expected error
-            } catch {
-                XCTFail("Unexpected error for \(backend): \(error)")
-            }
+        // Test embedding extraction fails when not initialized
+        do {
+            _ = try await manager.extractEmbedding(from: testSamples)
+            XCTFail("Should have thrown notInitialized error")
+        } catch DiarizerError.notInitialized {
+            // Expected error
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testBothBackendsAudioValidation() {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
+    func testCoreMLAudioValidation() {
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
         // Test valid audio
         let validSamples = Array(0..<16000).map { i in
@@ -117,105 +96,86 @@ final class CrossBackendDiarizerTests: XCTestCase {
         // Test empty audio
         let emptySamples: [Float] = []
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
+        // Test valid audio
+        let validResult = manager.validateAudio(validSamples)
+        XCTAssertTrue(validResult.isValid, "Valid audio should pass validation")
+        XCTAssertEqual(validResult.durationSeconds, 1.0, accuracy: 0.1, "Duration should be ~1 second")
+        XCTAssertTrue(validResult.issues.isEmpty, "Valid audio should have no issues")
 
-            // Test valid audio
-            let validResult = manager.validateAudio(validSamples)
-            XCTAssertTrue(validResult.isValid, "Valid audio should pass validation for \(backend)")
-            XCTAssertEqual(validResult.durationSeconds, 1.0, accuracy: 0.1, "Duration should be ~1 second for \(backend)")
-            XCTAssertTrue(validResult.issues.isEmpty, "Valid audio should have no issues for \(backend)")
+        // Test short audio
+        let shortResult = manager.validateAudio(shortSamples)
+        XCTAssertFalse(shortResult.isValid, "Short audio should fail validation")
+        XCTAssertTrue(shortResult.issues.contains("Audio too short (minimum 1 second)"), "Short audio should have correct error")
 
-            // Test short audio
-            let shortResult = manager.validateAudio(shortSamples)
-            XCTAssertFalse(shortResult.isValid, "Short audio should fail validation for \(backend)")
-            XCTAssertTrue(shortResult.issues.contains("Audio too short (minimum 1 second)"), "Short audio should have correct error for \(backend)")
+        // Test silent audio
+        let silentResult = manager.validateAudio(silentSamples)
+        XCTAssertFalse(silentResult.isValid, "Silent audio should fail validation")
+        XCTAssertTrue(silentResult.issues.contains("Audio too quiet or silent"), "Silent audio should have correct error")
 
-            // Test silent audio
-            let silentResult = manager.validateAudio(silentSamples)
-            XCTAssertFalse(silentResult.isValid, "Silent audio should fail validation for \(backend)")
-            XCTAssertTrue(silentResult.issues.contains("Audio too quiet or silent"), "Silent audio should have correct error for \(backend)")
-
-            // Test empty audio
-            let emptyResult = manager.validateAudio(emptySamples)
-            XCTAssertFalse(emptyResult.isValid, "Empty audio should fail validation for \(backend)")
-            XCTAssertTrue(emptyResult.issues.contains("No audio data"), "Empty audio should have correct error for \(backend)")
-        }
+        // Test empty audio
+        let emptyResult = manager.validateAudio(emptySamples)
+        XCTAssertFalse(emptyResult.isValid, "Empty audio should fail validation")
+        XCTAssertTrue(emptyResult.issues.contains("No audio data"), "Empty audio should have correct error")
     }
 
-    func testBothBackendsCosineDistance() {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
+    func testCoreMLCosineDistance() {
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
+        // Test identical embeddings
+        let embedding1: [Float] = [1.0, 0.0, 0.0]
+        let embedding2: [Float] = [1.0, 0.0, 0.0]
+        let distance1 = manager.cosineDistance(embedding1, embedding2)
+        XCTAssertEqual(distance1, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
 
-            // Test identical embeddings
-            let embedding1: [Float] = [1.0, 0.0, 0.0]
-            let embedding2: [Float] = [1.0, 0.0, 0.0]
-            let distance1 = manager.cosineDistance(embedding1, embedding2)
-            XCTAssertEqual(distance1, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance for \(backend)")
+        // Test orthogonal embeddings
+        let embedding3: [Float] = [1.0, 0.0, 0.0]
+        let embedding4: [Float] = [0.0, 1.0, 0.0]
+        let distance2 = manager.cosineDistance(embedding3, embedding4)
+        XCTAssertEqual(distance2, 1.0, accuracy: 0.001, "Orthogonal embeddings should have distance 1")
 
-            // Test orthogonal embeddings
-            let embedding3: [Float] = [1.0, 0.0, 0.0]
-            let embedding4: [Float] = [0.0, 1.0, 0.0]
-            let distance2 = manager.cosineDistance(embedding3, embedding4)
-            XCTAssertEqual(distance2, 1.0, accuracy: 0.001, "Orthogonal embeddings should have distance 1 for \(backend)")
-
-            // Test opposite embeddings
-            let embedding5: [Float] = [1.0, 0.0, 0.0]
-            let embedding6: [Float] = [-1.0, 0.0, 0.0]
-            let distance3 = manager.cosineDistance(embedding5, embedding6)
-            XCTAssertEqual(distance3, 2.0, accuracy: 0.001, "Opposite embeddings should have distance 2 for \(backend)")
-        }
+        // Test opposite embeddings
+        let embedding5: [Float] = [1.0, 0.0, 0.0]
+        let embedding6: [Float] = [-1.0, 0.0, 0.0]
+        let distance3 = manager.cosineDistance(embedding5, embedding6)
+        XCTAssertEqual(distance3, 2.0, accuracy: 0.001, "Opposite embeddings should have distance 2")
     }
 
-    func testBothBackendsEmbeddingValidation() {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
+    func testCoreMLEmbeddingValidation() {
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
+        // Test valid embedding
+        let validEmbedding: [Float] = [0.5, 0.3, -0.2, 0.8]
+        XCTAssertTrue(manager.validateEmbedding(validEmbedding), "Valid embedding should pass validation")
 
-            // Test valid embedding
-            let validEmbedding: [Float] = [0.5, 0.3, -0.2, 0.8]
-            XCTAssertTrue(manager.validateEmbedding(validEmbedding), "Valid embedding should pass validation for \(backend)")
+        // Test empty embedding
+        let emptyEmbedding: [Float] = []
+        XCTAssertFalse(manager.validateEmbedding(emptyEmbedding), "Empty embedding should fail validation")
 
-            // Test empty embedding
-            let emptyEmbedding: [Float] = []
-            XCTAssertFalse(manager.validateEmbedding(emptyEmbedding), "Empty embedding should fail validation for \(backend)")
+        // Test embedding with NaN
+        let nanEmbedding: [Float] = [0.5, Float.nan, 0.3]
+        XCTAssertFalse(manager.validateEmbedding(nanEmbedding), "NaN embedding should fail validation")
 
-            // Test embedding with NaN
-            let nanEmbedding: [Float] = [0.5, Float.nan, 0.3]
-            XCTAssertFalse(manager.validateEmbedding(nanEmbedding), "NaN embedding should fail validation for \(backend)")
+        // Test embedding with infinity
+        let infEmbedding: [Float] = [0.5, Float.infinity, 0.3]
+        XCTAssertFalse(manager.validateEmbedding(infEmbedding), "Infinite embedding should fail validation")
 
-            // Test embedding with infinity
-            let infEmbedding: [Float] = [0.5, Float.infinity, 0.3]
-            XCTAssertFalse(manager.validateEmbedding(infEmbedding), "Infinite embedding should fail validation for \(backend)")
-
-            // Test very small magnitude embedding
-            let smallEmbedding: [Float] = [0.01, 0.01, 0.01]
-            XCTAssertFalse(manager.validateEmbedding(smallEmbedding), "Small magnitude embedding should fail validation for \(backend)")
-        }
+        // Test very small magnitude embedding
+        let smallEmbedding: [Float] = [0.01, 0.01, 0.01]
+        XCTAssertFalse(manager.validateEmbedding(smallEmbedding), "Small magnitude embedding should fail validation")
     }
 
-    func testBothBackendsCleanup() async {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
+    func testCoreMLCleanup() async {
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
-
-            // Test cleanup doesn't crash
-            await manager.cleanup()
-            XCTAssertFalse(manager.isAvailable, "Manager should not be available after cleanup for \(backend)")
-        }
+        // Test cleanup doesn't crash
+        await manager.cleanup()
+        XCTAssertFalse(manager.isAvailable, "Manager should not be available after cleanup")
     }
 
-    func testBothBackendsSpeakerComparison() async {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
-
+    func testCoreMLSpeakerComparison() async {
         let audio1 = Array(0..<16000).map { i in
             sin(Float(i) * 0.01) * 0.5
         }
@@ -223,57 +183,44 @@ final class CrossBackendDiarizerTests: XCTestCase {
             sin(Float(i) * 0.02) * 0.5
         }
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
-            do {
-                let similarity = try await manager.compareSpeakers(audio1: audio1, audio2: audio2)
-                XCTAssertGreaterThanOrEqual(similarity, 0, "Similarity should be >= 0 for \(backend)")
-                XCTAssertLessThanOrEqual(similarity, 100, "Similarity should be <= 100 for \(backend)")
-            } catch DiarizerError.notInitialized {
-                // Expected error in test environment
-                print("Speaker comparison failed due to not being initialized (expected) for \(backend)")
-            } catch {
-                XCTFail("Unexpected error for \(backend): \(error)")
-            }
+        do {
+            let similarity = try await manager.compareSpeakers(audio1: audio1, audio2: audio2)
+            XCTAssertGreaterThanOrEqual(similarity, 0, "Similarity should be >= 0")
+            XCTAssertLessThanOrEqual(similarity, 100, "Similarity should be <= 100")
+        } catch DiarizerError.notInitialized {
+            // Expected error in test environment
+            print("Speaker comparison failed due to not being initialized (expected)")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
         }
     }
 
-    func testBothBackendsModelDownloadPaths() async {
-        let backends: [DiarizerBackend] = [.sherpaOnnx, .coreML]
+    func testCoreMLModelDownloadPaths() async {
+        let config = DiarizerConfig(backend: .coreML)
+        let manager = DiarizerFactory.createManager(config: config)
 
-        for backend in backends {
-            let config = DiarizerConfig(backend: backend)
-            let manager = DiarizerFactory.createManager(config: config)
-
-            // Test model download (this might fail in CI/test environment, but should return valid paths)
-            do {
-                let modelPaths: ModelPaths
-                if let sherpaManager = manager as? SherpaOnnxDiarizerManager {
-                    modelPaths = try await sherpaManager.downloadModels()
-                } else if let coremlManager = manager as? CoreMLDiarizerManager {
-                    modelPaths = try await coremlManager.downloadModels()
-                } else {
-                    XCTFail("Unknown manager type for \(backend)")
-                    continue
-                }
-
-                XCTAssertFalse(modelPaths.segmentationPath.isEmpty, "Segmentation path should not be empty for \(backend)")
-                XCTAssertFalse(modelPaths.embeddingPath.isEmpty, "Embedding path should not be empty for \(backend)")
-
-                // Verify backend-specific model directories
-                switch backend {
-                case .sherpaOnnx:
-                    XCTAssertTrue(modelPaths.segmentationPath.contains("sherpa-onnx"), "SherpaOnnx models should be in sherpa-onnx directory")
-                case .coreML:
-                    XCTAssertTrue(modelPaths.segmentationPath.contains("coreml"), "CoreML models should be in coreml directory")
-                }
-
-            } catch {
-                // This may fail in test environment without network access - that's expected
-                print("Model download failed (expected in test environment) for \(backend): \(error)")
+        // Test model download (this might fail in CI/test environment, but should return valid paths)
+        do {
+            let modelPaths: ModelPaths
+            if let coremlManager = manager as? CoreMLDiarizerManager {
+                modelPaths = try await coremlManager.downloadModels()
+            } else {
+                XCTFail("Unknown manager type")
+                return
             }
+
+            XCTAssertFalse(modelPaths.segmentationPath.isEmpty, "Segmentation path should not be empty")
+            XCTAssertFalse(modelPaths.embeddingPath.isEmpty, "Embedding path should not be empty")
+
+            // Verify CoreML model directories
+            XCTAssertTrue(modelPaths.segmentationPath.contains("coreml"), "CoreML models should be in coreml directory")
+
+        } catch {
+            // This may fail in test environment without network access - that's expected
+            print("Model download failed (expected in test environment): \(error)")
         }
     }
 }
@@ -281,7 +228,7 @@ final class CrossBackendDiarizerTests: XCTestCase {
 // MARK: - CoreML Backend Specific Test
 
 @available(macOS 13.0, iOS 16.0, *)
-final class CoreMLBackendTests: XCTestCase {
+final class CoreMLBackendIntegrationTests: XCTestCase {
 
     func testCoreMLDiarizerCreationAndBasicFunctionality() async {
         // Test that CoreML diarizer can be created with the same config as WhisperState.swift
@@ -344,5 +291,16 @@ final class CoreMLBackendTests: XCTestCase {
             print("ℹ️  CoreML initialization test completed (expected in test environment): \(error)")
             XCTAssertFalse(diarizer.isAvailable, "Should not be available if initialization failed")
         }
+    }
+
+    func testCoreMLModelPaths() async throws {
+        let manager = DiarizerFactory.createCoreMLManager()
+
+        // Initialize to download models
+        try await manager.initialize()
+
+        // Get model paths (this is implementation specific)
+        // For CoreML, we'll test that the manager initializes properly
+        XCTAssertTrue(manager.isAvailable)
     }
 }

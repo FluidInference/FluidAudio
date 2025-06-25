@@ -1,9 +1,0 @@
-prefix=${pcfiledir}
-libdir=${prefix}/lib
-includedir=${prefix}/include
-
-Name: SherpaOnnxWrapperC
-Description: SherpaOnnx C API
-Version: 1.0.0
-Libs: -L${libdir} -lonnxruntime -lpiper_phonemize -lsherpa-onnx -lsherpa-onnx-c-api -lsherpa-onnx-core -lsherpa-onnx-cxx-api -lsherpa-onnx-fst -lsherpa-onnx-fstfar -lsherpa-onnx-kaldifst-core -lsherpa-onnx-portaudio_static -lssentencepiece_core -lucd -lc++
-Cflags: -I${includedir}

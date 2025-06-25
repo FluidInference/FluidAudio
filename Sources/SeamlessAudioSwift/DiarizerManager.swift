@@ -3,12 +3,11 @@ import OSLog
 
 
 public enum DiarizerBackend: String, CaseIterable, Sendable {
-    case sherpaOnnx = "sherpa-onnx"
     case coreML = "coreml"
 }
 
 public struct DiarizerConfig: Sendable {
-    public var backend: DiarizerBackend = .sherpaOnnx
+    public var backend: DiarizerBackend = .coreML
     public var clusteringThreshold: Float = 0.7
     public var minDurationOn: Float = 1.0
     public var minDurationOff: Float = 0.5
@@ -19,7 +18,7 @@ public struct DiarizerConfig: Sendable {
     public static let `default` = DiarizerConfig()
 
     public init(
-        backend: DiarizerBackend = .sherpaOnnx,
+        backend: DiarizerBackend = .coreML,
         clusteringThreshold: Float = 0.7,
         minDurationOn: Float = 1.0,
         minDurationOff: Float = 0.5,
@@ -125,8 +124,6 @@ public final class DiarizerFactory {
     /// Create a diarization manager based on the configuration
     public static func createManager(config: DiarizerConfig = .default) -> any DiarizerManager {
         switch config.backend {
-        case .sherpaOnnx:
-            return SherpaOnnxDiarizerManager(config: config)
         case .coreML:
             return CoreMLDiarizerManager(config: config)
         }
@@ -165,27 +162,6 @@ public enum DiarizerError: Error, LocalizedError {
 
 @available(macOS 13.0, iOS 16.0, *)
 extension DiarizerFactory {
-    /// Create a SherpaOnnx diarization manager with custom configuration
-    public static func createSherpaOnnxManager(
-        clusteringThreshold: Float = 0.7,
-        minDurationOn: Float = 1.0,
-        minDurationOff: Float = 0.5,
-        numClusters: Int = -1,
-        debugMode: Bool = false,
-        modelCacheDirectory: URL? = nil
-    ) -> SherpaOnnxDiarizerManager {
-        let config = DiarizerConfig(
-            backend: .sherpaOnnx,
-            clusteringThreshold: clusteringThreshold,
-            minDurationOn: minDurationOn,
-            minDurationOff: minDurationOff,
-            numClusters: numClusters,
-            debugMode: debugMode,
-            modelCacheDirectory: modelCacheDirectory
-        )
-        return SherpaOnnxDiarizerManager(config: config)
-    }
-
     /// Create a CoreML diarization manager with custom configuration
     public static func createCoreMLManager(
         clusteringThreshold: Float = 0.7,

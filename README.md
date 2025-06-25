@@ -1,125 +1,87 @@
 # SeamlessAudioSwift
 
-A Swift package for seamless audio processing, speech recognition, and speaker diarization using SherpaOnnx.
+A Swift package for seamless audio processing with speaker diarization and embedding extraction capabilities.
 
 ## Features
 
-- 🎤 **Speech Recognition**: Real-time and offline speech-to-text
-- 👥 **Speaker Diarization**: Identify and separate different speakers in audio
-- 🔊 **Speaker Embedding**: Extract speaker embeddings for identification
-- 🎯 **Voice Activity Detection**: Detect speech segments in audio
-- 📱 **Cross-Platform**: Works on macOS and iOS
-- ⚡ **High Performance**: Optimized with native C++ libraries
+- **Speaker Diarization**: Identify and separate different speakers in audio
+- **Speaker Embedding**: Extract speaker embeddings for comparison and clustering
+- **CoreML Backend**: Native Apple CoreML integration for optimal performance on Apple devices
+- **Cross-platform**: Support for macOS and iOS
+- **Easy Integration**: Simple Swift API for audio processing tasks
 
 ## Installation
 
 ### Swift Package Manager
 
-Add SeamlessAudioSwift to your project using Xcode:
+Add this package to your project using Xcode:
 
-1. In Xcode, go to **File → Add Package Dependencies**
-2. Enter the repository URL: `https://github.com/SeamlessCompute/SeamlessAudioSwift.git`
-3. Choose the version and add to your target
+1. Open your project in Xcode
+2. Go to File → Add Package Dependencies
+3. Enter the repository URL
+4. Select the version you want to use
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/SeamlessCompute/SeamlessAudioSwift.git", from: "1.0.0")
+    .package(url: "https://github.com/[your-org]/SeamlessAudioSwift", from: "1.0.0")
 ]
 ```
 
 ## Quick Start
 
-### Basic Speech Recognition
+### Basic Speaker Diarization
 
 ```swift
 import SeamlessAudioSwift
 
-// Initialize the speech recognition manager
-let manager = SpeakerDiarizationManager()
+// Create a CoreML diarization manager
+let config = DiarizerConfig(
+    backend: .coreML,
+    clusteringThreshold: 0.7,
+    minDurationOn: 1.0,
+    minDurationOff: 0.5
+)
 
-// Process audio samples
+let diarizer = DiarizerFactory.createManager(config: config)
+
+// Initialize the system (downloads models if needed)
+try await diarizer.initialize()
+
+// Process audio samples (16kHz, Float32)
 let audioSamples: [Float] = // your audio data
-let result = try await manager.extractEmbedding(from: audioSamples)
-```
+let segments = try await diarizer.performSegmentation(audioSamples, sampleRate: 16000)
 
-### Speaker Diarization
-
-```swift
-import SeamlessAudioSwift
-
-// Initialize with models
-let manager = SpeakerDiarizationManager()
-try await manager.initialize()
-
-// Process audio for speaker separation
-let segments = try await manager.performDiarization(on: audioSamples)
-
+// Process results
 for segment in segments {
-    print("Speaker \(segment.speaker): \(segment.start)s - \(segment.end)s")
+    print("Speaker \(segment.speakerClusterId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
 }
 ```
 
-## Requirements
+## Configuration
 
-- **iOS**: 16.0+
-- **macOS**: 13.0+
-- **Xcode**: 16.0+
-- **Swift**: 6.1+
+### DiarizerConfig
 
-## Models and Attribution
+```swift
+let config = DiarizerConfig(
+    backend: .coreML,              // CoreML backend
+    clusteringThreshold: 0.7,      // Speaker similarity threshold (0.0-1.0)
+    minDurationOn: 1.0,           // Minimum speech duration (seconds)
+    minDurationOff: 0.5,          // Minimum silence duration (seconds)
+    numClusters: -1,              // Number of speakers (-1 for auto-detection)
+    debugMode: false,             // Enable debug logging
+    modelCacheDirectory: nil      // Custom model storage location
+)
+```
 
-This package uses models and libraries from the excellent [**SherpaOnnx**](https://github.com/k2-fsa/sherpa-onnx) project by the K2-FSA team.
+## Acknowledgments
 
-### SherpaOnnx Models
-
-SherpaOnnx provides state-of-the-art speech recognition and audio processing models. You can find pre-trained models at:
-
-- **Main Repository**: [https://github.com/k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
-- **Pre-trained Models**: [https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html)
-- **Documentation**: [https://k2-fsa.github.io/sherpa/onnx/](https://k2-fsa.github.io/sherpa/onnx/)
-
-### Supported Model Types
-
-- **Speech Recognition**: Transducer, Paraformer, Whisper, CTC models
-- **Speaker Diarization**: Pyannote-based segmentation models
-- **Speaker Embedding**: Speaker verification and identification models
-- **Voice Activity Detection**: Silero VAD models
-
-## Architecture
-
-SeamlessAudioSwift is built on top of:
-
-- **SherpaOnnx C++ Libraries**: High-performance audio processing
-- **ONNX Runtime**: Optimized neural network inference
-- **Swift Package Manager**: Modern dependency management
-- **Git LFS**: Efficient handling of large model files
+This package leverages Apple's CoreML framework for high-performance audio processing on Apple devices.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- **[SherpaOnnx](https://github.com/k2-fsa/sherpa-onnx)** by the K2-FSA team for the underlying speech processing libraries
-- **[ONNX Runtime](https://onnxruntime.ai/)** for neural network inference
-- **[Pyannote](https://github.com/pyannote/pyannote-audio)** for speaker diarization models
-- **[Silero](https://github.com/snakers4/silero-vad)** for voice activity detection models
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For questions and support:
-- 📧 Contact: [SeamlessCompute](https://github.com/SeamlessCompute)
-- 🐛 Issues: [GitHub Issues](https://github.com/SeamlessCompute/SeamlessAudioSwift/issues)
-
----
-
-**Note**: This package includes pre-compiled libraries and models. The first build may take longer due to the size of the dependencies.
 
 # macOS
 .DS_Store

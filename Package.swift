@@ -23,34 +23,8 @@ let package = Package(
     targets: [
         .target(
             name: "SeamlessAudioSwift",
-            dependencies: ["SherpaOnnxWrapper"],
-            path: "Sources/SeamlessAudioSwift",
-            linkerSettings: [
-                .unsafeFlags(["-L\(packageDir)/Sources/SherpaOnnxWrapperC/lib"]),
-                .linkedLibrary("onnxruntime"),
-                .linkedLibrary("piper_phonemize"),
-                .linkedLibrary("sherpa-onnx"),
-                .linkedLibrary("sherpa-onnx-c-api"),
-                .linkedLibrary("sherpa-onnx-core"),
-                .linkedLibrary("sherpa-onnx-cxx-api"),
-                .linkedLibrary("sherpa-onnx-fst"),
-                .linkedLibrary("sherpa-onnx-fstfar"),
-                .linkedLibrary("sherpa-onnx-kaldifst-core"),
-                .linkedLibrary("sherpa-onnx-portaudio_static"),
-                .linkedLibrary("ssentencepiece_core"),
-                .linkedLibrary("ucd"),
-                .linkedLibrary("c++")
-            ]
-        ),
-        .target(
-            name: "SherpaOnnxWrapper",
-            dependencies: ["SherpaOnnxWrapperC"],
-            path: "Sources/SherpaOnnxWrapper",
-            exclude: ["lib/"]
-        ),
-        .systemLibrary(
-            name: "SherpaOnnxWrapperC",
-            path: "Sources/SherpaOnnxWrapperC"
+            dependencies: [],
+            path: "Sources/SeamlessAudioSwift"
         ),
         .testTarget(
             name: "SeamlessAudioSwiftTests",
