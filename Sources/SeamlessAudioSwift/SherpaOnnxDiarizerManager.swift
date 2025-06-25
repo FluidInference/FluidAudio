@@ -1,10 +1,3 @@
-//
-//  SherpaOnnxDiarizerManager.swift
-//  SeamlessAudioSwift
-//
-//  Created by Kiko Wei on 2025-06-24.
-//
-
 import Foundation
 import OSLog
 import SherpaOnnxWrapper
@@ -36,7 +29,6 @@ public final class SherpaOnnxDiarizerManager: DiarizerManager, @unchecked Sendab
 
         let modelPaths = try await downloadModels()
 
-        // Setup diarizer with SherpaOnnx config
         var diarizationConfig = sherpaOnnxOfflineSpeakerDiarizationConfig(
             segmentation: sherpaOnnxOfflineSpeakerSegmentationModelConfig(
                 pyannote: sherpaOnnxOfflineSpeakerSegmentationPyannoteModelConfig(

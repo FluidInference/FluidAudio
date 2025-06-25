@@ -46,18 +46,13 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
         self.config = config
     }
 
-    // MARK: - Initialization
-
-    /// Initialize the CoreML diarization system
     public func initialize() async throws {
         logger.info("Initializing CoreML diarization system")
 
-        // Clean up any broken models first
         try await cleanupBrokenModels()
 
         let modelPaths = try await downloadModels()
 
-        // Load CoreML models
         let segmentationURL = URL(fileURLWithPath: modelPaths.segmentationPath)
         let embeddingURL = URL(fileURLWithPath: modelPaths.embeddingPath)
 
@@ -67,20 +62,17 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
         logger.info("CoreML diarization system initialized successfully")
     }
 
-    /// Clean up any broken or incompatible models
     private func cleanupBrokenModels() async throws {
         let modelsDirectory = getModelsDirectory()
         let segmentationModelPath = modelsDirectory.appendingPathComponent("pyannote_segmentation.mlmodelc")
         let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc")
 
-        // Check and remove broken segmentation model
         if FileManager.default.fileExists(atPath: segmentationModelPath.path) &&
            !isModelCompiled(at: segmentationModelPath) {
             logger.info("Removing broken segmentation model")
             try FileManager.default.removeItem(at: segmentationModelPath)
         }
 
-        // Check and remove broken embedding model
         if FileManager.default.fileExists(atPath: embeddingModelPath.path) &&
            !isModelCompiled(at: embeddingModelPath) {
             logger.info("Removing broken embedding model")
@@ -88,14 +80,10 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
         }
     }
 
-    /// Check if the diarization system is ready for use
     public var isAvailable: Bool {
         return segmentationModel != nil && embeddingModel != nil
     }
 
-    // MARK: - Core Processing
-
-    /// Perform speaker segmentation on audio samples
     public func performSegmentation(_ samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
         guard segmentationModel != nil else {
             throw DiarizerError.notInitialized
@@ -103,7 +91,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
 
         logger.info("Processing \(samples.count) samples for CoreML speaker segmentation")
 
-        // Process in chunks if needed
         let chunkSize = sampleRate * 10 // 10 seconds
         var allSegments: [SpeakerSegment] = []
 
@@ -121,7 +108,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
         return allSegments
     }
 
-    /// Extract speaker embedding from audio samples
     public func extractEmbedding(from samples: [Float]) async throws -> SpeakerEmbedding? {
         guard let embeddingModel = self.embeddingModel else {
             throw DiarizerError.notInitialized
@@ -148,7 +134,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
             return nil
         }
 
-        // Return the first embedding (dominant speaker)
         let embedding = embeddings[0]
         let qualityScore = calculateEmbeddingQuality(embedding)
         let duration = Float(samples.count) / 16000.0
@@ -159,8 +144,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
             durationSeconds: duration
         )
     }
-
-    // MARK: - Private Processing Methods
 
     private func processChunk(_ chunk: [Float], chunkOffset: Double) async throws -> [SpeakerSegment] {
         let chunkSize = 16000 * 10 // 10 seconds
@@ -173,7 +156,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
         let binarizedSegments = try getSegments(audioChunk: paddedChunk)
         let slidingFeature = createSlidingWindowFeature(binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
 
-        // Create annotations with raw speaker indices (0, 1, 2)
         var annotations: [CoreMLSegment: Int] = [:]
 
         getAnnotation(
@@ -182,7 +164,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
             slidingWindow: slidingFeature.slidingWindow
         )
 
-        // Convert to SpeakerSegment format
         return annotations.map { (segment, speakerIndex) in
             SpeakerSegment(
                 speakerClusterId: speakerIndex,
@@ -198,19 +179,15 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
             throw DiarizerError.notInitialized
         }
 
-        // Ensure correct shape: (1, 1, chunk_size)
         let audioArray = try MLMultiArray(shape: [1, 1, NSNumber(value: chunkSize)], dataType: .float32)
         for i in 0..<min(audioChunk.count, chunkSize) {
             audioArray[i] = NSNumber(value: audioChunk[i])
         }
 
-        // Prepare input
         let input = try MLDictionaryFeatureProvider(dictionary: ["audio": audioArray])
 
-        // Run prediction
         let output = try segmentationModel.prediction(from: input)
 
-        // Extract segments output: shape assumed (1, frames, 7)
         guard let segmentOutput = output.featureValue(for: "segments")?.multiArrayValue else {
             throw DiarizerError.processingFailed("Missing segments output from segmentation model")
         }
@@ -218,7 +195,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
         let frames = segmentOutput.shape[1].intValue
         let combinations = segmentOutput.shape[2].intValue
 
-        // Convert MLMultiArray to [[[Float]]]
         var segments = Array(repeating: Array(repeating: Array(repeating: 0.0 as Float, count: combinations), count: frames), count: 1)
 
         for f in 0..<frames {
@@ -228,7 +204,6 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
             }
         }
 
-        // Apply powerset conversion
         return powersetConversion(segments)
     }
 
@@ -340,14 +315,12 @@ public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
             throw DiarizerError.processingFailed("Failed to allocate MLMultiArray for embeddings")
         }
 
-        // Fill waveform
         for s in 0..<3 {
             for i in 0..<chunkSize {
                 waveformArray[s * chunkSize + i] = NSNumber(value: audioBatch[s][i])
             }
         }
 
-        // Fill mask
         for s in 0..<3 {
             for f in 0..<numFrames {
                 maskArray[s * numFrames + f] = NSNumber(value: cleanMasks[s][f])

@@ -1,22 +1,12 @@
-//
-//  DiarizerManager.swift
-//  SeamlessAudioSwift
-//
-//  Created by Kiko Wei on 2025-06-24.
-//
-
 import Foundation
 import OSLog
 
-// MARK: - Backend Configuration
 
-/// Supported diarization backends
 public enum DiarizerBackend: String, CaseIterable, Sendable {
     case sherpaOnnx = "sherpa-onnx"
     case coreML = "coreml"
 }
 
-/// Configuration for speaker diarization
 public struct DiarizerConfig: Sendable {
     public var backend: DiarizerBackend = .sherpaOnnx
     public var clusteringThreshold: Float = 0.7
@@ -47,8 +37,6 @@ public struct DiarizerConfig: Sendable {
     }
 }
 
-// MARK: - Public Data Types
-
 /// Represents a speaker segment with timing and speaker information
 public struct SpeakerSegment: Sendable, Identifiable {
     public let id = UUID()
@@ -69,7 +57,6 @@ public struct SpeakerSegment: Sendable, Identifiable {
     }
 }
 
-/// Speaker embedding with quality metrics
 public struct SpeakerEmbedding: Sendable {
     public let embedding: [Float]
     public let qualityScore: Float
@@ -82,7 +69,6 @@ public struct SpeakerEmbedding: Sendable {
     }
 }
 
-/// Model file paths for diarization
 public struct ModelPaths: Sendable {
     public let segmentationPath: String
     public let embeddingPath: String
@@ -106,39 +92,28 @@ public struct AudioValidationResult: Sendable {
     }
 }
 
-// MARK: - Protocol for Diarization Managers
-
 /// Protocol that all diarization managers must implement
 @available(macOS 13.0, iOS 16.0, *)
 public protocol DiarizerManager: Sendable {
     /// The backend type this manager uses
     var backend: DiarizerBackend { get }
 
-    /// Check if the diarization system is ready for use
     var isAvailable: Bool { get }
 
-    /// Initialize the diarization system
     func initialize() async throws
 
-    /// Perform speaker segmentation on audio samples
     func performSegmentation(_ samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment]
 
-    /// Extract speaker embedding from audio samples
     func extractEmbedding(from samples: [Float]) async throws -> SpeakerEmbedding?
 
-    /// Compare similarity between two audio samples
     func compareSpeakers(audio1: [Float], audio2: [Float]) async throws -> Float
 
-    /// Validate if an embedding is valid
     func validateEmbedding(_ embedding: [Float]) -> Bool
 
-    /// Validate audio quality and characteristics
     func validateAudio(_ samples: [Float]) -> AudioValidationResult
 
-    /// Calculate cosine distance between two embeddings
     func cosineDistance(_ a: [Float], _ b: [Float]) -> Float
 
-    /// Clean up resources
     func cleanup() async
 }
 
