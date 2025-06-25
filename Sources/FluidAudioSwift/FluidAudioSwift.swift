@@ -18,12 +18,12 @@ public typealias SpeakerDiarizationError = DiarizerError
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 
-/// A library for seamless audio processing using CoreML on Apple platforms.
+/// A library for fluid audio processing using CoreML on Apple platforms.
 ///
 /// This package provides speaker diarization and embedding extraction capabilities
 /// optimized for macOS and iOS using Apple's CoreML framework.
 
-public struct SeamlessAudioSwift {
+public struct FluidAudioSwift {
 
 }
 

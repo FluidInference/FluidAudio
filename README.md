@@ -1,6 +1,6 @@
-# SeamlessAudioSwift
+# FluidAudioSwift
 
-A Swift package for seamless audio processing with speaker diarization and embedding extraction capabilities.
+A Swift package for fluid audio processing with speaker diarization and embedding extraction capabilities.
 
 ## Features
 
@@ -25,7 +25,7 @@ Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/[your-org]/SeamlessAudioSwift", from: "1.0.0")
+    .package(url: "https://github.com/[your-org]/FluidAudioSwift", from: "1.0.0")
 ]
 ```
 
@@ -34,7 +34,7 @@ dependencies: [
 ### Basic Speaker Diarization
 
 ```swift
-import SeamlessAudioSwift
+import FluidAudioSwift
 
 // Create a CoreML diarization manager
 let config = DiarizerConfig(

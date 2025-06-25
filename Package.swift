@@ -6,15 +6,15 @@ import Foundation
 let packageDir = Context.packageDirectory
 
 let package = Package(
-    name: "SeamlessAudioSwift",
+    name: "FluidAudioSwift",
     platforms: [
         .macOS(.v13),
         .iOS(.v16)
     ],
     products: [
         .library(
-            name: "SeamlessAudioSwift",
-            targets: ["SeamlessAudioSwift"]
+            name: "FluidAudioSwift",
+            targets: ["FluidAudioSwift"]
         ),
     ],
     dependencies: [
@@ -22,13 +22,13 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "SeamlessAudioSwift",
+            name: "FluidAudioSwift",
             dependencies: [],
-            path: "Sources/SeamlessAudioSwift"
+            path: "Sources/FluidAudioSwift"
         ),
         .testTarget(
-            name: "SeamlessAudioSwiftTests",
-            dependencies: ["SeamlessAudioSwift"]
+            name: "FluidAudioSwiftTests",
+            dependencies: ["FluidAudioSwift"]
         ),
     ]
 )

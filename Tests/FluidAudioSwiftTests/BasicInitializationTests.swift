@@ -1,5 +1,5 @@
 import XCTest
-@testable import SeamlessAudioSwift
+@testable import FluidAudioSwift
 
 final class BasicInitializationTests: XCTestCase {
 
