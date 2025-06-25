@@ -15,6 +15,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Setup Swift 6.1 (primary method)
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: '6.1'
+      continue-on-error: true
+      id: swift-setup
+
     - name: Select Xcode version
       run: |
         # Try to use Xcode 16.x for Swift 6.1 support, fallback to latest available
@@ -36,7 +43,8 @@ jobs:
           echo "Using latest available Xcode"
         fi
 
-    - name: Install Swift 6.1 if needed
+    - name: Install Swift 6.1 (fallback method)
+      if: steps.swift-setup.outcome == 'failure'
       run: |
         SWIFT_VERSION=$(swift --version | head -n1)
         echo "Current Swift version: $SWIFT_VERSION"
@@ -44,17 +52,33 @@ jobs:
         if [[ "$SWIFT_VERSION" == *"6.1"* ]]; then
           echo "✅ Swift 6.1 is already available"
         else
-          echo "⚠️  Swift 6.1 not found, attempting to install via swiftly..."
-          # Install swiftly (Swift toolchain manager)
-          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
-          export PATH="$HOME/.swiftly/bin:$PATH"
+          echo "⚠️  Swift 6.1 not found, installing from Swift.org..."
 
-          # Install Swift 6.1
-          swiftly install 6.1-release
-          swiftly use 6.1-release
+          # Download Swift 6.1 toolchain for macOS
+          SWIFT_URL="https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg"
+          echo "Downloading Swift 6.1 from: $SWIFT_URL"
 
-          echo "Swift 6.1 installed via swiftly"
-          swift --version
+          if curl -L -f -o swift-6.1.pkg "$SWIFT_URL"; then
+            echo "✅ Swift 6.1 package downloaded successfully"
+
+            # Install the toolchain
+            if sudo installer -pkg swift-6.1.pkg -target /; then
+              echo "✅ Swift 6.1 toolchain installed"
+
+              # Add Swift 6.1 to PATH
+              export PATH="/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin:$PATH"
+              echo "/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin" >> $GITHUB_PATH
+
+              echo "Swift 6.1 installed from Swift.org"
+              swift --version
+            else
+              echo "❌ Failed to install Swift 6.1 toolchain"
+              echo "Continuing with available Swift version: $SWIFT_VERSION"
+            fi
+          else
+            echo "❌ Failed to download Swift 6.1 package"
+            echo "Continuing with available Swift version: $SWIFT_VERSION"
+          fi
         fi
 
     - name: Show Swift version
@@ -104,6 +128,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Setup Swift 6.1 (primary method)
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: '6.1'
+      continue-on-error: true
+      id: swift-setup
+
     - name: Select Xcode version
       run: |
         # Try to use Xcode 16.x for Swift 6.1 support, fallback to latest available
@@ -119,7 +150,8 @@ jobs:
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
         fi
 
-    - name: Install Swift 6.1 if needed
+    - name: Install Swift 6.1 (fallback method)
+      if: steps.swift-setup.outcome == 'failure'
       run: |
         SWIFT_VERSION=$(swift --version | head -n1)
         echo "Current Swift version: $SWIFT_VERSION"
@@ -127,12 +159,32 @@ jobs:
         if [[ "$SWIFT_VERSION" == *"6.1"* ]]; then
           echo "✅ Swift 6.1 is already available"
         else
-          echo "⚠️  Swift 6.1 not found, attempting to install via swiftly..."
-          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
-          export PATH="$HOME/.swiftly/bin:$PATH"
-          swiftly install 6.1-release
-          swiftly use 6.1-release
-          echo "Swift 6.1 installed via swiftly"
+          echo "⚠️  Swift 6.1 not found, installing from Swift.org..."
+
+          # Download Swift 6.1 toolchain for macOS
+          SWIFT_URL="https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg"
+          echo "Downloading Swift 6.1 from: $SWIFT_URL"
+
+          if curl -L -f -o swift-6.1.pkg "$SWIFT_URL"; then
+            echo "✅ Swift 6.1 package downloaded successfully"
+
+            # Install the toolchain
+            if sudo installer -pkg swift-6.1.pkg -target /; then
+              echo "✅ Swift 6.1 toolchain installed"
+
+              # Add Swift 6.1 to PATH
+              export PATH="/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin:$PATH"
+              echo "/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin" >> $GITHUB_PATH
+
+              echo "Swift 6.1 installed from Swift.org"
+            else
+              echo "❌ Failed to install Swift 6.1 toolchain"
+              echo "Continuing with available Swift version: $SWIFT_VERSION"
+            fi
+          else
+            echo "❌ Failed to download Swift 6.1 package"
+            echo "Continuing with available Swift version: $SWIFT_VERSION"
+          fi
         fi
 
     - name: Build benchmarks
@@ -170,7 +222,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install Swift 6.1 if needed
+    - name: Setup Swift 6.1 (primary method)
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: '6.1'
+      continue-on-error: true
+      id: swift-setup
+
+    - name: Install Swift 6.1 (fallback method)
+      if: steps.swift-setup.outcome == 'failure'
       run: |
         SWIFT_VERSION=$(swift --version | head -n1)
         echo "Current Swift version: $SWIFT_VERSION"
@@ -178,12 +238,32 @@ jobs:
         if [[ "$SWIFT_VERSION" == *"6.1"* ]]; then
           echo "✅ Swift 6.1 is already available"
         else
-          echo "⚠️  Swift 6.1 not found, attempting to install via swiftly..."
-          curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash
-          export PATH="$HOME/.swiftly/bin:$PATH"
-          swiftly install 6.1-release
-          swiftly use 6.1-release
-          echo "Swift 6.1 installed via swiftly"
+          echo "⚠️  Swift 6.1 not found, installing from Swift.org..."
+
+          # Download Swift 6.1 toolchain for macOS
+          SWIFT_URL="https://download.swift.org/swift-6.1-release/xcode/swift-6.1-RELEASE/swift-6.1-RELEASE-osx.pkg"
+          echo "Downloading Swift 6.1 from: $SWIFT_URL"
+
+          if curl -L -f -o swift-6.1.pkg "$SWIFT_URL"; then
+            echo "✅ Swift 6.1 package downloaded successfully"
+
+            # Install the toolchain
+            if sudo installer -pkg swift-6.1.pkg -target /; then
+              echo "✅ Swift 6.1 toolchain installed"
+
+              # Add Swift 6.1 to PATH
+              export PATH="/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin:$PATH"
+              echo "/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/usr/bin" >> $GITHUB_PATH
+
+              echo "Swift 6.1 installed from Swift.org"
+            else
+              echo "❌ Failed to install Swift 6.1 toolchain"
+              echo "Continuing with available Swift version: $SWIFT_VERSION"
+            fi
+          else
+            echo "❌ Failed to download Swift 6.1 package"
+            echo "Continuing with available Swift version: $SWIFT_VERSION"
+          fi
         fi
 
     - name: Check Swift formatting
