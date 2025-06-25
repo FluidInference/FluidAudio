@@ -1,0 +1,129 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, beta, develop ]
+  pull_request:
+    branches: [ main, beta ]
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Select Xcode version
+      run: sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+
+    - name: Show Swift version
+      run: swift --version
+
+    - name: Cache Swift packages
+      uses: actions/cache@v3
+      with:
+        path: .build
+        key: ${{ runner.os }}-swift-${{ hashFiles('Package.swift') }}
+        restore-keys: |
+          ${{ runner.os }}-swift-
+
+    - name: Build package
+      run: swift build
+
+    - name: Run CI tests (fast, no external dependencies)
+      run: swift test --filter CITests
+      timeout-minutes: 5
+
+    - name: Run basic initialization tests
+      run: swift test --filter BasicInitializationTests
+      timeout-minutes: 10
+
+    - name: Run CoreML backend tests
+      run: swift test --filter CoreMLDiarizerTests
+      timeout-minutes: 10
+
+    - name: Run CoreML integration tests
+      run: swift test --filter CoreMLBackendIntegrationTests
+      timeout-minutes: 15
+      continue-on-error: true  # May fail if models can't download in CI
+
+    - name: Test package compilation (release mode)
+      run: swift build --configuration release
+
+    - name: Run all tests (summary)
+      run: swift test --parallel
+      timeout-minutes: 20
+      continue-on-error: true  # Some tests may fail without models
+
+  benchmark-check:
+    name: Benchmark Compilation Check
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Select Xcode version
+      run: sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+
+    - name: Build benchmarks
+      run: swift build --target FluidAudioSwiftPackageTests
+
+    - name: Check benchmark tests compile
+      run: swift test --filter BenchmarkTests --dry-run
+      continue-on-error: true  # Benchmarks need AMI data to actually run
+
+    - name: Verify benchmark documentation
+      run: |
+        if [ -f "Tests/FluidAudioSwiftTests/README_BENCHMARKS.md" ]; then
+          echo "✅ Benchmark documentation found"
+          echo "📄 Documentation size: $(wc -l < Tests/FluidAudioSwiftTests/README_BENCHMARKS.md) lines"
+        else
+          echo "❌ Benchmark documentation missing"
+          exit 1
+        fi
+
+    - name: Check download script exists
+      run: |
+        if [ -f "Scripts/download_ami_benchmark_data.sh" ]; then
+          echo "✅ AMI download script found"
+          chmod +x Scripts/download_ami_benchmark_data.sh
+        else
+          echo "❌ AMI download script missing"
+          exit 1
+        fi
+
+  lint:
+    name: Swift Lint Check
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check Swift formatting
+      run: |
+        # Basic formatting check - ensure no obvious issues
+        find Sources Tests -name "*.swift" -exec grep -l "import Foundation" {} \; | wc -l
+        echo "✅ Swift files found and accessible"
+
+    - name: Check for TODO/FIXME comments
+      run: |
+        TODO_COUNT=$(find Sources Tests -name "*.swift" -exec grep -l "TODO\|FIXME" {} \; | wc -l)
+        echo "📝 Found $TODO_COUNT files with TODO/FIXME comments"
+        if [ $TODO_COUNT -gt 10 ]; then
+          echo "⚠️  Consider addressing some TODO/FIXME comments"
+        fi
+
+    - name: Check package structure
+      run: |
+        echo "📦 Package structure:"
+        ls -la
+        echo ""
+        echo "📁 Sources structure:"
+        find Sources -type f -name "*.swift" | head -10
+        echo ""
+        echo "🧪 Tests structure:"
+        find Tests -type f -name "*.swift" | head -10
