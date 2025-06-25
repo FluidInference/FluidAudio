@@ -8,10 +8,10 @@ public enum DiarizerBackend: String, CaseIterable, Sendable {
 
 public struct DiarizerConfig: Sendable {
     public var backend: DiarizerBackend = .coreML
-    public var clusteringThreshold: Float = 0.7
-    public var minDurationOn: Float = 1.0
-    public var minDurationOff: Float = 0.5
-    public var numClusters: Int = -1  // -1 = auto
+    public var clusteringThreshold: Float = 0.7 // Similarity threshold for grouping speakers (0.0-1.0, higher = stricter)
+    public var minDurationOn: Float = 1.0 // Minimum duration (seconds) for a speaker segment to be considered valid
+    public var minDurationOff: Float = 0.5 // Minimum silence duration (seconds) between different speakers
+    public var numClusters: Int = -1  // Number of speakers to detect (-1 = auto-detect)
     public var debugMode: Bool = false
     public var modelCacheDirectory: URL?
 

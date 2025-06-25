@@ -35,7 +35,7 @@ private struct CoreMLSlidingWindowFeature {
 public final class CoreMLDiarizerManager: DiarizerManager, @unchecked Sendable {
     public let backend: DiarizerBackend = .coreML
 
-    private let logger = Logger(subsystem: "com.speakerkit", category: "CoreMLDiarizer")
+    private let logger = Logger(subsystem: "com.fluidinfluence", category: "CoreMLDiarizer")
     private let config: DiarizerConfig
 
     // CoreML models

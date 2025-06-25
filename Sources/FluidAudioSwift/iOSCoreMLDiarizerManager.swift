@@ -35,7 +35,7 @@ public final class iOSCoreMLDiarizerManager: ObservableObject {
     }
 
     // MARK: - Private Properties
-    private let logger = Logger(subsystem: "com.yourapp.diarizer", category: "iOSCoreML")
+    private let logger = Logger(subsystem: "com.fluidinfluenceiOS", category: "iOSCoreML")
     private var segmentationModel: MLModel?
     private var embeddingModel: MLModel?
     #if canImport(UIKit)
