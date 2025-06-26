@@ -21,6 +21,6 @@ jobs:
     - name: Build package
       run: swift build
 
-    - name: Verify CoreMLDiarizerManager runs
-      run: swift test --filter testCoreMLManagerBasicValidation
+    - name: Verify DiarizerManager runs
+      run: swift test --filter testManagerBasicValidation
       timeout-minutes: 5

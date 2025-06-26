@@ -3,39 +3,35 @@ import XCTest
 
 final class BasicInitializationTests: XCTestCase {
 
-    func testDiarizerFactoryCreatesCorrectBackends() {
-        // Test CoreML backend
-        let coremlConfig = DiarizerConfig(backend: .coreML)
-        let coremlManager = DiarizerFactory.createManager(config: coremlConfig)
-        XCTAssertEqual(coremlManager.backend, .coreML)
-        XCTAssertTrue(coremlManager is CoreMLDiarizerManager)
+    func testDiarizerCreation() {
+        // Test CoreML diarizer creation
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
+        XCTAssertFalse(manager.isAvailable) // Not initialized yet
     }
 
-    func testConvenienceFactoryMethods() {
-        // Test CoreML convenience factory
-        let coremlManager = DiarizerFactory.createCoreMLManager()
-        XCTAssertEqual(coremlManager.backend, .coreML)
-        XCTAssertFalse(coremlManager.isAvailable) // Not initialized yet
+    func testDiarizerWithCustomConfig() {
+        // Test CoreML with custom configuration
+        let config = DiarizerConfig(
+            clusteringThreshold: 0.8,
+            minDurationOn: 2.0,
+            minDurationOff: 1.0,
+            numClusters: 3,
+            debugMode: true
+        )
+        let manager = DiarizerManager(config: config)
+        XCTAssertFalse(manager.isAvailable) // Not initialized yet
     }
 
-    func testDiarizerBackendEnum() {
-        // Test enum cases
-        XCTAssertEqual(DiarizerBackend.coreML.rawValue, "coreml")
-
-        // Test all cases
-        let allCases = DiarizerBackend.allCases
-        XCTAssertEqual(allCases.count, 1)
-        XCTAssertTrue(allCases.contains(.coreML))
-    }
-
-    func testDiarizerBackendCases() {
-        // Test that all backend cases are available
-        let backends = DiarizerBackend.allCases
-        XCTAssertEqual(backends.count, 1)
-        XCTAssertTrue(backends.contains(.coreML))
-
-        // Test raw values
-        XCTAssertEqual(DiarizerBackend.coreML.rawValue, "coreml")
+    func testDiarizerConfigDefaults() {
+        // Test default configuration
+        let defaultConfig = DiarizerConfig.default
+        XCTAssertEqual(defaultConfig.clusteringThreshold, 0.7, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minDurationOn, 1.0, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.numClusters, -1)
+        XCTAssertFalse(defaultConfig.debugMode)
+        XCTAssertNil(defaultConfig.modelCacheDirectory)
     }
 }
 
@@ -44,18 +40,17 @@ final class BasicInitializationTests: XCTestCase {
 @available(macOS 13.0, iOS 16.0, *)
 final class CoreMLDiarizerTests: XCTestCase {
 
-    func testCoreMLInitialization() {
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+    func testInitialization() {
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
-        XCTAssertEqual(manager.backend, .coreML, "Backend should be CoreML")
         XCTAssertFalse(manager.isAvailable, "Manager should not be available before initialization")
     }
 
-    func testCoreMLNotInitializedErrors() async {
+    func testNotInitializedErrors() async {
         let testSamples = Array(repeating: Float(0.5), count: 16000)
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
         // Test segmentation fails when not initialized
         do {
@@ -78,9 +73,9 @@ final class CoreMLDiarizerTests: XCTestCase {
         }
     }
 
-    func testCoreMLAudioValidation() {
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+    func testAudioValidation() {
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
         // Test valid audio
         let validSamples = Array(0..<16000).map { i in
@@ -118,9 +113,9 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertTrue(emptyResult.issues.contains("No audio data"), "Empty audio should have correct error")
     }
 
-    func testCoreMLCosineDistance() {
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+    func testCosineDistance() {
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
         // Test identical embeddings
         let embedding1: [Float] = [1.0, 0.0, 0.0]
@@ -141,9 +136,9 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertEqual(distance3, 2.0, accuracy: 0.001, "Opposite embeddings should have distance 2")
     }
 
-    func testCoreMLEmbeddingValidation() {
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+    func testEmbeddingValidation() {
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
         // Test valid embedding
         let validEmbedding: [Float] = [0.5, 0.3, -0.2, 0.8]
@@ -166,16 +161,16 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertFalse(manager.validateEmbedding(smallEmbedding), "Small magnitude embedding should fail validation")
     }
 
-    func testCoreMLCleanup() async {
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+    func testCleanup() async {
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
         // Test cleanup doesn't crash
         await manager.cleanup()
         XCTAssertFalse(manager.isAvailable, "Manager should not be available after cleanup")
     }
 
-    func testCoreMLSpeakerComparison() async {
+    func testSpeakerComparison() async {
         let audio1 = Array(0..<16000).map { i in
             sin(Float(i) * 0.01) * 0.5
         }
@@ -183,8 +178,8 @@ final class CoreMLDiarizerTests: XCTestCase {
             sin(Float(i) * 0.02) * 0.5
         }
 
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
         do {
             let similarity = try await manager.compareSpeakers(audio1: audio1, audio2: audio2)
@@ -198,19 +193,13 @@ final class CoreMLDiarizerTests: XCTestCase {
         }
     }
 
-    func testCoreMLModelDownloadPaths() async {
-        let config = DiarizerConfig(backend: .coreML)
-        let manager = DiarizerFactory.createManager(config: config)
+    func testModelDownloadPaths() async {
+        let config = DiarizerConfig()
+        let manager = DiarizerManager(config: config)
 
         // Test model download (this might fail in CI/test environment, but should return valid paths)
         do {
-            let modelPaths: ModelPaths
-            if let coremlManager = manager as? CoreMLDiarizerManager {
-                modelPaths = try await coremlManager.downloadModels()
-            } else {
-                XCTFail("Unknown manager type")
-                return
-            }
+            let modelPaths = try await manager.downloadModels()
 
             XCTAssertFalse(modelPaths.segmentationPath.isEmpty, "Segmentation path should not be empty")
             XCTAssertFalse(modelPaths.embeddingPath.isEmpty, "Embedding path should not be empty")
@@ -230,10 +219,9 @@ final class CoreMLDiarizerTests: XCTestCase {
 @available(macOS 13.0, iOS 16.0, *)
 final class CoreMLBackendIntegrationTests: XCTestCase {
 
-    func testCoreMLDiarizerCreationAndBasicFunctionality() async {
-        // Test that CoreML diarizer can be created with the same config as WhisperState.swift
+    func testDiarizerCreationAndBasicFunctionality() async {
+        // Test that CoreML diarizer can be created with custom config
         let config = DiarizerConfig(
-            backend: .coreML,
             clusteringThreshold: 0.7,
             minDurationOn: 1.0,
             minDurationOff: 0.5,
@@ -241,11 +229,9 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
             debugMode: true
         )
 
-        let diarizer = DiarizerFactory.createManager(config: config)
+        let diarizer = DiarizerManager(config: config)
 
-        // Verify it's the correct type
-        XCTAssertTrue(diarizer is CoreMLDiarizerManager, "Should create CoreML diarizer")
-        XCTAssertEqual(diarizer.backend, .coreML, "Should be CoreML backend")
+        // Verify basic functionality
         XCTAssertFalse(diarizer.isAvailable, "Should not be available before initialization")
 
         // Test basic validation functionality (doesn't require initialization)
@@ -264,10 +250,10 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
         XCTAssertEqual(distance, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
     }
 
-    func testCoreMLDiarizerInitializationAttempt() async {
+    func testDiarizerInitializationAttempt() async {
         // Test that initialization attempt works (may fail due to model download but shouldn't crash)
-        let config = DiarizerConfig(backend: .coreML, debugMode: true)
-        let diarizer = DiarizerFactory.createManager(config: config)
+        let config = DiarizerConfig(debugMode: true)
+        let diarizer = DiarizerManager(config: config)
 
         do {
             try await diarizer.initialize()
@@ -293,8 +279,8 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
         }
     }
 
-    func testCoreMLModelPaths() async throws {
-        let manager = DiarizerFactory.createCoreMLManager()
+    func testModelPaths() async throws {
+        let manager = DiarizerManager()
 
         // Initialize to download models
         try await manager.initialize()

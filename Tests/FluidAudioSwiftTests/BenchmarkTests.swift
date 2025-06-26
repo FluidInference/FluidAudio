@@ -31,8 +31,8 @@ final class BenchmarkTests: XCTestCase {
     // MARK: - Official AMI Dataset Tests
 
     func testAMI_Official_IHM_Benchmark() async throws {
-        let config = DiarizerConfig(backend: .coreML, debugMode: true)
-        let manager = DiarizerFactory.createManager(config: config)
+        let config = DiarizerConfig(debugMode: true)
+        let manager = DiarizerManager(config: config)
 
         do {
             try await manager.initialize()
@@ -99,8 +99,8 @@ final class BenchmarkTests: XCTestCase {
     }
 
     func testAMI_Official_SDM_Benchmark() async throws {
-        let config = DiarizerConfig(backend: .coreML, debugMode: true)
-        let manager = DiarizerFactory.createManager(config: config)
+        let config = DiarizerConfig(debugMode: true)
+        let manager = DiarizerManager(config: config)
 
         do {
             try await manager.initialize()
@@ -169,8 +169,8 @@ final class BenchmarkTests: XCTestCase {
 
     /// Test with official AMI data following exact research paper protocols
     func testAMI_Research_Protocol_Evaluation() async throws {
-        let config = DiarizerConfig(backend: .coreML, debugMode: true)
-        let manager = DiarizerFactory.createManager(config: config)
+        let config = DiarizerConfig(debugMode: true)
+        let manager = DiarizerManager(config: config)
 
         // Initialize models first
         do {

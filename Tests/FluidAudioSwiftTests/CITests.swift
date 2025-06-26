@@ -9,18 +9,15 @@ final class CITests: XCTestCase {
 
     func testPackageImports() {
         // Test that all public APIs are accessible
-        let _ = DiarizerBackend.allCases
         let _ = DiarizerConfig.default
-        let _ = DiarizerFactory.self
+        let _ = DiarizerManager.self
     }
 
-    func testDiarizerFactoryCreation() {
-        // Test factory methods work
-        let manager1 = DiarizerFactory.createCoreMLManager()
-        let manager2 = DiarizerFactory.createManager(config: .default)
+    func testDiarizerCreation() {
+        // Test CoreML diarizer creation works
+        let manager1 = DiarizerManager()
+        let manager2 = DiarizerManager(config: .default)
 
-        XCTAssertEqual(manager1.backend, .coreML)
-        XCTAssertEqual(manager2.backend, .coreML)
         XCTAssertFalse(manager1.isAvailable) // Not initialized
         XCTAssertFalse(manager2.isAvailable) // Not initialized
     }
@@ -30,7 +27,6 @@ final class CITests: XCTestCase {
     func testDiarizerConfigDefaults() {
         let defaultConfig = DiarizerConfig.default
 
-        XCTAssertEqual(defaultConfig.backend, .coreML)
         XCTAssertEqual(defaultConfig.clusteringThreshold, 0.7, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.minDurationOn, 1.0, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
@@ -41,7 +37,6 @@ final class CITests: XCTestCase {
 
     func testDiarizerConfigCustom() {
         let customConfig = DiarizerConfig(
-            backend: .coreML,
             clusteringThreshold: 0.8,
             minDurationOn: 2.0,
             minDurationOff: 1.0,
@@ -50,7 +45,6 @@ final class CITests: XCTestCase {
             modelCacheDirectory: URL(fileURLWithPath: "/tmp/test")
         )
 
-        XCTAssertEqual(customConfig.backend, .coreML)
         XCTAssertEqual(customConfig.clusteringThreshold, 0.8, accuracy: 0.01)
         XCTAssertEqual(customConfig.minDurationOn, 2.0, accuracy: 0.01)
         XCTAssertEqual(customConfig.minDurationOff, 1.0, accuracy: 0.01)
@@ -149,8 +143,8 @@ final class CITests: XCTestCase {
     // MARK: - CoreML Manager Validation (Without Initialization)
 
     @available(macOS 13.0, iOS 16.0, *)
-    func testCoreMLManagerBasicValidation() {
-        let manager = DiarizerFactory.createCoreMLManager()
+    func testManagerBasicValidation() {
+        let manager = DiarizerManager()
 
         // Test audio validation (doesn't require initialization)
         let validAudio = Array(0..<16000).map { i in
@@ -187,19 +181,15 @@ final class CITests: XCTestCase {
 
     // MARK: - Backend Enum Tests
 
-    func testDiarizerBackendEnum() {
-        // Test all cases exist
-        let allCases = DiarizerBackend.allCases
-        XCTAssertEqual(allCases.count, 1)
-        XCTAssertTrue(allCases.contains(.coreML))
+    func testManagerTypes() {
+        // Test that CoreML manager can be created and basic types exist
+        let manager = DiarizerManager()
+        XCTAssertFalse(manager.isAvailable) // Not initialized
 
-        // Test raw values
-        XCTAssertEqual(DiarizerBackend.coreML.rawValue, "coreml")
-
-        // Test case iteration
-        for backend in DiarizerBackend.allCases {
-            XCTAssertFalse(backend.rawValue.isEmpty)
-        }
+        // Test that we can create with custom config
+        let config = DiarizerConfig(debugMode: true)
+        let debugManager = DiarizerManager(config: config)
+        XCTAssertFalse(debugManager.isAvailable)
     }
 
     // MARK: - Performance Baseline Tests
@@ -209,7 +199,7 @@ final class CITests: XCTestCase {
         let largeAudio = Array(repeating: Float(0.5), count: 160000) // 10 seconds at 16kHz
 
         measure {
-            let manager = DiarizerFactory.createCoreMLManager()
+            let manager = DiarizerManager()
             let _ = manager.validateAudio(largeAudio)
         }
     }
@@ -220,7 +210,7 @@ final class CITests: XCTestCase {
         let embedding2 = Array(repeating: Float(0.3), count: 512)
 
         measure {
-            let manager = DiarizerFactory.createCoreMLManager()
+            let manager = DiarizerManager()
             let _ = manager.cosineDistance(embedding1, embedding2)
         }
     }
