@@ -52,19 +52,9 @@ final class CoreMLDiarizerTests: XCTestCase {
         let config = DiarizerConfig()
         let manager = DiarizerManager(config: config)
 
-        // Test segmentation fails when not initialized
+        // Test diarization fails when not initialized
         do {
-            _ = try await manager.performSegmentation(testSamples, sampleRate: 16000)
-            XCTFail("Should have thrown notInitialized error")
-        } catch DiarizerError.notInitialized {
-            // Expected error
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-
-        // Test embedding extraction fails when not initialized
-        do {
-            _ = try await manager.extractEmbedding(from: testSamples)
+            _ = try await manager.performCompleteDiarization(testSamples, sampleRate: 16000)
             XCTFail("Should have thrown notInitialized error")
         } catch DiarizerError.notInitialized {
             // Expected error
@@ -264,8 +254,8 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
             let testSamples = Array(repeating: Float(0.5), count: 16000)
 
             do {
-                let segments = try await diarizer.performSegmentation(testSamples, sampleRate: 16000)
-                print("✅ CoreML segmentation completed, found \(segments.count) segments")
+                let result = try await diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
+                print("✅ CoreML diarization completed, found \(result.segments.count) segments")
             } catch {
                 print("ℹ️  Segmentation test completed (may need more realistic audio): \(error)")
             }
