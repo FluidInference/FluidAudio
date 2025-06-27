@@ -2,7 +2,6 @@
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 FluidAudioSwift is a Swift framework for on-device speaker diarization and audio processing.
 
@@ -67,7 +66,7 @@ let config = DiarizerConfig(
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Apache 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
