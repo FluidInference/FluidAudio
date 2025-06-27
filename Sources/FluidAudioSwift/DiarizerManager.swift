@@ -7,6 +7,7 @@ public struct DiarizerConfig: Sendable {
     public var minDurationOn: Float = 1.0 // Minimum duration (seconds) for a speaker segment to be considered valid
     public var minDurationOff: Float = 0.5 // Minimum silence duration (seconds) between different speakers
     public var numClusters: Int = -1  // Number of speakers to detect (-1 = auto-detect)
+    public var minActivityThreshold: Float = 10.0 // Minimum activity threshold (frames) for speaker to be considered active
     public var debugMode: Bool = false
     public var modelCacheDirectory: URL?
 
@@ -17,6 +18,7 @@ public struct DiarizerConfig: Sendable {
         minDurationOn: Float = 1.0,
         minDurationOff: Float = 0.5,
         numClusters: Int = -1,
+        minActivityThreshold: Float = 10.0,
         debugMode: Bool = false,
         modelCacheDirectory: URL? = nil
     ) {
@@ -24,28 +26,9 @@ public struct DiarizerConfig: Sendable {
         self.minDurationOn = minDurationOn
         self.minDurationOff = minDurationOff
         self.numClusters = numClusters
+        self.minActivityThreshold = minActivityThreshold
         self.debugMode = debugMode
         self.modelCacheDirectory = modelCacheDirectory
-    }
-}
-
-/// Represents a speaker segment with timing and speaker information
-public struct SpeakerSegment: Sendable, Identifiable {
-    public let id = UUID()
-    public let speakerClusterId: Int
-    public let startTimeSeconds: Float
-    public let endTimeSeconds: Float
-    public let confidenceScore: Float
-
-    public var durationSeconds: Float {
-        endTimeSeconds - startTimeSeconds
-    }
-
-    public init(speakerClusterId: Int, startTimeSeconds: Float, endTimeSeconds: Float, confidenceScore: Float = 1.0) {
-        self.speakerClusterId = speakerClusterId
-        self.startTimeSeconds = startTimeSeconds
-        self.endTimeSeconds = endTimeSeconds
-        self.confidenceScore = confidenceScore
     }
 }
 
@@ -222,12 +205,6 @@ public final class DiarizerManager: @unchecked Sendable {
         }
     }
 
-
-
-
-
-
-
     private func getSegments(audioChunk: [Float], chunkSize: Int = 160_000) throws -> [[[Float]]] {
         guard let segmentationModel = self.segmentationModel else {
             throw DiarizerError.notInitialized
@@ -349,13 +326,13 @@ public final class DiarizerManager: @unchecked Sendable {
             }
         }
 
-        // Flatten audio tensor to shape (3, 160000)
+        // Flatten audio tensor to shape (numSpeakers, 160000)
         var audioBatch: [[Float]] = []
-        for _ in 0..<3 {
+        for _ in 0..<numSpeakers {
             audioBatch.append(audioTensor)
         }
 
-        // Transpose mask shape to (3, 589)
+        // Transpose mask shape to (numSpeakers, 589)
         var cleanMasks: [[Float]] = Array(repeating: Array(repeating: 0.0, count: numFrames), count: numSpeakers)
 
         for s in 0..<numSpeakers {
@@ -365,18 +342,18 @@ public final class DiarizerManager: @unchecked Sendable {
         }
 
         // Prepare MLMultiArray inputs
-        guard let waveformArray = try? MLMultiArray(shape: [3, chunkSize] as [NSNumber], dataType: .float32),
-              let maskArray = try? MLMultiArray(shape: [3, numFrames] as [NSNumber], dataType: .float32) else {
+        guard let waveformArray = try? MLMultiArray(shape: [numSpeakers, chunkSize] as [NSNumber], dataType: .float32),
+              let maskArray = try? MLMultiArray(shape: [numSpeakers, numFrames] as [NSNumber], dataType: .float32) else {
             throw DiarizerError.processingFailed("Failed to allocate MLMultiArray for embeddings")
         }
 
-        for s in 0..<3 {
+        for s in 0..<numSpeakers {
             for i in 0..<chunkSize {
                 waveformArray[s * chunkSize + i] = NSNumber(value: audioBatch[s][i])
             }
         }
 
-        for s in 0..<3 {
+        for s in 0..<numSpeakers {
             for f in 0..<numFrames {
                 maskArray[s * numFrames + f] = NSNumber(value: cleanMasks[s][f])
             }
@@ -848,7 +825,7 @@ public final class DiarizerManager: @unchecked Sendable {
         // Step 4: Assign consistent speaker IDs using global database
         var speakerLabels: [String] = []
         for (speakerIndex, activity) in speakerActivities.enumerated() {
-            if activity > 10.0 { // Minimum activity threshold (10 frames)
+            if activity > config.minActivityThreshold { // Use configurable activity threshold
                 let embedding = embeddings[speakerIndex]
                 if validateEmbedding(embedding) {
                     let speakerId = assignSpeaker(embedding: embedding, speakerDB: &speakerDB)
@@ -887,7 +864,7 @@ public final class DiarizerManager: @unchecked Sendable {
     }
 
     /// Assign speaker ID using global database (like main.swift)
-    private func assignSpeaker(embedding: [Float], speakerDB: inout [String: [Float]], threshold: Float = 0.7) -> String {
+    private func assignSpeaker(embedding: [Float], speakerDB: inout [String: [Float]]) -> String {
         if speakerDB.isEmpty {
             let speakerId = "Speaker 1"
             speakerDB[speakerId] = embedding
@@ -907,7 +884,7 @@ public final class DiarizerManager: @unchecked Sendable {
         }
 
         if let bestSpeaker = identifiedSpeaker {
-            if minDistance > threshold {
+            if minDistance > config.clusteringThreshold {
                 // New speaker
                 let newSpeakerId = "Speaker \(speakerDB.count + 1)"
                 speakerDB[newSpeakerId] = embedding

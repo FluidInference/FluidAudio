@@ -64,14 +64,7 @@ final class BenchmarkTests: XCTestCase {
 
             do {
                 let result = try await manager.performCompleteDiarization(sample.audioSamples, sampleRate: sampleRate)
-                let predictedSegments = result.segments.map { timedSegment in
-                    SpeakerSegment(
-                        speakerClusterId: Int(timedSegment.speakerId.replacingOccurrences(of: "Speaker ", with: "")) ?? 0,
-                        startTimeSeconds: timedSegment.startTimeSeconds,
-                        endTimeSeconds: timedSegment.endTimeSeconds,
-                        confidenceScore: timedSegment.qualityScore
-                    )
-                }
+                let predictedSegments = result.segments
 
                 let metrics = calculateDiarizationMetrics(
                     predicted: predictedSegments,
@@ -140,14 +133,7 @@ final class BenchmarkTests: XCTestCase {
 
             do {
                 let result = try await manager.performCompleteDiarization(sample.audioSamples, sampleRate: sampleRate)
-                let predictedSegments = result.segments.map { timedSegment in
-                    SpeakerSegment(
-                        speakerClusterId: Int(timedSegment.speakerId.replacingOccurrences(of: "Speaker ", with: "")) ?? 0,
-                        startTimeSeconds: timedSegment.startTimeSeconds,
-                        endTimeSeconds: timedSegment.endTimeSeconds,
-                        confidenceScore: timedSegment.qualityScore
-                    )
-                }
+                let predictedSegments = result.segments
 
                 let metrics = calculateDiarizationMetrics(
                     predicted: predictedSegments,
@@ -294,22 +280,23 @@ final class BenchmarkTests: XCTestCase {
 
     /// Load ground truth annotations for a specific AMI meeting
     /// In practice, this would parse the official NXT format annotations
-    private func loadGroundTruthForMeeting(_ meetingId: String) async throws -> [SpeakerSegment] {
+    private func loadGroundTruthForMeeting(_ meetingId: String) async throws -> [TimedSpeakerSegment] {
         // This is a simplified placeholder based on typical AMI meeting structure
         // Real implementation would parse AMI manual annotations v1.6.2
         // from the NXT format files downloaded from Edinburgh
 
         // Return realistic AMI meeting structure for testing
         // AMI meetings are typically 30-45 minutes with 4 speakers
+        let dummyEmbedding: [Float] = [0.1, 0.2, 0.3, 0.4, 0.5] // Placeholder embedding
         return [
-            SpeakerSegment(speakerClusterId: 0, startTimeSeconds: 0.0, endTimeSeconds: 180.0, confidenceScore: 1.0),
-            SpeakerSegment(speakerClusterId: 1, startTimeSeconds: 180.0, endTimeSeconds: 360.0, confidenceScore: 1.0),
-            SpeakerSegment(speakerClusterId: 2, startTimeSeconds: 360.0, endTimeSeconds: 540.0, confidenceScore: 1.0),
-            SpeakerSegment(speakerClusterId: 0, startTimeSeconds: 540.0, endTimeSeconds: 720.0, confidenceScore: 1.0),
-            SpeakerSegment(speakerClusterId: 3, startTimeSeconds: 720.0, endTimeSeconds: 900.0, confidenceScore: 1.0),
-            SpeakerSegment(speakerClusterId: 1, startTimeSeconds: 900.0, endTimeSeconds: 1080.0, confidenceScore: 1.0),
-            SpeakerSegment(speakerClusterId: 2, startTimeSeconds: 1080.0, endTimeSeconds: 1260.0, confidenceScore: 1.0),
-            SpeakerSegment(speakerClusterId: 0, startTimeSeconds: 1260.0, endTimeSeconds: 1440.0, confidenceScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 1", embedding: dummyEmbedding, startTimeSeconds: 0.0, endTimeSeconds: 180.0, qualityScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 2", embedding: dummyEmbedding, startTimeSeconds: 180.0, endTimeSeconds: 360.0, qualityScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 3", embedding: dummyEmbedding, startTimeSeconds: 360.0, endTimeSeconds: 540.0, qualityScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 1", embedding: dummyEmbedding, startTimeSeconds: 540.0, endTimeSeconds: 720.0, qualityScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 4", embedding: dummyEmbedding, startTimeSeconds: 720.0, endTimeSeconds: 900.0, qualityScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 2", embedding: dummyEmbedding, startTimeSeconds: 900.0, endTimeSeconds: 1080.0, qualityScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 3", embedding: dummyEmbedding, startTimeSeconds: 1080.0, endTimeSeconds: 1260.0, qualityScore: 1.0),
+            TimedSpeakerSegment(speakerId: "Speaker 1", embedding: dummyEmbedding, startTimeSeconds: 1260.0, endTimeSeconds: 1440.0, qualityScore: 1.0),
         ]
     }
 
@@ -398,14 +385,7 @@ final class BenchmarkTests: XCTestCase {
         for sample in dataset.samples {
             do {
                 let result = try await manager.performCompleteDiarization(sample.audioSamples, sampleRate: sampleRate)
-                let predictedSegments = result.segments.map { timedSegment in
-                    SpeakerSegment(
-                        speakerClusterId: Int(timedSegment.speakerId.replacingOccurrences(of: "Speaker ", with: "")) ?? 0,
-                        startTimeSeconds: timedSegment.startTimeSeconds,
-                        endTimeSeconds: timedSegment.endTimeSeconds,
-                        confidenceScore: timedSegment.qualityScore
-                    )
-                }
+                let predictedSegments = result.segments
 
                 let metrics = calculateDiarizationMetrics(
                     predicted: predictedSegments,
@@ -430,7 +410,7 @@ final class BenchmarkTests: XCTestCase {
 
     // MARK: - Diarization Metrics (Research Standard)
 
-    private func calculateDiarizationMetrics(predicted: [SpeakerSegment], groundTruth: [SpeakerSegment], totalDuration: Float) -> DiarizationMetrics {
+    private func calculateDiarizationMetrics(predicted: [TimedSpeakerSegment], groundTruth: [TimedSpeakerSegment], totalDuration: Float) -> DiarizationMetrics {
         // Frame-based evaluation (standard in research)
         let frameSize: Float = 0.01 // 10ms frames
         let totalFrames = Int(totalDuration / frameSize)
@@ -475,7 +455,7 @@ final class BenchmarkTests: XCTestCase {
         )
     }
 
-    private func calculateJaccardErrorRate(predicted: [SpeakerSegment], groundTruth: [SpeakerSegment]) -> Float {
+    private func calculateJaccardErrorRate(predicted: [TimedSpeakerSegment], groundTruth: [TimedSpeakerSegment]) -> Float {
         // Simplified JER calculation
         // In practice, you'd implement the full Jaccard index calculation
         let totalGTDuration = groundTruth.reduce(0) { $0 + $1.durationSeconds }
@@ -488,10 +468,10 @@ final class BenchmarkTests: XCTestCase {
 
     // MARK: - Helper Methods
 
-    private func findSpeakerAtTime(_ time: Float, in segments: [SpeakerSegment]) -> Int? {
+    private func findSpeakerAtTime(_ time: Float, in segments: [TimedSpeakerSegment]) -> String? {
         for segment in segments {
             if time >= segment.startTimeSeconds && time < segment.endTimeSeconds {
-                return segment.speakerClusterId
+                return segment.speakerId
             }
         }
         return nil
@@ -524,7 +504,7 @@ struct AMISample {
     let sampleRate: Int                    // Sample rate (typically 16kHz)
     let durationSeconds: Float             // Meeting duration
     let speakerCount: Int                  // Number of speakers (typically 4)
-    let groundTruthSegments: [SpeakerSegment] // Official annotations
+    let groundTruthSegments: [TimedSpeakerSegment] // Official annotations
 }
 
 /// Research-standard diarization evaluation metrics

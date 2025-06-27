@@ -31,6 +31,7 @@ final class CITests: XCTestCase {
         XCTAssertEqual(defaultConfig.minDurationOn, 1.0, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.numClusters, -1)
+        XCTAssertEqual(defaultConfig.minActivityThreshold, 10.0, accuracy: 0.01)
         XCTAssertFalse(defaultConfig.debugMode)
         XCTAssertNil(defaultConfig.modelCacheDirectory)
     }
@@ -41,6 +42,7 @@ final class CITests: XCTestCase {
             minDurationOn: 2.0,
             minDurationOff: 1.0,
             numClusters: 3,
+            minActivityThreshold: 15.0,
             debugMode: true,
             modelCacheDirectory: URL(fileURLWithPath: "/tmp/test")
         )
@@ -49,6 +51,7 @@ final class CITests: XCTestCase {
         XCTAssertEqual(customConfig.minDurationOn, 2.0, accuracy: 0.01)
         XCTAssertEqual(customConfig.minDurationOff, 1.0, accuracy: 0.01)
         XCTAssertEqual(customConfig.numClusters, 3)
+        XCTAssertEqual(customConfig.minActivityThreshold, 15.0, accuracy: 0.01)
         XCTAssertTrue(customConfig.debugMode)
         XCTAssertNotNil(customConfig.modelCacheDirectory)
     }
@@ -56,18 +59,21 @@ final class CITests: XCTestCase {
     // MARK: - Data Structure Tests
 
     func testSpeakerSegmentCreation() {
-        let segment = SpeakerSegment(
-            speakerClusterId: 1,
+        let embedding: [Float] = [0.1, 0.2, -0.3, 0.4, -0.5]
+        let segment = TimedSpeakerSegment(
+            speakerId: "Speaker 1",
+            embedding: embedding,
             startTimeSeconds: 10.5,
             endTimeSeconds: 25.3,
-            confidenceScore: 0.95
+            qualityScore: 0.95
         )
 
-        XCTAssertEqual(segment.speakerClusterId, 1)
+        XCTAssertEqual(segment.speakerId, "Speaker 1")
         XCTAssertEqual(segment.startTimeSeconds, 10.5, accuracy: 0.01)
         XCTAssertEqual(segment.endTimeSeconds, 25.3, accuracy: 0.01)
-        XCTAssertEqual(segment.confidenceScore, 0.95, accuracy: 0.01)
+        XCTAssertEqual(segment.qualityScore, 0.95, accuracy: 0.01)
         XCTAssertEqual(segment.durationSeconds, 14.8, accuracy: 0.01)
+        XCTAssertEqual(segment.embedding.count, 5)
     }
 
     func testSpeakerEmbeddingCreation() {
