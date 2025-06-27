@@ -1,131 +1,76 @@
-# SeamlessAudioSwift
+# FluidAudioSwift
 
-A Swift package for seamless audio processing, speech recognition, and speaker diarization using SherpaOnnx.
+[![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+FluidAudioSwift is a Swift framework for on-device speaker diarization and audio processing.
 
 ## Features
 
-- 🎤 **Speech Recognition**: Real-time and offline speech-to-text
-- 👥 **Speaker Diarization**: Identify and separate different speakers in audio
-- 🔊 **Speaker Embedding**: Extract speaker embeddings for identification
-- 🎯 **Voice Activity Detection**: Detect speech segments in audio
-- 📱 **Cross-Platform**: Works on macOS and iOS
-- ⚡ **High Performance**: Optimized with native C++ libraries
+- **Speaker Diarization**: Automatically identify and separate different speakers in audio recordings
+- **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering
+- **CoreML Integration**: Native Apple CoreML backend for optimal performance on Apple Silicon and iOS support
+- **Real-time Processing**: Support for streaming audio processing with minimal latency
+- **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+
 
 ## Installation
 
-### Swift Package Manager
-
-Add SeamlessAudioSwift to your project using Xcode:
-
-1. In Xcode, go to **File → Add Package Dependencies**
-2. Enter the repository URL: `https://github.com/SeamlessCompute/SeamlessAudioSwift.git`
-3. Choose the version and add to your target
-
-Or add it to your `Package.swift`:
+Add FluidAudioSwift to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/SeamlessCompute/SeamlessAudioSwift.git", from: "1.0.0")
-]
+    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "1.0.0"),
+],
 ```
 
 ## Quick Start
 
-### Basic Speech Recognition
-
 ```swift
-import SeamlessAudioSwift
+import FluidAudioSwift
 
-// Initialize the speech recognition manager
-let manager = SpeakerDiarizationManager()
+// Initialize and process audio
+Task {
+    let diarizer = DiarizerManager()
+    try await diarizer.initialize()
 
-// Process audio samples
-let audioSamples: [Float] = // your audio data
-let result = try await manager.extractEmbedding(from: audioSamples)
-```
+    let audioSamples: [Float] = // your 16kHz audio data
+    let result = try await diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
 
-### Speaker Diarization
-
-```swift
-import SeamlessAudioSwift
-
-// Initialize with models
-let manager = SpeakerDiarizationManager()
-try await manager.initialize()
-
-// Process audio for speaker separation
-let segments = try await manager.performDiarization(on: audioSamples)
-
-for segment in segments {
-    print("Speaker \(segment.speaker): \(segment.start)s - \(segment.end)s")
+    for segment in result.segments {
+        print("\(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    }
 }
 ```
 
-## Requirements
+## Configuration
 
-- **iOS**: 16.0+
-- **macOS**: 13.0+
-- **Xcode**: 16.0+
-- **Swift**: 6.1+
+Customize behavior with `DiarizerConfig`:
 
-## Models and Attribution
+```swift
+let config = DiarizerConfig(
+    clusteringThreshold: 0.7,      // Speaker similarity (0.0-1.0, higher = stricter)
+    minActivityThreshold: 10.0,    // Minimum activity frames for speaker detection
+    minDurationOn: 1.0,           // Minimum speech duration (seconds)
+    minDurationOff: 0.5,          // Minimum silence between speakers (seconds)
+    numClusters: -1,              // Number of speakers (-1 = auto-detect)
+    debugMode: false
+)
+```
 
-This package uses models and libraries from the excellent [**SherpaOnnx**](https://github.com/k2-fsa/sherpa-onnx) project by the K2-FSA team.
+## API Reference
 
-### SherpaOnnx Models
-
-SherpaOnnx provides state-of-the-art speech recognition and audio processing models. You can find pre-trained models at:
-
-- **Main Repository**: [https://github.com/k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
-- **Pre-trained Models**: [https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/index.html)
-- **Documentation**: [https://k2-fsa.github.io/sherpa/onnx/](https://k2-fsa.github.io/sherpa/onnx/)
-
-### Supported Model Types
-
-- **Speech Recognition**: Transducer, Paraformer, Whisper, CTC models
-- **Speaker Diarization**: Pyannote-based segmentation models
-- **Speaker Embedding**: Speaker verification and identification models
-- **Voice Activity Detection**: Silero VAD models
-
-## Architecture
-
-SeamlessAudioSwift is built on top of:
-
-- **SherpaOnnx C++ Libraries**: High-performance audio processing
-- **ONNX Runtime**: Optimized neural network inference
-- **Swift Package Manager**: Modern dependency management
-- **Git LFS**: Efficient handling of large model files
+- **`DiarizerManager`**: Main diarization class
+- **`performCompleteDiarization(_:sampleRate:)`**: Process audio and return speaker segments
+- **`compareSpeakers(audio1:audio2:)`**: Compare similarity between two audio samples
+- **`validateAudio(_:)`**: Validate audio quality and characteristics
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- **[SherpaOnnx](https://github.com/k2-fsa/sherpa-onnx)** by the K2-FSA team for the underlying speech processing libraries
-- **[ONNX Runtime](https://onnxruntime.ai/)** for neural network inference
-- **[Pyannote](https://github.com/pyannote/pyannote-audio)** for speaker diarization models
-- **[Silero](https://github.com/snakers4/silero-vad)** for voice activity detection models
+This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing.
 
-## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For questions and support:
-- 📧 Contact: [SeamlessCompute](https://github.com/SeamlessCompute)
-- 🐛 Issues: [GitHub Issues](https://github.com/SeamlessCompute/SeamlessAudioSwift/issues)
-
----
-
-**Note**: This package includes pre-compiled libraries and models. The first build may take longer due to the size of the dependencies.
-
-# macOS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db

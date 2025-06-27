@@ -1,0 +1,26 @@
+name: CoreML Build Compile
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  verify-coreml:
+    name: Verify CoreMLDiarizerManager Builds
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Swift 6.1
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: '6.1'
+
+    - name: Build package
+      run: swift build
+
+    - name: Verify DiarizerManager runs
+      run: swift test --filter testManagerBasicValidation
+      timeout-minutes: 5
