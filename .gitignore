@@ -76,3 +76,5 @@ FluidAudioSwiftTests/
 
 threshold*.json
 baseline*.json
+.vscode/
+.build/
