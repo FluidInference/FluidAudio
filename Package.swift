@@ -5,22 +5,29 @@ let package = Package(
     name: "FluidAudioSwift",
     platforms: [
         .macOS(.v13),
-        .iOS(.v16)
+        .iOS(.v16),
     ],
     products: [
         .library(
             name: "FluidAudioSwift",
             targets: ["FluidAudioSwift"]
         ),
+        .executable(
+            name: "fluidaudio",
+            targets: ["DiarizationCLI"]
+        ),
     ],
-    dependencies: [
-        // Add any external dependencies here if needed
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "FluidAudioSwift",
             dependencies: [],
             path: "Sources/FluidAudioSwift"
+        ),
+        .executableTarget(
+            name: "DiarizationCLI",
+            dependencies: ["FluidAudioSwift"],
+            path: "Sources/DiarizationCLI"
         ),
         .testTarget(
             name: "FluidAudioSwiftTests",

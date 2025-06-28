@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<nite:root nite:id="IB4001.D.segs" xmlns:nite="http://nite.sourceforge.net/">
+   <segment nite:id="IB4001.sync.995" channel="3" transcriber_start="6.352" transcriber_end="7.584">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words0)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.997" channel="3" transcriber_start="49.563" transcriber_end="51.264">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words1)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.999" channel="3" transcriber_start="52.905" transcriber_end="53.77">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words2)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,001" channel="3" transcriber_start="249.36" transcriber_end="251.712">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words3)..id(IB4001.D.words12)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,003" channel="3" transcriber_start="313.824" transcriber_end="315.09">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words13)..id(IB4001.D.words17)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,005" channel="3" transcriber_start="361.424" transcriber_end="362.144">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words18)..id(IB4001.D.words19)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,007" channel="3" transcriber_start="427.184" transcriber_end="429.856">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words20)..id(IB4001.D.words31)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,009" channel="3" transcriber_start="456.144" transcriber_end="469.904">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words32)..id(IB4001.D.words71)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,011" channel="3" transcriber_start="471.258" transcriber_end="472.942">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words72)..id(IB4001.D.words75)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,013" channel="3" transcriber_start="473.552" transcriber_end="476.496">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words76)..id(IB4001.D.words86)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,015" channel="3" transcriber_start="583.36" transcriber_end="590.016">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words87)..id(IB4001.D.words111)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,017" channel="3" transcriber_start="604.14" transcriber_end="604.633">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words112)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,019" channel="3" transcriber_start="605.599" transcriber_end="620.821">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words113)..id(IB4001.D.words159)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,021" channel="3" transcriber_start="744.384" transcriber_end="752.706">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words160)..id(IB4001.D.words180)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,023" channel="3" transcriber_start="838.345" transcriber_end="839.475">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words181)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,025" channel="3" transcriber_start="848.816" transcriber_end="850.391">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words182)..id(IB4001.D.words190)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,027" channel="3" transcriber_start="877.92" transcriber_end="880.561">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words191)..id(IB4001.D.words199)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,029" channel="3" transcriber_start="882.208" transcriber_end="883.872">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words200)..id(IB4001.D.words206)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,031" channel="3" transcriber_start="885.44" transcriber_end="892.176">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words207)..id(IB4001.D.words236)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,033" channel="3" transcriber_start="893.277" transcriber_end="894.749">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words237)..id(IB4001.D.words240)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,035" channel="3" transcriber_start="896.016" transcriber_end="897.184">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words241)..id(IB4001.D.words245)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,037" channel="3" transcriber_start="900.638" transcriber_end="901.499">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words246)..id(IB4001.D.words247)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,039" channel="3" transcriber_start="904.752" transcriber_end="911.472">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words248)..id(IB4001.D.words259)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,041" channel="3" transcriber_start="924.142" transcriber_end="925.518">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words260)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,043" channel="3" transcriber_start="926.56" transcriber_end="927.904">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words261)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,045" channel="3" transcriber_start="942.032" transcriber_end="942.576">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words262)..id(IB4001.D.words264)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,047" channel="3" transcriber_start="955.328" transcriber_end="961.904">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words265)..id(IB4001.D.words292)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,049" channel="3" transcriber_start="1026.178" transcriber_end="1028.029">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words293)..id(IB4001.D.words297)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,051" channel="3" transcriber_start="1147.487" transcriber_end="1148.405">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words298)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,053" channel="3" transcriber_start="1151.952" transcriber_end="1156.752">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words299)..id(IB4001.D.words313)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,055" channel="3" transcriber_start="1157.936" transcriber_end="1166.944">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words314)..id(IB4001.D.words341)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,057" channel="3" transcriber_start="1168.32" transcriber_end="1169.088">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words342)..id(IB4001.D.words344)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,059" channel="3" transcriber_start="1171.696" transcriber_end="1172.665">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words345)..id(IB4001.D.words347)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,061" channel="3" transcriber_start="1173.372" transcriber_end="1175.257">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words348)..id(IB4001.D.words354)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,063" channel="3" transcriber_start="1179.472" transcriber_end="1179.84">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words355)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,065" channel="3" transcriber_start="1182.608" transcriber_end="1183.708">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words356)..id(IB4001.D.words361)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,067" channel="3" transcriber_start="1195.648" transcriber_end="1196.576">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words362)..id(IB4001.D.words367)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,069" channel="3" transcriber_start="1201.136" transcriber_end="1205.739">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words368)..id(IB4001.D.words386)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,071" channel="3" transcriber_start="1218.895" transcriber_end="1219.769">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words387)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,073" channel="3" transcriber_start="1222.926" transcriber_end="1224.089">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words388)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,075" channel="3" transcriber_start="1228.518" transcriber_end="1230.47">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words389)..id(IB4001.D.words394)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,077" channel="3" transcriber_start="1260.784" transcriber_end="1263.184">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words395)..id(IB4001.D.words401)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,079" channel="3" transcriber_start="1272.656" transcriber_end="1273.552">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words402)..id(IB4001.D.words408)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,081" channel="3" transcriber_start="1277.52" transcriber_end="1278.698">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words409)..id(IB4001.D.words412)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,083" channel="3" transcriber_start="1298.272" transcriber_end="1299.182">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words413)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,085" channel="3" transcriber_start="1310.144" transcriber_end="1316.666">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words414)..id(IB4001.D.words439)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,087" channel="3" transcriber_start="1338.272" transcriber_end="1340.062">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words440)..id(IB4001.D.words444)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,089" channel="3" transcriber_start="1357.712" transcriber_end="1364.432">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words445)..id(IB4001.D.words469)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,091" channel="3" transcriber_start="1377.586" transcriber_end="1378.358">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words470)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,093" channel="3" transcriber_start="1394.601" transcriber_end="1395.136">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words471)..id(IB4001.D.words472)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,095" channel="3" transcriber_start="1411.765" transcriber_end="1413.088">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words473)..id(IB4001.D.words476)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,097" channel="3" transcriber_start="1416.096" transcriber_end="1418.18">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words477)..id(IB4001.D.words482)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,099" channel="3" transcriber_start="1431.984" transcriber_end="1434.608">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words483)..id(IB4001.D.words491)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,101" channel="3" transcriber_start="1455.481" transcriber_end="1458.032">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words492)..id(IB4001.D.words501)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,103" channel="3" transcriber_start="1461.008" transcriber_end="1463.072">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words502)..id(IB4001.D.words512)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,105" channel="3" transcriber_start="1464.832" transcriber_end="1466.096">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words513)..id(IB4001.D.words519)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,107" channel="3" transcriber_start="1478.336" transcriber_end="1480.911">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words520)..id(IB4001.D.words533)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,109" channel="3" transcriber_start="1528.453" transcriber_end="1529.495">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words534)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,111" channel="3" transcriber_start="1530.176" transcriber_end="1531.802">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words535)..id(IB4001.D.words540)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,113" channel="3" transcriber_start="1533.456" transcriber_end="1533.984">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words541)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,115" channel="3" transcriber_start="1544.627" transcriber_end="1546.546">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words542)..id(IB4001.D.words551)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,117" channel="3" transcriber_start="1597.646" transcriber_end="1598.959">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words552)..id(IB4001.D.words556)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,119" channel="3" transcriber_start="1624.768" transcriber_end="1626.642">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words557)..id(IB4001.D.words560)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,121" channel="3" transcriber_start="1629.888" transcriber_end="1630.96">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words561)..id(IB4001.D.words564)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,123" channel="3" transcriber_start="1633.931" transcriber_end="1635.093">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words565)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,125" channel="3" transcriber_start="1636.432" transcriber_end="1636.72">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words566)..id(IB4001.D.words567)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,127" channel="3" transcriber_start="1639.665" transcriber_end="1640.843">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words568)..id(IB4001.D.words572)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,129" channel="3" transcriber_start="1645.2" transcriber_end="1646.272">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words573)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,131" channel="3" transcriber_start="1647.032" transcriber_end="1649.035">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words574)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,133" channel="3" transcriber_start="1671.312" transcriber_end="1673.345">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words575)..id(IB4001.D.words577)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,135" channel="3" transcriber_start="1677.648" transcriber_end="1686.992">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words578)..id(IB4001.D.words607)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,137" channel="3" transcriber_start="1688.778" transcriber_end="1690.216">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words608)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,139" channel="3" transcriber_start="1720.944" transcriber_end="1721.712">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words609)..id(IB4001.D.words610)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,141" channel="3" transcriber_start="1723.248" transcriber_end="1727.024">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words611)..id(IB4001.D.words621)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,143" channel="3" transcriber_start="1728.752" transcriber_end="1729.979">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words622)..id(IB4001.D.words625)"/>
+   </segment>
+   <segment nite:id="IB4001.sync.1,145" channel="3" transcriber_start="1763.632" transcriber_end="1764.96">
+      <nite:child href="IB4001.D.words.xml#id(IB4001.D.words626)..id(IB4001.D.words631)"/>
+   </segment>
+</nite:root>

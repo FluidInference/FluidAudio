@@ -1,0 +1,669 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<nite:root nite:id="TS3009b.D.segs" xmlns:nite="http://nite.sourceforge.net/">
+   <segment nite:id="TS3009b.sync.1,175" channel="3" transcriber_start="61.445" transcriber_end="64.023">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words0)..id(TS3009b.D.words5)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,177" channel="3" transcriber_start="66.896" transcriber_end="67.967">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words6)..id(TS3009b.D.words9)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,179" channel="3" transcriber_start="70.713" transcriber_end="71.382">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words10)..id(TS3009b.D.words11)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,181" channel="3" transcriber_start="79.904" transcriber_end="80.557">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words12)..id(TS3009b.D.words13)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,183" channel="3" transcriber_start="97.898" transcriber_end="98.528">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words14)..id(TS3009b.D.words15)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,185" channel="3" transcriber_start="117.622" transcriber_end="118.225">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words16)..id(TS3009b.D.words17)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,187" channel="3" transcriber_start="120.334" transcriber_end="120.836">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words18)..id(TS3009b.D.words19)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,189" channel="3" transcriber_start="131.872" transcriber_end="134.848">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words20)..id(TS3009b.D.words27)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,191" channel="3" transcriber_start="136.256" transcriber_end="136.941">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words28)..id(TS3009b.D.words29)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,193" channel="3" transcriber_start="148.879" transcriber_end="149.515">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words30)..id(TS3009b.D.words31)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,195" channel="3" transcriber_start="174.816" transcriber_end="175.326">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words32)..id(TS3009b.D.words33)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,197" channel="3" transcriber_start="208.0" transcriber_end="208.466">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words34)..id(TS3009b.D.words35)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,199" channel="3" transcriber_start="239.088" transcriber_end="241.376">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words36)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,201" channel="3" transcriber_start="243.648" transcriber_end="245.216">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words37)..id(TS3009b.D.words39)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,203" channel="3" transcriber_start="256.834" transcriber_end="257.504">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words40)..id(TS3009b.D.words41)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,205" channel="3" transcriber_start="288.816" transcriber_end="289.216">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words42)..id(TS3009b.D.words43)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,207" channel="3" transcriber_start="294.725" transcriber_end="295.227">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words44)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,209" channel="3" transcriber_start="303.793" transcriber_end="304.396">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words45)..id(TS3009b.D.words46)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,211" channel="3" transcriber_start="327.163" transcriber_end="327.699">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words47)..id(TS3009b.D.words48)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,213" channel="3" transcriber_start="328.79" transcriber_end="333.2">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words49)..id(TS3009b.D.words66)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,215" channel="3" transcriber_start="350.152" transcriber_end="350.922">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words67)..id(TS3009b.D.words68)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,217" channel="3" transcriber_start="363.312" transcriber_end="363.851">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words69)..id(TS3009b.D.words70)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,219" channel="3" transcriber_start="364.8" transcriber_end="366.4">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words71)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,221" channel="3" transcriber_start="383.072" transcriber_end="383.776">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words72)..id(TS3009b.D.words73)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,223" channel="3" transcriber_start="391.207" transcriber_end="391.743">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words74)..id(TS3009b.D.words75)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,225" channel="3" transcriber_start="393.651" transcriber_end="405.28">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words76)..id(TS3009b.D.words113)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,227" channel="3" transcriber_start="406.713" transcriber_end="408.354">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words114)..id(TS3009b.D.words119)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,229" channel="3" transcriber_start="409.224" transcriber_end="410.363">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words120)..id(TS3009b.D.words124)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,231" channel="3" transcriber_start="414.213" transcriber_end="414.782">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words125)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,233" channel="3" transcriber_start="420.14" transcriber_end="422.483">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words126)..id(TS3009b.D.words130)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,235" channel="3" transcriber_start="423.186" transcriber_end="423.722">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words131)..id(TS3009b.D.words132)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,237" channel="3" transcriber_start="425.22" transcriber_end="435.881">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words133)..id(TS3009b.D.words161)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,239" channel="3" transcriber_start="437.296" transcriber_end="450.93">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words162)..id(TS3009b.D.words205)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,240" channel="3" transcriber_start="450.93" transcriber_end="467.751">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words206)..id(TS3009b.D.words250)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,242" channel="3" transcriber_start="468.832" transcriber_end="473.168">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words251)..id(TS3009b.D.words261)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,244" channel="3" transcriber_start="474.16" transcriber_end="477.756">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words262)..id(TS3009b.D.words271)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,246" channel="3" transcriber_start="478.72" transcriber_end="486.928">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words272)..id(TS3009b.D.words298)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,248" channel="3" transcriber_start="488.336" transcriber_end="501.152">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words299)..id(TS3009b.D.words339)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,250" channel="3" transcriber_start="504.89" transcriber_end="511.92">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words340)..id(TS3009b.D.words349)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,252" channel="3" transcriber_start="513.424" transcriber_end="532.288">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words350)..id(TS3009b.D.words402)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,254" channel="3" transcriber_start="535.328" transcriber_end="550.032">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words403)..id(TS3009b.D.words455)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,256" channel="3" transcriber_start="553.296" transcriber_end="553.696">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words456)..id(TS3009b.D.words457)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,258" channel="3" transcriber_start="554.944" transcriber_end="582.64">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words458)..id(TS3009b.D.words542)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,260" channel="3" transcriber_start="593.952" transcriber_end="596.42">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words543)..id(TS3009b.D.words552)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,262" channel="3" transcriber_start="597.6" transcriber_end="601.392">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words553)..id(TS3009b.D.words568)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,264" channel="3" transcriber_start="603.786" transcriber_end="609.472">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words569)..id(TS3009b.D.words586)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,266" channel="3" transcriber_start="610.624" transcriber_end="611.296">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words587)..id(TS3009b.D.words588)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,268" channel="3" transcriber_start="612.233" transcriber_end="631.653">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words589)..id(TS3009b.D.words643)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,270" channel="3" transcriber_start="637.056" transcriber_end="638.592">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words644)..id(TS3009b.D.words650)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,272" channel="3" transcriber_start="640.144" transcriber_end="640.69">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words651)..id(TS3009b.D.words652)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,274" channel="3" transcriber_start="644.842" transcriber_end="651.304">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words653)..id(TS3009b.D.words675)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,276" channel="3" transcriber_start="655.696" transcriber_end="656.728">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words676)..id(TS3009b.D.words679)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,278" channel="3" transcriber_start="657.872" transcriber_end="661.264">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words680)..id(TS3009b.D.words690)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,280" channel="3" transcriber_start="664.684" transcriber_end="665.354">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words691)..id(TS3009b.D.words692)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,282" channel="3" transcriber_start="674.796" transcriber_end="683.104">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words693)..id(TS3009b.D.words726)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,284" channel="3" transcriber_start="686.28" transcriber_end="687.424">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words727)..id(TS3009b.D.words731)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,286" channel="3" transcriber_start="690.544" transcriber_end="709.792">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words732)..id(TS3009b.D.words784)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,288" channel="3" transcriber_start="715.056" transcriber_end="738.752">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words785)..id(TS3009b.D.words854)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,290" channel="3" transcriber_start="740.32" transcriber_end="750.8">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words855)..id(TS3009b.D.words890)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,292" channel="3" transcriber_start="758.384" transcriber_end="763.648">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words891)..id(TS3009b.D.words911)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,294" channel="3" transcriber_start="764.903" transcriber_end="771.808">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words912)..id(TS3009b.D.words939)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,296" channel="3" transcriber_start="778.028" transcriber_end="781.632">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words940)..id(TS3009b.D.words956)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,298" channel="3" transcriber_start="782.816" transcriber_end="790.631">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words957)..id(TS3009b.D.words982)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,300" channel="3" transcriber_start="793.184" transcriber_end="794.208">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words983)..id(TS3009b.D.words986)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,302" channel="3" transcriber_start="795.232" transcriber_end="797.584">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words987)..id(TS3009b.D.words996)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,304" channel="3" transcriber_start="802.457" transcriber_end="809.36">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words997)..id(TS3009b.D.words1016)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,306" channel="3" transcriber_start="815.344" transcriber_end="816.051">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1017)..id(TS3009b.D.words1018)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,308" channel="3" transcriber_start="818.629" transcriber_end="822.144">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1019)..id(TS3009b.D.words1029)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,310" channel="3" transcriber_start="823.551" transcriber_end="824.689">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1030)..id(TS3009b.D.words1031)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,312" channel="3" transcriber_start="825.52" transcriber_end="826.966">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1032)..id(TS3009b.D.words1034)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,314" channel="3" transcriber_start="828.572" transcriber_end="833.584">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1035)..id(TS3009b.D.words1053)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,316" channel="3" transcriber_start="837.042" transcriber_end="838.482">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1054)..id(TS3009b.D.words1057)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,318" channel="3" transcriber_start="866.232" transcriber_end="870.928">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1058)..id(TS3009b.D.words1064)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,320" channel="3" transcriber_start="878.486" transcriber_end="879.29">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1065)..id(TS3009b.D.words1067)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,322" channel="3" transcriber_start="881.504" transcriber_end="882.896">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1068)..id(TS3009b.D.words1070)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,324" channel="3" transcriber_start="883.683" transcriber_end="885.424">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1071)..id(TS3009b.D.words1079)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,326" channel="3" transcriber_start="892.522" transcriber_end="895.77">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1080)..id(TS3009b.D.words1090)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,328" channel="3" transcriber_start="898.96" transcriber_end="902.4">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1091)..id(TS3009b.D.words1103)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,330" channel="3" transcriber_start="925.161" transcriber_end="925.763">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1104)..id(TS3009b.D.words1105)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,332" channel="3" transcriber_start="926.5" transcriber_end="927.27">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1106)..id(TS3009b.D.words1107)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,334" channel="3" transcriber_start="948.219" transcriber_end="948.955">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1108)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,336" channel="3" transcriber_start="995.077" transcriber_end="995.78">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1109)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,338" channel="3" transcriber_start="1063.129" transcriber_end="1063.899">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1110)..id(TS3009b.D.words1111)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,340" channel="3" transcriber_start="1064.81" transcriber_end="1089.664">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1112)..id(TS3009b.D.words1189)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,342" channel="3" transcriber_start="1091.031" transcriber_end="1095.016">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1190)..id(TS3009b.D.words1203)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,344" channel="3" transcriber_start="1096.824" transcriber_end="1097.46">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1204)..id(TS3009b.D.words1205)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,346" channel="3" transcriber_start="1103.52" transcriber_end="1105.027">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1206)..id(TS3009b.D.words1211)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,348" channel="3" transcriber_start="1109.696" transcriber_end="1112.928">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1212)..id(TS3009b.D.words1223)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,350" channel="3" transcriber_start="1115.938" transcriber_end="1116.288">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1224)..id(TS3009b.D.words1225)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,352" channel="3" transcriber_start="1119.822" transcriber_end="1122.969">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1226)..id(TS3009b.D.words1233)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,354" channel="3" transcriber_start="1134.992" transcriber_end="1141.744">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1234)..id(TS3009b.D.words1259)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,356" channel="3" transcriber_start="1143.232" transcriber_end="1149.552">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1260)..id(TS3009b.D.words1285)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,358" channel="3" transcriber_start="1160.712" transcriber_end="1165.064">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1286)..id(TS3009b.D.words1299)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,360" channel="3" transcriber_start="1165.856" transcriber_end="1168.64">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1300)..id(TS3009b.D.words1306)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,362" channel="3" transcriber_start="1194.182" transcriber_end="1195.789">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1307)..id(TS3009b.D.words1311)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,364" channel="3" transcriber_start="1205.265" transcriber_end="1205.834">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1312)..id(TS3009b.D.words1313)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,366" channel="3" transcriber_start="1207.424" transcriber_end="1209.024">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1314)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,368" channel="3" transcriber_start="1212.028" transcriber_end="1212.698">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1315)..id(TS3009b.D.words1316)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,370" channel="3" transcriber_start="1213.869" transcriber_end="1214.907">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1317)..id(TS3009b.D.words1321)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,372" channel="3" transcriber_start="1226.962" transcriber_end="1229.473">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1322)..id(TS3009b.D.words1329)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,374" channel="3" transcriber_start="1230.592" transcriber_end="1231.616">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1330)..id(TS3009b.D.words1334)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,376" channel="3" transcriber_start="1233.022" transcriber_end="1235.534">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1335)..id(TS3009b.D.words1340)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,378" channel="3" transcriber_start="1238.614" transcriber_end="1240.054">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1341)..id(TS3009b.D.words1345)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,380" channel="3" transcriber_start="1250.829" transcriber_end="1251.967">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1346)..id(TS3009b.D.words1350)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,382" channel="3" transcriber_start="1258.633" transcriber_end="1259.403">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1351)..id(TS3009b.D.words1353)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,384" channel="3" transcriber_start="1282.648" transcriber_end="1284.121">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1354)..id(TS3009b.D.words1359)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,386" channel="3" transcriber_start="1287.536" transcriber_end="1289.076">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1360)..id(TS3009b.D.words1363)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,388" channel="3" transcriber_start="1298.176" transcriber_end="1300.32">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1364)..id(TS3009b.D.words1370)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,390" channel="3" transcriber_start="1316.992" transcriber_end="1317.574">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1371)..id(TS3009b.D.words1372)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,392" channel="3" transcriber_start="1323.333" transcriber_end="1327.018">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1373)..id(TS3009b.D.words1384)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,394" channel="3" transcriber_start="1331.134" transcriber_end="1331.837">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1385)..id(TS3009b.D.words1386)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,396" channel="3" transcriber_start="1337.852" transcriber_end="1338.588">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1387)..id(TS3009b.D.words1390)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,398" channel="3" transcriber_start="1344.381" transcriber_end="1344.916">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1391)..id(TS3009b.D.words1392)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,400" channel="3" transcriber_start="1374.586" transcriber_end="1375.423">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1393)..id(TS3009b.D.words1395)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,402" channel="3" transcriber_start="1384.196" transcriber_end="1384.88">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1396)..id(TS3009b.D.words1400)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,404" channel="3" transcriber_start="1388.139" transcriber_end="1391.42">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1401)..id(TS3009b.D.words1411)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,406" channel="3" transcriber_start="1398.15" transcriber_end="1406.42">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1412)..id(TS3009b.D.words1447)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,408" channel="3" transcriber_start="1409.132" transcriber_end="1413.392">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1448)..id(TS3009b.D.words1461)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,410" channel="3" transcriber_start="1424.474" transcriber_end="1425.311">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1462)..id(TS3009b.D.words1463)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,412" channel="3" transcriber_start="1445.968" transcriber_end="1447.327">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1464)..id(TS3009b.D.words1468)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,414" channel="3" transcriber_start="1450.928" transcriber_end="1479.072">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1469)..id(TS3009b.D.words1547)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,416" channel="3" transcriber_start="1488.56" transcriber_end="1489.225">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1548)..id(TS3009b.D.words1549)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,418" channel="3" transcriber_start="1506.536" transcriber_end="1507.908">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1550)..id(TS3009b.D.words1554)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,420" channel="3" transcriber_start="1511.145" transcriber_end="1512.183">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1555)..id(TS3009b.D.words1557)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,422" channel="3" transcriber_start="1516.208" transcriber_end="1517.54">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1558)..id(TS3009b.D.words1562)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,424" channel="3" transcriber_start="1518.645" transcriber_end="1525.408">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1563)..id(TS3009b.D.words1587)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,426" channel="3" transcriber_start="1526.4" transcriber_end="1546.235">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1588)..id(TS3009b.D.words1642)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,428" channel="3" transcriber_start="1547.376" transcriber_end="1548.947">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1643)..id(TS3009b.D.words1650)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,430" channel="3" transcriber_start="1555.115" transcriber_end="1556.655">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1651)..id(TS3009b.D.words1654)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,432" channel="3" transcriber_start="1563.419" transcriber_end="1567.104">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1655)..id(TS3009b.D.words1667)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,434" channel="3" transcriber_start="1574.568" transcriber_end="1576.309">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1668)..id(TS3009b.D.words1674)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,436" channel="3" transcriber_start="1604.942" transcriber_end="1614.116">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1675)..id(TS3009b.D.words1715)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,438" channel="3" transcriber_start="1619.376" transcriber_end="1621.717">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1716)..id(TS3009b.D.words1723)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,440" channel="3" transcriber_start="1630.672" transcriber_end="1632.416">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1724)..id(TS3009b.D.words1730)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,442" channel="3" transcriber_start="1638.661" transcriber_end="1643.483">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1731)..id(TS3009b.D.words1748)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,444" channel="3" transcriber_start="1644.688" transcriber_end="1647.048">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1749)..id(TS3009b.D.words1757)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,446" channel="3" transcriber_start="1648.016" transcriber_end="1648.896">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1758)..id(TS3009b.D.words1759)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,448" channel="3" transcriber_start="1652.032" transcriber_end="1654.784">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1760)..id(TS3009b.D.words1772)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,450" channel="3" transcriber_start="1657.2" transcriber_end="1658.608">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1773)..id(TS3009b.D.words1778)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,452" channel="3" transcriber_start="1671.766" transcriber_end="1673.44">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1779)..id(TS3009b.D.words1786)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,454" channel="3" transcriber_start="1678.012" transcriber_end="1680.992">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1787)..id(TS3009b.D.words1798)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,456" channel="3" transcriber_start="1694.485" transcriber_end="1695.255">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1799)..id(TS3009b.D.words1800)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,458" channel="3" transcriber_start="1697.733" transcriber_end="1698.704">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1801)..id(TS3009b.D.words1804)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,460" channel="3" transcriber_start="1704.32" transcriber_end="1706.027">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1805)..id(TS3009b.D.words1812)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,462" channel="3" transcriber_start="1707.668" transcriber_end="1711.024">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1813)..id(TS3009b.D.words1827)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,464" channel="3" transcriber_start="1712.336" transcriber_end="1713.126">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1828)..id(TS3009b.D.words1831)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,466" channel="3" transcriber_start="1720.726" transcriber_end="1724.777">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1832)..id(TS3009b.D.words1846)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,468" channel="3" transcriber_start="1726.518" transcriber_end="1728.832">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1847)..id(TS3009b.D.words1857)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,470" channel="3" transcriber_start="1731.731" transcriber_end="1741.14">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1858)..id(TS3009b.D.words1888)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,472" channel="3" transcriber_start="1751.887" transcriber_end="1752.758">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1889)..id(TS3009b.D.words1891)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,474" channel="3" transcriber_start="1757.12" transcriber_end="1765.888">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1892)..id(TS3009b.D.words1917)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,476" channel="3" transcriber_start="1778.677" transcriber_end="1779.916">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1918)..id(TS3009b.D.words1922)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,478" channel="3" transcriber_start="1781.055" transcriber_end="1787.168">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1923)..id(TS3009b.D.words1936)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,480" channel="3" transcriber_start="1793.39" transcriber_end="1794.26">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1937)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,482" channel="3" transcriber_start="1805.683" transcriber_end="1807.893">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1938)..id(TS3009b.D.words1941)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,484" channel="3" transcriber_start="1809.664" transcriber_end="1809.984">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1942)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,486" channel="3" transcriber_start="1814.054" transcriber_end="1814.69">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1943)..id(TS3009b.D.words1944)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,488" channel="3" transcriber_start="1817.904" transcriber_end="1822.656">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1945)..id(TS3009b.D.words1962)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,490" channel="3" transcriber_start="1824.199" transcriber_end="1825.002">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1963)..id(TS3009b.D.words1967)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,492" channel="3" transcriber_start="1826.304" transcriber_end="1829.924">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1968)..id(TS3009b.D.words1980)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,494" channel="3" transcriber_start="1833.197" transcriber_end="1833.733">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1981)..id(TS3009b.D.words1982)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,496" channel="3" transcriber_start="1834.838" transcriber_end="1839.793">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words1983)..id(TS3009b.D.words2002)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,498" channel="3" transcriber_start="1841.132" transcriber_end="1849.804">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2003)..id(TS3009b.D.words2038)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,500" channel="3" transcriber_start="1854.8" transcriber_end="1855.376">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2039)..id(TS3009b.D.words2041)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,502" channel="3" transcriber_start="1856.534" transcriber_end="1857.137">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2042)..id(TS3009b.D.words2043)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,504" channel="3" transcriber_start="1858.112" transcriber_end="1860.853">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2044)..id(TS3009b.D.words2051)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,506" channel="3" transcriber_start="1864.342" transcriber_end="1865.916">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2052)..id(TS3009b.D.words2055)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,508" channel="3" transcriber_start="1872.345" transcriber_end="1879.744">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2056)..id(TS3009b.D.words2081)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,510" channel="3" transcriber_start="1883.561" transcriber_end="1884.499">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2082)..id(TS3009b.D.words2085)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,512" channel="3" transcriber_start="1885.734" transcriber_end="1887.107">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2086)..id(TS3009b.D.words2092)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,514" channel="3" transcriber_start="1901.984" transcriber_end="1902.877">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2093)..id(TS3009b.D.words2094)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,516" channel="3" transcriber_start="1906.56" transcriber_end="1907.263">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2095)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,518" channel="3" transcriber_start="1925.856" transcriber_end="1926.414">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2096)..id(TS3009b.D.words2097)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,520" channel="3" transcriber_start="1936.048" transcriber_end="1941.92">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2098)..id(TS3009b.D.words2115)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,522" channel="3" transcriber_start="1947.184" transcriber_end="1949.086">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2116)..id(TS3009b.D.words2123)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,524" channel="3" transcriber_start="1949.991" transcriber_end="1971.328">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2124)..id(TS3009b.D.words2181)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,526" channel="3" transcriber_start="1986.896" transcriber_end="1987.587">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2182)..id(TS3009b.D.words2183)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,528" channel="3" transcriber_start="1994.617" transcriber_end="2012.688">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2184)..id(TS3009b.D.words2227)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,530" channel="3" transcriber_start="2015.51" transcriber_end="2018.858">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2228)..id(TS3009b.D.words2235)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,532" channel="3" transcriber_start="2019.687" transcriber_end="2023.712">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2236)..id(TS3009b.D.words2251)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,534" channel="3" transcriber_start="2045.076" transcriber_end="2048.056">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2252)..id(TS3009b.D.words2263)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,536" channel="3" transcriber_start="2048.96" transcriber_end="2049.998">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2264)..id(TS3009b.D.words2267)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,538" channel="3" transcriber_start="2050.969" transcriber_end="2052.543">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2268)..id(TS3009b.D.words2272)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,540" channel="3" transcriber_start="2056.728" transcriber_end="2058.369">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2273)..id(TS3009b.D.words2279)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,542" channel="3" transcriber_start="2062.922" transcriber_end="2065.4">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2280)..id(TS3009b.D.words2286)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,544" channel="3" transcriber_start="2066.304" transcriber_end="2068.347">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2287)..id(TS3009b.D.words2295)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,546" channel="3" transcriber_start="2078.8" transcriber_end="2085.408">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2296)..id(TS3009b.D.words2324)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,548" channel="3" transcriber_start="2094.852" transcriber_end="2095.421">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2325)..id(TS3009b.D.words2326)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,550" channel="3" transcriber_start="2102.032" transcriber_end="2106.64">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2327)..id(TS3009b.D.words2339)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,552" channel="3" transcriber_start="2108.408" transcriber_end="2109.312">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2340)..id(TS3009b.D.words2343)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,554" channel="3" transcriber_start="2124.986" transcriber_end="2125.722">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2344)..id(TS3009b.D.words2345)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,556" channel="3" transcriber_start="2127.932" transcriber_end="2129.305">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2346)..id(TS3009b.D.words2351)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,558" channel="3" transcriber_start="2133.825" transcriber_end="2135.031">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2352)..id(TS3009b.D.words2355)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,560" channel="3" transcriber_start="2162.372" transcriber_end="2162.941">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2356)..id(TS3009b.D.words2357)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,562" channel="3" transcriber_start="2172.081" transcriber_end="2173.889">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2358)..id(TS3009b.D.words2366)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,564" channel="3" transcriber_start="2181.284" transcriber_end="2182.288">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2367)..id(TS3009b.D.words2372)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,566" channel="3" transcriber_start="2184.866" transcriber_end="2194.241">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2373)..id(TS3009b.D.words2402)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,568" channel="3" transcriber_start="2195.011" transcriber_end="2197.924">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2403)..id(TS3009b.D.words2411)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,570" channel="3" transcriber_start="2206.226" transcriber_end="2206.895">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2412)..id(TS3009b.D.words2413)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,572" channel="3" transcriber_start="2210.043" transcriber_end="2211.884">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2414)..id(TS3009b.D.words2421)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,574" channel="3" transcriber_start="2219.584" transcriber_end="2219.856">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2422)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,576" channel="3" transcriber_start="2225.52" transcriber_end="2225.728">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2423)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,578" channel="3" transcriber_start="2231.824" transcriber_end="2232.494">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2424)..id(TS3009b.D.words2425)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,580" channel="3" transcriber_start="2236.344" transcriber_end="2240.094">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2426)..id(TS3009b.D.words2439)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,582" channel="3" transcriber_start="2242.17" transcriber_end="2242.974">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2440)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,584" channel="3" transcriber_start="2249.034" transcriber_end="2250.273">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2441)..id(TS3009b.D.words2446)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,586" channel="3" transcriber_start="2289.625" transcriber_end="2293.312">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2447)..id(TS3009b.D.words2458)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,588" channel="3" transcriber_start="2295.2" transcriber_end="2300.416">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2459)..id(TS3009b.D.words2482)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,590" channel="3" transcriber_start="2306.224" transcriber_end="2309.216">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2483)..id(TS3009b.D.words2495)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,592" channel="3" transcriber_start="2312.166" transcriber_end="2315.146">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2496)..id(TS3009b.D.words2502)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,594" channel="3" transcriber_start="2333.904" transcriber_end="2345.504">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2503)..id(TS3009b.D.words2550)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,596" channel="3" transcriber_start="2348.96" transcriber_end="2350.224">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2551)..id(TS3009b.D.words2556)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,598" channel="3" transcriber_start="2361.408" transcriber_end="2364.752">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2557)..id(TS3009b.D.words2568)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,600" channel="3" transcriber_start="2368.967" transcriber_end="2372.181">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2569)..id(TS3009b.D.words2577)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,602" channel="3" transcriber_start="2374.558" transcriber_end="2376.065">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2578)..id(TS3009b.D.words2581)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,604" channel="3" transcriber_start="2378.896" transcriber_end="2379.614">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2582)..id(TS3009b.D.words2583)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,606" channel="3" transcriber_start="2392.029" transcriber_end="2393.469">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2584)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,608" channel="3" transcriber_start="2396.784" transcriber_end="2398.257">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2585)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,610" channel="3" transcriber_start="2427.44" transcriber_end="2429.488">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2586)..id(TS3009b.D.words2589)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,612" channel="3" transcriber_start="2432.144" transcriber_end="2432.825">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2590)..id(TS3009b.D.words2591)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,614" channel="3" transcriber_start="2436.307" transcriber_end="2438.45">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2592)..id(TS3009b.D.words2596)"/>
+   </segment>
+   <segment nite:id="TS3009b.sync.1,616" channel="3" transcriber_start="2439.632" transcriber_end="2442.609">
+      <nite:child href="TS3009b.D.words.xml#id(TS3009b.D.words2597)..id(TS3009b.D.words2603)"/>
+   </segment>
+</nite:root>

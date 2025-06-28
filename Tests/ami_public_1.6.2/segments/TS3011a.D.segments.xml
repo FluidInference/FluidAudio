@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<nite:root nite:id="TS3011a.D.segs" xmlns:nite="http://nite.sourceforge.net/">
+   <segment nite:id="TS3011a.sync.516" channel="3" transcriber_start="56.288" transcriber_end="58.899">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words0)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.518" channel="3" transcriber_start="60.315" transcriber_end="61.744">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words1)..id(TS3011a.D.words3)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.520" channel="3" transcriber_start="87.026" transcriber_end="89.808">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words4)..id(TS3011a.D.words7)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.522" channel="3" transcriber_start="514.27" transcriber_end="514.761">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words8)..id(TS3011a.D.words9)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.524" channel="3" transcriber_start="528.122" transcriber_end="529.973">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words10)..id(TS3011a.D.words12)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.526" channel="3" transcriber_start="537.648" transcriber_end="540.356">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words13)..id(TS3011a.D.words19)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.528" channel="3" transcriber_start="552.512" transcriber_end="554.433">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words20)..id(TS3011a.D.words24)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.530" channel="3" transcriber_start="555.678" transcriber_end="556.907">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words25)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.532" channel="3" transcriber_start="561.52" transcriber_end="563.099">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words26)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.534" channel="3" transcriber_start="606.928" transcriber_end="609.04">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words27)..id(TS3011a.D.words29)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.536" channel="3" transcriber_start="717.674" transcriber_end="718.382">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words30)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.538" channel="3" transcriber_start="918.666" transcriber_end="919.039">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words31)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.540" channel="3" transcriber_start="1085.341" transcriber_end="1086.938">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words32)..id(TS3011a.D.words42)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.542" channel="3" transcriber_start="1283.2" transcriber_end="1288.441">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words43)..id(TS3011a.D.words59)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.544" channel="3" transcriber_start="1290.976" transcriber_end="1293.216">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words60)..id(TS3011a.D.words70)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.546" channel="3" transcriber_start="1295.552" transcriber_end="1302.88">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words71)..id(TS3011a.D.words95)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.548" channel="3" transcriber_start="1304.112" transcriber_end="1305.776">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words96)..id(TS3011a.D.words102)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.550" channel="3" transcriber_start="1369.456" transcriber_end="1369.696">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words103)..id(TS3011a.D.words104)"/>
+   </segment>
+   <segment nite:id="TS3011a.sync.552" channel="3" transcriber_start="1463.071" transcriber_end="1463.891">
+      <nite:child href="TS3011a.D.words.xml#id(TS3011a.D.words105)"/>
+   </segment>
+</nite:root>

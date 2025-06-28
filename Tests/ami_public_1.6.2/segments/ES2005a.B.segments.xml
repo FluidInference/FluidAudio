@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<nite:root nite:id="ES2005a.B.segs" xmlns:nite="http://nite.sourceforge.net/">
+   <segment nite:id="ES2005a.sync.40" channel="1" transcriber_start="26.64" transcriber_end="27.357">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words0)..id(ES2005a.B.words1)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.42" channel="1" transcriber_start="41.168" transcriber_end="41.895">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words2)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.44" channel="1" transcriber_start="74.368" transcriber_end="106.713">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words3)..id(ES2005a.B.words91)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.45" channel="1" transcriber_start="106.713" transcriber_end="133.664">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words92)..id(ES2005a.B.words180)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.47" channel="1" transcriber_start="141.764" transcriber_end="142.544">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words181)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.49" channel="1" transcriber_start="186.592" transcriber_end="187.504">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words182)..id(ES2005a.B.words183)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.51" channel="1" transcriber_start="225.731" transcriber_end="227.007">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words184)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.53" channel="1" transcriber_start="230.72" transcriber_end="231.166">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words185)..id(ES2005a.B.words186)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.55" channel="1" transcriber_start="236.384" transcriber_end="237.376">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words187)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.57" channel="1" transcriber_start="241.376" transcriber_end="242.336">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words188)..id(ES2005a.B.words189)"/>
+   </segment>
+   <segment nite:id="ES2005a.sync.59" channel="1" transcriber_start="298.752" transcriber_end="299.721">
+      <nite:child href="ES2005a.B.words.xml#id(ES2005a.B.words190)..id(ES2005a.B.words191)"/>
+   </segment>
+</nite:root>

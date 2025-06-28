@@ -1,0 +1,190 @@
+1 abstractive
+2 headGesture
+3 focus
+4 segments
+5 words
+6 youUsages
+7 participantRoles
+8 disfluency
+9 movement
+10 handGesture
+11 participantSummaries
+12 decision
+13 topics
+14 argumentation
+15 dialogueActs
+16 namedEntities
+17 extractive
+
+          1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16  17 
+EN2001a               X   X                                                 
+EN2001b               X   X                                                 
+EN2001d               X   X                                                 
+EN2001e               X   X                                                 
+EN2002a               X   X                                                 
+EN2002b               X   X                                                 
+EN2002c               X   X                                                 
+EN2002d               X   X                                                 
+EN2003a               X   X                                                 
+EN2004a               X   X                                                 
+EN2005a               X   X                                                 
+EN2006a               X   X                                                 
+EN2006b               X   X                                                 
+EN2009b               X   X                                                 
+EN2009c               X   X                                                 
+EN2009d               X   X                                                 
+ES2002a   X           X   X   X       X   X   X   X   X   X   X   X   X   X 
+ES2002b   X           X   X           X   X   X   X       X   X   X   X   X 
+ES2002c   X           X   X   X       X   X   X   X       X   X   X   X   X 
+ES2002d   X           X   X   X   X   X   X   X   X   X   X   X   X   X   X 
+ES2003a   X   X       X   X               X       X       X   X   X   X   X 
+ES2003b   X   X       X   X               X       X       X   X   X   X   X 
+ES2003c   X           X   X               X       X       X   X   X   X   X 
+ES2003d   X           X   X               X       X       X   X   X   X   X 
+ES2004a   X           X   X               X       X       X   X   X   X   X 
+ES2004b   X           X   X               X       X       X   X   X   X   X 
+ES2004c   X           X   X               X       X       X   X   X   X   X 
+ES2004d   X           X   X                       X       X   X   X   X   X 
+ES2005a   X           X   X           X       X   X       X       X   X   X 
+ES2005b   X           X   X           X       X   X       X   X   X   X   X 
+ES2005c   X           X   X           X           X       X   X   X   X   X 
+ES2005d   X           X   X           X           X       X   X   X   X   X 
+ES2006a   X           X   X           X   X       X   X   X   X   X   X   X 
+ES2006b   X           X   X           X   X       X       X   X   X   X   X 
+ES2006c   X           X   X           X   X       X   X       X   X   X   X 
+ES2006d   X           X   X           X   X       X       X   X   X   X   X 
+ES2007a   X           X   X               X       X       X   X   X   X   X 
+ES2007b   X           X   X               X       X       X   X   X   X   X 
+ES2007c   X           X   X               X       X       X   X   X   X   X 
+ES2007d   X           X   X               X       X       X   X   X   X   X 
+ES2008a   X   X   X   X   X           X   X   X   X       X   X   X   X   X 
+ES2008b   X   X       X   X       X   X   X   X   X       X   X   X   X   X 
+ES2008c   X   X       X   X           X   X       X       X   X   X   X   X 
+ES2008d   X   X       X   X       X   X   X       X       X   X   X   X   X 
+ES2009a   X   X       X   X               X       X   X   X       X   X   X 
+ES2009b   X   X       X   X               X       X   X   X   X   X   X   X 
+ES2009c   X   X       X   X   X           X   X   X   X   X   X   X   X   X 
+ES2009d   X   X       X   X   X   X       X   X   X       X   X   X   X   X 
+ES2010a   X           X   X               X       X       X   X   X   X   X 
+ES2010b   X           X   X               X       X   X   X   X   X   X   X 
+ES2010c   X           X   X               X       X   X   X   X   X   X   X 
+ES2010d   X           X   X               X       X   X   X   X   X   X   X 
+ES2011a   X           X   X               X       X       X       X   X   X 
+ES2011b   X           X   X               X       X       X   X   X   X   X 
+ES2011c   X           X   X               X       X       X   X   X   X   X 
+ES2011d   X           X   X                       X       X   X   X   X   X 
+ES2012a   X           X   X               X       X       X   X   X   X   X 
+ES2012b   X           X   X               X       X       X   X   X   X   X 
+ES2012c   X           X   X               X       X   X   X   X   X   X   X 
+ES2012d   X           X   X               X       X   X   X       X   X   X 
+ES2013a   X           X   X               X       X       X       X   X   X 
+ES2013b   X           X   X               X       X       X   X   X   X   X 
+ES2013c   X           X   X               X       X       X   X   X   X   X 
+ES2013d   X           X   X               X       X       X       X   X   X 
+ES2014a   X           X   X               X       X       X       X   X   X 
+ES2014b   X           X   X               X       X       X   X   X   X   X 
+ES2014c   X           X   X               X       X       X   X   X   X   X 
+ES2014d   X           X   X               X       X       X       X       X 
+ES2015a   X           X   X               X       X   X   X       X   X   X 
+ES2015b   X           X   X               X       X   X           X   X   X 
+ES2015c   X           X   X               X       X   X       X   X   X   X 
+ES2015d   X           X   X               X       X   X   X   X   X   X   X 
+ES2016a   X           X   X               X       X   X   X   X   X   X   X 
+ES2016b   X           X   X               X       X   X   X   X   X   X   X 
+ES2016c   X           X   X               X       X   X   X   X   X   X   X 
+ES2016d   X           X   X               X       X   X   X   X   X   X   X 
+IB4001                X   X                                           X     
+IB4002                X   X                                                 
+IB4003    X           X   X               X               X       X   X     
+IB4004                X   X               X                           X     
+IB4005    X           X   X               X               X           X     
+IB4010    X           X   X                               X           X     
+IB4011    X           X   X               X               X           X     
+IN1001                X   X                                                 
+IN1002                X   X               X                                 
+IN1005                X   X               X                                 
+IN1007                X   X                                                 
+IN1008                X   X                                                 
+IN1009                X   X                                                 
+IN1012                X   X                                                 
+IN1013                X   X                                                 
+IN1014                X   X                                                 
+IN1016                X   X                                                 
+IS1000a   X   X   X   X   X               X           X   X       X   X   X 
+IS1000b   X   X       X   X               X               X   X   X   X   X 
+IS1000c   X           X   X               X               X   X   X   X   X 
+IS1000d   X   X       X   X               X               X   X   X   X   X 
+IS1001a   X   X   X   X   X   X       X   X       X       X   X   X   X   X 
+IS1001b   X   X   X   X   X   X       X   X       X   X   X   X   X   X   X 
+IS1001c   X   X   X   X   X   X       X   X       X   X   X   X   X   X   X 
+IS1001d   X   X       X   X           X   X           X   X       X   X   X 
+IS1002b   X   X       X   X               X       X       X   X   X   X   X 
+IS1002c   X           X   X               X   X   X       X   X   X   X   X 
+IS1002d   X           X   X               X       X       X       X   X   X 
+IS1003a   X   X       X   X           X   X       X   X   X       X   X   X 
+IS1003b   X   X   X   X   X   X       X   X       X   X   X       X   X   X 
+IS1003c   X   X       X   X           X   X       X   X   X   X   X   X   X 
+IS1003d   X   X   X   X   X   X   X   X   X       X       X   X   X   X   X 
+IS1004a   X   X       X   X               X       X   X   X       X   X   X 
+IS1004b   X   X       X   X               X       X   X   X   X   X   X   X 
+IS1004c   X   X       X   X               X       X   X   X   X   X   X   X 
+IS1004d   X   X       X   X               X       X   X   X   X   X   X   X 
+IS1005a   X   X       X   X   X           X       X   X   X   X   X   X   X 
+IS1005b   X   X       X   X               X       X       X   X   X   X   X 
+IS1005c   X   X       X   X               X       X       X   X   X   X   X 
+IS1006a   X   X       X   X               X           X   X   X   X   X   X 
+IS1006b   X   X   X   X   X   X           X           X   X   X   X   X   X 
+IS1006c   X   X       X   X               X           X   X   X   X   X   X 
+IS1006d   X   X   X   X   X   X           X           X   X       X       X 
+IS1007a   X           X   X               X       X       X   X   X   X   X 
+IS1007b   X           X   X               X       X       X   X   X   X   X 
+IS1007c   X           X   X               X       X       X   X   X       X 
+IS1007d   X           X   X               X       X       X   X   X   X   X 
+IS1008a   X   X   X   X   X   X           X   X   X   X   X       X   X   X 
+IS1008b   X   X   X   X   X   X           X   X   X   X   X   X   X   X   X 
+IS1008c   X   X   X   X   X   X           X   X   X   X   X   X   X   X   X 
+IS1008d   X   X   X   X   X               X   X   X   X   X   X   X   X   X 
+IS1009a   X   X       X   X           X   X       X       X   X   X   X   X 
+IS1009b   X   X       X   X           X   X       X       X   X   X   X   X 
+IS1009c   X   X       X   X           X   X       X       X   X   X   X   X 
+IS1009d   X   X       X   X           X   X       X       X   X   X   X   X 
+TS3003a   X   X       X   X               X               X   X   X   X   X 
+TS3003b   X           X   X               X               X   X   X   X   X 
+TS3003c   X           X   X               X               X   X   X   X   X 
+TS3003d   X           X   X                               X       X       X 
+TS3004a   X           X   X               X           X   X   X   X   X   X 
+TS3004b   X           X   X               X           X   X   X   X   X   X 
+TS3004c   X           X   X               X               X   X   X   X   X 
+TS3004d   X           X   X                               X   X   X   X   X 
+TS3005a   X   X   X   X   X           X   X   X       X   X   X   X   X   X 
+TS3005b   X   X       X   X           X   X   X       X   X       X   X   X 
+TS3005c   X           X   X           X   X           X   X   X   X   X   X 
+TS3005d   X           X   X           X   X           X   X   X   X   X   X 
+TS3006a   X           X   X           X   X               X   X   X   X   X 
+TS3006b   X           X   X           X   X               X   X   X   X   X 
+TS3006c   X           X   X           X                   X   X   X   X   X 
+TS3006d   X           X   X           X                   X       X       X 
+TS3007a   X           X   X           X   X           X   X   X   X   X   X 
+TS3007b   X           X   X           X   X               X   X   X   X   X 
+TS3007c   X           X   X           X                   X       X       X 
+TS3007d   X           X   X           X                   X       X       X 
+TS3008a   X           X   X               X               X       X       X 
+TS3008b   X           X   X                               X       X       X 
+TS3008c   X           X   X                               X       X       X 
+TS3008d   X           X   X                               X       X       X 
+TS3009a   X           X   X               X               X       X       X 
+TS3009b   X           X   X               X               X       X       X 
+TS3009c   X           X   X               X               X       X       X 
+TS3009d   X           X   X               X               X       X       X 
+TS3010a   X           X   X               X               X       X       X 
+TS3010b   X           X   X               X               X       X       X 
+TS3010c   X           X   X               X               X       X       X 
+TS3010d   X           X   X               X               X       X       X 
+TS3011a   X   X       X   X               X               X       X       X 
+TS3011b   X   X       X   X               X               X       X       X 
+TS3011c   X           X   X               X               X       X       X 
+TS3011d   X           X   X               X               X       X       X 
+TS3012a   X           X   X                               X       X       X 
+TS3012b   X           X   X                               X       X       X 
+TS3012c   X           X   X                               X       X         
+TS3012d   X           X   X                               X       X       X 

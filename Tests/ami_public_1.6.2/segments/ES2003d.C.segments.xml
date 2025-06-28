@@ -1,0 +1,519 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<nite:root nite:id="ES2003d.C.segs" xmlns:nite="http://nite.sourceforge.net/">
+   <segment nite:id="ES2003d.sync.546" channel="2" transcriber_start="48.592" transcriber_end="49.312">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words0)..id(ES2003d.C.words1)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.548" channel="2" transcriber_start="299.344" transcriber_end="300.08">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2)..id(ES2003d.C.words3)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.550" channel="2" transcriber_start="301.136" transcriber_end="305.191">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words4)..id(ES2003d.C.words16)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.552" channel="2" transcriber_start="307.905" transcriber_end="308.436">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words17)..id(ES2003d.C.words18)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.554" channel="2" transcriber_start="322.08" transcriber_end="322.832">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words19)..id(ES2003d.C.words21)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.556" channel="2" transcriber_start="327.76" transcriber_end="328.336">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words22)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.558" channel="2" transcriber_start="329.92" transcriber_end="339.936">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words23)..id(ES2003d.C.words51)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.560" channel="2" transcriber_start="341.136" transcriber_end="375.55">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words52)..id(ES2003d.C.words132)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.562" channel="2" transcriber_start="378.693" transcriber_end="400.944">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words133)..id(ES2003d.C.words191)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.564" channel="2" transcriber_start="402.368" transcriber_end="403.536">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words192)..id(ES2003d.C.words194)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.566" channel="2" transcriber_start="408.386" transcriber_end="411.241">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words195)..id(ES2003d.C.words200)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.568" channel="2" transcriber_start="414.352" transcriber_end="438.269">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words201)..id(ES2003d.C.words286)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.570" channel="2" transcriber_start="439.584" transcriber_end="441.36">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words287)..id(ES2003d.C.words297)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.572" channel="2" transcriber_start="443.056" transcriber_end="443.765">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words298)..id(ES2003d.C.words299)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.574" channel="2" transcriber_start="448.992" transcriber_end="449.973">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words300)..id(ES2003d.C.words302)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.576" channel="2" transcriber_start="451.025" transcriber_end="451.773">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words303)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.578" channel="2" transcriber_start="455.2" transcriber_end="455.93">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words304)..id(ES2003d.C.words305)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.580" channel="2" transcriber_start="459.744" transcriber_end="469.737">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words306)..id(ES2003d.C.words344)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.582" channel="2" transcriber_start="473.136" transcriber_end="478.641">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words345)..id(ES2003d.C.words357)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.584" channel="2" transcriber_start="494.671" transcriber_end="497.84">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words358)..id(ES2003d.C.words367)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.586" channel="2" transcriber_start="510.736" transcriber_end="511.28">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words368)..id(ES2003d.C.words369)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.588" channel="2" transcriber_start="512.64" transcriber_end="513.328">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words370)..id(ES2003d.C.words371)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.590" channel="2" transcriber_start="515.744" transcriber_end="516.096">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words372)..id(ES2003d.C.words373)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.592" channel="2" transcriber_start="518.592" transcriber_end="519.392">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words374)..id(ES2003d.C.words378)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.594" channel="2" transcriber_start="530.224" transcriber_end="530.848">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words379)..id(ES2003d.C.words381)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.596" channel="2" transcriber_start="531.69" transcriber_end="533.032">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words382)..id(ES2003d.C.words386)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.598" channel="2" transcriber_start="546.88" transcriber_end="548.608">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words387)..id(ES2003d.C.words397)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.600" channel="2" transcriber_start="554.912" transcriber_end="556.343">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words398)..id(ES2003d.C.words402)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.602" channel="2" transcriber_start="556.932" transcriber_end="557.405">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words403)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.604" channel="2" transcriber_start="558.752" transcriber_end="588.672">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words404)..id(ES2003d.C.words490)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.606" channel="2" transcriber_start="590.256" transcriber_end="606.576">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words491)..id(ES2003d.C.words545)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.608" channel="2" transcriber_start="700.361" transcriber_end="701.408">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words546)..id(ES2003d.C.words548)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.610" channel="2" transcriber_start="706.569" transcriber_end="707.131">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words549)..id(ES2003d.C.words550)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.612" channel="2" transcriber_start="710.955" transcriber_end="711.425">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words551)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.614" channel="2" transcriber_start="758.432" transcriber_end="758.992">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words552)..id(ES2003d.C.words553)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.616" channel="2" transcriber_start="765.284" transcriber_end="772.864">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words554)..id(ES2003d.C.words580)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.618" channel="2" transcriber_start="776.4" transcriber_end="777.2">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words581)..id(ES2003d.C.words582)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.620" channel="2" transcriber_start="781.616" transcriber_end="782.384">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words583)..id(ES2003d.C.words586)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.622" channel="2" transcriber_start="855.2" transcriber_end="860.016">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words587)..id(ES2003d.C.words604)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.624" channel="2" transcriber_start="861.12" transcriber_end="863.024">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words605)..id(ES2003d.C.words609)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.626" channel="2" transcriber_start="866.023" transcriber_end="868.393">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words610)..id(ES2003d.C.words611)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.628" channel="2" transcriber_start="874.048" transcriber_end="874.56">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words612)..id(ES2003d.C.words613)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.630" channel="2" transcriber_start="899.6" transcriber_end="907.104">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words614)..id(ES2003d.C.words644)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.632" channel="2" transcriber_start="910.48" transcriber_end="919.04">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words645)..id(ES2003d.C.words671)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.634" channel="2" transcriber_start="921.6" transcriber_end="922.112">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words672)..id(ES2003d.C.words673)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.636" channel="2" transcriber_start="932.509" transcriber_end="935.32">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words674)..id(ES2003d.C.words684)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.638" channel="2" transcriber_start="938.193" transcriber_end="946.111">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words685)..id(ES2003d.C.words706)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.640" channel="2" transcriber_start="949.648" transcriber_end="952.48">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words707)..id(ES2003d.C.words719)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.642" channel="2" transcriber_start="953.988" transcriber_end="957.444">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words720)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.644" channel="2" transcriber_start="958.848" transcriber_end="962.154">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words721)..id(ES2003d.C.words725)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.646" channel="2" transcriber_start="963.777" transcriber_end="964.336">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words726)..id(ES2003d.C.words727)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.648" channel="2" transcriber_start="978.016" transcriber_end="989.024">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words728)..id(ES2003d.C.words773)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.650" channel="2" transcriber_start="1011.84" transcriber_end="1012.352">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words774)..id(ES2003d.C.words775)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.652" channel="2" transcriber_start="1017.776" transcriber_end="1019.024">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words776)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.654" channel="2" transcriber_start="1022.384" transcriber_end="1025.424">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words777)..id(ES2003d.C.words784)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.656" channel="2" transcriber_start="1036.336" transcriber_end="1042.432">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words785)..id(ES2003d.C.words804)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.658" channel="2" transcriber_start="1043.6" transcriber_end="1050.56">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words805)..id(ES2003d.C.words826)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.660" channel="2" transcriber_start="1052.671" transcriber_end="1053.205">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words827)..id(ES2003d.C.words828)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.662" channel="2" transcriber_start="1059.034" transcriber_end="1059.644">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words829)..id(ES2003d.C.words830)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.664" channel="2" transcriber_start="1068.657" transcriber_end="1069.341">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words831)..id(ES2003d.C.words834)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.666" channel="2" transcriber_start="1105.632" transcriber_end="1106.064">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words835)..id(ES2003d.C.words836)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.668" channel="2" transcriber_start="1121.04" transcriber_end="1133.616">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words837)..id(ES2003d.C.words872)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.670" channel="2" transcriber_start="1135.488" transcriber_end="1137.059">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words873)..id(ES2003d.C.words879)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.672" channel="2" transcriber_start="1161.824" transcriber_end="1162.979">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words880)..id(ES2003d.C.words882)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.674" channel="2" transcriber_start="1169.536" transcriber_end="1172.463">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words883)..id(ES2003d.C.words891)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.676" channel="2" transcriber_start="1190.132" transcriber_end="1196.0">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words892)..id(ES2003d.C.words906)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.678" channel="2" transcriber_start="1206.032" transcriber_end="1206.832">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words907)..id(ES2003d.C.words912)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.680" channel="2" transcriber_start="1207.984" transcriber_end="1209.184">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words913)..id(ES2003d.C.words915)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.682" channel="2" transcriber_start="1210.224" transcriber_end="1213.664">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words916)..id(ES2003d.C.words930)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.684" channel="2" transcriber_start="1218.448" transcriber_end="1218.8">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words931)..id(ES2003d.C.words932)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.686" channel="2" transcriber_start="1221.824" transcriber_end="1223.44">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words933)..id(ES2003d.C.words940)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.688" channel="2" transcriber_start="1224.512" transcriber_end="1225.584">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words941)..id(ES2003d.C.words946)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.690" channel="2" transcriber_start="1239.04" transcriber_end="1242.257">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words947)..id(ES2003d.C.words963)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.692" channel="2" transcriber_start="1243.2" transcriber_end="1244.624">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words964)..id(ES2003d.C.words967)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.694" channel="2" transcriber_start="1250.816" transcriber_end="1254.88">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words968)..id(ES2003d.C.words983)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.696" channel="2" transcriber_start="1259.888" transcriber_end="1260.784">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words984)..id(ES2003d.C.words986)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.698" channel="2" transcriber_start="1261.808" transcriber_end="1264.352">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words987)..id(ES2003d.C.words989)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.700" channel="2" transcriber_start="1295.44" transcriber_end="1297.376">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words990)..id(ES2003d.C.words997)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.702" channel="2" transcriber_start="1307.152" transcriber_end="1307.709">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words998)..id(ES2003d.C.words999)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.704" channel="2" transcriber_start="1321.136" transcriber_end="1323.2">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1000)..id(ES2003d.C.words1009)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.706" channel="2" transcriber_start="1326.704" transcriber_end="1327.072">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1010)..id(ES2003d.C.words1011)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.708" channel="2" transcriber_start="1334.288" transcriber_end="1334.576">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1012)..id(ES2003d.C.words1013)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.710" channel="2" transcriber_start="1342.064" transcriber_end="1342.4">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1014)..id(ES2003d.C.words1015)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.712" channel="2" transcriber_start="1344.112" transcriber_end="1345.548">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1016)..id(ES2003d.C.words1018)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.714" channel="2" transcriber_start="1348.864" transcriber_end="1354.016">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1019)..id(ES2003d.C.words1025)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.716" channel="2" transcriber_start="1360.416" transcriber_end="1361.568">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1026)..id(ES2003d.C.words1030)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.718" channel="2" transcriber_start="1363.764" transcriber_end="1368.08">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1031)..id(ES2003d.C.words1048)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.720" channel="2" transcriber_start="1369.36" transcriber_end="1372.416">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1049)..id(ES2003d.C.words1055)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.722" channel="2" transcriber_start="1373.552" transcriber_end="1376.368">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1056)..id(ES2003d.C.words1059)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.724" channel="2" transcriber_start="1377.6" transcriber_end="1379.786">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1060)..id(ES2003d.C.words1068)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.726" channel="2" transcriber_start="1380.832" transcriber_end="1382.32">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1069)..id(ES2003d.C.words1076)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.728" channel="2" transcriber_start="1386.241" transcriber_end="1386.686">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1077)..id(ES2003d.C.words1078)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.730" channel="2" transcriber_start="1389.584" transcriber_end="1395.312">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1079)..id(ES2003d.C.words1100)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.732" channel="2" transcriber_start="1396.848" transcriber_end="1399.056">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1101)..id(ES2003d.C.words1113)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.734" channel="2" transcriber_start="1400.96" transcriber_end="1417.242">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1114)..id(ES2003d.C.words1162)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.736" channel="2" transcriber_start="1420.352" transcriber_end="1428.88">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1163)..id(ES2003d.C.words1194)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.738" channel="2" transcriber_start="1430.192" transcriber_end="1431.32">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1195)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.740" channel="2" transcriber_start="1435.993" transcriber_end="1440.496">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1196)..id(ES2003d.C.words1215)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.742" channel="2" transcriber_start="1441.632" transcriber_end="1456.273">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1216)..id(ES2003d.C.words1241)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.744" channel="2" transcriber_start="1458.208" transcriber_end="1458.896">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1242)..id(ES2003d.C.words1243)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.746" channel="2" transcriber_start="1460.024" transcriber_end="1460.518">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1244)..id(ES2003d.C.words1245)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.748" channel="2" transcriber_start="1472.176" transcriber_end="1479.488">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1246)..id(ES2003d.C.words1270)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.750" channel="2" transcriber_start="1480.592" transcriber_end="1483.981">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1271)..id(ES2003d.C.words1286)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.752" channel="2" transcriber_start="1486.372" transcriber_end="1487.344">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1287)..id(ES2003d.C.words1290)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.754" channel="2" transcriber_start="1489.622" transcriber_end="1490.592">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1291)..id(ES2003d.C.words1292)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.756" channel="2" transcriber_start="1491.808" transcriber_end="1498.168">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1293)..id(ES2003d.C.words1309)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.758" channel="2" transcriber_start="1498.952" transcriber_end="1499.92">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1310)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.760" channel="2" transcriber_start="1505.438" transcriber_end="1505.824">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1311)..id(ES2003d.C.words1312)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.762" channel="2" transcriber_start="1511.924" transcriber_end="1514.264">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1313)..id(ES2003d.C.words1321)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.764" channel="2" transcriber_start="1518.768" transcriber_end="1533.376">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1322)..id(ES2003d.C.words1362)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.766" channel="2" transcriber_start="1534.448" transcriber_end="1535.8">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1363)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.768" channel="2" transcriber_start="1539.088" transcriber_end="1540.481">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1364)..id(ES2003d.C.words1368)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.770" channel="2" transcriber_start="1546.546" transcriber_end="1551.616">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1369)..id(ES2003d.C.words1384)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.772" channel="2" transcriber_start="1552.273" transcriber_end="1553.008">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1385)..id(ES2003d.C.words1387)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.774" channel="2" transcriber_start="1564.096" transcriber_end="1564.432">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1388)..id(ES2003d.C.words1389)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.776" channel="2" transcriber_start="1565.664" transcriber_end="1566.511">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1390)..id(ES2003d.C.words1391)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.778" channel="2" transcriber_start="1568.144" transcriber_end="1570.912">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1392)..id(ES2003d.C.words1402)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.780" channel="2" transcriber_start="1573.445" transcriber_end="1579.392">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1403)..id(ES2003d.C.words1425)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.782" channel="2" transcriber_start="1583.996" transcriber_end="1588.875">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1426)..id(ES2003d.C.words1442)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.784" channel="2" transcriber_start="1594.88" transcriber_end="1603.712">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1443)..id(ES2003d.C.words1458)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.786" channel="2" transcriber_start="1609.92" transcriber_end="1614.112">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1459)..id(ES2003d.C.words1470)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.788" channel="2" transcriber_start="1618.676" transcriber_end="1619.796">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1471)..id(ES2003d.C.words1472)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.790" channel="2" transcriber_start="1622.752" transcriber_end="1623.68">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1473)..id(ES2003d.C.words1476)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.792" channel="2" transcriber_start="1634.528" transcriber_end="1635.2">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1477)..id(ES2003d.C.words1478)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.794" channel="2" transcriber_start="1636.592" transcriber_end="1637.776">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1479)..id(ES2003d.C.words1483)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.796" channel="2" transcriber_start="1638.768" transcriber_end="1649.232">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1484)..id(ES2003d.C.words1520)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.798" channel="2" transcriber_start="1650.288" transcriber_end="1651.008">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1521)..id(ES2003d.C.words1523)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.800" channel="2" transcriber_start="1654.768" transcriber_end="1663.44">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1524)..id(ES2003d.C.words1549)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.802" channel="2" transcriber_start="1667.952" transcriber_end="1671.824">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1550)..id(ES2003d.C.words1563)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.804" channel="2" transcriber_start="1673.514" transcriber_end="1676.224">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1564)..id(ES2003d.C.words1572)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.806" channel="2" transcriber_start="1679.028" transcriber_end="1679.784">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1573)..id(ES2003d.C.words1574)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.808" channel="2" transcriber_start="1680.568" transcriber_end="1681.76">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1575)..id(ES2003d.C.words1577)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.810" channel="2" transcriber_start="1686.664" transcriber_end="1690.912">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1578)..id(ES2003d.C.words1596)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.812" channel="2" transcriber_start="1693.056" transcriber_end="1698.224">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1597)..id(ES2003d.C.words1608)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.814" channel="2" transcriber_start="1699.485" transcriber_end="1701.776">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1609)..id(ES2003d.C.words1616)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.816" channel="2" transcriber_start="1703.424" transcriber_end="1712.112">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1617)..id(ES2003d.C.words1639)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.818" channel="2" transcriber_start="1716.848" transcriber_end="1721.628">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1640)..id(ES2003d.C.words1649)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.820" channel="2" transcriber_start="1725.088" transcriber_end="1730.176">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1650)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.822" channel="2" transcriber_start="1732.704" transcriber_end="1733.319">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1651)..id(ES2003d.C.words1652)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.824" channel="2" transcriber_start="1739.579" transcriber_end="1740.368">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1653)..id(ES2003d.C.words1654)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.826" channel="2" transcriber_start="1754.483" transcriber_end="1787.136">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1655)..id(ES2003d.C.words1767)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.828" channel="2" transcriber_start="1828.016" transcriber_end="1828.352">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1768)..id(ES2003d.C.words1769)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.830" channel="2" transcriber_start="1861.152" transcriber_end="1871.664">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1770)..id(ES2003d.C.words1813)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.832" channel="2" transcriber_start="1872.864" transcriber_end="1893.12">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1814)..id(ES2003d.C.words1898)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.834" channel="2" transcriber_start="1906.544" transcriber_end="1906.8">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1899)..id(ES2003d.C.words1900)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.836" channel="2" transcriber_start="1908.672" transcriber_end="1914.208">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1901)..id(ES2003d.C.words1921)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.838" channel="2" transcriber_start="1916.064" transcriber_end="1917.792">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1922)..id(ES2003d.C.words1928)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.840" channel="2" transcriber_start="1964.425" transcriber_end="1970.4">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1929)..id(ES2003d.C.words1938)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.842" channel="2" transcriber_start="1975.904" transcriber_end="1977.104">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1939)..id(ES2003d.C.words1942)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.844" channel="2" transcriber_start="1994.528" transcriber_end="1996.032">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1943)..id(ES2003d.C.words1950)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.846" channel="2" transcriber_start="2013.031" transcriber_end="2014.348">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1951)..id(ES2003d.C.words1959)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.848" channel="2" transcriber_start="2024.192" transcriber_end="2025.904">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1960)..id(ES2003d.C.words1966)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.850" channel="2" transcriber_start="2030.456" transcriber_end="2044.176">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1967)..id(ES2003d.C.words1989)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.852" channel="2" transcriber_start="2056.72" transcriber_end="2057.184">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1990)..id(ES2003d.C.words1991)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.854" channel="2" transcriber_start="2063.44" transcriber_end="2063.824">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1992)..id(ES2003d.C.words1993)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.856" channel="2" transcriber_start="2143.76" transcriber_end="2147.6">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words1994)..id(ES2003d.C.words2008)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.858" channel="2" transcriber_start="2148.752" transcriber_end="2151.088">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2009)..id(ES2003d.C.words2016)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.860" channel="2" transcriber_start="2155.2" transcriber_end="2155.664">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2017)..id(ES2003d.C.words2018)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.862" channel="2" transcriber_start="2184.388" transcriber_end="2185.071">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2019)..id(ES2003d.C.words2020)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.864" channel="2" transcriber_start="2190.048" transcriber_end="2190.368">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2021)..id(ES2003d.C.words2022)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.866" channel="2" transcriber_start="2216.016" transcriber_end="2218.832">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2023)..id(ES2003d.C.words2029)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.868" channel="2" transcriber_start="2222.553" transcriber_end="2223.748">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2030)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.870" channel="2" transcriber_start="2234.437" transcriber_end="2236.576">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2031)..id(ES2003d.C.words2033)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.872" channel="2" transcriber_start="2237.486" transcriber_end="2238.131">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2034)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.874" channel="2" transcriber_start="2275.136" transcriber_end="2275.6">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2035)..id(ES2003d.C.words2036)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.876" channel="2" transcriber_start="2280.256" transcriber_end="2280.64">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2037)..id(ES2003d.C.words2038)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.878" channel="2" transcriber_start="2304.4" transcriber_end="2304.656">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2039)..id(ES2003d.C.words2040)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.880" channel="2" transcriber_start="2305.856" transcriber_end="2307.536">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2041)..id(ES2003d.C.words2044)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.882" channel="2" transcriber_start="2310.768" transcriber_end="2311.152">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2045)..id(ES2003d.C.words2047)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.884" channel="2" transcriber_start="2313.056" transcriber_end="2327.84">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2048)..id(ES2003d.C.words2083)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.886" channel="2" transcriber_start="2328.928" transcriber_end="2331.035">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2084)..id(ES2003d.C.words2090)"/>
+   </segment>
+   <segment nite:id="ES2003d.sync.888" channel="2" transcriber_start="2333.52" transcriber_end="2337.871">
+      <nite:child href="ES2003d.C.words.xml#id(ES2003d.C.words2091)..id(ES2003d.C.words2101)"/>
+   </segment>
+</nite:root>

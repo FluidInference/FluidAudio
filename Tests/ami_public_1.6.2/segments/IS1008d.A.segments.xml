@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<nite:root nite:id="IS1008d.A.segs" xmlns:nite="http://nite.sourceforge.net/">
+   <segment nite:id="IS1008d.sync.4" channel="0" transcriber_start="30.672" transcriber_end="35.344">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words0)..id(IS1008d.A.words6)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.6" channel="0" transcriber_start="41.488" transcriber_end="46.08">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words7)..id(IS1008d.A.words17)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.8" channel="0" transcriber_start="47.984" transcriber_end="48.848">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words18)..id(IS1008d.A.words19)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.10" channel="0" transcriber_start="50.768" transcriber_end="59.904">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words20)..id(IS1008d.A.words39)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.12" channel="0" transcriber_start="61.536" transcriber_end="63.68">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words40)..id(IS1008d.A.words45)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.14" channel="0" transcriber_start="65.072" transcriber_end="84.32">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words46)..id(IS1008d.A.words92)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.16" channel="0" transcriber_start="88.896" transcriber_end="94.24">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words93)..id(IS1008d.A.words105)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.18" channel="0" transcriber_start="96.672" transcriber_end="97.632">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words106)..id(IS1008d.A.words110)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.20" channel="0" transcriber_start="104.976" transcriber_end="106.677">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words111)..id(IS1008d.A.words118)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.22" channel="0" transcriber_start="107.408" transcriber_end="107.632">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words119)..id(IS1008d.A.words120)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.24" channel="0" transcriber_start="107.954" transcriber_end="108.589">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words121)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.26" channel="0" transcriber_start="109.216" transcriber_end="112.09">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words122)..id(IS1008d.A.words128)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.28" channel="0" transcriber_start="118.385" transcriber_end="119.936">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words129)..id(IS1008d.A.words136)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.30" channel="0" transcriber_start="136.607" transcriber_end="136.944">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words137)..id(IS1008d.A.words138)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.32" channel="0" transcriber_start="142.768" transcriber_end="143.136">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words139)..id(IS1008d.A.words140)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.34" channel="0" transcriber_start="246.606" transcriber_end="247.342">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words141)..id(IS1008d.A.words142)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.36" channel="0" transcriber_start="281.328" transcriber_end="286.448">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words143)..id(IS1008d.A.words163)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.38" channel="0" transcriber_start="288.016" transcriber_end="295.341">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words164)..id(IS1008d.A.words191)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.40" channel="0" transcriber_start="297.328" transcriber_end="297.728">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words192)..id(IS1008d.A.words193)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.42" channel="0" transcriber_start="303.874" transcriber_end="305.183">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words194)..id(IS1008d.A.words198)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.44" channel="0" transcriber_start="305.888" transcriber_end="324.928">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words199)..id(IS1008d.A.words270)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.46" channel="0" transcriber_start="352.849" transcriber_end="355.57">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words271)..id(IS1008d.A.words283)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.48" channel="0" transcriber_start="357.056" transcriber_end="358.848">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words284)..id(IS1008d.A.words291)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.50" channel="0" transcriber_start="367.758" transcriber_end="368.222">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words292)..id(IS1008d.A.words293)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.52" channel="0" transcriber_start="370.23" transcriber_end="371.412">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words294)..id(IS1008d.A.words296)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.54" channel="0" transcriber_start="376.352" transcriber_end="377.559">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words297)..id(IS1008d.A.words302)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.55" channel="0" transcriber_start="377.559" transcriber_end="378.17">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words303)..id(IS1008d.A.words304)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.57" channel="0" transcriber_start="386.288" transcriber_end="388.128">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words305)..id(IS1008d.A.words308)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.58" channel="0" transcriber_start="388.128" transcriber_end="391.12">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words309)..id(IS1008d.A.words316)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.60" channel="0" transcriber_start="393.093" transcriber_end="398.672">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words317)..id(IS1008d.A.words339)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.62" channel="0" transcriber_start="400.943" transcriber_end="401.46">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words340)..id(IS1008d.A.words341)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.64" channel="0" transcriber_start="418.008" transcriber_end="418.352">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words342)..id(IS1008d.A.words343)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.66" channel="0" transcriber_start="426.624" transcriber_end="432.864">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words344)..id(IS1008d.A.words365)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.68" channel="0" transcriber_start="440.307" transcriber_end="441.024">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words366)..id(IS1008d.A.words367)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.70" channel="0" transcriber_start="444.488" transcriber_end="445.712">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words368)..id(IS1008d.A.words373)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.72" channel="0" transcriber_start="447.024" transcriber_end="448.784">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words374)..id(IS1008d.A.words380)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.74" channel="0" transcriber_start="456.944" transcriber_end="457.542">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words381)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.76" channel="0" transcriber_start="463.53" transcriber_end="474.752">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words382)..id(IS1008d.A.words417)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.78" channel="0" transcriber_start="476.368" transcriber_end="483.6">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words418)..id(IS1008d.A.words439)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.80" channel="0" transcriber_start="484.752" transcriber_end="491.28">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words440)..id(IS1008d.A.words462)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.82" channel="0" transcriber_start="492.474" transcriber_end="501.792">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words463)..id(IS1008d.A.words487)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.84" channel="0" transcriber_start="502.848" transcriber_end="513.568">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words488)..id(IS1008d.A.words533)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.86" channel="0" transcriber_start="516.288" transcriber_end="517.856">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words534)..id(IS1008d.A.words540)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.87" channel="0" transcriber_start="517.856" transcriber_end="521.966">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words541)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.88" channel="0" transcriber_start="521.966" transcriber_end="522.959">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words542)..id(IS1008d.A.words546)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.89" channel="0" transcriber_start="522.959" transcriber_end="527.887">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words547)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.91" channel="0" transcriber_start="530.352" transcriber_end="536.56">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words548)..id(IS1008d.A.words571)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.93" channel="0" transcriber_start="556.057" transcriber_end="558.34">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words572)..id(IS1008d.A.words578)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.94" channel="0" transcriber_start="558.34" transcriber_end="559.69">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words579)..id(IS1008d.A.words582)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.96" channel="0" transcriber_start="596.354" transcriber_end="596.806">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words583)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.98" channel="0" transcriber_start="605.648" transcriber_end="607.993">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words584)..id(IS1008d.A.words595)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.100" channel="0" transcriber_start="609.312" transcriber_end="609.984">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words596)..id(IS1008d.A.words597)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.102" channel="0" transcriber_start="610.711" transcriber_end="611.242">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words598)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.104" channel="0" transcriber_start="611.679" transcriber_end="612.083">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words599)..id(IS1008d.A.words602)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.106" channel="0" transcriber_start="613.024" transcriber_end="614.524">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words603)..id(IS1008d.A.words606)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.108" channel="0" transcriber_start="620.976" transcriber_end="628.032">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words607)..id(IS1008d.A.words635)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.110" channel="0" transcriber_start="636.064" transcriber_end="636.407">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words636)..id(IS1008d.A.words637)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.112" channel="0" transcriber_start="654.449" transcriber_end="654.794">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words638)..id(IS1008d.A.words639)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.114" channel="0" transcriber_start="655.712" transcriber_end="656.028">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words640)..id(IS1008d.A.words641)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.116" channel="0" transcriber_start="658.101" transcriber_end="658.486">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words642)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.118" channel="0" transcriber_start="659.747" transcriber_end="684.88">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words643)..id(IS1008d.A.words736)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.120" channel="0" transcriber_start="695.024" transcriber_end="695.456">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words737)..id(IS1008d.A.words738)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.122" channel="0" transcriber_start="710.864" transcriber_end="711.936">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words739)..id(IS1008d.A.words742)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.124" channel="0" transcriber_start="715.808" transcriber_end="716.605">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words743)..id(IS1008d.A.words744)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.126" channel="0" transcriber_start="735.354" transcriber_end="736.006">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words745)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.128" channel="0" transcriber_start="746.236" transcriber_end="746.86">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words746)..id(IS1008d.A.words747)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.130" channel="0" transcriber_start="765.376" transcriber_end="766.367">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words748)..id(IS1008d.A.words750)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.132" channel="0" transcriber_start="779.648" transcriber_end="780.0">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words751)..id(IS1008d.A.words752)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.134" channel="0" transcriber_start="794.928" transcriber_end="795.456">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words753)..id(IS1008d.A.words754)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.136" channel="0" transcriber_start="816.91" transcriber_end="817.64">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words755)..id(IS1008d.A.words756)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.138" channel="0" transcriber_start="818.547" transcriber_end="818.858">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words757)..id(IS1008d.A.words758)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.140" channel="0" transcriber_start="845.414" transcriber_end="845.825">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words759)..id(IS1008d.A.words760)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.142" channel="0" transcriber_start="848.304" transcriber_end="848.674">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words761)..id(IS1008d.A.words762)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.144" channel="0" transcriber_start="849.368" transcriber_end="850.297">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words763)..id(IS1008d.A.words765)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.146" channel="0" transcriber_start="853.376" transcriber_end="853.584">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words766)..id(IS1008d.A.words767)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.148" channel="0" transcriber_start="855.788" transcriber_end="856.386">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words768)..id(IS1008d.A.words769)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.150" channel="0" transcriber_start="872.832" transcriber_end="873.322">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words770)..id(IS1008d.A.words771)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.152" channel="0" transcriber_start="890.832" transcriber_end="891.32">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words772)..id(IS1008d.A.words773)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.154" channel="0" transcriber_start="892.368" transcriber_end="893.416">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words774)..id(IS1008d.A.words777)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.156" channel="0" transcriber_start="900.706" transcriber_end="901.126">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words778)..id(IS1008d.A.words779)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.158" channel="0" transcriber_start="902.173" transcriber_end="903.099">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words780)..id(IS1008d.A.words784)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.160" channel="0" transcriber_start="903.735" transcriber_end="904.535">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words785)..id(IS1008d.A.words786)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.162" channel="0" transcriber_start="907.256" transcriber_end="908.417">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words787)..id(IS1008d.A.words793)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.164" channel="0" transcriber_start="909.52" transcriber_end="911.168">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words794)..id(IS1008d.A.words800)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.166" channel="0" transcriber_start="911.663" transcriber_end="912.538">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words801)..id(IS1008d.A.words804)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.168" channel="0" transcriber_start="979.24" transcriber_end="979.641">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words805)..id(IS1008d.A.words806)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.170" channel="0" transcriber_start="987.715" transcriber_end="988.272">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words807)..id(IS1008d.A.words809)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.172" channel="0" transcriber_start="989.904" transcriber_end="1001.952">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words810)..id(IS1008d.A.words857)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.174" channel="0" transcriber_start="1004.679" transcriber_end="1005.109">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words858)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.176" channel="0" transcriber_start="1007.856" transcriber_end="1008.316">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words859)..id(IS1008d.A.words861)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.178" channel="0" transcriber_start="1009.888" transcriber_end="1018.032">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words862)..id(IS1008d.A.words894)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.180" channel="0" transcriber_start="1021.488" transcriber_end="1024.064">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words895)..id(IS1008d.A.words904)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.182" channel="0" transcriber_start="1026.043" transcriber_end="1026.72">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words905)..id(IS1008d.A.words906)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.184" channel="0" transcriber_start="1027.862" transcriber_end="1030.199">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words907)..id(IS1008d.A.words910)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.186" channel="0" transcriber_start="1031.567" transcriber_end="1031.978">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words911)..id(IS1008d.A.words912)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.188" channel="0" transcriber_start="1034.372" transcriber_end="1037.265">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words913)..id(IS1008d.A.words926)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.190" channel="0" transcriber_start="1038.057" transcriber_end="1038.423">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words927)..id(IS1008d.A.words928)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.192" channel="0" transcriber_start="1046.416" transcriber_end="1053.53">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words929)..id(IS1008d.A.words958)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.194" channel="0" transcriber_start="1054.074" transcriber_end="1058.912">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words959)..id(IS1008d.A.words979)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.196" channel="0" transcriber_start="1061.488" transcriber_end="1062.1">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words980)..id(IS1008d.A.words982)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.198" channel="0" transcriber_start="1063.872" transcriber_end="1079.376">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words983)..id(IS1008d.A.words1028)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.200" channel="0" transcriber_start="1081.728" transcriber_end="1081.953">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1029)..id(IS1008d.A.words1030)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.202" channel="0" transcriber_start="1083.586" transcriber_end="1089.272">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1031)..id(IS1008d.A.words1043)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.204" channel="0" transcriber_start="1094.064" transcriber_end="1095.566">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1044)..id(IS1008d.A.words1049)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.206" channel="0" transcriber_start="1108.976" transcriber_end="1121.44">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1050)..id(IS1008d.A.words1091)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.208" channel="0" transcriber_start="1122.528" transcriber_end="1131.712">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1092)..id(IS1008d.A.words1123)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.210" channel="0" transcriber_start="1132.752" transcriber_end="1133.872">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1124)..id(IS1008d.A.words1126)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.212" channel="0" transcriber_start="1134.864" transcriber_end="1139.669">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1127)..id(IS1008d.A.words1139)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.214" channel="0" transcriber_start="1142.693" transcriber_end="1143.024">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1140)..id(IS1008d.A.words1141)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.215" channel="0" transcriber_start="1143.024" transcriber_end="1150.72">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1142)..id(IS1008d.A.words1171)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.217" channel="0" transcriber_start="1165.856" transcriber_end="1170.845">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1172)..id(IS1008d.A.words1195)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.219" channel="0" transcriber_start="1181.524" transcriber_end="1198.128">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1196)..id(IS1008d.A.words1268)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.221" channel="0" transcriber_start="1209.632" transcriber_end="1210.098">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1269)..id(IS1008d.A.words1270)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.223" channel="0" transcriber_start="1210.991" transcriber_end="1211.589">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1271)..id(IS1008d.A.words1272)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.225" channel="0" transcriber_start="1224.672" transcriber_end="1225.68">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1273)..id(IS1008d.A.words1276)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.227" channel="0" transcriber_start="1230.247" transcriber_end="1230.929">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1277)..id(IS1008d.A.words1278)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.229" channel="0" transcriber_start="1233.56" transcriber_end="1234.534">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1279)..id(IS1008d.A.words1280)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.231" channel="0" transcriber_start="1244.67" transcriber_end="1245.107">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1281)..id(IS1008d.A.words1282)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.233" channel="0" transcriber_start="1247.227" transcriber_end="1247.713">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1283)..id(IS1008d.A.words1284)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.235" channel="0" transcriber_start="1267.104" transcriber_end="1267.505">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1285)..id(IS1008d.A.words1286)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.237" channel="0" transcriber_start="1276.946" transcriber_end="1277.78">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1287)..id(IS1008d.A.words1288)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.239" channel="0" transcriber_start="1282.063" transcriber_end="1282.59">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1289)..id(IS1008d.A.words1290)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.241" channel="0" transcriber_start="1303.079" transcriber_end="1303.626">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1291)..id(IS1008d.A.words1292)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.243" channel="0" transcriber_start="1308.208" transcriber_end="1312.448">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1293)..id(IS1008d.A.words1311)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.245" channel="0" transcriber_start="1319.054" transcriber_end="1321.376">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1312)..id(IS1008d.A.words1318)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.247" channel="0" transcriber_start="1355.798" transcriber_end="1356.572">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1319)..id(IS1008d.A.words1320)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.249" channel="0" transcriber_start="1365.324" transcriber_end="1365.619">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1321)..id(IS1008d.A.words1322)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.251" channel="0" transcriber_start="1367.632" transcriber_end="1375.077">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1323)..id(IS1008d.A.words1345)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.253" channel="0" transcriber_start="1377.568" transcriber_end="1380.544">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1346)..id(IS1008d.A.words1359)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.255" channel="0" transcriber_start="1382.128" transcriber_end="1383.27">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1360)..id(IS1008d.A.words1365)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.257" channel="0" transcriber_start="1396.397" transcriber_end="1418.666">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1366)..id(IS1008d.A.words1435)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.259" channel="0" transcriber_start="1419.488" transcriber_end="1426.416">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1436)..id(IS1008d.A.words1456)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.261" channel="0" transcriber_start="1429.856" transcriber_end="1430.427">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1457)..id(IS1008d.A.words1459)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.263" channel="0" transcriber_start="1432.8" transcriber_end="1435.264">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1460)..id(IS1008d.A.words1468)"/>
+   </segment>
+   <segment nite:id="IS1008d.sync.265" channel="0" transcriber_start="1436.368" transcriber_end="1437.838">
+      <nite:child href="IS1008d.A.words.xml#id(IS1008d.A.words1469)..id(IS1008d.A.words1477)"/>
+   </segment>
+</nite:root>

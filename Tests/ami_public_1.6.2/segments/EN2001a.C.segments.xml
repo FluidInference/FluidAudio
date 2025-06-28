@@ -1,0 +1,405 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nite:root xmlns:nite="http://nite.sourceforge.net/" nite:id="EN2001a.C.segs">
+   <segment nite:id="EN2001a.sync.548" channel="2" transcriber_start="211.312" transcriber_end="220.896">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words0)..id(EN2001a.C.words29)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.550" channel="2" transcriber_start="707.022" transcriber_end="707.663">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words30)..id(EN2001a.C.words31)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.552" channel="2" transcriber_start="719.101" transcriber_end="719.907">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words32)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.554" channel="2" transcriber_start="804.074" transcriber_end="804.832">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words33)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.556" channel="2" transcriber_start="811.495" transcriber_end="816.501">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words34)..id(EN2001a.C.words55)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.558" channel="2" transcriber_start="822.88" transcriber_end="824.39">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words56)..id(EN2001a.C.words61)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.560" channel="2" transcriber_start="833.825" transcriber_end="834.623">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words62)..id(EN2001a.C.words63)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.562" channel="2" transcriber_start="855.402" transcriber_end="856.333">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words64)..id(EN2001a.C.words66)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.564" channel="2" transcriber_start="890.967" transcriber_end="898.816">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words67)..id(EN2001a.C.words90)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.566" channel="2" transcriber_start="901.28" transcriber_end="917.211">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words91)..id(EN2001a.C.words131)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.568" channel="2" transcriber_start="925.287" transcriber_end="926.093">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words132)..id(EN2001a.C.words134)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.570" channel="2" transcriber_start="930.971" transcriber_end="931.378">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words135)..id(EN2001a.C.words136)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.572" channel="2" transcriber_start="933.509" transcriber_end="934.34">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words137)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.574" channel="2" transcriber_start="973.567" transcriber_end="974.517">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words138)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.576" channel="2" transcriber_start="1558.189" transcriber_end="1558.679">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words139)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.578" channel="2" transcriber_start="1603.921" transcriber_end="1605.817">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words140)..id(EN2001a.C.words142)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.580" channel="2" transcriber_start="1620.272" transcriber_end="1630.96">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words143)..id(EN2001a.C.words174)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.582" channel="2" transcriber_start="1633.824" transcriber_end="1636.288">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words175)..id(EN2001a.C.words180)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.584" channel="2" transcriber_start="1638.736" transcriber_end="1640.397">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words181)..id(EN2001a.C.words187)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.586" channel="2" transcriber_start="1643.248" transcriber_end="1643.695">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words188)..id(EN2001a.C.words189)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.588" channel="2" transcriber_start="1674.675" transcriber_end="1680.464">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words190)..id(EN2001a.C.words210)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.590" channel="2" transcriber_start="1683.296" transcriber_end="1692.445">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words211)..id(EN2001a.C.words236)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.592" channel="2" transcriber_start="1698.192" transcriber_end="1701.951">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words237)..id(EN2001a.C.words253)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.594" channel="2" transcriber_start="1703.323" transcriber_end="1705.262">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words254)..id(EN2001a.C.words258)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.596" channel="2" transcriber_start="1708.224" transcriber_end="1708.881">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words259)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.598" channel="2" transcriber_start="1731.387" transcriber_end="1732.169">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words260)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.600" channel="2" transcriber_start="2106.052" transcriber_end="2106.825">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words261)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.602" channel="2" transcriber_start="2234.594" transcriber_end="2243.105">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words262)..id(EN2001a.C.words282)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.604" channel="2" transcriber_start="2244.594" transcriber_end="2245.317">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words283)..id(EN2001a.C.words284)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.606" channel="2" transcriber_start="2248.336" transcriber_end="2248.799">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words285)..id(EN2001a.C.words286)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.608" channel="2" transcriber_start="2251.252" transcriber_end="2251.76">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words287)..id(EN2001a.C.words288)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.610" channel="2" transcriber_start="2393.861" transcriber_end="2394.905">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words289)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.612" channel="2" transcriber_start="2429.991" transcriber_end="2430.522">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words290)..id(EN2001a.C.words291)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.614" channel="2" transcriber_start="2621.316" transcriber_end="2623.885">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words292)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.616" channel="2" transcriber_start="2627.801" transcriber_end="2641.628">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words293)..id(EN2001a.C.words329)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.618" channel="2" transcriber_start="2644.299" transcriber_end="2646.378">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words330)..id(EN2001a.C.words336)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.620" channel="2" transcriber_start="2654.96" transcriber_end="2665.131">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words337)..id(EN2001a.C.words364)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.622" channel="2" transcriber_start="2667.12" transcriber_end="2669.453">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words365)..id(EN2001a.C.words374)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.624" channel="2" transcriber_start="2671.332" transcriber_end="2672.709">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words375)..id(EN2001a.C.words378)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.626" channel="2" transcriber_start="2673.717" transcriber_end="2674.409">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words379)..id(EN2001a.C.words381)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.628" channel="2" transcriber_start="2678.625" transcriber_end="2679.074">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words382)..id(EN2001a.C.words383)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.630" channel="2" transcriber_start="2686.594" transcriber_end="2693.953">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words384)..id(EN2001a.C.words410)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.632" channel="2" transcriber_start="2699.888" transcriber_end="2708.443">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words411)..id(EN2001a.C.words436)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.634" channel="2" transcriber_start="2709.948" transcriber_end="2715.61">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words437)..id(EN2001a.C.words459)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.636" channel="2" transcriber_start="2718.641" transcriber_end="2727.488">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words460)..id(EN2001a.C.words491)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.638" channel="2" transcriber_start="2728.872" transcriber_end="2729.695">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words492)..id(EN2001a.C.words496)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.640" channel="2" transcriber_start="2730.699" transcriber_end="2736.328">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words497)..id(EN2001a.C.words520)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.642" channel="2" transcriber_start="2737.634" transcriber_end="2738.025">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words521)..id(EN2001a.C.words522)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.644" channel="2" transcriber_start="2739.856" transcriber_end="2745.391">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words523)..id(EN2001a.C.words544)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.646" channel="2" transcriber_start="2747.264" transcriber_end="2753.344">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words545)..id(EN2001a.C.words565)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.648" channel="2" transcriber_start="2756.853" transcriber_end="2757.519">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words566)..id(EN2001a.C.words567)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.650" channel="2" transcriber_start="2763.008" transcriber_end="2767.88">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words568)..id(EN2001a.C.words586)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.652" channel="2" transcriber_start="2769.292" transcriber_end="2769.766">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words587)..id(EN2001a.C.words588)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.654" channel="2" transcriber_start="2775.264" transcriber_end="2775.595">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words589)..id(EN2001a.C.words590)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.656" channel="2" transcriber_start="2800.261" transcriber_end="2801.184">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words591)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.658" channel="2" transcriber_start="2808.336" transcriber_end="2810.88">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words592)..id(EN2001a.C.words601)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.660" channel="2" transcriber_start="2813.35" transcriber_end="2818.939">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words602)..id(EN2001a.C.words619)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.662" channel="2" transcriber_start="2844.416" transcriber_end="2858.689">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words620)..id(EN2001a.C.words655)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.664" channel="2" transcriber_start="2862.624" transcriber_end="2863.066">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words656)..id(EN2001a.C.words657)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.666" channel="2" transcriber_start="2864.813" transcriber_end="2866.309">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words658)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.668" channel="2" transcriber_start="2918.208" transcriber_end="2924.0">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words659)..id(EN2001a.C.words679)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.670" channel="2" transcriber_start="2924.992" transcriber_end="2925.673">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words680)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.672" channel="2" transcriber_start="2935.805" transcriber_end="2943.856">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words681)..id(EN2001a.C.words703)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.674" channel="2" transcriber_start="2947.712" transcriber_end="2957.648">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words704)..id(EN2001a.C.words731)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.676" channel="2" transcriber_start="2961.232" transcriber_end="2962.662">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words732)..id(EN2001a.C.words735)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.678" channel="2" transcriber_start="2965.776" transcriber_end="2969.408">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words736)..id(EN2001a.C.words754)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.680" channel="2" transcriber_start="2978.128" transcriber_end="2987.216">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words755)..id(EN2001a.C.words777)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.682" channel="2" transcriber_start="2991.36" transcriber_end="2996.658">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words778)..id(EN2001a.C.words796)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.684" channel="2" transcriber_start="2998.53" transcriber_end="3000.72">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words797)..id(EN2001a.C.words802)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.686" channel="2" transcriber_start="3005.472" transcriber_end="3006.343">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words803)..id(EN2001a.C.words807)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.688" channel="2" transcriber_start="3010.5" transcriber_end="3011.14">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words808)..id(EN2001a.C.words809)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.690" channel="2" transcriber_start="3019.536" transcriber_end="3020.077">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words810)..id(EN2001a.C.words811)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.692" channel="2" transcriber_start="3026.096" transcriber_end="3030.895">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words812)..id(EN2001a.C.words826)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.694" channel="2" transcriber_start="3037.556" transcriber_end="3038.171">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words827)..id(EN2001a.C.words829)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.696" channel="2" transcriber_start="3493.472" transcriber_end="3497.6">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words830)..id(EN2001a.C.words849)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.698" channel="2" transcriber_start="3502.225" transcriber_end="3503.048">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words850)..id(EN2001a.C.words854)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.700" channel="2" transcriber_start="3523.344" transcriber_end="3531.12">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words855)..id(EN2001a.C.words877)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.702" channel="2" transcriber_start="3537.136" transcriber_end="3537.66">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words878)..id(EN2001a.C.words879)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.704" channel="2" transcriber_start="3563.248" transcriber_end="3570.8">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words880)..id(EN2001a.C.words903)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.706" channel="2" transcriber_start="3571.956" transcriber_end="3572.629">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words904)..id(EN2001a.C.words905)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.708" channel="2" transcriber_start="3575.296" transcriber_end="3578.992">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words906)..id(EN2001a.C.words914)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.710" channel="2" transcriber_start="3585.479" transcriber_end="3586.069">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words915)..id(EN2001a.C.words916)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.712" channel="2" transcriber_start="3587.636" transcriber_end="3588.152">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words917)..id(EN2001a.C.words918)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.714" channel="2" transcriber_start="3741.137" transcriber_end="3742.544">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words919)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.716" channel="2" transcriber_start="3783.297" transcriber_end="3793.856">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words920)..id(EN2001a.C.words947)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.718" channel="2" transcriber_start="3796.132" transcriber_end="3798.469">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words948)..id(EN2001a.C.words957)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.720" channel="2" transcriber_start="4108.675" transcriber_end="4109.864">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words958)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.722" channel="2" transcriber_start="4149.347" transcriber_end="4150.07">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words959)..id(EN2001a.C.words960)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.724" channel="2" transcriber_start="4174.796" transcriber_end="4175.786">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words961)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.726" channel="2" transcriber_start="4196.528" transcriber_end="4197.293">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words962)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.728" channel="2" transcriber_start="4245.888" transcriber_end="4247.23">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words963)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.730" channel="2" transcriber_start="4249.219" transcriber_end="4250.674">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words964)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.732" channel="2" transcriber_start="4252.195" transcriber_end="4255.889">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words965)..id(EN2001a.C.words978)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.734" channel="2" transcriber_start="4265.056" transcriber_end="4270.74">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words979)..id(EN2001a.C.words998)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.736" channel="2" transcriber_start="4272.976" transcriber_end="4273.477">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words999)..id(EN2001a.C.words1000)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.738" channel="2" transcriber_start="4296.021" transcriber_end="4296.77">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1001)..id(EN2001a.C.words1002)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.740" channel="2" transcriber_start="4303.032" transcriber_end="4308.454">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1003)..id(EN2001a.C.words1023)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.742" channel="2" transcriber_start="4312.407" transcriber_end="4312.929">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1024)..id(EN2001a.C.words1025)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.744" channel="2" transcriber_start="4315.13" transcriber_end="4315.754">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1026)..id(EN2001a.C.words1027)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.746" channel="2" transcriber_start="4317.883" transcriber_end="4318.64">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1028)..id(EN2001a.C.words1030)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.748" channel="2" transcriber_start="4327.975" transcriber_end="4328.832">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1031)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.750" channel="2" transcriber_start="4336.604" transcriber_end="4337.901">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1032)..id(EN2001a.C.words1037)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.752" channel="2" transcriber_start="4342.782" transcriber_end="4343.272">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1038)..id(EN2001a.C.words1039)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.754" channel="2" transcriber_start="4344.559" transcriber_end="4345.267">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1040)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.756" channel="2" transcriber_start="4351.181" transcriber_end="4353.885">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1041)..id(EN2001a.C.words1050)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.758" channel="2" transcriber_start="4356.016" transcriber_end="4356.424">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1051)..id(EN2001a.C.words1052)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.760" channel="2" transcriber_start="4358.666" transcriber_end="4360.256">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1053)..id(EN2001a.C.words1057)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.762" channel="2" transcriber_start="4361.488" transcriber_end="4361.937">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1058)..id(EN2001a.C.words1059)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.764" channel="2" transcriber_start="4369.15" transcriber_end="4369.616">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1060)..id(EN2001a.C.words1061)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.766" channel="2" transcriber_start="4411.727" transcriber_end="4412.234">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1062)..id(EN2001a.C.words1063)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.768" channel="2" transcriber_start="4415.547" transcriber_end="4419.235">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1064)..id(EN2001a.C.words1065)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.770" channel="2" transcriber_start="4420.691" transcriber_end="4421.805">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1066)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.772" channel="2" transcriber_start="4435.351" transcriber_end="4436.32">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1067)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.774" channel="2" transcriber_start="4545.408" transcriber_end="4546.067">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1068)..id(EN2001a.C.words1069)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.776" channel="2" transcriber_start="4672.094" transcriber_end="4676.992">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1070)..id(EN2001a.C.words1085)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.778" channel="2" transcriber_start="4678.098" transcriber_end="4682.656">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1086)..id(EN2001a.C.words1095)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.780" channel="2" transcriber_start="4694.848" transcriber_end="4697.392">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1096)..id(EN2001a.C.words1106)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.782" channel="2" transcriber_start="4719.065" transcriber_end="4719.773">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1107)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.784" channel="2" transcriber_start="4751.712" transcriber_end="4752.469">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1108)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.786" channel="2" transcriber_start="4817.273" transcriber_end="4817.87">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1109)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.788" channel="2" transcriber_start="4825.216" transcriber_end="4825.75">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1110)..id(EN2001a.C.words1111)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.790" channel="2" transcriber_start="4839.839" transcriber_end="4840.338">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1112)..id(EN2001a.C.words1113)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.792" channel="2" transcriber_start="4856.286" transcriber_end="4863.264">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1114)..id(EN2001a.C.words1129)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.794" channel="2" transcriber_start="4868.176" transcriber_end="4868.912">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1130)..id(EN2001a.C.words1131)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.796" channel="2" transcriber_start="4871.024" transcriber_end="4874.384">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1132)..id(EN2001a.C.words1142)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.798" channel="2" transcriber_start="4879.741" transcriber_end="4880.489">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1143)..id(EN2001a.C.words1144)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.800" channel="2" transcriber_start="4886.32" transcriber_end="4886.813">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1145)..id(EN2001a.C.words1146)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.802" channel="2" transcriber_start="4890.831" transcriber_end="4899.768">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1147)..id(EN2001a.C.words1175)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.804" channel="2" transcriber_start="4901.599" transcriber_end="4902.139">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1176)..id(EN2001a.C.words1177)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.806" channel="2" transcriber_start="4905.008" transcriber_end="4906.016">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1178)..id(EN2001a.C.words1180)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.808" channel="2" transcriber_start="4915.068" transcriber_end="4915.478">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1181)..id(EN2001a.C.words1182)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.810" channel="2" transcriber_start="4938.202" transcriber_end="4938.873">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1183)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.812" channel="2" transcriber_start="5055.637" transcriber_end="5056.585">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1184)"/>
+   </segment>
+   <segment nite:id="EN2001a.sync.814" channel="2" transcriber_start="5063.72" transcriber_end="5064.204">
+      <nite:child href="EN2001a.C.words.xml#id(EN2001a.C.words1185)"/>
+   </segment>
+</nite:root>

@@ -1,0 +1,1065 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="yes"?>
+<nite:root nite:id="EN2009d.A.segs" xmlns:nite="http://nite.sourceforge.net/">
+   <segment nite:id="EN2009d.sync.3" channel="0" transcriber_start="1.536" transcriber_end="1.921">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words0)..id(EN2009d.A.words1)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.5" channel="0" transcriber_start="3.751" transcriber_end="8.591">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2)..id(EN2009d.A.words16)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.7" channel="0" transcriber_start="10.252" transcriber_end="45.798">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words17)..id(EN2009d.A.words139)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.9" channel="0" transcriber_start="48.107" transcriber_end="48.522">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words140)..id(EN2009d.A.words141)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.11" channel="0" transcriber_start="52.843" transcriber_end="67.774">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words142)..id(EN2009d.A.words193)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.13" channel="0" transcriber_start="82.323" transcriber_end="85.534">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words194)..id(EN2009d.A.words206)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.15" channel="0" transcriber_start="95.472" transcriber_end="103.712">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words207)..id(EN2009d.A.words243)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.17" channel="0" transcriber_start="105.088" transcriber_end="149.747">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words244)..id(EN2009d.A.words402)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.19" channel="0" transcriber_start="155.744" transcriber_end="176.78">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words403)..id(EN2009d.A.words502)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.21" channel="0" transcriber_start="191.829" transcriber_end="192.311">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words503)..id(EN2009d.A.words504)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.23" channel="0" transcriber_start="207.376" transcriber_end="207.833">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words505)..id(EN2009d.A.words506)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.25" channel="0" transcriber_start="221.527" transcriber_end="231.958">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words507)..id(EN2009d.A.words549)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.27" channel="0" transcriber_start="233.829" transcriber_end="234.328">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words550)..id(EN2009d.A.words551)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.29" channel="0" transcriber_start="248.235" transcriber_end="248.645">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words552)..id(EN2009d.A.words553)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.31" channel="0" transcriber_start="262.884" transcriber_end="263.308">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words554)..id(EN2009d.A.words555)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.33" channel="0" transcriber_start="265.133" transcriber_end="269.124">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words556)..id(EN2009d.A.words571)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.35" channel="0" transcriber_start="270.125" transcriber_end="270.46">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words572)..id(EN2009d.A.words573)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.37" channel="0" transcriber_start="287.696" transcriber_end="293.98">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words574)..id(EN2009d.A.words611)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.39" channel="0" transcriber_start="318.906" transcriber_end="319.438">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words612)..id(EN2009d.A.words613)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.41" channel="0" transcriber_start="329.491" transcriber_end="329.901">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words614)..id(EN2009d.A.words615)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.43" channel="0" transcriber_start="354.646" transcriber_end="355.019">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words616)..id(EN2009d.A.words617)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.45" channel="0" transcriber_start="365.28" transcriber_end="365.603">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words618)..id(EN2009d.A.words619)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.47" channel="0" transcriber_start="379.603" transcriber_end="379.985">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words620)..id(EN2009d.A.words621)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.49" channel="0" transcriber_start="381.95" transcriber_end="385.609">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words622)..id(EN2009d.A.words640)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.51" channel="0" transcriber_start="391.054" transcriber_end="391.453">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words641)..id(EN2009d.A.words642)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.53" channel="0" transcriber_start="393.712" transcriber_end="398.918">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words643)..id(EN2009d.A.words662)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.55" channel="0" transcriber_start="400.519" transcriber_end="423.101">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words663)..id(EN2009d.A.words731)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.57" channel="0" transcriber_start="425.04" transcriber_end="435.085">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words732)..id(EN2009d.A.words767)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.59" channel="0" transcriber_start="444.941" transcriber_end="445.448">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words768)..id(EN2009d.A.words769)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.61" channel="0" transcriber_start="458.796" transcriber_end="459.243">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words770)..id(EN2009d.A.words771)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.63" channel="0" transcriber_start="468.308" transcriber_end="468.716">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words772)..id(EN2009d.A.words773)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.65" channel="0" transcriber_start="480.192" transcriber_end="480.535">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words774)..id(EN2009d.A.words775)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.67" channel="0" transcriber_start="488.819" transcriber_end="489.21">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words776)..id(EN2009d.A.words777)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.69" channel="0" transcriber_start="494.928" transcriber_end="495.283">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words778)..id(EN2009d.A.words779)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.71" channel="0" transcriber_start="527.116" transcriber_end="527.638">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words780)..id(EN2009d.A.words783)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.73" channel="0" transcriber_start="528.868" transcriber_end="529.24">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words784)..id(EN2009d.A.words785)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.75" channel="0" transcriber_start="546.596" transcriber_end="547.137">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words786)..id(EN2009d.A.words787)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.77" channel="0" transcriber_start="554.535" transcriber_end="554.908">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words788)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.79" channel="0" transcriber_start="563.633" transcriber_end="564.257">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words789)..id(EN2009d.A.words790)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.81" channel="0" transcriber_start="589.142" transcriber_end="589.575">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words791)..id(EN2009d.A.words792)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.83" channel="0" transcriber_start="591.728" transcriber_end="609.525">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words793)..id(EN2009d.A.words857)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.85" channel="0" transcriber_start="616.32" transcriber_end="646.906">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words858)..id(EN2009d.A.words982)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.87" channel="0" transcriber_start="648.594" transcriber_end="655.856">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words983)..id(EN2009d.A.words1012)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.89" channel="0" transcriber_start="662.288" transcriber_end="677.943">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1013)..id(EN2009d.A.words1072)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.91" channel="0" transcriber_start="685.477" transcriber_end="686.242">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1073)..id(EN2009d.A.words1074)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.93" channel="0" transcriber_start="692.046" transcriber_end="717.299">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1075)..id(EN2009d.A.words1158)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.95" channel="0" transcriber_start="722.448" transcriber_end="728.633">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1159)..id(EN2009d.A.words1185)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.97" channel="0" transcriber_start="729.248" transcriber_end="760.638">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1186)..id(EN2009d.A.words1291)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.99" channel="0" transcriber_start="772.0" transcriber_end="778.793">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1292)..id(EN2009d.A.words1320)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.101" channel="0" transcriber_start="795.773" transcriber_end="802.529">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1321)..id(EN2009d.A.words1349)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.103" channel="0" transcriber_start="805.408" transcriber_end="805.872">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1350)..id(EN2009d.A.words1351)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.105" channel="0" transcriber_start="815.73" transcriber_end="816.295">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1352)..id(EN2009d.A.words1353)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.107" channel="0" transcriber_start="819.072" transcriber_end="821.577">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1354)..id(EN2009d.A.words1364)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.109" channel="0" transcriber_start="823.199" transcriber_end="825.89">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1365)..id(EN2009d.A.words1375)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.111" channel="0" transcriber_start="830.356" transcriber_end="830.938">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1376)..id(EN2009d.A.words1377)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.113" channel="0" transcriber_start="835.285" transcriber_end="841.649">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1378)..id(EN2009d.A.words1379)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.114" channel="0" transcriber_start="841.649" transcriber_end="842.096">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1380)..id(EN2009d.A.words1381)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.116" channel="0" transcriber_start="844.192" transcriber_end="865.127">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1382)..id(EN2009d.A.words1461)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.118" channel="0" transcriber_start="868.037" transcriber_end="872.4">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1462)..id(EN2009d.A.words1471)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.120" channel="0" transcriber_start="874.0" transcriber_end="874.91">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1472)..id(EN2009d.A.words1474)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.122" channel="0" transcriber_start="929.729" transcriber_end="930.557">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1475)..id(EN2009d.A.words1478)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.124" channel="0" transcriber_start="933.919" transcriber_end="936.33">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1479)..id(EN2009d.A.words1488)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.126" channel="0" transcriber_start="955.648" transcriber_end="956.105">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1489)..id(EN2009d.A.words1490)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.128" channel="0" transcriber_start="960.221" transcriber_end="960.57">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1491)..id(EN2009d.A.words1492)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.130" channel="0" transcriber_start="962.482" transcriber_end="965.377">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1493)..id(EN2009d.A.words1507)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.132" channel="0" transcriber_start="967.433" transcriber_end="971.601">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1508)..id(EN2009d.A.words1522)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.134" channel="0" transcriber_start="973.861" transcriber_end="977.398">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1523)..id(EN2009d.A.words1531)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.136" channel="0" transcriber_start="984.624" transcriber_end="988.274">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1532)..id(EN2009d.A.words1547)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.138" channel="0" transcriber_start="989.113" transcriber_end="989.448">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1548)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.140" channel="0" transcriber_start="1008.925" transcriber_end="1021.051">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1549)..id(EN2009d.A.words1592)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.142" channel="0" transcriber_start="1027.487" transcriber_end="1033.559">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1593)..id(EN2009d.A.words1620)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.144" channel="0" transcriber_start="1040.735" transcriber_end="1054.853">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1621)..id(EN2009d.A.words1680)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.146" channel="0" transcriber_start="1056.368" transcriber_end="1066.646">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1681)..id(EN2009d.A.words1731)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.148" channel="0" transcriber_start="1078.898" transcriber_end="1083.912">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1732)..id(EN2009d.A.words1750)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.150" channel="0" transcriber_start="1108.027" transcriber_end="1115.67">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1751)..id(EN2009d.A.words1785)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.152" channel="0" transcriber_start="1150.434" transcriber_end="1164.326">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1786)..id(EN2009d.A.words1849)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.154" channel="0" transcriber_start="1170.196" transcriber_end="1173.875">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1850)..id(EN2009d.A.words1866)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.156" channel="0" transcriber_start="1179.371" transcriber_end="1179.912">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1867)..id(EN2009d.A.words1868)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.158" channel="0" transcriber_start="1182.389" transcriber_end="1184.193">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1869)..id(EN2009d.A.words1872)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.160" channel="0" transcriber_start="1185.279" transcriber_end="1186.584">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1873)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.162" channel="0" transcriber_start="1188.8" transcriber_end="1225.119">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1874)..id(EN2009d.A.words1989)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.163" channel="0" transcriber_start="1225.119" transcriber_end="1253.399">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words1990)..id(EN2009d.A.words2101)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.165" channel="0" transcriber_start="1256.676" transcriber_end="1267.649">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2102)..id(EN2009d.A.words2139)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.167" channel="0" transcriber_start="1275.524" transcriber_end="1294.638">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2140)..id(EN2009d.A.words2223)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.169" channel="0" transcriber_start="1318.864" transcriber_end="1326.755">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2224)..id(EN2009d.A.words2255)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.171" channel="0" transcriber_start="1334.144" transcriber_end="1335.341">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2256)..id(EN2009d.A.words2262)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.173" channel="0" transcriber_start="1348.048" transcriber_end="1348.505">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2263)..id(EN2009d.A.words2264)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.175" channel="0" transcriber_start="1353.045" transcriber_end="1367.413">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2265)..id(EN2009d.A.words2312)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.177" channel="0" transcriber_start="1369.65" transcriber_end="1374.16">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2313)..id(EN2009d.A.words2326)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.179" channel="0" transcriber_start="1385.14" transcriber_end="1385.624">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2327)..id(EN2009d.A.words2328)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.181" channel="0" transcriber_start="1387.904" transcriber_end="1390.608">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2329)..id(EN2009d.A.words2336)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.183" channel="0" transcriber_start="1443.401" transcriber_end="1444.221">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2337)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.185" channel="0" transcriber_start="1446.16" transcriber_end="1461.344">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2338)..id(EN2009d.A.words2386)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.187" channel="0" transcriber_start="1508.333" transcriber_end="1535.958">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2387)..id(EN2009d.A.words2501)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.189" channel="0" transcriber_start="1538.901" transcriber_end="1542.819">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2502)..id(EN2009d.A.words2518)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.191" channel="0" transcriber_start="1549.834" transcriber_end="1571.481">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2519)..id(EN2009d.A.words2611)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.193" channel="0" transcriber_start="1573.477" transcriber_end="1578.626">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2612)..id(EN2009d.A.words2629)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.195" channel="0" transcriber_start="1585.784" transcriber_end="1596.213">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2630)..id(EN2009d.A.words2677)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.197" channel="0" transcriber_start="1598.068" transcriber_end="1603.18">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2678)..id(EN2009d.A.words2702)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.199" channel="0" transcriber_start="1605.068" transcriber_end="1608.448">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2703)..id(EN2009d.A.words2717)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.201" channel="0" transcriber_start="1610.422" transcriber_end="1611.154">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2718)..id(EN2009d.A.words2719)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.203" channel="0" transcriber_start="1614.396" transcriber_end="1624.846">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2720)..id(EN2009d.A.words2753)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.205" channel="0" transcriber_start="1626.892" transcriber_end="1645.596">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2754)..id(EN2009d.A.words2813)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.207" channel="0" transcriber_start="1733.644" transcriber_end="1734.218">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2814)..id(EN2009d.A.words2815)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.209" channel="0" transcriber_start="1765.523" transcriber_end="1765.847">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2816)..id(EN2009d.A.words2817)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.211" channel="0" transcriber_start="1773.278" transcriber_end="1773.918">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2818)..id(EN2009d.A.words2821)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.213" channel="0" transcriber_start="1782.208" transcriber_end="1793.933">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2822)..id(EN2009d.A.words2872)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.215" channel="0" transcriber_start="1807.024" transcriber_end="1819.343">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2873)..id(EN2009d.A.words2917)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.217" channel="0" transcriber_start="1822.711" transcriber_end="1837.739">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2918)..id(EN2009d.A.words2967)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.219" channel="0" transcriber_start="1843.314" transcriber_end="1843.863">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2968)..id(EN2009d.A.words2969)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.221" channel="0" transcriber_start="1851.638" transcriber_end="1852.095">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2970)..id(EN2009d.A.words2971)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.223" channel="0" transcriber_start="1866.627" transcriber_end="1867.034">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2972)..id(EN2009d.A.words2973)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.225" channel="0" transcriber_start="1868.816" transcriber_end="1876.016">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2974)..id(EN2009d.A.words2997)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.227" channel="0" transcriber_start="1878.436" transcriber_end="1887.536">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words2998)..id(EN2009d.A.words3024)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.229" channel="0" transcriber_start="1890.009" transcriber_end="1906.48">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3025)..id(EN2009d.A.words3078)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.231" channel="0" transcriber_start="1908.267" transcriber_end="1928.28">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3079)..id(EN2009d.A.words3154)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.233" channel="0" transcriber_start="1935.256" transcriber_end="1935.68">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3155)..id(EN2009d.A.words3156)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.235" channel="0" transcriber_start="1937.103" transcriber_end="1941.054">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3157)..id(EN2009d.A.words3169)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.237" channel="0" transcriber_start="1957.136" transcriber_end="1971.096">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3170)..id(EN2009d.A.words3226)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.239" channel="0" transcriber_start="1984.965" transcriber_end="1985.705">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3227)..id(EN2009d.A.words3230)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.241" channel="0" transcriber_start="1989.206" transcriber_end="1990.038">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3231)..id(EN2009d.A.words3234)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.243" channel="0" transcriber_start="1993.116" transcriber_end="1993.676">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3235)..id(EN2009d.A.words3236)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.245" channel="0" transcriber_start="2001.241" transcriber_end="2005.515">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3237)..id(EN2009d.A.words3257)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.247" channel="0" transcriber_start="2010.64" transcriber_end="2012.001">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3258)..id(EN2009d.A.words3263)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.249" channel="0" transcriber_start="2015.264" transcriber_end="2016.407">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3264)..id(EN2009d.A.words3269)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.251" channel="0" transcriber_start="2018.912" transcriber_end="2024.101">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3270)..id(EN2009d.A.words3286)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.253" channel="0" transcriber_start="2026.155" transcriber_end="2034.635">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3287)..id(EN2009d.A.words3312)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.255" channel="0" transcriber_start="2036.598" transcriber_end="2037.537">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3313)..id(EN2009d.A.words3316)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.257" channel="0" transcriber_start="2039.114" transcriber_end="2043.338">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3317)..id(EN2009d.A.words3335)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.259" channel="0" transcriber_start="2057.28" transcriber_end="2058.827">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3336)..id(EN2009d.A.words3343)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.261" channel="0" transcriber_start="2067.776" transcriber_end="2071.194">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3344)..id(EN2009d.A.words3356)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.263" channel="0" transcriber_start="2073.385" transcriber_end="2078.694">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3357)..id(EN2009d.A.words3379)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.265" channel="0" transcriber_start="2084.548" transcriber_end="2085.728">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3380)..id(EN2009d.A.words3386)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.267" channel="0" transcriber_start="2090.326" transcriber_end="2092.684">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3387)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.269" channel="0" transcriber_start="2101.82" transcriber_end="2102.436">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3388)..id(EN2009d.A.words3389)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.271" channel="0" transcriber_start="2109.68" transcriber_end="2112.569">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3390)..id(EN2009d.A.words3403)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.273" channel="0" transcriber_start="2128.61" transcriber_end="2137.362">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3404)..id(EN2009d.A.words3439)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.275" channel="0" transcriber_start="2147.685" transcriber_end="2148.317">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3440)..id(EN2009d.A.words3441)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.277" channel="0" transcriber_start="2151.868" transcriber_end="2155.909">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3442)..id(EN2009d.A.words3455)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.279" channel="0" transcriber_start="2158.986" transcriber_end="2159.485">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3456)..id(EN2009d.A.words3457)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.281" channel="0" transcriber_start="2167.087" transcriber_end="2168.615">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3458)..id(EN2009d.A.words3463)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.283" channel="0" transcriber_start="2179.44" transcriber_end="2187.203">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3464)..id(EN2009d.A.words3485)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.285" channel="0" transcriber_start="2193.5" transcriber_end="2193.799">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3486)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.287" channel="0" transcriber_start="2196.926" transcriber_end="2201.109">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3487)..id(EN2009d.A.words3497)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.289" channel="0" transcriber_start="2203.408" transcriber_end="2204.257">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3498)..id(EN2009d.A.words3500)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.291" channel="0" transcriber_start="2216.456" transcriber_end="2219.857">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3501)..id(EN2009d.A.words3515)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.293" channel="0" transcriber_start="2239.787" transcriber_end="2288.915">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3516)..id(EN2009d.A.words3718)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.295" channel="0" transcriber_start="2293.0" transcriber_end="2294.597">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3719)..id(EN2009d.A.words3728)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.297" channel="0" transcriber_start="2297.76" transcriber_end="2307.924">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3729)..id(EN2009d.A.words3773)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.299" channel="0" transcriber_start="2392.449" transcriber_end="2392.84">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3774)..id(EN2009d.A.words3776)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.301" channel="0" transcriber_start="2407.87" transcriber_end="2421.183">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3777)..id(EN2009d.A.words3806)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.303" channel="0" transcriber_start="2422.666" transcriber_end="2423.246">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3807)..id(EN2009d.A.words3808)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.305" channel="0" transcriber_start="2425.312" transcriber_end="2429.118">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3809)..id(EN2009d.A.words3828)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.307" channel="0" transcriber_start="2435.436" transcriber_end="2444.965">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3829)..id(EN2009d.A.words3876)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.309" channel="0" transcriber_start="2467.702" transcriber_end="2469.132">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3877)..id(EN2009d.A.words3885)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.311" channel="0" transcriber_start="2526.448" transcriber_end="2526.9">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3886)..id(EN2009d.A.words3887)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.313" channel="0" transcriber_start="2533.04" transcriber_end="2535.434">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3888)..id(EN2009d.A.words3899)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.315" channel="0" transcriber_start="2558.564" transcriber_end="2559.113">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3900)..id(EN2009d.A.words3902)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.317" channel="0" transcriber_start="2574.725" transcriber_end="2576.402">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3903)..id(EN2009d.A.words3910)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.319" channel="0" transcriber_start="2591.57" transcriber_end="2592.012">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3911)..id(EN2009d.A.words3912)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.321" channel="0" transcriber_start="2607.124" transcriber_end="2609.261">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3913)..id(EN2009d.A.words3919)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.323" channel="0" transcriber_start="2615.398" transcriber_end="2622.659">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3920)..id(EN2009d.A.words3957)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.325" channel="0" transcriber_start="2631.696" transcriber_end="2638.657">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3958)..id(EN2009d.A.words3990)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.327" channel="0" transcriber_start="2662.153" transcriber_end="2664.288">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words3991)..id(EN2009d.A.words4002)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.329" channel="0" transcriber_start="2665.753" transcriber_end="2666.185">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4003)..id(EN2009d.A.words4004)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.331" channel="0" transcriber_start="2667.973" transcriber_end="2669.703">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4005)..id(EN2009d.A.words4013)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.333" channel="0" transcriber_start="2674.73" transcriber_end="2679.17">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4014)..id(EN2009d.A.words4043)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.335" channel="0" transcriber_start="2690.368" transcriber_end="2691.158">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4044)..id(EN2009d.A.words4047)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.337" channel="0" transcriber_start="2723.824" transcriber_end="2725.607">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4048)..id(EN2009d.A.words4055)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.339" channel="0" transcriber_start="2734.424" transcriber_end="2734.84">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4056)..id(EN2009d.A.words4057)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.341" channel="0" transcriber_start="2740.902" transcriber_end="2741.384">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4058)..id(EN2009d.A.words4059)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.343" channel="0" transcriber_start="2743.152" transcriber_end="2746.521">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4060)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.345" channel="0" transcriber_start="2775.01" transcriber_end="2785.102">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4061)..id(EN2009d.A.words4107)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.347" channel="0" transcriber_start="2796.176" transcriber_end="2796.976">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4108)..id(EN2009d.A.words4111)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.349" channel="0" transcriber_start="2798.256" transcriber_end="2798.996">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4112)..id(EN2009d.A.words4115)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.351" channel="0" transcriber_start="2812.276" transcriber_end="2814.473">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4116)..id(EN2009d.A.words4121)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.353" channel="0" transcriber_start="2827.094" transcriber_end="2827.601">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4122)..id(EN2009d.A.words4123)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.355" channel="0" transcriber_start="2840.544" transcriber_end="2842.399">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4124)..id(EN2009d.A.words4130)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.357" channel="0" transcriber_start="2845.85" transcriber_end="2847.238">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4131)..id(EN2009d.A.words4135)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.359" channel="0" transcriber_start="2854.996" transcriber_end="2855.719">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4136)..id(EN2009d.A.words4139)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.361" channel="0" transcriber_start="2865.472" transcriber_end="2868.112">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4140)..id(EN2009d.A.words4151)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.363" channel="0" transcriber_start="2872.736" transcriber_end="2875.015">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4152)..id(EN2009d.A.words4156)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.365" channel="0" transcriber_start="2882.763" transcriber_end="2883.212">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4157)..id(EN2009d.A.words4158)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.367" channel="0" transcriber_start="2884.561" transcriber_end="2885.834">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4159)..id(EN2009d.A.words4163)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.369" channel="0" transcriber_start="2888.395" transcriber_end="2908.907">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4164)..id(EN2009d.A.words4229)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.371" channel="0" transcriber_start="2919.286" transcriber_end="2939.759">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4230)..id(EN2009d.A.words4308)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.373" channel="0" transcriber_start="2948.224" transcriber_end="2949.328">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4309)..id(EN2009d.A.words4314)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.375" channel="0" transcriber_start="2972.294" transcriber_end="2972.776">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4315)..id(EN2009d.A.words4316)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.377" channel="0" transcriber_start="3000.448" transcriber_end="3000.935">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4317)..id(EN2009d.A.words4318)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.379" channel="0" transcriber_start="3004.833" transcriber_end="3015.288">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4319)..id(EN2009d.A.words4357)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.381" channel="0" transcriber_start="3043.818" transcriber_end="3044.489">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4358)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.383" channel="0" transcriber_start="3079.272" transcriber_end="3083.739">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4359)..id(EN2009d.A.words4380)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.385" channel="0" transcriber_start="3091.675" transcriber_end="3093.122">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4381)..id(EN2009d.A.words4386)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.387" channel="0" transcriber_start="3095.89" transcriber_end="3096.531">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4387)..id(EN2009d.A.words4388)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.389" channel="0" transcriber_start="3125.504" transcriber_end="3125.849">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4389)..id(EN2009d.A.words4390)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.391" channel="0" transcriber_start="3131.595" transcriber_end="3146.24">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4391)..id(EN2009d.A.words4456)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.393" channel="0" transcriber_start="3153.233" transcriber_end="3155.348">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4457)..id(EN2009d.A.words4465)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.395" channel="0" transcriber_start="3157.003" transcriber_end="3157.81">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4466)..id(EN2009d.A.words4471)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.397" channel="0" transcriber_start="3161.47" transcriber_end="3171.235">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4472)..id(EN2009d.A.words4510)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.399" channel="0" transcriber_start="3173.104" transcriber_end="3174.752">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4511)..id(EN2009d.A.words4520)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.401" channel="0" transcriber_start="3176.954" transcriber_end="3181.678">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4521)..id(EN2009d.A.words4538)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.403" channel="0" transcriber_start="3182.96" transcriber_end="3183.416">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4539)..id(EN2009d.A.words4540)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.405" channel="0" transcriber_start="3191.798" transcriber_end="3193.145">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4541)..id(EN2009d.A.words4547)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.407" channel="0" transcriber_start="3204.42" transcriber_end="3205.119">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4548)..id(EN2009d.A.words4549)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.409" channel="0" transcriber_start="3207.223" transcriber_end="3209.808">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4550)..id(EN2009d.A.words4560)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.411" channel="0" transcriber_start="3212.146" transcriber_end="3219.738">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4561)..id(EN2009d.A.words4599)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.413" channel="0" transcriber_start="3221.301" transcriber_end="3221.784">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4600)..id(EN2009d.A.words4603)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.415" channel="0" transcriber_start="3224.604" transcriber_end="3225.203">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4604)..id(EN2009d.A.words4605)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.417" channel="0" transcriber_start="3240.8" transcriber_end="3241.686">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4606)..id(EN2009d.A.words4611)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.419" channel="0" transcriber_start="3254.976" transcriber_end="3259.815">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4612)..id(EN2009d.A.words4634)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.421" channel="0" transcriber_start="3262.806" transcriber_end="3264.788">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4635)..id(EN2009d.A.words4642)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.423" channel="0" transcriber_start="3269.296" transcriber_end="3269.677">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4643)..id(EN2009d.A.words4644)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.425" channel="0" transcriber_start="3272.439" transcriber_end="3273.196">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4645)..id(EN2009d.A.words4646)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.427" channel="0" transcriber_start="3278.326" transcriber_end="3292.233">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4647)..id(EN2009d.A.words4701)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.429" channel="0" transcriber_start="3295.667" transcriber_end="3304.555">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4702)..id(EN2009d.A.words4737)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.431" channel="0" transcriber_start="3336.69" transcriber_end="3342.123">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4738)..id(EN2009d.A.words4759)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.433" channel="0" transcriber_start="3344.541" transcriber_end="3345.123">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4760)..id(EN2009d.A.words4761)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.435" channel="0" transcriber_start="3387.416" transcriber_end="3392.217">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4762)..id(EN2009d.A.words4781)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.437" channel="0" transcriber_start="3396.235" transcriber_end="3399.561">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4782)..id(EN2009d.A.words4793)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.439" channel="0" transcriber_start="3405.923" transcriber_end="3406.306">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4794)..id(EN2009d.A.words4795)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.441" channel="0" transcriber_start="3409.481" transcriber_end="3409.93">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4796)..id(EN2009d.A.words4797)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.443" channel="0" transcriber_start="3414.262" transcriber_end="3422.234">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4798)..id(EN2009d.A.words4843)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.445" channel="0" transcriber_start="3434.939" transcriber_end="3435.404">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4844)..id(EN2009d.A.words4845)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.447" channel="0" transcriber_start="3441.417" transcriber_end="3447.843">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4846)..id(EN2009d.A.words4873)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.449" channel="0" transcriber_start="3457.264" transcriber_end="3459.931">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4874)..id(EN2009d.A.words4888)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.451" channel="0" transcriber_start="3480.037" transcriber_end="3481.059">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4889)..id(EN2009d.A.words4892)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.453" channel="0" transcriber_start="3484.931" transcriber_end="3488.681">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4893)..id(EN2009d.A.words4912)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.455" channel="0" transcriber_start="3513.946" transcriber_end="3515.218">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4913)..id(EN2009d.A.words4921)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.457" channel="0" transcriber_start="3522.69" transcriber_end="3524.793">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4922)..id(EN2009d.A.words4934)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.459" channel="0" transcriber_start="3529.456" transcriber_end="3531.763">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4935)..id(EN2009d.A.words4945)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.461" channel="0" transcriber_start="3538.541" transcriber_end="3565.454">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words4946)..id(EN2009d.A.words5043)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.463" channel="0" transcriber_start="3581.453" transcriber_end="3583.691">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5044)..id(EN2009d.A.words5057)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.465" channel="0" transcriber_start="3589.28" transcriber_end="3595.024">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5058)..id(EN2009d.A.words5082)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.467" channel="0" transcriber_start="3601.344" transcriber_end="3603.156">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5083)..id(EN2009d.A.words5090)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.469" channel="0" transcriber_start="3613.001" transcriber_end="3614.3">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5091)..id(EN2009d.A.words5096)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.471" channel="0" transcriber_start="3643.252" transcriber_end="3643.81">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5097)..id(EN2009d.A.words5098)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.473" channel="0" transcriber_start="3658.549" transcriber_end="3659.033">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5099)..id(EN2009d.A.words5100)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.475" channel="0" transcriber_start="3660.334" transcriber_end="3679.201">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5101)..id(EN2009d.A.words5167)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.477" channel="0" transcriber_start="3692.58" transcriber_end="3693.42">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5168)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.479" channel="0" transcriber_start="3701.408" transcriber_end="3705.092">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5169)..id(EN2009d.A.words5183)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.481" channel="0" transcriber_start="3707.965" transcriber_end="3708.763">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5184)..id(EN2009d.A.words5187)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.483" channel="0" transcriber_start="3719.184" transcriber_end="3720.372">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5188)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.485" channel="0" transcriber_start="3769.654" transcriber_end="3770.219">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5189)..id(EN2009d.A.words5190)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.487" channel="0" transcriber_start="3788.32" transcriber_end="3790.074">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5191)..id(EN2009d.A.words5200)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.489" channel="0" transcriber_start="3793.344" transcriber_end="3799.328">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5201)..id(EN2009d.A.words5225)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.491" channel="0" transcriber_start="3801.889" transcriber_end="3807.585">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5226)..id(EN2009d.A.words5255)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.493" channel="0" transcriber_start="3810.939" transcriber_end="3811.529">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5256)..id(EN2009d.A.words5257)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.495" channel="0" transcriber_start="3824.416" transcriber_end="3830.754">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5258)..id(EN2009d.A.words5281)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.497" channel="0" transcriber_start="3843.55" transcriber_end="3848.672">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5282)..id(EN2009d.A.words5308)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.499" channel="0" transcriber_start="3856.122" transcriber_end="3857.793">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5309)..id(EN2009d.A.words5316)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.501" channel="0" transcriber_start="3858.919" transcriber_end="3879.432">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5317)..id(EN2009d.A.words5390)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.503" channel="0" transcriber_start="3890.08" transcriber_end="3893.584">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5391)..id(EN2009d.A.words5400)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.505" channel="0" transcriber_start="3908.048" transcriber_end="3938.851">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5401)..id(EN2009d.A.words5510)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.507" channel="0" transcriber_start="3940.414" transcriber_end="3944.691">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5511)..id(EN2009d.A.words5529)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.509" channel="0" transcriber_start="3952.989" transcriber_end="3960.141">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5530)..id(EN2009d.A.words5560)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.511" channel="0" transcriber_start="3971.28" transcriber_end="3988.144">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5561)..id(EN2009d.A.words5632)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.513" channel="0" transcriber_start="3995.612" transcriber_end="4004.625">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5633)..id(EN2009d.A.words5664)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.515" channel="0" transcriber_start="4015.056" transcriber_end="4018.416">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5665)..id(EN2009d.A.words5677)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.517" channel="0" transcriber_start="4027.696" transcriber_end="4038.793">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5678)..id(EN2009d.A.words5697)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.519" channel="0" transcriber_start="4042.348" transcriber_end="4043.571">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5698)..id(EN2009d.A.words5701)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.521" channel="0" transcriber_start="4052.0" transcriber_end="4055.995">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5702)..id(EN2009d.A.words5716)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.523" channel="0" transcriber_start="4060.495" transcriber_end="4061.078">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5717)..id(EN2009d.A.words5720)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.525" channel="0" transcriber_start="4074.975" transcriber_end="4075.582">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5721)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.527" channel="0" transcriber_start="4079.016" transcriber_end="4079.482">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5722)..id(EN2009d.A.words5723)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.529" channel="0" transcriber_start="4094.56" transcriber_end="4095.147">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5724)..id(EN2009d.A.words5726)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.531" channel="0" transcriber_start="4096.928" transcriber_end="4101.44">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5727)..id(EN2009d.A.words5742)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.533" channel="0" transcriber_start="4103.846" transcriber_end="4105.328">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5743)..id(EN2009d.A.words5749)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.535" channel="0" transcriber_start="4117.52" transcriber_end="4119.933">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5750)..id(EN2009d.A.words5759)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.537" channel="0" transcriber_start="4121.813" transcriber_end="4126.863">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5760)..id(EN2009d.A.words5787)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.539" channel="0" transcriber_start="4128.51" transcriber_end="4128.95">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5788)..id(EN2009d.A.words5790)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.541" channel="0" transcriber_start="4130.913" transcriber_end="4131.411">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5791)..id(EN2009d.A.words5792)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.543" channel="0" transcriber_start="4133.124" transcriber_end="4134.413">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5793)..id(EN2009d.A.words5799)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.545" channel="0" transcriber_start="4141.998" transcriber_end="4144.892">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5800)..id(EN2009d.A.words5813)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.547" channel="0" transcriber_start="4148.03" transcriber_end="4149.102">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5814)..id(EN2009d.A.words5819)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.549" channel="0" transcriber_start="4154.304" transcriber_end="4160.352">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5820)..id(EN2009d.A.words5845)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.551" channel="0" transcriber_start="4162.224" transcriber_end="4167.073">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5846)..id(EN2009d.A.words5865)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.553" channel="0" transcriber_start="4177.904" transcriber_end="4187.364">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5866)..id(EN2009d.A.words5900)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.555" channel="0" transcriber_start="4200.304" transcriber_end="4201.246">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5901)..id(EN2009d.A.words5904)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.557" channel="0" transcriber_start="4202.618" transcriber_end="4204.663">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5905)..id(EN2009d.A.words5915)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.559" channel="0" transcriber_start="4217.776" transcriber_end="4222.721">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5916)..id(EN2009d.A.words5932)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.561" channel="0" transcriber_start="4226.786" transcriber_end="4227.277">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5933)..id(EN2009d.A.words5936)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.563" channel="0" transcriber_start="4229.424" transcriber_end="4231.328">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5937)..id(EN2009d.A.words5948)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.565" channel="0" transcriber_start="4257.931" transcriber_end="4272.827">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words5949)..id(EN2009d.A.words6013)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.567" channel="0" transcriber_start="4279.936" transcriber_end="4285.436">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6014)..id(EN2009d.A.words6038)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.569" channel="0" transcriber_start="4293.293" transcriber_end="4297.771">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6039)..id(EN2009d.A.words6049)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.571" channel="0" transcriber_start="4301.604" transcriber_end="4302.893">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6050)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.573" channel="0" transcriber_start="4312.32" transcriber_end="4312.946">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6051)..id(EN2009d.A.words6052)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.575" channel="0" transcriber_start="4314.122" transcriber_end="4316.992">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6053)..id(EN2009d.A.words6066)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.577" channel="0" transcriber_start="4323.311" transcriber_end="4323.785">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6067)..id(EN2009d.A.words6068)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.579" channel="0" transcriber_start="4325.44" transcriber_end="4328.352">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6069)..id(EN2009d.A.words6085)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.581" channel="0" transcriber_start="4329.92" transcriber_end="4330.401">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6086)..id(EN2009d.A.words6087)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.583" channel="0" transcriber_start="4337.337" transcriber_end="4338.41">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6088)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.585" channel="0" transcriber_start="4366.393" transcriber_end="4366.901">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6089)..id(EN2009d.A.words6090)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.587" channel="0" transcriber_start="4372.62" transcriber_end="4375.045">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6091)..id(EN2009d.A.words6101)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.589" channel="0" transcriber_start="4393.216" transcriber_end="4394.154">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6102)..id(EN2009d.A.words6107)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.591" channel="0" transcriber_start="4408.091" transcriber_end="4408.615">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6108)..id(EN2009d.A.words6109)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.593" channel="0" transcriber_start="4415.936" transcriber_end="4416.392">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6110)..id(EN2009d.A.words6111)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.595" channel="0" transcriber_start="4418.352" transcriber_end="4419.682">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6112)..id(EN2009d.A.words6121)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.597" channel="0" transcriber_start="4421.087" transcriber_end="4448.598">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6122)..id(EN2009d.A.words6216)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.599" channel="0" transcriber_start="4487.061" transcriber_end="4487.859">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6217)..id(EN2009d.A.words6222)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.601" channel="0" transcriber_start="4500.064" transcriber_end="4538.857">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6223)..id(EN2009d.A.words6371)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.603" channel="0" transcriber_start="4550.801" transcriber_end="4553.004">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6372)..id(EN2009d.A.words6383)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.605" channel="0" transcriber_start="4563.789" transcriber_end="4570.116">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6384)..id(EN2009d.A.words6400)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.607" channel="0" transcriber_start="4587.849" transcriber_end="4589.329">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6401)..id(EN2009d.A.words6411)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.609" channel="0" transcriber_start="4623.309" transcriber_end="4623.741">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6412)..id(EN2009d.A.words6413)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.611" channel="0" transcriber_start="4627.168" transcriber_end="4629.843">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6414)..id(EN2009d.A.words6424)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.613" channel="0" transcriber_start="4631.256" transcriber_end="4631.63">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6425)..id(EN2009d.A.words6427)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.615" channel="0" transcriber_start="4635.33" transcriber_end="4638.59">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6428)..id(EN2009d.A.words6438)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.617" channel="0" transcriber_start="4641.296" transcriber_end="4648.288">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6439)..id(EN2009d.A.words6460)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.619" channel="0" transcriber_start="4649.632" transcriber_end="4656.61">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6461)..id(EN2009d.A.words6488)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.621" channel="0" transcriber_start="4658.005" transcriber_end="4668.416">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6489)..id(EN2009d.A.words6534)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.623" channel="0" transcriber_start="4671.86" transcriber_end="4672.326">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6535)..id(EN2009d.A.words6536)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.625" channel="0" transcriber_start="4677.49" transcriber_end="4678.319">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6537)..id(EN2009d.A.words6540)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.627" channel="0" transcriber_start="4683.958" transcriber_end="4688.545">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6541)..id(EN2009d.A.words6559)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.629" channel="0" transcriber_start="4691.378" transcriber_end="4692.301">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6560)..id(EN2009d.A.words6564)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.631" channel="0" transcriber_start="4695.461" transcriber_end="4701.923">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6565)..id(EN2009d.A.words6592)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.633" channel="0" transcriber_start="4711.607" transcriber_end="4727.236">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6593)..id(EN2009d.A.words6657)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.635" channel="0" transcriber_start="4729.905" transcriber_end="4738.923">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6658)..id(EN2009d.A.words6701)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.637" channel="0" transcriber_start="4740.927" transcriber_end="4744.163">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6702)..id(EN2009d.A.words6718)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.639" channel="0" transcriber_start="4748.903" transcriber_end="4749.917">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6719)..id(EN2009d.A.words6722)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.641" channel="0" transcriber_start="4752.823" transcriber_end="4754.519">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6723)..id(EN2009d.A.words6728)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.643" channel="0" transcriber_start="4756.629" transcriber_end="4757.793">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6729)..id(EN2009d.A.words6733)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.645" channel="0" transcriber_start="4762.574" transcriber_end="4762.811">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6734)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.647" channel="0" transcriber_start="4764.896" transcriber_end="4767.932">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6735)..id(EN2009d.A.words6744)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.649" channel="0" transcriber_start="4807.242" transcriber_end="4807.633">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6745)..id(EN2009d.A.words6746)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.651" channel="0" transcriber_start="4817.211" transcriber_end="4822.049">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6747)..id(EN2009d.A.words6755)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.653" channel="0" transcriber_start="4823.778" transcriber_end="4824.834">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6756)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.655" channel="0" transcriber_start="4826.705" transcriber_end="4829.027">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6757)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.657" channel="0" transcriber_start="4855.185" transcriber_end="4856.784">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6758)..id(EN2009d.A.words6761)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.659" channel="0" transcriber_start="4859.446" transcriber_end="4859.945">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6762)..id(EN2009d.A.words6763)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.661" channel="0" transcriber_start="4880.096" transcriber_end="4884.181">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6764)..id(EN2009d.A.words6784)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.663" channel="0" transcriber_start="4886.692" transcriber_end="4890.535">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6785)..id(EN2009d.A.words6797)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.665" channel="0" transcriber_start="4896.127" transcriber_end="4896.645">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6798)..id(EN2009d.A.words6799)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.667" channel="0" transcriber_start="4903.923" transcriber_end="4908.88">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6800)..id(EN2009d.A.words6823)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.669" channel="0" transcriber_start="4914.939" transcriber_end="4918.529">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6824)..id(EN2009d.A.words6842)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.671" channel="0" transcriber_start="4928.944" transcriber_end="4931.841">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6843)..id(EN2009d.A.words6856)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.673" channel="0" transcriber_start="4942.384" transcriber_end="4958.664">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6857)..id(EN2009d.A.words6914)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.675" channel="0" transcriber_start="4962.815" transcriber_end="4965.451">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6915)..id(EN2009d.A.words6925)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.677" channel="0" transcriber_start="4969.812" transcriber_end="4976.867">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6926)..id(EN2009d.A.words6948)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.679" channel="0" transcriber_start="4983.504" transcriber_end="4988.312">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6949)..id(EN2009d.A.words6964)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.681" channel="0" transcriber_start="5001.812" transcriber_end="5008.704">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6965)..id(EN2009d.A.words6990)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.683" channel="0" transcriber_start="5010.521" transcriber_end="5011.377">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6991)..id(EN2009d.A.words6994)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.685" channel="0" transcriber_start="5013.19" transcriber_end="5014.637">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words6995)..id(EN2009d.A.words7000)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.687" channel="0" transcriber_start="5026.659" transcriber_end="5030.524">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7001)..id(EN2009d.A.words7019)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.689" channel="0" transcriber_start="5040.912" transcriber_end="5042.162">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7020)..id(EN2009d.A.words7023)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.691" channel="0" transcriber_start="5044.48" transcriber_end="5044.906">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7024)..id(EN2009d.A.words7025)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.693" channel="0" transcriber_start="5046.128" transcriber_end="5046.544">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7026)..id(EN2009d.A.words7027)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.695" channel="0" transcriber_start="5065.888" transcriber_end="5071.303">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7028)..id(EN2009d.A.words7050)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.697" channel="0" transcriber_start="5076.416" transcriber_end="5076.88">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7051)..id(EN2009d.A.words7052)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.699" channel="0" transcriber_start="5084.736" transcriber_end="5089.289">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7053)..id(EN2009d.A.words7069)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.701" channel="0" transcriber_start="5094.761" transcriber_end="5096.823">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7070)..id(EN2009d.A.words7073)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.703" channel="0" transcriber_start="5098.494" transcriber_end="5100.544">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7074)..id(EN2009d.A.words7081)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.705" channel="0" transcriber_start="5113.017" transcriber_end="5114.896">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7082)..id(EN2009d.A.words7093)"/>
+   </segment>
+   <segment nite:id="EN2009d.sync.707" channel="0" transcriber_start="5120.63" transcriber_end="5122.22">
+      <nite:child href="EN2009d.A.words.xml#id(EN2009d.A.words7094)..id(EN2009d.A.words7097)"/>
+   </segment>
+</nite:root>

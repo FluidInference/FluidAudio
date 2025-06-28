@@ -69,3 +69,7 @@ fastlane/test_output
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+node_modules/
+FluidAudioSwiftTests/
