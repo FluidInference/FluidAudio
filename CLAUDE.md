@@ -62,44 +62,157 @@ The CLI needs to be extended to support:
 - `--min-duration-off <float>`
 - `--min-activity <float>`
 
-## Optimization Strategy - Intelligent Parameter Tuning
+## Optimization Strategy - Expert ML Engineer Parameter Tuning
 
-### Phase 1: Baseline Assessment
-1. Run current baseline to confirm DER: 81.0%
-2. Analyze baseline results to identify primary error types:
-   - High DER suggests speaker confusion, missed speech, or false alarms
-   - Use error breakdown to guide parameter adjustments
-
-### Phase 2: Adaptive Parameter Search
-**Smart Optimization Approach:**
-1. **Start with most impactful parameter**: clusteringThreshold
-   - If DER > 50%: Try lower threshold (0.5, 0.4) for more aggressive clustering
-   - If many false speakers detected: Try higher threshold (0.8, 0.9)
+### Phase 1: Baseline Assessment & Anomaly Detection
+1. **Run baseline multiple times** to establish statistical significance
+   - Run 3-5 iterations of same config to measure stability
+   - Calculate mean ± std deviation for DER, JER, RTF
+   - **RED FLAG**: If std deviation > 5%, investigate non-deterministic behavior
    
-2. **Adjust based on results**:
-   - **If DER improves significantly (>10%)**: Continue in same direction
-   - **If DER worsens**: Reverse direction or try smaller steps
-   - **If DER plateaus**: Move to next parameter
+2. **Deep error analysis** (act like forensic ML engineer):
+   - **If DER > 60%**: Likely clustering failure - speakers being confused
+   - **If JER > DER**: Timeline alignment issues - check duration parameters
+   - **If RTF varies significantly**: Resource contention or memory issues
+   - **If same results across different parameters**: Model may be broken/not using params
 
-3. **Sequential parameter optimization**:
-   - Once clusteringThreshold converges, optimize minActivityThreshold
-   - Then optimize duration parameters (minDurationOn, minDurationOff)
-   - Each parameter builds on previous best configuration
+### Phase 2: Intelligent Anomaly-Aware Parameter Search
 
-### Phase 3: Gradient-Based Fine-Tuning
-1. **Binary search refinement**: Narrow down optimal ranges
-2. **Cross-parameter interaction**: Test parameter combinations that showed promise
-3. **Stability testing**: Ensure improvements are consistent across multiple files
+**Expert-Level Optimization with Consistency Checks:**
 
-### Phase 4: Validation and Analysis
-1. Run best configuration on full AMI test set
-2. Compare against research benchmarks
-3. Document parameter sensitivity and final recommendations
+1. **Pre-flight validation**:
+   ```
+   BEFORE each parameter test:
+   - Verify parameter actually changed in logs/debug output
+   - Confirm model is using new parameters (not cached)
+   - Check if audio files are being processed correctly
+   ```
 
-### Optimization Stopping Criteria
-- DER improvement < 1% for 3 consecutive tests
-- DER reaches target < 30%
-- Parameter has been tested in both directions without improvement
+2. **Smart parameter testing with anomaly detection**:
+   - **Test parameter extremes first**: (0.3, 0.9) for clusteringThreshold
+   - **CONSISTENCY CHECK**: If extreme values give identical results → INVESTIGATE
+   - **SANITY CHECK**: If threshold=0.9 gives same DER as threshold=0.3 → MODEL ISSUE
+   
+3. **Expert troubleshooting triggers**:
+   ```
+   IF (same DER across 3+ different parameter values):
+       → Check if parameters are actually being used
+       → Verify model isn't using cached/default values
+       → Add debug logging to confirm parameter propagation
+   
+   IF (DER increases when it should decrease):
+       → Analyze what type of errors increased
+       → Check if we're optimizing the wrong bottleneck
+       → Verify ground truth data integrity
+   
+   IF (improvement then sudden degradation):
+       → Look for parameter interaction effects
+       → Check if we hit a threshold/boundary condition
+       → Analyze if overfitting to specific audio characteristics
+   ```
+
+4. **Gradient analysis like an expert**:
+   - **Calculate parameter sensitivity**: ΔDER / Δparameter
+   - **Detect non-monotonic behavior**: When increasing parameter sometimes helps, sometimes hurts
+   - **Identify parameter interactions**: When two parameters must be tuned together
+
+### Phase 3: Expert Debugging & Deep Analysis
+
+**When things don't make sense (expert troubleshooting):**
+
+1. **Identical results debugging**:
+   ```
+   IF multiple different parameters → same DER:
+   THEN investigate:
+   - Are parameters reaching the model layer?
+   - Is there parameter clamping/saturation?
+   - Are we testing on different audio files accidentally?
+   - Is there a bug in parameter passing?
+   ```
+
+2. **Counterintuitive results analysis**:
+   ```
+   IF (lower clustering threshold → worse DER):
+   THEN analyze:
+   - Are we creating too many micro-clusters?
+   - Is the similarity metric broken?
+   - Are we hitting edge cases in clustering algorithm?
+   
+   IF (longer minDurationOn → worse performance):
+   THEN check:
+   - Are we filtering out too much real speech?
+   - Is ground truth data very granular?
+   - Are we introducing boundary artifacts?
+   ```
+
+3. **Expert validation techniques**:
+   - **A/B testing**: Run same config twice to verify reproducibility
+   - **Parameter sweep validation**: Test 3 values around best config
+   - **Cross-validation**: Test best config on different AMI files
+   - **Ablation studies**: Remove one optimization at a time
+
+### Phase 4: Advanced Optimization Strategies
+
+1. **Multi-objective optimization** (expert approach):
+   - Don't just minimize DER - analyze DER vs JER trade-offs
+   - Consider parameter stability (configs that work across multiple files)
+   - Factor in computational cost (RTF) as constraint
+
+2. **Adaptive search strategies**:
+   ```
+   IF (DER variance > 10% across files):
+       → Need more robust parameters, not just lowest DER
+   
+   IF (no improvement after 5 tests):
+       → Switch to different parameter or try combinations
+   
+   IF (improvements < 2% but consistent):
+       → Continue fine-tuning in smaller steps
+   ```
+
+3. **Expert stopping criteria**:
+   - **Statistical significance**: Need 3+ runs showing improvement
+   - **Diminishing returns**: When improvement rate < 0.5% per iteration
+   - **Validation consistency**: Best config must work on multiple test files
+
+### Phase 5: Expert Validation & Forensics
+
+1. **Results validation**:
+   - Run best config 5 times to confirm stability
+   - Test on different AMI files to verify generalization
+   - Compare against original baseline to quantify total improvement
+
+2. **Expert forensics** (if results seem weird):
+   - **Parameter correlation analysis**: Which parameters interact?
+   - **Error pattern analysis**: What types of errors decreased/increased?
+   - **Audio characteristics**: Do improvements work on all meeting types?
+   - **Boundary condition testing**: What happens at parameter extremes?
+
+### Expert Troubleshooting Decision Tree
+
+```
+START optimization iteration:
+├── Results identical to previous? 
+│   ├── YES → INVESTIGATE: Parameter not being used / Model caching
+│   └── NO → Continue
+├── Results worse than expected?
+│   ├── YES → ANALYZE: Wrong direction / Parameter interaction / Bad config
+│   └── NO → Continue
+├── Results too good to believe?
+│   ├── YES → VALIDATE: Run multiple times / Check different files
+│   └── NO → Continue
+└── Results make sense? → Document and continue
+```
+
+### Expert Anomaly Red Flags
+
+**Immediately investigate if you see:**
+- Same DER across 4+ different parameter values
+- DER improvement then sudden 20%+ degradation  
+- RTF varying by >50% with same parameters
+- JER > DER consistently (suggests timeline issues)
+- Parameters having opposite effect than expected
+- No improvement despite testing full parameter range
 
 ## Optimization Log
 
