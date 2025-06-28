@@ -73,3 +73,6 @@ Thumbs.db
 
 node_modules/
 FluidAudioSwiftTests/
+
+threshold*.json
+baseline*.json

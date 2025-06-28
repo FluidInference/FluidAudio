@@ -45,11 +45,14 @@ struct DiarizationCLI {
                 help         Show this help message
 
             BENCHMARK OPTIONS:
-                --dataset <name>     Dataset to use (ami-sdm, ami-ihm) [default: ami-sdm]
-                --threshold <float>  Clustering threshold 0.0-1.0 [default: 0.7]
-                --debug             Enable debug mode
-                --output <file>      Output results to JSON file
-                --auto-download     Automatically download dataset if not found
+                --dataset <name>        Dataset to use (ami-sdm, ami-ihm) [default: ami-sdm]
+                --threshold <float>     Clustering threshold 0.0-1.0 [default: 0.7]
+                --min-duration-on <float>   Minimum speaker segment duration in seconds [default: 1.0]
+                --min-duration-off <float>  Minimum silence between speakers in seconds [default: 0.5]
+                --min-activity <float>      Minimum activity threshold in frames [default: 10.0]
+                --debug                 Enable debug mode
+                --output <file>         Output results to JSON file
+                --auto-download         Automatically download dataset if not found
                 
             NOTE: Benchmark now uses real AMI manual annotations from Tests/ami_public_1.6.2/
                   If annotations are not found, falls back to simplified placeholder.
@@ -85,6 +88,9 @@ struct DiarizationCLI {
     static func runBenchmark(arguments: [String]) async {
         var dataset = "ami-sdm"
         var threshold: Float = 0.7
+        var minDurationOn: Float = 1.0
+        var minDurationOff: Float = 0.5
+        var minActivityThreshold: Float = 10.0
         var debugMode = false
         var outputFile: String?
         var autoDownload = false
@@ -101,6 +107,21 @@ struct DiarizationCLI {
             case "--threshold":
                 if i + 1 < arguments.count {
                     threshold = Float(arguments[i + 1]) ?? 0.7
+                    i += 1
+                }
+            case "--min-duration-on":
+                if i + 1 < arguments.count {
+                    minDurationOn = Float(arguments[i + 1]) ?? 1.0
+                    i += 1
+                }
+            case "--min-duration-off":
+                if i + 1 < arguments.count {
+                    minDurationOff = Float(arguments[i + 1]) ?? 0.5
+                    i += 1
+                }
+            case "--min-activity":
+                if i + 1 < arguments.count {
+                    minActivityThreshold = Float(arguments[i + 1]) ?? 10.0
                     i += 1
                 }
             case "--debug":
@@ -120,11 +141,17 @@ struct DiarizationCLI {
 
         print("🚀 Starting \(dataset.uppercased()) benchmark evaluation")
         print("   Clustering threshold: \(threshold)")
+        print("   Min duration on: \(minDurationOn)s")
+        print("   Min duration off: \(minDurationOff)s")
+        print("   Min activity threshold: \(minActivityThreshold)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
 
         let config = DiarizerConfig(
             clusteringThreshold: threshold,
+            minDurationOn: minDurationOn,
+            minDurationOff: minDurationOff,
+            minActivityThreshold: minActivityThreshold,
             debugMode: debugMode
         )
 
