@@ -78,3 +78,9 @@ threshold*.json
 baseline*.json
 .vscode/
 .build/
+*threshold*.json
+*log
+
+.vscode/
+
+*results.json
