@@ -4,6 +4,7 @@ import Foundation
 
 @main
 struct DiarizationCLI {
+
     static func main() async {
         let arguments = CommandLine.arguments
 
@@ -50,6 +51,7 @@ struct DiarizationCLI {
                 --min-duration-on <float>   Minimum speaker segment duration in seconds [default: 1.0]
                 --min-duration-off <float>  Minimum silence between speakers in seconds [default: 0.5]
                 --min-activity <float>      Minimum activity threshold in frames [default: 10.0]
+                --single-file <name>    Test only one specific meeting file (e.g., ES2004a)
                 --debug                 Enable debug mode
                 --output <file>         Output results to JSON file
                 --auto-download         Automatically download dataset if not found
@@ -91,6 +93,7 @@ struct DiarizationCLI {
         var minDurationOn: Float = 1.0
         var minDurationOff: Float = 0.5
         var minActivityThreshold: Float = 10.0
+        var singleFile: String?
         var debugMode = false
         var outputFile: String?
         var autoDownload = false
@@ -122,6 +125,11 @@ struct DiarizationCLI {
             case "--min-activity":
                 if i + 1 < arguments.count {
                     minActivityThreshold = Float(arguments[i + 1]) ?? 10.0
+                    i += 1
+                }
+            case "--single-file":
+                if i + 1 < arguments.count {
+                    singleFile = arguments[i + 1]
                     i += 1
                 }
             case "--debug":
@@ -170,10 +178,12 @@ struct DiarizationCLI {
         switch dataset.lowercased() {
         case "ami-sdm":
             await runAMISDMBenchmark(
-                manager: manager, outputFile: outputFile, autoDownload: autoDownload)
+                manager: manager, outputFile: outputFile, autoDownload: autoDownload,
+                singleFile: singleFile)
         case "ami-ihm":
             await runAMIIHMBenchmark(
-                manager: manager, outputFile: outputFile, autoDownload: autoDownload)
+                manager: manager, outputFile: outputFile, autoDownload: autoDownload,
+                singleFile: singleFile)
         default:
             print("❌ Unsupported dataset: \(dataset)")
             print("💡 Supported datasets: ami-sdm, ami-ihm")
@@ -319,7 +329,7 @@ struct DiarizationCLI {
     // MARK: - AMI Benchmark Implementation
 
     static func runAMISDMBenchmark(
-        manager: DiarizerManager, outputFile: String?, autoDownload: Bool
+        manager: DiarizerManager, outputFile: String?, autoDownload: Bool, singleFile: String? = nil
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -342,7 +352,8 @@ struct DiarizationCLI {
                 print("   Option 1: Use --auto-download flag")
                 print("   Option 2: Download manually:")
                 print("      1. Visit: https://groups.inf.ed.ac.uk/ami/download/")
-                print("      2. Select test meetings: ES2002a, ES2003a, ES2004a, IS1000a, IS1001a")
+                print(
+                    "      2. Select test meetings: ES2002a, ES2003a, ES2004a, IS1000a, IS1001a")
                 print("      3. Download 'Headset mix' (Mix-Headset.wav files)")
                 print("      4. Place files in: \(amiDirectory.path)")
                 print("   Option 3: Use download command:")
@@ -351,12 +362,18 @@ struct DiarizationCLI {
             }
         }
 
-        let commonMeetings = [
-            // Core AMI test set - smaller subset for initial benchmarking
-            "ES2002a", "ES2003a", "ES2004a", "ES2005a",
-            "IS1000a", "IS1001a", "IS1002b",
-            "TS3003a", "TS3004a",
-        ]
+        let commonMeetings: [String]
+        if let singleFile = singleFile {
+            commonMeetings = [singleFile]
+            print("📋 Testing single file: \(singleFile)")
+        } else {
+            commonMeetings = [
+                // Core AMI test set - smaller subset for initial benchmarking
+                "ES2002a", "ES2003a", "ES2004a", "ES2005a",
+                "IS1000a", "IS1001a", "IS1002b",
+                "TS3003a", "TS3004a",
+            ]
+        }
 
         var benchmarkResults: [BenchmarkResult] = []
         var totalDER: Float = 0.0
@@ -431,14 +448,8 @@ struct DiarizationCLI {
         let avgDER = totalDER / Float(processedFiles)
         let avgJER = totalJER / Float(processedFiles)
 
-        print("\n🏆 AMI SDM Benchmark Results:")
-        print("   Average DER: \(String(format: "%.1f", avgDER))%")
-        print("   Average JER: \(String(format: "%.1f", avgJER))%")
-        print("   Processed Files: \(processedFiles)/\(commonMeetings.count)")
-        print("   📝 Research Comparison:")
-        print("      - Powerset BCE (2023): 18.5% DER")
-        print("      - EEND (2019): 25.3% DER")
-        print("      - x-vector clustering: 28.7% DER")
+        // Print detailed results table
+        printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-SDM")
 
         // Save results if requested
         if let outputFile = outputFile {
@@ -461,7 +472,7 @@ struct DiarizationCLI {
     }
 
     static func runAMIIHMBenchmark(
-        manager: DiarizerManager, outputFile: String?, autoDownload: Bool
+        manager: DiarizerManager, outputFile: String?, autoDownload: Bool, singleFile: String? = nil
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -484,7 +495,8 @@ struct DiarizationCLI {
                 print("   Option 1: Use --auto-download flag")
                 print("   Option 2: Download manually:")
                 print("      1. Visit: https://groups.inf.ed.ac.uk/ami/download/")
-                print("      2. Select test meetings: ES2002a, ES2003a, ES2004a, IS1000a, IS1001a")
+                print(
+                    "      2. Select test meetings: ES2002a, ES2003a, ES2004a, IS1000a, IS1001a")
                 print("      3. Download 'Individual headsets' (Headset-0.wav files)")
                 print("      4. Place files in: \(amiDirectory.path)")
                 print("   Option 3: Use download command:")
@@ -573,15 +585,8 @@ struct DiarizationCLI {
         let avgDER = totalDER / Float(processedFiles)
         let avgJER = totalJER / Float(processedFiles)
 
-        print("\n🏆 AMI IHM Benchmark Results:")
-        print("   Average DER: \(String(format: "%.1f", avgDER))%")
-        print("   Average JER: \(String(format: "%.1f", avgJER))%")
-        print("   Processed Files: \(processedFiles)/\(commonMeetings.count)")
-        print("   📝 Research Comparison:")
-        print("      - Powerset BCE (2023): 18.5% DER")
-        print("      - EEND (2019): 25.3% DER")
-        print("      - x-vector clustering: 28.7% DER")
-        print("      - IHM is typically 5-10% lower DER than SDM (clean audio)")
+        // Print detailed results table
+        printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-IHM")
 
         // Save results if requested
         if let outputFile = outputFile {
@@ -714,6 +719,12 @@ struct DiarizationCLI {
         let frameSize: Float = 0.01
         let totalFrames = Int(totalDuration / frameSize)
 
+        // Step 1: Find optimal speaker assignment using frame-based overlap
+        let speakerMapping = findOptimalSpeakerMapping(
+            predicted: predicted, groundTruth: groundTruth, totalDuration: totalDuration)
+
+        print("🔍 SPEAKER MAPPING: \(speakerMapping)")
+
         var missedFrames = 0
         var falseAlarmFrames = 0
         var speakerErrorFrames = 0
@@ -732,8 +743,16 @@ struct DiarizationCLI {
             case (_, nil):
                 missedFrames += 1
             case let (gt?, pred?):
-                if gt != pred {
+                // Map predicted speaker ID to ground truth speaker ID
+                let mappedPredSpeaker = speakerMapping[pred] ?? pred
+                if gt != mappedPredSpeaker {
                     speakerErrorFrames += 1
+                    // Debug first few mismatches
+                    if speakerErrorFrames <= 5 {
+                        print(
+                            "🔍 DER DEBUG: Speaker mismatch at \(String(format: "%.2f", frameTime))s - GT: '\(gt)' vs Pred: '\(pred)' (mapped: '\(mappedPredSpeaker)')"
+                        )
+                    }
                 }
             }
         }
@@ -741,6 +760,14 @@ struct DiarizationCLI {
         let der =
             Float(missedFrames + falseAlarmFrames + speakerErrorFrames) / Float(totalFrames) * 100
         let jer = calculateJaccardErrorRate(predicted: predicted, groundTruth: groundTruth)
+
+        // Debug error breakdown
+        print(
+            "🔍 DER BREAKDOWN: Missed: \(missedFrames), FalseAlarm: \(falseAlarmFrames), SpeakerError: \(speakerErrorFrames), Total: \(totalFrames)"
+        )
+        print(
+            "🔍 DER RATES: Miss: \(String(format: "%.1f", Float(missedFrames) / Float(totalFrames) * 100))%, FA: \(String(format: "%.1f", Float(falseAlarmFrames) / Float(totalFrames) * 100))%, SE: \(String(format: "%.1f", Float(speakerErrorFrames) / Float(totalFrames) * 100))%"
+        )
 
         return DiarizationMetrics(
             der: der,
@@ -768,6 +795,91 @@ struct DiarizationCLI {
             }
         }
         return nil
+    }
+
+    /// Find optimal speaker mapping using frame-by-frame overlap analysis
+    static func findOptimalSpeakerMapping(
+        predicted: [TimedSpeakerSegment], groundTruth: [TimedSpeakerSegment], totalDuration: Float
+    ) -> [String: String] {
+        let frameSize: Float = 0.01
+        let totalFrames = Int(totalDuration / frameSize)
+
+        // Get all unique speaker IDs
+        let predSpeakers = Set(predicted.map { $0.speakerId })
+        let gtSpeakers = Set(groundTruth.map { $0.speakerId })
+
+        // Build overlap matrix: [predSpeaker][gtSpeaker] = overlap_frames
+        var overlapMatrix: [String: [String: Int]] = [:]
+
+        for predSpeaker in predSpeakers {
+            overlapMatrix[predSpeaker] = [:]
+            for gtSpeaker in gtSpeakers {
+                overlapMatrix[predSpeaker]![gtSpeaker] = 0
+            }
+        }
+
+        // Calculate frame-by-frame overlaps
+        for frame in 0..<totalFrames {
+            let frameTime = Float(frame) * frameSize
+
+            let gtSpeaker = findSpeakerAtTime(frameTime, in: groundTruth)
+            let predSpeaker = findSpeakerAtTime(frameTime, in: predicted)
+
+            if let gt = gtSpeaker, let pred = predSpeaker {
+                overlapMatrix[pred]![gt]! += 1
+            }
+        }
+
+        // Find optimal assignment using Hungarian Algorithm for globally optimal solution
+        let predSpeakerArray = Array(predSpeakers).sorted()  // Consistent ordering
+        let gtSpeakerArray = Array(gtSpeakers).sorted()      // Consistent ordering
+        
+        // Build numerical overlap matrix for Hungarian algorithm
+        var numericalOverlapMatrix: [[Int]] = []
+        for predSpeaker in predSpeakerArray {
+            var row: [Int] = []
+            for gtSpeaker in gtSpeakerArray {
+                row.append(overlapMatrix[predSpeaker]![gtSpeaker]!)
+            }
+            numericalOverlapMatrix.append(row)
+        }
+        
+        // Convert overlap matrix to cost matrix (higher overlap = lower cost)
+        let costMatrix = HungarianAlgorithm.overlapToCostMatrix(numericalOverlapMatrix)
+        
+        // Solve optimal assignment
+        let assignments = HungarianAlgorithm.minimumCostAssignment(costs: costMatrix)
+        
+        // Create speaker mapping from Hungarian result
+        var mapping: [String: String] = [:]
+        var totalAssignmentCost: Float = 0
+        var totalOverlap = 0
+        
+        for (predIndex, gtIndex) in assignments.assignments.enumerated() {
+            if gtIndex != -1 && predIndex < predSpeakerArray.count && gtIndex < gtSpeakerArray.count {
+                let predSpeaker = predSpeakerArray[predIndex]
+                let gtSpeaker = gtSpeakerArray[gtIndex]
+                let overlap = overlapMatrix[predSpeaker]![gtSpeaker]!
+                
+                if overlap > 0 {  // Only assign if there's actual overlap
+                    mapping[predSpeaker] = gtSpeaker
+                    totalOverlap += overlap
+                    print("🔍 HUNGARIAN MAPPING: '\(predSpeaker)' → '\(gtSpeaker)' (overlap: \(overlap) frames)")
+                }
+            }
+        }
+        
+        totalAssignmentCost = assignments.totalCost
+        print("🔍 HUNGARIAN RESULT: Total assignment cost: \(String(format: "%.1f", totalAssignmentCost)), Total overlap: \(totalOverlap) frames")
+        
+        // Handle unassigned predicted speakers
+        for predSpeaker in predSpeakerArray {
+            if mapping[predSpeaker] == nil {
+                print("🔍 HUNGARIAN MAPPING: '\(predSpeaker)' → NO_MATCH (no beneficial assignment)")
+            }
+        }
+
+        return mapping
     }
 
     // MARK: - Output and Results
@@ -816,6 +928,112 @@ struct DiarizationCLI {
         return String(format: "%02d:%02d", minutes, remainingSeconds)
     }
 
+    static func printBenchmarkResults(
+        _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String
+    ) {
+        print("\n🏆 \(dataset) Benchmark Results")
+        let separator = String(repeating: "=", count: 75)
+        print("\(separator)")
+
+        // Print table header
+        print("│ Meeting ID    │  DER   │  JER   │  RTF   │ Duration │ Speakers │")
+        let headerSep = "├───────────────┼────────┼────────┼────────┼──────────┼──────────┤"
+        print("\(headerSep)")
+
+        // Print individual results
+        for result in results.sorted(by: { $0.meetingId < $1.meetingId }) {
+            let meetingDisplay = String(result.meetingId.prefix(13)).padding(
+                toLength: 13, withPad: " ", startingAt: 0)
+            let derStr = String(format: "%.1f%%", result.der).padding(
+                toLength: 6, withPad: " ", startingAt: 0)
+            let jerStr = String(format: "%.1f%%", result.jer).padding(
+                toLength: 6, withPad: " ", startingAt: 0)
+            let rtfStr = String(format: "%.2fx", result.realTimeFactor).padding(
+                toLength: 6, withPad: " ", startingAt: 0)
+            let durationStr = formatTime(result.durationSeconds).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
+            let speakerStr = String(result.speakerCount).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
+
+            print(
+                "│ \(meetingDisplay) │ \(derStr) │ \(jerStr) │ \(rtfStr) │ \(durationStr) │ \(speakerStr) │"
+            )
+        }
+
+        // Print summary section
+        let midSep = "├───────────────┼────────┼────────┼────────┼──────────┼──────────┤"
+        print("\(midSep)")
+
+        let avgDerStr = String(format: "%.1f%%", avgDER).padding(
+            toLength: 6, withPad: " ", startingAt: 0)
+        let avgJerStr = String(format: "%.1f%%", avgJER).padding(
+            toLength: 6, withPad: " ", startingAt: 0)
+        let avgRtf = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
+        let avgRtfStr = String(format: "%.2fx", avgRtf).padding(
+            toLength: 6, withPad: " ", startingAt: 0)
+        let totalDuration = results.reduce(0.0) { $0 + $1.durationSeconds }
+        let avgDurationStr = formatTime(totalDuration).padding(
+            toLength: 8, withPad: " ", startingAt: 0)
+        let avgSpeakers = results.reduce(0) { $0 + $1.speakerCount } / results.count
+        let avgSpeakerStr = String(format: "%.1f", Float(avgSpeakers)).padding(
+            toLength: 8, withPad: " ", startingAt: 0)
+
+        print(
+            "│ AVERAGE       │ \(avgDerStr) │ \(avgJerStr) │ \(avgRtfStr) │ \(avgDurationStr) │ \(avgSpeakerStr) │"
+        )
+        let bottomSep = "└───────────────┴────────┴────────┴────────┴──────────┴──────────┘"
+        print("\(bottomSep)")
+
+        // Print statistics
+        if results.count > 1 {
+            let derValues = results.map { $0.der }
+            let jerValues = results.map { $0.jer }
+            let derStdDev = calculateStandardDeviation(derValues)
+            let jerStdDev = calculateStandardDeviation(jerValues)
+
+            print("\n📊 Statistical Analysis:")
+            print(
+                "   DER: \(String(format: "%.1f", avgDER))% ± \(String(format: "%.1f", derStdDev))% (min: \(String(format: "%.1f", derValues.min()!))%, max: \(String(format: "%.1f", derValues.max()!))%)"
+            )
+            print(
+                "   JER: \(String(format: "%.1f", avgJER))% ± \(String(format: "%.1f", jerStdDev))% (min: \(String(format: "%.1f", jerValues.min()!))%, max: \(String(format: "%.1f", jerValues.max()!))%)"
+            )
+            print("   Files Processed: \(results.count)")
+            print(
+                "   Total Audio: \(formatTime(totalDuration)) (\(String(format: "%.1f", totalDuration/60)) minutes)"
+            )
+        }
+
+        // Print research comparison
+        print("\n📝 Research Comparison:")
+        print("   Your Results:          \(String(format: "%.1f", avgDER))% DER")
+        print("   Powerset BCE (2023):   18.5% DER")
+        print("   EEND (2019):           25.3% DER")
+        print("   x-vector clustering:   28.7% DER")
+
+        if dataset == "AMI-IHM" {
+            print("   Note: IHM typically achieves 5-10% lower DER than SDM")
+        }
+
+        // Performance assessment
+        if avgDER < 20.0 {
+            print("\n🎉 EXCELLENT: Competitive with state-of-the-art research!")
+        } else if avgDER < 30.0 {
+            print("\n✅ GOOD: Above research baseline, room for optimization")
+        } else if avgDER < 50.0 {
+            print("\n⚠️  NEEDS WORK: Significant room for parameter tuning")
+        } else {
+            print("\n🚨 CRITICAL: Check configuration - results much worse than expected")
+        }
+    }
+
+    static func calculateStandardDeviation(_ values: [Float]) -> Float {
+        guard values.count > 1 else { return 0.0 }
+        let mean = values.reduce(0, +) / Float(values.count)
+        let variance = values.reduce(0) { $0 + pow($1 - mean, 2) } / Float(values.count - 1)
+        return sqrt(variance)
+    }
+
     // MARK: - Dataset Downloading
 
     enum AMIVariant: String, CaseIterable {
@@ -857,9 +1075,15 @@ struct DiarizationCLI {
 
         // Core AMI test set - smaller subset for initial benchmarking
         let commonMeetings = [
-            "ES2002a", "ES2003a", "ES2004a", "ES2005a",
-            "IS1000a", "IS1001a", "IS1002b",
-            "TS3003a", "TS3004a",
+            "ES2002a",
+            "ES2003a",
+            "ES2004a",
+            "ES2005a",
+            "IS1000a",
+            "IS1001a",
+            "IS1002b",
+            "TS3003a",
+            "TS3004a",
         ]
 
         var downloadedFiles = 0
@@ -931,7 +1155,8 @@ struct DiarizationCLI {
                         // Verify it's a valid audio file
                         if await isValidAudioFile(outputPath) {
                             let fileSizeMB = Double(data.count) / (1024 * 1024)
-                            print("     ✅ Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
+                            print(
+                                "     ✅ Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
                             return true
                         } else {
                             print("     ⚠️ Downloaded file is not valid audio")
@@ -943,12 +1168,14 @@ struct DiarizationCLI {
                         print("     ⚠️ File not found (HTTP 404) - trying next URL...")
                         continue
                     } else {
-                        print("     ⚠️ HTTP error: \(httpResponse.statusCode) - trying next URL...")
+                        print(
+                            "     ⚠️ HTTP error: \(httpResponse.statusCode) - trying next URL...")
                         continue
                     }
                 }
             } catch {
-                print("     ⚠️ Download error: \(error.localizedDescription) - trying next URL...")
+                print(
+                    "     ⚠️ Download error: \(error.localizedDescription) - trying next URL...")
                 continue
             }
         }
@@ -969,69 +1196,84 @@ struct DiarizationCLI {
     // MARK: - AMI Annotation Loading
 
     /// Load AMI ground truth annotations for a specific meeting
-    static func loadAMIGroundTruth(for meetingId: String, duration: Float) async -> [TimedSpeakerSegment] {
+    static func loadAMIGroundTruth(for meetingId: String, duration: Float) async
+        -> [TimedSpeakerSegment]
+    {
         // Try to find the AMI annotations directory in several possible locations
         let possiblePaths = [
             // Current working directory
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+                "Tests/ami_public_1.6.2"),
             // Relative to source file
-            URL(fileURLWithPath: #file).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: #file).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Tests/ami_public_1.6.2"),
             // Home directory
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("code/FluidAudioSwift/Tests/ami_public_1.6.2")
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                "code/FluidAudioSwift/Tests/ami_public_1.6.2"),
         ]
-        
+
         var amiDir: URL?
         for path in possiblePaths {
             let segmentsDir = path.appendingPathComponent("segments")
             let meetingsFile = path.appendingPathComponent("corpusResources/meetings.xml")
-            
-            if FileManager.default.fileExists(atPath: segmentsDir.path) &&
-               FileManager.default.fileExists(atPath: meetingsFile.path) {
+
+            if FileManager.default.fileExists(atPath: segmentsDir.path)
+                && FileManager.default.fileExists(atPath: meetingsFile.path)
+            {
                 amiDir = path
                 break
             }
         }
-        
+
         guard let validAmiDir = amiDir else {
             print("   ⚠️ AMI annotations not found in any expected location")
-            print("      Using simplified placeholder - real annotations expected in Tests/ami_public_1.6.2/")
+            print(
+                "      Using simplified placeholder - real annotations expected in Tests/ami_public_1.6.2/"
+            )
             return Self.generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
         }
-        
+
         let segmentsDir = validAmiDir.appendingPathComponent("segments")
         let meetingsFile = validAmiDir.appendingPathComponent("corpusResources/meetings.xml")
-        
+
         print("   📖 Loading AMI annotations for meeting: \(meetingId)")
-        
+
         do {
             let parser = AMIAnnotationParser()
-            
+
             // Get speaker mapping for this meeting
-            guard let speakerMapping = try parser.parseSpeakerMapping(for: meetingId, from: meetingsFile) else {
-                print("      ⚠️ No speaker mapping found for meeting: \(meetingId), using placeholder")
+            guard
+                let speakerMapping = try parser.parseSpeakerMapping(
+                    for: meetingId, from: meetingsFile)
+            else {
+                print(
+                    "      ⚠️ No speaker mapping found for meeting: \(meetingId), using placeholder")
                 return Self.generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
             }
-            
-            print("      Speaker mapping: A=\(speakerMapping.speakerA), B=\(speakerMapping.speakerB), C=\(speakerMapping.speakerC), D=\(speakerMapping.speakerD)")
-            
+
+            print(
+                "      Speaker mapping: A=\(speakerMapping.speakerA), B=\(speakerMapping.speakerB), C=\(speakerMapping.speakerC), D=\(speakerMapping.speakerD)"
+            )
+
             var allSegments: [TimedSpeakerSegment] = []
-            
+
             // Parse segments for each speaker (A, B, C, D)
             for speakerCode in ["A", "B", "C", "D"] {
-                let segmentFile = segmentsDir.appendingPathComponent("\(meetingId).\(speakerCode).segments.xml")
-                
+                let segmentFile = segmentsDir.appendingPathComponent(
+                    "\(meetingId).\(speakerCode).segments.xml")
+
                 if FileManager.default.fileExists(atPath: segmentFile.path) {
                     let segments = try parser.parseSegmentsFile(segmentFile)
-                    
+
                     // Map to TimedSpeakerSegment with real participant ID
                     guard let participantId = speakerMapping.participantId(for: speakerCode) else {
                         continue
                     }
-                    
+
                     for segment in segments {
                         // Filter out very short segments (< 0.5 seconds) as done in research
                         guard segment.duration >= 0.5 else { continue }
-                        
+
                         let timedSegment = TimedSpeakerSegment(
                             speakerId: participantId,  // Use real AMI participant ID
                             embedding: Self.generatePlaceholderEmbedding(for: participantId),
@@ -1039,20 +1281,22 @@ struct DiarizationCLI {
                             endTimeSeconds: Float(segment.endTime),
                             qualityScore: 1.0
                         )
-                        
+
                         allSegments.append(timedSegment)
                     }
-                    
-                    print("      Loaded \(segments.count) segments for speaker \(speakerCode) (\(participantId))")
+
+                    print(
+                        "      Loaded \(segments.count) segments for speaker \(speakerCode) (\(participantId))"
+                    )
                 }
             }
-            
+
             // Sort by start time
             allSegments.sort { $0.startTimeSeconds < $1.startTimeSeconds }
-            
+
             print("      Total segments loaded: \(allSegments.count)")
             return allSegments
-            
+
         } catch {
             print("      ❌ Failed to parse AMI annotations: \(error)")
             print("      Using simplified placeholder instead")
@@ -1065,7 +1309,7 @@ struct DiarizationCLI {
         // Generate a consistent embedding based on participant ID
         let hash = participantId.hashValue
         let seed = abs(hash) % 1000
-        
+
         var embedding: [Float] = []
         for i in 0..<512 {  // Match expected embedding size
             let value = Float(sin(Double(seed + i * 37))) * 0.5 + 0.5
@@ -1232,11 +1476,11 @@ extension TimedSpeakerSegment: Codable {
 
 /// Represents a single AMI speaker segment from NXT format
 struct AMISpeakerSegment {
-    let segmentId: String       // e.g., "EN2001a.sync.4"
-    let participantId: String   // e.g., "FEE005" (mapped from A/B/C/D)
-    let startTime: Double       // Start time in seconds
-    let endTime: Double         // End time in seconds
-    
+    let segmentId: String  // e.g., "EN2001a.sync.4"
+    let participantId: String  // e.g., "FEE005" (mapped from A/B/C/D)
+    let startTime: Double  // Start time in seconds
+    let endTime: Double  // End time in seconds
+
     var duration: Double {
         return endTime - startTime
     }
@@ -1249,7 +1493,7 @@ struct AMISpeakerMapping {
     let speakerB: String  // e.g., "FEE005"
     let speakerC: String  // e.g., "MEE007"
     let speakerD: String  // e.g., "MEE008"
-    
+
     func participantId(for speakerCode: String) -> String? {
         switch speakerCode.uppercased() {
         case "A": return speakerA
@@ -1263,55 +1507,64 @@ struct AMISpeakerMapping {
 
 /// Parser for AMI NXT XML annotation files
 class AMIAnnotationParser: NSObject {
-    
+
     /// Parse segments.xml file and return speaker segments
     func parseSegmentsFile(_ xmlFile: URL) throws -> [AMISpeakerSegment] {
         let data = try Data(contentsOf: xmlFile)
-        
+
         // Extract speaker code from filename (e.g., "EN2001a.A.segments.xml" -> "A")
         let speakerCode = extractSpeakerCodeFromFilename(xmlFile.lastPathComponent)
-        
+
         let parser = XMLParser(data: data)
         let delegate = AMISegmentsXMLDelegate(speakerCode: speakerCode)
         parser.delegate = delegate
-        
+
         guard parser.parse() else {
-            throw NSError(domain: "AMIParser", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to parse XML file: \(xmlFile.lastPathComponent)"])
+            throw NSError(
+                domain: "AMIParser", code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Failed to parse XML file: \(xmlFile.lastPathComponent)"
+                ])
         }
-        
+
         if let error = delegate.parsingError {
             throw error
         }
-        
+
         return delegate.segments
     }
-    
+
     /// Extract speaker code from AMI filename
     private func extractSpeakerCodeFromFilename(_ filename: String) -> String {
         // Filename format: "EN2001a.A.segments.xml" -> extract "A"
         let components = filename.components(separatedBy: ".")
         if components.count >= 3 {
-            return components[1] // The speaker code is the second component
+            return components[1]  // The speaker code is the second component
         }
         return "UNKNOWN"
     }
-    
+
     /// Parse meetings.xml to get speaker mappings for a specific meeting
-    func parseSpeakerMapping(for meetingId: String, from meetingsFile: URL) throws -> AMISpeakerMapping? {
+    func parseSpeakerMapping(for meetingId: String, from meetingsFile: URL) throws
+        -> AMISpeakerMapping?
+    {
         let data = try Data(contentsOf: meetingsFile)
-        
+
         let parser = XMLParser(data: data)
         let delegate = AMIMeetingsXMLDelegate(targetMeetingId: meetingId)
         parser.delegate = delegate
-        
+
         guard parser.parse() else {
-            throw NSError(domain: "AMIParser", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to parse meetings.xml"])
+            throw NSError(
+                domain: "AMIParser", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to parse meetings.xml"])
         }
-        
+
         if let error = delegate.parsingError {
             throw error
         }
-        
+
         return delegate.speakerMapping
     }
 }
@@ -1320,36 +1573,40 @@ class AMIAnnotationParser: NSObject {
 private class AMISegmentsXMLDelegate: NSObject, XMLParserDelegate {
     var segments: [AMISpeakerSegment] = []
     var parsingError: Error?
-    
+
     private let speakerCode: String
-    
+
     init(speakerCode: String) {
         self.speakerCode = speakerCode
     }
-    
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        
+
+    func parser(
+        _ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+        qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]
+    ) {
+
         if elementName == "segment" {
             // Extract segment attributes
             guard let segmentId = attributeDict["nite:id"],
-                  let startTimeStr = attributeDict["transcriber_start"],
-                  let endTimeStr = attributeDict["transcriber_end"],
-                  let startTime = Double(startTimeStr),
-                  let endTime = Double(endTimeStr) else {
-                return // Skip invalid segments
+                let startTimeStr = attributeDict["transcriber_start"],
+                let endTimeStr = attributeDict["transcriber_end"],
+                let startTime = Double(startTimeStr),
+                let endTime = Double(endTimeStr)
+            else {
+                return  // Skip invalid segments
             }
-            
+
             let segment = AMISpeakerSegment(
                 segmentId: segmentId,
-                participantId: speakerCode, // Use speaker code from filename
+                participantId: speakerCode,  // Use speaker code from filename
                 startTime: startTime,
                 endTime: endTime
             )
-            
+
             segments.append(segment)
         }
     }
-    
+
     func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
         parsingError = parseError
     }
@@ -1360,33 +1617,40 @@ private class AMIMeetingsXMLDelegate: NSObject, XMLParserDelegate {
     let targetMeetingId: String
     var speakerMapping: AMISpeakerMapping?
     var parsingError: Error?
-    
+
     private var currentMeetingId: String?
-    private var speakersInCurrentMeeting: [String: String] = [:] // agent code -> global_name
+    private var speakersInCurrentMeeting: [String: String] = [:]  // agent code -> global_name
     private var isInTargetMeeting = false
-    
+
     init(targetMeetingId: String) {
         self.targetMeetingId = targetMeetingId
     }
-    
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        
+
+    func parser(
+        _ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+        qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]
+    ) {
+
         if elementName == "meeting" {
             currentMeetingId = attributeDict["observation"]
             isInTargetMeeting = (currentMeetingId == targetMeetingId)
             speakersInCurrentMeeting.removeAll()
         }
-        
+
         if elementName == "speaker" && isInTargetMeeting {
             guard let nxtAgent = attributeDict["nxt_agent"],
-                  let globalName = attributeDict["global_name"] else {
+                let globalName = attributeDict["global_name"]
+            else {
                 return
             }
             speakersInCurrentMeeting[nxtAgent] = globalName
         }
     }
-    
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+
+    func parser(
+        _ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
         if elementName == "meeting" && isInTargetMeeting {
             // Create the speaker mapping for this meeting
             if let meetingId = currentMeetingId {
@@ -1401,7 +1665,7 @@ private class AMIMeetingsXMLDelegate: NSObject, XMLParserDelegate {
             isInTargetMeeting = false
         }
     }
-    
+
     func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
         parsingError = parseError
     }

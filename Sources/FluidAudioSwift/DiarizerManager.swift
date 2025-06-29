@@ -1,13 +1,13 @@
+import CoreML
 import Foundation
 import OSLog
-import CoreML
 
 public struct DiarizerConfig: Sendable {
-    public var clusteringThreshold: Float = 0.7 // Similarity threshold for grouping speakers (0.0-1.0, higher = stricter)
-    public var minDurationOn: Float = 1.0 // Minimum duration (seconds) for a speaker segment to be considered valid
-    public var minDurationOff: Float = 0.5 // Minimum silence duration (seconds) between different speakers
+    public var clusteringThreshold: Float = 0.7  // Similarity threshold for grouping speakers (0.0-1.0, higher = stricter)
+    public var minDurationOn: Float = 1.0  // Minimum duration (seconds) for a speaker segment to be considered valid
+    public var minDurationOff: Float = 0.5  // Minimum silence duration (seconds) between different speakers
     public var numClusters: Int = -1  // Number of speakers to detect (-1 = auto-detect)
-    public var minActivityThreshold: Float = 10.0 // Minimum activity threshold (frames) for speaker to be considered active
+    public var minActivityThreshold: Float = 10.0  // Minimum activity threshold (frames) for speaker to be considered active
     public var debugMode: Bool = false
     public var modelCacheDirectory: URL?
 
@@ -46,17 +46,20 @@ public struct DiarizationResult: Sendable {
 /// Speaker segment with embedding and consistent ID across chunks
 public struct TimedSpeakerSegment: Sendable, Identifiable {
     public let id = UUID()
-    public let speakerId: String              // "Speaker 1", "Speaker 2", etc.
-    public let embedding: [Float]             // Voice characteristics
-    public let startTimeSeconds: Float       // When segment starts
-    public let endTimeSeconds: Float         // When segment ends
-    public let qualityScore: Float           // Embedding quality
+    public let speakerId: String  // "Speaker 1", "Speaker 2", etc.
+    public let embedding: [Float]  // Voice characteristics
+    public let startTimeSeconds: Float  // When segment starts
+    public let endTimeSeconds: Float  // When segment ends
+    public let qualityScore: Float  // Embedding quality
 
     public var durationSeconds: Float {
         endTimeSeconds - startTimeSeconds
     }
 
-    public init(speakerId: String, embedding: [Float], startTimeSeconds: Float, endTimeSeconds: Float, qualityScore: Float) {
+    public init(
+        speakerId: String, embedding: [Float], startTimeSeconds: Float, endTimeSeconds: Float,
+        qualityScore: Float
+    ) {
         self.speakerId = speakerId
         self.embedding = embedding
         self.startTimeSeconds = startTimeSeconds
@@ -146,7 +149,7 @@ private struct SlidingWindow {
 }
 
 private struct SlidingWindowFeature {
-    var data: [[[Float]]] // (1, 589, 3)
+    var data: [[[Float]]]  // (1, 589, 3)
     var slidingWindow: SlidingWindow
 }
 
@@ -189,17 +192,20 @@ public final class DiarizerManager: @unchecked Sendable {
 
     private func cleanupBrokenModels() async throws {
         let modelsDirectory = getModelsDirectory()
-        let segmentationModelPath = modelsDirectory.appendingPathComponent("pyannote_segmentation.mlmodelc")
+        let segmentationModelPath = modelsDirectory.appendingPathComponent(
+            "pyannote_segmentation.mlmodelc")
         let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc")
 
-        if FileManager.default.fileExists(atPath: segmentationModelPath.path) &&
-           !isModelCompiled(at: segmentationModelPath) {
+        if FileManager.default.fileExists(atPath: segmentationModelPath.path)
+            && !isModelCompiled(at: segmentationModelPath)
+        {
             logger.info("Removing broken segmentation model")
             try FileManager.default.removeItem(at: segmentationModelPath)
         }
 
-        if FileManager.default.fileExists(atPath: embeddingModelPath.path) &&
-           !isModelCompiled(at: embeddingModelPath) {
+        if FileManager.default.fileExists(atPath: embeddingModelPath.path)
+            && !isModelCompiled(at: embeddingModelPath)
+        {
             logger.info("Removing broken embedding model")
             try FileManager.default.removeItem(at: embeddingModelPath)
         }
@@ -210,7 +216,8 @@ public final class DiarizerManager: @unchecked Sendable {
             throw DiarizerError.notInitialized
         }
 
-        let audioArray = try MLMultiArray(shape: [1, 1, NSNumber(value: chunkSize)], dataType: .float32)
+        let audioArray = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: chunkSize)], dataType: .float32)
         for i in 0..<min(audioChunk.count, chunkSize) {
             audioArray[i] = NSNumber(value: audioChunk[i])
         }
@@ -226,7 +233,10 @@ public final class DiarizerManager: @unchecked Sendable {
         let frames = segmentOutput.shape[1].intValue
         let combinations = segmentOutput.shape[2].intValue
 
-        var segments = Array(repeating: Array(repeating: Array(repeating: 0.0 as Float, count: combinations), count: frames), count: 1)
+        var segments = Array(
+            repeating: Array(
+                repeating: Array(repeating: 0.0 as Float, count: combinations), count: frames),
+            count: 1)
 
         for f in 0..<frames {
             for c in 0..<combinations {
@@ -240,13 +250,13 @@ public final class DiarizerManager: @unchecked Sendable {
 
     private func powersetConversion(_ segments: [[[Float]]]) -> [[[Float]]] {
         let powerset: [[Int]] = [
-            [], // 0
-            [0], // 1
-            [1], // 2
-            [2], // 3
-            [0, 1], // 4
-            [0, 2], // 5
-            [1, 2], // 6
+            [],  // 0
+            [0],  // 1
+            [1],  // 2
+            [2],  // 3
+            [0, 1],  // 4
+            [0, 2],  // 5
+            [1, 2],  // 6
         ]
 
         let batchSize = segments.count
@@ -280,7 +290,9 @@ public final class DiarizerManager: @unchecked Sendable {
         return binarized
     }
 
-    private func createSlidingWindowFeature(binarizedSegments: [[[Float]]], chunkOffset: Double = 0.0) -> SlidingWindowFeature {
+    private func createSlidingWindowFeature(
+        binarizedSegments: [[[Float]]], chunkOffset: Double = 0.0
+    ) -> SlidingWindowFeature {
         let slidingWindow = SlidingWindow(
             start: chunkOffset,
             duration: 0.0619375,
@@ -306,7 +318,8 @@ public final class DiarizerManager: @unchecked Sendable {
         let numSpeakers = slidingWindowFeature.data[0][0].count
 
         // Compute clean_frames = 1.0 where active speakers < 2
-        var cleanFrames = Array(repeating: Array(repeating: 0.0 as Float, count: 1), count: numFrames)
+        var cleanFrames = Array(
+            repeating: Array(repeating: 0.0 as Float, count: 1), count: numFrames)
 
         for f in 0..<numFrames {
             let frame = slidingWindowFeature.data[0][f]
@@ -316,7 +329,8 @@ public final class DiarizerManager: @unchecked Sendable {
 
         // Multiply slidingWindowSegments.data by cleanFrames
         var cleanSegmentData = Array(
-            repeating: Array(repeating: Array(repeating: 0.0 as Float, count: numSpeakers), count: numFrames),
+            repeating: Array(
+                repeating: Array(repeating: 0.0 as Float, count: numSpeakers), count: numFrames),
             count: 1
         )
 
@@ -333,7 +347,8 @@ public final class DiarizerManager: @unchecked Sendable {
         }
 
         // Transpose mask shape to (numSpeakers, 589)
-        var cleanMasks: [[Float]] = Array(repeating: Array(repeating: 0.0, count: numFrames), count: numSpeakers)
+        var cleanMasks: [[Float]] = Array(
+            repeating: Array(repeating: 0.0, count: numFrames), count: numSpeakers)
 
         for s in 0..<numSpeakers {
             for f in 0..<numFrames {
@@ -342,8 +357,12 @@ public final class DiarizerManager: @unchecked Sendable {
         }
 
         // Prepare MLMultiArray inputs
-        guard let waveformArray = try? MLMultiArray(shape: [numSpeakers, chunkSize] as [NSNumber], dataType: .float32),
-              let maskArray = try? MLMultiArray(shape: [numSpeakers, numFrames] as [NSNumber], dataType: .float32) else {
+        guard
+            let waveformArray = try? MLMultiArray(
+                shape: [numSpeakers, chunkSize] as [NSNumber], dataType: .float32),
+            let maskArray = try? MLMultiArray(
+                shape: [numSpeakers, numFrames] as [NSNumber], dataType: .float32)
+        else {
             throw DiarizerError.processingFailed("Failed to allocate MLMultiArray for embeddings")
         }
 
@@ -365,8 +384,11 @@ public final class DiarizerManager: @unchecked Sendable {
             "mask": maskArray,
         ]
 
-        guard let output = try? embeddingModel.prediction(from: MLDictionaryFeatureProvider(dictionary: inputs)),
-              let multiArray = output.featureValue(for: "embedding")?.multiArrayValue else {
+        guard
+            let output = try? embeddingModel.prediction(
+                from: MLDictionaryFeatureProvider(dictionary: inputs)),
+            let multiArray = output.featureValue(for: "embedding")?.multiArrayValue
+        else {
             throw DiarizerError.processingFailed("Embedding model prediction failed")
         }
 
@@ -379,7 +401,8 @@ public final class DiarizerManager: @unchecked Sendable {
         let numCols = shape[1]
         let strides = multiArray.strides.map { $0.intValue }
 
-        var result: [[Float]] = Array(repeating: Array(repeating: 0.0, count: numCols), count: numRows)
+        var result: [[Float]] = Array(
+            repeating: Array(repeating: 0.0, count: numCols), count: numRows)
 
         for i in 0..<numRows {
             for j in 0..<numCols {
@@ -396,7 +419,7 @@ public final class DiarizerManager: @unchecked Sendable {
         binarizedSegments: [[[Float]]],
         slidingWindow: SlidingWindow
     ) {
-        let segmentation = binarizedSegments[0] // shape: [589][3]
+        let segmentation = binarizedSegments[0]  // shape: [589][3]
         let numFrames = segmentation.count
 
         // Step 1: argmax to get dominant speaker per frame
@@ -405,7 +428,7 @@ public final class DiarizerManager: @unchecked Sendable {
             if let maxIdx = frame.indices.max(by: { frame[$0] < frame[$1] }) {
                 frameSpeakers.append(maxIdx)
             } else {
-                frameSpeakers.append(0) // fallback
+                frameSpeakers.append(0)  // fallback
             }
         }
 
@@ -419,7 +442,7 @@ public final class DiarizerManager: @unchecked Sendable {
                 let endTime = slidingWindow.time(forFrame: i)
 
                 let segment = Segment(start: startTime, end: endTime)
-                annotation[segment] = currentSpeaker // Use raw speaker index
+                annotation[segment] = currentSpeaker  // Use raw speaker index
                 currentSpeaker = frameSpeakers[i]
                 startFrame = i
             }
@@ -429,7 +452,7 @@ public final class DiarizerManager: @unchecked Sendable {
         let finalStart = slidingWindow.time(forFrame: startFrame)
         let finalEnd = slidingWindow.segment(forFrame: numFrames - 1).end
         let finalSegment = Segment(start: finalStart, end: finalEnd)
-        annotation[finalSegment] = currentSpeaker // Use raw speaker index
+        annotation[finalSegment] = currentSpeaker  // Use raw speaker index
     }
 
     // MARK: - Model Management
@@ -440,7 +463,9 @@ public final class DiarizerManager: @unchecked Sendable {
 
         let modelsDirectory = getModelsDirectory()
 
-        let segmentationModelPath = modelsDirectory.appendingPathComponent("pyannote_segmentation.mlmodelc").path
+        let segmentationModelPath = modelsDirectory.appendingPathComponent(
+            "pyannote_segmentation.mlmodelc"
+        ).path
         let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc").path
 
         // Force redownload - remove existing models first
@@ -465,7 +490,8 @@ public final class DiarizerManager: @unchecked Sendable {
         logger.info("Downloaded embedding model bundle from Hugging Face")
 
         logger.info("Successfully downloaded and compiled diarization models from Hugging Face")
-        return ModelPaths(segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
+        return ModelPaths(
+            segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
     }
 
     /// Check if a model is properly compiled
@@ -475,7 +501,9 @@ public final class DiarizerManager: @unchecked Sendable {
     }
 
     /// Download a complete .mlmodelc bundle from Hugging Face
-    private func downloadMLModelCBundle(repoPath: String, modelName: String, outputPath: URL) async throws {
+    private func downloadMLModelCBundle(repoPath: String, modelName: String, outputPath: URL)
+        async throws
+    {
         logger.info("Downloading \(modelName) bundle from Hugging Face")
 
         // Create output directory
@@ -485,7 +513,7 @@ public final class DiarizerManager: @unchecked Sendable {
         let bundleFiles = [
             "model.mil",
             "coremldata.bin",
-            "metadata.json"
+            "metadata.json",
         ]
 
         // Weight files that are referenced by model.mil
@@ -495,7 +523,8 @@ public final class DiarizerManager: @unchecked Sendable {
 
         // Download each file in the bundle
         for fileName in bundleFiles {
-            let fileURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(fileName)")!
+            let fileURL = URL(
+                string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(fileName)")!
 
             do {
                 let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
@@ -511,7 +540,8 @@ public final class DiarizerManager: @unchecked Sendable {
                     try FileManager.default.moveItem(at: tempFile, to: destinationPath)
                     logger.info("Downloaded \(fileName) for \(modelName)")
                 } else {
-                    logger.warning("Failed to download \(fileName) for \(modelName) - file may not exist")
+                    logger.warning(
+                        "Failed to download \(fileName) for \(modelName) - file may not exist")
                     // Create empty file if it doesn't exist (some files are optional)
                     if fileName == "metadata.json" {
                         let destinationPath = outputPath.appendingPathComponent(fileName)
@@ -533,7 +563,9 @@ public final class DiarizerManager: @unchecked Sendable {
 
         // Download weight files
         for weightFile in weightFiles {
-            let fileURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(weightFile)")!
+            let fileURL = URL(
+                string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(weightFile)"
+            )!
 
             do {
                 let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
@@ -544,7 +576,8 @@ public final class DiarizerManager: @unchecked Sendable {
 
                     // Create weights directory if it doesn't exist
                     let weightsDir = destinationPath.deletingLastPathComponent()
-                    try FileManager.default.createDirectory(at: weightsDir, withIntermediateDirectories: true)
+                    try FileManager.default.createDirectory(
+                        at: weightsDir, withIntermediateDirectories: true)
 
                     // Remove existing file if it exists
                     try? FileManager.default.removeItem(at: destinationPath)
@@ -557,18 +590,23 @@ public final class DiarizerManager: @unchecked Sendable {
                     throw DiarizerError.modelDownloadFailed
                 }
             } catch {
-                logger.error("Critical error downloading \(weightFile): \(error.localizedDescription)")
+                logger.error(
+                    "Critical error downloading \(weightFile): \(error.localizedDescription)")
                 throw DiarizerError.modelDownloadFailed
             }
         }
 
         // Also try to download analytics directory if it exists
-        let analyticsURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/analytics/coremldata.bin")!
+        let analyticsURL = URL(
+            string:
+                "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/analytics/coremldata.bin"
+        )!
         do {
             let (tempFile, response) = try await URLSession.shared.download(from: analyticsURL)
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                 let analyticsDir = outputPath.appendingPathComponent("analytics")
-                try FileManager.default.createDirectory(at: analyticsDir, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: analyticsDir, withIntermediateDirectories: true)
                 let destinationPath = analyticsDir.appendingPathComponent("coremldata.bin")
                 try? FileManager.default.removeItem(at: destinationPath)
                 try FileManager.default.moveItem(at: tempFile, to: destinationPath)
@@ -609,8 +647,11 @@ public final class DiarizerManager: @unchecked Sendable {
         if let customDirectory = config.modelCacheDirectory {
             directory = customDirectory.appendingPathComponent("coreml", isDirectory: true)
         } else {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            directory = appSupport.appendingPathComponent("SpeakerKitModels/coreml", isDirectory: true)
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            directory = appSupport.appendingPathComponent(
+                "SpeakerKitModels/coreml", isDirectory: true)
         }
 
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -627,12 +668,13 @@ public final class DiarizerManager: @unchecked Sendable {
 
         // Get the most representative embedding from each audio
         guard let segment1 = result1.segments.max(by: { $0.qualityScore < $1.qualityScore }),
-              let segment2 = result2.segments.max(by: { $0.qualityScore < $1.qualityScore }) else {
+            let segment2 = result2.segments.max(by: { $0.qualityScore < $1.qualityScore })
+        else {
             throw DiarizerError.embeddingExtractionFailed
         }
 
         let distance = cosineDistance(segment1.embedding, segment2.embedding)
-        return max(0, (1.0 - distance) * 100) // Convert to similarity percentage
+        return max(0, (1.0 - distance) * 100)  // Convert to similarity percentage
     }
 
     /// Validate if an embedding is valid
@@ -680,7 +722,9 @@ public final class DiarizerManager: @unchecked Sendable {
     /// Calculate cosine distance between two embeddings
     public func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else {
-            logger.error("Invalid embeddings for distance calculation")
+            logger.debug(
+                "🔍 CLUSTERING DEBUG: Invalid embeddings for distance calculation - a.count: \(a.count), b.count: \(b.count)"
+            )
             return Float.infinity
         }
 
@@ -698,12 +742,21 @@ public final class DiarizerManager: @unchecked Sendable {
         magnitudeB = sqrt(magnitudeB)
 
         guard magnitudeA > 0 && magnitudeB > 0 else {
-            logger.info("Zero magnitude embedding detected")
+            logger.warning(
+                "🔍 CLUSTERING DEBUG: Zero magnitude embedding detected - magnitudeA: \(magnitudeA), magnitudeB: \(magnitudeB)"
+            )
             return Float.infinity
         }
 
         let similarity = dotProduct / (magnitudeA * magnitudeB)
-        return 1 - similarity
+        let distance = 1 - similarity
+
+        // DEBUG: Log distance calculation details
+        logger.debug(
+            "🔍 CLUSTERING DEBUG: cosineDistance - similarity: \(String(format: "%.4f", similarity)), distance: \(String(format: "%.4f", distance)), magA: \(String(format: "%.4f", magnitudeA)), magB: \(String(format: "%.4f", magnitudeB))"
+        )
+
+        return distance
     }
 
     private func calculateRMSEnergy(_ samples: [Float]) -> Float {
@@ -743,7 +796,11 @@ public final class DiarizerManager: @unchecked Sendable {
         }
 
         // Find the most active speaker
-        guard let maxActivityIndex = speakerActivities.indices.max(by: { speakerActivities[$0] < speakerActivities[$1] }) else {
+        guard
+            let maxActivityIndex = speakerActivities.indices.max(by: {
+                speakerActivities[$0] < speakerActivities[$1]
+            })
+        else {
             return (embeddings[0], 0.0)
         }
 
@@ -759,14 +816,14 @@ public final class DiarizerManager: @unchecked Sendable {
 
     /// Perform complete diarization with consistent speaker IDs across chunks
     /// This is more efficient than calling performSegmentation + extractEmbedding separately
-    public func performCompleteDiarization(_ samples: [Float], sampleRate: Int = 16000) async throws -> DiarizationResult {
+    public func performCompleteDiarization(_ samples: [Float], sampleRate: Int = 16000) async throws
+        -> DiarizationResult
+    {
         guard segmentationModel != nil, embeddingModel != nil else {
             throw DiarizerError.notInitialized
         }
 
-        logger.info("Starting complete diarization for \(samples.count) samples")
-
-        let chunkSize = sampleRate * 10 // 10 seconds
+        let chunkSize = sampleRate * 10  // 10 seconds
         var allSegments: [TimedSpeakerSegment] = []
         var speakerDB: [String: [Float]] = [:]  // Global speaker database
 
@@ -785,7 +842,6 @@ public final class DiarizerManager: @unchecked Sendable {
             allSegments.append(contentsOf: chunkSegments)
         }
 
-        logger.info("Complete diarization finished: \(allSegments.count) segments, \(speakerDB.count) speakers")
         return DiarizationResult(segments: allSegments, speakerDatabase: speakerDB)
     }
 
@@ -796,7 +852,7 @@ public final class DiarizerManager: @unchecked Sendable {
         speakerDB: inout [String: [Float]],
         sampleRate: Int = 16000
     ) async throws -> [TimedSpeakerSegment] {
-        let chunkSize = sampleRate * 10 // 10 seconds
+        let chunkSize = sampleRate * 10  // 10 seconds
         var paddedChunk = chunk
         if chunk.count < chunkSize {
             paddedChunk += Array(repeating: 0.0, count: chunkSize - chunk.count)
@@ -804,7 +860,8 @@ public final class DiarizerManager: @unchecked Sendable {
 
         // Step 1: Get segmentation (when speakers are active)
         let binarizedSegments = try getSegments(audioChunk: paddedChunk)
-        let slidingFeature = createSlidingWindowFeature(binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
+        let slidingFeature = createSlidingWindowFeature(
+            binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
 
         // Step 2: Get embeddings using same segmentation results
         guard let embeddingModel = self.embeddingModel else {
@@ -824,16 +881,24 @@ public final class DiarizerManager: @unchecked Sendable {
 
         // Step 4: Assign consistent speaker IDs using global database
         var speakerLabels: [String] = []
+        var activityFilteredCount = 0
+        var embeddingInvalidCount = 0
+        var clusteringProcessedCount = 0
+
         for (speakerIndex, activity) in speakerActivities.enumerated() {
-            if activity > config.minActivityThreshold { // Use configurable activity threshold
+            if activity > self.config.minActivityThreshold {  // Use configurable activity threshold
                 let embedding = embeddings[speakerIndex]
                 if validateEmbedding(embedding) {
+                    clusteringProcessedCount += 1
                     let speakerId = assignSpeaker(embedding: embedding, speakerDB: &speakerDB)
                     speakerLabels.append(speakerId)
                 } else {
+                    embeddingInvalidCount += 1
                     speakerLabels.append("")  // Invalid embedding
                 }
             } else {
+                activityFilteredCount += 1
+
                 speakerLabels.append("")  // No activity
             }
         }
@@ -868,15 +933,16 @@ public final class DiarizerManager: @unchecked Sendable {
         if speakerDB.isEmpty {
             let speakerId = "Speaker 1"
             speakerDB[speakerId] = embedding
-            logger.info("Created new speaker: \(speakerId)")
             return speakerId
         }
 
         var minDistance: Float = Float.greatestFiniteMagnitude
         var identifiedSpeaker: String? = nil
+        var allDistances: [(String, Float)] = []
 
         for (speakerId, refEmbedding) in speakerDB {
             let distance = cosineDistance(embedding, refEmbedding)
+            allDistances.append((speakerId, distance))
             if distance < minDistance {
                 minDistance = distance
                 identifiedSpeaker = speakerId
@@ -884,16 +950,14 @@ public final class DiarizerManager: @unchecked Sendable {
         }
 
         if let bestSpeaker = identifiedSpeaker {
-            if minDistance > config.clusteringThreshold {
+            if minDistance > self.config.clusteringThreshold {
                 // New speaker
                 let newSpeakerId = "Speaker \(speakerDB.count + 1)"
                 speakerDB[newSpeakerId] = embedding
-                logger.info("Created new speaker: \(newSpeakerId) (distance: \(String(format: "%.3f", minDistance)))")
                 return newSpeakerId
             } else {
                 // Existing speaker - update embedding (exponential moving average)
                 updateSpeakerEmbedding(bestSpeaker, embedding, speakerDB: &speakerDB)
-                logger.debug("Matched existing speaker: \(bestSpeaker) (distance: \(String(format: "%.3f", minDistance)))")
                 return bestSpeaker
             }
         }
@@ -902,7 +966,10 @@ public final class DiarizerManager: @unchecked Sendable {
     }
 
     /// Update speaker embedding with exponential moving average
-    private func updateSpeakerEmbedding(_ speakerId: String, _ newEmbedding: [Float], speakerDB: inout [String: [Float]], alpha: Float = 0.9) {
+    private func updateSpeakerEmbedding(
+        _ speakerId: String, _ newEmbedding: [Float], speakerDB: inout [String: [Float]],
+        alpha: Float = 0.9
+    ) {
         guard var oldEmbedding = speakerDB[speakerId] else { return }
 
         for i in 0..<oldEmbedding.count {
@@ -982,16 +1049,25 @@ public final class DiarizerManager: @unchecked Sendable {
         speakerActivities: [Float]
     ) -> TimedSpeakerSegment? {
         guard speakerIndex < speakerLabels.count,
-              !speakerLabels[speakerIndex].isEmpty,
-              speakerIndex < embeddings.count else {
+            !speakerLabels[speakerIndex].isEmpty,
+            speakerIndex < embeddings.count
+        else {
             return nil
         }
 
         let startTime = slidingWindow.time(forFrame: startFrame)
         let endTime = slidingWindow.time(forFrame: endFrame)
+        let duration = endTime - startTime
+
+        // Check minimum duration requirement
+        if Float(duration) < self.config.minDurationOn {
+            return nil
+        }
+
         let embedding = embeddings[speakerIndex]
         let activity = speakerActivities[speakerIndex]
-        let quality = calculateEmbeddingQuality(embedding) * (activity / Float(endFrame - startFrame))
+        let quality =
+            calculateEmbeddingQuality(embedding) * (activity / Float(endFrame - startFrame))
 
         return TimedSpeakerSegment(
             speakerId: speakerLabels[speakerIndex],
@@ -1009,4 +1085,3 @@ public final class DiarizerManager: @unchecked Sendable {
         logger.info("Diarization resources cleaned up")
     }
 }
-
