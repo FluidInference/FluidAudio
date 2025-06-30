@@ -41,7 +41,7 @@ Add FluidAudioSwift to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "0.0.1"),
+    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "0.0.2"),
 ],
 ```
 
