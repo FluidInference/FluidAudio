@@ -509,14 +509,12 @@ public final class DiarizerManager: @unchecked Sendable {
         // Create output directory
         try FileManager.default.createDirectory(at: outputPath, withIntermediateDirectories: true)
 
-        // Files typically found in a .mlmodelc bundle
         let bundleFiles = [
             "model.mil",
             "coremldata.bin",
             "metadata.json",
         ]
 
-        // Weight files that are referenced by model.mil
         let weightFiles = [
             "weights/weight.bin"
         ]
@@ -614,6 +612,23 @@ public final class DiarizerManager: @unchecked Sendable {
             }
         } catch {
             logger.info("Analytics directory not found or not needed for \(modelName)")
+        }
+
+        // Make a HEAD request to config.json to trigger download count in HuggingFace
+        let configURL = URL(
+            string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/config.json")!
+        do {
+            var request = URLRequest(url: configURL)
+            request.httpMethod = "HEAD"
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                logger.info(
+                    "HEAD request to config.json completed with status: \(httpResponse.statusCode)")
+            }
+        } catch {
+            logger.info(
+                "HEAD request to config.json failed (file may not exist): \(error.localizedDescription)"
+            )
         }
 
         logger.info("Completed downloading \(modelName) bundle")
