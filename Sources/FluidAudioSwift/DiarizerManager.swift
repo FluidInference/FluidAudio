@@ -32,14 +32,82 @@ public struct DiarizerConfig: Sendable {
     }
 }
 
+/// Detailed timing breakdown for each stage of the diarization pipeline
+public struct PipelineTimings: Sendable, Codable {
+    public let modelDownloadSeconds: TimeInterval
+    public let modelCompilationSeconds: TimeInterval
+    public let audioLoadingSeconds: TimeInterval
+    public let segmentationSeconds: TimeInterval
+    public let embeddingExtractionSeconds: TimeInterval
+    public let speakerClusteringSeconds: TimeInterval
+    public let postProcessingSeconds: TimeInterval
+    public let totalInferenceSeconds: TimeInterval  // segmentation + embedding + clustering
+    public let totalProcessingSeconds: TimeInterval  // all stages combined
+    
+    public init(
+        modelDownloadSeconds: TimeInterval = 0,
+        modelCompilationSeconds: TimeInterval = 0,
+        audioLoadingSeconds: TimeInterval = 0,
+        segmentationSeconds: TimeInterval = 0,
+        embeddingExtractionSeconds: TimeInterval = 0,
+        speakerClusteringSeconds: TimeInterval = 0,
+        postProcessingSeconds: TimeInterval = 0
+    ) {
+        self.modelDownloadSeconds = modelDownloadSeconds
+        self.modelCompilationSeconds = modelCompilationSeconds
+        self.audioLoadingSeconds = audioLoadingSeconds
+        self.segmentationSeconds = segmentationSeconds
+        self.embeddingExtractionSeconds = embeddingExtractionSeconds
+        self.speakerClusteringSeconds = speakerClusteringSeconds
+        self.postProcessingSeconds = postProcessingSeconds
+        self.totalInferenceSeconds = segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds
+        self.totalProcessingSeconds = modelDownloadSeconds + modelCompilationSeconds + audioLoadingSeconds + 
+                                    segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds + postProcessingSeconds
+    }
+    
+    /// Calculate percentage breakdown of time spent in each stage
+    public var stagePercentages: [String: Double] {
+        guard totalProcessingSeconds > 0 else {
+            return [:]
+        }
+        
+        return [
+            "Model Download": (modelDownloadSeconds / totalProcessingSeconds) * 100,
+            "Model Compilation": (modelCompilationSeconds / totalProcessingSeconds) * 100,
+            "Audio Loading": (audioLoadingSeconds / totalProcessingSeconds) * 100,
+            "Segmentation": (segmentationSeconds / totalProcessingSeconds) * 100,
+            "Embedding Extraction": (embeddingExtractionSeconds / totalProcessingSeconds) * 100,
+            "Speaker Clustering": (speakerClusteringSeconds / totalProcessingSeconds) * 100,
+            "Post Processing": (postProcessingSeconds / totalProcessingSeconds) * 100
+        ]
+    }
+    
+    /// Identify the bottleneck stage (stage taking the most time)
+    public var bottleneckStage: String {
+        let stages = [
+            ("Model Download", modelDownloadSeconds),
+            ("Model Compilation", modelCompilationSeconds),
+            ("Audio Loading", audioLoadingSeconds),
+            ("Segmentation", segmentationSeconds),
+            ("Embedding Extraction", embeddingExtractionSeconds),
+            ("Speaker Clustering", speakerClusteringSeconds),
+            ("Post Processing", postProcessingSeconds)
+        ]
+        
+        return stages.max(by: { $0.1 < $1.1 })?.0 ?? "Unknown"
+    }
+}
+
 /// Complete diarization result with consistent speaker IDs and embeddings
 public struct DiarizationResult: Sendable {
     public let segments: [TimedSpeakerSegment]
     public let speakerDatabase: [String: [Float]]  // Speaker ID → representative embedding
+    public let timings: PipelineTimings
 
-    public init(segments: [TimedSpeakerSegment], speakerDatabase: [String: [Float]]) {
+    public init(segments: [TimedSpeakerSegment], speakerDatabase: [String: [Float]], timings: PipelineTimings = PipelineTimings()) {
         self.segments = segments
         self.speakerDatabase = speakerDatabase
+        self.timings = timings
     }
 }
 
@@ -108,6 +176,7 @@ public struct AudioValidationResult: Sendable {
 public enum DiarizerError: Error, LocalizedError {
     case notInitialized
     case modelDownloadFailed
+    case modelCompilationFailed
     case embeddingExtractionFailed
     case invalidAudioData
     case processingFailed(String)
@@ -118,6 +187,8 @@ public enum DiarizerError: Error, LocalizedError {
             return "Diarization system not initialized. Call initialize() first."
         case .modelDownloadFailed:
             return "Failed to download required models."
+        case .modelCompilationFailed:
+            return "Failed to compile CoreML models."
         case .embeddingExtractionFailed:
             return "Failed to extract speaker embedding from audio."
         case .invalidAudioData:
@@ -165,6 +236,10 @@ public final class DiarizerManager: @unchecked Sendable {
     // ML models
     private var segmentationModel: MLModel?
     private var embeddingModel: MLModel?
+    
+    // Timing tracking
+    private var modelDownloadTime: TimeInterval = 0
+    private var modelCompilationTime: TimeInterval = 0
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
@@ -173,21 +248,104 @@ public final class DiarizerManager: @unchecked Sendable {
     public var isAvailable: Bool {
         return segmentationModel != nil && embeddingModel != nil
     }
+    
+    /// Get the initialization timing data
+    public var initializationTimings: (downloadTime: TimeInterval, compilationTime: TimeInterval) {
+        return (modelDownloadTime, modelCompilationTime)
+    }
 
     public func initialize() async throws {
+        let initStartTime = Date()
         logger.info("Initializing diarization system")
 
         try await cleanupBrokenModels()
 
+        let downloadStartTime = Date()
         let modelPaths = try await downloadModels()
+        self.modelDownloadTime = Date().timeIntervalSince(downloadStartTime)
 
         let segmentationURL = URL(fileURLWithPath: modelPaths.segmentationPath)
         let embeddingURL = URL(fileURLWithPath: modelPaths.embeddingPath)
 
-        self.segmentationModel = try MLModel(contentsOf: segmentationURL)
-        self.embeddingModel = try MLModel(contentsOf: embeddingURL)
+        let compilationStartTime = Date()
+        try await loadModelsWithAutoRecovery(segmentationURL: segmentationURL, embeddingURL: embeddingURL)
+        self.modelCompilationTime = Date().timeIntervalSince(compilationStartTime)
 
-        logger.info("Diarization system initialized successfully")
+        let totalInitTime = Date().timeIntervalSince(initStartTime)
+        logger.info("Diarization system initialized successfully in \(String(format: "%.2f", totalInitTime))s (download: \(String(format: "%.2f", self.modelDownloadTime))s, compilation: \(String(format: "%.2f", self.modelCompilationTime))s)")
+    }
+
+    /// Load models with automatic recovery on compilation failures
+    private func loadModelsWithAutoRecovery(segmentationURL: URL, embeddingURL: URL, maxRetries: Int = 2) async throws {
+        var attempt = 0
+        
+        while attempt <= maxRetries {
+            do {
+                // Try to load both models
+                logger.info("Attempting to load CoreML models (attempt \(attempt + 1)/\(maxRetries + 1))")
+                
+                let segmentationModel = try MLModel(contentsOf: segmentationURL)
+                let embeddingModel = try MLModel(contentsOf: embeddingURL)
+                
+                // If we get here, both models loaded successfully
+                self.segmentationModel = segmentationModel
+                self.embeddingModel = embeddingModel
+                
+                if attempt > 0 {
+                    logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
+                }
+                return
+                
+            } catch {
+                logger.warning("Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
+                
+                // If this is our last attempt, throw the error
+                if attempt >= maxRetries {
+                    logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
+                    throw DiarizerError.modelCompilationFailed
+                }
+                
+                // Auto-recovery: Delete corrupted models and re-download
+                logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
+                
+                try await performModelRecovery(segmentationURL: segmentationURL, embeddingURL: embeddingURL)
+                
+                attempt += 1
+            }
+        }
+    }
+
+    /// Perform model recovery by deleting and re-downloading corrupted models
+    private func performModelRecovery(segmentationURL: URL, embeddingURL: URL) async throws {
+        // Remove potentially corrupted model files
+        if FileManager.default.fileExists(atPath: segmentationURL.path) {
+            logger.info("Removing corrupted segmentation model at \(segmentationURL.path)")
+            try FileManager.default.removeItem(at: segmentationURL)
+        }
+        
+        if FileManager.default.fileExists(atPath: embeddingURL.path) {
+            logger.info("Removing corrupted embedding model at \(embeddingURL.path)")
+            try FileManager.default.removeItem(at: embeddingURL)
+        }
+        
+        // Re-download the models from Hugging Face
+        logger.info("Re-downloading models from Hugging Face...")
+        
+        // Re-download segmentation model
+        try await downloadMLModelCBundle(
+            repoPath: "bweng/speaker-diarization-coreml",
+            modelName: "pyannote_segmentation.mlmodelc",
+            outputPath: segmentationURL
+        )
+        
+        // Re-download embedding model
+        try await downloadMLModelCBundle(
+            repoPath: "bweng/speaker-diarization-coreml",
+            modelName: "wespeaker.mlmodelc",
+            outputPath: embeddingURL
+        )
+        
+        logger.info("Model recovery completed - models re-downloaded")
     }
 
     private func cleanupBrokenModels() async throws {
@@ -459,7 +617,7 @@ public final class DiarizerManager: @unchecked Sendable {
 
     /// Download required models for diarization
     public func downloadModels() async throws -> ModelPaths {
-        logger.info("Downloading diarization models from Hugging Face")
+        logger.info("Checking for existing diarization models")
 
         let modelsDirectory = getModelsDirectory()
 
@@ -468,28 +626,48 @@ public final class DiarizerManager: @unchecked Sendable {
         ).path
         let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc").path
 
-        // Force redownload - remove existing models first
-        try? FileManager.default.removeItem(at: URL(fileURLWithPath: segmentationModelPath))
-        try? FileManager.default.removeItem(at: URL(fileURLWithPath: embeddingModelPath))
-        logger.info("Removed existing models to force fresh download")
+        let segmentationURL = URL(fileURLWithPath: segmentationModelPath)
+        let embeddingURL = URL(fileURLWithPath: embeddingModelPath)
 
-        // Download segmentation model bundle from Hugging Face
-        try await downloadMLModelCBundle(
-            repoPath: "bweng/speaker-diarization-coreml",
-            modelName: "pyannote_segmentation.mlmodelc",
-            outputPath: URL(fileURLWithPath: segmentationModelPath)
-        )
-        logger.info("Downloaded segmentation model bundle from Hugging Face")
+        // Check if models already exist and are valid
+        let segmentationExists =
+            FileManager.default.fileExists(atPath: segmentationModelPath)
+            && isModelCompiled(at: segmentationURL)
+        let embeddingExists =
+            FileManager.default.fileExists(atPath: embeddingModelPath)
+            && isModelCompiled(at: embeddingURL)
 
-        // Download embedding model bundle from Hugging Face
-        try await downloadMLModelCBundle(
-            repoPath: "bweng/speaker-diarization-coreml",
-            modelName: "wespeaker.mlmodelc",
-            outputPath: URL(fileURLWithPath: embeddingModelPath)
-        )
-        logger.info("Downloaded embedding model bundle from Hugging Face")
+        if segmentationExists && embeddingExists {
+            logger.info("Valid models already exist, skipping download")
+            return ModelPaths(
+                segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
+        }
 
-        logger.info("Successfully downloaded and compiled diarization models from Hugging Face")
+        logger.info("Downloading missing or invalid diarization models from Hugging Face")
+
+        // Download segmentation model if needed
+        if !segmentationExists {
+            logger.info("Downloading segmentation model bundle from Hugging Face")
+            try await downloadMLModelCBundle(
+                repoPath: "bweng/speaker-diarization-coreml",
+                modelName: "pyannote_segmentation.mlmodelc",
+                outputPath: segmentationURL
+            )
+            logger.info("Downloaded segmentation model bundle from Hugging Face")
+        }
+
+        // Download embedding model if needed
+        if !embeddingExists {
+            logger.info("Downloading embedding model bundle from Hugging Face")
+            try await downloadMLModelCBundle(
+                repoPath: "bweng/speaker-diarization-coreml",
+                modelName: "wespeaker.mlmodelc",
+                outputPath: embeddingURL
+            )
+            logger.info("Downloaded embedding model bundle from Hugging Face")
+        }
+
+        logger.info("Successfully ensured diarization models are available")
         return ModelPaths(
             segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
     }
@@ -592,26 +770,6 @@ public final class DiarizerManager: @unchecked Sendable {
                     "Critical error downloading \(weightFile): \(error.localizedDescription)")
                 throw DiarizerError.modelDownloadFailed
             }
-        }
-
-        // Also try to download analytics directory if it exists
-        let analyticsURL = URL(
-            string:
-                "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/analytics/coremldata.bin"
-        )!
-        do {
-            let (tempFile, response) = try await URLSession.shared.download(from: analyticsURL)
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                let analyticsDir = outputPath.appendingPathComponent("analytics")
-                try FileManager.default.createDirectory(
-                    at: analyticsDir, withIntermediateDirectories: true)
-                let destinationPath = analyticsDir.appendingPathComponent("coremldata.bin")
-                try? FileManager.default.removeItem(at: destinationPath)
-                try FileManager.default.moveItem(at: tempFile, to: destinationPath)
-                logger.info("Downloaded analytics/coremldata.bin for \(modelName)")
-            }
-        } catch {
-            logger.info("Analytics directory not found or not needed for \(modelName)")
         }
 
         // Make a HEAD request to config.json to trigger download count in HuggingFace
@@ -838,6 +996,12 @@ public final class DiarizerManager: @unchecked Sendable {
             throw DiarizerError.notInitialized
         }
 
+        let processingStartTime = Date()
+        var segmentationTime: TimeInterval = 0
+        var embeddingTime: TimeInterval = 0
+        var clusteringTime: TimeInterval = 0
+        var postProcessingTime: TimeInterval = 0
+
         let chunkSize = sampleRate * 10  // 10 seconds
         var allSegments: [TimedSpeakerSegment] = []
         var speakerDB: [String: [Float]] = [:]  // Global speaker database
@@ -848,25 +1012,58 @@ public final class DiarizerManager: @unchecked Sendable {
             let chunk = Array(samples[chunkStart..<chunkEnd])
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
 
-            let chunkSegments = try await processChunkWithSpeakerTracking(
+            let (chunkSegments, chunkTimings) = try await processChunkWithSpeakerTracking(
                 chunk,
                 chunkOffset: chunkOffset,
                 speakerDB: &speakerDB,
                 sampleRate: sampleRate
             )
             allSegments.append(contentsOf: chunkSegments)
+            
+            // Accumulate timing from all chunks
+            segmentationTime += chunkTimings.segmentationTime
+            embeddingTime += chunkTimings.embeddingTime
+            clusteringTime += chunkTimings.clusteringTime
         }
 
-        return DiarizationResult(segments: allSegments, speakerDatabase: speakerDB)
+        let postProcessingStartTime = Date()
+        // Post-processing: filter segments, apply duration constraints, etc.
+        let filteredSegments = applyPostProcessingFilters(allSegments)
+        postProcessingTime = Date().timeIntervalSince(postProcessingStartTime)
+
+        let totalProcessingTime = Date().timeIntervalSince(processingStartTime)
+
+        let timings = PipelineTimings(
+            modelDownloadSeconds: self.modelDownloadTime,
+            modelCompilationSeconds: self.modelCompilationTime,
+            audioLoadingSeconds: 0, // Will be set by CLI
+            segmentationSeconds: segmentationTime,
+            embeddingExtractionSeconds: embeddingTime,
+            speakerClusteringSeconds: clusteringTime,
+            postProcessingSeconds: postProcessingTime
+        )
+
+        logger.info("Complete diarization finished in \(String(format: "%.2f", totalProcessingTime))s (segmentation: \(String(format: "%.2f", segmentationTime))s, embedding: \(String(format: "%.2f", embeddingTime))s, clustering: \(String(format: "%.2f", clusteringTime))s, post-processing: \(String(format: "%.2f", postProcessingTime))s)")
+
+        return DiarizationResult(segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
     }
 
-    /// Process a single chunk with speaker tracking across chunks
+    /// Timing data for chunk processing
+    private struct ChunkTimings {
+        let segmentationTime: TimeInterval
+        let embeddingTime: TimeInterval
+        let clusteringTime: TimeInterval
+    }
+
+    /// Process a single chunk with speaker tracking and timing
     private func processChunkWithSpeakerTracking(
         _ chunk: [Float],
         chunkOffset: Double,
         speakerDB: inout [String: [Float]],
         sampleRate: Int = 16000
-    ) async throws -> [TimedSpeakerSegment] {
+    ) async throws -> ([TimedSpeakerSegment], ChunkTimings) {
+        let segmentationStartTime = Date()
+        
         let chunkSize = sampleRate * 10  // 10 seconds
         var paddedChunk = chunk
         if chunk.count < chunkSize {
@@ -877,6 +1074,9 @@ public final class DiarizerManager: @unchecked Sendable {
         let binarizedSegments = try getSegments(audioChunk: paddedChunk)
         let slidingFeature = createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
+        
+        let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
+        let embeddingStartTime = Date()
 
         // Step 2: Get embeddings using same segmentation results
         guard let embeddingModel = self.embeddingModel else {
@@ -890,6 +1090,9 @@ public final class DiarizerManager: @unchecked Sendable {
             embeddingModel: embeddingModel,
             sampleRate: sampleRate
         )
+        
+        let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
+        let clusteringStartTime = Date()
 
         // Step 3: Calculate speaker activities
         let speakerActivities = calculateSpeakerActivities(binarizedSegments)
@@ -913,19 +1116,40 @@ public final class DiarizerManager: @unchecked Sendable {
                 }
             } else {
                 activityFilteredCount += 1
-
                 speakerLabels.append("")  // No activity
             }
         }
+        
+        let clusteringTime = Date().timeIntervalSince(clusteringStartTime)
 
         // Step 5: Create temporal segments with consistent speaker IDs
-        return createTimedSegments(
+        let segments = createTimedSegments(
             binarizedSegments: binarizedSegments,
             slidingWindow: slidingFeature.slidingWindow,
             embeddings: embeddings,
             speakerLabels: speakerLabels,
             speakerActivities: speakerActivities
         )
+        
+        let timings = ChunkTimings(
+            segmentationTime: segmentationTime,
+            embeddingTime: embeddingTime,
+            clusteringTime: clusteringTime
+        )
+        
+        return (segments, timings)
+    }
+
+    
+    /// Apply post-processing filters to segments
+    private func applyPostProcessingFilters(_ segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
+        return segments.filter { segment in
+            // Apply minimum duration filter
+            segment.durationSeconds >= self.config.minDurationOn
+        }.compactMap { segment in
+            // Additional post-processing could be added here
+            return segment
+        }
     }
 
     /// Calculate total activity for each speaker across all frames

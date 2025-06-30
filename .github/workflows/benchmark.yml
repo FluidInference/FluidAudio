@@ -33,34 +33,10 @@ jobs:
         id: benchmark
         run: |
           echo "🚀 Running single file benchmark..."
-          swift run fluidaudio benchmark --auto-download --single-file ES2004a --output benchmark_results.json | tee benchmark.log
+          swift run fluidaudio benchmark --auto-download --single-file ES2004a --output benchmark_results.json
 
-          # Extract total time from CLI output
-          if grep -q "Total benchmark execution time:" benchmark.log; then
-            BENCHMARK_TIME=$(grep "Total benchmark execution time:" benchmark.log | grep -o '[0-9.]*')
-            echo "BENCHMARK_TIME=${BENCHMARK_TIME}" >> $GITHUB_OUTPUT
-          else
-            echo "BENCHMARK_TIME=NA" >> $GITHUB_OUTPUT
-          fi
-
-          # Extract key metrics from JSON output
+          # Check if results file was generated
           if [ -f benchmark_results.json ]; then
-            # Parse JSON results (using basic tools available in GitHub runners)
-            AVERAGE_DER=$(cat benchmark_results.json | grep -o '"averageDER":[0-9]*\.?[0-9]*' | cut -d':' -f2)
-            AVERAGE_JER=$(cat benchmark_results.json | grep -o '"averageJER":[0-9]*\.?[0-9]*' | cut -d':' -f2)
-            PROCESSED_FILES=$(cat benchmark_results.json | grep -o '"processedFiles":[0-9]*' | cut -d':' -f2)
-
-            # Get first result details
-            RTF=$(cat benchmark_results.json | grep -o '"realTimeFactor":[0-9]*\.?[0-9]*' | head -1 | cut -d':' -f2)
-            DURATION=$(cat benchmark_results.json | grep -o '"durationSeconds":[0-9]*\.?[0-9]*' | head -1 | cut -d':' -f2)
-            SPEAKER_COUNT=$(cat benchmark_results.json | grep -o '"speakerCount":[0-9]*' | head -1 | cut -d':' -f2)
-
-            echo "DER=${AVERAGE_DER}" >> $GITHUB_OUTPUT
-            echo "JER=${AVERAGE_JER}" >> $GITHUB_OUTPUT
-            echo "RTF=${RTF}" >> $GITHUB_OUTPUT
-            echo "DURATION=${DURATION}" >> $GITHUB_OUTPUT
-            echo "SPEAKER_COUNT=${SPEAKER_COUNT}" >> $GITHUB_OUTPUT
-            echo "PROCESSED_FILES=${PROCESSED_FILES}" >> $GITHUB_OUTPUT
             echo "SUCCESS=true" >> $GITHUB_OUTPUT
           else
             echo "❌ Benchmark failed - no results file generated"
@@ -83,11 +59,30 @@ jobs:
           RTF=$(jq '.results[0].realTimeFactor' benchmark_results.json)
           DURATION=$(jq '.results[0].durationSeconds' benchmark_results.json)
           SPEAKER_COUNT=$(jq '.results[0].speakerCount' benchmark_results.json)
+          
+          # Extract detailed timing information
+          TOTAL_TIME=$(jq '.results[0].timings.totalProcessingSeconds' benchmark_results.json)
+          MODEL_DOWNLOAD_TIME=$(jq '.results[0].timings.modelDownloadSeconds' benchmark_results.json)
+          MODEL_COMPILE_TIME=$(jq '.results[0].timings.modelCompilationSeconds' benchmark_results.json)
+          AUDIO_LOAD_TIME=$(jq '.results[0].timings.audioLoadingSeconds' benchmark_results.json)
+          SEGMENTATION_TIME=$(jq '.results[0].timings.segmentationSeconds' benchmark_results.json)
+          EMBEDDING_TIME=$(jq '.results[0].timings.embeddingExtractionSeconds' benchmark_results.json)
+          CLUSTERING_TIME=$(jq '.results[0].timings.speakerClusteringSeconds' benchmark_results.json)
+          INFERENCE_TIME=$(jq '.results[0].timings.totalInferenceSeconds' benchmark_results.json)
+          
           echo "DER=${DER}" >> $GITHUB_OUTPUT
           echo "JER=${JER}" >> $GITHUB_OUTPUT
           echo "RTF=${RTF}" >> $GITHUB_OUTPUT
           echo "DURATION=${DURATION}" >> $GITHUB_OUTPUT
           echo "SPEAKER_COUNT=${SPEAKER_COUNT}" >> $GITHUB_OUTPUT
+          echo "TOTAL_TIME=${TOTAL_TIME}" >> $GITHUB_OUTPUT
+          echo "MODEL_DOWNLOAD_TIME=${MODEL_DOWNLOAD_TIME}" >> $GITHUB_OUTPUT
+          echo "MODEL_COMPILE_TIME=${MODEL_COMPILE_TIME}" >> $GITHUB_OUTPUT
+          echo "AUDIO_LOAD_TIME=${AUDIO_LOAD_TIME}" >> $GITHUB_OUTPUT
+          echo "SEGMENTATION_TIME=${SEGMENTATION_TIME}" >> $GITHUB_OUTPUT
+          echo "EMBEDDING_TIME=${EMBEDDING_TIME}" >> $GITHUB_OUTPUT
+          echo "CLUSTERING_TIME=${CLUSTERING_TIME}" >> $GITHUB_OUTPUT
+          echo "INFERENCE_TIME=${INFERENCE_TIME}" >> $GITHUB_OUTPUT
 
       - name: Comment PR with Benchmark Results
         if: always()
@@ -99,17 +94,38 @@ jobs:
             const rtf = parseFloat('${{ steps.extract.outputs.RTF }}');
             const duration = parseFloat('${{ steps.extract.outputs.DURATION }}').toFixed(1);
             const speakerCount = '${{ steps.extract.outputs.SPEAKER_COUNT }}';
-            const benchmarkTime = '${{ steps.benchmark.outputs.BENCHMARK_TIME }}';
+            const totalTime = parseFloat('${{ steps.extract.outputs.TOTAL_TIME }}');
+            const inferenceTime = parseFloat('${{ steps.extract.outputs.INFERENCE_TIME }}');
+            const modelDownloadTime = parseFloat('${{ steps.extract.outputs.MODEL_DOWNLOAD_TIME }}');
+            const modelCompileTime = parseFloat('${{ steps.extract.outputs.MODEL_COMPILE_TIME }}');
+            const audioLoadTime = parseFloat('${{ steps.extract.outputs.AUDIO_LOAD_TIME }}');
+            const segmentationTime = parseFloat('${{ steps.extract.outputs.SEGMENTATION_TIME }}');
+            const embeddingTime = parseFloat('${{ steps.extract.outputs.EMBEDDING_TIME }}');
+            const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
 
             let comment = '## 🎯 Single File Benchmark Results\n\n';
             comment += `**Test File:** ES2004a (${duration}s audio)\n\n`;
+            comment += '### 📊 Accuracy Metrics\n';
             comment += '| Metric | Value | Target | Status |\n';
             comment += '|--------|-------|--------|---------|\n';
             comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% | < 30% | ${der < 30 ? '✅' : '❌'} |\n`;
             comment += `| **JER** (Jaccard Error Rate) | ${jer.toFixed(1)}% | < 25% | ${jer < 25 ? '✅' : '❌'} |\n`;
             comment += `| **RTF** (Real-Time Factor) | ${rtf.toFixed(2)}x | < 1.0x | ${rtf < 1.0 ? '✅' : '❌'} |\n`;
-            comment += `| **Speakers Detected** | ${speakerCount} | - | ℹ️ |\n`;
-            comment += `| **Benchmark Runtime** | ${benchmarkTime}s | - | ℹ️ |\n\n`;
+            comment += `| **Speakers Detected** | ${speakerCount} | - | ℹ️ |\n\n`;
+            
+            comment += '### ⏱️ Performance Timing\n';
+            comment += '| Stage | Time (s) | % of Total |\n';
+            comment += '|-------|----------|------------|\n';
+            comment += `| Model Download | ${modelDownloadTime.toFixed(3)} | ${(modelDownloadTime/totalTime*100).toFixed(1)}% |\n`;
+            comment += `| Model Compilation | ${modelCompileTime.toFixed(3)} | ${(modelCompileTime/totalTime*100).toFixed(1)}% |\n`;
+            comment += `| Audio Loading | ${audioLoadTime.toFixed(3)} | ${(audioLoadTime/totalTime*100).toFixed(1)}% |\n`;
+            comment += `| Segmentation | ${segmentationTime.toFixed(3)} | ${(segmentationTime/totalTime*100).toFixed(1)}% |\n`;
+            comment += `| Embedding Extraction | ${embeddingTime.toFixed(3)} | ${(embeddingTime/totalTime*100).toFixed(1)}% |\n`;
+            comment += `| Speaker Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)}% |\n`;
+            comment += `| **Total Processing** | **${totalTime.toFixed(3)}** | **100%** |\n\n`;
+            
+            comment += `**Inference Time**: ${inferenceTime.toFixed(3)}s (${(inferenceTime/totalTime*100).toFixed(1)}% of total)\n`;
+            comment += `**Setup Overhead**: ${(modelDownloadTime + modelCompileTime).toFixed(3)}s (${((modelDownloadTime + modelCompileTime)/totalTime*100).toFixed(1)}% of total)\n\n`;
 
             // Performance assessment
             if (der < 20) {

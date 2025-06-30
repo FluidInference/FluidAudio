@@ -3,11 +3,11 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 
-FluidAudioSwift is a high-performance Swift framework for on-device speaker diarization and audio processing, achieving **state-of-the-art results** competitive with academic research.
+FluidAudioSwift is a high-performance Swift framework for on-device speaker diarization and audio processing, achieving competitive with academic research.
 
 ## 🎯 Performance
 
-**AMI Benchmark Results** (Single Distant Microphone), a subset of the files:
+**AMI Benchmark Results** (Single Distant Microphone) with a subset of the files:
 
 - **DER: 17.7%** - Competitive with Powerset BCE 2023 (18.5%)
 - **JER: 28.0%** - Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
@@ -41,7 +41,7 @@ Add FluidAudioSwift to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "1.0.0"),
+    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "0.0.1"),
 ],
 ```
 
