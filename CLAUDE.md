@@ -300,6 +300,95 @@ DiarizerConfig(
 - **Chunk-based processing** (10-second chunks) doesn't hurt performance significantly  
 - **Speaker tracking across chunks** is effective with current approach
 
+## Auto-Recovery Mechanism ✨
+
+### CoreML Model Compilation Failure Recovery
+The system now includes an **automatic recovery mechanism** for CoreML model compilation failures:
+
+#### How It Works:
+1. **Automatic Detection**: When `MLModel(contentsOf:)` fails during initialization
+2. **Smart Recovery**: Automatically deletes corrupted model files and re-downloads from Hugging Face
+3. **Retry Logic**: Up to 3 attempts (1 initial + 2 recovery attempts)
+4. **Logging**: Comprehensive logging of recovery attempts and progress
+
+#### Recovery Process:
+```
+Model Loading Failed → Delete Corrupted Files → Re-download from HF → Retry Loading
+```
+
+#### Error Handling:
+- **New Error**: `DiarizerError.modelCompilationFailed` for persistent compilation failures
+- **Graceful Degradation**: Clear error messages after exhausting retry attempts
+- **Detailed Logging**: Full visibility into recovery process
+
+#### Benefits:
+- **Robust Operation**: Handles corrupted downloads, disk corruption, or OS-level compilation issues
+- **Zero User Intervention**: Fully automatic recovery without user action required
+- **Fast Recovery**: Efficient re-download and retry mechanism
+- **Production Ready**: Handles edge cases in deployment environments
+
+#### Implementation Details:
+- **Recovery Methods**: `loadModelsWithAutoRecovery()` and `performModelRecovery()`
+- **Configurable Retries**: `maxRetries` parameter (default: 2 recovery attempts)
+- **Clean State**: Ensures complete model cleanup before re-download
+- **Atomic Operations**: Either both models load successfully or initialization fails
+
+This addresses the common issue where CoreML models fail compilation due to network interruptions during download, file system corruption, or iOS/macOS updates affecting compiled model compatibility.
+
+## Development Commands
+
+### Build Commands
+```bash
+# Build the project
+swift build
+
+# Build in release mode  
+swift build -c release
+
+# Clean build artifacts
+swift package clean
+```
+
+### Testing Commands
+```bash
+# Run all tests
+swift test
+
+# Run specific test classes
+swift test --filter CITests
+swift test --filter CoreMLDiarizerTests
+
+# Run tests with coverage
+swift test --enable-code-coverage
+```
+
+### CLI Usage
+```bash
+# Run full AMI benchmark
+swift run fluidaudio benchmark --auto-download
+
+# Single file benchmark with custom parameters
+swift run fluidaudio benchmark --single-file ES2004a --threshold 0.7 --output results.json
+
+# Process individual audio files
+swift run fluidaudio process meeting.wav --output results.json
+
+# Download datasets
+swift run fluidaudio download --dataset ami-sdm
+```
+
+### Package Management
+```bash
+# Update dependencies
+swift package update
+
+# Generate Xcode project
+swift package generate-xcodeproj
+
+# Resolve dependencies
+swift package resolve
+```
+
 ## Instructions for Claude Code
 
 When asked to optimize DiarizerConfig parameters:

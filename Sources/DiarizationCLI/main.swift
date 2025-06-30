@@ -400,13 +400,26 @@ struct DiarizationCLI {
             print("   🎵 Processing \(audioFileName)...")
 
             do {
+                let audioLoadingStartTime = Date()
                 let audioSamples = try await loadAudioFile(path: audioPath.path)
+                let audioLoadingTime = Date().timeIntervalSince(audioLoadingStartTime)
                 let duration = Float(audioSamples.count) / 16000.0
 
                 let startTime = Date()
                 let result = try await manager.performCompleteDiarization(
                     audioSamples, sampleRate: 16000)
                 let processingTime = Date().timeIntervalSince(startTime)
+                
+                // Create complete timing information including audio loading
+                let completeTimings = PipelineTimings(
+                    modelDownloadSeconds: result.timings.modelDownloadSeconds,
+                    modelCompilationSeconds: result.timings.modelCompilationSeconds,
+                    audioLoadingSeconds: audioLoadingTime,
+                    segmentationSeconds: result.timings.segmentationSeconds,
+                    embeddingExtractionSeconds: result.timings.embeddingExtractionSeconds,
+                    speakerClusteringSeconds: result.timings.speakerClusteringSeconds,
+                    postProcessingSeconds: result.timings.postProcessingSeconds
+                )
 
                 // Load ground truth from AMI annotations
                 let groundTruth = await Self.loadAMIGroundTruth(for: meetingId, duration: duration)
@@ -437,7 +450,8 @@ struct DiarizationCLI {
                         der: metrics.der,
                         jer: metrics.jer,
                         segments: result.segments,
-                        speakerCount: result.speakerDatabase.count
+                        speakerCount: result.speakerDatabase.count,
+                        timings: completeTimings
                     ))
 
             } catch {
@@ -537,13 +551,26 @@ struct DiarizationCLI {
             print("   🎵 Processing \(audioFileName)...")
 
             do {
+                let audioLoadingStartTime = Date()
                 let audioSamples = try await loadAudioFile(path: audioPath.path)
+                let audioLoadingTime = Date().timeIntervalSince(audioLoadingStartTime)
                 let duration = Float(audioSamples.count) / 16000.0
 
                 let startTime = Date()
                 let result = try await manager.performCompleteDiarization(
                     audioSamples, sampleRate: 16000)
                 let processingTime = Date().timeIntervalSince(startTime)
+                
+                // Create complete timing information including audio loading
+                let completeTimings = PipelineTimings(
+                    modelDownloadSeconds: result.timings.modelDownloadSeconds,
+                    modelCompilationSeconds: result.timings.modelCompilationSeconds,
+                    audioLoadingSeconds: audioLoadingTime,
+                    segmentationSeconds: result.timings.segmentationSeconds,
+                    embeddingExtractionSeconds: result.timings.embeddingExtractionSeconds,
+                    speakerClusteringSeconds: result.timings.speakerClusteringSeconds,
+                    postProcessingSeconds: result.timings.postProcessingSeconds
+                )
 
                 // Load ground truth from AMI annotations
                 let groundTruth = await Self.loadAMIGroundTruth(for: meetingId, duration: duration)
@@ -574,7 +601,8 @@ struct DiarizationCLI {
                         der: metrics.der,
                         jer: metrics.jer,
                         segments: result.segments,
-                        speakerCount: result.speakerDatabase.count
+                        speakerCount: result.speakerDatabase.count,
+                        timings: completeTimings
                     ))
 
             } catch {
@@ -1052,6 +1080,9 @@ struct DiarizationCLI {
         let bottomSep = "└───────────────┴────────┴────────┴────────┴──────────┴──────────┘"
         print("\(bottomSep)")
 
+        // Print detailed timing breakdown
+        printTimingBreakdown(results)
+
         // Print statistics
         if results.count > 1 {
             let derValues = results.map { $0.der }
@@ -1093,6 +1124,98 @@ struct DiarizationCLI {
         } else {
             print("\n🚨 CRITICAL: Check configuration - results much worse than expected")
         }
+    }
+    
+    /// Print detailed timing breakdown for pipeline stages
+    static func printTimingBreakdown(_ results: [BenchmarkResult]) {
+        guard !results.isEmpty else { return }
+        
+        print("\n⏱️  Pipeline Timing Breakdown")
+        let timingSeparator = String(repeating: "=", count: 95)
+        print("\(timingSeparator)")
+        
+        // Calculate average timings across all results
+        let avgTimings = calculateAverageTimings(results)
+        let totalAvgTime = avgTimings.totalProcessingSeconds
+        
+        // Print timing table header
+        print("│ Stage                 │   Time   │ Percentage │ Per Audio Minute │")
+        let timingHeaderSep = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
+        print("\(timingHeaderSep)")
+        
+        // Print each stage
+        let stages: [(String, TimeInterval)] = [
+            ("Model Download", avgTimings.modelDownloadSeconds),
+            ("Model Compilation", avgTimings.modelCompilationSeconds),
+            ("Audio Loading", avgTimings.audioLoadingSeconds),
+            ("Segmentation", avgTimings.segmentationSeconds),
+            ("Embedding Extraction", avgTimings.embeddingExtractionSeconds),
+            ("Speaker Clustering", avgTimings.speakerClusteringSeconds),
+            ("Post Processing", avgTimings.postProcessingSeconds)
+        ]
+        
+        let totalAudioMinutes = results.reduce(0.0) { $0 + Double($1.durationSeconds) } / 60.0
+        
+        for (stageName, stageTime) in stages {
+            let stageNamePadded = stageName.padding(toLength: 19, withPad: " ", startingAt: 0)
+            let timeStr = String(format: "%.3fs", stageTime).padding(toLength: 8, withPad: " ", startingAt: 0)
+            let percentage = totalAvgTime > 0 ? (stageTime / totalAvgTime) * 100 : 0
+            let percentageStr = String(format: "%.1f%%", percentage).padding(toLength: 10, withPad: " ", startingAt: 0)
+            let perMinute = totalAudioMinutes > 0 ? stageTime / totalAudioMinutes : 0
+            let perMinuteStr = String(format: "%.3fs/min", perMinute).padding(toLength: 16, withPad: " ", startingAt: 0)
+            
+            print("│ \(stageNamePadded) │ \(timeStr) │ \(percentageStr) │ \(perMinuteStr) │")
+        }
+        
+        // Print total
+        let totalSep = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
+        print("\(totalSep)")
+        let totalTimeStr = String(format: "%.3fs", totalAvgTime).padding(toLength: 8, withPad: " ", startingAt: 0)
+        let totalPerMinuteStr = String(format: "%.3fs/min", totalAudioMinutes > 0 ? totalAvgTime / totalAudioMinutes : 0).padding(toLength: 16, withPad: " ", startingAt: 0)
+        print("│ TOTAL                 │ \(totalTimeStr) │ 100.0%     │ \(totalPerMinuteStr) │")
+        
+        let timingBottomSep = "└───────────────────────┴──────────┴────────────┴──────────────────┘"
+        print("\(timingBottomSep)")
+        
+        // Print bottleneck analysis
+        let bottleneck = avgTimings.bottleneckStage
+        print("\n🔍 Performance Analysis:")
+        print("   Bottleneck Stage: \(bottleneck)")
+        print("   Inference Only: \(String(format: "%.3f", avgTimings.totalInferenceSeconds))s (\(String(format: "%.1f", (avgTimings.totalInferenceSeconds / totalAvgTime) * 100))% of total)")
+        print("   Setup Overhead: \(String(format: "%.3f", avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", ((avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds) / totalAvgTime) * 100))% of total)")
+        
+        // Optimization suggestions
+        if avgTimings.modelDownloadSeconds > avgTimings.totalInferenceSeconds {
+            print("\n💡 Optimization Suggestion: Model download is dominating execution time - consider model caching")
+        } else if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
+            print("\n💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization")
+        } else if avgTimings.embeddingExtractionSeconds > avgTimings.segmentationSeconds * 2 {
+            print("\n💡 Optimization Suggestion: Embedding extraction is the bottleneck - consider batch processing")
+        }
+    }
+    
+    /// Calculate average timings across all benchmark results
+    static func calculateAverageTimings(_ results: [BenchmarkResult]) -> PipelineTimings {
+        let count = Double(results.count)
+        guard count > 0 else { return PipelineTimings() }
+        
+        let avgModelDownload = results.reduce(0.0) { $0 + $1.timings.modelDownloadSeconds } / count
+        let avgModelCompilation = results.reduce(0.0) { $0 + $1.timings.modelCompilationSeconds } / count
+        let avgAudioLoading = results.reduce(0.0) { $0 + $1.timings.audioLoadingSeconds } / count
+        let avgSegmentation = results.reduce(0.0) { $0 + $1.timings.segmentationSeconds } / count
+        let avgEmbedding = results.reduce(0.0) { $0 + $1.timings.embeddingExtractionSeconds } / count
+        let avgClustering = results.reduce(0.0) { $0 + $1.timings.speakerClusteringSeconds } / count
+        let avgPostProcessing = results.reduce(0.0) { $0 + $1.timings.postProcessingSeconds } / count
+        
+        return PipelineTimings(
+            modelDownloadSeconds: avgModelDownload,
+            modelCompilationSeconds: avgModelCompilation,
+            audioLoadingSeconds: avgAudioLoading,
+            segmentationSeconds: avgSegmentation,
+            embeddingExtractionSeconds: avgEmbedding,
+            speakerClusteringSeconds: avgClustering,
+            postProcessingSeconds: avgPostProcessing
+        )
     }
 
     static func calculateStandardDeviation(_ values: [Float]) -> Float {
@@ -1424,6 +1547,12 @@ struct BenchmarkResult: Codable {
     let jer: Float
     let segments: [TimedSpeakerSegment]
     let speakerCount: Int
+    let timings: PipelineTimings
+    
+    /// Total time including audio loading
+    var totalExecutionTime: TimeInterval {
+        return timings.totalProcessingSeconds + timings.audioLoadingSeconds
+    }
 }
 
 struct BenchmarkSummary: Codable {
