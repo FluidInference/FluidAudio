@@ -13,7 +13,7 @@ FluidAudioSwift is a high-performance Swift framework for on-device speaker diar
 - **JER: 28.0%** - Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
 - **RTF: 0.02x** - Real-time processing with 50x speedup
 
-```
+```text
   RTF = Processing Time / Audio Duration
 
   With RTF = 0.02x:
