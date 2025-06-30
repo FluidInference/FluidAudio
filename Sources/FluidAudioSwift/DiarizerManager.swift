@@ -616,7 +616,7 @@ public final class DiarizerManager: @unchecked Sendable {
 
         // Make a HEAD request to config.json to trigger download count in HuggingFace
         let configURL = URL(
-            string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/config.json")!
+            string: "https://huggingface.co/\(repoPath)/resolve/main/config.json")!
         do {
             var request = URLRequest(url: configURL)
             request.httpMethod = "HEAD"
