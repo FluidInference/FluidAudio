@@ -1,17 +1,50 @@
-# FluidAudioSwift
+# FluidAudio - Efficient Speaker Diarization for Apple devices
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
+[![Models](https://img.shields.io/badge/Models-HuggingFace-yellow.svg)](https://huggingface.co/bweng/speaker-diarization-coreml)
 
-FluidAudioSwift is a high-performance Swift framework for on-device speaker diarization and audio processing, achieving competitive with academic research.
+FluidAudio is a high-performance Swift framework for on-device speaker diarization and audio processing that is competitive with research standards. The goal is to deliver maximum performance per watt by using only CoreML models. We are also working on adding ASR (Automatic Speech Recognition) support.
+
+## Features
+
+- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
+- **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
+- **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering
+- **CoreML Integration**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon and iOS
+- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/bweng/speaker-diarization-coreml) - converted and optimized by our team
+- **Real-time Processing**: Support for streaming audio processing with minimal latency
+- **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+
+
+- **Comprehensive CLI**: Professional benchmarking tools with beautiful tabular output
+
+## Installation
+
+Add FluidAudioSwift to your project using Swift Package Manager:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "0.0.2"),
+],
+```
+
+## 🚀 Roadmap
+
+**Coming Soon:**
+
+- **Voice Activity Detection (VAD)**: Voice activity detection capabilities
+- **ASR Models**: Support for open-source ASR models
+- **System Audio Access**: Tap into system audio via CoreAudio 
 
 ## 🎯 Performance
 
-**AMI Benchmark Results** (Single Distant Microphone) with a subset of the files:
+**AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
 
 - **DER: 17.7%** - Competitive with Powerset BCE 2023 (18.5%)
 - **JER: 28.0%** - Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
 - **RTF: 0.02x** - Real-time processing with 50x speedup
+
+- **Efficient Computing**: Runs on Apple Neural Engine with zero performance trade-offs
 
 ```text
   RTF = Processing Time / Audio Duration
@@ -26,24 +59,24 @@ FluidAudioSwift is a high-performance Swift framework for on-device speaker diar
   - Pipeline impact: Minimal - diarization won't be the bottleneck
 ```
 
-## Features
+## ⚡ Apple Neural Engine Optimization
 
-- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
-- **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering
-- **CoreML Integration**: Native Apple CoreML backend for optimal performance on Apple Silicon and iOS support
-- **Real-time Processing**: Support for streaming audio processing with minimal latency
-- **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+
-- **Comprehensive CLI**: Professional benchmarking tools with beautiful tabular output
+FluidAudioSwift leverages Apple's Neural Engine for maximum efficiency:
 
-## Installation
+- **Zero Performance Trade-offs**: Full ANE utilization without sacrificing accuracy
+- **Maximum Performance per Watt**: Dedicated to delivering the most efficient computing possible on Apple devices
+- **Power Efficient**: Minimal battery impact on mobile devices
+- **Custom Model Conversion**: Our team has converted and optimized all models specifically for CoreML
+- **Ongoing CoreML Support**: We're committed to converting and supporting the latest models through CoreML for optimal Apple ecosystem performance
+- **Open Source Models**: All converted models are [available on HuggingFace](https://huggingface.co/bweng/speaker-diarization-coreml) for transparency and community contribution
 
-Add FluidAudioSwift to your project using Swift Package Manager:
+## 🏢 Real-World Usage
 
-```swift
-dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "0.0.2"),
-],
-```
+FluidAudioSwift powers production applications including:
+
+- **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence
+
+Make a PR if you want to add your app!
 
 ## Quick Start
 
@@ -92,7 +125,7 @@ swift run fluidaudio benchmark --auto-download
 # Test with specific parameters
 swift run fluidaudio benchmark --threshold 0.7 --min-duration-on 1.0 --output results.json
 
-# Test single file for quick parameter tuning  
+# Test a single file for quick parameter tuning  
 swift run fluidaudio benchmark --single-file ES2004a --threshold 0.8
 ```
 
@@ -126,6 +159,5 @@ Apache 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing.
-
+This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing. 
 
