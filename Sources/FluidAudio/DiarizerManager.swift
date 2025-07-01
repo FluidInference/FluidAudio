@@ -43,7 +43,7 @@ public struct PipelineTimings: Sendable, Codable {
     public let postProcessingSeconds: TimeInterval
     public let totalInferenceSeconds: TimeInterval  // segmentation + embedding + clustering
     public let totalProcessingSeconds: TimeInterval  // all stages combined
-    
+
     public init(
         modelDownloadSeconds: TimeInterval = 0,
         modelCompilationSeconds: TimeInterval = 0,
@@ -60,17 +60,20 @@ public struct PipelineTimings: Sendable, Codable {
         self.embeddingExtractionSeconds = embeddingExtractionSeconds
         self.speakerClusteringSeconds = speakerClusteringSeconds
         self.postProcessingSeconds = postProcessingSeconds
-        self.totalInferenceSeconds = segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds
-        self.totalProcessingSeconds = modelDownloadSeconds + modelCompilationSeconds + audioLoadingSeconds + 
-                                    segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds + postProcessingSeconds
+        self.totalInferenceSeconds =
+            segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds
+        self.totalProcessingSeconds =
+            modelDownloadSeconds + modelCompilationSeconds + audioLoadingSeconds
+            + segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds
+            + postProcessingSeconds
     }
-    
+
     /// Calculate percentage breakdown of time spent in each stage
     public var stagePercentages: [String: Double] {
         guard totalProcessingSeconds > 0 else {
             return [:]
         }
-        
+
         return [
             "Model Download": (modelDownloadSeconds / totalProcessingSeconds) * 100,
             "Model Compilation": (modelCompilationSeconds / totalProcessingSeconds) * 100,
@@ -78,10 +81,10 @@ public struct PipelineTimings: Sendable, Codable {
             "Segmentation": (segmentationSeconds / totalProcessingSeconds) * 100,
             "Embedding Extraction": (embeddingExtractionSeconds / totalProcessingSeconds) * 100,
             "Speaker Clustering": (speakerClusteringSeconds / totalProcessingSeconds) * 100,
-            "Post Processing": (postProcessingSeconds / totalProcessingSeconds) * 100
+            "Post Processing": (postProcessingSeconds / totalProcessingSeconds) * 100,
         ]
     }
-    
+
     /// Identify the bottleneck stage (stage taking the most time)
     public var bottleneckStage: String {
         let stages = [
@@ -91,9 +94,9 @@ public struct PipelineTimings: Sendable, Codable {
             ("Segmentation", segmentationSeconds),
             ("Embedding Extraction", embeddingExtractionSeconds),
             ("Speaker Clustering", speakerClusteringSeconds),
-            ("Post Processing", postProcessingSeconds)
+            ("Post Processing", postProcessingSeconds),
         ]
-        
+
         return stages.max(by: { $0.1 < $1.1 })?.0 ?? "Unknown"
     }
 }
@@ -104,7 +107,10 @@ public struct DiarizationResult: Sendable {
     public let speakerDatabase: [String: [Float]]  // Speaker ID → representative embedding
     public let timings: PipelineTimings
 
-    public init(segments: [TimedSpeakerSegment], speakerDatabase: [String: [Float]], timings: PipelineTimings = PipelineTimings()) {
+    public init(
+        segments: [TimedSpeakerSegment], speakerDatabase: [String: [Float]],
+        timings: PipelineTimings = PipelineTimings()
+    ) {
         self.segments = segments
         self.speakerDatabase = speakerDatabase
         self.timings = timings
@@ -236,7 +242,7 @@ public final class DiarizerManager: @unchecked Sendable {
     // ML models
     private var segmentationModel: MLModel?
     private var embeddingModel: MLModel?
-    
+
     // Timing tracking
     private var modelDownloadTime: TimeInterval = 0
     private var modelCompilationTime: TimeInterval = 0
@@ -248,7 +254,7 @@ public final class DiarizerManager: @unchecked Sendable {
     public var isAvailable: Bool {
         return segmentationModel != nil && embeddingModel != nil
     }
-    
+
     /// Get the initialization timing data
     public var initializationTimings: (downloadTime: TimeInterval, compilationTime: TimeInterval) {
         return (modelDownloadTime, modelCompilationTime)
@@ -268,48 +274,57 @@ public final class DiarizerManager: @unchecked Sendable {
         let embeddingURL = URL(fileURLWithPath: modelPaths.embeddingPath)
 
         let compilationStartTime = Date()
-        try await loadModelsWithAutoRecovery(segmentationURL: segmentationURL, embeddingURL: embeddingURL)
+        try await loadModelsWithAutoRecovery(
+            segmentationURL: segmentationURL, embeddingURL: embeddingURL)
         self.modelCompilationTime = Date().timeIntervalSince(compilationStartTime)
 
         let totalInitTime = Date().timeIntervalSince(initStartTime)
-        logger.info("Diarization system initialized successfully in \(String(format: "%.2f", totalInitTime))s (download: \(String(format: "%.2f", self.modelDownloadTime))s, compilation: \(String(format: "%.2f", self.modelCompilationTime))s)")
+        logger.info(
+            "Diarization system initialized successfully in \(String(format: "%.2f", totalInitTime))s (download: \(String(format: "%.2f", self.modelDownloadTime))s, compilation: \(String(format: "%.2f", self.modelCompilationTime))s)"
+        )
     }
 
     /// Load models with automatic recovery on compilation failures
-    private func loadModelsWithAutoRecovery(segmentationURL: URL, embeddingURL: URL, maxRetries: Int = 2) async throws {
+    private func loadModelsWithAutoRecovery(
+        segmentationURL: URL, embeddingURL: URL, maxRetries: Int = 2
+    ) async throws {
         var attempt = 0
-        
+
         while attempt <= maxRetries {
             do {
                 // Try to load both models
-                logger.info("Attempting to load CoreML models (attempt \(attempt + 1)/\(maxRetries + 1))")
-                
+                logger.info(
+                    "Attempting to load CoreML models (attempt \(attempt + 1)/\(maxRetries + 1))")
+
                 let segmentationModel = try MLModel(contentsOf: segmentationURL)
                 let embeddingModel = try MLModel(contentsOf: embeddingURL)
-                
+
                 // If we get here, both models loaded successfully
                 self.segmentationModel = segmentationModel
                 self.embeddingModel = embeddingModel
-                
+
                 if attempt > 0 {
                     logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
                 }
                 return
-                
+
             } catch {
-                logger.warning("Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
-                
+                logger.warning(
+                    "Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
+
                 // If this is our last attempt, throw the error
                 if attempt >= maxRetries {
                     logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
                     throw DiarizerError.modelCompilationFailed
                 }
-                
+
                 // Auto-recovery: Delete corrupted models and re-download
-                logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
-                
-                try await performModelRecovery(segmentationURL: segmentationURL, embeddingURL: embeddingURL)
-                
+                logger.info(
+                    "Initiating auto-recovery: removing corrupted models and re-downloading...")
+
+                try await performModelRecovery(
+                    segmentationURL: segmentationURL, embeddingURL: embeddingURL)
+
                 attempt += 1
             }
         }
@@ -322,29 +337,29 @@ public final class DiarizerManager: @unchecked Sendable {
             logger.info("Removing corrupted segmentation model at \(segmentationURL.path)")
             try FileManager.default.removeItem(at: segmentationURL)
         }
-        
+
         if FileManager.default.fileExists(atPath: embeddingURL.path) {
             logger.info("Removing corrupted embedding model at \(embeddingURL.path)")
             try FileManager.default.removeItem(at: embeddingURL)
         }
-        
+
         // Re-download the models from Hugging Face
         logger.info("Re-downloading models from Hugging Face...")
-        
+
         // Re-download segmentation model
         try await downloadMLModelCBundle(
             repoPath: "bweng/speaker-diarization-coreml",
             modelName: "pyannote_segmentation.mlmodelc",
             outputPath: segmentationURL
         )
-        
+
         // Re-download embedding model
         try await downloadMLModelCBundle(
             repoPath: "bweng/speaker-diarization-coreml",
             modelName: "wespeaker.mlmodelc",
             outputPath: embeddingURL
         )
-        
+
         logger.info("Model recovery completed - models re-downloaded")
     }
 
@@ -1019,7 +1034,7 @@ public final class DiarizerManager: @unchecked Sendable {
                 sampleRate: sampleRate
             )
             allSegments.append(contentsOf: chunkSegments)
-            
+
             // Accumulate timing from all chunks
             segmentationTime += chunkTimings.segmentationTime
             embeddingTime += chunkTimings.embeddingTime
@@ -1036,16 +1051,19 @@ public final class DiarizerManager: @unchecked Sendable {
         let timings = PipelineTimings(
             modelDownloadSeconds: self.modelDownloadTime,
             modelCompilationSeconds: self.modelCompilationTime,
-            audioLoadingSeconds: 0, // Will be set by CLI
+            audioLoadingSeconds: 0,  // Will be set by CLI
             segmentationSeconds: segmentationTime,
             embeddingExtractionSeconds: embeddingTime,
             speakerClusteringSeconds: clusteringTime,
             postProcessingSeconds: postProcessingTime
         )
 
-        logger.info("Complete diarization finished in \(String(format: "%.2f", totalProcessingTime))s (segmentation: \(String(format: "%.2f", segmentationTime))s, embedding: \(String(format: "%.2f", embeddingTime))s, clustering: \(String(format: "%.2f", clusteringTime))s, post-processing: \(String(format: "%.2f", postProcessingTime))s)")
+        logger.info(
+            "Complete diarization finished in \(String(format: "%.2f", totalProcessingTime))s (segmentation: \(String(format: "%.2f", segmentationTime))s, embedding: \(String(format: "%.2f", embeddingTime))s, clustering: \(String(format: "%.2f", clusteringTime))s, post-processing: \(String(format: "%.2f", postProcessingTime))s)"
+        )
 
-        return DiarizationResult(segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
+        return DiarizationResult(
+            segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
     }
 
     /// Timing data for chunk processing
@@ -1063,7 +1081,7 @@ public final class DiarizerManager: @unchecked Sendable {
         sampleRate: Int = 16000
     ) async throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
-        
+
         let chunkSize = sampleRate * 10  // 10 seconds
         var paddedChunk = chunk
         if chunk.count < chunkSize {
@@ -1074,7 +1092,7 @@ public final class DiarizerManager: @unchecked Sendable {
         let binarizedSegments = try getSegments(audioChunk: paddedChunk)
         let slidingFeature = createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
-        
+
         let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
         let embeddingStartTime = Date()
 
@@ -1090,7 +1108,7 @@ public final class DiarizerManager: @unchecked Sendable {
             embeddingModel: embeddingModel,
             sampleRate: sampleRate
         )
-        
+
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
         let clusteringStartTime = Date()
 
@@ -1119,7 +1137,7 @@ public final class DiarizerManager: @unchecked Sendable {
                 speakerLabels.append("")  // No activity
             }
         }
-        
+
         let clusteringTime = Date().timeIntervalSince(clusteringStartTime)
 
         // Step 5: Create temporal segments with consistent speaker IDs
@@ -1130,19 +1148,20 @@ public final class DiarizerManager: @unchecked Sendable {
             speakerLabels: speakerLabels,
             speakerActivities: speakerActivities
         )
-        
+
         let timings = ChunkTimings(
             segmentationTime: segmentationTime,
             embeddingTime: embeddingTime,
             clusteringTime: clusteringTime
         )
-        
+
         return (segments, timings)
     }
 
-    
     /// Apply post-processing filters to segments
-    private func applyPostProcessingFilters(_ segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
+    private func applyPostProcessingFilters(_ segments: [TimedSpeakerSegment])
+        -> [TimedSpeakerSegment]
+    {
         return segments.filter { segment in
             // Apply minimum duration filter
             segment.durationSeconds >= self.config.minDurationOn

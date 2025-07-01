@@ -23,7 +23,6 @@ public typealias SpeakerDiarizationError = DiarizerError
 /// This package provides speaker diarization and embedding extraction capabilities
 /// optimized for macOS and iOS using Apple's machine learning framework.
 
-public struct FluidAudioSwift {
+public struct FluidAudio {
 
 }
-

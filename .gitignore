@@ -72,7 +72,7 @@ Thumbs.db
 
 
 node_modules/
-FluidAudioSwiftTests/
+FluidAudioTests/
 
 threshold*.json
 baseline*.json
@@ -84,3 +84,8 @@ baseline*.json
 .vscode/
 
 *results.json
+
+
+FluidAudioDatasets/
+
+*.wav
