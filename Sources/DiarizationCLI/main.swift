@@ -1,5 +1,5 @@
 import AVFoundation
-import FluidAudioSwift
+import FluidAudio
 import Foundation
 
 @main
@@ -34,7 +34,7 @@ struct DiarizationCLI {
     static func printUsage() {
         print(
             """
-            FluidAudioSwift Diarization CLI
+            FluidAudio Diarization CLI
 
             USAGE:
                 fluidaudio <command> [options]
@@ -193,7 +193,9 @@ struct DiarizationCLI {
         }
 
         let benchmarkElapsed = Date().timeIntervalSince(benchmarkStartTime)
-        print("\n⏱️ Total benchmark execution time: \(String(format: "%.1f", benchmarkElapsed)) seconds")
+        print(
+            "\n⏱️ Total benchmark execution time: \(String(format: "%.1f", benchmarkElapsed)) seconds"
+        )
     }
 
     static func downloadDataset(arguments: [String]) async {
@@ -338,13 +340,13 @@ struct DiarizationCLI {
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
-            "FluidAudioSwiftDatasets/ami_official/sdm")
+            "FluidAudioDatasets/ami_official/sdm")
 
         // Check if AMI dataset exists, download if needed
         if !FileManager.default.fileExists(atPath: amiDirectory.path) {
             if autoDownload {
                 print("📥 AMI SDM dataset not found - downloading automatically...")
-                await downloadAMIDataset(variant: .sdm, force: false)
+                await downloadAMIDataset(variant: .sdm, force: false, singleFile: singleFile)
 
                 // Check again after download
                 if !FileManager.default.fileExists(atPath: amiDirectory.path) {
@@ -409,7 +411,7 @@ struct DiarizationCLI {
                 let result = try await manager.performCompleteDiarization(
                     audioSamples, sampleRate: 16000)
                 let processingTime = Date().timeIntervalSince(startTime)
-                
+
                 // Create complete timing information including audio loading
                 let completeTimings = PipelineTimings(
                     modelDownloadSeconds: result.timings.modelDownloadSeconds,
@@ -495,13 +497,13 @@ struct DiarizationCLI {
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
-            "FluidAudioSwiftDatasets/ami_official/ihm")
+            "FluidAudioDatasets/ami_official/ihm")
 
         // Check if AMI dataset exists, download if needed
         if !FileManager.default.fileExists(atPath: amiDirectory.path) {
             if autoDownload {
                 print("📥 AMI IHM dataset not found - downloading automatically...")
-                await downloadAMIDataset(variant: .ihm, force: false)
+                await downloadAMIDataset(variant: .ihm, force: false, singleFile: singleFile)
 
                 // Check again after download
                 if !FileManager.default.fileExists(atPath: amiDirectory.path) {
@@ -560,7 +562,7 @@ struct DiarizationCLI {
                 let result = try await manager.performCompleteDiarization(
                     audioSamples, sampleRate: 16000)
                 let processingTime = Date().timeIntervalSince(startTime)
-                
+
                 // Create complete timing information including audio loading
                 let completeTimings = PipelineTimings(
                     modelDownloadSeconds: result.timings.modelDownloadSeconds,
@@ -866,7 +868,7 @@ struct DiarizationCLI {
                     // Same speaker - contributes to intersection
                     intersectionFrames += 1
                 }
-                // Different speakers - only contributes to union
+            // Different speakers - only contributes to union
             }
         }
 
@@ -878,7 +880,9 @@ struct DiarizationCLI {
 
         // Debug logging for first few calculations
         if predicted.count > 0 && groundTruth.count > 0 {
-            print("🔍 JER DEBUG: Intersection: \(intersectionFrames), Union: \(unionFrames), Jaccard Index: \(String(format: "%.3f", jaccardIndex)), JER: \(String(format: "%.1f", jer))%")
+            print(
+                "🔍 JER DEBUG: Intersection: \(intersectionFrames), Union: \(unionFrames), Jaccard Index: \(String(format: "%.3f", jaccardIndex)), JER: \(String(format: "%.1f", jer))%"
+            )
         }
 
         return jer
@@ -928,7 +932,7 @@ struct DiarizationCLI {
 
         // Find optimal assignment using Hungarian Algorithm for globally optimal solution
         let predSpeakerArray = Array(predSpeakers).sorted()  // Consistent ordering
-        let gtSpeakerArray = Array(gtSpeakers).sorted()      // Consistent ordering
+        let gtSpeakerArray = Array(gtSpeakers).sorted()  // Consistent ordering
 
         // Build numerical overlap matrix for Hungarian algorithm
         var numericalOverlapMatrix: [[Int]] = []
@@ -952,7 +956,8 @@ struct DiarizationCLI {
         var totalOverlap = 0
 
         for (predIndex, gtIndex) in assignments.assignments.enumerated() {
-            if gtIndex != -1 && predIndex < predSpeakerArray.count && gtIndex < gtSpeakerArray.count {
+            if gtIndex != -1 && predIndex < predSpeakerArray.count && gtIndex < gtSpeakerArray.count
+            {
                 let predSpeaker = predSpeakerArray[predIndex]
                 let gtSpeaker = gtSpeakerArray[gtIndex]
                 let overlap = overlapMatrix[predSpeaker]![gtSpeaker]!
@@ -960,13 +965,17 @@ struct DiarizationCLI {
                 if overlap > 0 {  // Only assign if there's actual overlap
                     mapping[predSpeaker] = gtSpeaker
                     totalOverlap += overlap
-                    print("🔍 HUNGARIAN MAPPING: '\(predSpeaker)' → '\(gtSpeaker)' (overlap: \(overlap) frames)")
+                    print(
+                        "🔍 HUNGARIAN MAPPING: '\(predSpeaker)' → '\(gtSpeaker)' (overlap: \(overlap) frames)"
+                    )
                 }
             }
         }
 
         totalAssignmentCost = assignments.totalCost
-        print("🔍 HUNGARIAN RESULT: Total assignment cost: \(String(format: "%.1f", totalAssignmentCost)), Total overlap: \(totalOverlap) frames")
+        print(
+            "🔍 HUNGARIAN RESULT: Total assignment cost: \(String(format: "%.1f", totalAssignmentCost)), Total overlap: \(totalOverlap) frames"
+        )
 
         // Handle unassigned predicted speakers
         for predSpeaker in predSpeakerArray {
@@ -1125,24 +1134,24 @@ struct DiarizationCLI {
             print("\n🚨 CRITICAL: Check configuration - results much worse than expected")
         }
     }
-    
+
     /// Print detailed timing breakdown for pipeline stages
     static func printTimingBreakdown(_ results: [BenchmarkResult]) {
         guard !results.isEmpty else { return }
-        
+
         print("\n⏱️  Pipeline Timing Breakdown")
         let timingSeparator = String(repeating: "=", count: 95)
         print("\(timingSeparator)")
-        
+
         // Calculate average timings across all results
         let avgTimings = calculateAverageTimings(results)
         let totalAvgTime = avgTimings.totalProcessingSeconds
-        
+
         // Print timing table header
         print("│ Stage                 │   Time   │ Percentage │ Per Audio Minute │")
         let timingHeaderSep = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
         print("\(timingHeaderSep)")
-        
+
         // Print each stage
         let stages: [(String, TimeInterval)] = [
             ("Model Download", avgTimings.modelDownloadSeconds),
@@ -1151,62 +1160,81 @@ struct DiarizationCLI {
             ("Segmentation", avgTimings.segmentationSeconds),
             ("Embedding Extraction", avgTimings.embeddingExtractionSeconds),
             ("Speaker Clustering", avgTimings.speakerClusteringSeconds),
-            ("Post Processing", avgTimings.postProcessingSeconds)
+            ("Post Processing", avgTimings.postProcessingSeconds),
         ]
-        
+
         let totalAudioMinutes = results.reduce(0.0) { $0 + Double($1.durationSeconds) } / 60.0
-        
+
         for (stageName, stageTime) in stages {
             let stageNamePadded = stageName.padding(toLength: 19, withPad: " ", startingAt: 0)
-            let timeStr = String(format: "%.3fs", stageTime).padding(toLength: 8, withPad: " ", startingAt: 0)
+            let timeStr = String(format: "%.3fs", stageTime).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
             let percentage = totalAvgTime > 0 ? (stageTime / totalAvgTime) * 100 : 0
-            let percentageStr = String(format: "%.1f%%", percentage).padding(toLength: 10, withPad: " ", startingAt: 0)
+            let percentageStr = String(format: "%.1f%%", percentage).padding(
+                toLength: 10, withPad: " ", startingAt: 0)
             let perMinute = totalAudioMinutes > 0 ? stageTime / totalAudioMinutes : 0
-            let perMinuteStr = String(format: "%.3fs/min", perMinute).padding(toLength: 16, withPad: " ", startingAt: 0)
-            
+            let perMinuteStr = String(format: "%.3fs/min", perMinute).padding(
+                toLength: 16, withPad: " ", startingAt: 0)
+
             print("│ \(stageNamePadded) │ \(timeStr) │ \(percentageStr) │ \(perMinuteStr) │")
         }
-        
+
         // Print total
         let totalSep = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
         print("\(totalSep)")
-        let totalTimeStr = String(format: "%.3fs", totalAvgTime).padding(toLength: 8, withPad: " ", startingAt: 0)
-        let totalPerMinuteStr = String(format: "%.3fs/min", totalAudioMinutes > 0 ? totalAvgTime / totalAudioMinutes : 0).padding(toLength: 16, withPad: " ", startingAt: 0)
+        let totalTimeStr = String(format: "%.3fs", totalAvgTime).padding(
+            toLength: 8, withPad: " ", startingAt: 0)
+        let totalPerMinuteStr = String(
+            format: "%.3fs/min", totalAudioMinutes > 0 ? totalAvgTime / totalAudioMinutes : 0
+        ).padding(toLength: 16, withPad: " ", startingAt: 0)
         print("│ TOTAL                 │ \(totalTimeStr) │ 100.0%     │ \(totalPerMinuteStr) │")
-        
+
         let timingBottomSep = "└───────────────────────┴──────────┴────────────┴──────────────────┘"
         print("\(timingBottomSep)")
-        
+
         // Print bottleneck analysis
         let bottleneck = avgTimings.bottleneckStage
         print("\n🔍 Performance Analysis:")
         print("   Bottleneck Stage: \(bottleneck)")
-        print("   Inference Only: \(String(format: "%.3f", avgTimings.totalInferenceSeconds))s (\(String(format: "%.1f", (avgTimings.totalInferenceSeconds / totalAvgTime) * 100))% of total)")
-        print("   Setup Overhead: \(String(format: "%.3f", avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", ((avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds) / totalAvgTime) * 100))% of total)")
-        
+        print(
+            "   Inference Only: \(String(format: "%.3f", avgTimings.totalInferenceSeconds))s (\(String(format: "%.1f", (avgTimings.totalInferenceSeconds / totalAvgTime) * 100))% of total)"
+        )
+        print(
+            "   Setup Overhead: \(String(format: "%.3f", avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", ((avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds) / totalAvgTime) * 100))% of total)"
+        )
+
         // Optimization suggestions
         if avgTimings.modelDownloadSeconds > avgTimings.totalInferenceSeconds {
-            print("\n💡 Optimization Suggestion: Model download is dominating execution time - consider model caching")
+            print(
+                "\n💡 Optimization Suggestion: Model download is dominating execution time - consider model caching"
+            )
         } else if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
-            print("\n💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization")
+            print(
+                "\n💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization"
+            )
         } else if avgTimings.embeddingExtractionSeconds > avgTimings.segmentationSeconds * 2 {
-            print("\n💡 Optimization Suggestion: Embedding extraction is the bottleneck - consider batch processing")
+            print(
+                "\n💡 Optimization Suggestion: Embedding extraction is the bottleneck - consider batch processing"
+            )
         }
     }
-    
+
     /// Calculate average timings across all benchmark results
     static func calculateAverageTimings(_ results: [BenchmarkResult]) -> PipelineTimings {
         let count = Double(results.count)
         guard count > 0 else { return PipelineTimings() }
-        
+
         let avgModelDownload = results.reduce(0.0) { $0 + $1.timings.modelDownloadSeconds } / count
-        let avgModelCompilation = results.reduce(0.0) { $0 + $1.timings.modelCompilationSeconds } / count
+        let avgModelCompilation =
+            results.reduce(0.0) { $0 + $1.timings.modelCompilationSeconds } / count
         let avgAudioLoading = results.reduce(0.0) { $0 + $1.timings.audioLoadingSeconds } / count
         let avgSegmentation = results.reduce(0.0) { $0 + $1.timings.segmentationSeconds } / count
-        let avgEmbedding = results.reduce(0.0) { $0 + $1.timings.embeddingExtractionSeconds } / count
+        let avgEmbedding =
+            results.reduce(0.0) { $0 + $1.timings.embeddingExtractionSeconds } / count
         let avgClustering = results.reduce(0.0) { $0 + $1.timings.speakerClusteringSeconds } / count
-        let avgPostProcessing = results.reduce(0.0) { $0 + $1.timings.postProcessingSeconds } / count
-        
+        let avgPostProcessing =
+            results.reduce(0.0) { $0 + $1.timings.postProcessingSeconds } / count
+
         return PipelineTimings(
             modelDownloadSeconds: avgModelDownload,
             modelCompilationSeconds: avgModelCompilation,
@@ -1246,9 +1274,9 @@ struct DiarizationCLI {
         }
     }
 
-    static func downloadAMIDataset(variant: AMIVariant, force: Bool) async {
+    static func downloadAMIDataset(variant: AMIVariant, force: Bool, singleFile: String? = nil) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let baseDir = homeDir.appendingPathComponent("FluidAudioSwiftDatasets")
+        let baseDir = homeDir.appendingPathComponent("FluidAudioDatasets")
         let amiDir = baseDir.appendingPathComponent("ami_official")
         let variantDir = amiDir.appendingPathComponent(variant.rawValue)
 
@@ -1265,17 +1293,23 @@ struct DiarizationCLI {
         print("   Target directory: \(variantDir.path)")
 
         // Core AMI test set - smaller subset for initial benchmarking
-        let commonMeetings = [
-            "ES2002a",
-            "ES2003a",
-            "ES2004a",
-            "ES2005a",
-            "IS1000a",
-            "IS1001a",
-            "IS1002b",
-            "TS3003a",
-            "TS3004a",
-        ]
+        let commonMeetings: [String]
+        if let singleFile = singleFile {
+            commonMeetings = [singleFile]
+            print("📋 Downloading single file: \(singleFile)")
+        } else {
+            commonMeetings = [
+                "ES2002a",
+                "ES2003a",
+                "ES2004a",
+                "ES2005a",
+                "IS1000a",
+                "IS1001a",
+                "IS1002b",
+                "TS3003a",
+                "TS3004a",
+            ]
+        }
 
         var downloadedFiles = 0
         var skippedFiles = 0
@@ -1400,7 +1434,7 @@ struct DiarizationCLI {
                 .deletingLastPathComponent().appendingPathComponent("Tests/ami_public_1.6.2"),
             // Home directory
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-                "code/FluidAudioSwift/Tests/ami_public_1.6.2"),
+                "code/FluidAudio/Tests/ami_public_1.6.2"),
         ]
 
         var amiDir: URL?
@@ -1548,7 +1582,7 @@ struct BenchmarkResult: Codable {
     let segments: [TimedSpeakerSegment]
     let speakerCount: Int
     let timings: PipelineTimings
-    
+
     /// Total time including audio loading
     var totalExecutionTime: TimeInterval {
         return timings.totalProcessingSeconds + timings.audioLoadingSeconds

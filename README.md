@@ -1,4 +1,4 @@
-# FluidAudio - Efficient Speaker Diarization for Apple devices
+# FluidAudio - Efficient Speaker Diarization for Apple devices in Swift
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
@@ -20,11 +20,11 @@ FluidAudio is a high-performance Swift framework for on-device speaker diarizati
 
 ## Installation
 
-Add FluidAudioSwift to your project using Swift Package Manager:
+Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudioSwift.git", from: "0.0.2"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.0.2"),
 ],
 ```
 
@@ -61,7 +61,7 @@ dependencies: [
 
 ## ⚡ Apple Neural Engine Optimization
 
-FluidAudioSwift leverages Apple's Neural Engine for maximum efficiency:
+FluidAudio leverages Apple's Neural Engine for maximum efficiency:
 
 - **Zero Performance Trade-offs**: Full ANE utilization without sacrificing accuracy
 - **Maximum Performance per Watt**: Dedicated to delivering the most efficient computing possible on Apple devices
@@ -72,7 +72,7 @@ FluidAudioSwift leverages Apple's Neural Engine for maximum efficiency:
 
 ## 🏢 Real-World Usage
 
-FluidAudioSwift powers production applications including:
+FluidAudio powers production applications including:
 
 - **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence
 
@@ -81,7 +81,7 @@ Make a PR if you want to add your app!
 ## Quick Start
 
 ```swift
-import FluidAudioSwift
+import FluidAudio
 
 // Initialize and process audio
 Task {
@@ -114,7 +114,7 @@ let config = DiarizerConfig(
 
 ## CLI Usage
 
-FluidAudioSwift includes a powerful command-line interface for benchmarking and audio processing:
+FluidAudio includes a powerful command-line interface for benchmarking and audio processing:
 
 ### Benchmark with Beautiful Output
 
@@ -161,3 +161,6 @@ Apache 2.0 - see [LICENSE](LICENSE) for details.
 
 This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing. 
 
+## Community
+
+[Join our discord](https://discord.gg/8FbwRaDFJR)

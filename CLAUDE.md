@@ -1,7 +1,7 @@
-# FluidAudioSwift - Claude Code Instructions
+# FluidAudio - Claude Code Instructions
 
 ## Project Overview
-FluidAudioSwift is a speaker diarization system for Apple platforms using Core ML models. The system processes audio to identify "who spoke when" by segmenting audio and clustering speaker embeddings.
+FluidAudio is a speaker diarization system for Apple platforms using Core ML models. The system processes audio to identify "who spoke when" by segmenting audio and clustering speaker embeddings.
 
 ## Current Performance Baseline (AMI Benchmark)
 - **Dataset**: AMI SDM (Single Distant Microphone)

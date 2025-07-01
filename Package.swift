@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "FluidAudioSwift",
+    name: "FluidAudio",
     platforms: [
         .macOS(.v13),
         .iOS(.v16),
     ],
     products: [
         .library(
-            name: "FluidAudioSwift",
-            targets: ["FluidAudioSwift"]
+            name: "FluidAudio",
+            targets: ["FluidAudio"]
         ),
         .executable(
             name: "fluidaudio",
@@ -20,18 +20,18 @@ let package = Package(
     dependencies: [],
     targets: [
         .target(
-            name: "FluidAudioSwift",
+            name: "FluidAudio",
             dependencies: [],
-            path: "Sources/FluidAudioSwift"
+            path: "Sources/FluidAudio"
         ),
         .executableTarget(
             name: "DiarizationCLI",
-            dependencies: ["FluidAudioSwift"],
+            dependencies: ["FluidAudio"],
             path: "Sources/DiarizationCLI"
         ),
         .testTarget(
-            name: "FluidAudioSwiftTests",
-            dependencies: ["FluidAudioSwift"],
+            name: "FluidAudioTests",
+            dependencies: ["FluidAudio"],
             resources: [
                 .copy("README_BENCHMARKS.md")
             ]
