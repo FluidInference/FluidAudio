@@ -4,7 +4,11 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Models](https://img.shields.io/badge/Models-HuggingFace-yellow.svg)](https://huggingface.co/bweng/speaker-diarization-coreml)
 
-FluidAudio is a high-performance Swift framework for on-device speaker diarization and audio processing that is competitive with research standards. The goal is to deliver maximum performance per watt by using only CoreML models. We are also working on adding ASR (Automatic Speech Recognition) support.
+FluidAudio is a high-performance Swift framework for on-device speaker diarization and audio processing, designed to meet research standards. Our goal is to maximize performance per watt by leveraging CoreML models exclusively. We are also working on adding support for ASR (Automatic Speech Recognition).
+
+All models have been manually converted by our team from open-source variants and are available on Hugging Face.
+
+In our tests, the CoreML versions deliver significantly more efficient inference compared to their ONNX counterparts, making them truly suitable for real-time transcription use cases. Try it yourself with [fluidtop](https://github.com/FluidInference/fluidtop)!
 
 ## Features
 
