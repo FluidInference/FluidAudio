@@ -1,0 +1,221 @@
+Hello! My name is Steve Nimick.
+ I’m an audio software engineer working on spatial audio technologies.
+ In this video, I’ll talk about how to enhance the audio capabilities of your app.
+I’ll present API updates for input device selection, audio capture, and playback.
+The first step to capture audio is to select an input device.
+ There are many different types of microphones, and new API allows changing the active audio source from within your app.
+Additional enhancements enable your app to use AirPods in a new high quality recording mode.
+ Other updates include Spatial Audio capture, plus new features that provide your app with more possibilities for processing audio.
+ And finally, new API unlocks the Audio Mix feature during spatial audio playback.
+I'll begin with the input route selection, with updates for how your app interacts with connected devices.
+Content creators may use multiple audio devices for different applications, such as recording music or podcasting.
+IOS 26 has improvements to how the system manages audio hardware improvements that also extend to apps! New API in AVKit displays the list of available inputs and allows audio source switching from within the app, without a need to navigate over to the System Settings.
+ Here’s an example of this UI.
+Your app can have a UI button that brings up the new input selection menu.
+ It shows the list of devices, with live sound level metering.
+ And there’s a microphone mode selection view, for displaying the modes that the input device supports.
+ The audio stack remembers the selected device, and chooses the same input the next time the app goes active.
+ Here's the API that enables this for your app.
+First, the Audio Session needs to be configured before calling this API.
+ This ensures that the input selection view shows the correct list of devices.
+To present the input picker, create an instance of AVInputPickerInteraction.
+ Do this after setting up the audio session.
+ Then, assign the InputPickerInteraction’s delegate as the presenting view controller.
+ Your app may designate a UI element, like a button, that brings up the picker interaction view.
+Finally, in your UI callback function, use the 'present' method to show the audio input menu.
+ Now, when the button is tapped, the picker interaction view appears and lets people select and change the device.
+This API provides a nice, intuitive way for users to change inputs while keeping your app active.
+For content creators, the best microphone is the one that's the most readily available.
+ So now, I’ll talk about a popular, convenient input device, AirPods.
+ In IOS 26, there’s a new high quality, high sample rate, bluetooth option for apps that feature audio capture.
+ With a new media tuning designed specifically for content creators, it strikes a great balance between voice and background sounds, just like someone would expect from a LAV microphone.
+When this tuning mode is active, your app uses a more reliable bluetooth link that is designed specifically for AirPods high quality recording.
+Here's how an app configures this feature.
+It is supported in both AVAudioSession and AVCaptureSession.
+ For the AudioSession, there’s a new category option, called bluetoothHighQualityRecording.
+ If your app already uses the AllowBluetoothHFP option, then, by adding the high quality option, your app will use it as the default.
+ BluetoothHFP is a fallback in case the input route doesn’t support bluetooth high quality.
+ For AVCaptureSession, there’s a similar property that, when set to true, enables this High Quality mode, without your app having to set up the audio session manually.
+ With both sessions, if this option is enabled, the system-level audio input menu will include high-quality AirPods in the device list.
+ This AirPods feature is a great addition to apps that record audio, and you can support this with minimal code change.
+In addition to high quality recording, AirPods also have built-in controls that make it easy to record.
+ People can start and stop by pressing the stem of the AirPods.
+ To learn more about how to support this in your app, check out “Enhancing your camera experience with capture controls” from WWDC25.
+Next, I’ll introduce new updates for Spatial Audio capture.
+ In IOS 26, apps that use AVAssetWriter are able to record with Spatial Audio.
+ First, it's important to define how "Spatial Audio” works.
+ Spatial Audio capture uses an array of microphones, like the ones on an iPhone, to take a recording of the 3D scene, and then, the microphone captures are transformed into a format based on spherical harmonics, called Ambisonics.
+ Spatial Audio is stored as First Order Ambisonics, or FOA.
+ FOA uses the first 4 spherical harmonic components.
+ There is an omni component, and 3 perpendicular dipoles, in the X, Y, and Z directions or front-back, left-right, and up-down.
+ Audio that’s recorded in this format benefits from Spatial Audio playback features, like headtracking on AirPods.
+ In addition, your apps can use new API for the Audio Mix effect, which allows people to easily adjust the balance of foreground and background sounds.
+Spatial Audio capture API was introduced in iOS 18.
+ Apps that use AVCaptureMovieFileOutput can record Spatial Audio by setting the multichannelAudioMode property of the AVCaptureDevice Input to .
+firstOrderAmbisonics.
+In IOS 26, audio-only apps, like Voice Memos, now have the option to save data in the QuickTime audio format with the extension .
+qta.
+Similar to QuickTime movies or MPEG files, the QTA format supports multiple audio tracks with alternate track groups, just like how Spatial Audio files are composed.
+Here’s an overview of a properly-formatted Spatial Audio asset.
+ There are two audio tracks: a stereo track in AAC format, and a Spatial Audio track in the new Apple Positional Audio Codec (or APAC) format.
+ During ProRes recording, these audio tracks are encoded as PCM.
+ The stereo track is included for compatibility with devices that don’t support Spatial Audio.
+ Lastly, there’s at least one metadata track that contains information for playback.
+ When a recording stops, the capture process creates a data sample that signals that the Audio Mix effect can be used.
+ It also contains tuning parameters that are applied during playback.
+I'll expand on this topic in the next section on Audio Mix.
+ If you'd like more information on creating track groups and fallback relationships, please read the TechNote, “Understanding alternate track groups in movie files”.
+ For apps that assemble their own file with AVAssetWriter instead of MovieFileOutput, I’ll go through the elements needed to create a Spatial Audio recording.
+There must be two audio tracks and a metadata track.
+ When the multichannelAudioMode property of the CaptureDeviceInput is set to FOA, the AVCaptureSession can support up to two instances of AudioDataOutput (or ADO).
+A single ADO can produce either four channels of FOA or two channels in Stereo.
+ Spatial Audio, with two tracks, requires two ADOs, One of them must be configured in FOA, and the other must output Stereo.
+ There’s a new channel layout tag property on the ADO object, called spatialAudioChannelLayoutTag This layout tag can take two possible values - Stereo, or first order ambisonics, which is 4 channels of the ambisonic layout HOA - ACN - SN3D.
+ Your app needs 2 AssetWriter Inputs to make the audio tracks.
+ One for stereo, and one for FOA.
+ The final piece, is the metadata, and there's new API to create that sample.
+ Use the helper object: AVCaptureSpatialAudioMetadataSampleGenerator.
+ The sample generator object receives the same buffers that are coming from the FOA AudioDataOutput.
+ When the recording stops, after sending the final buffer, the sample generator creates a timed metadata sample that is passed into another AssetWriterInput and then compiled into the final composition as a metadata track.
+There’s one more update to AVCaptureSession that affects the MovieFileOutput and the AudioDataOutput, and it’s useful for apps that could benefit from using both objects.
+ AudioDataOutput provides access to audio sample buffers as they’re being received, so your app can apply effects or draw waveforms on screen.
+ in IOS 26, the CaptureSession supports the operation of both the MovieFileOutput and the AudioDataOutput simultaneously.
+ This means your app can record to a file, and process or visualize the audio samples in real-time.
+ This update gives you more freedom to add those “surprise and delight” elements to your app.
+ For an example of spatial audio capture with AVAssetWriter, check out the new “Capturing Spatial Audio in your iOS app” sample app linked to this video.
+ In IOS 26, there’s also the option to record Cinematic Videos, with Spatial Audio included.
+ To learn more, check out “Capture Cinematic video in your app” from WWDC25.
+ In the next section, I’ll discuss one more element of Spatial Audio: playback and editing, using Audio Mix.
+New in IOS and macOS 26, the Cinematic Framework includes options to control the Audio Mix effect.
+ This is the same as the Photos edit feature, for videos recorded with Spatial Audio.
+Audio Mix enables control of the balance between foreground sounds, like speech, and background ambient noise.
+ The new API includes the same mix modes that Photos app uses Cinematic, Studio, and In-Frame.
+ And, there are 6 additional modes available for your app.
+ These other modes can provide the extracted speech by itself, as a mono, foreground stem, or only the ambience background stem, in FOA format.
+This is a powerful addition to apps that play Spatial Audio content, Like this next demo.
+This is a demo to show how to control the Audio Mix effect on Spatial Audio recordings.
+ I'm here at the beautiful Apple Park campus - a wonderful setting for my video.
+ But the unprocessed microphones on my phone are picking up all of the sounds around me.
+ And that's not what I have in mind for my audio recording.
+ Steve has added a UI element to his app for switching between the various audio mix styles: standard, cinematic, studio, or one of the background stem modes.
+ Selecting Cinematic applies the cinematic audio mix style.
+There, that sounds a lot better.
+ There's also now a slider for controlling the balance between the speech and ambient noise.
+ I'll find the position where my voice comes through loud and clear.
+There, I think that position works pretty well.
+If I choose a background mode, my voice would be removed.
+ The audio track will only contain ambient sounds.
+ This can be used for creating a pure ambient track for use in post production later on.
+ I'll select that mode now.
+Now, back to voice mode.
+Now, Steve will show you how to add this to your apps.
+Here’s how you can implement this.
+ First, import the Cinematic framework.
+The two primary Audio Mix parameters are, the effectIntensity, and the renderingStyle the demo app uses UI elements to change them in real-time.
+ The intensity operates within a range of 0 to 1, and CNSpatialAudioRenderingStyle is an enum that contains the style options.
+ Next, initialize an instance of CNAssetSpatialAudioInfo, this class contains many properties and methods for working with Audio Mix.
+ For example, in the next line, run audioInfo.
+audioMix() this creates an AVAudioMix using the current mix parameters.
+And then set this new mix on the audio mix property of the AVPlayerItem.
+ And that is all you need to start using Audio Mix in your AVPlayer app.
+Outside of AVPlayer, you can run the Audio Mix processing with a new AudioUnit called AUAudioMix.
+This is the AU that performs the separation between speech and ambience.
+Using this AU directly is useful for apps that don’t use AVPlayer, which configures many settings automatically.
+ If your app needs a more specific, customized workflow, AUAudioMix provides more flexibility and tuning options.
+ Here are the different components inside the AU.
+ The input is 4 channels of FOA spatial audio.
+ It flows into the processing block that separates speech and ambience.
+ And the output of that is sent into AUSpatialMixer, which provides other playback options.
+ The first 2 AU parameters are the RemixAmount and the Style, the 2 fundamental elements of audio mix.
+There’s also the AUAudioMix property EnableSpatialization, which turns the SpatialMixer on or off.
+ This changes the output format of the entire AU, and I’ll talk more about that shortly.
+AudioUnit property SpatialMixerOutputType provides the option to render the output to either headphones, your device built-in speakers, or external speakers.
+The AU also has a property for the input and output stream formats.
+ Since the AU receives FOA audio, set the input stream with 4 channels.
+There is one more property called SpatialAudioMixMetadata.
+ This is a CFData object that contains automatically - generated tuning parameters for the dialog and ambience components.
+ Here’s how this works.
+Immediately after spatial audio recording is stopped, the capture process analyzes the sounds in the foreground and background.
+ It calculates audio parameters, such as gain and EQ, that get applied during playback.
+ Those values are saved in a metadata track.
+ When configuring AUAudioMix, your app needs to read this data from the input file, and apply those tuning parameters on the AU.
+ Here's an example of how to extract this metadata from a file.
+Again, it starts with an instance of CNAssetSpatialAudioInfo, Retrieve the MixMetadata property by calling audioInfo.
+spacialAudioMixMetadata This needs to be type CFData to set this property on the AU.
+Earlier, I mentioned the EnableSpatialization property.
+ It’s turned off by default, and in this mode, the AU outputs the 5 channel result of the sound separation.
+ That is, 4 channels of ambience, in FOA, plus one channel of dialog.
+With the spatialization property turned on, the AU supports other common channel layouts, such as 5.
+1 surround, or 7.
+1.
+4.
+Lastly, linked to this video, is a command-line tool sample project, called “Editing Spatial Audio with an audio mix”.
+SpatialAudioCLI has examples for how to apply an audio mix in three different ways.
+ Preview mode uses 'AVPlayer' to play the input, and apply audio mix parameters.
+ The Bake option uses AVAssetWriter to save a new file with the audio mix params, including a stereo compatibility track.
+ And Process mode sends the input through 'AUAudioMix' and renders the output to a channel layout that you specify.
+Now that you know all the new audio features, here’s how to take your app to the next level.
+Add the AVInputPickerInteraction to let people select the audio input natively within your app.
+Enable the bluetooth high quality recording option for AirPods, so content creators can quickly and easily capture remarkable sound.
+Give your app more flexibility by using MovieFileOutput and AudioDataOutput to record, and, apply audio effects.
+For utmost control, integrate Spatial Audio capture with AVAssetWriter, and use the new Audio Mix API during playback.
+To get started with Spatial Audio, download the related sample code projects.
+I look forward to being immersed by everything that people create using your apps.
+ Have a great day!
+
+ 2:10 - Input route selection
+
+import AVKit
+
+class AppViewController {
+
+    // Configure AudioSession
+
+    // AVInputPickerInteraction is a NSObject subclass that presents an input picker
+    let inputPickerInteraction = AVInputPickerInteraction()   
+    inputPickerInteraction.delegate = self
+
+    // connect the PickerInteraction to a UI element for displaying the picker
+    @IBOutlet weak var selectMicButton: UIButton!
+    self.selectMicButton.addInteraction(self.inputPickerInteraction)
+
+    // button press callback: present input picker UI
+    @IBAction func handleSelectMicButton(_ sender: UIButton) {
+	    inputPickerInteraction.present()
+    }
+}
+Copy Code
+3:57 - AirPods high quality recording
+
+// AVAudioSession clients opt-in - session category option
+AVAudioSessionCategoryOptions.bluetoothHighQualityRecording
+
+// AVCaptureSession clients opt-in - captureSession property
+session.configuresApplicationAudioSessionForBluetoothHighQualityRecording = true
+Copy Code
+13:26 - Audio Mix with AVPlayer
+
+import Cinematic
+
+// Audio Mix parameters (consider using UI elements to change these values)
+var intensity: Float32 = 0.5 // values between 0.0 and 1.0
+var style = CNSpatialAudioRenderingStyle.cinematic
+
+// Initializes an instance of CNAssetAudioInfo for an AVAsset asynchronously
+let audioInfo = try await CNAssetSpatialAudioInfo(asset: myAVAsset)
+    
+// Returns an AVAudioMix with effect intensity and rendering style.
+let newAudioMix: AVAudioMix = audioInfo.audioMix(effectIntensity: intensity,
+                                                 renderingStyle: style)
+
+// Set the new AVAudioMix on your AVPlayerItem
+myAVPlayerItem.audioMix = newAudioMix
+Copy Code
+16:45 - Get remix metadata from input file
+
+// Get Spatial Audio remix metadata from input AVAsset
+
+let audioInfo = try await CNAssetSpatialAudioInfo(asset: myAVAsset)
+
+// extract the remix metadata. Set on AUAudioMix with AudioUnitSetProperty()
+let remixMetadata = audioInfo.spatialAudioMixMetadata as CFData
