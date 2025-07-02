@@ -1,0 +1,612 @@
+Hi, I’m Louis.
+ Today we’ll look at getting the most out of the Foundation Models framework.
+As you may know, the Foundation Models framework gives you direct access to an on-device Large Language Model, with a convenient Swift API.
+ It’s available on macOS, iPadOS, iOS, and visionOS.
+ And because it runs on-device, using it in your project is just a simple import away.
+ In this video, we will look at how sessions work with Foundation Models.
+ How to use Generable to get structured output.
+ How to get structured output with dynamic schemas defined at runtime, and using tool calling to let the model call into your custom functions.
+Let’s start simple, by generating text with a session.
+Now, I’ve been working on this pixel art game about a coffee shop, and I think it could be really fun to use Foundation Models to generate game dialog and other content to make it feel more alive! We can prompt the model to respond to a player’s question, so our barista gives a unique dialog.
+To do this, we’ll create a LanguageModelSession with custom instructions.
+ This let’s us tell the model what its purpose is for this session and for the prompt we’ll take the user’s input.
+ And that’s really all it takes for a pretty fun new game element.
+ Let’s ask the Barista “How long have you worked here?”, and let it respond to our question.
+That was generated entirely on-device.
+ Pretty amazing.
+ But how does this actually work? Let’s get a better sense of how Foundation Models generates text, and what to look out for.
+ When you call respond(to:) on a session, it first takes your session’s instructions, and the prompt, in this case the user’s input, and it turns that text into tokens.
+ Tokens are small substrings, sometimes a word but typically just a few characters.
+ A large language model takes a sequence of tokens as input, and it then generates a new sequence of tokens as output.
+ You don’t have to worry about the exact tokens that Foundation Models operates with, the API nicely abstracts that away for you.
+ But it is important to understand that tokens are not free.
+ Each token in your instructions and prompt adds extra latency.
+ Before the model can start producing response tokens, it first needs to process all the input tokens.
+ And generating tokens also has a computational cost, which is why longer outputs take longer to generate.
+A LanguageModelSession is stateful.
+ Each respond(to:) call is recorded in the transcript.
+The transcript includes all prompts and responses for a given session.
+This can be useful for debugging, or even showing it in your UI.
+But a session has a limit for how large it can grow.
+If you’re making a lot of requests, or if you’re giving a large prompt or getting large outputs, you can hit the context limit.
+If your session exceeds the available context size, it will throw an error, which you should be prepared to catch.
+Back in our game, when we’re talking with a character and hit an error, the conversation just ends, which is unfortunate, I was just getting to know this character! Luckily there are ways to recover from this error.
+You can catch the exceededContextWindowSize error.
+And when you do, you can start a brand new session, without any history.
+ But in my game that would mean the character suddenly forgets the whole conversation.
+You can also choose some of the transcript from your current session to carry over into the new session.
+You can take the entries from a session’s transcript, and condense it into a new array of entries.
+So for our game dialog, we could take the first entry of the session’s transcript, which is the instructions.
+ As well as the last entry, which is the last successful response.
+And when we pass that into a new session, our character is good to chat with for another while.
+But keep in mind, the session’s transcript includes the initial instructions as the first entry.
+ When carrying over a transcript for our game character, we definitely want to include those instructions.
+Including just a few relevant pieces from the transcript can be a simple, and effective, solution.
+ But sometimes it’s not that simple.
+Let’s imagine a transcript with more entries.
+You definitely always want to start by carrying over the instructions.
+ But a lot of entries in the transcript might be relevant, so for this use case you could consider summarizing the transcript.
+You could do this with some external library, or perhaps even summarize parts of the transcript with Foundation Models itself.
+So that’s what you can do with the transcript of a session.
+Now let’s take a brief look at how the responses are actually generated.
+In our game, when you walk up to the barista, the player can ask any question.
+But if you start two new games, and ask the exact same question in each, you will probably get different output.
+ So how does that work? Well that’s where sampling comes in.
+When the model is generating its output, it does so one token at a time.
+ And it does this by creating a distribution, for the likelihood of any given token By default, Foundation Models will pick tokens within some probability range.
+ Sometimes it might start by saying “Ah”, and other times it might pick “Well” for the first token.
+ This happens for every token that’s generated.
+ Picking a token is what we call sampling.
+ And the default behavior is random sampling.
+ Getting varied output is great for use cases like a game.
+ But sometimes you might want deterministic output, like when you’re writing a demo that should be repeatable.
+ The GenerationOptions API let’s you control the sampling method.
+ You can set it to greedy to get deterministic output.
+ And when that’s set, you will get the same output for the same prompt, assuming your session is also in the same state.
+ Although note, this only holds true for a given version of the on-device model.
+ When the model is updated as part of an OS update, your prompt can definitely give different output, even when using greedy sampling.
+You can also play with the temperature for the random sampling.
+ For example, setting the temperature to 0.
+5 to get output that only varies a little.
+ Or setting it to a higher value to get wildly different output for the same prompt.
+Also, keep in mind, when taking user input in your prompt, the language might not be supported.
+There is the dedicated unsupportedLanguageOrLocale error that you can catch for this case.
+This can be a good way to show a custom message in your UI.
+And there’s also an API to check whether the model supports a certain language.
+ For example to checkout if the user’s current language is supported, and to show a disclaimer when it’s not.
+ So that’s an overview of sessions.
+ You can prompt it, which will store the history in the transcript.
+ And you can optionally set the sampling parameter, to control the randomness of the session’s output.
+ But let’s get fancier! When the player walks around, we can generate NPCs, Non Playable Characters, again using Foundation Models.
+ However, this time, we want more complicated output.
+ Instead of just plain text, we’d like a name and a coffee order from the NPC.
+ Generable can help us here.
+It can be a challenge to get structured output from a Large Language Model.
+ You could prompt it with the specific fields you expect, and have some parsing code to extract that.
+ But this is hard to maintain, and very fragile, it might not always give the valid keys, which would make the whole method fail.
+Luckily, Foundation Models has a much better API, called Generable.
+On your struct, you can apply the @Generable macro.
+ So, what is Generable and is that even a word? Well, yes, it is.
+Generable is an easy way to let the model generate structured data, using Swift types The macro generates a schema at compile time, which the model can use to produce the expected structure.
+The macro also generates an initializer, which is automatically called for you when making a request to a session.
+So then we can generate instances of our struct.
+ Like before, we’ll call the respond method on our session.
+ But this time pass the generating argument telling the model which type to generate.
+Foundation Models will even automatically include details about your Generable type in the prompt, in a specific format that the model has been trained on.
+ You don’t have to tell it about what fields your Generable type has In our game, we’ll now get some great generated NPC encounters! Generable is actually more powerful than it might seem.
+ At a low level, this uses constrained decoding, which is a technique to let the model generate text that follows a specific schema.
+Remember, that schema that the macro generates.
+As we saw before, an LLM generates tokens, which are later transformed into text.
+ And with Generable, that text is even automatically parsed for you in a type-safe way.
+ The tokens are generated in a loop, often referred to as the decoding loop.
+Without constrained decoding, the model might hallucinate some invalid field name.
+Like `firstName`instead of a name.
+ Which would then fail to be parsed into the NPC type.
+But with constrained decoding, the model is prevented from making structural mistakes like this.
+ For every token that’s generated, there’s a distribution of all the tokens in the model’s vocabulary.
+And constrained decoding works by masking out the tokens that are not valid.
+ So instead of just picking any token, the model is only allowed to pick valid tokens according to the schema.
+And that’s all without needing to worry about manually parsing the model’s output.
+ Which means you can spend your time on what truly matters, like talking to virtual guests in your coffee shop! Generable is truly the best way to get output from the on-device LLM.
+ And it can do so much more.
+ Not only can you use it on structs, but also on enums! So let’s use that to make our encounters more dynamic! Here, I’ve added an Encounter enum, with two cases.
+ The enum can even contain associated values in its cases, so let’s use that to either generate a coffee order, or, to have someone that wants to speak to the manager.
+Let’s checkout what we encounter in our game now! Wow, someone really needs a coffee.
+Clearly, not every guest is as easy to deal with, so let’s level this up by adding levels to our NPCs.
+Generable supports most common Swift types out of the box, including Int.
+ So let’s add a level property.
+ But we don’t want to generate any integer.
+ If we want the level to be in a specific range, we can specify this using a Guide.
+ We can use the Guide macro on our property, and pass a range.
+Again, the model will use constrained decoding, to guarantee a value in this range.
+While we’re at it, let’s also add an array of attributes to our NPC.
+We can again use a guide, this time to specify we want exactly three attributes for this array in our NPC.
+ Keep in mind, the properties of your Generable type are generated in the order they are declared in the source code.
+ Here, name will be generated first, followed by the level, then the attributes, and encounter last.
+This order can be important, if you’re expecting the value of a property to be influenced by another property.
+And you can even stream property-by-property, if you don’t want to wait until the full output is generated.
+ The game is pretty fun now! Almost ready to share with my friends.
+ But I notice the names of the NPCs aren’t exactly what I had in mind.
+ I would prefer to have a first and last name.
+We can use a guide for this, but this time just provide a natural language description.
+We can say our name should be a “full name”.
+And this is effectively another way of prompting.
+ Instead of having to describe different properties in your prompt, you can do it directly in your Generable type.
+ And it gives the model a stronger relation for what these descriptions are tied to.
+If we walk around in our game now, we’ll checkout these new names in action.
+Here’s an overview of all the guides you can apply to different types.
+With common numerical types, like int, you can specify the minimum, maximum or a range.
+ And with array, you can control the count, or specify guides on the array’s element type.
+For String, you can let the model pick from an array with anyOf, or even constrain to a regex pattern.
+A regex pattern guide is especially powerful.
+ You may be familiar with using a regex for matching against text.
+ But with Foundation Models, you can use a regex pattern to define the structure of a string to generate.
+ For example, you can constrain the name to a set of prefixes.
+And you can even use the regex builder syntax! If this renews your excitement in regex, make sure to watch the timeless classic “Meet Swift Regex” from a few years ago.
+To recap, Generable is a macro that you can apply to structs and enums, and it gives you a reliable way to get structured output from the model.
+ You don’t need to worry about any of the parsing, and to get even more specific output, you can apply guides to your properties.
+So Generable is great when you know the structure at compile time.
+The macro generates the schema for you, and you get an instance of your type as output.
+ But sometimes you only know about a structure at runtime.
+ That’s where dynamic schemas can help.
+I’m adding a level creator to my game, where players can dynamically define entities to encounter while walking around in the game.
+ For example, a player could create a riddle structure.
+ Where a riddle has a question, and multiple choice answers.
+ If we knew this structure at compile time, we could simply define a Generable struct for it.
+ But our level creator allows for creating any structure the player can think of.
+We can use DynamicGenerationSchema to create a schema at runtime.
+Just like a compile-time defined struct, a dynamic schema has a list of properties.
+ We can add a level creator, that can take a player’s input.
+Each property has a name and its own schema, which defines its type.
+ You can use the schema for any Generable type, including built-in types, such as String.
+A dynamic schema can contain an array, where you then specify a schema for the element of the array.
+ And importantly, a dynamic schema can have references to other dynamic schemas.
+So here, our array can reference a custom schema that is also defined at runtime.
+From the user’s input, we can create a riddle schema, with two properties.
+The first is the question, which is a string property.
+ And secondly, an array property, of a custom type called Answer.
+And we'll then create the answer.
+ This has a string and boolean property.
+Note that the riddle’s answers property refers to the answer schema by its name.
+Then we can create the DynamicGenerationSchema instances.
+ Each dynamic schema is independent.
+ Meaning the riddle dynamic schema doesn't actually contain the answer’s dynamic schema.
+ Before we can do inference, we first have to convert our dynamic schemas into a validated schema.
+ This can throw errors if there are inconsistencies in the dynamic schemas, such as type references that don’t exist.
+And once we have a validated schema, we can prompt a session as usual.
+ But this time, the output type is a GeneratedContent instance.
+ Which holds the dynamic values.
+You can query this with the property names from your dynamic schemas.
+ Again, Foundation Models will use guided generation to make sure the output matches your schema.
+ It will never make up an unexpected field! So even though it’s dynamic, you still don’t have to worry about manually parsing the output.
+So now when the player encounters an NPC, the model can generate this dynamic content.
+ Which we’ll show in a dynamic UI.
+ Let’s checkout what we run into.
+ I’m dark or light, bitter or sweet, I wake you up and bring the heat, what am I? Coffee or hot chocolate.
+ I think the answer is coffee.
+That's correct! I think my players will have a lot of fun creating all sorts of fun levels.
+To recap, with the Generable macro, we can easily generate structured output from a Swift type that’s defined at compile time.
+And under the hood, Foundation Models takes care of the schema, and converting the GeneratedContent into an instance of your own type.
+ Dynamic schemas work very similar, but give you much more control.
+ You control the schema entirely at runtime, and get direct access to the GeneratedContent.
+ Next, let’s take a look at tool calling, which can let the model call your own functions.
+ I’m thinking of creating a DLC, downloadable content, to make my game more personal.
+ Using tool calling, I can let the model autonomously fetch information.
+ I’m thinking that integrating the player’s contacts and calendar could be really fun.
+I wouldn’t normally do that with a server-based model, my players wouldn’t appreciate it if the game uploaded such personal data.
+ But since it’s all on-device with Foundation Models, we can do this while preserving privacy.
+Defining a tool is very easy, with the Tool protocol.
+ You start by giving it a name, and a description.
+ This is what will be put in the prompt, automatically by the API, to let the model decide when and how often to call your tool.
+It’s best to make your tool name short, but still readable as English text.
+ Avoid abbreviations, and don’t make your description too long, or explain any of the implementations.
+ Because remember, these strings are put verbatim in your prompt.
+ So longer strings means more tokens, which can increase the latency.
+ Instead, consider using a verb in the name, such as findContact.
+ And your description should be about one sentence.
+ As always, it’s important to try different variations to checkout what works best for your specific tool.
+Next, we can define the input for our tool.
+ I want the tool to get contacts from a certain age generation, like millennials.
+ The model will be able to pick a funny case based on the game state, and I can add the Arguments struct, and make it Generable.
+When the model decides to call this tool, it will generate the input arguments.
+ By using Generable, this guarantees your tool always gets valid input arguments.
+ So it won’t make up a different generation, like gen alpha, which we don’t support in our game.
+Then I can implement the call function.
+ The model will call this function when it decides to invoke the tool.
+In this example, we’ll then call out to the Contacts API.
+ And return a contact’s name for that query.
+To use our tool, we’ll pass it in the session initializer.
+ The model will then call our tool when it wants that extra piece of information.
+This is more powerful than just getting the contact ourselves, because the model will only call the tool when it needs for a certain NPC, and it can pick fun input arguments based on the game state.
+ Like the age generation for the NPC.
+Keep in mind, this is using the regular contacts API, which you might be familiar with.
+ When our tool is first is invoked, it will ask the player for the usual permission.
+ Even if the player doesn’t want to give access to their contacts, Foundation Models can still generate content like before, but if they do give access, we make it more personal.
+Let’s walk around a bit in our game until we encounter another NPC.
+ And this time, I’ll get a name from my contacts! Oh hi there Naomy! Let’s checkout what she has to say, I didn’t know you liked coffee.
+Note that LanguageModelSession takes an instance of a tool.
+ This means you control the lifecycle of the tool.
+ The instance of this tool stays the same for the whole session.
+Now, in this example, because we’re just getting a random character with our FindContactsTool, it’s possible we’ll get the same contact sometimes.
+ In our game, there are multiple Naomy’s now.
+ And that’s not right, there can only be the one.
+To fix this, we can keep track of the contacts the game has already used.
+ We can add state to our FindContactTool.
+ To do this, we will first convert our FindContactTool to be a class.
+ So it can mutate its state from the call method.
+Then we can keep track of the picked contacts, and in our call method we don’t pick the same one again.
+The NPC names are now based on my contacts! But talking to them doesn’t feel right yet.
+ Let’s round this off with another tool, this time for accessing my calendar.
+For this tool, we’ll pass in the contact name from a dialog that’s going on in our game.
+ And when the model calls this tool, we’ll let it generate a day, month and a year for which to fetch events with this contact.
+ And we’ll pass this tool in the session for the NPC dialog.
+So now, if we ask my friend Naomy’s NPC "What’s going on?", she can reply with real events we have planned together.
+Wow, it's like talking to the real Naomy now.
+Let’s take a closer look at how tool calling works.
+We start by passing the tool at the start of the session, along with instructions.
+ And for this example, we include information like today’s date.
+Then, when the user prompts the session, the model can analyze the text.
+ In this example, the model understands that the prompt is asking for events, so calling the calendar tool makes sense.
+To call the tool, the model first generates the input arguments.
+ In this case the model needs to generate the date to get events for.
+ The model can relate information from the instructions and prompt, and understand how to fill in the tool arguments based on that.
+So in this example it can infer what tomorrow means based on today’s date in the instructions.
+ Once the input for your tool is generated, your call method is invoked.
+This is your time to shine, your tool can do anything it wants.
+ But note, the session waits for your tool to return, before it can generate any further output.
+The output of your tool is then put in the transcript, just like output from the model.
+ And based on your tool’s output, the model can generate a response to the prompt.
+Note that a tool can be called multiple times for a single request.
+And when that happens, your tool gets called in parallel.
+ So keep that in mind when accessing data from your tool’s call method.
+Alright, that was pretty fun! Our game now randomly generates content, based on my personal contacts and calendar.
+ All without my data ever leaving my device.
+ To recap, tool calling can let the model call your code to access external data during a request.
+ This can be private information, like Contacts, or even external data from sources on the web.
+ Keep in mind that a tool can be invoked multiple times, within a given request.
+ The model determines this based on its context.
+Tools can also be called in parallel, and they can store state.
+That was quite a lot.
+Perhaps get a coffee before doing anything else.
+To learn more, you can check out the dedicated video about prompt engineering, including design and safety tips.
+ And, if you want to meet the real Naomy, check out the code-along video.
+ I hope you will have as much fun with Foundation Models as I’ve had.
+ Thanks for watching.
+
+
+1:05 - Prompting a session
+
+import FoundationModels
+
+func respond(userInput: String) async throws -> String {
+  let session = LanguageModelSession(instructions: """
+    You are a friendly barista in a world full of pixels.
+    Respond to the player’s question.
+    """
+  )
+  let response = try await session.respond(to: userInput)
+  return response.content
+}
+Copy Code
+3:37 - Handle context size errors
+
+var session = LanguageModelSession()
+
+do {
+  let answer = try await session.respond(to: prompt)
+  print(answer.content)
+} catch LanguageModelSession.GenerationError.exceededContextWindowSize {
+  // New session, without any history from the previous session.
+  session = LanguageModelSession()
+}
+Copy Code
+3:55 - Handling context size errors with a new session
+
+var session = LanguageModelSession()
+
+do {
+  let answer = try await session.respond(to: prompt)
+  print(answer.content)
+} catch LanguageModelSession.GenerationError.exceededContextWindowSize {
+  // New session, with some history from the previous session.
+  session = newSession(previousSession: session)
+}
+
+private func newSession(previousSession: LanguageModelSession) -> LanguageModelSession {
+  let allEntries = previousSession.transcript.entries
+  var condensedEntries = [Transcript.Entry]()
+  if let firstEntry = allEntries.first {
+    condensedEntries.append(firstEntry)
+    if allEntries.count > 1, let lastEntry = allEntries.last {
+      condensedEntries.append(lastEntry)
+    }
+  }
+  let condensedTranscript = Transcript(entries: condensedEntries)
+  // Note: transcript includes instructions.
+  return LanguageModelSession(transcript: condensedTranscript)
+}
+Copy Code
+6:14 - Sampling
+
+// Deterministic output
+let response = try await session.respond(
+  to: prompt,
+  options: GenerationOptions(sampling: .greedy)
+)
+                
+// Low-variance output
+let response = try await session.respond(
+  to: prompt,
+  options: GenerationOptions(temperature: 0.5)
+)
+                
+// High-variance output
+let response = try await session.respond(
+  to: prompt,
+  options: GenerationOptions(temperature: 2.0)
+)
+Copy Code
+7:06 - Handling languages
+
+var session = LanguageModelSession()
+
+do {
+  let answer = try await session.respond(to: userInput)
+  print(answer.content)
+} catch LanguageModelSession.GenerationError.unsupportedLanguageOrLocale {
+  // Unsupported language in prompt.
+}
+
+let supportedLanguages = SystemLanguageModel.default.supportedLanguages
+guard supportedLanguages.contains(Locale.current.language) else {
+  // Show message
+  return
+}
+Copy Code
+8:14 - Generable
+
+@Generable
+struct NPC {
+  let name: String
+  let coffeeOrder: String
+}
+
+func makeNPC() async throws -> NPC {
+  let session = LanguageModelSession(instructions: ...)
+  let response = try await session.respond(generating: NPC.self) {
+    "Generate a character that orders a coffee."
+  }
+  return response.content
+}
+Copy Code
+9:22 - NPC
+
+@Generable
+struct NPC {
+  let name: String
+  let coffeeOrder: String
+}
+Copy Code
+10:49 - Generable with enum
+
+@Generable
+struct NPC {
+  let name: String
+  let encounter: Encounter
+
+  @Generable
+  enum Encounter {
+    case orderCoffee(String)
+    case wantToTalkToManager(complaint: String)
+  }
+}
+Copy Code
+11:20 - Generable with guides
+
+@Generable
+struct NPC {
+  @Guide(description: "A full name")
+  let name: String
+  @Guide(.range(1...10))
+  let level: Int
+  @Guide(.count(3))
+  let attributes: [Attribute]
+  let encounter: Encounter
+
+  @Generable
+  enum Attribute {
+    case sassy
+    case tired
+    case hungry
+  }
+  @Generable
+  enum Encounter {
+    case orderCoffee(String)
+    case wantToTalkToManager(complaint: String)
+  }
+}
+Copy Code
+13:40 - Regex guide
+
+@Generable
+struct NPC {
+  @Guide(Regex {
+    Capture {
+      ChoiceOf {
+        "Mr"
+        "Mrs"
+      }
+    }
+    ". "
+    OneOrMore(.word)
+  })
+  let name: String
+}
+
+session.respond(to: "Generate a fun NPC", generating: NPC.self)
+// > {name: "Mrs. Brewster"}
+Copy Code
+14:50 - Generable riddle
+
+@Generable
+struct Riddle {
+  let question: String
+  let answers: [Answer]
+
+  @Generable
+  struct Answer {
+    let text: String
+    let isCorrect: Bool
+  }
+}
+Copy Code
+15:10 - Dynamic schema
+
+struct LevelObjectCreator {
+  var properties: [DynamicGenerationSchema.Property] = []
+
+  mutating func addStringProperty(name: String) {
+    let property = DynamicGenerationSchema.Property(
+      name: name,
+      schema: DynamicGenerationSchema(type: String.self)
+    )
+    properties.append(property)
+  }
+
+  mutating func addArrayProperty(name: String, customType: String) {
+    let property = DynamicGenerationSchema.Property(
+      name: name,
+      schema: DynamicGenerationSchema(
+        arrayOf: DynamicGenerationSchema(referenceTo: customType)
+      )
+    )
+    properties.append(property)
+  }
+  
+  var root: DynamicGenerationSchema {
+    DynamicGenerationSchema(
+      name: name,
+      properties: properties
+    )
+  }
+}
+
+var riddleBuilder = LevelObjectCreator(name: "Riddle")
+riddleBuilder.addStringProperty(name: "question")
+riddleBuilder.addArrayProperty(name: "answers", customType: "Answer")
+
+var answerBuilder = LevelObjectCreator(name: "Answer")
+answerBuilder.addStringProperty(name: "text")
+answerBuilder.addBoolProperty(name: "isCorrect")
+
+let riddleDynamicSchema = riddleBuilder.root
+let answerDynamicSchema = answerBuilder.root
+
+let schema = try GenerationSchema(
+  root: riddleDynamicSchema,
+  dependencies: [answerDynamicSchema]
+)
+
+let session = LanguageModelSession()
+let response = try await session.respond(
+  to: "Generate a fun riddle about coffee",
+  schema: schema
+)
+let generatedContent = response.content
+let question = try generatedContent.value(String.self, forProperty: "question")
+let answers = try generatedContent.value([GeneratedContent].self, forProperty: "answers")
+Copy Code
+18:47 - FindContactTool
+
+import FoundationModels
+import Contacts
+
+struct FindContactTool: Tool {
+  let name = "findContact"
+  let description = "Finds a contact from a specified age generation."
+    
+  @Generable
+  struct Arguments {
+    let generation: Generation
+        
+    @Generable
+    enum Generation {
+      case babyBoomers
+      case genX
+      case millennial
+      case genZ            
+    }
+  }
+  
+  func call(arguments: Arguments) async throws -> ToolOutput {
+    let store = CNContactStore()
+        
+    let keysToFetch = [CNContactGivenNameKey, CNContactBirthdayKey] as [CNKeyDescriptor]
+    let request = CNContactFetchRequest(keysToFetch: keysToFetch)
+
+    var contacts: [CNContact] = []
+    try store.enumerateContacts(with: request) { contact, stop in
+      if let year = contact.birthday?.year {
+        if arguments.generation.yearRange.contains(year) {
+          contacts.append(contact)
+        }
+      }
+    }
+    guard let pickedContact = contacts.randomElement() else {
+      return ToolOutput("Could not find a contact.")
+    }
+    return ToolOutput(pickedContact.givenName)
+  }
+}
+Copy Code
+20:26 - Call FindContactTool
+
+import FoundationModels
+
+let session = LanguageModelSession(
+  tools: [FindContactTool()],
+  instructions: "Generate fun NPCs"
+)
+Copy Code
+21:55 - FindContactTool with state
+
+import FoundationModels
+import Contacts
+
+class FindContactTool: Tool {
+  let name = "findContact"
+  let description = "Finds a contact from a specified age generation."
+   
+  var pickedContacts = Set<String>()
+    
+  ...
+
+  func call(arguments: Arguments) async throws -> ToolOutput {
+    contacts.removeAll(where: { pickedContacts.contains($0.givenName) })
+    guard let pickedContact = contacts.randomElement() else {
+      return ToolOutput("Could not find a contact.")
+    }
+    return ToolOutput(pickedContact.givenName)
+  }
+}
+Copy Code
+22:27 - GetContactEventTool
+
+import FoundationModels
+import EventKit
+
+struct GetContactEventTool: Tool {
+  let name = "getContactEvent"
+  let description = "Get an event with a contact."
+
+  let contactName: String
+    
+  @Generable
+  struct Arguments {
+    let day: Int
+    let month: Int
+    let year: Int
+  }
+    
+  func call(arguments: Arguments) async throws -> ToolOutput { ... }
+}
