@@ -47,7 +47,7 @@ struct DiarizationCLI {
 
             BENCHMARK OPTIONS:
                 --dataset <name>        Dataset to use (ami-sdm, ami-ihm) [default: ami-sdm]
-                --threshold <float>     Clustering threshold 0.0-1.0 [default: 0.7]
+                --threshold <float>     Clustering threshold 0.0-1.0 [default: 0.8]
                 --min-duration-on <float>   Minimum speaker segment duration in seconds [default: 1.0]
                 --min-duration-off <float>  Minimum silence between speakers in seconds [default: 0.5]
                 --min-activity <float>      Minimum activity threshold in frames [default: 10.0]
@@ -55,6 +55,7 @@ struct DiarizationCLI {
                 --debug                 Enable debug mode
                 --output <file>         Output results to JSON file
                 --auto-download         Automatically download dataset if not found
+                --iterations <num>      Run multiple iterations for consistency testing [default: 1]
 
             NOTE: Benchmark now uses real AMI manual annotations from Tests/ami_public_1.6.2/
                   If annotations are not found, falls back to simplified placeholder.
@@ -99,6 +100,8 @@ struct DiarizationCLI {
         var debugMode = false
         var outputFile: String?
         var autoDownload = false
+        var disableVAD = false
+        var iterations = 1
 
         // Parse arguments
         var i = 0
@@ -143,6 +146,13 @@ struct DiarizationCLI {
                 }
             case "--auto-download":
                 autoDownload = true
+            case "--disable-vad":
+                disableVAD = true
+            case "--iterations":
+                if i + 1 < arguments.count {
+                    iterations = Int(arguments[i + 1]) ?? 1
+                    i += 1
+                }
             default:
                 print("⚠️ Unknown option: \(arguments[i])")
             }
@@ -156,13 +166,19 @@ struct DiarizationCLI {
         print("   Min activity threshold: \(minActivityThreshold)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
+        print("   VAD: \(disableVAD ? "disabled" : "enabled")")
+        if iterations > 1 {
+            print("   Iterations: \(iterations) (consistency testing)")
+        }
 
+        let vadConfig = VadConfig(enableVAD: !disableVAD)
         let config = DiarizerConfig(
             clusteringThreshold: threshold,
             minDurationOn: minDurationOn,
             minDurationOff: minDurationOff,
             minActivityThreshold: minActivityThreshold,
-            debugMode: debugMode
+            debugMode: debugMode,
+            vadConfig: vadConfig
         )
 
         let manager = DiarizerManager(config: config)
@@ -180,12 +196,12 @@ struct DiarizationCLI {
         switch dataset.lowercased() {
         case "ami-sdm":
             await runAMISDMBenchmark(
-                manager: manager, outputFile: outputFile, autoDownload: autoDownload,
-                singleFile: singleFile)
+                manager: manager, config: config, outputFile: outputFile, autoDownload: autoDownload,
+                singleFile: singleFile, iterations: iterations)
         case "ami-ihm":
             await runAMIIHMBenchmark(
-                manager: manager, outputFile: outputFile, autoDownload: autoDownload,
-                singleFile: singleFile)
+                manager: manager, config: config, outputFile: outputFile, autoDownload: autoDownload,
+                singleFile: singleFile, iterations: iterations)
         default:
             print("❌ Unsupported dataset: \(dataset)")
             print("💡 Supported datasets: ami-sdm, ami-ihm")
@@ -246,7 +262,7 @@ struct DiarizationCLI {
         }
 
         let audioFile = arguments[0]
-        var threshold: Float = 0.7
+        var threshold: Float = 0.8
         var debugMode = false
         var outputFile: String?
 
@@ -336,7 +352,7 @@ struct DiarizationCLI {
     // MARK: - AMI Benchmark Implementation
 
     static func runAMISDMBenchmark(
-        manager: DiarizerManager, outputFile: String?, autoDownload: Bool, singleFile: String? = nil
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -417,13 +433,17 @@ struct DiarizationCLI {
                     modelDownloadSeconds: result.timings.modelDownloadSeconds,
                     modelCompilationSeconds: result.timings.modelCompilationSeconds,
                     audioLoadingSeconds: audioLoadingTime,
+                    vadProcessingSeconds: result.timings.vadProcessingSeconds,
                     segmentationSeconds: result.timings.segmentationSeconds,
                     embeddingExtractionSeconds: result.timings.embeddingExtractionSeconds,
                     speakerClusteringSeconds: result.timings.speakerClusteringSeconds,
                     postProcessingSeconds: result.timings.postProcessingSeconds
                 )
 
-                // Load ground truth from AMI annotations
+                // Get ground truth speaker count
+                let groundTruthSpeakerCount = getGroundTruthSpeakerCount(for: meetingId)
+
+                // Load ground truth annotations
                 let groundTruth = await Self.loadAMIGroundTruth(for: meetingId, duration: duration)
 
                 // Calculate metrics
@@ -453,6 +473,7 @@ struct DiarizationCLI {
                         jer: metrics.jer,
                         segments: result.segments,
                         speakerCount: result.speakerDatabase.count,
+                        groundTruthSpeakerCount: groundTruthSpeakerCount,
                         timings: completeTimings
                     ))
 
@@ -493,7 +514,7 @@ struct DiarizationCLI {
     }
 
     static func runAMIIHMBenchmark(
-        manager: DiarizerManager, outputFile: String?, autoDownload: Bool, singleFile: String? = nil
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -568,13 +589,17 @@ struct DiarizationCLI {
                     modelDownloadSeconds: result.timings.modelDownloadSeconds,
                     modelCompilationSeconds: result.timings.modelCompilationSeconds,
                     audioLoadingSeconds: audioLoadingTime,
+                    vadProcessingSeconds: result.timings.vadProcessingSeconds,
                     segmentationSeconds: result.timings.segmentationSeconds,
                     embeddingExtractionSeconds: result.timings.embeddingExtractionSeconds,
                     speakerClusteringSeconds: result.timings.speakerClusteringSeconds,
                     postProcessingSeconds: result.timings.postProcessingSeconds
                 )
 
-                // Load ground truth from AMI annotations
+                // Get ground truth speaker count
+                let groundTruthSpeakerCount = getGroundTruthSpeakerCount(for: meetingId)
+
+                // Load ground truth annotations
                 let groundTruth = await Self.loadAMIGroundTruth(for: meetingId, duration: duration)
 
                 // Calculate metrics
@@ -604,6 +629,7 @@ struct DiarizationCLI {
                         jer: metrics.jer,
                         segments: result.segments,
                         speakerCount: result.speakerDatabase.count,
+                        groundTruthSpeakerCount: groundTruthSpeakerCount,
                         timings: completeTimings
                     ))
 
@@ -1157,6 +1183,7 @@ struct DiarizationCLI {
             ("Model Download", avgTimings.modelDownloadSeconds),
             ("Model Compilation", avgTimings.modelCompilationSeconds),
             ("Audio Loading", avgTimings.audioLoadingSeconds),
+            ("VAD Processing", avgTimings.vadProcessingSeconds),
             ("Segmentation", avgTimings.segmentationSeconds),
             ("Embedding Extraction", avgTimings.embeddingExtractionSeconds),
             ("Speaker Clustering", avgTimings.speakerClusteringSeconds),
@@ -1228,6 +1255,7 @@ struct DiarizationCLI {
         let avgModelCompilation =
             results.reduce(0.0) { $0 + $1.timings.modelCompilationSeconds } / count
         let avgAudioLoading = results.reduce(0.0) { $0 + $1.timings.audioLoadingSeconds } / count
+        let avgVadProcessing = results.reduce(0.0) { $0 + $1.timings.vadProcessingSeconds } / count
         let avgSegmentation = results.reduce(0.0) { $0 + $1.timings.segmentationSeconds } / count
         let avgEmbedding =
             results.reduce(0.0) { $0 + $1.timings.embeddingExtractionSeconds } / count
@@ -1239,6 +1267,7 @@ struct DiarizationCLI {
             modelDownloadSeconds: avgModelDownload,
             modelCompilationSeconds: avgModelCompilation,
             audioLoadingSeconds: avgAudioLoading,
+            vadProcessingSeconds: avgVadProcessing,
             segmentationSeconds: avgSegmentation,
             embeddingExtractionSeconds: avgEmbedding,
             speakerClusteringSeconds: avgClustering,
@@ -1420,6 +1449,43 @@ struct DiarizationCLI {
 
     // MARK: - AMI Annotation Loading
 
+    /// Get ground truth speaker count from AMI meetings.xml
+    static func getGroundTruthSpeakerCount(for meetingId: String) -> Int {
+        let possibleLocations = [
+            URL(fileURLWithPath: "Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: "../Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: "./Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Tests/ami_public_1.6.2")
+        ]
+
+        for location in possibleLocations {
+            let meetingsFile = location.appendingPathComponent("corpusResources/meetings.xml")
+            if FileManager.default.fileExists(atPath: meetingsFile.path) {
+                do {
+                    let xmlData = try Data(contentsOf: meetingsFile)
+                    let xmlString = String(data: xmlData, encoding: .utf8) ?? ""
+
+                    // Find the meeting entry for this meetingId
+                    if let meetingRange = xmlString.range(of: "observation=\"\(meetingId)\"") {
+                        let afterObservation = xmlString[meetingRange.upperBound...]
+
+                        // Count speaker elements within this meeting
+                        if let meetingEndRange = afterObservation.range(of: "</meeting>") {
+                            let meetingContent = String(afterObservation[..<meetingEndRange.lowerBound])
+                            let speakerCount = meetingContent.components(separatedBy: "<speaker ").count - 1
+                            return speakerCount
+                        }
+                    }
+                } catch {
+                    continue
+                }
+            }
+        }
+
+        // Default fallback for unknown meetings
+        return 4  // AMI meetings typically have 4 speakers
+    }
+
     /// Load AMI ground truth annotations for a specific meeting
     static func loadAMIGroundTruth(for meetingId: String, duration: Float) async
         -> [TimedSpeakerSegment]
@@ -1581,6 +1647,7 @@ struct BenchmarkResult: Codable {
     let jer: Float
     let segments: [TimedSpeakerSegment]
     let speakerCount: Int
+    let groundTruthSpeakerCount: Int
     let timings: PipelineTimings
 
     /// Total time including audio loading
