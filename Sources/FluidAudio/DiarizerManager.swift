@@ -290,14 +290,23 @@ public final class DiarizerManager: @unchecked Sendable {
     ) async throws {
         var attempt = 0
 
+        let config: MLModelConfiguration = MLModelConfiguration()
+        config.computeUnits = .cpuAndNeuralEngine
+
         while attempt <= maxRetries {
             do {
                 // Try to load both models
                 logger.info(
                     "Attempting to load CoreML models (attempt \(attempt + 1)/\(maxRetries + 1))")
 
-                let segmentationModel = try MLModel(contentsOf: segmentationURL)
-                let embeddingModel = try MLModel(contentsOf: embeddingURL)
+                let segmentationModel = try MLModel(
+                    contentsOf: segmentationURL,
+                    configuration: config
+                )
+                let embeddingModel = try MLModel(
+                    contentsOf: embeddingURL,
+                    configuration: config
+                )
 
                 // If we get here, both models loaded successfully
                 self.segmentationModel = segmentationModel
