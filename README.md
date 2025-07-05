@@ -34,11 +34,11 @@ dependencies: [
 
 ## Documentation
 
-https://deepwiki.com/FluidInference/FluidAudio 
+See the public DeepWiki docs: [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio)
 
-## MCP 
+## MCP
 
-The repo is indexed by [Deepwiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) - the MCP server gives your coding tool access to the docs already.
+The repo is indexed by [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) - the MCP server gives your coding tool access to the docs already.
 
 For most clients:
 
