@@ -1274,7 +1274,9 @@ struct DiarizationCLI {
         }
     }
 
-    static func downloadAMIDataset(variant: AMIVariant, force: Bool, singleFile: String? = nil) async {
+    static func downloadAMIDataset(variant: AMIVariant, force: Bool, singleFile: String? = nil)
+        async
+    {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let baseDir = homeDir.appendingPathComponent("FluidAudioDatasets")
         let amiDir = baseDir.appendingPathComponent("ami_official")

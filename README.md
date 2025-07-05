@@ -1,4 +1,6 @@
-# FluidAudio - Efficient Speaker Diarization for Apple devices in Swift
+![banner.png](banner.png)
+
+# FluidAudio - Swift Speaker Diarization on CoreML
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
