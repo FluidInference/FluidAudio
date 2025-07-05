@@ -32,6 +32,33 @@ dependencies: [
 ],
 ```
 
+## Documentation
+
+https://deepwiki.com/FluidInference/FluidAudio 
+
+## MCP 
+
+The repo is indexed by [Deepwiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) - the MCP server gives your coding tool access to the docs already.
+
+For most clients:
+
+```json
+{
+  "mcpServers": {
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/mcp"
+    }
+  }
+}
+```
+
+For claude code:
+
+```bash
+claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
+```
+
+
 ## 🚀 Roadmap
 
 **Coming Soon:**
