@@ -108,6 +108,7 @@ FluidAudio leverages Apple's Neural Engine for maximum efficiency:
 FluidAudio powers production applications including:
 
 - **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence
+- **[Whisper Mate](https://whisper.marksdo.com)**: Transcribe movie/audio to text locally. Realtime record & transcribe from speaker or system apps. 🔒 All process in local mac Whisper AI Model.
 
 Make a PR if you want to add your app!
 
