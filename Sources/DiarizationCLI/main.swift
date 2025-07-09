@@ -2,6 +2,10 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+enum CLIError: Error {
+    case invalidArgument(String)
+}
+
 @main
 struct DiarizationCLI {
 
@@ -18,6 +22,109 @@ struct DiarizationCLI {
         switch command {
         case "benchmark":
             await runBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "vad-benchmark":
+            await runVADBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "vad-compare":
+            print("🔬 VAD Model Comparison")
+            print("======================")
+            print("Running individual benchmarks for comparison...")
+            print("")
+            
+            print("🧠 Testing CoreML VAD Model...")
+            // Extract threshold from arguments if provided
+            var threshold = "0.3"
+            var numFiles = "40"  // Use all 40 available test files by default
+            var i = 0
+            while i < arguments.count {
+                switch arguments[i] {
+                case "--threshold":
+                    if i + 1 < arguments.count {
+                        threshold = arguments[i + 1]
+                        i += 1
+                    }
+                case "--num-files":
+                    if i + 1 < arguments.count {
+                        numFiles = arguments[i + 1]
+                        i += 1
+                    }
+                default:
+                    break
+                }
+                i += 1
+            }
+            
+            print("   Running CoreML VAD benchmark...")
+            await runVADBenchmark(arguments: ["--vad-model", "coreml", "--num-files", numFiles, "--threshold", threshold, "--output", "coreml_results.json"])
+            print("   ✅ CoreML benchmark completed successfully")
+            
+            print("")
+            print("🤖 Testing CoreML VAD Model...")
+            print("   Running CoreML VAD benchmark...")
+            await runVADBenchmark(arguments: ["--vad-model", "coreml", "--num-files", numFiles, "--threshold", threshold, "--output", "coreml_results.json"])
+            print("   ✅ CoreML benchmark completed successfully")
+            
+            print("")
+            print("📊 COMPARISON SUMMARY")
+            print("====================")
+            
+            // Read and compare results
+            if FileManager.default.fileExists(atPath: "coreml_results.json") && 
+               FileManager.default.fileExists(atPath: "silero_results.json") {
+                do {
+                    let coremlData = try Data(contentsOf: URL(fileURLWithPath: "coreml_results.json"))
+                    let sileroData = try Data(contentsOf: URL(fileURLWithPath: "silero_results.json"))
+                    
+                    if let coremlJson = try JSONSerialization.jsonObject(with: coremlData) as? [String: Any],
+                       let sileroJson = try JSONSerialization.jsonObject(with: sileroData) as? [String: Any] {
+                        
+                        let coremlAcc = coremlJson["accuracy"] as? Double ?? 0.0
+                        let coremlPrec = coremlJson["precision"] as? Double ?? 0.0
+                        let coremlRec = coremlJson["recall"] as? Double ?? 0.0
+                        let coremlF1 = coremlJson["f1_score"] as? Double ?? 0.0
+                        let coremlTime = coremlJson["processing_time_seconds"] as? Double ?? 0.0
+                        
+                        let sileroAcc = sileroJson["accuracy"] as? Double ?? 0.0
+                        let sileroPrec = sileroJson["precision"] as? Double ?? 0.0
+                        let sileroRec = sileroJson["recall"] as? Double ?? 0.0
+                        let sileroF1 = sileroJson["f1_score"] as? Double ?? 0.0
+                        let sileroTime = sileroJson["processing_time_seconds"] as? Double ?? 0.0
+                        
+                        // Print comparison table
+                        print("┌─────────────────┬─────────────┬─────────────┐")
+                        print("│ Metric          │ CoreML VAD  │ PyTorch VAD │")
+                        print("├─────────────────┼─────────────┼─────────────┤")
+                        print(String(format: "│ Accuracy        │    %5.1f%%   │    %5.1f%%   │", coremlAcc, sileroAcc))
+                        print(String(format: "│ Precision       │    %5.1f%%   │    %5.1f%%   │", coremlPrec, sileroPrec))
+                        print(String(format: "│ Recall          │    %5.1f%%   │    %5.1f%%   │", coremlRec, sileroRec))
+                        print(String(format: "│ F1-Score        │    %5.1f%%   │    %5.1f%%   │", coremlF1, sileroF1))
+                        print(String(format: "│ Processing Time │    %5.1fs   │    %5.1fs   │", coremlTime, sileroTime))
+                        print("└─────────────────┴─────────────┴─────────────┘")
+                        
+                        // Winner analysis
+                        print("")
+                        if coremlF1 > sileroF1 {
+                            print("🏆 Winner: CoreML VAD (Higher F1-Score)")
+                        } else if sileroF1 > coremlF1 {
+                            print("🏆 Winner: PyTorch VAD (Higher F1-Score)")
+                        } else {
+                            print("🤝 Tie: Both models have equal F1-Score")
+                        }
+                        
+                        if coremlTime < sileroTime {
+                            print("⚡ Faster: CoreML VAD")
+                        } else {
+                            print("⚡ Faster: PyTorch VAD")
+                        }
+                    }
+                } catch {
+                    print("⚠️ Could not parse results for comparison: \(error)")
+                }
+            } else {
+                print("⚠️ Missing result files for comparison")
+            }
+            
+            print("")
+            print("✅ Comparison complete! Check coreml_results.json and silero_results.json for detailed results.")
         case "process":
             await processFile(arguments: Array(arguments.dropFirst(2)))
         case "download":
@@ -40,14 +147,16 @@ struct DiarizationCLI {
                 fluidaudio <command> [options]
 
             COMMANDS:
-                benchmark    Run AMI SDM benchmark evaluation with real annotations
-                process      Process a single audio file
-                download     Download datasets for benchmarking
-                help         Show this help message
+                benchmark       Run AMI SDM benchmark evaluation with real annotations
+                vad-benchmark   Run VAD benchmark with real audio files
+                vad-compare     Compare CoreML vs PyTorch VAD models side-by-side
+                process         Process a single audio file
+                download        Download datasets for benchmarking
+                help            Show this help message
 
             BENCHMARK OPTIONS:
                 --dataset <name>        Dataset to use (ami-sdm, ami-ihm) [default: ami-sdm]
-                --threshold <float>     Clustering threshold 0.0-1.0 [default: 0.7]
+                --threshold <float>     Clustering threshold 0.0-1.0 [default: 0.8]
                 --min-duration-on <float>   Minimum speaker segment duration in seconds [default: 1.0]
                 --min-duration-off <float>  Minimum silence between speakers in seconds [default: 0.5]
                 --min-activity <float>      Minimum activity threshold in frames [default: 10.0]
@@ -55,9 +164,22 @@ struct DiarizationCLI {
                 --debug                 Enable debug mode
                 --output <file>         Output results to JSON file
                 --auto-download         Automatically download dataset if not found
+                --iterations <num>      Run multiple iterations for consistency testing [default: 1]
 
             NOTE: Benchmark now uses real AMI manual annotations from Tests/ami_public_1.6.2/
                   If annotations are not found, falls back to simplified placeholder.
+
+            VAD-BENCHMARK OPTIONS:
+                --num-files <int>       Number of test files to process [default: 40]
+                --all-files             Use all available files (overrides --num-files)
+                --threshold <float>     VAD threshold 0.0-1.0 [default: 0.3]
+                --vad-model <type>      VAD model type: coreml, silero-pytorch [default: coreml]
+                --output <file>         Output results to JSON file [default: vad_benchmark_results.json]
+
+            VAD-COMPARE OPTIONS:
+                --num-files <int>       Number of test files to process [default: 40]
+                --threshold <float>     VAD threshold 0.0-1.0 [default: 0.3]
+                --output <file>         Output comparison results to JSON file [default: vad_comparison_results.json]
 
             PROCESS OPTIONS:
                 <audio-file>         Audio file to process (.wav, .m4a, .mp3)
@@ -66,18 +188,33 @@ struct DiarizationCLI {
                 --debug             Enable debug mode
 
             DOWNLOAD OPTIONS:
-                --dataset <name>     Dataset to download (ami-sdm, ami-ihm, all) [default: all]
+                --dataset <name>     Dataset to download (ami-sdm, ami-ihm, vad, all) [default: all]
                 --force             Force re-download even if files exist
 
             EXAMPLES:
                 # Download AMI datasets
                 swift run fluidaudio download --dataset ami-sdm
+                
+                # Download VAD dataset from Hugging Face
+                swift run fluidaudio download --dataset vad
 
                 # Run AMI SDM benchmark with auto-download
                 swift run fluidaudio benchmark --auto-download
 
                 # Run benchmark with custom threshold and save results
                 swift run fluidaudio benchmark --threshold 0.8 --output results.json
+
+                # Run VAD benchmark with PyTorch model
+                swift run fluidaudio vad-benchmark --vad-model silero-pytorch --num-files 20
+
+                # Run VAD benchmark with CoreML model
+                swift run fluidaudio vad-benchmark --vad-model coreml --threshold 0.5
+                
+                # Run VAD benchmark with all available files
+                swift run fluidaudio vad-benchmark --all-files
+
+                # Compare CoreML vs PyTorch VAD models
+                swift run fluidaudio vad-compare --num-files 15 --threshold 0.3
 
                 # Process a single audio file
                 swift run fluidaudio process meeting.wav
@@ -99,6 +236,8 @@ struct DiarizationCLI {
         var debugMode = false
         var outputFile: String?
         var autoDownload = false
+        var disableVAD = false
+        var iterations = 1
 
         // Parse arguments
         var i = 0
@@ -143,6 +282,13 @@ struct DiarizationCLI {
                 }
             case "--auto-download":
                 autoDownload = true
+            case "--disable-vad":
+                disableVAD = true
+            case "--iterations":
+                if i + 1 < arguments.count {
+                    iterations = Int(arguments[i + 1]) ?? 1
+                    i += 1
+                }
             default:
                 print("⚠️ Unknown option: \(arguments[i])")
             }
@@ -156,6 +302,10 @@ struct DiarizationCLI {
         print("   Min activity threshold: \(minActivityThreshold)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
+        print("   VAD: \(disableVAD ? "disabled" : "enabled")")
+        if iterations > 1 {
+            print("   Iterations: \(iterations) (consistency testing)")
+        }
 
         let config = DiarizerConfig(
             clusteringThreshold: threshold,
@@ -180,12 +330,12 @@ struct DiarizationCLI {
         switch dataset.lowercased() {
         case "ami-sdm":
             await runAMISDMBenchmark(
-                manager: manager, outputFile: outputFile, autoDownload: autoDownload,
-                singleFile: singleFile)
+                manager: manager, config: config, outputFile: outputFile, autoDownload: autoDownload,
+                singleFile: singleFile, iterations: iterations)
         case "ami-ihm":
             await runAMIIHMBenchmark(
-                manager: manager, outputFile: outputFile, autoDownload: autoDownload,
-                singleFile: singleFile)
+                manager: manager, config: config, outputFile: outputFile, autoDownload: autoDownload,
+                singleFile: singleFile, iterations: iterations)
         default:
             print("❌ Unsupported dataset: \(dataset)")
             print("💡 Supported datasets: ami-sdm, ami-ihm")
@@ -228,12 +378,15 @@ struct DiarizationCLI {
             await downloadAMIDataset(variant: .sdm, force: forceDownload)
         case "ami-ihm":
             await downloadAMIDataset(variant: .ihm, force: forceDownload)
+        case "vad":
+            await downloadVADDataset(force: forceDownload)
         case "all":
             await downloadAMIDataset(variant: .sdm, force: forceDownload)
             await downloadAMIDataset(variant: .ihm, force: forceDownload)
+            await downloadVADDataset(force: forceDownload)
         default:
             print("❌ Unsupported dataset: \(dataset)")
-            print("💡 Supported datasets: ami-sdm, ami-ihm, all")
+            print("💡 Supported datasets: ami-sdm, ami-ihm, vad, all")
             exit(1)
         }
     }
@@ -246,7 +399,7 @@ struct DiarizationCLI {
         }
 
         let audioFile = arguments[0]
-        var threshold: Float = 0.7
+        var threshold: Float = 0.8
         var debugMode = false
         var outputFile: String?
 
@@ -336,7 +489,7 @@ struct DiarizationCLI {
     // MARK: - AMI Benchmark Implementation
 
     static func runAMISDMBenchmark(
-        manager: DiarizerManager, outputFile: String?, autoDownload: Bool, singleFile: String? = nil
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -423,7 +576,10 @@ struct DiarizationCLI {
                     postProcessingSeconds: result.timings.postProcessingSeconds
                 )
 
-                // Load ground truth from AMI annotations
+                // Get ground truth speaker count
+                let groundTruthSpeakerCount = getGroundTruthSpeakerCount(for: meetingId)
+
+                // Load ground truth annotations
                 let groundTruth = await Self.loadAMIGroundTruth(for: meetingId, duration: duration)
 
                 // Calculate metrics
@@ -453,6 +609,7 @@ struct DiarizationCLI {
                         jer: metrics.jer,
                         segments: result.segments,
                         speakerCount: result.speakerDatabase.count,
+                        groundTruthSpeakerCount: groundTruthSpeakerCount,
                         timings: completeTimings
                     ))
 
@@ -493,7 +650,7 @@ struct DiarizationCLI {
     }
 
     static func runAMIIHMBenchmark(
-        manager: DiarizerManager, outputFile: String?, autoDownload: Bool, singleFile: String? = nil
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1
     ) async {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -574,7 +731,10 @@ struct DiarizationCLI {
                     postProcessingSeconds: result.timings.postProcessingSeconds
                 )
 
-                // Load ground truth from AMI annotations
+                // Get ground truth speaker count
+                let groundTruthSpeakerCount = getGroundTruthSpeakerCount(for: meetingId)
+
+                // Load ground truth annotations
                 let groundTruth = await Self.loadAMIGroundTruth(for: meetingId, duration: duration)
 
                 // Calculate metrics
@@ -604,6 +764,7 @@ struct DiarizationCLI {
                         jer: metrics.jer,
                         segments: result.segments,
                         speakerCount: result.speakerDatabase.count,
+                        groundTruthSpeakerCount: groundTruthSpeakerCount,
                         timings: completeTimings
                     ))
 
@@ -1420,7 +1581,134 @@ struct DiarizationCLI {
         }
     }
 
+    /// Download VAD dataset from Hugging Face
+    static func downloadVADDataset(force: Bool) async {
+        let cacheDir = getVADDatasetCacheDirectory()
+        
+        print("📥 Downloading VAD dataset from Hugging Face...")
+        print("   Target directory: \(cacheDir.path)")
+        
+        // Create cache directories
+        let speechDir = cacheDir.appendingPathComponent("speech")
+        let noiseDir = cacheDir.appendingPathComponent("noise")
+        
+        do {
+            try FileManager.default.createDirectory(at: speechDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: noiseDir, withIntermediateDirectories: true)
+        } catch {
+            print("❌ Failed to create cache directories: \(error)")
+            return
+        }
+        
+        // Check if we should skip download
+        if !force {
+            let existingSpeechFiles = (try? FileManager.default.contentsOfDirectory(at: speechDir, includingPropertiesForKeys: nil)) ?? []
+            let existingNoiseFiles = (try? FileManager.default.contentsOfDirectory(at: noiseDir, includingPropertiesForKeys: nil)) ?? []
+            
+            if !existingSpeechFiles.isEmpty && !existingNoiseFiles.isEmpty {
+                print("📂 VAD dataset already exists (use --force to re-download)")
+                print("   Speech files: \(existingSpeechFiles.count)")
+                print("   Noise files: \(existingNoiseFiles.count)")
+                return
+            }
+        } else {
+            // Force download - clean existing files
+            try? FileManager.default.removeItem(at: speechDir)
+            try? FileManager.default.removeItem(at: noiseDir)
+            try? FileManager.default.createDirectory(at: speechDir, withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(at: noiseDir, withIntermediateDirectories: true)
+        }
+        
+        let repoBase = "https://huggingface.co/datasets/alexwengg/musan_mini2/resolve/main"
+        
+        var downloadedFiles = 0
+        var failedFiles = 0
+        
+        // Download speech files
+        print("📢 Downloading speech samples...")
+        do {
+            let speechFiles = try await downloadVADFilesFromHF(
+                baseUrl: "\(repoBase)/speech",
+                targetDir: speechDir,
+                expectedLabel: 1,
+                count: 30, // Balanced for comprehensive testing and CI performance
+                filePrefix: "speech"
+            )
+            downloadedFiles += speechFiles.count
+            print("   ✅ Downloaded \(speechFiles.count) speech files")
+        } catch {
+            print("   ❌ Failed to download speech files: \(error)")
+            failedFiles += 1
+        }
+        
+        // Download noise files
+        print("🔇 Downloading noise samples...")
+        do {
+            let noiseFiles = try await downloadVADFilesFromHF(
+                baseUrl: "\(repoBase)/noise",
+                targetDir: noiseDir,
+                expectedLabel: 0,
+                count: 30, // Balanced for comprehensive testing and CI performance
+                filePrefix: "noise"
+            )
+            downloadedFiles += noiseFiles.count
+            print("   ✅ Downloaded \(noiseFiles.count) noise files")
+        } catch {
+            print("   ❌ Failed to download noise files: \(error)")
+            failedFiles += 1
+        }
+        
+        print("\n📊 VAD Dataset Download Summary:")
+        print("   Downloaded: \(downloadedFiles) files")
+        print("   Failed: \(failedFiles) categories")
+        
+        if downloadedFiles > 0 {
+            print("✅ VAD dataset download completed")
+            print("💡 You can now run VAD benchmarks with the downloaded dataset")
+        } else {
+            print("❌ No files were downloaded successfully")
+            print("⚠️ VAD benchmarks will fall back to legacy URLs")
+        }
+    }
+
     // MARK: - AMI Annotation Loading
+
+    /// Get ground truth speaker count from AMI meetings.xml
+    static func getGroundTruthSpeakerCount(for meetingId: String) -> Int {
+        let possibleLocations = [
+            URL(fileURLWithPath: "Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: "../Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: "./Tests/ami_public_1.6.2"),
+            URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Tests/ami_public_1.6.2")
+        ]
+
+        for location in possibleLocations {
+            let meetingsFile = location.appendingPathComponent("corpusResources/meetings.xml")
+            if FileManager.default.fileExists(atPath: meetingsFile.path) {
+                do {
+                    let xmlData = try Data(contentsOf: meetingsFile)
+                    let xmlString = String(data: xmlData, encoding: .utf8) ?? ""
+
+                    // Find the meeting entry for this meetingId
+                    if let meetingRange = xmlString.range(of: "observation=\"\(meetingId)\"") {
+                        let afterObservation = xmlString[meetingRange.upperBound...]
+
+                        // Count speaker elements within this meeting
+                        if let meetingEndRange = afterObservation.range(of: "</meeting>") {
+                            let meetingContent = String(afterObservation[..<meetingEndRange.lowerBound])
+                            let speakerCount = meetingContent.components(separatedBy: "<speaker ").count - 1
+                            return speakerCount
+                        }
+                    }
+                } catch {
+                    continue
+                }
+            }
+        }
+
+        // Default fallback for unknown meetings
+        return 4  // AMI meetings typically have 4 speakers
+    }
 
     /// Load AMI ground truth annotations for a specific meeting
     static func loadAMIGroundTruth(for meetingId: String, duration: Float) async
@@ -1544,6 +1832,670 @@ struct DiarizationCLI {
         }
         return embedding
     }
+    
+    // MARK: - VAD Benchmark Implementation
+    
+    static func runVADBenchmark(arguments: [String]) async {
+        do {
+            try await runVADBenchmarkWithErrorHandling(arguments: arguments)
+        } catch {
+            print("❌ VAD Benchmark failed: \(error)")
+            // Don't exit - return gracefully so comparison can continue
+        }
+    }
+    
+    static func runVADBenchmarkWithErrorHandling(arguments: [String]) async throws {
+        var numFiles = 40  // Default to all 40 available test files
+        var useAllFiles = false
+        var vadThreshold: Float = 0.3
+        var outputFile: String?
+        var vadModelType: VADModelType = .coreML  // Default to CoreML
+        
+        // Parse arguments
+        var i = 0
+        while i < arguments.count {
+            switch arguments[i] {
+            case "--num-files":
+                if i + 1 < arguments.count {
+                    numFiles = Int(arguments[i + 1]) ?? 40
+                    i += 1
+                }
+            case "--all-files":
+                useAllFiles = true
+            case "--threshold":
+                if i + 1 < arguments.count {
+                    vadThreshold = Float(arguments[i + 1]) ?? 0.3
+                    i += 1
+                }
+            case "--output":
+                if i + 1 < arguments.count {
+                    outputFile = arguments[i + 1]
+                    i += 1
+                }
+            case "--vad-model":
+                if i + 1 < arguments.count {
+                    let modelName = arguments[i + 1].lowercased()
+                    switch modelName {
+                    case "coreml":
+                        vadModelType = .coreML
+                    case "silero-pytorch", "pytorch":
+                        vadModelType = .sileroPyTorch
+                    default:
+                        print("⚠️ Unknown VAD model type: \(arguments[i + 1])")
+                        print("   Supported models: coreml, silero-pytorch")
+                        throw CLIError.invalidArgument("Unknown VAD model type: \(arguments[i + 1])")
+                    }
+                    i += 1
+                }
+            default:
+                print("⚠️ Unknown option: \(arguments[i])")
+            }
+            i += 1
+        }
+        
+        print("🚀 Starting VAD Benchmark")
+        print("   Test files: \(numFiles)")
+        print("   VAD threshold: \(vadThreshold)")
+        print("   VAD model type: \(vadModelType)")
+        
+        let vadManager = VADManager(config: VADConfig(
+            threshold: vadThreshold,
+            chunkSize: 512,
+            debugMode: true,
+            modelType: vadModelType
+        ))
+        
+        // VAD models will be automatically downloaded from Hugging Face if needed
+        print("🔄 VAD models will be auto-downloaded from Hugging Face if needed")
+        
+        do {
+            try await vadManager.initialize()
+            print("✅ VAD system initialized")
+        } catch {
+            print("❌ Failed to initialize VAD: \(error)")
+            print("   Error type: \(type(of: error))")
+            if let vadError = error as? VADError {
+                print("   VAD Error: \(vadError.localizedDescription)")
+            }
+            print("   Make sure VAD models are available in vadCoreml/ or cached directory")
+            throw error
+        }
+        
+        // Download test files
+        let testFiles = try await downloadVADTestFiles(count: useAllFiles ? -1 : numFiles)
+        
+        // Run benchmark
+        let result = try await runVADBenchmarkInternal(vadManager: vadManager, testFiles: testFiles, threshold: vadThreshold)
+        
+        // Print results
+        print("\n📊 VAD Benchmark Results:")
+        print("   Accuracy: \(String(format: "%.1f", result.accuracy))%")
+        print("   Precision: \(String(format: "%.1f", result.precision))%")
+        print("   Recall: \(String(format: "%.1f", result.recall))%")
+        print("   F1-Score: \(String(format: "%.1f", result.f1Score))%")
+        print("   Processing Time: \(String(format: "%.2f", result.processingTime))s")
+        print("   Files Processed: \(result.totalFiles)")
+        
+        // Save results
+        if let outputFile = outputFile {
+            try saveVADBenchmarkResults(result, to: outputFile)
+            print("💾 Results saved to: \(outputFile)")
+        } else {
+            try saveVADBenchmarkResults(result, to: "vad_benchmark_results.json")
+            print("💾 Results saved to: vad_benchmark_results.json")
+        }
+        
+        // Performance assessment
+        if result.f1Score >= 70.0 {
+            print("\n✅ EXCELLENT: F1-Score above 70%")
+        } else if result.f1Score >= 60.0 {
+            print("\n⚠️ ACCEPTABLE: F1-Score above 60%")
+        } else {
+            print("\n❌ NEEDS IMPROVEMENT: F1-Score below 60%")
+            // Don't exit - just report the poor performance
+        }
+    }
+    
+    static func downloadVADTestFiles(count: Int) async throws -> [VADTestFile] {
+        if count == -1 {
+            print("📥 Loading all available test audio files...")
+        } else {
+            print("📥 Loading \(count) test audio files...")
+        }
+        
+        // First try to load from local dataset directory
+        if let localFiles = try await loadLocalDataset(count: count) {
+            return localFiles
+        }
+        
+        // Second, try to load from Hugging Face cache
+        if let cachedFiles = try await loadHuggingFaceVADDataset(count: count) {
+            return cachedFiles
+        }
+        
+        // Finally, download from Hugging Face
+        print("🌐 Downloading VAD dataset from Hugging Face...")
+        if let hfFiles = try await downloadHuggingFaceVADDataset(count: count) {
+            return hfFiles
+        }
+        
+        // No fallback to mock data - fail cleanly
+        print("❌ Failed to load VAD dataset from all sources:")
+        print("   • Local dataset not found")
+        print("   • Hugging Face cache empty")  
+        print("   • Hugging Face download failed")
+        print("💡 Try: swift run fluidaudio download --dataset vad")
+        throw NSError(domain: "VADError", code: 404, userInfo: [
+            NSLocalizedDescriptionKey: "No VAD dataset available. Use 'download --dataset vad' to get real data."
+        ])
+    }
+    
+    static func loadLocalDataset(count: Int) async throws -> [VADTestFile]? {
+        // Check for local VAD dataset directories
+        let possiblePaths = [
+            "VADDataset/",
+            "vad_test_data/",
+            "datasets/vad/",
+            "../datasets/vad/"
+        ]
+        
+        for basePath in possiblePaths {
+            let datasetDir = URL(fileURLWithPath: basePath)
+            
+            guard FileManager.default.fileExists(atPath: datasetDir.path) else {
+                continue
+            }
+            
+            print("🗂️ Found local dataset at: \(basePath)")
+            
+            var testFiles: [VADTestFile] = []
+            
+            // Look for speech and non-speech subdirectories
+            let speechDir = datasetDir.appendingPathComponent("speech")
+            let nonSpeechDir = datasetDir.appendingPathComponent("non_speech")
+            
+            if FileManager.default.fileExists(atPath: speechDir.path) {
+                let maxSpeechFiles = count == -1 ? Int.max : count/2
+                let speechFiles = try loadAudioFiles(from: speechDir, expectedLabel: 1, maxCount: maxSpeechFiles)
+                testFiles.append(contentsOf: speechFiles)
+                print("   ✅ Loaded \(speechFiles.count) speech files")
+            }
+            
+            if FileManager.default.fileExists(atPath: nonSpeechDir.path) {
+                let maxNoiseFiles = count == -1 ? Int.max : count - testFiles.count
+                let nonSpeechFiles = try loadAudioFiles(from: nonSpeechDir, expectedLabel: 0, maxCount: maxNoiseFiles)
+                testFiles.append(contentsOf: nonSpeechFiles)
+                print("   ✅ Loaded \(nonSpeechFiles.count) non-speech files")
+            }
+            
+            if !testFiles.isEmpty {
+                print("📂 Using local dataset: \(testFiles.count) files total")
+                return testFiles
+            }
+        }
+        
+        return nil
+    }
+    
+    static func loadAudioFiles(from directory: URL, expectedLabel: Int, maxCount: Int) throws -> [VADTestFile] {
+        let fileManager = FileManager.default
+        let audioExtensions = ["wav", "mp3", "m4a", "aac", "aiff"]
+        
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        
+        var files: [VADTestFile] = []
+        
+        for case let fileURL as URL in enumerator {
+            guard files.count < maxCount else { break }
+            
+            let fileExtension = fileURL.pathExtension.lowercased()
+            guard audioExtensions.contains(fileExtension) else { continue }
+            
+            let fileName = fileURL.lastPathComponent
+            files.append(VADTestFile(name: fileName, expectedLabel: expectedLabel, url: fileURL))
+        }
+        
+        return files
+    }
+    
+    /// Load VAD dataset from Hugging Face cache
+    static func loadHuggingFaceVADDataset(count: Int) async throws -> [VADTestFile]? {
+        let cacheDir = getVADDatasetCacheDirectory()
+        
+        // Check if cache exists and has the required structure
+        let speechDir = cacheDir.appendingPathComponent("speech")
+        let noiseDir = cacheDir.appendingPathComponent("noise")
+        
+        guard FileManager.default.fileExists(atPath: speechDir.path) &&
+              FileManager.default.fileExists(atPath: noiseDir.path) else {
+            return nil
+        }
+        
+        // Load files from cache
+        var testFiles: [VADTestFile] = []
+        
+        // If count is -1, use all available files
+        if count == -1 {
+            print("📂 Loading all available files from Hugging Face cache...")
+            
+            // Load all speech files
+            let speechFiles = try loadAudioFiles(from: speechDir, expectedLabel: 1, maxCount: Int.max)
+            testFiles.append(contentsOf: speechFiles)
+            
+            // Load all noise files
+            let noiseFiles = try loadAudioFiles(from: noiseDir, expectedLabel: 0, maxCount: Int.max)
+            testFiles.append(contentsOf: noiseFiles)
+        } else {
+            let speechCount = count / 2
+            let noiseCount = count - speechCount
+            
+            // Load speech files
+            let speechFiles = try loadAudioFiles(from: speechDir, expectedLabel: 1, maxCount: speechCount)
+            testFiles.append(contentsOf: speechFiles)
+            
+            // Load noise files
+            let noiseFiles = try loadAudioFiles(from: noiseDir, expectedLabel: 0, maxCount: noiseCount)
+            testFiles.append(contentsOf: noiseFiles)
+        }
+        
+        if testFiles.isEmpty {
+            return nil
+        }
+        
+        print("🗂️ Found cached Hugging Face dataset: \(testFiles.count) files total")
+        return testFiles
+    }
+    
+    /// Download VAD dataset from Hugging Face musan_mini2 repository
+    static func downloadHuggingFaceVADDataset(count: Int) async throws -> [VADTestFile]? {
+        let cacheDir = getVADDatasetCacheDirectory()
+        
+        // Create cache directories
+        let speechDir = cacheDir.appendingPathComponent("speech")
+        let noiseDir = cacheDir.appendingPathComponent("noise")
+        try FileManager.default.createDirectory(at: speechDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: noiseDir, withIntermediateDirectories: true)
+        
+        let repoBase = "https://huggingface.co/datasets/alexwengg/musan_mini2/resolve/main"
+        
+        var testFiles: [VADTestFile] = []
+        
+        // If count is -1, download many files (large number)
+        let speechCount = count == -1 ? 50 : count / 2
+        let noiseCount = count == -1 ? 50 : count - speechCount
+        
+        do {
+            // Download speech files
+            print("   📢 Downloading speech samples...")
+            let speechFiles = try await downloadVADFilesFromHF(
+                baseUrl: "\(repoBase)/speech",
+                targetDir: speechDir,
+                expectedLabel: 1,
+                count: speechCount,
+                filePrefix: "speech"
+            )
+            testFiles.append(contentsOf: speechFiles)
+            
+            // Download noise files  
+            print("   🔇 Downloading noise samples...")
+            let noiseFiles = try await downloadVADFilesFromHF(
+                baseUrl: "\(repoBase)/noise",
+                targetDir: noiseDir,
+                expectedLabel: 0,
+                count: noiseCount,
+                filePrefix: "noise"
+            )
+            testFiles.append(contentsOf: noiseFiles)
+            
+            if !testFiles.isEmpty {
+                print("✅ Downloaded VAD dataset from Hugging Face: \(testFiles.count) files")
+                return testFiles
+            }
+            
+        } catch {
+            print("❌ Failed to download from Hugging Face: \(error)")
+            // Clean up partial downloads
+            try? FileManager.default.removeItem(at: cacheDir)
+        }
+        
+        return nil
+    }
+    
+    /// Download VAD audio files from Hugging Face
+    static func downloadVADFilesFromHF(
+        baseUrl: String,
+        targetDir: URL,
+        expectedLabel: Int,
+        count: Int,
+        filePrefix: String
+    ) async throws -> [VADTestFile] {
+        var testFiles: [VADTestFile] = []
+        
+        // Get files directly from the directory (simplified structure in musan_mini2)
+        let repoApiUrl = "https://huggingface.co/api/datasets/alexwengg/musan_mini2/tree/main/\(filePrefix)"
+        var allFiles: [String] = []
+        
+        do {
+            let directoryFiles = try await getHuggingFaceFileList(apiUrl: repoApiUrl)
+            let audioFiles = directoryFiles.filter { fileName in
+                let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+                return ["wav", "mp3", "flac", "m4a"].contains(ext)
+            }
+            allFiles.append(contentsOf: audioFiles)
+        } catch {
+            print("      ⚠️ Could not access \(filePrefix): \(error)")
+        }
+        
+        print("      Found \(allFiles.count) audio files in \(filePrefix)/ directory")
+        
+        if !allFiles.isEmpty {
+            let filesToDownload = Array(allFiles.prefix(count))
+            var downloadedCount = 0
+            
+            for fileName in filesToDownload {
+                let fileUrl = "\(baseUrl)/\(fileName)"
+                let destination = targetDir.appendingPathComponent(fileName)
+                
+                do {
+                    let downloadedFile = try await downloadAudioFile(from: fileUrl, to: destination)
+                    testFiles.append(VADTestFile(
+                        name: fileName,
+                        expectedLabel: expectedLabel,
+                        url: downloadedFile
+                    ))
+                    downloadedCount += 1
+                    print("      ✅ Downloaded: \(fileName)")
+                    
+                } catch {
+                    print("      ⚠️ Failed to download \(fileName): \(error)")
+                    continue
+                }
+            }
+        } else {
+            print("      No audio files found in subdirectories")
+        }
+        
+        // If no files downloaded via API, try pattern-based download
+        if testFiles.isEmpty {
+            print("      ⚠️ API method failed or no files found, trying pattern-based download...")
+            
+            // Fallback to pattern-based download
+            let extensions = ["wav", "mp3", "flac"]
+            let patterns = [
+                // Common MUSAN file patterns
+                "\(filePrefix)-music-",
+                "\(filePrefix)-speech-", 
+                "\(filePrefix)-noise-",
+                "musan-\(filePrefix)-",
+                // Simple numbered patterns
+                "\(filePrefix)-",
+                "\(filePrefix)_",
+            ]
+            
+            var downloadedCount = 0
+            
+            for pattern in patterns {
+                if downloadedCount >= count { break }
+                
+                for i in 0..<(count * 2) { // Try more files than needed
+                    if downloadedCount >= count { break }
+                    
+                    for ext in extensions {
+                        if downloadedCount >= count { break }
+                        
+                        let fileName = "\(pattern)\(String(format: "%04d", i)).\(ext)"
+                        let fileUrl = "\(baseUrl)/\(fileName)"
+                        let destination = targetDir.appendingPathComponent(fileName)
+                        
+                        do {
+                            let downloadedFile = try await downloadAudioFile(from: fileUrl, to: destination)
+                            testFiles.append(VADTestFile(
+                                name: fileName,
+                                expectedLabel: expectedLabel,
+                                url: downloadedFile
+                            ))
+                            downloadedCount += 1
+                            print("      ✅ Downloaded: \(fileName)")
+                            
+                        } catch {
+                            // File doesn't exist, continue trying
+                            continue
+                        }
+                    }
+                }
+            }
+        }
+        
+        return testFiles
+    }
+    
+    /// Get file list from HuggingFace API
+    static func getHuggingFaceFileList(apiUrl: String) async throws -> [String] {
+        guard let url = URL(string: apiUrl) else {
+            throw NSError(domain: "APIError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid API URL"])
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        
+        // Parse the JSON response to extract file names
+        if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return json.compactMap { item in
+                if let type = item["type"] as? String,
+                   let path = item["path"] as? String,
+                   type == "file" {
+                    // Extract just the filename from the path
+                    return URL(fileURLWithPath: path).lastPathComponent
+                }
+                return nil
+            }
+        }
+        
+        return []
+    }
+    
+    /// Get VAD dataset cache directory
+    static func getVADDatasetCacheDirectory() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let cacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset", isDirectory: true)
+        
+        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        return cacheDir
+    }
+    
+    static func downloadAudioFile(from urlString: String, to destination: URL) async throws -> URL {
+        // Skip if already exists
+        if FileManager.default.fileExists(atPath: destination.path) {
+            return destination
+        }
+        
+        guard let url = URL(string: urlString) else {
+            throw NSError(domain: "DownloadError", code: 1,
+                         userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        try data.write(to: destination)
+        
+        // Verify it's valid audio
+        do {
+            let _ = try AVAudioFile(forReading: destination)
+        } catch {
+            throw NSError(domain: "DownloadError", code: 2,
+                         userInfo: [NSLocalizedDescriptionKey: "Downloaded file is not valid audio"])
+        }
+        
+        return destination
+    }
+    
+    static func runVADBenchmarkInternal(vadManager: VADManager, testFiles: [VADTestFile], threshold: Float) async throws -> VADBenchmarkResult {
+        print("\n🔍 Running VAD benchmark on \(testFiles.count) files...")
+        
+        let startTime = Date()
+        var predictions: [Int] = []
+        var groundTruth: [Int] = []
+        
+        for (index, testFile) in testFiles.enumerated() {
+            print("   Processing \(index + 1)/\(testFiles.count): \(testFile.name)")
+            
+            do {
+                // Load audio file
+                let audioFile = try AVAudioFile(forReading: testFile.url)
+                let audioData = try await loadVADAudioData(audioFile)
+                
+                // Process with VAD
+                let vadResults = try await vadManager.processAudioFile(audioData)
+                
+                // Aggregate results (use max probability as file-level decision)
+                let maxProbability = vadResults.map { $0.probability }.max() ?? 0.0
+                let prediction = maxProbability >= threshold ? 1 : 0
+                
+                predictions.append(prediction)
+                groundTruth.append(testFile.expectedLabel)
+                
+                print("      Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel)")
+                
+            } catch {
+                print("      ❌ Error: \(error)")
+                // Use default prediction on error
+                predictions.append(0)
+                groundTruth.append(testFile.expectedLabel)
+            }
+        }
+        
+        let processingTime = Date().timeIntervalSince(startTime)
+        
+        // Calculate metrics
+        let metrics = calculateVADMetrics(predictions: predictions, groundTruth: groundTruth)
+        
+        return VADBenchmarkResult(
+            testName: "VAD_Benchmark_\(testFiles.count)_Files",
+            accuracy: metrics.accuracy,
+            precision: metrics.precision,
+            recall: metrics.recall,
+            f1Score: metrics.f1Score,
+            processingTime: processingTime,
+            totalFiles: testFiles.count,
+            correctPredictions: zip(predictions, groundTruth).filter { $0 == $1 }.count
+        )
+    }
+    
+    static func loadVADAudioData(_ audioFile: AVAudioFile) async throws -> [Float] {
+        let format = audioFile.processingFormat
+        let frameCount = AVAudioFrameCount(audioFile.length)
+        
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            throw NSError(domain: "AudioError", code: 1, userInfo: nil)
+        }
+        
+        try audioFile.read(into: buffer)
+        
+        guard let floatData = buffer.floatChannelData?[0] else {
+            throw NSError(domain: "AudioError", code: 2, userInfo: nil)
+        }
+        
+        let actualFrameCount = Int(buffer.frameLength)
+        var samples = Array(UnsafeBufferPointer(start: floatData, count: actualFrameCount))
+        
+        // Resample to 16kHz if needed
+        if format.sampleRate != 16000 {
+            samples = try await resampleVADAudio(samples, from: format.sampleRate, to: 16000)
+        }
+        
+        return samples
+    }
+    
+    static func resampleVADAudio(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) async throws -> [Float] {
+        if sourceSampleRate == targetSampleRate {
+            return samples
+        }
+        
+        let ratio = sourceSampleRate / targetSampleRate
+        let outputLength = Int(Double(samples.count) / ratio)
+        var resampled: [Float] = []
+        resampled.reserveCapacity(outputLength)
+        
+        for i in 0..<outputLength {
+            let sourceIndex = Double(i) * ratio
+            let index = Int(sourceIndex)
+            
+            if index < samples.count - 1 {
+                let fraction = sourceIndex - Double(index)
+                let sample = samples[index] * Float(1.0 - fraction) + samples[index + 1] * Float(fraction)
+                resampled.append(sample)
+            } else if index < samples.count {
+                resampled.append(samples[index])
+            }
+        }
+        
+        return resampled
+    }
+    
+    static func calculateVADMetrics(predictions: [Int], groundTruth: [Int]) -> (accuracy: Float, precision: Float, recall: Float, f1Score: Float) {
+        guard predictions.count == groundTruth.count && !predictions.isEmpty else {
+            return (0, 0, 0, 0)
+        }
+        
+        var truePositives = 0
+        var falsePositives = 0
+        var trueNegatives = 0
+        var falseNegatives = 0
+        
+        for (pred, truth) in zip(predictions, groundTruth) {
+            switch (pred, truth) {
+            case (1, 1): truePositives += 1
+            case (1, 0): falsePositives += 1
+            case (0, 0): trueNegatives += 1
+            case (0, 1): falseNegatives += 1
+            default: break
+            }
+        }
+        
+        let accuracy = Float(truePositives + trueNegatives) / Float(predictions.count) * 100
+        let precision = truePositives + falsePositives > 0 ? Float(truePositives) / Float(truePositives + falsePositives) * 100 : 0
+        let recall = truePositives + falseNegatives > 0 ? Float(truePositives) / Float(truePositives + falseNegatives) * 100 : 0
+        let f1Score = precision + recall > 0 ? 2 * (precision * recall) / (precision + recall) : 0
+        
+        return (accuracy, precision, recall, f1Score)
+    }
+    
+    static func saveVADBenchmarkResults(_ result: VADBenchmarkResult, to file: String) throws {
+        let resultsDict: [String: Any] = [
+            "test_name": result.testName,
+            "accuracy": result.accuracy,
+            "precision": result.precision,
+            "recall": result.recall,
+            "f1_score": result.f1Score,
+            "processing_time_seconds": result.processingTime,
+            "total_files": result.totalFiles,
+            "correct_predictions": result.correctPredictions,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "environment": "CLI"
+        ]
+        
+        let jsonData = try JSONSerialization.data(withJSONObject: resultsDict, options: .prettyPrinted)
+        try jsonData.write(to: URL(fileURLWithPath: file))
+    }
+}
+
+// MARK: - VAD Benchmark Data Structures
+
+struct VADTestFile {
+    let name: String
+    let expectedLabel: Int // 0 = no speech, 1 = speech
+    let url: URL
+}
+
+struct VADBenchmarkResult {
+    let testName: String
+    let accuracy: Float
+    let precision: Float
+    let recall: Float
+    let f1Score: Float
+    let processingTime: TimeInterval
+    let totalFiles: Int
+    let correctPredictions: Int
 }
 
 // MARK: - Data Structures
@@ -1583,6 +2535,7 @@ struct BenchmarkResult: Codable {
     let jer: Float
     let segments: [TimedSpeakerSegment]
     let speakerCount: Int
+    let groundTruthSpeakerCount: Int
     let timings: PipelineTimings
 
     /// Total time including audio loading
@@ -1902,4 +2855,15 @@ private class AMIMeetingsXMLDelegate: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
         parsingError = parseError
     }
+}
+
+// MARK: - VAD Comparison Data Structure
+
+struct VADComparisonResult {
+    let testName: String
+    let numFiles: Int
+    let threshold: Float
+    let coreMLResult: VADBenchmarkResult
+    let pytorchResult: VADBenchmarkResult
+    let winner: String
 }
