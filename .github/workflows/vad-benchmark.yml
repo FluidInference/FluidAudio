@@ -251,17 +251,20 @@ jobs:
               reportContent += `| **Processing Time** | ${results.processing_time_seconds?.toFixed(1) || 'N/A'}s |\n`;
               reportContent += `| **Files Processed** | ${results.total_files || 'N/A'} |\n\n`;
 
-              // Performance assessment
+              // Performance assessment with updated thresholds for enhanced VAD
               const f1Score = results.f1_score || 0;
-              if (f1Score >= 70) {
+              if (f1Score >= 75) {
+                reportContent += `### 🏆 Status: OUTSTANDING\n`;
+                reportContent += `F1-Score of ${f1Score.toFixed(1)}% exceeds expectations with enhanced VAD features.\n\n`;
+              } else if (f1Score >= 70) {
                 reportContent += `### ✅ Status: EXCELLENT\n`;
-                reportContent += `F1-Score of ${f1Score.toFixed(1)}% meets quality standards.\n\n`;
+                reportContent += `F1-Score of ${f1Score.toFixed(1)}% meets enhanced quality standards.\n\n`;
               } else if (f1Score >= 60) {
                 reportContent += `### ⚠️ Status: ACCEPTABLE\n`;
-                reportContent += `F1-Score of ${f1Score.toFixed(1)}% is acceptable but could be improved.\n\n`;
+                reportContent += `F1-Score of ${f1Score.toFixed(1)}% is acceptable but below enhanced target (70%+).\n\n`;
               } else {
                 reportContent += `### ❌ Status: NEEDS IMPROVEMENT\n`;
-                reportContent += `F1-Score of ${f1Score.toFixed(1)}% is below target (60%+).\n\n`;
+                reportContent += `F1-Score of ${f1Score.toFixed(1)}% is below minimum target (60%+).\n\n`;
               }
 
             } else {
