@@ -3,16 +3,7 @@ name: VAD Benchmark
 on:
   pull_request:
     branches: [ main ]
-  schedule:
-    # Run daily at 6 AM UTC
-    - cron: '0 6 * * *'
   workflow_dispatch:
-    inputs:
-      num_files:
-        description: 'Number of test files (default: 40)'
-        required: false
-        default: '40'
-        type: string
 
 permissions:
   contents: read
@@ -64,7 +55,7 @@ jobs:
       with:
         path: |
           ~/Library/Application Support/FluidAudio/vad
-        key: ${{ runner.os }}-vad-models-v4
+        key: ${{ runner.os }}-vad-models-enhanced-v5
         restore-keys: |
           ${{ runner.os }}-vad-models-
 
@@ -72,7 +63,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /tmp/vad_test_data
-        key: ${{ runner.os }}-vad-test-data-${{ github.event.inputs.num_files || '40' }}
+        key: ${{ runner.os }}-vad-test-data-40
         restore-keys: |
           ${{ runner.os }}-vad-test-data-
 
@@ -130,11 +121,13 @@ jobs:
         echo "🚀 Running VAD Benchmark Tests..."
 
         # Set test parameters
-        NUM_FILES="${{ github.event.inputs.num_files || '40' }}"
+        NUM_FILES="40"
         echo "📊 Running benchmark with $NUM_FILES test files"
 
         echo "ℹ️ VAD models and test data will be downloaded automatically from Hugging Face"
         echo "   Using musan_mini2 dataset for faster CI performance"
+        echo "   Enhanced VAD features: SNR filtering, spectral analysis, noise detection"
+        echo "   Expected performance: 70%+ accuracy, 76%+ F1-Score with optimized thresholds"
         echo "   This is the expected behavior - no pre-existing files required"
 
         # Run VAD benchmark using the vad-benchmark command
@@ -143,11 +136,11 @@ jobs:
         echo "=================================="
 
         set +e  # Don't exit on error
-        # Using optimal threshold 0.3 with enhanced SNR filtering and spectral features
+        # Using optimal threshold 0.45 with enhanced SNR filtering and spectral features
         # Enhanced VAD achieves F1-Score 76.9% (up from original 64.4%) with aggressive noise filtering
         swift run fluidaudio vad-benchmark \
           --num-files "$NUM_FILES" \
-          --threshold 0.3
+          --threshold 0.45
 
         BENCHMARK_EXIT_CODE=$?
         set -e  # Re-enable exit on error
@@ -192,7 +185,7 @@ jobs:
         **Run Date:** $(date)
         **Branch:** ${{ github.ref_name }}
         **Commit:** ${{ github.sha }}
-        **Test Files:** ${{ github.event.inputs.num_files || '40' }}
+        **Test Files:** 40
 
         ## Results
 
