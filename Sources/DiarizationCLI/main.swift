@@ -862,7 +862,7 @@ struct DiarizationCLI {
 
         // Count mapped speakers (those that successfully mapped to ground truth)
         let mappedSpeakerCount = speakerMapping.count
-        
+
         return DiarizationMetrics(
             der: der,
             jer: jer,
@@ -1752,7 +1752,7 @@ struct DiarizationCLI {
         var useAllFiles = true  // Default to all files
         var vadThreshold: Float = 0.3
         var outputFile: String?
-        var dataset = "mini50"  // Default to mini50 dataset
+        var dataset = "mini100"  // Default to mini50 dataset
 
 
         // Parse arguments
@@ -2246,7 +2246,7 @@ struct DiarizationCLI {
 
                 // Process with VAD
                 let vadResults = try await vadManager.processAudioFile(audioData)
-                
+
                 // Free audio data immediately after processing
                 // This helps with GitHub Actions memory constraints
 
@@ -2287,40 +2287,40 @@ struct DiarizationCLI {
     static func loadVADAudioData(_ audioFile: AVAudioFile) async throws -> [Float] {
         let format = audioFile.processingFormat
         let frameCount = AVAudioFrameCount(audioFile.length)
-        
+
         // Early exit if already 16kHz - avoid resampling overhead
         let needsResampling = format.sampleRate != 16000
-        
+
         // Use smaller buffer size for GitHub Actions memory constraints
         let bufferSize: AVAudioFrameCount = min(frameCount, 4096)
-        
+
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: bufferSize) else {
             throw NSError(domain: "AudioError", code: 1, userInfo: nil)
         }
 
         var allSamples: [Float] = []
         allSamples.reserveCapacity(Int(frameCount))
-        
+
         // Read file in chunks to reduce memory pressure
         var remainingFrames = frameCount
-        
+
         while remainingFrames > 0 {
             let framesToRead = min(remainingFrames, bufferSize)
             buffer.frameLength = 0  // Reset buffer
-            
+
             try audioFile.read(into: buffer, frameCount: framesToRead)
-            
+
             guard let floatData = buffer.floatChannelData?[0] else {
                 throw NSError(domain: "AudioError", code: 2, userInfo: nil)
             }
-            
+
             let actualFrameCount = Int(buffer.frameLength)
             if actualFrameCount == 0 { break }
-            
+
             // Direct append without intermediate array creation
             let bufferPointer = UnsafeBufferPointer(start: floatData, count: actualFrameCount)
             allSamples.append(contentsOf: bufferPointer)
-            
+
             remainingFrames -= AVAudioFrameCount(actualFrameCount)
         }
 

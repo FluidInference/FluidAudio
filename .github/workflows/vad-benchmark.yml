@@ -249,8 +249,8 @@ jobs:
               reportContent += `- **WebRTC VAD**: ~75-80% F1 (GMM-based, fast but lower accuracy)\n`;
               reportContent += `- **Sohn's VAD**: 77.5% F1 (traditional approach)\n`;
               reportContent += `- **Modern DNNs**: 85-97% F1 (varies by SNR conditions)\n\n`;
-              
-              reportContent += `**Your Performance:**\n`;
+
+              reportContent += `**Results:**\n`;
               const f1Score = results.f1_score || 0;
               if (f1Score >= 90) {
                 reportContent += `- **${f1Score.toFixed(1)}% F1-Score** places FluidAudio VAD in the **state-of-the-art** category\n`;
@@ -261,11 +261,11 @@ jobs:
               } else {
                 reportContent += `- **${f1Score.toFixed(1)}% F1-Score** indicates room for improvement\n`;
               }
-              
+
               if (results.precision >= 95) {
                 reportContent += `- **${results.precision.toFixed(1)}% Precision** indicates exceptional false positive control\n`;
               }
-              
+
               reportContent += `- Performance ${f1Score >= 85.9 ? 'exceeds' : 'below'} Sohn's VAD baseline (85.9% F1)\n`;
               reportContent += `- Suitable for ${f1Score >= 90 ? 'production deployment' : f1Score >= 75 ? 'development use' : 'further optimization'}\n\n`;
 
