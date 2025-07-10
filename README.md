@@ -11,21 +11,17 @@ FluidAudio is a Swift framework for on-device speaker diarization and audio proc
 
 Built to address the need for an open-source solution capable of real-time workloads on iOS and older macOS devices, FluidAudio fills a gap where existing solutions either rely on CPU-only models or remain closed-source behind paid licenses. Since speaker diarization and identification are among the most popular features for voice AI applications, we believe these capabilities should be freely available.
 
-Our testing demonstrates that CoreML versions deliver significantly more efficient inference compared to their ONNX counterparts, making them truly suitable for real-time transcription use cases.
-
-We are also working on adding support for ASR (Automatic Speech Recognition) and VAD (Voice Activity Detection).
-
-All models have been manually converted by our team from open-source variants and are available on Hugging Face.
-
 ## Features
+
+Our testing demonstrates that CoreML versions deliver significantly more efficient inference compared to their ONNX counterparts, making them truly suitable for real-time transcription use cases.
 
 - **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
 - **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
-- **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering
-- **CoreML Integration**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon and iOS
-- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/bweng/speaker-diarization-coreml) - converted and optimized by our team
-- **Real-time Processing**: Designed for real-time workloads but also works for offline 
-- **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+
+- **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
+- **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
+- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/bweng/speaker-diarization-coreml) - converted and optimized by our team. Permissive licenses.
+- **Real-time Processing**: Designed for real-time workloads but also works for offline processing
+- **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+ and any Apple Sillicon device
 
 ## Installation
 
