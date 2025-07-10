@@ -278,10 +278,6 @@ jobs:
             reportContent += `Could not parse benchmark results: ${error.message}\n\n`;
           }
 
-          reportContent += `### 🔗 Links\n`;
-          reportContent += `- [Workflow Run](${context.payload.repository.html_url}/actions/runs/${{ github.run_id }})\n`;
-          reportContent += `- [Test Artifacts](${context.payload.repository.html_url}/actions/runs/${{ github.run_id }}#artifacts)\n`;
-
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
