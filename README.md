@@ -4,13 +4,18 @@
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
-[![Models](https://img.shields.io/badge/Models-HuggingFace-yellow.svg)](https://huggingface.co/bweng/speaker-diarization-coreml)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/8FbwRaDFJR)
+[![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/bweng/speaker-diarization-coreml)
 
-FluidAudio is a high-performance Swift framework for on-device speaker diarization and audio processing, designed to meet research standards. Our goal is to maximize performance per watt by leveraging CoreML models exclusively. We are also working on adding support for ASR (Automatic Speech Recognition).
+FluidAudio is a Swift framework for on-device speaker diarization and audio processing, designed to maximize performance per watt by leveraging CoreML models exclusively. Optimized for Apple's Neural Engine, it delivers faster and more efficient processing than CPU or GPU alternatives.
+
+Built to address the need for an open-source solution capable of real-time workloads on iOS and older macOS devices, FluidAudio fills a gap where existing solutions either rely on CPU-only models or remain closed-source behind paid licenses. Since speaker diarization and identification are among the most popular features for voice AI applications, we believe these capabilities should be freely available.
+
+Our testing demonstrates that CoreML versions deliver significantly more efficient inference compared to their ONNX counterparts, making them truly suitable for real-time transcription use cases.
+
+We are also working on adding support for ASR (Automatic Speech Recognition) and VAD (Voice Activity Detection).
 
 All models have been manually converted by our team from open-source variants and are available on Hugging Face.
-
-In our tests, the CoreML versions deliver significantly more efficient inference compared to their ONNX counterparts, making them truly suitable for real-time transcription use cases. Try it yourself with [fluidtop](https://github.com/FluidInference/fluidtop)!
 
 ## Features
 
@@ -19,10 +24,8 @@ In our tests, the CoreML versions deliver significantly more efficient inference
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering
 - **CoreML Integration**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon and iOS
 - **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/bweng/speaker-diarization-coreml) - converted and optimized by our team
-- **Real-time Processing**: Support for streaming audio processing with minimal latency
+- **Real-time Processing**: Designed for real-time workloads but also works for offline 
 - **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+
-
-- **Comprehensive CLI**: Professional benchmarking tools with beautiful tabular output
 
 ## Installation
 
@@ -67,7 +70,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 - **Voice Activity Detection (VAD)**: Voice activity detection capabilities
 - **ASR Models**: Support for open-source ASR models
-- **System Audio Access**: Tap into system audio via CoreAudio 
+- **System Audio Access**: Tap into system audio via CoreAudio
 
 ## 🎯 Performance
 
@@ -91,17 +94,6 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - Throughput: Can process 50x faster than real-time
   - Pipeline impact: Minimal - diarization won't be the bottleneck
 ```
-
-## ⚡ Apple Neural Engine Optimization
-
-FluidAudio leverages Apple's Neural Engine for maximum efficiency:
-
-- **Zero Performance Trade-offs**: Full ANE utilization without sacrificing accuracy
-- **Maximum Performance per Watt**: Dedicated to delivering the most efficient computing possible on Apple devices
-- **Power Efficient**: Minimal battery impact on mobile devices
-- **Custom Model Conversion**: Our team has converted and optimized all models specifically for CoreML
-- **Ongoing CoreML Support**: We're committed to converting and supporting the latest models through CoreML for optimal Apple ecosystem performance
-- **Open Source Models**: All converted models are [available on HuggingFace](https://huggingface.co/bweng/speaker-diarization-coreml) for transparency and community contribution
 
 ## 🏢 Real-World Usage
 
@@ -198,7 +190,3 @@ This project builds upon the excellent work of the [sherpa-onnx](https://github.
 Pyannote: https://github.com/pyannote/pyannote-audio
 
 Wewpeaker: https://github.com/wenet-e2e/wespeaker
-
-## Community
-
-[Join our discord](https://discord.gg/8FbwRaDFJR)
