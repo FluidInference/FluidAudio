@@ -63,7 +63,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /tmp/vad_test_data
-        key: ${{ runner.os }}-vad-test-data-40
+        key: ${{ runner.os }}-vad-test-data-50
         restore-keys: |
           ${{ runner.os }}-vad-test-data-
 
@@ -78,7 +78,7 @@ jobs:
         echo ""
         echo "ℹ️ VAD models will be downloaded automatically from Hugging Face"
         echo "   Model Repository: alexwengg/coreml_silero_vad"
-        echo "   Test Data Repository: alexwengg/musan_mini2 (smaller files, faster CI)"
+        echo "   Test Data Repository: alexwengg/musan_mini50 (50 files, optimized for CI)"
         echo "   Models: silero_stft.mlmodel, silero_encoder.mlmodel, silero_rnn_decoder.mlmodel, correct_classifier_conv1d.mlmodel"
         echo "   🎯 Enhanced Features: SNR filtering, spectral analysis, noise detection"
 
@@ -121,11 +121,11 @@ jobs:
         echo "🚀 Running VAD Benchmark Tests..."
 
         # Set test parameters
-        NUM_FILES="40"
+        NUM_FILES="50"
         echo "📊 Running benchmark with $NUM_FILES test files"
 
         echo "ℹ️ VAD models and test data will be downloaded automatically from Hugging Face"
-        echo "   Using musan_mini2 dataset for faster CI performance"
+        echo "   Using musan_mini50 dataset for optimized CI performance"
         echo "   Enhanced VAD features: SNR filtering, spectral analysis, noise detection"
         echo "   Expected performance: 70%+ accuracy, 76%+ F1-Score with optimized thresholds"
         echo "   This is the expected behavior - no pre-existing files required"
@@ -185,7 +185,7 @@ jobs:
         **Run Date:** $(date)
         **Branch:** ${{ github.ref_name }}
         **Commit:** ${{ github.sha }}
-        **Test Files:** 40
+        **Test Files:** 50
 
         ## Results
 
