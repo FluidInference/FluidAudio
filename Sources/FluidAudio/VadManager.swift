@@ -5,8 +5,7 @@ import Accelerate
 
 /// VAD model types
 public enum VADModelType: Sendable {
-    case coreML          // Current CoreML-based pipeline (STFT + Encoder + RNN + Fallback)
-    case sileroPyTorch   // Official Silero VAD PyTorch model (requires Python)
+    case coreML          // CoreML-based pipeline (STFT + Encoder + RNN + Enhanced Fallback)
 }
 
 /// Configuration for VAD processing
@@ -21,7 +20,7 @@ public struct VADConfig: Sendable {
     public var maxThreshold: Float = 0.7       // Maximum threshold for adaptive mode
     public var modelType: VADModelType = .coreML  // Use CoreML for Mac
     public var useGPU: Bool = true             // Use Metal Performance Shaders on Mac
-    
+
     // SNR and noise detection parameters
     public var enableSNRFiltering: Bool = true      // Enable SNR-based filtering for better noise rejection
     public var minSNRThreshold: Float = 6.0         // Minimum SNR for speech detection (dB) - more aggressive
@@ -91,7 +90,7 @@ public struct SpectralFeatures: Sendable {
     public let mfccFeatures: [Float]        // MFCC coefficients (first 13)
     public let zeroCrossingRate: Float      // Zero crossing rate
     public let spectralEntropy: Float       // Measure of spectral complexity
-    
+
     public init(spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float], zeroCrossingRate: Float, spectralEntropy: Float) {
         self.spectralCentroid = spectralCentroid
         self.spectralRolloff = spectralRolloff
@@ -171,27 +170,17 @@ public actor VADManager {
     }
 
     public var isAvailable: Bool {
-        switch config.modelType {
-        case .coreML:
-            return stftModel != nil && encoderModel != nil && rnnModel != nil // Classifier is optional - using fallback
-        case .sileroPyTorch:
-            return false  // Not implemented yet
-        }
+        return stftModel != nil && encoderModel != nil && rnnModel != nil // Classifier is optional - using fallback
     }
 
     /// Initialize VAD system with selected model type
     public func initialize() async throws {
         let initStartTime = Date()
-        logger.info("Initializing VAD system with \(String(describing: self.config.modelType))")
+        logger.info("Initializing VAD system with CoreML")
 
         let loadStartTime = Date()
 
-        switch config.modelType {
-        case .coreML:
-            try await loadCoreMLModels()
-        case .sileroPyTorch:
-            try await loadSileroPyTorchModel()
-        }
+        try await loadCoreMLModels()
 
         self.modelLoadTime = Date().timeIntervalSince(loadStartTime)
 
@@ -212,62 +201,43 @@ public actor VADManager {
         let stftPath = modelsDirectory.appendingPathComponent("silero_stft.mlmodel")
         let encoderPath = modelsDirectory.appendingPathComponent("silero_encoder.mlmodel")
         let rnnPath = modelsDirectory.appendingPathComponent("silero_rnn_decoder.mlmodel")
-        let classifierPath = modelsDirectory.appendingPathComponent("correct_classifier_conv1d.mlmodel")  // Use standard .mlmodel format
 
         // Load models with auto-recovery mechanism
         try await loadModelsWithAutoRecovery(
             stftPath: stftPath,
             encoderPath: encoderPath,
-            rnnPath: rnnPath,
-            classifierPath: classifierPath
+            rnnPath: rnnPath
         )
     }
 
 
-    /// Load Silero PyTorch VAD model (requires Python runtime)
-    private func loadSileroPyTorchModel() async throws {
-        logger.info("Loading Silero PyTorch VAD model")
-
-        // This would require Python integration via PythonKit or similar
-        // For now, throw an error as it's not implemented
-        logger.error("PyTorch model loading not implemented yet")
-        throw VADError.modelLoadingFailed
-    }
-
 
     /// Reset RNN state and feature buffer
     public func resetState() {
-        switch config.modelType {
-        case .coreML:
-            do {
-                // Initialize CoreML RNN states with shape (1, 1, 128)
-                self.hState = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
-                self.cState = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
+        do {
+            // Initialize CoreML RNN states with shape (1, 1, 128)
+            self.hState = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
+            self.cState = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
 
-                // Clear feature buffer
-                self.featureBuffer.removeAll()
+            // Clear feature buffer
+            self.featureBuffer.removeAll()
 
-            } catch {
-                logger.error("Failed to reset CoreML VAD state: \(error.localizedDescription)")
-            }
-
-        case .sileroPyTorch:
-            // Reset PyTorch model state (not implemented yet)
-            break
+        } catch {
+            logger.error("Failed to reset CoreML VAD state: \(error.localizedDescription)")
         }
 
         // Reset adaptive thresholding state (common to all models)
         self.probabilityHistory.removeAll()
         self.probabilityWindow.removeAll()
         self.adaptiveThreshold = config.threshold
-        
+
         // Reset SNR and spectral analysis state
         self.noiseFloorBuffer.removeAll()
         self.currentNoiseFloor = -60.0
         self.previousSpectrum.removeAll()
 
         if config.debugMode {
-            logger.debug("VAD state reset successfully for \(String(describing: self.config.modelType))")
+            logger.debug("VAD state reset successfully for CoreML")
         }
     }
 
@@ -281,12 +251,7 @@ public actor VADManager {
 
         let rawProbability: Float
 
-        switch config.modelType {
-        case .coreML:
-            rawProbability = try await processCoreMLChunk(audioChunk)
-        case .sileroPyTorch:
-            throw VADError.modelProcessingFailed("PyTorch model not implemented yet")
-        }
+        rawProbability = try await processCoreMLChunk(audioChunk)
 
         // Calculate SNR and spectral features if enabled
         var snrValue: Float?
@@ -296,10 +261,10 @@ public actor VADManager {
         if config.enableSNRFiltering {
             // Calculate spectral features
             spectralFeatures = calculateSpectralFeatures(audioChunk)
-            
+
             // Calculate SNR
             snrValue = calculateSNR(audioChunk)
-            
+
             // Apply SNR-based filtering
             enhancedProbability = applyAudioQualityFiltering(
                 rawProbability: rawProbability,
@@ -319,7 +284,7 @@ public actor VADManager {
 
         if config.debugMode {
             let snrString = snrValue.map { String(format: "%.1f", $0) } ?? "N/A"
-            let debugMessage = "VAD processing (\(config.modelType)): raw=\(String(format: "%.3f", rawProbability)), enhanced=\(String(format: "%.3f", enhancedProbability)), smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", effectiveThreshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
+            let debugMessage = "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)), enhanced=\(String(format: "%.3f", enhancedProbability)), smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", effectiveThreshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
             logger.debug("\(debugMessage)")
         }
 
@@ -658,19 +623,19 @@ public actor VADManager {
         let varianceScore = tanh(std * 2.0) * 0.15                // Moderate variance importance
         let speechScore = speechIndicator * 0.4                   // Strong weight for speech patterns
         let crossingScore = tanh(zeroCrossingRate * 4.0) * 0.15   // Moderate crossing rate
-        
+
         // Refined noise detection with moderate penalties
         var penalties: Float = 0.0
         if isHighFrequencyNoise { penalties -= 0.2 }         // Moderate penalty for high-frequency noise
         if isVeryHighEnergy { penalties -= 0.15 }            // Moderate penalty for very high energy
         if isTooManyPeaks { penalties -= 0.15 }              // Moderate penalty for too many peaks
         if speechIndicator < 0.3 { penalties -= 0.2 }       // Moderate penalty for non-speech patterns
-        
+
         // Moderate additional noise pattern detection
         if std < 0.005 { penalties -= 0.15 }                 // Very little variation = likely noise
         if logEnergy > 3.0 { penalties -= 0.1 }              // Very high energy = potentially noise
         if zeroCrossingRate > 0.5 { penalties -= 0.2 }      // Excessive zero crossings = noise
-        
+
         let baseScore = energyScore + varianceScore + speechScore + crossingScore
         let combinedScore = max(0.0, baseScore + penalties)  // Ensure non-negative
 
@@ -784,52 +749,52 @@ public actor VADManager {
     /// Calculate Signal-to-Noise Ratio for audio quality assessment
     private func calculateSNR(_ audioChunk: [Float]) -> Float {
         guard audioChunk.count > 0 else { return -Float.infinity }
-        
+
         // Calculate signal energy
         let signalEnergy = audioChunk.map { $0 * $0 }.reduce(0, +) / Float(audioChunk.count)
         let signalPower = max(signalEnergy, 1e-10)
-        
+
         // Update noise floor estimate
         updateNoiseFloor(signalPower)
-        
+
         // Calculate SNR in dB
         let snrLinear = signalPower / pow(10, currentNoiseFloor / 10.0)
         let snrDB = 10.0 * log10(max(snrLinear, 1e-10))
-        
+
         return snrDB
     }
-    
+
     /// Update noise floor estimation using minimum statistics
     private func updateNoiseFloor(_ currentPower: Float) {
         let powerDB = 10.0 * log10(max(currentPower, 1e-10))
-        
+
         // Add to noise floor buffer
         noiseFloorBuffer.append(powerDB)
-        
+
         // Keep only recent samples for noise floor estimation
         if noiseFloorBuffer.count > config.noiseFloorWindow {
             noiseFloorBuffer.removeFirst()
         }
-        
+
         // Update noise floor using minimum statistics (conservative approach)
         if noiseFloorBuffer.count >= 10 {
             let sortedPowers = noiseFloorBuffer.sorted()
             let percentile10 = sortedPowers[sortedPowers.count / 10]  // 10th percentile
-            
+
             // Smooth the noise floor update
             let alpha: Float = 0.1
             currentNoiseFloor = currentNoiseFloor * (1 - alpha) + percentile10 * alpha
         }
     }
-    
+
     /// Calculate spectral features for enhanced VAD (optimized version)
     private func calculateSpectralFeatures(_ audioChunk: [Float]) -> SpectralFeatures {
         let fftSize = min(256, audioChunk.count)  // Reduced FFT size for better performance
         let fftInput = Array(audioChunk.prefix(fftSize))
-        
+
         // Compute FFT magnitude spectrum
         let spectrum = computeFFTMagnitude(fftInput)
-        
+
         // Calculate spectral features (optimized calculations)
         let spectralCentroid = calculateSpectralCentroid(spectrum)
         let spectralRolloff = calculateSpectralRolloff(spectrum)
@@ -837,7 +802,7 @@ public actor VADManager {
         let mfccFeatures = calculateSimplifiedMFCC(spectrum)  // Simplified MFCC
         let zeroCrossingRate = calculateZeroCrossingRate(fftInput)
         let spectralEntropy = calculateSpectralEntropy(spectrum)
-        
+
         return SpectralFeatures(
             spectralCentroid: spectralCentroid,
             spectralRolloff: spectralRolloff,
@@ -847,7 +812,7 @@ public actor VADManager {
             spectralEntropy: spectralEntropy
         )
     }
-    
+
     /// Apply audio quality filtering based on SNR and spectral features
     private func applyAudioQualityFiltering(
         rawProbability: Float,
@@ -855,39 +820,39 @@ public actor VADManager {
         spectralFeatures: SpectralFeatures?
     ) -> Float {
         var filteredProbability = rawProbability
-        
+
         // SNR-based filtering - more aggressive
         if let snr = snr, snr < config.minSNRThreshold {
             let snrPenalty = max(0.0, (config.minSNRThreshold - snr) / config.minSNRThreshold)
             filteredProbability *= (1.0 - snrPenalty * 0.8)  // Reduce probability by up to 80%
         }
-        
+
         // Spectral feature-based filtering - more aggressive
         if let features = spectralFeatures {
             // Check if spectral centroid is in expected speech range
-            let centroidInRange = features.spectralCentroid >= config.spectralCentroidRange.min && 
+            let centroidInRange = features.spectralCentroid >= config.spectralCentroidRange.min &&
                                  features.spectralCentroid <= config.spectralCentroidRange.max
-            
+
             if !centroidInRange {
                 filteredProbability *= 0.5  // Reduce probability by 50%
             }
-            
+
             // Check spectral rolloff (speech should have energy distributed across frequencies)
             if features.spectralRolloff > config.spectralRolloffThreshold {
                 filteredProbability *= 0.6  // Reduce probability by 40%
             }
-            
+
             // Excessive zero crossings indicate noise
             if features.zeroCrossingRate > 0.3 {
                 filteredProbability *= 0.4  // Reduce probability by 60%
             }
-            
+
             // Low spectral entropy indicates tonal/musical content (not speech)
             if features.spectralEntropy < 0.3 {
                 filteredProbability *= 0.3  // Reduce probability by 70%
             }
         }
-        
+
         return max(0.0, min(1.0, filteredProbability))
     }
 
@@ -895,119 +860,119 @@ public actor VADManager {
     private func computeFFTMagnitude(_ input: [Float]) -> [Float] {
         let n = input.count
         guard n > 0 else { return [] }
-        
+
         // Find next power of 2 for FFT
         let log2n = Int(log2(Float(n)).rounded(.up))
         let fftSize = 1 << log2n
-        
+
         // Prepare input with zero padding
         var paddedInput = input
         paddedInput.append(contentsOf: Array(repeating: 0.0, count: fftSize - n))
-        
+
         // Setup FFT
         guard let fftSetup = vDSP_create_fftsetup(vDSP_Length(log2n), FFTRadix(kFFTRadix2)) else {
             return []
         }
         defer { vDSP_destroy_fftsetup(fftSetup) }
-        
+
         // Prepare complex buffer using proper pointer management
         var realInput = paddedInput
         var imagInput = Array(repeating: Float(0.0), count: fftSize)
-        
+
         // Use withUnsafeMutableBufferPointer for proper pointer management
         return realInput.withUnsafeMutableBufferPointer { realPtr in
             imagInput.withUnsafeMutableBufferPointer { imagPtr in
                 var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
-                
+
                 // Perform FFT
                 vDSP_fft_zip(fftSetup, &splitComplex, 1, vDSP_Length(log2n), FFTDirection(FFT_FORWARD))
-                
+
                 // Compute magnitude spectrum
                 var magnitudes = Array(repeating: Float(0.0), count: fftSize / 2)
                 vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
-                
+
                 // Take square root to get magnitude (not power)
                 for i in 0..<magnitudes.count {
                     magnitudes[i] = sqrt(magnitudes[i])
                 }
-                
+
                 return magnitudes
             }
         }
     }
-    
+
     /// Calculate spectral centroid (center of mass of spectrum)
     private func calculateSpectralCentroid(_ spectrum: [Float]) -> Float {
         guard !spectrum.isEmpty else { return 0.0 }
-        
+
         let totalEnergy = spectrum.reduce(0, +)
         guard totalEnergy > 0 else { return 0.0 }
-        
+
         var weightedSum: Float = 0.0
         for (i, magnitude) in spectrum.enumerated() {
             let frequency = Float(i) * Float(config.sampleRate) / Float(spectrum.count * 2)
             weightedSum += frequency * magnitude
         }
-        
+
         return weightedSum / totalEnergy
     }
-    
+
     /// Calculate spectral rolloff (frequency below which X% of energy is contained)
     private func calculateSpectralRolloff(_ spectrum: [Float]) -> Float {
         guard !spectrum.isEmpty else { return 0.0 }
-        
+
         let totalEnergy = spectrum.map { $0 * $0 }.reduce(0, +)
         guard totalEnergy > 0 else { return 0.0 }
-        
+
         let rolloffThreshold = totalEnergy * config.spectralRolloffThreshold
         var cumulativeEnergy: Float = 0.0
-        
+
         for (i, magnitude) in spectrum.enumerated() {
             cumulativeEnergy += magnitude * magnitude
             if cumulativeEnergy >= rolloffThreshold {
                 return Float(i) * Float(config.sampleRate) / Float(spectrum.count * 2)
             }
         }
-        
+
         return Float(spectrum.count - 1) * Float(config.sampleRate) / Float(spectrum.count * 2)
     }
-    
+
     /// Calculate spectral flux (measure of spectral change)
     private func calculateSpectralFlux(_ spectrum: [Float]) -> Float {
         guard !spectrum.isEmpty else { return 0.0 }
-        
+
         if previousSpectrum.isEmpty {
             previousSpectrum = spectrum
             return 0.0
         }
-        
+
         guard previousSpectrum.count == spectrum.count else {
             previousSpectrum = spectrum
             return 0.0
         }
-        
+
         var flux: Float = 0.0
         for i in 0..<spectrum.count {
             let diff = spectrum[i] - previousSpectrum[i]
             flux += max(0.0, diff)  // Only positive changes
         }
-        
+
         previousSpectrum = spectrum
         return flux / Float(spectrum.count)
     }
-    
+
     /// Calculate MFCC features (simplified version)
     private func calculateMFCC(_ spectrum: [Float]) -> [Float] {
         guard !spectrum.isEmpty else { return Array(repeating: 0.0, count: 13) }
-        
+
         // Simplified MFCC calculation (for production, use proper mel-scale filtering)
         let numCoefficients = 13
         let logSpectrum = spectrum.map { log(max($0, 1e-10)) }
-        
+
         // DCT (Discrete Cosine Transform) approximation
         var mfcc: [Float] = []
         let n = logSpectrum.count
-        
+
         for i in 0..<numCoefficients {
             var sum: Float = 0.0
             for j in 0..<n {
@@ -1016,40 +981,40 @@ public actor VADManager {
             }
             mfcc.append(sum)
         }
-        
+
         return mfcc
     }
-    
+
     /// Calculate simplified MFCC features (faster version)
     private func calculateSimplifiedMFCC(_ spectrum: [Float]) -> [Float] {
         guard !spectrum.isEmpty else { return Array(repeating: 0.0, count: 13) }
-        
+
         // Very simplified MFCC - just use log spectrum with decimation
         let numCoefficients = 13
         let logSpectrum = spectrum.map { log(max($0, 1e-10)) }
-        
+
         // Simple decimation approach (much faster than full DCT)
         var mfcc: [Float] = []
         let step = max(1, logSpectrum.count / numCoefficients)
-        
+
         for i in 0..<numCoefficients {
             let index = min(i * step, logSpectrum.count - 1)
             mfcc.append(logSpectrum[index])
         }
-        
+
         return mfcc
     }
-    
+
     /// Calculate spectral entropy (measure of spectral complexity)
     private func calculateSpectralEntropy(_ spectrum: [Float]) -> Float {
         guard !spectrum.isEmpty else { return 0.0 }
-        
+
         let totalEnergy = spectrum.map { $0 * $0 }.reduce(0, +)
         guard totalEnergy > 0 else { return 0.0 }
-        
+
         // Normalize to probability distribution
         let probabilities = spectrum.map { ($0 * $0) / totalEnergy }
-        
+
         // Calculate entropy
         var entropy: Float = 0.0
         for p in probabilities {
@@ -1057,7 +1022,7 @@ public actor VADManager {
                 entropy -= p * log(p)
             }
         }
-        
+
         // Normalize entropy
         return entropy / log(Float(spectrum.count))
     }
@@ -1186,7 +1151,7 @@ public actor VADManager {
     public func copyModelsFromBundle() throws {
         let modelsDirectory = getModelsDirectory()
 
-        let modelNames = ["silero_stft.mlmodel", "silero_encoder.mlmodel", "silero_rnn_decoder.mlmodel", "correct_classifier_conv1d.mlmodel"]
+        let modelNames = ["silero_stft.mlmodel", "silero_encoder.mlmodel", "silero_rnn_decoder.mlmodel"]
 
         for modelName in modelNames {
             let destinationPath = modelsDirectory.appendingPathComponent(modelName)
@@ -1221,8 +1186,7 @@ public actor VADManager {
         let modelMappings = [
             ("silero_stft.mlmodel", "silero_stft.mlmodel"),
             ("silero_encoder.mlmodel", "silero_encoder.mlmodel"),
-            ("silero_rnn_decoder.mlmodel", "silero_rnn_decoder.mlmodel"),
-            ("correct_classifier_conv1d.mlmodel", "correct_classifier_conv1d.mlmodel")
+            ("silero_rnn_decoder.mlmodel", "silero_rnn_decoder.mlmodel")
         ]
 
         for (sourceModelName, destinationModelName) in modelMappings {
@@ -1272,7 +1236,7 @@ public actor VADManager {
     /// Check if all required VAD models exist
     private func allModelsExist() -> Bool {
         let modelsDirectory = getModelsDirectory()
-        let modelNames = ["silero_stft.mlmodel", "silero_encoder.mlmodel", "silero_rnn_decoder.mlmodel", "correct_classifier_conv1d.mlmodel"]
+        let modelNames = ["silero_stft.mlmodel", "silero_encoder.mlmodel", "silero_rnn_decoder.mlmodel"]
 
         for modelName in modelNames {
             let modelPath = modelsDirectory.appendingPathComponent(modelName)
@@ -1316,7 +1280,7 @@ public actor VADManager {
 
     /// Load VAD models with automatic recovery on compilation failures
     private func loadModelsWithAutoRecovery(
-        stftPath: URL, encoderPath: URL, rnnPath: URL, classifierPath: URL, maxRetries: Int = 2
+        stftPath: URL, encoderPath: URL, rnnPath: URL, maxRetries: Int = 2
     ) async throws {
         var attempt = 0
 
@@ -1343,24 +1307,11 @@ public actor VADManager {
                 let encoderModel = try MLModel(contentsOf: compiledEncoderPath, configuration: config)
                 let rnnModel = try MLModel(contentsOf: compiledRnnPath, configuration: config)
 
-                // Try to load classifier model, but make it optional
-                var classifierModel: MLModel?
-                do {
-                    logger.info("Attempting to compile classifier model...")
-                    let compiledClassifierPath = try await compileModelIfNeeded(classifierPath)
-                    logger.info("Classifier model compiled, attempting to load...")
-                    classifierModel = try MLModel(contentsOf: compiledClassifierPath, configuration: config)
-                    logger.info("✅ Classifier model loaded successfully")
-                } catch {
-                    logger.warning("Failed to load classifier model, will use fallback method: \(error)")
-                    classifierModel = nil
-                }
-
                 // If we get here, all models loaded successfully
                 self.stftModel = stftModel
                 self.encoderModel = encoderModel
                 self.rnnModel = rnnModel
-                self.classifierModel = classifierModel
+                self.classifierModel = nil  // Always use fallback
 
                 if attempt > 0 {
                     logger.info("VAD models loaded successfully after \(attempt) recovery attempt(s)")
@@ -1389,15 +1340,8 @@ public actor VADManager {
                         self.encoderModel = try MLModel(contentsOf: compiledEncoderPath, configuration: cpuConfig)
                         self.rnnModel = try MLModel(contentsOf: compiledRnnPath, configuration: cpuConfig)
 
-                        // Try to load classifier model, but make it optional
-                        do {
-                            let compiledClassifierPath = try await compileModelIfNeeded(classifierPath)
-                            self.classifierModel = try MLModel(contentsOf: compiledClassifierPath, configuration: cpuConfig)
-                            logger.info("✅ Classifier model loaded successfully (CPU-only)")
-                        } catch {
-                            logger.warning("Failed to load classifier model (CPU-only), will use fallback method: \(error)")
-                            self.classifierModel = nil
-                        }
+                        // No classifier model - always use fallback
+                        self.classifierModel = nil
 
                         logger.info("VAD models loaded successfully with CPU-only configuration")
                         return
@@ -1411,12 +1355,11 @@ public actor VADManager {
                 // Auto-recovery: Delete corrupted models and re-download
                 logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
 
-                try await performModelRecovery(
-                    stftPath: stftPath,
-                    encoderPath: encoderPath,
-                    rnnPath: rnnPath,
-                    classifierPath: classifierPath
-                )
+                        try await performModelRecovery(
+            stftPath: stftPath,
+            encoderPath: encoderPath,
+            rnnPath: rnnPath
+        )
 
                 attempt += 1
             }
@@ -1425,10 +1368,10 @@ public actor VADManager {
 
     /// Perform model recovery by removing corrupted models and re-downloading
     private func performModelRecovery(
-        stftPath: URL, encoderPath: URL, rnnPath: URL, classifierPath: URL
+        stftPath: URL, encoderPath: URL, rnnPath: URL
     ) async throws {
         // Remove potentially corrupted model files
-        let modelPaths = [stftPath, encoderPath, rnnPath, classifierPath]
+        let modelPaths = [stftPath, encoderPath, rnnPath]
 
         for modelPath in modelPaths {
             if FileManager.default.fileExists(atPath: modelPath.path) {
@@ -1465,7 +1408,6 @@ public actor VADManager {
             "silero_stft.mlmodel",
             "silero_encoder.mlmodel",
             "silero_rnn_decoder.mlmodel",
-            "correct_classifier_conv1d.mlmodel",
         ]
 
         // Download each source model file
