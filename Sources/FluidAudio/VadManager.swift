@@ -1401,7 +1401,7 @@ public actor VADManager {
         logger.info("Downloading VAD models from Hugging Face...")
 
         let modelsDirectory = getModelsDirectory()
-        let repoPath = "alexwengg/coreml_silero_vad"
+        let repoPath = "alexwengg/coreml-silero-vad"
 
         // Model files to download (source models)
         let modelFiles = [
