@@ -79,7 +79,7 @@ jobs:
         echo "ℹ️ VAD models will be downloaded automatically from Hugging Face"
         echo "   Model Repository: alexwengg/coreml_silero_vad"
         echo "   Test Data Repository: alexwengg/musan_mini50 (50 files, optimized for CI)"
-        echo "   Models: silero_stft.mlmodel, silero_encoder.mlmodel, silero_rnn_decoder.mlmodel"
+        echo "   Models: silero_stft.mlmodelc, silero_encoder.mlmodelc, silero_rnn_decoder.mlmodelc"
         echo "   🎯 Enhanced Features: SNR filtering, spectral analysis, noise detection"
 
     - name: Install system dependencies

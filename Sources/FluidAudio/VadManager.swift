@@ -14,8 +14,8 @@ public struct VADConfig: Sendable {
     public var chunkSize: Int = 512   // Audio chunk size for processing
     public var sampleRate: Int = 16000 // Sample rate for audio processing
     public var modelCacheDirectory: URL?
-    public var debugMode: Bool = false
-    public var adaptiveThreshold: Bool = true  // Enable adaptive thresholding
+    public var debugMode: Bool = true
+    public var adaptiveThreshold: Bool = false  // Disable adaptive thresholding temporarily
     public var minThreshold: Float = 0.1       // Minimum threshold for adaptive mode
     public var maxThreshold: Float = 0.7       // Maximum threshold for adaptive mode
     public var modelType: VADModelType = .coreML  // Use CoreML for Mac
@@ -36,7 +36,7 @@ public struct VADConfig: Sendable {
         sampleRate: Int = 16000,
         modelCacheDirectory: URL? = nil,
         debugMode: Bool = false,
-        adaptiveThreshold: Bool = true,
+        adaptiveThreshold: Bool = false,
         minThreshold: Float = 0.1,
         maxThreshold: Float = 0.7,
         modelType: VADModelType = .coreML,
@@ -149,24 +149,15 @@ public actor VADManager {
     private var cState: MLMultiArray?
     private var featureBuffer: [MLMultiArray] = []
 
-    // Adaptive thresholding (isolated to actor)
-    private var probabilityHistory: [Float] = []
-    private var adaptiveThreshold: Float = 0.3
-
-    // Probability smoothing (isolated to actor)
-    private var probabilityWindow: [Float] = []
-    private let windowSize = 5
-
-    // SNR and noise floor estimation (isolated to actor)
-    private var noiseFloorBuffer: [Float] = []
-    private var currentNoiseFloor: Float = -60.0  // Initial noise floor estimate (dB)
-    private var previousSpectrum: [Float] = []     // For spectral flux calculation
+    // Audio processing handler
+    private var audioProcessor: VADAudioProcessor
 
     // Timing tracking
     private var modelLoadTime: TimeInterval = 0
 
     public init(config: VADConfig = .default) {
         self.config = config
+        self.audioProcessor = VADAudioProcessor(config: config)
     }
 
     public var isAvailable: Bool {
@@ -193,22 +184,229 @@ public actor VADManager {
         )
     }
 
-    /// Load CoreML models from the model directory
+    /// Enhanced model management: check compiled models exist, auto-download if missing
     private func loadCoreMLModels() async throws {
         let modelsDirectory = getModelsDirectory()
-        logger.info("Looking for VAD models in: \(modelsDirectory.path)")
+        let compiledModelNames = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
 
-        let stftPath = modelsDirectory.appendingPathComponent("silero_stft.mlmodel")
-        let encoderPath = modelsDirectory.appendingPathComponent("silero_encoder.mlmodel")
-        let rnnPath = modelsDirectory.appendingPathComponent("silero_rnn_decoder.mlmodel")
+        // Check if we need to download any compiled models
+        var missingModels: [String] = []
+        for modelName in compiledModelNames {
+            let modelPath = modelsDirectory.appendingPathComponent(modelName)
+            if !FileManager.default.fileExists(atPath: modelPath.path) {
+                missingModels.append(modelName)
+            }
+        }
 
-        // Load models with auto-recovery mechanism
+        // Auto-download missing models
+        if !missingModels.isEmpty {
+            logger.info("🔄 Missing VAD models: \(missingModels.joined(separator: ", "))")
+            logger.info("🔄 Auto-downloading VAD models from Hugging Face...")
+            try await downloadMissingVADModels()
+        }
+
+        // Verify all models are now present
+        for modelName in compiledModelNames {
+            let modelPath = modelsDirectory.appendingPathComponent(modelName)
+            if !FileManager.default.fileExists(atPath: modelPath.path) {
+                logger.error("❌ Missing compiled model after download: \(modelName)")
+                throw VADError.modelLoadingFailed
+            }
+        }
+
+        // Get paths for compiled models
+        logger.info("🔍 Loading pre-compiled VAD models...")
+        let pathStart = Date()
+        let stftPath = modelsDirectory.appendingPathComponent("silero_stft.mlmodelc")
+        let encoderPath = modelsDirectory.appendingPathComponent("silero_encoder.mlmodelc")
+        let rnnPath = modelsDirectory.appendingPathComponent("silero_rnn_decoder.mlmodelc")
+        logger.info("✓ Model paths resolved in \(String(format: "%.2f", Date().timeIntervalSince(pathStart)))s")
+
+        // Load models with auto-recovery mechanism (similar to DiarizerManager)
         try await loadModelsWithAutoRecovery(
             stftPath: stftPath,
             encoderPath: encoderPath,
             rnnPath: rnnPath
         )
     }
+
+    /// Load models with automatic recovery on compilation failures (based on DiarizerManager pattern)
+    private func loadModelsWithAutoRecovery(
+        stftPath: URL, encoderPath: URL, rnnPath: URL, maxRetries: Int = 2
+    ) async throws {
+        var attempt = 0
+
+        while attempt <= maxRetries {
+            do {
+                logger.info("Attempting to load VAD models (attempt \(attempt + 1)/\(maxRetries + 1))")
+
+                // Try GPU first, then CPU fallback
+                for useGPU in [true, false] {
+                    let config = MLModelConfiguration()
+                    config.computeUnits = useGPU ? .cpuAndNeuralEngine : .cpuOnly
+                    let computeType = useGPU ? "GPU+Neural Engine" : "CPU-only"
+
+                    do {
+                        logger.info("🔄 Loading with \(computeType)...")
+
+                        let stftStart = Date()
+                        let stftModel = try MLModel(contentsOf: stftPath, configuration: config)
+                        logger.info("✓ STFT model loaded (\(String(format: "%.2f", Date().timeIntervalSince(stftStart)))s)")
+
+                        let encoderStart = Date()
+                        let encoderModel = try MLModel(contentsOf: encoderPath, configuration: config)
+                        logger.info("✓ Encoder model loaded (\(String(format: "%.2f", Date().timeIntervalSince(encoderStart)))s)")
+
+                        let rnnStart = Date()
+                        let rnnModel = try MLModel(contentsOf: rnnPath, configuration: config)
+                        logger.info("✓ RNN model loaded (\(String(format: "%.2f", Date().timeIntervalSince(rnnStart)))s)")
+
+                        // If we get here, all models loaded successfully
+                        self.stftModel = stftModel
+                        self.encoderModel = encoderModel
+                        self.rnnModel = rnnModel
+                        self.classifierModel = nil // Always use fallback
+
+                        if attempt > 0 {
+                            logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
+                        }
+                        logger.info("🎉 VAD models loaded successfully with \(computeType)")
+                        return
+
+                    } catch {
+                        if !useGPU {
+                            throw error // Rethrow CPU failure - will trigger recovery
+                        }
+                        logger.warning("⚠️ \(computeType) loading failed, trying CPU-only...")
+                    }
+                }
+
+            } catch {
+                logger.warning("Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
+
+                // If this is our last attempt, throw the error
+                if attempt >= maxRetries {
+                    logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
+                    throw VADError.modelCompilationFailed
+                }
+
+                // Auto-recovery: Delete corrupted models and re-download
+                logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
+                try await performVADModelRecovery(stftPath: stftPath, encoderPath: encoderPath, rnnPath: rnnPath)
+
+                attempt += 1
+            }
+        }
+    }
+
+    /// Perform model recovery by deleting corrupted compiled models and re-downloading
+    private func performVADModelRecovery(stftPath: URL, encoderPath: URL, rnnPath: URL) async throws {
+        let modelPaths = [stftPath, encoderPath, rnnPath]
+
+        // Remove potentially corrupted compiled model files
+        for modelPath in modelPaths {
+            if FileManager.default.fileExists(atPath: modelPath.path) {
+                logger.info("Removing corrupted compiled model at \(modelPath.lastPathComponent)")
+                try FileManager.default.removeItem(at: modelPath)
+            }
+        }
+
+        // Re-download models from Hugging Face
+        logger.info("🔄 Re-downloading VAD models from Hugging Face...")
+        try await downloadMissingVADModels()
+    }
+
+    /// Download missing VAD models from Hugging Face
+    private func downloadMissingVADModels() async throws {
+        let modelsDirectory = getModelsDirectory()
+
+        // Download .mlmodelc folders from Hugging Face
+        let modelFolders = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
+
+        for folderName in modelFolders {
+            let folderPath = modelsDirectory.appendingPathComponent(folderName)
+
+            if !FileManager.default.fileExists(atPath: folderPath.path) {
+                logger.info("📥 Downloading \(folderName)...")
+                print("📥 Downloading \(folderName)...")
+                try await downloadVADModelFolder(folderName: folderName, to: folderPath)
+            }
+        }
+
+        logger.info("✅ VAD models downloaded successfully")
+    }
+
+    /// Download a .mlmodelc folder from Hugging Face
+    private func downloadVADModelFolder(folderName: String, to folderPath: URL) async throws {
+        // Create the folder
+        try FileManager.default.createDirectory(at: folderPath, withIntermediateDirectories: true)
+
+        // Download the main files inside the .mlmodelc folder
+        let modelFiles = [
+            "coremldata.bin",
+            "model.espresso.net",
+            "model.espresso.shape",
+            "model.espresso.weights"
+        ]
+
+        let baseURL = "https://huggingface.co/alexwengg/coreml-silero-vad/resolve/main/\(folderName)"
+
+        for fileName in modelFiles {
+            let fileURL = "\(baseURL)/\(fileName)"
+            let destinationPath = folderPath.appendingPathComponent(fileName)
+
+            try await downloadVADModelFile(from: fileURL, to: destinationPath)
+        }
+
+        // Download subdirectory files required by CoreML
+        let subDirs = ["analytics", "model", "neural_network_optionals"]
+        for subDir in subDirs {
+            let subDirPath = folderPath.appendingPathComponent(subDir)
+            try FileManager.default.createDirectory(at: subDirPath, withIntermediateDirectories: true)
+
+            // Download the coremldata.bin file in each subdirectory
+            let subFileURL = "\(baseURL)/\(subDir)/coremldata.bin"
+            let subDestinationPath = subDirPath.appendingPathComponent("coremldata.bin")
+
+            do {
+                try await downloadVADModelFile(from: subFileURL, to: subDestinationPath)
+            } catch {
+                logger.warning("⚠️ Failed to download \(subDir)/coremldata.bin for \(folderName): \(error)")
+                // Some subdirectory files might be optional
+            }
+        }
+    }
+
+    /// Download a model file from URL
+    private func downloadVADModelFile(from urlString: String, to destinationPath: URL) async throws {
+        guard let url = URL(string: urlString) else {
+            logger.error("Invalid URL: \(urlString)")
+            throw VADError.modelDownloadFailed
+        }
+
+        logger.info("🔄 Downloading from: \(urlString)")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                logger.error("Invalid response type for \(urlString)")
+                throw VADError.modelDownloadFailed
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                logger.error("HTTP Error \(httpResponse.statusCode) for \(urlString)")
+                throw VADError.modelDownloadFailed
+            }
+
+            try data.write(to: destinationPath)
+            logger.info("✅ Downloaded \(destinationPath.lastPathComponent) (\(data.count) bytes)")
+        } catch {
+            logger.error("Download failed for \(urlString): \(error.localizedDescription)")
+            throw VADError.modelDownloadFailed
+        }
+    }
+
 
 
 
@@ -226,15 +424,8 @@ public actor VADManager {
             logger.error("Failed to reset CoreML VAD state: \(error.localizedDescription)")
         }
 
-        // Reset adaptive thresholding state (common to all models)
-        self.probabilityHistory.removeAll()
-        self.probabilityWindow.removeAll()
-        self.adaptiveThreshold = config.threshold
-
-        // Reset SNR and spectral analysis state
-        self.noiseFloorBuffer.removeAll()
-        self.currentNoiseFloor = -60.0
-        self.previousSpectrum.removeAll()
+        // Reset audio processor state
+        audioProcessor.reset()
 
         if config.debugMode {
             logger.debug("VAD state reset successfully for CoreML")
@@ -253,38 +444,23 @@ public actor VADManager {
 
         rawProbability = try await processCoreMLChunk(audioChunk)
 
-        // Calculate SNR and spectral features if enabled
-        var snrValue: Float?
-        var spectralFeatures: SpectralFeatures?
-        var enhancedProbability = rawProbability
+        // Post-process raw ML probability
+        let (enhancedProbability, snrValue, spectralFeatures) = audioProcessor.processRawProbability(
+            rawProbability,
+            audioChunk: audioChunk
+        )
 
-        if config.enableSNRFiltering {
-            // Calculate spectral features
-            spectralFeatures = calculateSpectralFeatures(audioChunk)
+        // Apply temporal smoothing
+        let smoothedProbability = audioProcessor.applySmoothingFilter(enhancedProbability)
 
-            // Calculate SNR
-            snrValue = calculateSNR(audioChunk)
-
-            // Apply SNR-based filtering
-            enhancedProbability = applyAudioQualityFiltering(
-                rawProbability: rawProbability,
-                snr: snrValue,
-                spectralFeatures: spectralFeatures
-            )
-        }
-
-        // Apply probability smoothing (common to all models)
-        let smoothedProbability = applySmoothingFilter(enhancedProbability)
-
-        // Apply adaptive thresholding (common to all models)
-        let effectiveThreshold = updateAdaptiveThreshold(smoothedProbability)
-        let isVoiceActive = smoothedProbability >= effectiveThreshold
+        // Apply fixed threshold
+        let isVoiceActive = smoothedProbability >= config.threshold
 
         let processingTime = Date().timeIntervalSince(processingStartTime)
 
         if config.debugMode {
             let snrString = snrValue.map { String(format: "%.1f", $0) } ?? "N/A"
-            let debugMessage = "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)), enhanced=\(String(format: "%.3f", enhancedProbability)), smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", effectiveThreshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
+            let debugMessage = "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)), enhanced=\(String(format: "%.3f", enhancedProbability)), smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", config.threshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
             logger.debug("\(debugMessage)")
         }
 
@@ -329,18 +505,6 @@ public actor VADManager {
 
 
 
-    /// Fallback VAD processing method (temporary)
-    private func processFallbackVAD(_ audioChunk: [Float]) async throws -> Float {
-        // Simple fallback based on energy and statistical features
-        let energy = audioChunk.map { $0 * $0 }.reduce(0, +) / Float(audioChunk.count)
-        let logEnergy = log(max(energy, 1e-10))
-
-        // Normalize energy to probability (0.0 - 1.0)
-        // This is a very basic fallback method
-        let normalizedEnergy = max(0.0, min(1.0, (logEnergy + 10.0) / 10.0))
-
-        return normalizedEnergy
-    }
 
     /// Process audio through STFT model
     private func processSTFT(_ audioChunk: [Float]) throws -> MLMultiArray {
@@ -497,7 +661,7 @@ public actor VADManager {
             if config.debugMode {
                 logger.debug("Using fallback VAD calculation (classifier model not loaded)")
             }
-            return calculateVADProbability(from: rnnFeatures)
+            return audioProcessor.calculateVADProbability(from: rnnFeatures)
         }
 
         // Ensure correct shape for classifier (1, 4, 128)
@@ -513,7 +677,13 @@ public actor VADManager {
 
         // Get raw probability and apply calibration
         let rawProbability = classifierOutput[0].floatValue
-        let calibratedProbability = calibrateClassifierOutput(rawProbability)
+
+        // Calibrate classifier output (inline calibration)
+        let scale: Float = 3.0
+        let bias: Float = -0.25
+        let sharpness: Float = 4.0
+        let scaled = (rawProbability + bias) * scale
+        let calibratedProbability = max(0.0, min(1.0, 1.0 / (1.0 + exp(-sharpness * (scaled - 0.5)))))
 
         if config.debugMode {
             logger.debug("Classifier: raw=\(String(format: "%.4f", rawProbability)), calibrated=\(String(format: "%.4f", calibratedProbability))")
@@ -563,534 +733,7 @@ public actor VADManager {
         return targetArray
     }
 
-    /// Calibrate classifier output to match expected probability distribution
-    private func calibrateClassifierOutput(_ rawProbability: Float) -> Float {
-        // Based on the Python reference implementation
-        let scale: Float = 3.0
-        let bias: Float = -0.25
-        let sharpness: Float = 4.0
 
-        // Apply scaling and bias
-        let scaled = (rawProbability + bias) * scale
-
-        // Apply sharper sigmoid for better separation
-        let calibrated = 1.0 / (1.0 + exp(-sharpness * (scaled - 0.5)))
-
-        // Ensure valid probability range
-        return max(0.0, min(1.0, calibrated))
-    }
-
-    /// Calculate VAD probability from RNN features (improved fallback method)
-    private func calculateVADProbability(from rnnFeatures: MLMultiArray) -> Float {
-        let shape = rnnFeatures.shape.map { $0.intValue }
-        guard shape.count >= 2 else {
-            return 0.0
-        }
-
-        let totalElements = rnnFeatures.count
-        guard totalElements > 0 else { return 0.0 }
-
-        // Extract values from MLMultiArray
-        var values: [Float] = []
-        for i in 0..<totalElements {
-            values.append(rnnFeatures[i].floatValue)
-        }
-
-        // Advanced feature extraction optimized for speech vs non-speech discrimination
-        let mean = values.reduce(0, +) / Float(values.count)
-        let variance = values.map { pow($0 - mean, 2) }.reduce(0, +) / Float(values.count)
-        let std = sqrt(variance)
-
-        // Energy-based features (fundamental for VAD)
-        let energy = values.map { $0 * $0 }.reduce(0, +) / Float(values.count)
-        let logEnergy = log(max(energy, 1e-10))
-
-        // Temporal features
-        let zeroCrossingRate = calculateZeroCrossingRate(values)
-        let peakCount = calculatePeakCount(values)
-        let _ = Float(peakCount) / Float(values.count)  // peakRatio for future use
-
-        // Speech pattern analysis
-        let speechIndicator = calculateSpeechIndicator(values)
-
-        // Noise detection features
-        let isHighFrequencyNoise = zeroCrossingRate > 0.3  // Too many zero crossings = noise
-        let isVeryHighEnergy = logEnergy > -0.5           // Extremely high energy = often noise
-        let isTooManyPeaks = peakCount > 200              // Too many peaks = noise
-
-        // Balanced feature weighting for better speech/noise discrimination
-        let energyScore = max(0.0, tanh(logEnergy + 5.0) * 0.3)   // Moderate energy threshold
-        let varianceScore = tanh(std * 2.0) * 0.15                // Moderate variance importance
-        let speechScore = speechIndicator * 0.4                   // Strong weight for speech patterns
-        let crossingScore = tanh(zeroCrossingRate * 4.0) * 0.15   // Moderate crossing rate
-
-        // Refined noise detection with moderate penalties
-        var penalties: Float = 0.0
-        if isHighFrequencyNoise { penalties -= 0.2 }         // Moderate penalty for high-frequency noise
-        if isVeryHighEnergy { penalties -= 0.15 }            // Moderate penalty for very high energy
-        if isTooManyPeaks { penalties -= 0.15 }              // Moderate penalty for too many peaks
-        if speechIndicator < 0.3 { penalties -= 0.2 }       // Moderate penalty for non-speech patterns
-
-        // Moderate additional noise pattern detection
-        if std < 0.005 { penalties -= 0.15 }                 // Very little variation = likely noise
-        if logEnergy > 3.0 { penalties -= 0.1 }              // Very high energy = potentially noise
-        if zeroCrossingRate > 0.5 { penalties -= 0.2 }      // Excessive zero crossings = noise
-
-        let baseScore = energyScore + varianceScore + speechScore + crossingScore
-        let combinedScore = max(0.0, baseScore + penalties)  // Ensure non-negative
-
-        // Balanced sigmoid for reasonable speech detection
-        let probability = 1.0 / (1.0 + exp(-8.0 * (combinedScore - 0.4)))
-
-        if config.debugMode {
-            // print("VAD Debug: energy=\(String(format: "%.4f", logEnergy)), std=\(String(format: "%.4f", std)), peaks=\(peakCount), speech=\(String(format: "%.4f", speechIndicator)), combined=\(String(format: "%.4f", combinedScore)), prob=\(String(format: "%.4f", probability))")
-        }
-
-        return max(0.0, min(1.0, probability))
-    }
-
-    /// Calculate zero crossing rate for VAD
-    private func calculateZeroCrossingRate(_ values: [Float]) -> Float {
-        guard values.count > 1 else { return 0.0 }
-
-        var crossings = 0
-        for i in 1..<values.count {
-            if (values[i] >= 0) != (values[i-1] >= 0) {
-                crossings += 1
-            }
-        }
-        return Float(crossings) / Float(values.count - 1)
-    }
-
-    /// Calculate number of peaks (local maxima)
-    private func calculatePeakCount(_ values: [Float]) -> Int {
-        guard values.count > 2 else { return 0 }
-
-        var peaks = 0
-        for i in 1..<(values.count - 1) {
-            if values[i] > values[i-1] && values[i] > values[i+1] && abs(values[i]) > 0.1 {
-                peaks += 1
-            }
-        }
-        return peaks
-    }
-
-    /// Calculate skewness
-    private func calculateSkewness(_ values: [Float], mean: Float, std: Float) -> Float {
-        guard std > 0 else { return 0.0 }
-
-        let skew = values.map { pow(($0 - mean) / std, 3) }.reduce(0, +) / Float(values.count)
-        return skew
-    }
-
-    /// Calculate kurtosis
-    private func calculateKurtosis(_ values: [Float], mean: Float, std: Float) -> Float {
-        guard std > 0 else { return 0.0 }
-
-        let kurt = values.map { pow(($0 - mean) / std, 4) }.reduce(0, +) / Float(values.count) - 3.0
-        return kurt
-    }
-
-    /// Calculate speech-like pattern indicator
-    private func calculateSpeechIndicator(_ values: [Float]) -> Float {
-        // Look for patterns that are characteristic of speech vs noise/music
-        let absValues = values.map { abs($0) }
-        let sortedValues = absValues.sorted(by: >)
-
-        // Speech typically has moderate dynamic range (not too flat, not too extreme)
-        let topQuartile = Array(sortedValues.prefix(max(1, sortedValues.count / 4)))
-        let bottomQuartile = Array(sortedValues.suffix(max(1, sortedValues.count / 4)))
-        let middleHalf = Array(sortedValues[sortedValues.count/4..<3*sortedValues.count/4])
-
-        let topMean = topQuartile.reduce(0, +) / Float(topQuartile.count)
-        let bottomMean = bottomQuartile.reduce(0, +) / Float(bottomQuartile.count)
-        let middleMean = middleHalf.isEmpty ? 0 : middleHalf.reduce(0, +) / Float(middleHalf.count)
-
-        // Speech has balanced distribution (strong middle component)
-        let dynamicRange = topMean / max(bottomMean, 1e-10)
-        let middleRatio = middleMean / max(topMean, 1e-10)
-
-        // Speech-like patterns: moderate dynamic range + good middle energy
-        let rangeScore = 1.0 / (1.0 + exp(-2.0 * (log(max(dynamicRange, 1.0)) - 3.0))) // Peak around 20:1 ratio
-        let middleScore = middleRatio  // Higher middle energy is speech-like
-
-        // Temporal consistency check (speech has structured patterns)
-        let consistency = calculateTemporalConsistency(absValues)
-
-        // Combine indicators (speech needs all three)
-        let speechLikeness = (rangeScore * 0.4 + middleScore * 0.4 + consistency * 0.2)
-
-        return max(0.0, min(1.0, speechLikeness))
-    }
-
-    /// Calculate temporal consistency for speech patterns
-    private func calculateTemporalConsistency(_ absValues: [Float]) -> Float {
-        guard absValues.count > 10 else { return 0.0 }
-
-        // Look for structured patterns (not random noise)
-        let windowSize = 5
-        var consistencyScore: Float = 0.0
-        var windowCount = 0
-
-        for i in stride(from: 0, to: absValues.count - windowSize, by: windowSize) {
-            let window = Array(absValues[i..<min(i + windowSize, absValues.count)])
-            let windowMean = window.reduce(0, +) / Float(window.count)
-            let windowVar = window.map { pow($0 - windowMean, 2) }.reduce(0, +) / Float(window.count)
-
-            // Speech has moderate variance within short windows
-            let normalizedVar = tanh(sqrt(windowVar) * 10.0)
-            consistencyScore += normalizedVar
-            windowCount += 1
-        }
-
-        return windowCount > 0 ? consistencyScore / Float(windowCount) : 0.0
-    }
-
-    /// Calculate Signal-to-Noise Ratio for audio quality assessment
-    private func calculateSNR(_ audioChunk: [Float]) -> Float {
-        guard audioChunk.count > 0 else { return -Float.infinity }
-
-        // Calculate signal energy
-        let signalEnergy = audioChunk.map { $0 * $0 }.reduce(0, +) / Float(audioChunk.count)
-        let signalPower = max(signalEnergy, 1e-10)
-
-        // Update noise floor estimate
-        updateNoiseFloor(signalPower)
-
-        // Calculate SNR in dB
-        let snrLinear = signalPower / pow(10, currentNoiseFloor / 10.0)
-        let snrDB = 10.0 * log10(max(snrLinear, 1e-10))
-
-        return snrDB
-    }
-
-    /// Update noise floor estimation using minimum statistics
-    private func updateNoiseFloor(_ currentPower: Float) {
-        let powerDB = 10.0 * log10(max(currentPower, 1e-10))
-
-        // Add to noise floor buffer
-        noiseFloorBuffer.append(powerDB)
-
-        // Keep only recent samples for noise floor estimation
-        if noiseFloorBuffer.count > config.noiseFloorWindow {
-            noiseFloorBuffer.removeFirst()
-        }
-
-        // Update noise floor using minimum statistics (conservative approach)
-        if noiseFloorBuffer.count >= 10 {
-            let sortedPowers = noiseFloorBuffer.sorted()
-            let percentile10 = sortedPowers[sortedPowers.count / 10]  // 10th percentile
-
-            // Smooth the noise floor update
-            let alpha: Float = 0.1
-            currentNoiseFloor = currentNoiseFloor * (1 - alpha) + percentile10 * alpha
-        }
-    }
-
-    /// Calculate spectral features for enhanced VAD (optimized version)
-    private func calculateSpectralFeatures(_ audioChunk: [Float]) -> SpectralFeatures {
-        let fftSize = min(256, audioChunk.count)  // Reduced FFT size for better performance
-        let fftInput = Array(audioChunk.prefix(fftSize))
-
-        // Compute FFT magnitude spectrum
-        let spectrum = computeFFTMagnitude(fftInput)
-
-        // Calculate spectral features (optimized calculations)
-        let spectralCentroid = calculateSpectralCentroid(spectrum)
-        let spectralRolloff = calculateSpectralRolloff(spectrum)
-        let spectralFlux = calculateSpectralFlux(spectrum)
-        let mfccFeatures = calculateSimplifiedMFCC(spectrum)  // Simplified MFCC
-        let zeroCrossingRate = calculateZeroCrossingRate(fftInput)
-        let spectralEntropy = calculateSpectralEntropy(spectrum)
-
-        return SpectralFeatures(
-            spectralCentroid: spectralCentroid,
-            spectralRolloff: spectralRolloff,
-            spectralFlux: spectralFlux,
-            mfccFeatures: mfccFeatures,
-            zeroCrossingRate: zeroCrossingRate,
-            spectralEntropy: spectralEntropy
-        )
-    }
-
-    /// Apply audio quality filtering based on SNR and spectral features
-    private func applyAudioQualityFiltering(
-        rawProbability: Float,
-        snr: Float?,
-        spectralFeatures: SpectralFeatures?
-    ) -> Float {
-        var filteredProbability = rawProbability
-
-        // SNR-based filtering - more aggressive
-        if let snr = snr, snr < config.minSNRThreshold {
-            let snrPenalty = max(0.0, (config.minSNRThreshold - snr) / config.minSNRThreshold)
-            filteredProbability *= (1.0 - snrPenalty * 0.8)  // Reduce probability by up to 80%
-        }
-
-        // Spectral feature-based filtering - more aggressive
-        if let features = spectralFeatures {
-            // Check if spectral centroid is in expected speech range
-            let centroidInRange = features.spectralCentroid >= config.spectralCentroidRange.min &&
-                                 features.spectralCentroid <= config.spectralCentroidRange.max
-
-            if !centroidInRange {
-                filteredProbability *= 0.5  // Reduce probability by 50%
-            }
-
-            // Check spectral rolloff (speech should have energy distributed across frequencies)
-            if features.spectralRolloff > config.spectralRolloffThreshold {
-                filteredProbability *= 0.6  // Reduce probability by 40%
-            }
-
-            // Excessive zero crossings indicate noise
-            if features.zeroCrossingRate > 0.3 {
-                filteredProbability *= 0.4  // Reduce probability by 60%
-            }
-
-            // Low spectral entropy indicates tonal/musical content (not speech)
-            if features.spectralEntropy < 0.3 {
-                filteredProbability *= 0.3  // Reduce probability by 70%
-            }
-        }
-
-        return max(0.0, min(1.0, filteredProbability))
-    }
-
-    /// Compute FFT magnitude spectrum using Accelerate framework
-    private func computeFFTMagnitude(_ input: [Float]) -> [Float] {
-        let n = input.count
-        guard n > 0 else { return [] }
-
-        // Find next power of 2 for FFT
-        let log2n = Int(log2(Float(n)).rounded(.up))
-        let fftSize = 1 << log2n
-
-        // Prepare input with zero padding
-        var paddedInput = input
-        paddedInput.append(contentsOf: Array(repeating: 0.0, count: fftSize - n))
-
-        // Setup FFT
-        guard let fftSetup = vDSP_create_fftsetup(vDSP_Length(log2n), FFTRadix(kFFTRadix2)) else {
-            return []
-        }
-        defer { vDSP_destroy_fftsetup(fftSetup) }
-
-        // Prepare complex buffer using proper pointer management
-        var realInput = paddedInput
-        var imagInput = Array(repeating: Float(0.0), count: fftSize)
-
-        // Use withUnsafeMutableBufferPointer for proper pointer management
-        return realInput.withUnsafeMutableBufferPointer { realPtr in
-            imagInput.withUnsafeMutableBufferPointer { imagPtr in
-                var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
-
-                // Perform FFT
-                vDSP_fft_zip(fftSetup, &splitComplex, 1, vDSP_Length(log2n), FFTDirection(FFT_FORWARD))
-
-                // Compute magnitude spectrum
-                var magnitudes = Array(repeating: Float(0.0), count: fftSize / 2)
-                vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
-
-                // Take square root to get magnitude (not power)
-                for i in 0..<magnitudes.count {
-                    magnitudes[i] = sqrt(magnitudes[i])
-                }
-
-                return magnitudes
-            }
-        }
-    }
-
-    /// Calculate spectral centroid (center of mass of spectrum)
-    private func calculateSpectralCentroid(_ spectrum: [Float]) -> Float {
-        guard !spectrum.isEmpty else { return 0.0 }
-
-        let totalEnergy = spectrum.reduce(0, +)
-        guard totalEnergy > 0 else { return 0.0 }
-
-        var weightedSum: Float = 0.0
-        for (i, magnitude) in spectrum.enumerated() {
-            let frequency = Float(i) * Float(config.sampleRate) / Float(spectrum.count * 2)
-            weightedSum += frequency * magnitude
-        }
-
-        return weightedSum / totalEnergy
-    }
-
-    /// Calculate spectral rolloff (frequency below which X% of energy is contained)
-    private func calculateSpectralRolloff(_ spectrum: [Float]) -> Float {
-        guard !spectrum.isEmpty else { return 0.0 }
-
-        let totalEnergy = spectrum.map { $0 * $0 }.reduce(0, +)
-        guard totalEnergy > 0 else { return 0.0 }
-
-        let rolloffThreshold = totalEnergy * config.spectralRolloffThreshold
-        var cumulativeEnergy: Float = 0.0
-
-        for (i, magnitude) in spectrum.enumerated() {
-            cumulativeEnergy += magnitude * magnitude
-            if cumulativeEnergy >= rolloffThreshold {
-                return Float(i) * Float(config.sampleRate) / Float(spectrum.count * 2)
-            }
-        }
-
-        return Float(spectrum.count - 1) * Float(config.sampleRate) / Float(spectrum.count * 2)
-    }
-
-    /// Calculate spectral flux (measure of spectral change)
-    private func calculateSpectralFlux(_ spectrum: [Float]) -> Float {
-        guard !spectrum.isEmpty else { return 0.0 }
-
-        if previousSpectrum.isEmpty {
-            previousSpectrum = spectrum
-            return 0.0
-        }
-
-        guard previousSpectrum.count == spectrum.count else {
-            previousSpectrum = spectrum
-            return 0.0
-        }
-
-        var flux: Float = 0.0
-        for i in 0..<spectrum.count {
-            let diff = spectrum[i] - previousSpectrum[i]
-            flux += max(0.0, diff)  // Only positive changes
-        }
-
-        previousSpectrum = spectrum
-        return flux / Float(spectrum.count)
-    }
-
-    /// Calculate MFCC features (simplified version)
-    private func calculateMFCC(_ spectrum: [Float]) -> [Float] {
-        guard !spectrum.isEmpty else { return Array(repeating: 0.0, count: 13) }
-
-        // Simplified MFCC calculation (for production, use proper mel-scale filtering)
-        let numCoefficients = 13
-        let logSpectrum = spectrum.map { log(max($0, 1e-10)) }
-
-        // DCT (Discrete Cosine Transform) approximation
-        var mfcc: [Float] = []
-        let n = logSpectrum.count
-
-        for i in 0..<numCoefficients {
-            var sum: Float = 0.0
-            for j in 0..<n {
-                let angle = Float(Double.pi * Double(i) * (Double(j) + 0.5) / Double(n))
-                sum += logSpectrum[j] * cos(angle)
-            }
-            mfcc.append(sum)
-        }
-
-        return mfcc
-    }
-
-    /// Calculate simplified MFCC features (faster version)
-    private func calculateSimplifiedMFCC(_ spectrum: [Float]) -> [Float] {
-        guard !spectrum.isEmpty else { return Array(repeating: 0.0, count: 13) }
-
-        // Very simplified MFCC - just use log spectrum with decimation
-        let numCoefficients = 13
-        let logSpectrum = spectrum.map { log(max($0, 1e-10)) }
-
-        // Simple decimation approach (much faster than full DCT)
-        var mfcc: [Float] = []
-        let step = max(1, logSpectrum.count / numCoefficients)
-
-        for i in 0..<numCoefficients {
-            let index = min(i * step, logSpectrum.count - 1)
-            mfcc.append(logSpectrum[index])
-        }
-
-        return mfcc
-    }
-
-    /// Calculate spectral entropy (measure of spectral complexity)
-    private func calculateSpectralEntropy(_ spectrum: [Float]) -> Float {
-        guard !spectrum.isEmpty else { return 0.0 }
-
-        let totalEnergy = spectrum.map { $0 * $0 }.reduce(0, +)
-        guard totalEnergy > 0 else { return 0.0 }
-
-        // Normalize to probability distribution
-        let probabilities = spectrum.map { ($0 * $0) / totalEnergy }
-
-        // Calculate entropy
-        var entropy: Float = 0.0
-        for p in probabilities {
-            if p > 0 {
-                entropy -= p * log(p)
-            }
-        }
-
-        // Normalize entropy
-        return entropy / log(Float(spectrum.count))
-    }
-
-    /// Apply temporal smoothing filter to reduce noise
-    private func applySmoothingFilter(_ probability: Float) -> Float {
-        // Add to sliding window
-        probabilityWindow.append(probability)
-        if probabilityWindow.count > windowSize {
-            probabilityWindow.removeFirst()
-        }
-
-        // Apply weighted moving average (more weight to recent values)
-        guard !probabilityWindow.isEmpty else { return probability }
-
-        let weights: [Float] = [0.1, 0.15, 0.2, 0.25, 0.3] // Most recent gets highest weight
-        var weightedSum: Float = 0.0
-        var totalWeight: Float = 0.0
-
-        let startIndex = max(0, weights.count - probabilityWindow.count)
-        for (i, prob) in probabilityWindow.enumerated() {
-            let weightIndex = startIndex + i
-            if weightIndex < weights.count {
-                let weight = weights[weightIndex]
-                weightedSum += prob * weight
-                totalWeight += weight
-            }
-        }
-
-        return totalWeight > 0 ? weightedSum / totalWeight : probability
-    }
-
-    /// Update adaptive threshold based on recent probability distribution
-    private func updateAdaptiveThreshold(_ probability: Float) -> Float {
-        guard config.adaptiveThreshold else {
-            return config.threshold
-        }
-
-        // Update probability history
-        probabilityHistory.append(probability)
-        let historyLimit = 50  // Keep last 50 values for analysis
-        if probabilityHistory.count > historyLimit {
-            probabilityHistory.removeFirst()
-        }
-
-        // Calculate adaptive threshold based on recent distribution
-        guard probabilityHistory.count >= 10 else {
-            return config.threshold  // Use default until we have enough data
-        }
-
-        let sortedProbs = probabilityHistory.sorted()
-        let median = sortedProbs[sortedProbs.count / 2]
-        let q75 = sortedProbs[Int(Float(sortedProbs.count) * 0.75)]
-        let q25 = sortedProbs[Int(Float(sortedProbs.count) * 0.25)]
-
-        // Adaptive threshold based on distribution statistics
-        let iqr = q75 - q25
-        let adaptiveBase = median + (iqr * 0.5)  // Above median + half IQR
-
-        // Constrain to configured bounds
-        let newThreshold = max(config.minThreshold, min(config.maxThreshold, adaptiveBase))
-
-        // Smooth threshold changes to avoid sudden jumps
-        let smoothingFactor: Float = 0.1
-        adaptiveThreshold = adaptiveThreshold * (1 - smoothingFactor) + newThreshold * smoothingFactor
-
-        return adaptiveThreshold
-    }
 
     /// Concatenate temporal features from buffer to create shape (1, 201, 4)
     private func concatenateTemporalFeatures() throws -> MLMultiArray {
@@ -1147,69 +790,6 @@ public actor VADManager {
         return directory.standardizedFileURL
     }
 
-    /// Copy models from bundle to cache directory
-    public func copyModelsFromBundle() throws {
-        let modelsDirectory = getModelsDirectory()
-
-        let modelNames = ["silero_stft.mlmodel", "silero_encoder.mlmodel", "silero_rnn_decoder.mlmodel"]
-
-        for modelName in modelNames {
-            let destinationPath = modelsDirectory.appendingPathComponent(modelName)
-
-            // Skip if already exists
-            if FileManager.default.fileExists(atPath: destinationPath.path) {
-                continue
-            }
-
-            // Try to find in bundle
-            if modelName.hasSuffix(".mlmodel") {
-                // Handle .mlmodel files
-                let baseName = modelName.replacingOccurrences(of: ".mlmodel", with: "")
-                if let bundlePath = Bundle.main.path(forResource: baseName, ofType: "mlmodel") {
-                    try FileManager.default.copyItem(atPath: bundlePath, toPath: destinationPath.path)
-                    logger.info("Copied \(modelName) from bundle to cache")
-                } else {
-                    logger.warning("Model \(modelName) not found in bundle")
-                }
-            } else {
-                logger.warning("Unknown model format: \(modelName)")
-            }
-        }
-    }
-
-    /// Copy models from a specific directory (deprecated - use Hugging Face download instead)
-    @available(*, deprecated, message: "Use automatic Hugging Face download instead")
-    public func copyModelsFromDirectory(_ sourceDirectory: URL) throws {
-        let modelsDirectory = getModelsDirectory()
-
-        // Define source models and their destination names
-        let modelMappings = [
-            ("silero_stft.mlmodel", "silero_stft.mlmodel"),
-            ("silero_encoder.mlmodel", "silero_encoder.mlmodel"),
-            ("silero_rnn_decoder.mlmodel", "silero_rnn_decoder.mlmodel")
-        ]
-
-        for (sourceModelName, destinationModelName) in modelMappings {
-            let sourcePath = sourceDirectory.appendingPathComponent(sourceModelName)
-            let destinationPath = modelsDirectory.appendingPathComponent(destinationModelName)
-
-            // Skip if source doesn't exist
-            guard FileManager.default.fileExists(atPath: sourcePath.path) else {
-                logger.warning("Source model \(sourceModelName) not found at: \(sourcePath.path)")
-                continue
-            }
-
-            // Remove existing destination if it exists
-            if FileManager.default.fileExists(atPath: destinationPath.path) {
-                try FileManager.default.removeItem(at: destinationPath)
-            }
-
-            // Copy the model
-            try FileManager.default.copyItem(at: sourcePath, to: destinationPath)
-            logger.info("Copied \(sourceModelName) from \(sourcePath.path) to cache")
-        }
-    }
-
     /// Process audio file and return VAD results
     public func processAudioFile(_ audioData: [Float]) async throws -> [VADResult] {
         guard isAvailable else {
@@ -1233,304 +813,6 @@ public actor VADManager {
         return results
     }
 
-    /// Check if all required VAD models exist
-    private func allModelsExist() -> Bool {
-        let modelsDirectory = getModelsDirectory()
-        let modelNames = ["silero_stft.mlmodel", "silero_encoder.mlmodel", "silero_rnn_decoder.mlmodel"]
-
-        for modelName in modelNames {
-            let modelPath = modelsDirectory.appendingPathComponent(modelName)
-            if !FileManager.default.fileExists(atPath: modelPath.path) {
-                return false
-            }
-        }
-        return true
-    }
-
-    /// Download VAD models from Hugging Face
-    private func downloadVADModels() async throws {
-        logger.info("Downloading VAD models...")
-
-        // Download from Hugging Face (primary method)
-        do {
-            try await downloadVADModelsFromHuggingFace()
-            logger.info("Successfully downloaded VAD models from Hugging Face")
-            return
-        } catch {
-            logger.warning("Failed to download from Hugging Face: \(error)")
-        }
-
-        // Try copying from bundle as fallback only
-        do {
-            try copyModelsFromBundle()
-            logger.info("Successfully copied VAD models from bundle")
-            return
-        } catch {
-            logger.warning("Failed to copy from bundle: \(error)")
-        }
-
-        // If we get here, we couldn't download or find the models
-        logger.error("Could not download VAD models from any source")
-        logger.error("  - Failed: Hugging Face repository download")
-        logger.error("  - Failed: application bundle fallback")
-        logger.error("  - Note: vadCoreml/ directory is no longer used")
-
-        throw VADError.modelLoadingFailed
-    }
-
-    /// Load VAD models with automatic recovery on compilation failures
-    private func loadModelsWithAutoRecovery(
-        stftPath: URL, encoderPath: URL, rnnPath: URL, maxRetries: Int = 2
-    ) async throws {
-        var attempt = 0
-
-        let config = MLModelConfiguration()
-        config.computeUnits = .cpuAndNeuralEngine
-
-        while attempt <= maxRetries {
-            do {
-                // Check if models exist, download if not found
-                let modelsExist = allModelsExist()
-                if !modelsExist {
-                    logger.info("VAD models not found, attempting to download...")
-                    try await downloadVADModelsFromHuggingFace()
-                }
-
-                // Compile models if needed and get compiled paths
-                let compiledStftPath = try await compileModelIfNeeded(stftPath)
-                let compiledEncoderPath = try await compileModelIfNeeded(encoderPath)
-                let compiledRnnPath = try await compileModelIfNeeded(rnnPath)
-                // Try to load all models
-                logger.info("Attempting to load VAD models (attempt \(attempt + 1)/\(maxRetries + 1))")
-
-                let stftModel = try MLModel(contentsOf: compiledStftPath, configuration: config)
-                let encoderModel = try MLModel(contentsOf: compiledEncoderPath, configuration: config)
-                let rnnModel = try MLModel(contentsOf: compiledRnnPath, configuration: config)
-
-                // If we get here, all models loaded successfully
-                self.stftModel = stftModel
-                self.encoderModel = encoderModel
-                self.rnnModel = rnnModel
-                self.classifierModel = nil  // Always use fallback
-
-                if attempt > 0 {
-                    logger.info("VAD models loaded successfully after \(attempt) recovery attempt(s)")
-                } else {
-                    logger.info("All VAD models loaded successfully")
-                }
-                return
-
-            } catch {
-                logger.warning("VAD model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
-
-                // If this is our last attempt, try CPU fallback
-                if attempt >= maxRetries {
-                    logger.info("Final attempt with CPU-only configuration...")
-
-                    do {
-                        let cpuConfig = MLModelConfiguration()
-                        cpuConfig.computeUnits = .cpuOnly
-
-                        // Try CPU-only loading as last resort
-                        let compiledStftPath = try await compileModelIfNeeded(stftPath)
-                        let compiledEncoderPath = try await compileModelIfNeeded(encoderPath)
-                        let compiledRnnPath = try await compileModelIfNeeded(rnnPath)
-
-                        self.stftModel = try MLModel(contentsOf: compiledStftPath, configuration: cpuConfig)
-                        self.encoderModel = try MLModel(contentsOf: compiledEncoderPath, configuration: cpuConfig)
-                        self.rnnModel = try MLModel(contentsOf: compiledRnnPath, configuration: cpuConfig)
-
-                        // No classifier model - always use fallback
-                        self.classifierModel = nil
-
-                        logger.info("VAD models loaded successfully with CPU-only configuration")
-                        return
-
-                    } catch {
-                        logger.error("VAD model loading failed after \(maxRetries + 1) attempts, giving up")
-                        throw VADError.modelCompilationFailed
-                    }
-                }
-
-                // Auto-recovery: Delete corrupted models and re-download
-                logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
-
-                        try await performModelRecovery(
-            stftPath: stftPath,
-            encoderPath: encoderPath,
-            rnnPath: rnnPath
-        )
-
-                attempt += 1
-            }
-        }
-    }
-
-    /// Perform model recovery by removing corrupted models and re-downloading
-    private func performModelRecovery(
-        stftPath: URL, encoderPath: URL, rnnPath: URL
-    ) async throws {
-        // Remove potentially corrupted model files
-        let modelPaths = [stftPath, encoderPath, rnnPath]
-
-        for modelPath in modelPaths {
-            if FileManager.default.fileExists(atPath: modelPath.path) {
-                logger.info("Removing corrupted VAD model at \(modelPath.path)")
-                try FileManager.default.removeItem(at: modelPath)
-            }
-
-            // Also remove compiled versions (for .mlmodel files)
-            if modelPath.lastPathComponent.hasSuffix(".mlmodel") {
-                let compiledPath = modelPath.appendingPathExtension("mlmodelc")
-                if FileManager.default.fileExists(atPath: compiledPath.path) {
-                    logger.info("Removing corrupted compiled VAD model at \(compiledPath.path)")
-                    try FileManager.default.removeItem(at: compiledPath)
-                }
-            }
-        }
-
-        // Re-download the models from Hugging Face
-        logger.info("Re-downloading VAD models from Hugging Face...")
-        try await downloadVADModelsFromHuggingFace()
-
-        logger.info("VAD model recovery completed - models re-downloaded")
-    }
-
-    /// Download VAD models from Hugging Face repository
-    private func downloadVADModelsFromHuggingFace() async throws {
-        logger.info("Downloading VAD models from Hugging Face...")
-
-        let modelsDirectory = getModelsDirectory()
-        let repoPath = "alexwengg/coreml-silero-vad"
-
-        // Model files to download (source models)
-        let modelFiles = [
-            "silero_stft.mlmodel",
-            "silero_encoder.mlmodel",
-            "silero_rnn_decoder.mlmodel",
-        ]
-
-        // Download each source model file
-        for modelFile in modelFiles {
-            let modelURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelFile)")!
-            let destinationPath = modelsDirectory.appendingPathComponent(modelFile)
-
-            do {
-                logger.info("Downloading \(modelFile)...")
-                let (data, response) = try await URLSession.shared.data(from: modelURL)
-
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        try data.write(to: destinationPath)
-                        logger.info("✅ Downloaded \(modelFile) (\(data.count) bytes)")
-                    } else {
-                        logger.error("Failed to download \(modelFile): HTTP \(httpResponse.statusCode)")
-                        throw VADError.modelDownloadFailed
-                    }
-                } else {
-                    // No HTTP response, but we have data - write it anyway
-                    try data.write(to: destinationPath)
-                    logger.info("✅ Downloaded \(modelFile) (\(data.count) bytes)")
-                }
-
-            } catch {
-                logger.error("Failed to download \(modelFile): \(error)")
-                throw VADError.modelDownloadFailed
-            }
-        }
-
-        logger.info("✅ All VAD models downloaded successfully from Hugging Face")
-    }
-
-    /// Download a complete .mlmodelc bundle from Hugging Face (for compiled models)
-    private func downloadMLModelCBundle(repoPath: String, modelName: String, outputPath: URL) async throws {
-        logger.info("Downloading \(modelName) bundle from Hugging Face")
-
-        // Create output directory
-        try FileManager.default.createDirectory(at: outputPath, withIntermediateDirectories: true)
-
-        let bundleFiles = [
-            "model.mil",
-            "coremldata.bin",
-            "metadata.json",
-        ]
-
-        let weightFiles = [
-            "weights/weight.bin"
-        ]
-
-        // Download each file in the bundle
-        for fileName in bundleFiles {
-            let fileURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(fileName)")!
-
-            do {
-                let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
-
-                // Check if download was successful
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let destinationPath = outputPath.appendingPathComponent(fileName)
-
-                    // Remove existing file if it exists
-                    try? FileManager.default.removeItem(at: destinationPath)
-
-                    // Move downloaded file to destination
-                    try FileManager.default.moveItem(at: tempFile, to: destinationPath)
-                    logger.info("Downloaded \(fileName) for \(modelName)")
-                } else {
-                    logger.warning("Failed to download \(fileName) for \(modelName) - file may not exist")
-                    // Create empty file if it doesn't exist (some files are optional)
-                    if fileName == "metadata.json" {
-                        let destinationPath = outputPath.appendingPathComponent(fileName)
-                        try "{}".write(to: destinationPath, atomically: true, encoding: .utf8)
-                    }
-                }
-            } catch {
-                logger.warning("Error downloading \(fileName): \(error.localizedDescription)")
-                // For critical files, create minimal versions
-                if fileName == "coremldata.bin" {
-                    let destinationPath = outputPath.appendingPathComponent(fileName)
-                    try Data().write(to: destinationPath)
-                } else if fileName == "metadata.json" {
-                    let destinationPath = outputPath.appendingPathComponent(fileName)
-                    try "{}".write(to: destinationPath, atomically: true, encoding: .utf8)
-                }
-            }
-        }
-
-        // Download weight files
-        for weightFile in weightFiles {
-            let fileURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(weightFile)")!
-
-            do {
-                let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
-
-                // Check if download was successful
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let destinationPath = outputPath.appendingPathComponent(weightFile)
-
-                    // Create weights directory if it doesn't exist
-                    let weightsDir = destinationPath.deletingLastPathComponent()
-                    try FileManager.default.createDirectory(at: weightsDir, withIntermediateDirectories: true)
-
-                    // Remove existing file if it exists
-                    try? FileManager.default.removeItem(at: destinationPath)
-
-                    // Move downloaded file to destination
-                    try FileManager.default.moveItem(at: tempFile, to: destinationPath)
-                    logger.info("Downloaded \(weightFile) for \(modelName)")
-                } else {
-                    logger.warning("Failed to download \(weightFile) for \(modelName)")
-                    throw VADError.modelDownloadFailed
-                }
-            } catch {
-                logger.error("Critical error downloading \(weightFile): \(error.localizedDescription)")
-                throw VADError.modelDownloadFailed
-            }
-        }
-
-        logger.info("Completed downloading \(modelName) bundle")
-    }
-
     /// Cleanup resources
     public func cleanup() {
         stftModel = nil
@@ -1540,77 +822,11 @@ public actor VADManager {
         hState = nil
         cState = nil
         featureBuffer.removeAll()
-        noiseFloorBuffer.removeAll()
-        previousSpectrum.removeAll()
-        probabilityHistory.removeAll()
-        probabilityWindow.removeAll()
+        
+        // Reset audio processor
+        audioProcessor.reset()
 
         logger.info("VAD resources cleaned up")
     }
 
-    /// Compile model if needed and return path to compiled model
-    private func compileModelIfNeeded(_ modelPath: URL) async throws -> URL {
-        let modelName = modelPath.lastPathComponent
-
-        // If the model is already compiled (.mlmodelc), return it directly
-        if modelName.hasSuffix(".mlmodelc") {
-            logger.info("Model is already compiled: \(modelName)")
-            return modelPath
-        }
-
-        // Handle .mlmodel files that need compilation
-        if modelName.hasSuffix(".mlmodel") {
-            let compiledModelName = modelName.replacingOccurrences(of: ".mlmodel", with: ".mlmodelc")
-            let compiledPath = modelPath.deletingLastPathComponent().appendingPathComponent(compiledModelName)
-
-            // Check if compiled model already exists and is newer than source
-            if FileManager.default.fileExists(atPath: compiledPath.path) {
-                do {
-                    let sourceAttributes = try FileManager.default.attributesOfItem(atPath: modelPath.path)
-                    let compiledAttributes = try FileManager.default.attributesOfItem(atPath: compiledPath.path)
-
-                    if let sourceDate = sourceAttributes[.modificationDate] as? Date,
-                       let compiledDate = compiledAttributes[.modificationDate] as? Date,
-                       compiledDate >= sourceDate {
-                        // Compiled model is up to date
-                        logger.info("Using existing compiled model: \(compiledModelName)")
-                        return compiledPath
-                    }
-                } catch {
-                    // If we can't check dates, just recompile
-                    logger.warning("Could not check model dates, recompiling: \(error)")
-                }
-            }
-
-            // Compile the model
-            logger.info("Compiling model: \(modelName)")
-            let startTime = Date()
-
-            do {
-                let newCompiledPath = try await MLModel.compileModel(at: modelPath)
-                let compileTime = Date().timeIntervalSince(startTime)
-                logger.info("Model compiled successfully in \(String(format: "%.2f", compileTime))s: \(compiledModelName)")
-
-                // Move compiled model to expected location if needed
-                if newCompiledPath != compiledPath {
-                    // Remove existing if present
-                    if FileManager.default.fileExists(atPath: compiledPath.path) {
-                        try FileManager.default.removeItem(at: compiledPath)
-                    }
-                    try FileManager.default.moveItem(at: newCompiledPath, to: compiledPath)
-                    logger.info("Moved compiled model to: \(compiledPath.path)")
-                }
-
-                return compiledPath
-
-            } catch {
-                logger.error("Failed to compile model \(modelName): \(error)")
-                throw VADError.modelLoadingFailed
-            }
-        }
-
-        // If we get here, the model is neither .mlmodel nor .mlmodelc
-        logger.error("Unknown model format: \(modelName)")
-        throw VADError.modelLoadingFailed
-    }
 }

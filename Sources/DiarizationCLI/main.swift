@@ -103,11 +103,11 @@ struct DiarizationCLI {
                 swift run fluidaudio vad-benchmark
                 swift run fluidaudio vad-benchmark --threshold 0.5
 
-                # Run VAD benchmark with mini100 dataset (all files)
-                swift run fluidaudio vad-benchmark --dataset mini100
+                # Run VAD benchmark with mini50 dataset (all files)
+                swift run fluidaudio vad-benchmark --dataset mini50
 
                 # Run VAD benchmark with custom threshold and dataset
-                swift run fluidaudio vad-benchmark --threshold 0.45 --dataset mini100
+                swift run fluidaudio vad-benchmark --threshold 0.45 --dataset mini50
 
 
 
@@ -274,11 +274,11 @@ struct DiarizationCLI {
         case "ami-ihm":
             await downloadAMIDataset(variant: .ihm, force: forceDownload)
         case "vad":
-            await downloadVADDataset(force: forceDownload)
+            await downloadVADDataset(force: forceDownload, dataset: "mini50")
         case "all":
             await downloadAMIDataset(variant: .sdm, force: forceDownload)
             await downloadAMIDataset(variant: .ihm, force: forceDownload)
-            await downloadVADDataset(force: forceDownload)
+            await downloadVADDataset(force: forceDownload, dataset: "mini50")
         default:
             print("❌ Unsupported dataset: \(dataset)")
             print("💡 Supported datasets: ami-sdm, ami-ihm, vad, all")
@@ -1481,7 +1481,7 @@ struct DiarizationCLI {
     }
 
     /// Download VAD dataset from Hugging Face
-    static func downloadVADDataset(force: Bool) async {
+    static func downloadVADDataset(force: Bool, dataset: String = "mini50") async {
         let cacheDir = getVADDatasetCacheDirectory()
 
         print("📥 Downloading VAD dataset from Hugging Face...")
@@ -1518,8 +1518,8 @@ struct DiarizationCLI {
             try? FileManager.default.createDirectory(at: noiseDir, withIntermediateDirectories: true)
         }
 
-        // Use default mini50 dataset for download command
-        let repoName = "musan_mini50"
+        // Use specified dataset for download command
+        let repoName = dataset == "mini100" ? "musan_mini100" : "musan_mini50"
         let repoBase = "https://huggingface.co/datasets/alexwengg/\(repoName)/resolve/main"
 
         var downloadedFiles = 0
@@ -1527,12 +1527,13 @@ struct DiarizationCLI {
 
         // Download speech files
         print("📢 Downloading speech samples...")
+        let speechCount = dataset == "mini100" ? 50 : 25
         do {
             let speechFiles = try await downloadVADFilesFromHF(
                 baseUrl: "\(repoBase)/speech",
                 targetDir: speechDir,
                 expectedLabel: 1,
-                count: 30, // Balanced for comprehensive testing and CI performance
+                count: speechCount,
                 filePrefix: "speech",
                 repoName: repoName
             )
@@ -1545,12 +1546,13 @@ struct DiarizationCLI {
 
         // Download noise files
         print("🔇 Downloading noise samples...")
+        let noiseCount = dataset == "mini100" ? 50 : 25
         do {
             let noiseFiles = try await downloadVADFilesFromHF(
                 baseUrl: "\(repoBase)/noise",
                 targetDir: noiseDir,
                 expectedLabel: 0,
-                count: 30, // Balanced for comprehensive testing and CI performance
+                count: noiseCount,
                 filePrefix: "noise",
                 repoName: repoName
             )
@@ -1748,11 +1750,13 @@ struct DiarizationCLI {
     }
 
     static func runVADBenchmarkWithErrorHandling(arguments: [String]) async throws {
+        print("🚀 Starting VAD Benchmark")
         var numFiles = -1  // Default to all files
         var useAllFiles = true  // Default to all files
         var vadThreshold: Float = 0.3
         var outputFile: String?
-        var dataset = "mini100"  // Default to mini50 dataset
+        var dataset = "mini50"  // Default to mini50 dataset
+        print("   📝 Parsing arguments...")
 
 
         // Parse arguments
@@ -1804,6 +1808,7 @@ struct DiarizationCLI {
         print("🔄 VAD models will be auto-downloaded from Hugging Face if needed")
 
         do {
+            print("🔧 Initializing VAD manager...")
             try await vadManager.initialize()
             print("✅ VAD system initialized")
         } catch {
@@ -1864,7 +1869,7 @@ struct DiarizationCLI {
         }
 
         // Second, try to load from Hugging Face cache
-        if let cachedFiles = try await loadHuggingFaceVADDataset(count: count) {
+        if let cachedFiles = try await loadHuggingFaceVADDataset(count: count, dataset: dataset) {
             return cachedFiles
         }
 
@@ -1956,7 +1961,7 @@ struct DiarizationCLI {
     }
 
     /// Load VAD dataset from Hugging Face cache
-    static func loadHuggingFaceVADDataset(count: Int) async throws -> [VADTestFile]? {
+    static func loadHuggingFaceVADDataset(count: Int, dataset: String = "mini50") async throws -> [VADTestFile]? {
         let cacheDir = getVADDatasetCacheDirectory()
 
         // Check if cache exists and has the required structure
@@ -1971,16 +1976,20 @@ struct DiarizationCLI {
         // Load files from cache
         var testFiles: [VADTestFile] = []
 
-        // If count is -1, use all available files
+        // Determine max files based on dataset
+        let maxFilesForDataset = dataset == "mini100" ? 100 : 50
+
+        // If count is -1, use all available files (but respect dataset limit)
         if count == -1 {
             print("📂 Loading all available files from Hugging Face cache...")
+            print("🗂️ Found cached Hugging Face dataset: \(maxFilesForDataset) files total")
 
-            // Load all speech files
-            let speechFiles = try loadAudioFiles(from: speechDir, expectedLabel: 1, maxCount: Int.max)
+            // Load speech files (half of dataset)
+            let speechFiles = try loadAudioFiles(from: speechDir, expectedLabel: 1, maxCount: maxFilesForDataset / 2)
             testFiles.append(contentsOf: speechFiles)
 
-            // Load all noise files
-            let noiseFiles = try loadAudioFiles(from: noiseDir, expectedLabel: 0, maxCount: Int.max)
+            // Load noise files (half of dataset)
+            let noiseFiles = try loadAudioFiles(from: noiseDir, expectedLabel: 0, maxCount: maxFilesForDataset / 2)
             testFiles.append(contentsOf: noiseFiles)
         } else {
             let speechCount = count / 2
@@ -2020,8 +2029,9 @@ struct DiarizationCLI {
         var testFiles: [VADTestFile] = []
 
         // If count is -1, download many files (large number)
-        let speechCount = count == -1 ? 50 : count / 2
-        let noiseCount = count == -1 ? 50 : count - speechCount
+        let maxFiles = dataset == "mini100" ? 100 : 50
+        let speechCount = count == -1 ? maxFiles / 2 : count / 2
+        let noiseCount = count == -1 ? maxFiles / 2 : count - speechCount
 
         do {
             // Download speech files
