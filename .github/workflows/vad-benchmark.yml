@@ -63,7 +63,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /tmp/vad_test_data
-        key: ${{ runner.os }}-vad-test-data-50
+        key: ${{ runner.os }}-vad-test-data-100
         restore-keys: |
           ${{ runner.os }}-vad-test-data-
 
@@ -78,7 +78,7 @@ jobs:
         echo ""
         echo "ℹ️ VAD models will be downloaded automatically from Hugging Face"
         echo "   Model Repository: alexwengg/coreml_silero_vad"
-        echo "   Test Data Repository: alexwengg/musan_mini50 (50 files, optimized for CI)"
+        echo "   Test Data Repository: alexwengg/musan_mini100 (100 files, comprehensive testing)"
         echo "   Models: silero_stft.mlmodelc, silero_encoder.mlmodelc, silero_rnn_decoder.mlmodelc"
         echo "   🎯 Enhanced Features: SNR filtering, spectral analysis, noise detection"
 
@@ -121,11 +121,11 @@ jobs:
         echo "🚀 Running VAD Benchmark Tests..."
 
         # Set test parameters
-        NUM_FILES="50"
+        NUM_FILES="100"
         echo "📊 Running benchmark with $NUM_FILES test files"
 
         echo "ℹ️ VAD models and test data will be downloaded automatically from Hugging Face"
-        echo "   Using musan_mini50 dataset for optimized CI performance"
+        echo "   Using musan_mini100 dataset for comprehensive performance testing"
         echo "   Enhanced VAD features: SNR filtering, spectral analysis, noise detection"
         echo "   Expected performance: 70%+ accuracy, 76%+ F1-Score with optimized thresholds"
         echo "   This is the expected behavior - no pre-existing files required"
@@ -136,11 +136,12 @@ jobs:
         echo "=================================="
 
         set +e  # Don't exit on error
-        # Using optimal threshold 0.46 with enhanced SNR filtering and spectral features
+        # Using optimal threshold 0.45 with enhanced SNR filtering and spectral features
         # Enhanced VAD achieves F1-Score 78.3% (up from original 64.4%) with aggressive noise filtering
         swift run fluidaudio vad-benchmark \
+          --dataset mini100 \
           --num-files "$NUM_FILES" \
-          --threshold 0.46
+          --threshold 0.45
 
         BENCHMARK_EXIT_CODE=$?
         set -e  # Re-enable exit on error
@@ -185,7 +186,7 @@ jobs:
         **Run Date:** $(date)
         **Branch:** ${{ github.ref_name }}
         **Commit:** ${{ github.sha }}
-        **Test Files:** 50
+        **Test Files:** 100
 
         ## Results
 
