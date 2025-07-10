@@ -55,7 +55,7 @@ struct DiarizationCLI {
 
             BENCHMARK OPTIONS:
                 --dataset <name>        Dataset to use (ami-sdm, ami-ihm) [default: ami-sdm]
-                --threshold <float>     Clustering threshold 0.0-1.0 [default: 0.8]
+                --threshold <float>     Clustering threshold 0.0-1.0 [default: 0.7]
                 --min-duration-on <float>   Minimum speaker segment duration in seconds [default: 1.0]
                 --min-duration-off <float>  Minimum silence between speakers in seconds [default: 0.5]
                 --min-activity <float>      Minimum activity threshold in frames [default: 10.0]
@@ -294,7 +294,7 @@ struct DiarizationCLI {
         }
 
         let audioFile = arguments[0]
-        var threshold: Float = 0.8
+        var threshold: Float = 0.7
         var debugMode = false
         var outputFile: String?
 
@@ -354,7 +354,7 @@ struct DiarizationCLI {
             print("✅ Diarization completed in \(String(format: "%.1f", processingTime))s")
             print("   Real-time factor: \(String(format: "%.2f", rtf))x")
             print("   Found \(result.segments.count) segments")
-            print("   Detected \(result.speakerDatabase.count) speakers")
+            print("   Detected \(result.speakerDatabase.count) speakers (total), mapped: TBD")
 
             // Create output
             let output = ProcessingResult(
@@ -503,7 +503,7 @@ struct DiarizationCLI {
                         der: metrics.der,
                         jer: metrics.jer,
                         segments: result.segments,
-                        speakerCount: result.speakerDatabase.count,
+                        speakerCount: metrics.mappedSpeakerCount,
                         groundTruthSpeakerCount: groundTruthSpeakerCount,
                         timings: completeTimings
                     ))
@@ -658,7 +658,7 @@ struct DiarizationCLI {
                         der: metrics.der,
                         jer: metrics.jer,
                         segments: result.segments,
-                        speakerCount: result.speakerDatabase.count,
+                        speakerCount: metrics.mappedSpeakerCount,
                         groundTruthSpeakerCount: groundTruthSpeakerCount,
                         timings: completeTimings
                     ))
@@ -860,12 +860,16 @@ struct DiarizationCLI {
             "🔍 DER RATES: Miss: \(String(format: "%.1f", Float(missedFrames) / Float(totalFrames) * 100))%, FA: \(String(format: "%.1f", Float(falseAlarmFrames) / Float(totalFrames) * 100))%, SE: \(String(format: "%.1f", Float(speakerErrorFrames) / Float(totalFrames) * 100))%"
         )
 
+        // Count mapped speakers (those that successfully mapped to ground truth)
+        let mappedSpeakerCount = speakerMapping.count
+        
         return DiarizationMetrics(
             der: der,
             jer: jer,
             missRate: Float(missedFrames) / Float(totalFrames) * 100,
             falseAlarmRate: Float(falseAlarmFrames) / Float(totalFrames) * 100,
-            speakerErrorRate: Float(speakerErrorFrames) / Float(totalFrames) * 100
+            speakerErrorRate: Float(speakerErrorFrames) / Float(totalFrames) * 100,
+            mappedSpeakerCount: mappedSpeakerCount
         )
     }
 
@@ -2495,6 +2499,7 @@ struct DiarizationMetrics {
     let missRate: Float
     let falseAlarmRate: Float
     let speakerErrorRate: Float
+    let mappedSpeakerCount: Int  // Number of predicted speakers that mapped to ground truth
 }
 
 // Make DiarizerConfig Codable for output
