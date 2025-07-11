@@ -141,7 +141,7 @@ jobs:
         swift run fluidaudio vad-benchmark \
           --dataset mini100 \
           --num-files "$NUM_FILES" \
-          --threshold 0.45
+          --threshold 0.445
 
         BENCHMARK_EXIT_CODE=$?
         set -e  # Re-enable exit on error
