@@ -58,6 +58,21 @@ jobs:
           echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
+      - name: Verify GitHub CLI Setup
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Verifying GitHub CLI authentication..."
+          gh auth status
+          echo "Current repository: $(gh repo view --json name,owner)"
+          echo "Testing PR access for PR #${{ steps.get_pr.outputs.pr_number }}..."
+          gh pr view ${{ steps.get_pr.outputs.pr_number }} --json number,title,state || echo "Warning: Could not access PR details"
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "Fluid AI Bot"
+          git config --global user.email "action@github.com"
+
       - name: Run Gemini PR Review
         uses: google-gemini/gemini-cli-action@main
         env:
@@ -80,12 +95,25 @@ jobs:
                 "run_shell_command(head)",
                 "run_shell_command(tail)",
                 "run_shell_command(grep)",
+                "run_shell_command(git add)",
+                "run_shell_command(git commit)",
+                "run_shell_command(git push)",
                 "write_file"
               ],
               "sandbox": false
             }
           prompt: |
             You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudio.
+
+            Steps:
+              1. Get PR details from environment variable: $PR_DATA (JSON with title, body, stats)
+              2. Get changed files from: $CHANGED_FILES (newline-separated list)
+              3. Review the diff: `gh pr diff $PR_NUMBER`
+              4. For changed files only, examine specific sections if needed: `head -50 filename` or `tail -50 filename`
+              5. Provide review comments: `gh pr review $PR_NUMBER --comment --body "REVIEW FEEDBACK"`
+              6. Update GEMINI.md with new insights if discovered: `write_file GEMINI.md "updated content"`
+              7. Commit the changes: `git commit -m "Update GEMINI.md with new insights"`
+              8. Push the changes: `git push`
 
             ## PROJECT CONTEXT
             - **FluidAudio**: High-performance speaker diarization library
@@ -95,13 +123,27 @@ jobs:
             - **Pipeline**: Segmentation → Embedding → Clustering (Hungarian algorithm)
             - **Features**: Auto-recovery for model download/compilation failures
 
+            ## ENVIRONMENT VARIABLES AVAILABLE
+            - PR_NUMBER: The PR number to review (e.g., "14")
+            - PR_DATA: JSON string with PR details (title, body, stats)
+            - CHANGED_FILES: Newline-separated list of changed files
+            - REPOSITORY: GitHub repository name
+            - GITHUB_TOKEN: Authentication token for GitHub API
+
             ## REVIEW PROCESS
-            1. Get PR details from environment variable: $PR_DATA (JSON with title, body, stats)
-            2. Get changed files from: $CHANGED_FILES (newline-separated list)
-            3. Review the diff: `gh pr diff $PR_NUMBER`
-            4. For changed files only, examine specific sections if needed: `head -50 filename` or `tail -50 filename`
-            5. Update GEMINI.md with new insights if discovered: `write_file GEMINI.md "updated content"`
-            6. Provide comprehensive review: `gh pr review $PR_NUMBER --comment --body "REVIEW FEEDBACK"`
+            1. **DEBUG**: First, verify environment: `echo "PR_NUMBER=$PR_NUMBER, REPOSITORY=$REPOSITORY"`
+            2. **DEBUG**: Check PR data: `echo "$PR_DATA"`
+            3. **DEBUG**: List changed files: `echo "$CHANGED_FILES"`
+            4. **MAIN**: Review the diff: `gh pr diff $PR_NUMBER`
+            5. **ANALYZE**: For changed files only, examine specific sections if needed: `head -50 filename` or `tail -50 filename`
+            6. **UPDATE**: Update GEMINI.md with new insights if discovered: `write_file GEMINI.md "updated content"`
+            7. **REVIEW**: Provide comprehensive review: `gh pr review $PR_NUMBER --comment --body "REVIEW FEEDBACK"`
+
+            ## CRITICAL: ALWAYS USE $PR_NUMBER IN GH COMMANDS
+            - Use `gh pr view $PR_NUMBER` NOT `gh pr view`
+            - Use `gh pr diff $PR_NUMBER` NOT `gh pr diff`
+            - Use `gh pr review $PR_NUMBER` NOT `gh pr review`
+            - If any command fails, explain why and suggest manual review steps
 
             ## CRITICAL RESPONSIBILITIES
             1. 🔍 **INVESTIGATE MODEL ASSUMPTIONS** - Question every ML model assumption and validate behavior
@@ -141,11 +183,10 @@ jobs:
             3. This knowledge will be committed automatically
 
             ## OUTPUT FORMAT
-            Provide a single comprehensive review comment with markdown formatting:
+            Provide a single comprehensive review comment with sections for different types of feedback.
+            Use markdown formatting for clarity. Include specific line references when relevant.
             - Use specific line references when relevant
             - Include code examples for suggestions
             - Highlight both issues and positive aspects
             - Structure with clear sections for different types of feedback
             - Focus on actionable recommendations
-
-            Start your review process now!
