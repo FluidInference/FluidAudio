@@ -83,7 +83,7 @@ struct DiarizationCLI {
                 --debug             Enable debug mode
 
             DOWNLOAD OPTIONS:
-                --dataset <name>     Dataset to download (ami-sdm, ami-ihm, vad, all) [default: all]
+                --dataset <name>     Dataset to download (ami-sdm, ami-ihm, vad, vad-mini50, vad-mini100, all) [default: all]
                 --force             Force re-download even if files exist
 
             EXAMPLES:
@@ -274,14 +274,18 @@ struct DiarizationCLI {
         case "ami-ihm":
             await downloadAMIDataset(variant: .ihm, force: forceDownload)
         case "vad":
+            await downloadVADDataset(force: forceDownload, dataset: "mini100")  // Default to mini100 for more test data
+        case "vad-mini50":
             await downloadVADDataset(force: forceDownload, dataset: "mini50")
+        case "vad-mini100":
+            await downloadVADDataset(force: forceDownload, dataset: "mini100")
         case "all":
             await downloadAMIDataset(variant: .sdm, force: forceDownload)
             await downloadAMIDataset(variant: .ihm, force: forceDownload)
-            await downloadVADDataset(force: forceDownload, dataset: "mini50")
+            await downloadVADDataset(force: forceDownload, dataset: "mini100")
         default:
             print("❌ Unsupported dataset: \(dataset)")
-            print("💡 Supported datasets: ami-sdm, ami-ihm, vad, all")
+            print("💡 Supported datasets: ami-sdm, ami-ihm, vad, vad-mini50, vad-mini100, all")
             exit(1)
         }
     }
@@ -2099,6 +2103,7 @@ struct DiarizationCLI {
         }
 
         print("      Found \(allFiles.count) audio files in \(filePrefix)/ directory")
+        print("      Debug: requesting \(count) files from \(allFiles.count) available")
 
         if !allFiles.isEmpty {
             let filesToDownload = Array(allFiles.prefix(count))
