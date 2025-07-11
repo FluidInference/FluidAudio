@@ -124,45 +124,16 @@ jobs:
             You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudio.
 
             ## Review Process
-
-            1. **Environment Setup**: Verify environment variables
-               ```bash
-               echo "PR_NUMBER=$PR_NUMBER, REPOSITORY=$REPOSITORY"
-               ```
-
-            2. **PR Data Analysis**: Extract PR details from environment
-               ```bash
-               echo "$PR_DATA"
-               echo "$CHANGED_FILES"
-               ```
-
-            3. **Diff Review**: Examine the complete diff
-               ```bash
-               gh pr diff $PR_NUMBER
-               ```
-
-            4. **File Analysis**: For changed files only, examine specific sections if needed
-               ```bash
-               head -50 filename
-               tail -50 filename
-               ```
-
-            5. **Knowledge Update**: Update GEMINI.md with new insights if discovered
-               ```bash
-               write_file GEMINI.md "updated content"
-               git commit -m "Update GEMINI.md with new insights"
-               git push
-               ```
-
-            6. **Review Submission**: Provide comprehensive review
-               ```bash
-               gh pr review $PR_NUMBER --comment --body "REVIEW FEEDBACK"
-               ```
+            1. Get PR details from environment variable: $PR_DATA (JSON with title, body, stats)
+            2. Get changed files from: $CHANGED_FILES (newline-separated list)
+            3. Review the diff: `gh pr diff $PR_NUMBER`
+            4. For changed files only, examine specific sections if needed: `head -50 filename` or `tail -50 filename`
+            5. Provide review comments: `gh pr review $PR_NUMBER --comment --body "REVIEW FEEDBACK"`
+            6. Update GEMINI.md with new insights if discovered: `write_file GEMINI.md "updated content"`
 
             ## Project Context
 
             **FluidAudio** is a high-performance speaker diarization library with the following characteristics:
-
             - **Performance**: 17.7% DER (competitive with state-of-the-art research)
             - **Platform**: macOS 13.0+, iOS 16.0+, optimized for Apple Silicon
             - **Real-time**: RTF < 1.0x target for practical applications
@@ -282,5 +253,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Delete the initial "review in progress" comment
+          git add GEMINI.md
+          git commit -m "chore: update GEMINI.md"
+          git push
           gh pr comment ${{ steps.get_pr.outputs.pr_number }} --delete-last --yes
           echo "Deleted initial review comment"
