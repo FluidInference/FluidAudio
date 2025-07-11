@@ -28,125 +28,73 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Generate GitHub App Token (Optional)
+      - name: Generate GitHub App Token
         id: generate_token
-        continue-on-error: true
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.PRIVATE_KEY }}
 
-      - name: Set GitHub Token
-        id: set_token
-        run: |
-          if [ -n "${{ steps.generate_token.outputs.token }}" ]; then
-            echo "GITHUB_TOKEN=${{ steps.generate_token.outputs.token }}" >> $GITHUB_OUTPUT
-            echo "Using GitHub App token"
-          else
-            echo "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_OUTPUT
-            echo "Using default GitHub token"
-          fi
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
-      - name: Get PR number
-        id: get_pr_number
+      - name: Get PR details
+        id: get_pr
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             PR_NUMBER=${{ github.event.inputs.pr_number }}
           elif [ "${{ github.event_name }}" = "issue_comment" ]; then
             PR_NUMBER=${{ github.event.issue.number }}
+          else
+            PR_NUMBER=${{ github.event.pull_request.number }}
           fi
-          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
 
-      - name: Checkout PR code
-        uses: actions/checkout@v4
-        with:
-          token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
-          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', steps.get_pr_number.outputs.PR_NUMBER) }}
-          fetch-depth: 0
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Get PR details with GitHub CLI
-        id: get_pr_details
-        env:
-          GITHUB_TOKEN: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER=${{ steps.get_pr_number.outputs.PR_NUMBER }}
+          # Get PR details
+          PR_DATA=$(gh pr view $PR_NUMBER --json title,body,additions,deletions,changedFiles,baseRefName,headRefName)
+          echo "pr_data=$PR_DATA" >> "$GITHUB_OUTPUT"
 
-          # Get PR details using GitHub CLI
-          PR_DETAILS=$(gh pr view $PR_NUMBER --json title,body,headRefName,baseRefName,commits,files,additions,deletions,changedFiles)
-          echo "PR_DETAILS<<EOF" >> $GITHUB_OUTPUT
-          echo "$PR_DETAILS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          # Get PR statistics
-          PR_STATS=$(gh pr view $PR_NUMBER --json additions,deletions,changedFiles)
-          echo "PR_STATS<<EOF" >> $GITHUB_OUTPUT
-          echo "$PR_STATS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          # Get actual code diff (truncated to avoid token limits)
-          PR_DIFF=$(gh pr diff $PR_NUMBER | head -n 1000)
-          echo "PR_DIFF<<EOF" >> $GITHUB_OUTPUT
-          echo "$PR_DIFF" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          # Get diff against base branch
-          BASE_DIFF=$(gh pr diff $PR_NUMBER --base main | head -n 1000)
-          echo "BASE_DIFF<<EOF" >> $GITHUB_OUTPUT
-          echo "$BASE_DIFF" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          # Get list of changed files for reference
+          # Get file changes
           CHANGED_FILES=$(gh pr diff $PR_NUMBER --name-only)
-          echo "CHANGED_FILES<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Gemini PR Review
-        id: gemini_review
         uses: google-gemini/gemini-cli-action@main
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          PR_NUMBER: ${{ steps.get_pr.outputs.pr_number }}
+          PR_DATA: ${{ steps.get_pr.outputs.pr_data }}
+          CHANGED_FILES: ${{ steps.get_pr.outputs.changed_files }}
+          REPOSITORY: ${{ github.repository }}
         with:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          settings_json: |
+            {
+              "coreTools": [
+                "run_shell_command(echo)",
+                "run_shell_command(gh pr view)",
+                "run_shell_command(gh pr diff)",
+                "run_shell_command(gh pr review)",
+                "run_shell_command(gh pr comment)",
+                "run_shell_command(cat)",
+                "run_shell_command(head)",
+                "run_shell_command(tail)",
+                "run_shell_command(grep)",
+                "write_file"
+              ],
+              "sandbox": false
+            }
           prompt: |
             You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudio.
-
-            ## PR CONTEXT
-            PR Number: ${{ steps.get_pr_number.outputs.PR_NUMBER }}
-            Files Changed: ${{ steps.get_pr_details.outputs.CHANGED_FILES }}
-
-            ## CODE CHANGES TO REVIEW
-
-            ### PR Diff (Changes in this PR):
-            ```diff
-            ${{ steps.get_pr_details.outputs.PR_DIFF }}
-            ```
-
-            ### Base Branch Diff (Changes against main):
-            ```diff
-            ${{ steps.get_pr_details.outputs.BASE_DIFF }}
-            ```
-
-            ### PR Statistics:
-            ${{ steps.get_pr_details.outputs.PR_STATS }}
-
-            ## CRITICAL RESPONSIBILITIES
-            1. 🔍 INVESTIGATE MODEL ASSUMPTIONS - Question every ML model assumption and validate behavior
-            2. 📚 REVIEW API DOCUMENTATION - Ensure APIs are well-documented and user-friendly  
-            3. 🧠 CAPTURE LEARNINGS - Document insights back into GEMINI.md file
-            4. 🔬 VALIDATE PERFORMANCE - Verify claims match actual behavior
-
-            ## INVESTIGATION FRAMEWORK
-            Use the comprehensive framework defined in GEMINI.md:
-            - Model Assumption Investigation Checklist
-            - API Documentation Investigation Template  
-            - Performance Validation Framework
-            - Reference docs/ folder for WWDC 2025 audio/ML context
-
-            ## SELF-LEARNING REQUIREMENT
-            **CRITICAL**: If you discover new insights, patterns, or domain knowledge:
-            1. ADD findings to GEMINI.md "Recent Learnings" section
-            2. Update relevant sections with new knowledge
-            3. Document architecture patterns, performance insights, or common issues
-            4. These changes will be automatically committed to the PR
 
             ## PROJECT CONTEXT
             - **FluidAudio**: High-performance speaker diarization library
@@ -156,144 +104,57 @@ jobs:
             - **Pipeline**: Segmentation → Embedding → Clustering (Hungarian algorithm)
             - **Features**: Auto-recovery for model download/compilation failures
 
-            ## REVIEW APPROACH
-            - **Investigative**: Always question assumptions and validate claims
+            ## REVIEW PROCESS
+            1. Get PR details from environment variable: $PR_DATA (JSON with title, body, stats)
+            2. Get changed files from: $CHANGED_FILES (newline-separated list)
+            3. Review the diff: `gh pr diff $PR_NUMBER`
+            4. For changed files only, examine specific sections if needed: `head -50 filename` or `tail -50 filename`
+            5. Update GEMINI.md with new insights if discovered: `write_file GEMINI.md "updated content"`
+            6. Provide comprehensive review: `gh pr review $PR_NUMBER --comment --body "REVIEW FEEDBACK"`
+
+            ## CRITICAL RESPONSIBILITIES
+            1. 🔍 **INVESTIGATE MODEL ASSUMPTIONS** - Question every ML model assumption and validate behavior
+            2. 📚 **REVIEW API DOCUMENTATION** - Ensure APIs are well-documented and user-friendly  
+            3. 🧠 **CAPTURE LEARNINGS** - Document insights back into GEMINI.md file
+            4. 🔬 **VALIDATE PERFORMANCE** - Verify claims match actual behavior
+
+            ## REVIEW FOCUS AREAS
+            - **Swift Best Practices**: Code style, error handling, memory management, async/await
+            - **Performance**: Apple Silicon optimization, CoreML efficiency, memory profiling
+            - **Audio Processing**: Pipeline validation, format assumptions, clustering algorithms
+            - **Apple Platform**: Foundation, CoreML, AVFoundation, OSLog usage
+            - **ML/AI**: Model assumptions, embedding quality, clustering effectiveness
+            - **Testing**: Unit/integration coverage, benchmark validation, edge cases
+            - **Documentation**: API clarity, parameter constraints, error conditions
+
+            ## INVESTIGATION FRAMEWORK
+            Use comprehensive analysis from GEMINI.md:
+            - Model Assumption Investigation Checklist
+            - API Documentation Investigation Template  
+            - Performance Validation Framework
+            - Reference docs/ folder for WWDC 2025 audio/ML context
+
+            ## REVIEW GUIDELINES
+            - **Be Investigative**: Always question assumptions and validate claims
             - **Evidence-based**: Validate performance claims with benchmarks
             - **Platform-aware**: Check Apple platform best practices
             - **Future-focused**: Compare with WWDC 2025 audio/ML enhancements
             - **Learning-focused**: Document insights for continuous improvement
+            - **Constructive**: Be specific and helpful in feedback
+            - **Comprehensive**: Cover security, performance, reliability, maintainability
 
-            ## SPECIFIC FOCUS AREAS
-            1. **Swift Best Practices**: Code style, error handling, memory management, async/await
-            2. **Performance**: Apple Silicon optimization, CoreML efficiency, memory profiling
-            3. **Audio Processing**: Pipeline validation, format assumptions, clustering algorithms
-            4. **Apple Platform**: Foundation, CoreML, AVFoundation, OSLog usage
-            5. **Testing**: Unit/integration coverage, benchmark validation, edge cases
-            6. **Documentation**: API clarity, parameter constraints, error conditions
+            ## SELF-LEARNING REQUIREMENT
+            **CRITICAL**: If you discover new insights, patterns, or domain knowledge:
+            1. UPDATE GEMINI.md with findings in "Recent Learnings" section
+            2. Document architecture patterns, performance insights, or common issues
+            3. This knowledge will be committed automatically
 
-            ## CODE REVIEW INSTRUCTIONS
+            ## OUTPUT FORMAT
+            Provide a single comprehensive review comment with markdown formatting:
+            - Use specific line references when relevant
+            - Include code examples for suggestions
+            - Highlight both issues and positive aspects
+            - Structure with clear sections for different types of feedback
+            - Focus on actionable recommendations
 
-            1. **Analyze the actual code diff above** - Don't just look at file names
-            2. **Review each changed line** for correctness and best practices
-            3. **Question assumptions** in the code changes
-            4. **Validate performance claims** if any benchmarks are mentioned
-            5. **Check API documentation** for any new public interfaces
-            6. **Look for potential issues** like memory leaks, race conditions, etc.
-            7. **Document insights** in GEMINI.md for future reviews
-
-            **Be thorough, investigative, and provide specific line-by-line feedback where appropriate**
-
-      - name: Capture Gemini Review Output
-        id: capture_review
-        if: always()
-        run: |
-          # Capture the review output from the Gemini action
-          if [ -n "${{ steps.gemini_review.outputs.response }}" ]; then
-            REVIEW_OUTPUT="${{ steps.gemini_review.outputs.response }}"
-          else
-            REVIEW_OUTPUT="Review completed but output format not recognized. Check workflow logs for details."
-          fi
-
-          # Save to output with proper escaping
-          echo "REVIEW_OUTPUT<<EOF" >> $GITHUB_OUTPUT
-          echo "$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          echo "REVIEW_OUTPUT:"
-          echo $REVIEW_OUTPUT
-
-      - name: Check for GEMINI.md updates
-        id: check_gemini_updates
-        run: |
-          if git diff --quiet GEMINI.md; then
-            echo "GEMINI_UPDATED=false" >> $GITHUB_OUTPUT
-          else
-            echo "GEMINI_UPDATED=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Commit GEMINI.md updates
-        if: steps.check_gemini_updates.outputs.GEMINI_UPDATED == 'true'
-        env:
-          GITHUB_TOKEN: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add GEMINI.md
-          git commit -m "🧠 Update GEMINI.md with review insights
-
-          - Added learnings from PR #${{ steps.get_pr_number.outputs.PR_NUMBER }} review
-          - Updated knowledge base with new patterns/insights
-          - Enhanced investigation framework based on findings
-
-          🤖 Generated by Fluid AI Code Review"
-
-          # Get the current branch name
-          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          if [ "$CURRENT_BRANCH" = "HEAD" ]; then
-            # We're in detached HEAD state, get the branch from PR
-            CURRENT_BRANCH=$(gh pr view ${{ steps.get_pr_number.outputs.PR_NUMBER }} --json headRefName --jq '.headRefName')
-          fi
-
-          # Push changes to the PR branch
-          if git push origin HEAD:$CURRENT_BRANCH; then
-            echo "✅ Successfully pushed GEMINI.md updates to PR branch"
-          else
-            echo "❌ Failed to push GEMINI.md updates. This may be due to:"
-            echo "  - Fork restrictions (PRs from forks cannot be updated by Actions)"
-            echo "  - Branch protection rules"
-            echo "  - Repository permissions"
-            echo "📝 The updates are committed locally and will be included in the review"
-            exit 0  # Don't fail the workflow
-          fi
-
-      - name: Add review summary comment
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
-          script: |
-            const prNumber = '${{ steps.get_pr_number.outputs.PR_NUMBER }}';
-            const triggerType = '${{ github.event_name }}';
-            const geminiUpdated = '${{ steps.check_gemini_updates.outputs.GEMINI_UPDATED }}';
-            const reviewOutput = `${{ steps.capture_review.outputs.REVIEW_OUTPUT }}`;
-
-            let comment = '## 🔍 Fluid AI Code Review Complete\n\n';
-
-            if (reviewOutput && reviewOutput.trim() !== '' && reviewOutput !== 'Review completed but output format not recognized. Check workflow logs for details.') {
-              comment += reviewOutput + '\n\n';
-            } else {
-              comment += '⚠️ *Review output not captured - check workflow logs for details*\n\n';
-            }
-
-            if (geminiUpdated === 'true') {
-              comment += '---\n\n📚 **Knowledge Updated**: New insights captured for future reviews\n\n';
-            }
-
-            comment += '---\n\n';
-            comment += `🔗 **[View Workflow Logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**\n\n`;
-            comment += '*For additional review, comment `/fluid review`*';
-
-            github.rest.issues.createComment({
-              issue_number: prNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
-
-      - name: Comment on GEMINI.md updates
-        if: steps.check_gemini_updates.outputs.GEMINI_UPDATED == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
-          script: |
-            const prNumber = '${{ steps.get_pr_number.outputs.PR_NUMBER }}';
-
-            const comment = '## 📚 Knowledge Base Updated\n\n' +
-              'New insights from this review have been captured for future improvements.';
-
-            github.rest.issues.createComment({
-              issue_number: prNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+            Start your review process now!
