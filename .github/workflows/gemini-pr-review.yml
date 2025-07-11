@@ -60,6 +60,7 @@ jobs:
 
       - name: Post initial review comment
         id: initial_comment
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -275,6 +276,8 @@ jobs:
 
       - name: Delete initial review comment
         if: always()
+        continue-on-error: true
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
