@@ -115,7 +115,6 @@ jobs:
                 "run_shell_command(git push)",
                 "write_file"
               ],
-              "model": "gemini-2.5-pro",
               "sandbox": false
             }
           prompt: |
