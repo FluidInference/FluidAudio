@@ -103,132 +103,92 @@ jobs:
 
       - name: Run Gemini PR Review
         id: gemini_review
-        env:
-          PR_NUMBER: ${{ steps.get_pr_number.outputs.PR_NUMBER }}
-          PR_DETAILS: ${{ steps.get_pr_details.outputs.PR_DETAILS }}
-          PR_STATS: ${{ steps.get_pr_details.outputs.PR_STATS }}
-          PR_DIFF: ${{ steps.get_pr_details.outputs.PR_DIFF }}
-          BASE_DIFF: ${{ steps.get_pr_details.outputs.BASE_DIFF }}
-          CHANGED_FILES: ${{ steps.get_pr_details.outputs.CHANGED_FILES }}
+        uses: google-gemini/gemini-cli-action@main
+        with:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          # Create a temporary file for the prompt
-          cat > prompt.txt << 'EOF'
-          You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudio.
+          prompt: |
+            You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudio.
 
-          ## PR CONTEXT
-          PR Number: ${{ env.PR_NUMBER }}
-          Files Changed: ${{ env.CHANGED_FILES }}
+            ## PR CONTEXT
+            PR Number: ${{ steps.get_pr_number.outputs.PR_NUMBER }}
+            Files Changed: ${{ steps.get_pr_details.outputs.CHANGED_FILES }}
 
-          ## CODE CHANGES TO REVIEW
+            ## CODE CHANGES TO REVIEW
 
-          ### PR Diff (Changes in this PR):
-          ```diff
-          ${{ env.PR_DIFF }}
-          ```
+            ### PR Diff (Changes in this PR):
+            ```diff
+            ${{ steps.get_pr_details.outputs.PR_DIFF }}
+            ```
 
-          ### Base Branch Diff (Changes against main):
-          ```diff
-          ${{ env.BASE_DIFF }}
-          ```
+            ### Base Branch Diff (Changes against main):
+            ```diff
+            ${{ steps.get_pr_details.outputs.BASE_DIFF }}
+            ```
 
-          ### PR Statistics:
-          ${{ env.PR_STATS }}
+            ### PR Statistics:
+            ${{ steps.get_pr_details.outputs.PR_STATS }}
 
-          ## CRITICAL RESPONSIBILITIES
-          1. 🔍 INVESTIGATE MODEL ASSUMPTIONS - Question every ML model assumption and validate behavior
-          2. 📚 REVIEW API DOCUMENTATION - Ensure APIs are well-documented and user-friendly  
-          3. 🧠 CAPTURE LEARNINGS - Document insights back into GEMINI.md file
-          4. 🔬 VALIDATE PERFORMANCE - Verify claims match actual behavior
+            ## CRITICAL RESPONSIBILITIES
+            1. 🔍 INVESTIGATE MODEL ASSUMPTIONS - Question every ML model assumption and validate behavior
+            2. 📚 REVIEW API DOCUMENTATION - Ensure APIs are well-documented and user-friendly  
+            3. 🧠 CAPTURE LEARNINGS - Document insights back into GEMINI.md file
+            4. 🔬 VALIDATE PERFORMANCE - Verify claims match actual behavior
 
-          ## INVESTIGATION FRAMEWORK
-          Use the comprehensive framework defined in GEMINI.md:
-          - Model Assumption Investigation Checklist
-          - API Documentation Investigation Template  
-          - Performance Validation Framework
-          - Reference docs/ folder for WWDC 2025 audio/ML context
+            ## INVESTIGATION FRAMEWORK
+            Use the comprehensive framework defined in GEMINI.md:
+            - Model Assumption Investigation Checklist
+            - API Documentation Investigation Template  
+            - Performance Validation Framework
+            - Reference docs/ folder for WWDC 2025 audio/ML context
 
-          ## SELF-LEARNING REQUIREMENT
-          **CRITICAL**: If you discover new insights, patterns, or domain knowledge:
-          1. ADD findings to GEMINI.md "Recent Learnings" section
-          2. Update relevant sections with new knowledge
-          3. Document architecture patterns, performance insights, or common issues
-          4. These changes will be automatically committed to the PR
+            ## SELF-LEARNING REQUIREMENT
+            **CRITICAL**: If you discover new insights, patterns, or domain knowledge:
+            1. ADD findings to GEMINI.md "Recent Learnings" section
+            2. Update relevant sections with new knowledge
+            3. Document architecture patterns, performance insights, or common issues
+            4. These changes will be automatically committed to the PR
 
-          ## PROJECT CONTEXT
-          - **FluidAudio**: High-performance speaker diarization library
-          - **Performance**: 17.7% DER (competitive with state-of-the-art research)
-          - **Platform**: macOS 13.0+, iOS 16.0+, optimized for Apple Silicon
-          - **Real-time**: RTF < 1.0x target for practical applications
-          - **Pipeline**: Segmentation → Embedding → Clustering (Hungarian algorithm)
-          - **Features**: Auto-recovery for model download/compilation failures
+            ## PROJECT CONTEXT
+            - **FluidAudio**: High-performance speaker diarization library
+            - **Performance**: 17.7% DER (competitive with state-of-the-art research)
+            - **Platform**: macOS 13.0+, iOS 16.0+, optimized for Apple Silicon
+            - **Real-time**: RTF < 1.0x target for practical applications
+            - **Pipeline**: Segmentation → Embedding → Clustering (Hungarian algorithm)
+            - **Features**: Auto-recovery for model download/compilation failures
 
-          ## REVIEW APPROACH
-          - **Investigative**: Always question assumptions and validate claims
-          - **Evidence-based**: Validate performance claims with benchmarks
-          - **Platform-aware**: Check Apple platform best practices
-          - **Future-focused**: Compare with WWDC 2025 audio/ML enhancements
-          - **Learning-focused**: Document insights for continuous improvement
+            ## REVIEW APPROACH
+            - **Investigative**: Always question assumptions and validate claims
+            - **Evidence-based**: Validate performance claims with benchmarks
+            - **Platform-aware**: Check Apple platform best practices
+            - **Future-focused**: Compare with WWDC 2025 audio/ML enhancements
+            - **Learning-focused**: Document insights for continuous improvement
 
-          ## SPECIFIC FOCUS AREAS
-          1. **Swift Best Practices**: Code style, error handling, memory management, async/await
-          2. **Performance**: Apple Silicon optimization, CoreML efficiency, memory profiling
-          3. **Audio Processing**: Pipeline validation, format assumptions, clustering algorithms
-          4. **Apple Platform**: Foundation, CoreML, AVFoundation, OSLog usage
-          5. **Testing**: Unit/integration coverage, benchmark validation, edge cases
-          6. **Documentation**: API clarity, parameter constraints, error conditions
+            ## SPECIFIC FOCUS AREAS
+            1. **Swift Best Practices**: Code style, error handling, memory management, async/await
+            2. **Performance**: Apple Silicon optimization, CoreML efficiency, memory profiling
+            3. **Audio Processing**: Pipeline validation, format assumptions, clustering algorithms
+            4. **Apple Platform**: Foundation, CoreML, AVFoundation, OSLog usage
+            5. **Testing**: Unit/integration coverage, benchmark validation, edge cases
+            6. **Documentation**: API clarity, parameter constraints, error conditions
 
-          ## CODE REVIEW INSTRUCTIONS
+            ## CODE REVIEW INSTRUCTIONS
 
-          1. **Analyze the actual code diff above** - Don't just look at file names
-          2. **Review each changed line** for correctness and best practices
-          3. **Question assumptions** in the code changes
-          4. **Validate performance claims** if any benchmarks are mentioned
-          5. **Check API documentation** for any new public interfaces
-          6. **Look for potential issues** like memory leaks, race conditions, etc.
-          7. **Document insights** in GEMINI.md for future reviews
+            1. **Analyze the actual code diff above** - Don't just look at file names
+            2. **Review each changed line** for correctness and best practices
+            3. **Question assumptions** in the code changes
+            4. **Validate performance claims** if any benchmarks are mentioned
+            5. **Check API documentation** for any new public interfaces
+            6. **Look for potential issues** like memory leaks, race conditions, etc.
+            7. **Document insights** in GEMINI.md for future reviews
 
-          **Be thorough, investigative, and provide specific line-by-line feedback where appropriate**
-          EOF
-
-          # Create settings file
-          cat > settings.json << 'EOF'
-          {
-            "sandbox": false,
-            "model": "gemini-2.5-pro",
-            "mcpServers": {
-              "deepwiki": {
-                "url": "https://mcp.deepwiki.com/sse"
-              }
-            }
-          }
-          EOF
-
-          # Install Gemini CLI
-          npm install -g @google-gemini/gemini-cli
-
-          # Run the review and capture output
-          gemini -k $GEMINI_API_KEY -s settings.json -f prompt.txt > gemini_output.txt 2>&1 || {
-            echo "Gemini CLI failed. Error output:" >> gemini_output.txt
-            echo "Exit code: $?" >> gemini_output.txt
-          }
-
-          # Ensure output file exists and has content
-          if [ ! -f "gemini_output.txt" ] || [ ! -s "gemini_output.txt" ]; then
-            echo "❌ Gemini CLI execution failed - no output generated" > gemini_output.txt
-            echo "Check workflow logs for details" >> gemini_output.txt
-          fi
-
-          echo "✅ Gemini review completed, output saved to gemini_output.txt"
+            **Be thorough, investigative, and provide specific line-by-line feedback where appropriate**
 
       - name: Capture Gemini Review Output
         id: capture_review
         if: always()
         run: |
-          # Try to capture the review output from the previous step
-          if [ -f "gemini_output.txt" ]; then
-            REVIEW_OUTPUT=$(cat gemini_output.txt)
-          elif [ -n "${{ steps.gemini_review.outputs.response }}" ]; then
+          # Capture the review output from the Gemini action
+          if [ -n "${{ steps.gemini_review.outputs.response }}" ]; then
             REVIEW_OUTPUT="${{ steps.gemini_review.outputs.response }}"
           else
             REVIEW_OUTPUT="Review completed but output format not recognized. Check workflow logs for details."
