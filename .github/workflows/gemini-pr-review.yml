@@ -64,15 +64,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Post initial "review in progress" comment
-          COMMENT_DATA=$(gh pr comment ${{ steps.get_pr.outputs.pr_number }} --body "🔍 **Fluid AI Review In Progress** 
+          gh pr comment ${{ steps.get_pr.outputs.pr_number }} --body "🔍 **Fluid AI Review In Progress** 
 
           Your PR review has been queued and is currently being analyzed by Fluid AI. This should take about 1-3 minutes depending on the size of the PR.
 
-          Please wait for the detailed review to be posted shortly..." --json id,url)
+          Please wait for the detailed review to be posted shortly..."
 
-          COMMENT_ID=$(echo "$COMMENT_DATA" | jq -r '.id')
-          echo "comment_id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
-          echo "Posted initial review comment with ID: $COMMENT_ID"
+          echo "Posted initial review comment"
 
       - name: Verify GitHub CLI Setup
         env:
@@ -281,9 +279,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Delete the initial "review in progress" comment
-          if [ -n "${{ steps.initial_comment.outputs.comment_id }}" ]; then
-            gh api -X DELETE /repos/${{ github.repository }}/issues/comments/${{ steps.initial_comment.outputs.comment_id }}
-            echo "Deleted initial review comment ID: ${{ steps.initial_comment.outputs.comment_id }}"
-          else
-            echo "No initial comment ID found to delete"
-          fi
+          gh pr comment ${{ steps.get_pr.outputs.pr_number }} --delete-last --yes
+          echo "Deleted initial review comment"
