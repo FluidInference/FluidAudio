@@ -47,65 +47,69 @@ jobs:
             echo "Using default GitHub token"
           fi
 
-      - name: Get PR details
-        id: get_pr
-        env:
-          GITHUB_TOKEN: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
+      - name: Get PR number
+        id: get_pr_number
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             PR_NUMBER=${{ github.event.inputs.pr_number }}
           elif [ "${{ github.event_name }}" = "issue_comment" ]; then
             PR_NUMBER=${{ github.event.issue.number }}
           fi
-
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
 
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
+          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', steps.get_pr_number.outputs.PR_NUMBER) }}
+          fetch-depth: 0
+
+      - name: Get PR details with GitHub CLI
+        id: get_pr_details
+        env:
+          GITHUB_TOKEN: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ steps.get_pr_number.outputs.PR_NUMBER }}
+          
           # Get PR details using GitHub CLI
           PR_DETAILS=$(gh pr view $PR_NUMBER --json title,body,headRefName,baseRefName,commits,files,additions,deletions,changedFiles)
           echo "PR_DETAILS<<EOF" >> $GITHUB_OUTPUT
           echo "$PR_DETAILS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-
+          
           # Get PR statistics
           PR_STATS=$(gh pr view $PR_NUMBER --json additions,deletions,changedFiles)
           echo "PR_STATS<<EOF" >> $GITHUB_OUTPUT
           echo "$PR_STATS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-
+          
           # Get actual code diff (truncated to avoid token limits)
           PR_DIFF=$(gh pr diff $PR_NUMBER | head -n 1000)
           echo "PR_DIFF<<EOF" >> $GITHUB_OUTPUT
           echo "$PR_DIFF" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-
+          
           # Get diff against base branch
           BASE_DIFF=$(gh pr diff $PR_NUMBER --base main | head -n 1000)
           echo "BASE_DIFF<<EOF" >> $GITHUB_OUTPUT
           echo "$BASE_DIFF" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-
+          
           # Get list of changed files for reference
           CHANGED_FILES=$(gh pr diff $PR_NUMBER --name-only)
           echo "CHANGED_FILES<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Checkout PR code
-        uses: actions/checkout@v4
-        with:
-          token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
-          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', steps.get_pr.outputs.PR_NUMBER) }}
-          fetch-depth: 0
-
       - name: Run Gemini PR Review
         uses: google-gemini/gemini-cli-action@main
         env:
-          PR_NUMBER: ${{ steps.get_pr.outputs.PR_NUMBER }}
-          PR_DETAILS: ${{ steps.get_pr.outputs.PR_DETAILS }}
-          PR_STATS: ${{ steps.get_pr.outputs.PR_STATS }}
-          PR_DIFF: ${{ steps.get_pr.outputs.PR_DIFF }}
-          BASE_DIFF: ${{ steps.get_pr.outputs.BASE_DIFF }}
-          CHANGED_FILES: ${{ steps.get_pr.outputs.CHANGED_FILES }}
+          PR_NUMBER: ${{ steps.get_pr_number.outputs.PR_NUMBER }}
+          PR_DETAILS: ${{ steps.get_pr_details.outputs.PR_DETAILS }}
+          PR_STATS: ${{ steps.get_pr_details.outputs.PR_STATS }}
+          PR_DIFF: ${{ steps.get_pr_details.outputs.PR_DIFF }}
+          BASE_DIFF: ${{ steps.get_pr_details.outputs.BASE_DIFF }}
+          CHANGED_FILES: ${{ steps.get_pr_details.outputs.CHANGED_FILES }}
         with:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           prompt: |
@@ -114,19 +118,19 @@ jobs:
             ## PR CONTEXT
             PR Number: ${{ env.PR_NUMBER }}
             Files Changed: ${{ env.CHANGED_FILES }}
-
+            
             ## CODE CHANGES TO REVIEW
-
+            
             ### PR Diff (Changes in this PR):
             ```diff
             ${{ env.PR_DIFF }}
             ```
-
+            
             ### Base Branch Diff (Changes against main):
             ```diff
             ${{ env.BASE_DIFF }}
             ```
-
+            
             ### PR Statistics:
             ${{ env.PR_STATS }}
 
@@ -135,21 +139,21 @@ jobs:
             2. 📚 REVIEW API DOCUMENTATION - Ensure APIs are well-documented and user-friendly  
             3. 🧠 CAPTURE LEARNINGS - Document insights back into GEMINI.md file
             4. 🔬 VALIDATE PERFORMANCE - Verify claims match actual behavior
-
+            
             ## INVESTIGATION FRAMEWORK
             Use the comprehensive framework defined in GEMINI.md:
             - Model Assumption Investigation Checklist
             - API Documentation Investigation Template  
             - Performance Validation Framework
             - Reference docs/ folder for WWDC 2025 audio/ML context
-
+            
             ## SELF-LEARNING REQUIREMENT
             **CRITICAL**: If you discover new insights, patterns, or domain knowledge:
             1. ADD findings to GEMINI.md "Recent Learnings" section
             2. Update relevant sections with new knowledge
             3. Document architecture patterns, performance insights, or common issues
             4. These changes will be automatically committed to the PR
-
+            
             ## PROJECT CONTEXT
             - **FluidAudio**: High-performance speaker diarization library
             - **Performance**: 17.7% DER (competitive with state-of-the-art research)
@@ -157,14 +161,14 @@ jobs:
             - **Real-time**: RTF < 1.0x target for practical applications
             - **Pipeline**: Segmentation → Embedding → Clustering (Hungarian algorithm)
             - **Features**: Auto-recovery for model download/compilation failures
-
+            
             ## REVIEW APPROACH
             - **Investigative**: Always question assumptions and validate claims
             - **Evidence-based**: Validate performance claims with benchmarks
             - **Platform-aware**: Check Apple platform best practices
             - **Future-focused**: Compare with WWDC 2025 audio/ML enhancements
             - **Learning-focused**: Document insights for continuous improvement
-
+            
             ## SPECIFIC FOCUS AREAS
             1. **Swift Best Practices**: Code style, error handling, memory management, async/await
             2. **Performance**: Apple Silicon optimization, CoreML efficiency, memory profiling
@@ -174,7 +178,7 @@ jobs:
             6. **Documentation**: API clarity, parameter constraints, error conditions
 
             ## CODE REVIEW INSTRUCTIONS
-
+            
             1. **Analyze the actual code diff above** - Don't just look at file names
             2. **Review each changed line** for correctness and best practices
             3. **Question assumptions** in the code changes
@@ -182,7 +186,7 @@ jobs:
             5. **Check API documentation** for any new public interfaces
             6. **Look for potential issues** like memory leaks, race conditions, etc.
             7. **Document insights** in GEMINI.md for future reviews
-
+            
             **Be thorough, investigative, and provide specific line-by-line feedback where appropriate**
           settings_json: |
             {
@@ -204,7 +208,7 @@ jobs:
           else
             echo "GEMINI_UPDATED=true" >> $GITHUB_OUTPUT
           fi
-
+          
       - name: Commit GEMINI.md updates
         if: steps.check_gemini_updates.outputs.GEMINI_UPDATED == 'true'
         env:
@@ -215,12 +219,12 @@ jobs:
           git add GEMINI.md
           git commit -m "🧠 Update GEMINI.md with review insights
 
-          - Added learnings from PR #${{ steps.get_pr.outputs.PR_NUMBER }} review
+          - Added learnings from PR #${{ steps.get_pr_number.outputs.PR_NUMBER }} review
           - Updated knowledge base with new patterns/insights
           - Enhanced investigation framework based on findings
-
+          
           🤖 Generated by Fluid AI Code Review"
-
+          
           # Push changes to the PR branch
           git push origin HEAD
 
@@ -230,20 +234,20 @@ jobs:
         with:
           github-token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
           script: |
-            const prNumber = '${{ steps.get_pr.outputs.PR_NUMBER }}';
+            const prNumber = '${{ steps.get_pr_number.outputs.PR_NUMBER }}';
             const triggerType = '${{ github.event_name }}';
             const geminiUpdated = '${{ steps.check_gemini_updates.outputs.GEMINI_UPDATED }}';
-
+            
             let comment = '## 🔍 Fluid AI Code Review Complete\n\n';
-
+            
             comment += '**Focus**: Model assumptions, API design, performance validation\n\n';
-
+            
             if (geminiUpdated === 'true') {
               comment += '📚 **Knowledge Updated**: New insights captured for future reviews\n\n';
             }
-
+            
             comment += '*For additional review, comment `/fluid review`*';
-
+            
             github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
@@ -257,11 +261,11 @@ jobs:
         with:
           github-token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
           script: |
-            const prNumber = '${{ steps.get_pr.outputs.PR_NUMBER }}';
-
+            const prNumber = '${{ steps.get_pr_number.outputs.PR_NUMBER }}';
+            
             const comment = '## 📚 Knowledge Base Updated\n\n' +
               'New insights from this review have been captured for future improvements.';
-
+            
             github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
