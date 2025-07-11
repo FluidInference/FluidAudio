@@ -210,40 +210,8 @@ jobs:
             - This knowledge will be committed automatically
 
             ## Output Format
-
-            Provide a single comprehensive review comment with the following structure:
-
-            ### 📋 PR Summary
-            - Brief overview of changes
-            - Impact assessment
-
-            ### 🔍 Code Review
-
-            #### Files Reviewed
-            - List all files examined with brief description of changes
-
-            #### Specific Feedback
-            **CRITICAL**: Always include file names in code-level feedback using this format:
-            ```
-            **In `filename.swift`:**
-            - Specific feedback about code in this file
-            - Include line numbers when relevant
-            ```
-
-            ### 🎯 Key Findings
-            - Major issues or improvements needed
-            - Performance considerations
-            - Best practice recommendations
-
-            ### 📝 Recommendations
-            - Actionable next steps
-            - Optional improvements
-
-            ### 🚀 Performance & Architecture
-            - Performance impact analysis
-            - Architecture pattern evaluation
-
-            Use proper GitHub markdown formatting throughout. Be specific, constructive, and thorough in your analysis.
+            Provide a single comprehensive review comment with sections for different types of feedback.
+            Use markdown formatting for clarity. Include specific line references when relevant. Remember to escape the string properly for commenting in GitHub.
 
       - name: Delete initial review comment
         if: always()
