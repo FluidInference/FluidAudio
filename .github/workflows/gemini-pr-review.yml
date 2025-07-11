@@ -199,6 +199,9 @@ jobs:
           echo "$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+          echo "REVIEW_OUTPUT:"
+          echo $REVIEW_OUTPUT
+
       - name: Check for GEMINI.md updates
         id: check_gemini_updates
         run: |
