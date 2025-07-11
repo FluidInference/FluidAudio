@@ -306,6 +306,8 @@ jobs:
               comment += '---\n\n📚 **Knowledge Updated**: New insights captured for future reviews\n\n';
             }
 
+            comment += '---\n\n';
+            comment += `🔗 **[View Workflow Logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**\n\n`;
             comment += '*For additional review, comment `/fluid review`*';
 
             github.rest.issues.createComment({
