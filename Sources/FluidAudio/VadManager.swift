@@ -151,9 +151,6 @@ public actor VADManager {
     // Audio processing handler
     private var audioProcessor: VADAudioProcessor
 
-    // Timing tracking
-    private var modelLoadTime: TimeInterval = 0
-
     public init(config: VADConfig = .default) {
         self.config = config
         self.audioProcessor = VADAudioProcessor(config: config)
@@ -165,21 +162,17 @@ public actor VADManager {
 
     /// Initialize VAD system with selected model type
     public func initialize() async throws {
-        let initStartTime = Date()
+        let startTime = Date()
         logger.info("Initializing VAD system with CoreML")
 
-        let loadStartTime = Date()
-
         try await loadCoreMLModels()
-
-        self.modelLoadTime = Date().timeIntervalSince(loadStartTime)
 
         // Initialize states
         resetState()
 
-        let totalInitTime = Date().timeIntervalSince(initStartTime)
+        let totalInitTime = Date().timeIntervalSince(startTime)
         logger.info(
-            "VAD system initialized successfully in \(String(format: "%.2f", totalInitTime))s (model loading: \(String(format: "%.2f", self.modelLoadTime))s)"
+            "VAD system initialized successfully in \(String(format: "%.2f", totalInitTime))s"
         )
     }
 
@@ -668,23 +661,71 @@ public actor VADManager {
 
         let output = try rnnModel.prediction(from: input)
 
-        // Extract RNN outputs and update states
+        // Extract RNN outputs using named outputs (preferred) with shape-based fallback
         var rnnFeatures: MLMultiArray?
+        
+        // Try to use specific named outputs first
+        let preferredOutputNames = [
+            "rnn_output": "sequence",
+            "rnn_features": "sequence", 
+            "output": "sequence",
+            "h_out": "h_state",
+            "hidden_out": "h_state",
+            "c_out": "c_state", 
+            "cell_out": "c_state"
+        ]
+        
+        for (outputName, outputType) in preferredOutputNames {
+            if let featureValue = output.featureValue(for: outputName)?.multiArrayValue {
+                if config.debugMode {
+                    let shape = featureValue.shape.map { $0.intValue }
+                    logger.debug("RNN named output '\(outputName)' (\(outputType)) shape: \(shape)")
+                }
+                
+                switch outputType {
+                case "sequence":
+                    rnnFeatures = featureValue
+                case "h_state":
+                    self.hState = featureValue
+                case "c_state":
+                    self.cState = featureValue
+                default:
+                    break
+                }
+            }
+        }
+        
+        // Fallback: use shape-based detection if named outputs not found
+        if rnnFeatures == nil {
+            if config.debugMode {
+                let availableOutputs = output.featureNames.joined(separator: ", ")
+                logger.warning("Named RNN outputs not found. Available outputs: [\(availableOutputs)]. Using shape-based detection.")
+            }
+            
+            for featureName in output.featureNames {
+                if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
+                    let shape = featureValue.shape.map { $0.intValue }
 
-        for featureName in output.featureNames {
-            if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
-                let shape = featureValue.shape.map { $0.intValue }
-
-                if shape.count == 3 {
-                    if shape[1] > 1 {
-                        // This is likely the sequence output
-                        rnnFeatures = featureValue
-                    } else if shape == [1, 1, 128] {
-                        // This is a state output - update our states
-                        if featureName.contains("h") || self.hState == nil {
-                            self.hState = featureValue
-                        } else if featureName.contains("c") || self.cState == nil {
-                            self.cState = featureValue
+                    if shape.count == 3 {
+                        if shape[1] > 1 {
+                            // This is likely the sequence output
+                            rnnFeatures = featureValue
+                            if config.debugMode {
+                                logger.debug("RNN shape-based sequence output '\(featureName)' shape: \(shape)")
+                            }
+                        } else if shape == [1, 1, 128] {
+                            // This is a state output - update our states
+                            if featureName.contains("h") && self.hState == nil {
+                                self.hState = featureValue
+                                if config.debugMode {
+                                    logger.debug("RNN shape-based h_state '\(featureName)' shape: \(shape)")
+                                }
+                            } else if featureName.contains("c") && self.cState == nil {
+                                self.cState = featureValue
+                                if config.debugMode {
+                                    logger.debug("RNN shape-based c_state '\(featureName)' shape: \(shape)")
+                                }
+                            }
                         }
                     }
                 }
