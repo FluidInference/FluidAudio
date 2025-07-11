@@ -136,7 +136,7 @@ jobs:
         echo "=================================="
 
         set +e  # Don't exit on error
-        # Using optimal threshold 0.45 with enhanced SNR filtering and spectral features
+        # Using optimal threshold 0.445 with enhanced SNR filtering and spectral features
         # Enhanced VAD achieves F1-Score 78.3% (up from original 64.4%) with aggressive noise filtering
         swift run fluidaudio vad-benchmark \
           --dataset mini100 \
