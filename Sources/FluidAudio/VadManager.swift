@@ -142,7 +142,6 @@ public actor VADManager {
     private var stftModel: MLModel?
     private var encoderModel: MLModel?
     private var rnnModel: MLModel?
-    private var classifierModel: MLModel?
 
     // RNN state management (isolated to actor)
     private var hState: MLMultiArray?
@@ -161,7 +160,7 @@ public actor VADManager {
     }
 
     public var isAvailable: Bool {
-        return stftModel != nil && encoderModel != nil && rnnModel != nil // Classifier is optional - using fallback
+        return stftModel != nil && encoderModel != nil && rnnModel != nil
     }
 
     /// Initialize VAD system with selected model type
@@ -189,14 +188,9 @@ public actor VADManager {
         let modelsDirectory = getModelsDirectory()
         let compiledModelNames = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
 
-        // Check if we need to download any compiled models
-        var missingModels: [String] = []
-        for modelName in compiledModelNames {
-            let modelPath = modelsDirectory.appendingPathComponent(modelName)
-            if !FileManager.default.fileExists(atPath: modelPath.path) {
-                missingModels.append(modelName)
-            }
-        }
+        // Check if we need to download any compiled models using utility class
+        let modelChecker = ModelFileChecker()
+        let missingModels = try modelChecker.checkModelFiles(in: modelsDirectory, modelNames: compiledModelNames)
 
         // Auto-download missing models
         if !missingModels.isEmpty {
@@ -243,8 +237,8 @@ public actor VADManager {
                 // Try GPU first, then CPU fallback
                 for useGPU in [true, false] {
                     let config = MLModelConfiguration()
-                    config.computeUnits = useGPU ? .cpuAndNeuralEngine : .cpuOnly
-                    let computeType = useGPU ? "GPU+Neural Engine" : "CPU-only"
+                    config.computeUnits = useGPU ? .all : .cpuOnly
+                    let computeType = useGPU ? "All (CPU+GPU+Neural Engine)" : "CPU-only"
 
                     do {
                         logger.info("🔄 Loading with \(computeType)...")
@@ -265,7 +259,6 @@ public actor VADManager {
                         self.stftModel = stftModel
                         self.encoderModel = encoderModel
                         self.rnnModel = rnnModel
-                        self.classifierModel = nil // Always use fallback
 
                         if attempt > 0 {
                             logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
@@ -408,14 +401,22 @@ public actor VADManager {
     }
 
 
-
-
     /// Reset RNN state and feature buffer
     public func resetState() {
         do {
-            // Initialize CoreML RNN states with shape (1, 1, 128)
+            // Initialize CoreML RNN states with shape (1, 1, 128) - explicitly set to zero
             self.hState = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
             self.cState = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
+
+            // Explicitly initialize to zero (MLMultiArray may contain random values)
+            if let hState = self.hState, let cState = self.cState {
+                for i in 0..<hState.count {
+                    hState[i] = 0.0
+                }
+                for i in 0..<cState.count {
+                    cState[i] = 0.0
+                }
+            }
 
             // Clear feature buffer
             self.featureBuffer.removeAll()
@@ -480,8 +481,15 @@ public actor VADManager {
         if processedChunk.count != config.chunkSize {
             // Pad or truncate to expected size
             if processedChunk.count < config.chunkSize {
-                processedChunk.append(contentsOf: Array(repeating: 0.0, count: config.chunkSize - processedChunk.count))
+                let paddingSize = config.chunkSize - processedChunk.count
+                if config.debugMode {
+                    logger.debug("Padding audio chunk with \(paddingSize) zeros (original: \(processedChunk.count) samples)")
+                }
+                processedChunk.append(contentsOf: Array(repeating: 0.0, count: paddingSize))
             } else {
+                if config.debugMode {
+                    logger.debug("Truncating audio chunk from \(processedChunk.count) to \(self.config.chunkSize) samples")
+                }
                 processedChunk = Array(processedChunk.prefix(config.chunkSize))
             }
         }
@@ -498,21 +506,19 @@ public actor VADManager {
         // Step 4: RNN processing
         let rnnFeatures = try processRNN(encoderFeatures)
 
-        // Step 5: Classification using the classifier model or fallback
-        return try processClassifier(rnnFeatures)
+        // Step 5: Calculate VAD probability from RNN features
+        return audioProcessor.calculateVADProbability(from: rnnFeatures)
     }
 
-
-
-
-
     /// Process audio through STFT model
+    /// Input: audio_input - shape (1, 512) - raw audio samples
+    /// Output: stft_features - shape (1, 201) - STFT features
     private func processSTFT(_ audioChunk: [Float]) throws -> MLMultiArray {
         guard let stftModel = self.stftModel else {
             throw VADError.notInitialized
         }
 
-        // Create input array with shape (1, chunkSize)
+        // Create input array with shape (1, chunkSize=512)
         let audioArray = try MLMultiArray(shape: [1, NSNumber(value: config.chunkSize)], dataType: .float32)
 
         for i in 0..<audioChunk.count {
@@ -522,10 +528,28 @@ public actor VADManager {
         let input = try MLDictionaryFeatureProvider(dictionary: ["audio_input": audioArray])
         let output = try stftModel.prediction(from: input)
 
-        // Get the first (and likely only) output
+        // Try to use specific named output first
+        let preferredOutputNames = ["stft_features", "features", "output"]
+
+        for outputName in preferredOutputNames {
+            if let stftOutput = output.featureValue(for: outputName)?.multiArrayValue {
+                if config.debugMode {
+                    let shape = stftOutput.shape.map { $0.intValue }
+                    logger.debug("STFT output '\(outputName)' shape: \(shape)")
+                }
+                return stftOutput
+            }
+        }
+
+        // Fallback: use first available output
         guard let outputName = output.featureNames.first,
               let stftOutput = output.featureValue(for: outputName)?.multiArrayValue else {
             throw VADError.modelProcessingFailed("No STFT output found")
+        }
+
+        if config.debugMode {
+            let shape = stftOutput.shape.map { $0.intValue }
+            logger.debug("STFT fallback output '\(outputName)' shape: \(shape)")
         }
 
         return stftOutput
@@ -555,6 +579,8 @@ public actor VADManager {
     }
 
     /// Process features through encoder
+    /// Input: stft_features - shape (1, 201, 4) - concatenated temporal STFT features
+    /// Output: encoder_features - shape (1, 128) - encoded features
     private func processEncoder() throws -> MLMultiArray {
         guard let encoderModel = self.encoderModel else {
             throw VADError.notInitialized
@@ -567,25 +593,68 @@ public actor VADManager {
         // Concatenate all 4 frames in the buffer to create shape (1, 201, 4)
         let concatenatedFeatures = try concatenateTemporalFeatures()
 
+        if config.debugMode {
+            let shape = concatenatedFeatures.shape.map { $0.intValue }
+            logger.debug("Encoder input shape: \(shape)")
+        }
+
         let input = try MLDictionaryFeatureProvider(dictionary: ["stft_features": concatenatedFeatures])
         let output = try encoderModel.prediction(from: input)
+
+        // Try to use specific named output first (more robust than shape-based detection)
+        let preferredOutputNames = ["encoder_output", "encoded_features", "output"]
+
+        for outputName in preferredOutputNames {
+            if let encoderOutput = output.featureValue(for: outputName)?.multiArrayValue {
+                if config.debugMode {
+                    let shape = encoderOutput.shape.map { $0.intValue }
+                    logger.debug("Encoder output '\(outputName)' shape: \(shape)")
+                }
+                return encoderOutput
+            }
+        }
+
+        // Fallback: use first available output with warning
+        if config.debugMode {
+            let availableOutputs = output.featureNames.joined(separator: ", ")
+            logger.warning("None of preferred output names found. Available outputs: [\(availableOutputs)]. Using first available.")
+        }
 
         guard let outputName = output.featureNames.first,
               let encoderOutput = output.featureValue(for: outputName)?.multiArrayValue else {
             throw VADError.modelProcessingFailed("No encoder output found")
         }
 
+        if config.debugMode {
+            let shape = encoderOutput.shape.map { $0.intValue }
+            logger.debug("Encoder fallback output '\(outputName)' shape: \(shape)")
+        }
+
         return encoderOutput
     }
 
     /// Process features through RNN decoder
+    /// Inputs:
+    ///   - encoder_features: shape (1, 4, 128) - encoded features
+    ///   - h_in: shape (1, 1, 128) - LSTM hidden state
+    ///   - c_in: shape (1, 1, 128) - LSTM cell state
+    /// Outputs:
+    ///   - rnn_features: shape (1, 4, 128) - RNN output features
+    ///   - h_out: shape (1, 1, 128) - updated LSTM hidden state
+    ///   - c_out: shape (1, 1, 128) - updated LSTM cell state
     private func processRNN(_ encoderFeatures: MLMultiArray) throws -> MLMultiArray {
         guard let rnnModel = self.rnnModel else {
             throw VADError.notInitialized
         }
 
+        // Initialize states if they don't exist (more robust than throwing)
+        if self.hState == nil || self.cState == nil {
+            logger.warning("RNN states not initialized, initializing to zero")
+            resetState()
+        }
+
         guard let hState = self.hState, let cState = self.cState else {
-            throw VADError.modelProcessingFailed("RNN states not initialized")
+            throw VADError.modelProcessingFailed("Failed to initialize RNN states")
         }
 
         // Prepare encoder features for RNN (reshape if needed)
@@ -638,103 +707,38 @@ public actor VADManager {
             return encoderFeatures
         }
 
-        // Create target shape (1, 4, 128)
-        let targetArray = try MLMultiArray(shape: [1, 4, 128], dataType: .float32)
-
-        // Copy data with appropriate reshaping/padding
-        let _ = encoderFeatures.strides.map { $0.intValue }
-        let _ = targetArray.strides.map { $0.intValue }
-
-        let sourceElements = min(encoderFeatures.count, targetArray.count)
-
-        for i in 0..<sourceElements {
-            targetArray[i] = encoderFeatures[i]
-        }
-
-        return targetArray
-    }
-
-    /// Process features through classifier model
-    private func processClassifier(_ rnnFeatures: MLMultiArray) throws -> Float {
-        guard let classifierModel = self.classifierModel else {
-            // Use fallback calculation when classifier model is not available
-            if config.debugMode {
-                logger.debug("Using fallback VAD calculation (classifier model not loaded)")
-            }
-            return audioProcessor.calculateVADProbability(from: rnnFeatures)
-        }
-
-        // Ensure correct shape for classifier (1, 4, 128)
-        let processedFeatures = try prepareRNNFeaturesForClassifier(rnnFeatures)
-
-        let input = try MLDictionaryFeatureProvider(dictionary: ["rnn_features": processedFeatures])
-        let output = try classifierModel.prediction(from: input)
-
-        guard let outputName = output.featureNames.first,
-              let classifierOutput = output.featureValue(for: outputName)?.multiArrayValue else {
-            throw VADError.modelProcessingFailed("No classifier output found")
-        }
-
-        // Get raw probability and apply calibration
-        let rawProbability = classifierOutput[0].floatValue
-
-        // Calibrate classifier output (inline calibration)
-        let scale: Float = 3.0
-        let bias: Float = -0.25
-        let sharpness: Float = 4.0
-        let scaled = (rawProbability + bias) * scale
-        let calibratedProbability = max(0.0, min(1.0, 1.0 / (1.0 + exp(-sharpness * (scaled - 0.5)))))
-
+        // Log unexpected shape for debugging
         if config.debugMode {
-            logger.debug("Classifier: raw=\(String(format: "%.4f", rawProbability)), calibrated=\(String(format: "%.4f", calibratedProbability))")
-        }
-
-        return calibratedProbability
-    }
-
-    /// Prepare RNN features for classifier input
-    private func prepareRNNFeaturesForClassifier(_ rnnFeatures: MLMultiArray) throws -> MLMultiArray {
-        let shape = rnnFeatures.shape.map { $0.intValue }
-
-        // If already in correct shape (1, 4, 128), return as is
-        if shape.count == 3 && shape[0] == 1 && shape[1] == 4 && shape[2] == 128 {
-            return rnnFeatures
+            logger.debug("Encoder features have unexpected shape: \(shape), reshaping to (1, 4, 128)")
         }
 
         // Create target shape (1, 4, 128)
         let targetArray = try MLMultiArray(shape: [1, 4, 128], dataType: .float32)
 
-        // Handle different input shapes
-        if shape.count == 3 {
-            let batchSize = min(shape[0], 1)
-            let timeSteps = min(shape[1], 4)
-            let featureSize = min(shape[2], 128)
-
-            for b in 0..<batchSize {
-                for t in 0..<timeSteps {
-                    for f in 0..<featureSize {
-                        let sourceIndex = b * (shape[1] * shape[2]) + t * shape[2] + f
-                        let targetIndex = b * (4 * 128) + t * 128 + f
-
-                        if sourceIndex < rnnFeatures.count && targetIndex < targetArray.count {
-                            targetArray[targetIndex] = rnnFeatures[sourceIndex]
-                        }
+        // Handle different input shapes - this suggests a model architecture mismatch
+        if shape.count == 2 && shape[0] == 1 {
+            // Encoder output is (1, N) - expand to (1, 4, 128) by replicating
+            let featureSize = min(shape[1], 128)
+            for timeStep in 0..<4 {
+                for feature in 0..<featureSize {
+                    let sourceIndex = feature
+                    let targetIndex = timeStep * 128 + feature
+                    if sourceIndex < encoderFeatures.count && targetIndex < targetArray.count {
+                        targetArray[targetIndex] = encoderFeatures[sourceIndex]
                     }
                 }
             }
         } else {
-            // Fallback: copy as much as possible
-            let sourceElements = min(rnnFeatures.count, targetArray.count)
+            // Fallback: linear copy (may not be semantically correct)
+            logger.warning("Unexpected encoder shape \(shape), using linear copy fallback")
+            let sourceElements = min(encoderFeatures.count, targetArray.count)
             for i in 0..<sourceElements {
-                targetArray[i] = rnnFeatures[i]
+                targetArray[i] = encoderFeatures[i]
             }
         }
 
         return targetArray
     }
-
-
-
     /// Concatenate temporal features from buffer to create shape (1, 201, 4)
     private func concatenateTemporalFeatures() throws -> MLMultiArray {
         guard featureBuffer.count == 4 else {
@@ -809,7 +813,6 @@ public actor VADManager {
             let result = try await processChunk(chunk)
             results.append(result)
         }
-
         return results
     }
 
@@ -818,15 +821,13 @@ public actor VADManager {
         stftModel = nil
         encoderModel = nil
         rnnModel = nil
-        classifierModel = nil
         hState = nil
         cState = nil
         featureBuffer.removeAll()
-        
+
         // Reset audio processor
         audioProcessor.reset()
 
         logger.info("VAD resources cleaned up")
     }
-
 }

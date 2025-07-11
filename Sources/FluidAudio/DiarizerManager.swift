@@ -291,7 +291,7 @@ public final class DiarizerManager: @unchecked Sendable {
         var attempt = 0
 
         let config: MLModelConfiguration = MLModelConfiguration()
-        config.computeUnits = .cpuAndNeuralEngine
+        config.computeUnits = .all
 
         while attempt <= maxRetries {
             do {

@@ -3,6 +3,41 @@ import Accelerate
 import OSLog
 import CoreML
 
+/// Utility functions for model file management
+internal class ModelFileChecker {
+    private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "ModelChecker")
+    
+    /// Check for missing models and handle corrupted downloads
+    func checkModelFiles(in directory: URL, modelNames: [String]) throws -> [String] {
+        var missingModels: [String] = []
+        
+        for modelName in modelNames {
+            let modelPath = directory.appendingPathComponent(modelName)
+            
+            if !FileManager.default.fileExists(atPath: modelPath.path) {
+                missingModels.append(modelName)
+            } else {
+                // Check for corrupted or incomplete downloads
+                do {
+                    let attributes = try FileManager.default.attributesOfItem(atPath: modelPath.path)
+                    if let fileSize = attributes[.size] as? Int64, fileSize < 1000 {
+                        // Model folder exists but seems corrupted (too small)
+                        logger.warning("Model \(modelName) appears corrupted (size: \(fileSize) bytes)")
+                        missingModels.append(modelName)
+                        // Remove corrupted model
+                        try? FileManager.default.removeItem(at: modelPath)
+                    }
+                } catch {
+                    logger.warning("Could not verify model \(modelName): \(error)")
+                    missingModels.append(modelName)
+                }
+            }
+        }
+        
+        return missingModels
+    }
+}
+
 /// Comprehensive audio processing for VAD including energy detection, spectral analysis, SNR filtering, and temporal smoothing
 internal class VADAudioProcessor {
 
