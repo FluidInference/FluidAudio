@@ -1,6 +1,6 @@
-# GEMINI.md - FluidAudioSwift Project Instructions
+# GEMINI.md - FluidAudio Project Instructions
 
-This file provides specific guidance for Gemini AI when reviewing code in the FluidAudioSwift repository.
+This file provides specific guidance for Fluid AI when reviewing code in the FluidAudio repository.
 
 ## 🎯 PRIMARY MISSION: DEEP PR REVIEW
 
@@ -40,7 +40,7 @@ The `docs/` folder contains WWDC 2025 content relevant to audio processing:
 
 ## Project Overview
 
-FluidAudioSwift is a high-performance speaker diarization library for Apple platforms (macOS 13.0+, iOS 16.0+). The project focuses on identifying "who spoke when" in audio recordings using state-of-the-art machine learning models optimized for Apple Silicon.
+FluidAudio is a high-performance speaker diarization library for Apple platforms (macOS 13.0+, iOS 16.0+). The project focuses on identifying "who spoke when" in audio recordings using state-of-the-art machine learning models optimized for Apple Silicon.
 
 ### Key Performance Metrics
 - **Current Benchmark**: 17.7% DER (Diarization Error Rate) on AMI corpus
@@ -249,10 +249,10 @@ For **every** performance-related change:
 ## Project Structure
 
 ```
-FluidAudioSwift/
+FluidAudio/
 ├── Sources/
 │   ├── FluidAudio/
-│   │   ├── FluidAudioSwift.swift      # Main library interface
+│   │   ├── FluidAudio.swift      # Main library interface
 │   │   ├── DiarizerManager.swift      # Core diarization logic
 │   │   └── HungarianAlgorithm.swift   # Optimal speaker assignment
 │   └── DiarizationCLI/
