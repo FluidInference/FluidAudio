@@ -28,24 +28,15 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Generate GitHub App Token
-        id: generate_token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
-
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          token: ${{ steps.generate_token.outputs.token }}
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Get PR details
         id: get_pr
         env:
-          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             PR_NUMBER=${{ github.event.inputs.pr_number }}
@@ -70,7 +61,7 @@ jobs:
       - name: Run Gemini PR Review
         uses: google-gemini/gemini-cli-action@main
         env:
-          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.get_pr.outputs.pr_number }}
           PR_DATA: ${{ steps.get_pr.outputs.pr_data }}
           CHANGED_FILES: ${{ steps.get_pr.outputs.changed_files }}
