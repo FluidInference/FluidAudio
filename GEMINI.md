@@ -1,6 +1,6 @@
 # GEMINI.md - FluidAudioSwift Project Instructions
 
-This file provides specific guidance for Gemini AI when reviewing code in the FluidAudioSwift repository.
+This file provides specific guidance for Fluid AI when reviewing code in the FluidAudioSwift repository.
 
 ## 🎯 PRIMARY MISSION: DEEP PR REVIEW
 

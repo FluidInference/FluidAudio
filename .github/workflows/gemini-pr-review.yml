@@ -1,4 +1,4 @@
-name: Gemini PR Review
+name: Fluid AI Code Review
 
 on:
   issue_comment:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to review'
+        description: "PR number to review"
         required: true
         type: number
 
@@ -16,7 +16,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && 
        github.event.issue.pull_request && 
-       contains(github.event.comment.body, '/gemini review') &&
+       contains(github.event.comment.body, '/fluid review') &&
        (github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
         github.event.comment.author_association == 'COLLABORATOR'))
@@ -57,15 +57,15 @@ jobs:
           elif [ "${{ github.event_name }}" = "issue_comment" ]; then
             PR_NUMBER=${{ github.event.issue.number }}
           fi
-          
+
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
-          
+
           # Get PR details using GitHub CLI
           PR_DETAILS=$(gh pr view $PR_NUMBER --json title,body,headRefName,baseRefName,commits,files,additions,deletions,changedFiles)
           echo "PR_DETAILS<<EOF" >> $GITHUB_OUTPUT
           echo "$PR_DETAILS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          
+
           # Get PR diff (limited to avoid token limits)
           PR_DIFF=$(gh pr diff $PR_NUMBER --name-only)
           echo "PR_DIFF<<EOF" >> $GITHUB_OUTPUT
@@ -88,32 +88,32 @@ jobs:
         with:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           prompt: |
-            You are a senior ML engineer and Swift expert conducting a deep PR review for FluidAudioSwift.
-            
+            You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudioSwift.
+
             ## PR CONTEXT
             PR Number: ${{ env.PR_NUMBER }}
             Files Changed: ${{ env.PR_DIFF }}
-            
+
             ## CRITICAL RESPONSIBILITIES
             1. 🔍 INVESTIGATE MODEL ASSUMPTIONS - Question every ML model assumption and validate behavior
             2. 📚 REVIEW API DOCUMENTATION - Ensure APIs are well-documented and user-friendly  
             3. 🧠 CAPTURE LEARNINGS - Document insights back into GEMINI.md file
             4. 🔬 VALIDATE PERFORMANCE - Verify claims match actual behavior
-            
+
             ## INVESTIGATION FRAMEWORK
             Use the comprehensive framework defined in GEMINI.md:
             - Model Assumption Investigation Checklist
             - API Documentation Investigation Template  
             - Performance Validation Framework
             - Reference docs/ folder for WWDC 2025 audio/ML context
-            
+
             ## SELF-LEARNING REQUIREMENT
             **CRITICAL**: If you discover new insights, patterns, or domain knowledge:
             1. ADD findings to GEMINI.md "Recent Learnings" section
             2. Update relevant sections with new knowledge
             3. Document architecture patterns, performance insights, or common issues
             4. These changes will be automatically committed to the PR
-            
+
             ## PROJECT CONTEXT
             - **FluidAudioSwift**: High-performance speaker diarization library
             - **Performance**: 17.7% DER (competitive with state-of-the-art research)
@@ -121,14 +121,14 @@ jobs:
             - **Real-time**: RTF < 1.0x target for practical applications
             - **Pipeline**: Segmentation → Embedding → Clustering (Hungarian algorithm)
             - **Features**: Auto-recovery for model download/compilation failures
-            
+
             ## REVIEW APPROACH
             - **Investigative**: Always question assumptions and validate claims
             - **Evidence-based**: Validate performance claims with benchmarks
             - **Platform-aware**: Check Apple platform best practices
             - **Future-focused**: Compare with WWDC 2025 audio/ML enhancements
             - **Learning-focused**: Document insights for continuous improvement
-            
+
             ## SPECIFIC FOCUS AREAS
             1. **Swift Best Practices**: Code style, error handling, memory management, async/await
             2. **Performance**: Apple Silicon optimization, CoreML efficiency, memory profiling
@@ -136,12 +136,13 @@ jobs:
             4. **Apple Platform**: Foundation, CoreML, AVFoundation, OSLog usage
             5. **Testing**: Unit/integration coverage, benchmark validation, edge cases
             6. **Documentation**: API clarity, parameter constraints, error conditions
-            
+
             **Be thorough, investigative, and document your learnings in GEMINI.md**
           settings_json: |
             {
               "telemetry": {"enabled": false},
-              "sandbox": false
+              "sandbox": false,
+              "model": "gemini-2.5-pro"
             }
           version: "latest"
 
@@ -153,7 +154,7 @@ jobs:
           else
             echo "GEMINI_UPDATED=true" >> $GITHUB_OUTPUT
           fi
-          
+
       - name: Commit GEMINI.md updates
         if: steps.check_gemini_updates.outputs.GEMINI_UPDATED == 'true'
         env:
@@ -167,9 +168,9 @@ jobs:
           - Added learnings from PR #${{ steps.get_pr.outputs.PR_NUMBER }} review
           - Updated knowledge base with new patterns/insights
           - Enhanced investigation framework based on findings
-          
-          🤖 Generated by Gemini AI Code Review"
-          
+
+          🤖 Generated by Fluid AI Code Review"
+
           # Push changes to the PR branch
           git push origin HEAD
 
@@ -182,27 +183,17 @@ jobs:
             const prNumber = '${{ steps.get_pr.outputs.PR_NUMBER }}';
             const triggerType = '${{ github.event_name }}';
             const geminiUpdated = '${{ steps.check_gemini_updates.outputs.GEMINI_UPDATED }}';
-            
-            let comment = '## 🤖 Gemini AI Code Review\n\n';
-            
-            if (triggerType === 'workflow_dispatch') {
-              comment += '✅ **Manual Review**: Review triggered via workflow dispatch.\n\n';
-            } else if (triggerType === 'issue_comment') {
-              comment += '✅ **Comment-Triggered Review**: Review triggered by `/gemini review` comment.\n\n';
-            }
-            
-            comment += '🎯 **Focus Areas**: Model assumptions, API documentation, performance validation, Apple platform integration\n\n';
-            comment += '📊 **Project Context**: FluidAudioSwift - Speaker diarization library (Current: 17.7% DER)\n\n';
-            comment += '🔍 **Investigation**: Deep analysis using GEMINI.md framework\n\n';
-            
+
+            let comment = '## 🔍 Fluid AI Code Review Complete\n\n';
+
+            comment += '**Focus**: Model assumptions, API design, performance validation\n\n';
+
             if (geminiUpdated === 'true') {
-              comment += '🧠 **Learning Captured**: New insights documented in GEMINI.md\n\n';
+              comment += '📚 **Knowledge Updated**: New insights captured for future reviews\n\n';
             }
-            
-            comment += '---\n\n';
-            comment += '*The detailed review has been provided above by Gemini AI using the deep investigation framework.*\n';
-            comment += '*For additional review, comment `/gemini review`.*';
-            
+
+            comment += '*For additional review, comment `/fluid review`*';
+
             github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
@@ -217,18 +208,10 @@ jobs:
           github-token: ${{ steps.set_token.outputs.GITHUB_TOKEN }}
           script: |
             const prNumber = '${{ steps.get_pr.outputs.PR_NUMBER }}';
-            
-            const comment = '## 🧠 GEMINI.md Knowledge Base Updated\n\n' +
-              '✅ **Learning Captured**: New insights from this PR review have been documented in GEMINI.md\n\n' +
-              '📚 **Knowledge Evolution**: The AI review framework has been enhanced with:\n' +
-              '- New patterns and anti-patterns discovered\n' +
-              '- Performance insights and optimization techniques\n' +
-              '- API design improvements and best practices\n' +
-              '- Testing strategies and common issues\n\n' +
-              '🔄 **Continuous Improvement**: These learnings will improve future PR reviews\n\n' +
-              '---\n\n' +
-              '*The GEMINI.md file serves as a living knowledge base that evolves with each review.*';
-            
+
+            const comment = '## 📚 Knowledge Base Updated\n\n' +
+              'New insights from this review have been captured for future improvements.';
+
             github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
