@@ -186,9 +186,13 @@ jobs:
             **Be thorough, investigative, and provide specific line-by-line feedback where appropriate**
           settings_json: |
             {
-              "telemetry": {"enabled": false},
               "sandbox": false,
-              "model": "gemini-2.5-pro"
+              "model": "gemini-2.5-pro",
+              "mcpServers": {
+                "deepwiki": {
+                  "url": "https://mcp.deepwiki.com/mcp"
+                }
+              }
             }
           version: "latest"
 
