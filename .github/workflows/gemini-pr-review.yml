@@ -1,4 +1,4 @@
-name: Fluid AI Code Review
+name: Fluid PR Review
 
 on:
   issue_comment:
@@ -66,10 +66,28 @@ jobs:
           echo "$PR_DETAILS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-          # Get PR diff (limited to avoid token limits)
-          PR_DIFF=$(gh pr diff $PR_NUMBER --name-only)
+          # Get PR statistics
+          PR_STATS=$(gh pr view $PR_NUMBER --json additions,deletions,changedFiles)
+          echo "PR_STATS<<EOF" >> $GITHUB_OUTPUT
+          echo "$PR_STATS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Get actual code diff (truncated to avoid token limits)
+          PR_DIFF=$(gh pr diff $PR_NUMBER | head -n 1000)
           echo "PR_DIFF<<EOF" >> $GITHUB_OUTPUT
           echo "$PR_DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Get diff against base branch
+          BASE_DIFF=$(gh pr diff $PR_NUMBER --base main | head -n 1000)
+          echo "BASE_DIFF<<EOF" >> $GITHUB_OUTPUT
+          echo "$BASE_DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Get list of changed files for reference
+          CHANGED_FILES=$(gh pr diff $PR_NUMBER --name-only)
+          echo "CHANGED_FILES<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Checkout PR code
@@ -84,15 +102,33 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.get_pr.outputs.PR_NUMBER }}
           PR_DETAILS: ${{ steps.get_pr.outputs.PR_DETAILS }}
+          PR_STATS: ${{ steps.get_pr.outputs.PR_STATS }}
           PR_DIFF: ${{ steps.get_pr.outputs.PR_DIFF }}
+          BASE_DIFF: ${{ steps.get_pr.outputs.BASE_DIFF }}
+          CHANGED_FILES: ${{ steps.get_pr.outputs.CHANGED_FILES }}
         with:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           prompt: |
-            You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudioSwift.
+            You are Fluid AI, a senior ML engineer and Swift expert conducting a deep PR review for FluidAudio.
 
             ## PR CONTEXT
             PR Number: ${{ env.PR_NUMBER }}
-            Files Changed: ${{ env.PR_DIFF }}
+            Files Changed: ${{ env.CHANGED_FILES }}
+
+            ## CODE CHANGES TO REVIEW
+
+            ### PR Diff (Changes in this PR):
+            ```diff
+            ${{ env.PR_DIFF }}
+            ```
+
+            ### Base Branch Diff (Changes against main):
+            ```diff
+            ${{ env.BASE_DIFF }}
+            ```
+
+            ### PR Statistics:
+            ${{ env.PR_STATS }}
 
             ## CRITICAL RESPONSIBILITIES
             1. 🔍 INVESTIGATE MODEL ASSUMPTIONS - Question every ML model assumption and validate behavior
@@ -115,7 +151,7 @@ jobs:
             4. These changes will be automatically committed to the PR
 
             ## PROJECT CONTEXT
-            - **FluidAudioSwift**: High-performance speaker diarization library
+            - **FluidAudio**: High-performance speaker diarization library
             - **Performance**: 17.7% DER (competitive with state-of-the-art research)
             - **Platform**: macOS 13.0+, iOS 16.0+, optimized for Apple Silicon
             - **Real-time**: RTF < 1.0x target for practical applications
@@ -137,7 +173,17 @@ jobs:
             5. **Testing**: Unit/integration coverage, benchmark validation, edge cases
             6. **Documentation**: API clarity, parameter constraints, error conditions
 
-            **Be thorough, investigative, and document your learnings in GEMINI.md**
+            ## CODE REVIEW INSTRUCTIONS
+
+            1. **Analyze the actual code diff above** - Don't just look at file names
+            2. **Review each changed line** for correctness and best practices
+            3. **Question assumptions** in the code changes
+            4. **Validate performance claims** if any benchmarks are mentioned
+            5. **Check API documentation** for any new public interfaces
+            6. **Look for potential issues** like memory leaks, race conditions, etc.
+            7. **Document insights** in GEMINI.md for future reviews
+
+            **Be thorough, investigative, and provide specific line-by-line feedback where appropriate**
           settings_json: |
             {
               "telemetry": {"enabled": false},
