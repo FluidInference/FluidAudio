@@ -288,88 +288,50 @@ public final class DiarizerManager: @unchecked Sendable {
     private func loadModelsWithAutoRecovery(
         segmentationURL: URL, embeddingURL: URL, maxRetries: Int = 2
     ) async throws {
-        var attempt = 0
-
         let config: MLModelConfiguration = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
 
-        while attempt <= maxRetries {
-            do {
-                // Try to load both models
-                logger.info(
-                    "Attempting to load CoreML models (attempt \(attempt + 1)/\(maxRetries + 1))")
+        let modelPaths = [
+            (url: segmentationURL, name: "segmentation"),
+            (url: embeddingURL, name: "embedding")
+        ]
 
-                let segmentationModel = try MLModel(
-                    contentsOf: segmentationURL,
-                    configuration: config
+        let models = try await DownloadUtils.loadModelsWithAutoRecovery(
+            modelPaths: modelPaths,
+            config: config,
+            maxRetries: maxRetries,
+            recoveryAction: {
+                try await self.performModelRecovery(
+                    segmentationURL: segmentationURL, 
+                    embeddingURL: embeddingURL
                 )
-                let embeddingModel = try MLModel(
-                    contentsOf: embeddingURL,
-                    configuration: config
-                )
-
-                // If we get here, both models loaded successfully
-                self.segmentationModel = segmentationModel
-                self.embeddingModel = embeddingModel
-
-                if attempt > 0 {
-                    logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
-                }
-                return
-
-            } catch {
-                logger.warning(
-                    "Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
-
-                // If this is our last attempt, throw the error
-                if attempt >= maxRetries {
-                    logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
-                    throw DiarizerError.modelCompilationFailed
-                }
-
-                // Auto-recovery: Delete corrupted models and re-download
-                logger.info(
-                    "Initiating auto-recovery: removing corrupted models and re-downloading...")
-
-                try await performModelRecovery(
-                    segmentationURL: segmentationURL, embeddingURL: embeddingURL)
-
-                attempt += 1
             }
-        }
+        )
+
+        self.segmentationModel = models[0]
+        self.embeddingModel = models[1]
     }
 
     /// Perform model recovery by deleting and re-downloading corrupted models
     private func performModelRecovery(segmentationURL: URL, embeddingURL: URL) async throws {
-        // Remove potentially corrupted model files
-        if FileManager.default.fileExists(atPath: segmentationURL.path) {
-            logger.info("Removing corrupted segmentation model at \(segmentationURL.path)")
-            try FileManager.default.removeItem(at: segmentationURL)
-        }
+        try await DownloadUtils.performModelRecovery(
+            modelPaths: [segmentationURL, embeddingURL],
+            downloadAction: {
+                // Re-download segmentation model
+                try await DownloadUtils.downloadMLModelBundle(
+                    repoPath: "bweng/speaker-diarization-coreml",
+                    modelName: "pyannote_segmentation.mlmodelc",
+                    outputPath: segmentationURL
+                )
 
-        if FileManager.default.fileExists(atPath: embeddingURL.path) {
-            logger.info("Removing corrupted embedding model at \(embeddingURL.path)")
-            try FileManager.default.removeItem(at: embeddingURL)
-        }
-
-        // Re-download the models from Hugging Face
-        logger.info("Re-downloading models from Hugging Face...")
-
-        // Re-download segmentation model
-        try await downloadMLModelCBundle(
-            repoPath: "bweng/speaker-diarization-coreml",
-            modelName: "pyannote_segmentation.mlmodelc",
-            outputPath: segmentationURL
+                // Re-download embedding model
+                try await DownloadUtils.downloadMLModelBundle(
+                    repoPath: "bweng/speaker-diarization-coreml",
+                    modelName: "wespeaker.mlmodelc",
+                    outputPath: embeddingURL
+                )
+            }
         )
-
-        // Re-download embedding model
-        try await downloadMLModelCBundle(
-            repoPath: "bweng/speaker-diarization-coreml",
-            modelName: "wespeaker.mlmodelc",
-            outputPath: embeddingURL
-        )
-
-        logger.info("Model recovery completed - models re-downloaded")
     }
 
     private func cleanupBrokenModels() async throws {
@@ -379,14 +341,14 @@ public final class DiarizerManager: @unchecked Sendable {
         let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc")
 
         if FileManager.default.fileExists(atPath: segmentationModelPath.path)
-            && !isModelCompiled(at: segmentationModelPath)
+            && !DownloadUtils.isModelCompiled(at: segmentationModelPath)
         {
             logger.info("Removing broken segmentation model")
             try FileManager.default.removeItem(at: segmentationModelPath)
         }
 
         if FileManager.default.fileExists(atPath: embeddingModelPath.path)
-            && !isModelCompiled(at: embeddingModelPath)
+            && !DownloadUtils.isModelCompiled(at: embeddingModelPath)
         {
             logger.info("Removing broken embedding model")
             try FileManager.default.removeItem(at: embeddingModelPath)
@@ -656,10 +618,10 @@ public final class DiarizerManager: @unchecked Sendable {
         // Check if models already exist and are valid
         let segmentationExists =
             FileManager.default.fileExists(atPath: segmentationModelPath)
-            && isModelCompiled(at: segmentationURL)
+            && DownloadUtils.isModelCompiled(at: segmentationURL)
         let embeddingExists =
             FileManager.default.fileExists(atPath: embeddingModelPath)
-            && isModelCompiled(at: embeddingURL)
+            && DownloadUtils.isModelCompiled(at: embeddingURL)
 
         if segmentationExists && embeddingExists {
             logger.info("Valid models already exist, skipping download")
@@ -672,7 +634,7 @@ public final class DiarizerManager: @unchecked Sendable {
         // Download segmentation model if needed
         if !segmentationExists {
             logger.info("Downloading segmentation model bundle from Hugging Face")
-            try await downloadMLModelCBundle(
+            try await DownloadUtils.downloadMLModelBundle(
                 repoPath: "bweng/speaker-diarization-coreml",
                 modelName: "pyannote_segmentation.mlmodelc",
                 outputPath: segmentationURL
@@ -683,7 +645,7 @@ public final class DiarizerManager: @unchecked Sendable {
         // Download embedding model if needed
         if !embeddingExists {
             logger.info("Downloading embedding model bundle from Hugging Face")
-            try await downloadMLModelCBundle(
+            try await DownloadUtils.downloadMLModelBundle(
                 repoPath: "bweng/speaker-diarization-coreml",
                 modelName: "wespeaker.mlmodelc",
                 outputPath: embeddingURL
@@ -696,125 +658,6 @@ public final class DiarizerManager: @unchecked Sendable {
             segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
     }
 
-    /// Check if a model is properly compiled
-    private func isModelCompiled(at url: URL) -> Bool {
-        let coreMLDataPath = url.appendingPathComponent("coremldata.bin")
-        return FileManager.default.fileExists(atPath: coreMLDataPath.path)
-    }
-
-    /// Download a complete .mlmodelc bundle from Hugging Face
-    private func downloadMLModelCBundle(repoPath: String, modelName: String, outputPath: URL)
-        async throws
-    {
-        logger.info("Downloading \(modelName) bundle from Hugging Face")
-
-        // Create output directory
-        try FileManager.default.createDirectory(at: outputPath, withIntermediateDirectories: true)
-
-        let bundleFiles = [
-            "model.mil",
-            "coremldata.bin",
-            "metadata.json",
-        ]
-
-        let weightFiles = [
-            "weights/weight.bin"
-        ]
-
-        // Download each file in the bundle
-        for fileName in bundleFiles {
-            let fileURL = URL(
-                string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(fileName)")!
-
-            do {
-                let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
-
-                // Check if download was successful
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let destinationPath = outputPath.appendingPathComponent(fileName)
-
-                    // Remove existing file if it exists
-                    try? FileManager.default.removeItem(at: destinationPath)
-
-                    // Move downloaded file to destination
-                    try FileManager.default.moveItem(at: tempFile, to: destinationPath)
-                    logger.info("Downloaded \(fileName) for \(modelName)")
-                } else {
-                    logger.warning(
-                        "Failed to download \(fileName) for \(modelName) - file may not exist")
-                    // Create empty file if it doesn't exist (some files are optional)
-                    if fileName == "metadata.json" {
-                        let destinationPath = outputPath.appendingPathComponent(fileName)
-                        try "{}".write(to: destinationPath, atomically: true, encoding: .utf8)
-                    }
-                }
-            } catch {
-                logger.warning("Error downloading \(fileName): \(error.localizedDescription)")
-                // For critical files, create minimal versions
-                if fileName == "coremldata.bin" {
-                    let destinationPath = outputPath.appendingPathComponent(fileName)
-                    try Data().write(to: destinationPath)
-                } else if fileName == "metadata.json" {
-                    let destinationPath = outputPath.appendingPathComponent(fileName)
-                    try "{}".write(to: destinationPath, atomically: true, encoding: .utf8)
-                }
-            }
-        }
-
-        // Download weight files
-        for weightFile in weightFiles {
-            let fileURL = URL(
-                string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(weightFile)"
-            )!
-
-            do {
-                let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
-
-                // Check if download was successful
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let destinationPath = outputPath.appendingPathComponent(weightFile)
-
-                    // Create weights directory if it doesn't exist
-                    let weightsDir = destinationPath.deletingLastPathComponent()
-                    try FileManager.default.createDirectory(
-                        at: weightsDir, withIntermediateDirectories: true)
-
-                    // Remove existing file if it exists
-                    try? FileManager.default.removeItem(at: destinationPath)
-
-                    // Move downloaded file to destination
-                    try FileManager.default.moveItem(at: tempFile, to: destinationPath)
-                    logger.info("Downloaded \(weightFile) for \(modelName)")
-                } else {
-                    logger.warning("Failed to download \(weightFile) for \(modelName)")
-                    throw DiarizerError.modelDownloadFailed
-                }
-            } catch {
-                logger.error(
-                    "Critical error downloading \(weightFile): \(error.localizedDescription)")
-                throw DiarizerError.modelDownloadFailed
-            }
-        }
-
-        // Make a HEAD request to config.json to trigger download count in HuggingFace
-        let configURL = URL(
-            string: "https://huggingface.co/\(repoPath)/resolve/main/config.json")!
-        do {
-            var request = URLRequest(url: configURL)
-            request.httpMethod = "HEAD"
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                logger.info(
-                    "HEAD request to config.json completed with status: \(httpResponse.statusCode)")
-            }
-        } catch {
-            logger.info(
-                "HEAD request to config.json failed (file may not exist): \(error.localizedDescription)"
-            )
-        }
-
-        logger.info("Completed downloading \(modelName) bundle")
-    }
 
     /// Compile a model
     private func compileModel(at sourceURL: URL, outputPath: URL) async throws -> URL {
