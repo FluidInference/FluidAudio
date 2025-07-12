@@ -20,8 +20,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full git history
-        lfs: false      # Don't use LFS since our files are small
+        fetch-depth: 0
 
     - name: Verify checkout
       run: |

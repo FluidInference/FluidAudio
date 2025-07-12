@@ -3,45 +3,11 @@ import Accelerate
 import OSLog
 import CoreML
 
-/// Utility functions for model file management
-internal class ModelFileChecker {
-    private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "ModelChecker")
-    
-    /// Check for missing models and handle corrupted downloads
-    func checkModelFiles(in directory: URL, modelNames: [String]) throws -> [String] {
-        var missingModels: [String] = []
-        
-        for modelName in modelNames {
-            let modelPath = directory.appendingPathComponent(modelName)
-            
-            if !FileManager.default.fileExists(atPath: modelPath.path) {
-                missingModels.append(modelName)
-            } else {
-                // Check for corrupted or incomplete downloads
-                do {
-                    let attributes = try FileManager.default.attributesOfItem(atPath: modelPath.path)
-                    if let fileSize = attributes[.size] as? Int64, fileSize < 1000 {
-                        // Model folder exists but seems corrupted (too small)
-                        logger.warning("Model \(modelName) appears corrupted (size: \(fileSize) bytes)")
-                        missingModels.append(modelName)
-                        // Remove corrupted model
-                        try? FileManager.default.removeItem(at: modelPath)
-                    }
-                } catch {
-                    logger.warning("Could not verify model \(modelName): \(error)")
-                    missingModels.append(modelName)
-                }
-            }
-        }
-        
-        return missingModels
-    }
-}
 
 /// Comprehensive audio processing for VAD including energy detection, spectral analysis, SNR filtering, and temporal smoothing
-internal class VADAudioProcessor {
+internal class VadAudioProcessor {
 
-    private let config: VADConfig
+    private let config: VadConfig
     private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "AudioProcessor")
 
     // State for audio processing
@@ -50,7 +16,7 @@ internal class VADAudioProcessor {
     private var noiseFloorBuffer: [Float] = []
     private var currentNoiseFloor: Float = -60.0
 
-    init(config: VADConfig) {
+    init(config: VadConfig) {
         self.config = config
     }
 
@@ -61,34 +27,13 @@ internal class VADAudioProcessor {
         currentNoiseFloor = -60.0
     }
 
-    // MARK: - Basic Energy Detection
-
-    /// Basic energy-based VAD (for testing without CoreML)
-    func calculateBasicEnergyVAD(_ audioChunk: [Float]) -> Float {
-        guard !audioChunk.isEmpty else { return 0.0 }
-
-        // Simple RMS energy calculation
-        let rmsEnergy = sqrt(audioChunk.map { $0 * $0 }.reduce(0, +) / Float(audioChunk.count))
-
-        // Convert to dB
-        let energyDB = 20.0 * log10(max(rmsEnergy, 1e-10))
-
-        // Simple sigmoid mapping (energy to probability)
-        // Typical speech energy: -40 to -10 dB
-        // Noise/silence: -60 to -40 dB
-        let normalizedEnergy = (energyDB + 50.0) / 40.0  // Map -50dB to 0, -10dB to 1
-        let probability = 1.0 / (1.0 + exp(-6.0 * (normalizedEnergy - 0.5)))
-
-        return max(0.0, min(1.0, probability))
-    }
-
     // MARK: - Enhanced VAD Processing
 
-    /// Process raw ML probability with SNR filtering and spectral analysis
+    /// Process raw ML probability with SNR filtering, spectral analysis, and temporal smoothing
     func processRawProbability(
         _ rawProbability: Float,
         audioChunk: [Float]
-    ) -> (enhancedProbability: Float, snrValue: Float?, spectralFeatures: SpectralFeatures?) {
+    ) -> (smoothedProbability: Float, snrValue: Float?, spectralFeatures: SpectralFeatures?) {
 
         var snrValue: Float?
         var spectralFeatures: SpectralFeatures?
@@ -109,11 +54,14 @@ internal class VADAudioProcessor {
             )
         }
 
-        return (enhancedProbability, snrValue, spectralFeatures)
+        // Apply temporal smoothing
+        let smoothedProbability = applySmoothingFilter(enhancedProbability)
+
+        return (smoothedProbability, snrValue, spectralFeatures)
     }
 
     /// Apply temporal smoothing filter to reduce noise
-    func applySmoothingFilter(_ probability: Float) -> Float {
+    private func applySmoothingFilter(_ probability: Float) -> Float {
         // Add to sliding window
         probabilityWindow.append(probability)
         if probabilityWindow.count > windowSize {
@@ -371,7 +319,7 @@ internal class VADAudioProcessor {
     // MARK: - Fallback VAD Calculations
 
     /// Calculate VAD probability from RNN features (improved fallback method)
-    func calculateVADProbability(from rnnFeatures: MLMultiArray) -> Float {
+    func calculateVadProbability(from rnnFeatures: MLMultiArray) -> Float {
         let shape = rnnFeatures.shape.map { $0.intValue }
         guard shape.count >= 2 else {
             return 0.0
