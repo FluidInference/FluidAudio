@@ -22,6 +22,8 @@ struct DiarizationCLI {
             await processFile(arguments: Array(arguments.dropFirst(2)))
         case "download":
             await downloadDataset(arguments: Array(arguments.dropFirst(2)))
+        case "transcribe":
+            await transcribeFile(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -43,6 +45,7 @@ struct DiarizationCLI {
                 benchmark    Run AMI SDM benchmark evaluation with real annotations
                 process      Process a single audio file
                 download     Download datasets for benchmarking
+                transcribe   Transcribe audio file to text (ASR)
                 help         Show this help message
 
             BENCHMARK OPTIONS:
@@ -84,6 +87,12 @@ struct DiarizationCLI {
 
                 # Process file with custom settings
                 swift run fluidaudio process meeting.wav --threshold 0.6 --output output.json
+
+                # Transcribe audio file to text
+                swift run fluidaudio transcribe meeting.wav
+
+                # Transcribe with debug output
+                swift run fluidaudio transcribe meeting.wav --debug
             """)
     }
 
@@ -1544,6 +1553,77 @@ struct DiarizationCLI {
         }
         return embedding
     }
+    
+    static func transcribeFile(arguments: [String]) async {
+        guard arguments.count >= 1 else {
+            print("❌ Please provide an audio file to transcribe")
+            print("Usage: fluidaudio transcribe <audio-file> [--debug]")
+            exit(1)
+        }
+        
+        let audioFile = arguments[0]
+        var debugMode = false
+        
+        // Parse arguments
+        for arg in arguments.dropFirst() {
+            if arg == "--debug" {
+                debugMode = true
+            }
+        }
+        
+        print("🎙️  Starting transcription...")
+        
+        do {
+            // Load audio file using existing DiarizationCLI method
+            let audioData = try await loadAudioFile(path: audioFile)
+            
+            // Initialize TranscriptManager
+            print("📦 Initializing transcription models...")
+            let config = TranscriptConfig(enableDebug: debugMode)
+            let transcriptManager = TranscriptManager(config: config)
+            try await transcriptManager.initialize()
+            
+            // Process in 10-second chunks if longer
+            let samplesPerChunk = 16000 * 10 // 10 seconds at 16kHz
+            let totalSamples = audioData.count
+            var allTranscripts: [String] = []
+            
+            if totalSamples <= samplesPerChunk {
+                // Single chunk
+                print("🎯 Processing audio (\(String(format: "%.1f", Float(totalSamples)/16000))s)")
+                let result = try await transcriptManager.transcribe(audioData)
+                allTranscripts.append(result.text)
+                
+                if debugMode {
+                    print("⏱️  Processing time: \(String(format: "%.2f", result.processingTime))s")
+                    print("🎵 Audio duration: \(String(format: "%.2f", result.duration))s")
+                }
+            } else {
+                // Multiple chunks
+                let chunkCount = (totalSamples + samplesPerChunk - 1) / samplesPerChunk
+                print("🎯 Processing \(chunkCount) chunks...")
+                
+                for i in 0..<chunkCount {
+                    let start = i * samplesPerChunk
+                    let end = min(start + samplesPerChunk, totalSamples)
+                    let chunk = Array(audioData[start..<end])
+                    
+                    print("🎯 Processing chunk \(i+1) (\(start/16000)s - \(end/16000)s)")
+                    let result = try await transcriptManager.transcribe(chunk)
+                    allTranscripts.append(result.text)
+                }
+            }
+            
+            // Output results
+            print("📝 Transcript:")
+            print(allTranscripts.joined(separator: " "))
+            print("🎉 Transcription completed!")
+            
+        } catch {
+            print("❌ Transcription failed: \(error)")
+            exit(1)
+        }
+    }
 }
 
 // MARK: - Data Structures
@@ -1799,6 +1879,140 @@ class AMIAnnotationParser: NSObject {
         }
 
         return delegate.speakerMapping
+    }
+
+    static func transcribeFile(arguments: [String]) async {
+        guard arguments.count >= 1 else {
+            print("❌ Please provide an audio file to transcribe")
+            print("Usage: fluidaudio transcribe <audio-file> [--debug]")
+            exit(1)
+        }
+
+        let audioFile = arguments[0]
+        var debugMode = false
+
+        // Parse arguments
+        for arg in arguments.dropFirst() {
+            if arg == "--debug" {
+                debugMode = true
+            }
+        }
+
+        print("🎙️  Starting transcription...")
+
+        do {
+            // Load audio file
+            let url = URL(fileURLWithPath: audioFile)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                print("❌ Audio file not found: \(audioFile)")
+                exit(1)
+            }
+
+            print("📂 Loading audio file: \(audioFile)")
+
+            let audioFileAV = try AVAudioFile(forReading: url)
+            let format = audioFileAV.processingFormat
+            let frameCount = UInt32(audioFileAV.length)
+
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                print("❌ Failed to create audio buffer")
+                exit(1)
+            }
+
+            try audioFileAV.read(into: buffer)
+
+            // Convert to mono if needed
+            let channelCount = Int(format.channelCount)
+            var audioData: [Float] = []
+
+            if channelCount == 1 {
+                audioData = Array(UnsafeBufferPointer(start: buffer.floatChannelData?[0], count: Int(frameCount)))
+            } else {
+                // Mix down to mono
+                let samples = Int(frameCount)
+                audioData = Array(repeating: 0, count: samples)
+                for i in 0..<samples {
+                    var sum: Float = 0
+                    for channel in 0..<channelCount {
+                        sum += buffer.floatChannelData![channel][i]
+                    }
+                    audioData[i] = sum / Float(channelCount)
+                }
+            }
+
+            // Resample to 16kHz if needed
+            let sourceSampleRate = format.sampleRate
+            if sourceSampleRate != 16000 {
+                print("📊 Resampling from \(Int(sourceSampleRate))Hz to 16000Hz...")
+                audioData = resampleAudio(audioData, from: sourceSampleRate, to: 16000)
+            }
+
+            // Initialize TranscriptManager
+            print("📦 Initializing transcription models...")
+            let config = TranscriptConfig(enableDebug: debugMode)
+            let transcriptManager = TranscriptManager(config: config)
+            try await transcriptManager.initialize()
+
+            // Process in 10-second chunks if longer
+            let samplesPerChunk = 16000 * 10 // 10 seconds at 16kHz
+            let totalSamples = audioData.count
+            var allTranscripts: [String] = []
+
+            if totalSamples <= samplesPerChunk {
+                // Single chunk
+                print("🎯 Processing audio (\(String(format: "%.1f", Float(totalSamples)/16000))s)")
+                let result = try await transcriptManager.transcribe(audioData)
+                allTranscripts.append(result.text)
+
+                if debugMode {
+                    print("⏱️  Processing time: \(String(format: "%.2f", result.processingTime))s")
+                    print("🎵 Audio duration: \(String(format: "%.2f", result.duration))s")
+                }
+            } else {
+                // Multiple chunks
+                let chunkCount = (totalSamples + samplesPerChunk - 1) / samplesPerChunk
+                print("🎯 Processing \(chunkCount) chunks...")
+
+                for i in 0..<chunkCount {
+                    let start = i * samplesPerChunk
+                    let end = min(start + samplesPerChunk, totalSamples)
+                    let chunk = Array(audioData[start..<end])
+
+                    print("🎯 Processing chunk \(i+1) (\(start/16000)s - \(end/16000)s)")
+                    let result = try await transcriptManager.transcribe(chunk)
+                    allTranscripts.append(result.text)
+                }
+            }
+
+            // Output results
+            print("📝 Transcript:")
+            print(allTranscripts.joined(separator: " "))
+            print("🎉 Transcription completed!")
+
+        } catch {
+            print("❌ Transcription failed: \(error)")
+            exit(1)
+        }
+    }
+
+    private static func resampleAudio(_ input: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
+        let ratio = targetSampleRate / sourceSampleRate
+        let outputLength = Int(Double(input.count) * ratio)
+        var output = Array<Float>(repeating: 0, count: outputLength)
+
+        for i in 0..<outputLength {
+            let sourceIndex = Double(i) / ratio
+            let index = Int(sourceIndex)
+            let fraction = Float(sourceIndex - Double(index))
+
+            if index < input.count - 1 {
+                output[i] = input[index] * (1 - fraction) + input[index + 1] * fraction
+            } else if index < input.count {
+                output[i] = input[index]
+            }
+        }
+
+        return output
     }
 }
 
