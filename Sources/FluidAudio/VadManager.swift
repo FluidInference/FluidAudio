@@ -3,13 +3,9 @@ import Foundation
 import OSLog
 import Accelerate
 
-/// VAD model types
-public enum VADModelType: Sendable {
-    case coreML          // CoreML-based pipeline (STFT + Encoder + RNN + Enhanced Fallback)
-}
 
 /// Configuration for VAD processing
-public struct VADConfig: Sendable {
+public struct VadConfig: Sendable {
     public var threshold: Float = 0.3  // Voice activity threshold (0.0-1.0) - lowered for better sensitivity
     public var chunkSize: Int = 512   // Audio chunk size for processing
     public var sampleRate: Int = 16000 // Sample rate for audio processing
@@ -18,8 +14,7 @@ public struct VADConfig: Sendable {
     public var adaptiveThreshold: Bool = false  // Disable adaptive thresholding temporarily
     public var minThreshold: Float = 0.1       // Minimum threshold for adaptive mode
     public var maxThreshold: Float = 0.7       // Maximum threshold for adaptive mode
-    public var modelType: VADModelType = .coreML  // Use CoreML for Mac
-    public var useGPU: Bool = true             // Use Metal Performance Shaders on Mac
+    public var computeUnits: MLComputeUnits = .cpuAndNeuralEngine  // Preferred compute units
 
     // SNR and noise detection parameters
     public var enableSNRFiltering: Bool = true      // Enable SNR-based filtering for better noise rejection
@@ -28,7 +23,7 @@ public struct VADConfig: Sendable {
     public var spectralRolloffThreshold: Float = 0.85  // Threshold for spectral rolloff
     public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)  // Expected speech range (Hz)
 
-    public static let `default` = VADConfig()
+    public static let `default` = VadConfig()
 
     public init(
         threshold: Float = 0.3,
@@ -39,8 +34,7 @@ public struct VADConfig: Sendable {
         adaptiveThreshold: Bool = false,
         minThreshold: Float = 0.1,
         maxThreshold: Float = 0.7,
-        modelType: VADModelType = .coreML,
-        useGPU: Bool = true,
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
         enableSNRFiltering: Bool = true,
         minSNRThreshold: Float = 6.0,
         noiseFloorWindow: Int = 100,
@@ -55,8 +49,7 @@ public struct VADConfig: Sendable {
         self.adaptiveThreshold = adaptiveThreshold
         self.minThreshold = minThreshold
         self.maxThreshold = maxThreshold
-        self.modelType = modelType
-        self.useGPU = useGPU
+        self.computeUnits = computeUnits
         self.enableSNRFiltering = enableSNRFiltering
         self.minSNRThreshold = minSNRThreshold
         self.noiseFloorWindow = noiseFloorWindow
@@ -66,7 +59,7 @@ public struct VADConfig: Sendable {
 }
 
 /// VAD processing result
-public struct VADResult: Sendable {
+public struct VadResult: Sendable {
     public let probability: Float  // Voice activity probability (0.0-1.0)
     public let isVoiceActive: Bool // Whether voice is detected
     public let processingTime: TimeInterval
@@ -102,7 +95,7 @@ public struct SpectralFeatures: Sendable {
 }
 
 /// VAD error types
-public enum VADError: Error, LocalizedError {
+public enum VadError: Error, LocalizedError {
     case notInitialized
     case modelLoadingFailed
     case modelProcessingFailed(String)
@@ -133,10 +126,10 @@ public enum VADError: Error, LocalizedError {
 
 /// Voice Activity Detection Manager using CoreML models
 @available(macOS 13.0, iOS 16.0, *)
-public actor VADManager {
+public actor VadManager {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "VAD")
-    private let config: VADConfig
+    private let config: VadConfig
 
     // CoreML models for VAD pipeline (isolated to actor)
     private var stftModel: MLModel?
@@ -148,12 +141,13 @@ public actor VADManager {
     private var cState: MLMultiArray?
     private var featureBuffer: [MLMultiArray] = []
 
-    // Audio processing handler
-    private var audioProcessor: VADAudioProcessor
 
-    public init(config: VADConfig = .default) {
+    // Audio processing handler
+    private var audioProcessor: VadAudioProcessor
+
+    public init(config: VadConfig = .default) {
         self.config = config
-        self.audioProcessor = VADAudioProcessor(config: config)
+        self.audioProcessor = VadAudioProcessor(config: config)
     }
 
     public var isAvailable: Bool {
@@ -181,27 +175,24 @@ public actor VADManager {
         let modelsDirectory = getModelsDirectory()
         let compiledModelNames = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
 
-        // Check if we need to download any compiled models using utility class
-        let modelChecker = ModelFileChecker()
-        let missingModels = try modelChecker.checkModelFiles(in: modelsDirectory, modelNames: compiledModelNames)
+        // Check if we need to download any compiled models
+        let missingModels = try DownloadUtils.checkModelFiles(in: modelsDirectory, modelNames: compiledModelNames)
 
         // Auto-download missing models
         if !missingModels.isEmpty {
             logger.info("🔄 Missing VAD models: \(missingModels.joined(separator: ", "))")
             logger.info("🔄 Auto-downloading VAD models from Hugging Face...")
-            try await downloadMissingVADModels()
+            try await downloadMissingVadModels()
         }
 
-        // Verify all models are now present
         for modelName in compiledModelNames {
             let modelPath = modelsDirectory.appendingPathComponent(modelName)
             if !FileManager.default.fileExists(atPath: modelPath.path) {
                 logger.error("❌ Missing compiled model after download: \(modelName)")
-                throw VADError.modelLoadingFailed
+                throw VadError.modelLoadingFailed
             }
         }
 
-        // Get paths for compiled models
         logger.info("🔍 Loading pre-compiled VAD models...")
         let pathStart = Date()
         let stftPath = modelsDirectory.appendingPathComponent("silero_stft.mlmodelc")
@@ -227,83 +218,63 @@ public actor VADManager {
             do {
                 logger.info("Attempting to load VAD models (attempt \(attempt + 1)/\(maxRetries + 1))")
 
-                // Try GPU first, then CPU fallback
-                for useGPU in [true, false] {
-                    let config = MLModelConfiguration()
-                    config.computeUnits = useGPU ? .all : .cpuOnly
-                    let computeType = useGPU ? "All (CPU+GPU+Neural Engine)" : "CPU-only"
+                let config = MLModelConfiguration()
+                config.computeUnits = self.config.computeUnits
+                logger.info("🔄 Loading with CPU+Neural Engine...")
 
-                    do {
-                        logger.info("🔄 Loading with \(computeType)...")
+                let stftStart = Date()
+                let stftModel = try MLModel(contentsOf: stftPath, configuration: config)
+                logger.info("✓ STFT model loaded (\(String(format: "%.2f", Date().timeIntervalSince(stftStart)))s)")
 
-                        let stftStart = Date()
-                        let stftModel = try MLModel(contentsOf: stftPath, configuration: config)
-                        logger.info("✓ STFT model loaded (\(String(format: "%.2f", Date().timeIntervalSince(stftStart)))s)")
+                let encoderStart = Date()
+                let encoderModel = try MLModel(contentsOf: encoderPath, configuration: config)
+                logger.info("✓ Encoder model loaded (\(String(format: "%.2f", Date().timeIntervalSince(encoderStart)))s)")
 
-                        let encoderStart = Date()
-                        let encoderModel = try MLModel(contentsOf: encoderPath, configuration: config)
-                        logger.info("✓ Encoder model loaded (\(String(format: "%.2f", Date().timeIntervalSince(encoderStart)))s)")
+                let rnnStart = Date()
+                let rnnModel = try MLModel(contentsOf: rnnPath, configuration: config)
+                logger.info("✓ RNN model loaded (\(String(format: "%.2f", Date().timeIntervalSince(rnnStart)))s)")
 
-                        let rnnStart = Date()
-                        let rnnModel = try MLModel(contentsOf: rnnPath, configuration: config)
-                        logger.info("✓ RNN model loaded (\(String(format: "%.2f", Date().timeIntervalSince(rnnStart)))s)")
+                // If we get here, all models loaded successfully
+                self.stftModel = stftModel
+                self.encoderModel = encoderModel
+                self.rnnModel = rnnModel
 
-                        // If we get here, all models loaded successfully
-                        self.stftModel = stftModel
-                        self.encoderModel = encoderModel
-                        self.rnnModel = rnnModel
-
-                        if attempt > 0 {
-                            logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
-                        }
-                        logger.info("🎉 VAD models loaded successfully with \(computeType)")
-                        return
-
-                    } catch {
-                        if !useGPU {
-                            throw error // Rethrow CPU failure - will trigger recovery
-                        }
-                        logger.warning("⚠️ \(computeType) loading failed, trying CPU-only...")
-                    }
+                if attempt > 0 {
+                    logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
                 }
+                logger.info("🎉 VAD models loaded successfully with CPU+Neural Engine")
+
+
+                return
 
             } catch {
                 logger.warning("Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
 
-                // If this is our last attempt, throw the error
                 if attempt >= maxRetries {
                     logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
-                    throw VADError.modelCompilationFailed
+                    throw VadError.modelCompilationFailed
                 }
 
                 // Auto-recovery: Delete corrupted models and re-download
                 logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
-                try await performVADModelRecovery(stftPath: stftPath, encoderPath: encoderPath, rnnPath: rnnPath)
+                try await performVadModelRecovery(stftPath: stftPath, encoderPath: encoderPath, rnnPath: rnnPath)
 
                 attempt += 1
             }
         }
     }
 
-    /// Perform model recovery by deleting corrupted compiled models and re-downloading
-    private func performVADModelRecovery(stftPath: URL, encoderPath: URL, rnnPath: URL) async throws {
-        let modelPaths = [stftPath, encoderPath, rnnPath]
-
-        // Remove potentially corrupted compiled model files
-        for modelPath in modelPaths {
-            if FileManager.default.fileExists(atPath: modelPath.path) {
-                logger.info("Removing corrupted compiled model at \(modelPath.lastPathComponent)")
-                try FileManager.default.removeItem(at: modelPath)
+    private func performVadModelRecovery(stftPath: URL, encoderPath: URL, rnnPath: URL) async throws {
+        try await DownloadUtils.performModelRecovery(
+            modelPaths: [stftPath, encoderPath, rnnPath],
+            downloadAction: {
+                try await self.downloadMissingVadModels()
             }
-        }
-
-        // Re-download models from Hugging Face
-        logger.info("🔄 Re-downloading VAD models from Hugging Face...")
-        try await downloadMissingVADModels()
+        )
     }
 
     /// Download missing VAD models from Hugging Face
-    private func downloadMissingVADModels() async throws {
+    private func downloadMissingVadModels() async throws {
         let modelsDirectory = getModelsDirectory()
 
         // Download .mlmodelc folders from Hugging Face
@@ -315,83 +286,13 @@ public actor VADManager {
             if !FileManager.default.fileExists(atPath: folderPath.path) {
                 logger.info("📥 Downloading \(folderName)...")
                 print("📥 Downloading \(folderName)...")
-                try await downloadVADModelFolder(folderName: folderName, to: folderPath)
+                try await DownloadUtils.downloadVadModelFolder(folderName: folderName, to: folderPath)
             }
         }
 
         logger.info("✅ VAD models downloaded successfully")
     }
 
-    /// Download a .mlmodelc folder from Hugging Face
-    private func downloadVADModelFolder(folderName: String, to folderPath: URL) async throws {
-        // Create the folder
-        try FileManager.default.createDirectory(at: folderPath, withIntermediateDirectories: true)
-
-        // Download the main files inside the .mlmodelc folder
-        let modelFiles = [
-            "coremldata.bin",
-            "model.espresso.net",
-            "model.espresso.shape",
-            "model.espresso.weights"
-        ]
-
-        let baseURL = "https://huggingface.co/alexwengg/coreml-silero-vad/resolve/main/\(folderName)"
-
-        for fileName in modelFiles {
-            let fileURL = "\(baseURL)/\(fileName)"
-            let destinationPath = folderPath.appendingPathComponent(fileName)
-
-            try await downloadVADModelFile(from: fileURL, to: destinationPath)
-        }
-
-        // Download subdirectory files required by CoreML
-        let subDirs = ["analytics", "model", "neural_network_optionals"]
-        for subDir in subDirs {
-            let subDirPath = folderPath.appendingPathComponent(subDir)
-            try FileManager.default.createDirectory(at: subDirPath, withIntermediateDirectories: true)
-
-            // Download the coremldata.bin file in each subdirectory
-            let subFileURL = "\(baseURL)/\(subDir)/coremldata.bin"
-            let subDestinationPath = subDirPath.appendingPathComponent("coremldata.bin")
-
-            do {
-                try await downloadVADModelFile(from: subFileURL, to: subDestinationPath)
-            } catch {
-                logger.warning("⚠️ Failed to download \(subDir)/coremldata.bin for \(folderName): \(error)")
-                // Some subdirectory files might be optional
-            }
-        }
-    }
-
-    /// Download a model file from URL
-    private func downloadVADModelFile(from urlString: String, to destinationPath: URL) async throws {
-        guard let url = URL(string: urlString) else {
-            logger.error("Invalid URL: \(urlString)")
-            throw VADError.modelDownloadFailed
-        }
-
-        logger.info("🔄 Downloading from: \(urlString)")
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                logger.error("Invalid response type for \(urlString)")
-                throw VADError.modelDownloadFailed
-            }
-
-            guard httpResponse.statusCode == 200 else {
-                logger.error("HTTP Error \(httpResponse.statusCode) for \(urlString)")
-                throw VADError.modelDownloadFailed
-            }
-
-            try data.write(to: destinationPath)
-            logger.info("✅ Downloaded \(destinationPath.lastPathComponent) (\(data.count) bytes)")
-        } catch {
-            logger.error("Download failed for \(urlString): \(error.localizedDescription)")
-            throw VADError.modelDownloadFailed
-        }
-    }
 
 
     /// Reset RNN state and feature buffer
@@ -427,9 +328,9 @@ public actor VADManager {
     }
 
     /// Process audio chunk and return VAD probability
-    public func processChunk(_ audioChunk: [Float]) async throws -> VADResult {
+    public func processChunk(_ audioChunk: [Float]) async throws -> VadResult {
         guard isAvailable else {
-            throw VADError.notInitialized
+            throw VadError.notInitialized
         }
 
         let processingStartTime = Date()
@@ -438,14 +339,11 @@ public actor VADManager {
 
         rawProbability = try await processCoreMLChunk(audioChunk)
 
-        // Post-process raw ML probability
-        let (enhancedProbability, snrValue, spectralFeatures) = audioProcessor.processRawProbability(
+        // Post-process raw ML probability (includes temporal smoothing)
+        let (smoothedProbability, snrValue, spectralFeatures) = audioProcessor.processRawProbability(
             rawProbability,
             audioChunk: audioChunk
         )
-
-        // Apply temporal smoothing
-        let smoothedProbability = audioProcessor.applySmoothingFilter(enhancedProbability)
 
         // Apply fixed threshold
         let isVoiceActive = smoothedProbability >= config.threshold
@@ -454,11 +352,11 @@ public actor VADManager {
 
         if config.debugMode {
             let snrString = snrValue.map { String(format: "%.1f", $0) } ?? "N/A"
-            let debugMessage = "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)), enhanced=\(String(format: "%.3f", enhancedProbability)), smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", config.threshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
+            let debugMessage = "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)),  smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", config.threshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
             logger.debug("\(debugMessage)")
         }
 
-        return VADResult(
+        return VadResult(
             probability: smoothedProbability,
             isVoiceActive: isVoiceActive,
             processingTime: processingTime,
@@ -500,7 +398,7 @@ public actor VADManager {
         let rnnFeatures = try processRNN(encoderFeatures)
 
         // Step 5: Calculate VAD probability from RNN features
-        return audioProcessor.calculateVADProbability(from: rnnFeatures)
+        return audioProcessor.calculateVadProbability(from: rnnFeatures)
     }
 
     /// Process audio through STFT model
@@ -508,7 +406,7 @@ public actor VADManager {
     /// Output: stft_features - shape (1, 201) - STFT features
     private func processSTFT(_ audioChunk: [Float]) throws -> MLMultiArray {
         guard let stftModel = self.stftModel else {
-            throw VADError.notInitialized
+            throw VadError.notInitialized
         }
 
         // Create input array with shape (1, chunkSize=512)
@@ -537,7 +435,7 @@ public actor VADManager {
         // Fallback: use first available output
         guard let outputName = output.featureNames.first,
               let stftOutput = output.featureValue(for: outputName)?.multiArrayValue else {
-            throw VADError.modelProcessingFailed("No STFT output found")
+            throw VadError.modelProcessingFailed("No STFT output found")
         }
 
         if config.debugMode {
@@ -576,11 +474,11 @@ public actor VADManager {
     /// Output: encoder_features - shape (1, 128) - encoded features
     private func processEncoder() throws -> MLMultiArray {
         guard let encoderModel = self.encoderModel else {
-            throw VADError.notInitialized
+            throw VadError.notInitialized
         }
 
         guard !featureBuffer.isEmpty else {
-            throw VADError.modelProcessingFailed("No features in buffer")
+            throw VadError.modelProcessingFailed("No features in buffer")
         }
 
         // Concatenate all 4 frames in the buffer to create shape (1, 201, 4)
@@ -615,7 +513,7 @@ public actor VADManager {
 
         guard let outputName = output.featureNames.first,
               let encoderOutput = output.featureValue(for: outputName)?.multiArrayValue else {
-            throw VADError.modelProcessingFailed("No encoder output found")
+            throw VadError.modelProcessingFailed("No encoder output found")
         }
 
         if config.debugMode {
@@ -637,7 +535,7 @@ public actor VADManager {
     ///   - c_out: shape (1, 1, 128) - updated LSTM cell state
     private func processRNN(_ encoderFeatures: MLMultiArray) throws -> MLMultiArray {
         guard let rnnModel = self.rnnModel else {
-            throw VADError.notInitialized
+            throw VadError.notInitialized
         }
 
         // Initialize states if they don't exist (more robust than throwing)
@@ -647,7 +545,7 @@ public actor VADManager {
         }
 
         guard let hState = self.hState, let cState = self.cState else {
-            throw VADError.modelProcessingFailed("Failed to initialize RNN states")
+            throw VadError.modelProcessingFailed("Failed to initialize RNN states")
         }
 
         // Prepare encoder features for RNN (reshape if needed)
@@ -661,71 +559,52 @@ public actor VADManager {
 
         let output = try rnnModel.prediction(from: input)
 
-        // Extract RNN outputs using named outputs (preferred) with shape-based fallback
-        var rnnFeatures: MLMultiArray?
-        
-        // Try to use specific named outputs first
-        let preferredOutputNames = [
-            "rnn_output": "sequence",
-            "rnn_features": "sequence", 
-            "output": "sequence",
-            "h_out": "h_state",
-            "hidden_out": "h_state",
-            "c_out": "c_state", 
-            "cell_out": "c_state"
-        ]
-        
-        for (outputName, outputType) in preferredOutputNames {
-            if let featureValue = output.featureValue(for: outputName)?.multiArrayValue {
-                if config.debugMode {
-                    let shape = featureValue.shape.map { $0.intValue }
-                    logger.debug("RNN named output '\(outputName)' (\(outputType)) shape: \(shape)")
-                }
-                
-                switch outputType {
-                case "sequence":
-                    rnnFeatures = featureValue
-                case "h_state":
-                    self.hState = featureValue
-                case "c_state":
-                    self.cState = featureValue
-                default:
-                    break
-                }
+        // Debug: Print all available outputs with their shapes for model inspection
+        logger.info("🔍 RNN Model Output Investigation:")
+        for featureName in output.featureNames.sorted() {
+            if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
+                let shape = featureValue.shape.map { $0.intValue }
+                logger.info("  Output '\(featureName)': shape \(shape)")
+            } else {
+                logger.info("  Output '\(featureName)': non-MLMultiArray type")
             }
         }
-        
-        // Fallback: use shape-based detection if named outputs not found
-        if rnnFeatures == nil {
-            if config.debugMode {
-                let availableOutputs = output.featureNames.joined(separator: ", ")
-                logger.warning("Named RNN outputs not found. Available outputs: [\(availableOutputs)]. Using shape-based detection.")
-            }
-            
+
+        // Try direct output names first, then discover actual names
+        var rnnFeatures: MLMultiArray?
+        var newHState: MLMultiArray?
+        var newCState: MLMultiArray?
+
+        // Try expected output names first
+        rnnFeatures = output.featureValue(for: "rnn_features")?.multiArrayValue
+        newHState = output.featureValue(for: "h_out")?.multiArrayValue
+        newCState = output.featureValue(for: "c_out")?.multiArrayValue
+
+        // If that fails, discover actual output names
+        if rnnFeatures == nil || newHState == nil || newCState == nil {
+            logger.info("⚠️ Expected output names not found, discovering actual names...")
+
             for featureName in output.featureNames {
                 if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
                     let shape = featureValue.shape.map { $0.intValue }
 
-                    if shape.count == 3 {
-                        if shape[1] > 1 {
-                            // This is likely the sequence output
-                            rnnFeatures = featureValue
-                            if config.debugMode {
-                                logger.debug("RNN shape-based sequence output '\(featureName)' shape: \(shape)")
-                            }
-                        } else if shape == [1, 1, 128] {
-                            // This is a state output - update our states
-                            if featureName.contains("h") && self.hState == nil {
-                                self.hState = featureValue
-                                if config.debugMode {
-                                    logger.debug("RNN shape-based h_state '\(featureName)' shape: \(shape)")
-                                }
-                            } else if featureName.contains("c") && self.cState == nil {
-                                self.cState = featureValue
-                                if config.debugMode {
-                                    logger.debug("RNN shape-based c_state '\(featureName)' shape: \(shape)")
-                                }
-                            }
+                    if rnnFeatures == nil && shape.count == 3 && shape[1] > 1 {
+                        rnnFeatures = featureValue
+                        logger.info("✓ Found sequence output: '\(featureName)' shape: \(shape)")
+                    } else if shape == [1, 1, 128] {
+                        let nameLower = featureName.lowercased()
+                        if newHState == nil && (nameLower.contains("h") || nameLower.contains("hidden")) {
+                            newHState = featureValue
+                            logger.info("✓ Found h_state output: '\(featureName)' shape: \(shape)")
+                        } else if newCState == nil && (nameLower.contains("c") || nameLower.contains("cell")) {
+                            newCState = featureValue
+                            logger.info("✓ Found c_state output: '\(featureName)' shape: \(shape)")
+                        } else if newHState == nil {
+                            newHState = featureValue
+                            logger.info("✓ Found h_state output (fallback): '\(featureName)' shape: \(shape)")
+                        } else if newCState == nil {
+                            newCState = featureValue
+                            logger.info("✓ Found c_state output (fallback): '\(featureName)' shape: \(shape)")
                         }
                     }
                 }
@@ -733,8 +612,18 @@ public actor VADManager {
         }
 
         guard let finalRnnFeatures = rnnFeatures else {
-            throw VADError.modelProcessingFailed("No RNN sequence output found")
+            throw VadError.modelProcessingFailed("No RNN sequence output found")
         }
+        guard let finalHState = newHState else {
+            throw VadError.modelProcessingFailed("No h_state output found")
+        }
+        guard let finalCState = newCState else {
+            throw VadError.modelProcessingFailed("No c_state output found")
+        }
+
+        // Update states
+        self.hState = finalHState
+        self.cState = finalCState
 
         return finalRnnFeatures
     }
@@ -783,13 +672,13 @@ public actor VADManager {
     /// Concatenate temporal features from buffer to create shape (1, 201, 4)
     private func concatenateTemporalFeatures() throws -> MLMultiArray {
         guard featureBuffer.count == 4 else {
-            throw VADError.modelProcessingFailed("Feature buffer must contain exactly 4 frames")
+            throw VadError.modelProcessingFailed("Feature buffer must contain exactly 4 frames")
         }
 
         // Get the shape of individual features (should be [1, 201])
         let singleShape = featureBuffer[0].shape.map { $0.intValue }
         guard singleShape.count >= 2 else {
-            throw VADError.modelProcessingFailed("Invalid feature shape")
+            throw VadError.modelProcessingFailed("Invalid feature shape")
         }
 
         let batchSize = singleShape[0]
@@ -818,6 +707,8 @@ public actor VADManager {
         return concatenatedArray
     }
 
+
+
     /// Get models directory
     private func getModelsDirectory() -> URL {
         let directory: URL
@@ -836,14 +727,14 @@ public actor VADManager {
     }
 
     /// Process audio file and return VAD results
-    public func processAudioFile(_ audioData: [Float]) async throws -> [VADResult] {
+    public func processAudioFile(_ audioData: [Float]) async throws -> [VadResult] {
         guard isAvailable else {
-            throw VADError.notInitialized
+            throw VadError.notInitialized
         }
 
         resetState()
 
-        var results: [VADResult] = []
+        var results: [VadResult] = []
         let chunkSize = config.chunkSize
 
         // Process in chunks
