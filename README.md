@@ -5,7 +5,7 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/8FbwRaDFJR)
-[![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/bweng/speaker-diarization-coreml)
+[![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/FluidInference/speaker-diarization-coreml)
 
 FluidAudio is a Swift framework for on-device speaker diarization and audio processing, designed to maximize performance per watt by leveraging CoreML models exclusively. Optimized for Apple's Neural Engine, it delivers faster and more efficient processing than CPU or GPU alternatives.
 
@@ -19,7 +19,7 @@ Our testing demonstrates that CoreML versions deliver significantly more efficie
 - **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
-- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/bweng/speaker-diarization-coreml) - converted and optimized by our team. Permissive licenses.
+- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference/speaker-diarization-coreml) - converted and optimized by our team. Permissive licenses.
 - **Real-time Processing**: Designed for real-time workloads but also works for offline processing
 - **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+ and any Apple Sillicon device
 
