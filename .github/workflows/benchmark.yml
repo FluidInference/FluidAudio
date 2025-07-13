@@ -33,6 +33,12 @@ jobs:
         id: benchmark
         run: |
           echo "🚀 Running single file benchmark..."
+          echo "Environment info:"
+          uname -a
+          swift --version
+          echo "Hardware info:"
+          sysctl -a | grep machdep.cpu || true
+          
           swift run fluidaudio benchmark --auto-download --single-file ES2004a --output benchmark_results.json
 
           # Check if results file was generated
@@ -59,6 +65,7 @@ jobs:
           RTF=$(jq '.results[0].realTimeFactor' benchmark_results.json)
           DURATION=$(jq '.results[0].durationSeconds' benchmark_results.json)
           SPEAKER_COUNT=$(jq '.results[0].speakerCount' benchmark_results.json)
+          GROUND_TRUTH_SPEAKER_COUNT=$(jq '.results[0].groundTruthSpeakerCount' benchmark_results.json)
           
           # Extract detailed timing information
           TOTAL_TIME=$(jq '.results[0].timings.totalProcessingSeconds' benchmark_results.json)
@@ -75,6 +82,7 @@ jobs:
           echo "RTF=${RTF}" >> $GITHUB_OUTPUT
           echo "DURATION=${DURATION}" >> $GITHUB_OUTPUT
           echo "SPEAKER_COUNT=${SPEAKER_COUNT}" >> $GITHUB_OUTPUT
+          echo "GROUND_TRUTH_SPEAKER_COUNT=${GROUND_TRUTH_SPEAKER_COUNT}" >> $GITHUB_OUTPUT
           echo "TOTAL_TIME=${TOTAL_TIME}" >> $GITHUB_OUTPUT
           echo "MODEL_DOWNLOAD_TIME=${MODEL_DOWNLOAD_TIME}" >> $GITHUB_OUTPUT
           echo "MODEL_COMPILE_TIME=${MODEL_COMPILE_TIME}" >> $GITHUB_OUTPUT
@@ -94,6 +102,7 @@ jobs:
             const rtf = parseFloat('${{ steps.extract.outputs.RTF }}');
             const duration = parseFloat('${{ steps.extract.outputs.DURATION }}').toFixed(1);
             const speakerCount = '${{ steps.extract.outputs.SPEAKER_COUNT }}';
+            const groundTruthSpeakerCount = '${{ steps.extract.outputs.GROUND_TRUTH_SPEAKER_COUNT }}';
             const totalTime = parseFloat('${{ steps.extract.outputs.TOTAL_TIME }}');
             const inferenceTime = parseFloat('${{ steps.extract.outputs.INFERENCE_TIME }}');
             const modelDownloadTime = parseFloat('${{ steps.extract.outputs.MODEL_DOWNLOAD_TIME }}');
@@ -111,7 +120,7 @@ jobs:
             comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% | < 30% | ${der < 30 ? '✅' : '❌'} |\n`;
             comment += `| **JER** (Jaccard Error Rate) | ${jer.toFixed(1)}% | < 25% | ${jer < 25 ? '✅' : '❌'} |\n`;
             comment += `| **RTF** (Real-Time Factor) | ${rtf.toFixed(2)}x | < 1.0x | ${rtf < 1.0 ? '✅' : '❌'} |\n`;
-            comment += `| **Speakers Detected** | ${speakerCount} | - | ℹ️ |\n\n`;
+            comment += `| **Speakers Detected** | ${speakerCount} | ${groundTruthSpeakerCount} | ${speakerCount == groundTruthSpeakerCount ? '✅' : '⚠️'} |\n\n`;
             
             comment += '### ⏱️ Performance Timing\n';
             comment += '| Stage | Time (s) | % of Total |\n';
