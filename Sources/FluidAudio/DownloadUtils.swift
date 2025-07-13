@@ -83,7 +83,7 @@ public class DownloadUtils {
             "model.espresso.weights"
         ]
 
-        let baseURL = "https://huggingface.co/alexwengg/coreml-silero-vad/resolve/main/\(folderName)"
+        let baseURL = "https://huggingface.co/FluidInference/silero-vad-coreml/resolve/main/\(folderName)"
 
         for fileName in modelFiles {
             let fileURL = "\(baseURL)/\(fileName)"
