@@ -335,6 +335,122 @@ Model Loading Failed → Delete Corrupted Files → Re-download from HF → Retr
 
 This addresses the common issue where CoreML models fail compilation due to network interruptions during download, file system corruption, or iOS/macOS updates affecting compiled model compatibility.
 
+## Voice Activity Detection (VAD) ✨
+
+### Implementation Status: ✅ PRODUCTION READY
+
+**VAD was successfully merged in PR #9** and is fully implemented in the main branch with production-ready performance.
+
+#### 🎯 Performance Achievements
+- **98% Accuracy** achieved on MUSAN dataset at optimal threshold (0.445)
+- **Research-Grade Performance**: Competitive with state-of-the-art VAD systems
+- **Real-time Processing**: Minimal latency overhead suitable for live applications
+- **Noise Robustness**: Advanced SNR filtering and spectral analysis
+
+#### 🏗️ Technical Architecture
+
+**CoreML Model Pipeline:**
+```
+Audio Input → STFT → Encoder → RNN → Enhanced Fallback → VAD Decision
+```
+
+**Key Components:**
+- **`VadManager.swift`**: Complete VAD pipeline with CoreML integration
+- **`VADAudioProcessor.swift`**: Advanced audio processing with SNR filtering, spectral analysis, temporal smoothing
+- **Custom Fallback Algorithm**: Handles PyTorch → CoreML conversion limitations
+
+**Model Sources:**
+- **CoreML Models**: [`alexwengg/coreml_silero_vad`](https://huggingface.co/alexwengg/coreml_silero_vad)
+- **Training Data**: MUSAN dataset (curated subsets)
+  - [`alexwengg/musan_mini50`](https://huggingface.co/datasets/alexwengg/musan_mini50) (50 files)
+  - [`alexwengg/musan_mini100`](https://huggingface.co/datasets/alexwengg/musan_mini100) (100 files)
+  - [`alexwengg/musan_mini2`](https://huggingface.co/datasets/alexwengg/musan_mini2) (CI testing)
+
+#### ⚙️ VAD Configuration
+
+**Optimal Production Configuration:**
+```swift
+VADConfig(
+    threshold: 0.445,             // Optimized for 98% accuracy
+    chunkSize: 512,              // Audio chunk size for processing
+    sampleRate: 16000,           // 16kHz audio processing
+    adaptiveThreshold: true,     // Enable dynamic thresholding
+    minThreshold: 0.1,           // Minimum threshold value
+    maxThreshold: 0.7,           // Maximum threshold value
+    enableSNRFiltering: true,    // SNR-based noise rejection
+    minSNRThreshold: 6.0,        // Aggressive noise filtering
+    useGPU: true                 // Metal Performance Shaders
+)
+```
+
+#### 🔧 Technical Challenges Solved
+
+**PyTorch → CoreML Conversion Issues:**
+- **Challenge**: `conv2d` operations not supported → switched to `conv1d`
+- **Challenge**: Complex STFT/Encoder weights incompatible with CoreML
+- **Solution**: Custom classifier algorithm for unsupported components
+
+**Dataset Limitations:**
+- **Challenge**: Limited VAD datasets with human + ambient audio
+- **Solution**: Curated MUSAN subset with balanced audio types
+
+#### 🚧 Current Status & Next Steps
+
+**✅ Completed:**
+- Complete VAD system implementation
+- CoreML model pipeline with 98% accuracy
+- Advanced audio processing capabilities
+- Production-ready performance optimization
+- Comprehensive testing on MUSAN dataset
+
+**⏳ Pending CLI Integration:**
+- VAD commands not yet exposed through CLI interface
+- Expected commands (from PR design):
+  ```bash
+  swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.445
+  swift run fluidaudio vad-compare --threshold 0.3
+  swift run fluidaudio download --dataset vad
+  ```
+
+#### 📊 VAD Benchmarking
+
+**GitHub Actions Integration:**
+- Automated VAD benchmarking workflow implemented
+- Uses `.github/workflows/vad-benchmark.yml`
+- Tests against MUSAN dataset variants
+
+**Manual Testing:**
+```bash
+# Once CLI integration is complete:
+swift run fluidaudio vad-benchmark --threshold 0.445 --output vad_results.json
+```
+
+#### 🔍 Development Notes
+
+**Library Usage (Available Now):**
+```swift
+import FluidAudio
+
+Task {
+    let vadManager = VadManager(config: vadConfig)
+    try await vadManager.initialize()
+    
+    let audioSamples: [Float] = // your 16kHz audio data
+    let vadResult = try await vadManager.detectVoiceActivity(audioSamples)
+    
+    print("Voice activity: \(vadResult.hasVoice)")
+    print("Confidence: \(vadResult.confidence)")
+}
+```
+
+**Integration with Diarization:**
+VAD is designed to integrate seamlessly with the existing diarization pipeline for enhanced preprocessing and more accurate speaker detection.
+
+**Model Management:**
+- Automatic model download from HuggingFace
+- Auto-recovery for corrupted models (same system as diarization models)
+- Intelligent caching system
+
 ## Development Commands
 
 ### Build Commands
