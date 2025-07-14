@@ -5,7 +5,7 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/8FbwRaDFJR)
-[![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/FluidInference/speaker-diarization-coreml)
+[![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 
 FluidAudio is a Swift framework for on-device speaker diarization and audio processing, designed to maximize performance per watt by leveraging CoreML models exclusively. Optimized for Apple's Neural Engine, it delivers faster and more efficient processing than CPU or GPU alternatives.
 
@@ -105,7 +105,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 - **Noise Robustness**: SNR filtering (6.0 dB threshold), spectral analysis, temporal smoothing
 
 **Model Sources & Datasets:**
-- **CoreML Models**: [`alexwengg/coreml_silero_vad`](https://huggingface.co/alexwengg/coreml_silero_vad)
+- **CoreML Models**: [`alexwengg/coreml_silero_vad`](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **Training Data**: MUSAN dataset (curated subsets)
   - [`alexwengg/musan_mini50`](https://huggingface.co/datasets/alexwengg/musan_mini50) (50 test files)
   - [`alexwengg/musan_mini100`](https://huggingface.co/datasets/alexwengg/musan_mini100) (100 test files)
