@@ -133,7 +133,7 @@ jobs:
           echo "CLUSTERING_TIME=${CLUSTERING_TIME}" >> $GITHUB_OUTPUT
           echo "INFERENCE_TIME=${INFERENCE_TIME}" >> $GITHUB_OUTPUT
 
-      - name: Comment PR with Benchmark Results
+      - name: Update PR with Benchmark Results
         if: always()
         continue-on-error: true
         uses: actions/github-script@v7
@@ -160,6 +160,7 @@ jobs:
             const jerThreshold = parseFloat('${{ env.JER_THRESHOLD }}');
             const rtfThreshold = parseFloat('${{ env.RTF_THRESHOLD }}');
             
+            // Build the comment body
             let comment = '## 🎯 Single File Benchmark Results\n\n';
             comment += `**Test File:** ES2004a (${duration}s audio)\n`;
             comment += `**Overall Result:** ${jobOutcome === 'success' ? '✅ **PASSED**' : '❌ **FAILED**'}\n\n`;
@@ -208,15 +209,40 @@ jobs:
             comment += `*Quality Gates: DER<${derThreshold}%, JER<${jerThreshold}%, RTF<${rtfThreshold}x*`;
 
             try {
-              await github.rest.issues.createComment({
+              // First, try to find existing benchmark comment
+              const comments = await github.rest.issues.listComments({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: comment
               });
-              console.log('✅ Successfully posted benchmark results comment');
+
+              // Look for existing benchmark comment (identified by the header)
+              const existingComment = comments.data.find(comment => 
+                comment.body.includes('## 🎯 Single File Benchmark Results') &&
+                comment.user.type === 'Bot'
+              );
+
+              if (existingComment) {
+                // Update existing comment
+                await github.rest.issues.updateComment({
+                  comment_id: existingComment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Successfully updated existing benchmark comment');
+              } else {
+                // Create new comment if none exists
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Successfully posted new benchmark results comment');
+              }
             } catch (error) {
-              console.error('❌ Failed to post comment:', error.message);
+              console.error('❌ Failed to update/post comment:', error.message);
               if (error.status === 403) {
                 console.error('💡 This is likely a permissions issue. Common causes:');
                 console.error('   - PR from fork without proper permissions');
