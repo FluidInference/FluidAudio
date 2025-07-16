@@ -199,10 +199,6 @@ jobs:
             comment += '- EEND (2019): 25.3% DER\n';
             comment += '- x-vector clustering: 28.7% DER\n';
 
-            comment += '\n\n---\n';
-            comment += `*Automated benchmark using AMI corpus ES2004a test file*\n`;
-            comment += `*Quality Gates: DER<${derThreshold}%, JER<${jerThreshold}%, RTF<${rtfThreshold}x*`;
-
             try {
               // First, try to find existing benchmark comment
               const comments = await github.rest.issues.listComments({
