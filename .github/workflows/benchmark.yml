@@ -155,10 +155,10 @@ jobs:
             const rtfThreshold = parseFloat('${{ env.RTF_THRESHOLD }}');
 
             // Build the comment body
-            let comment = '## 🎯 Single File Benchmark Results\n\n';
+            let comment = '## Single File Benchmark Results\n\n';
             comment += `**Test File:** ES2004a (${duration}s audio)\n`;
-            comment += `**Overall Result:** ${jobOutcome === 'success' ? '✅ **PASSED**' : '❌ **FAILED**'}\n\n`;
-            comment += '### 📊 Accuracy Metrics\n';
+            comment += `**Overall Result:** ${jobOutcome === 'success' ? '✅' : '❌'}\n\n`;
+            comment += '### Accuracy Metrics\n';
             comment += '| Metric | Value |\n';
             comment += '|--------|-------|\n';
             comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% |\n`;
