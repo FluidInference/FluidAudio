@@ -45,11 +45,19 @@ jobs:
           swift --version
           xcodebuild -version
 
+      - name: Clean up any build artifacts
+        run: |
+          rm -rf .swiftpm .build
+          
       - name: Build iOS library (simulator)
         run: |
           set -e
           echo "Building FluidAudio library for iOS Simulator..."
           xcodebuild -scheme FluidAudio -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' build
+
+      - name: Clean up build artifacts
+        run: |
+          rm -rf .swiftpm .build
 
       - name: Build iOS library (device)
         run: |
