@@ -4,11 +4,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-  # NOTE: If you need to support comment posting for fork PRs, consider using:
-  # pull_request_target:
-  #   branches: [ main ]
-  # WARNING: pull_request_target runs in the context of the base repository
-  # and has access to secrets, so it requires careful security considerations.
 
 permissions:
   contents: read

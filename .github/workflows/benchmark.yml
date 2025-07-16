@@ -4,12 +4,6 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
-  # NOTE: If you need to support comment posting for fork PRs, consider using:
-  # pull_request_target:
-  #   branches: [main]
-  #   types: [opened, synchronize, reopened]
-  # WARNING: pull_request_target runs in the context of the base repository
-  # and has access to secrets, so it requires careful security considerations.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
