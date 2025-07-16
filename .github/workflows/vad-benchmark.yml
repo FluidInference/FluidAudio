@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  # NOTE: If you need to support comment posting for fork PRs, consider using:
+  # pull_request_target:
+  #   branches: [ main ]
+  # WARNING: pull_request_target runs in the context of the base repository
+  # and has access to secrets, so it requires careful security considerations.
 
 permissions:
   contents: read
@@ -38,6 +43,23 @@ jobs:
       uses: swift-actions/setup-swift@v2
       with:
         swift-version: "6.1"
+
+    - name: Debug permissions
+      run: |
+        echo "🔍 Debugging GitHub Actions permissions..."
+        echo "Event: ${{ github.event_name }}"
+        echo "Actor: ${{ github.actor }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "Head ref: ${{ github.head_ref }}"
+        echo "Base ref: ${{ github.base_ref }}"
+        echo "Token permissions debug:"
+        gh auth status || echo "No gh auth available"
+        echo "PR details:"
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "  PR number: ${{ github.event.pull_request.number }}"
+          echo "  PR from fork: ${{ github.event.pull_request.head.repo.fork }}"
+          echo "  PR author: ${{ github.event.pull_request.user.login }}"
+        fi
 
     - name: Cache Swift packages
       uses: actions/cache@v4
@@ -223,6 +245,7 @@ jobs:
 
     - name: Comment PR with results
       if: github.event_name == 'pull_request' && always()
+      continue-on-error: true
       uses: actions/github-script@v7
       with:
         script: |
@@ -278,12 +301,26 @@ jobs:
             reportContent += `Could not parse benchmark results: ${error.message}\n\n`;
           }
 
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: reportContent
-          });
+          try {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: reportContent
+            });
+            console.log('✅ Successfully posted VAD benchmark results comment');
+          } catch (error) {
+            console.error('❌ Failed to post comment:', error.message);
+            if (error.status === 403) {
+              console.error('💡 This is likely a permissions issue. Common causes:');
+              console.error('   - PR from fork without proper permissions');
+              console.error('   - GitHub token lacks issues:write permission');
+              console.error('   - Repository settings restrict comment posting');
+              console.error('   - Workflow running on fork without write access');
+            }
+            // Re-throw to let continue-on-error handle it
+            throw error;
+          }
 
     - name: Validate performance thresholds
       if: always()

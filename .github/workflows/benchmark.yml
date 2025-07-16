@@ -4,6 +4,12 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
+  # NOTE: If you need to support comment posting for fork PRs, consider using:
+  # pull_request_target:
+  #   branches: [main]
+  #   types: [opened, synchronize, reopened]
+  # WARNING: pull_request_target runs in the context of the base repository
+  # and has access to secrets, so it requires careful security considerations.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +22,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout code
@@ -25,6 +32,23 @@ jobs:
         uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.1"
+
+      - name: Debug permissions
+        run: |
+          echo "🔍 Debugging GitHub Actions permissions..."
+          echo "Event: ${{ github.event_name }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Head ref: ${{ github.head_ref }}"
+          echo "Base ref: ${{ github.base_ref }}"
+          echo "Token permissions debug:"
+          gh auth status || echo "No gh auth available"
+          echo "PR details:"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "  PR number: ${{ github.event.pull_request.number }}"
+            echo "  PR from fork: ${{ github.event.pull_request.head.repo.fork }}"
+            echo "  PR author: ${{ github.event.pull_request.user.login }}"
+          fi
 
       - name: Build package
         run: swift build
@@ -111,6 +135,7 @@ jobs:
 
       - name: Comment PR with Benchmark Results
         if: always()
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -182,9 +207,22 @@ jobs:
             comment += `*Automated benchmark using AMI corpus ES2004a test file*\n`;
             comment += `*Quality Gates: DER<${derThreshold}%, JER<${jerThreshold}%, RTF<${rtfThreshold}x*`;
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+              console.log('✅ Successfully posted benchmark results comment');
+            } catch (error) {
+              console.error('❌ Failed to post comment:', error.message);
+              if (error.status === 403) {
+                console.error('💡 This is likely a permissions issue. Common causes:');
+                console.error('   - PR from fork without proper permissions');
+                console.error('   - GitHub token lacks issues:write permission');
+                console.error('   - Repository settings restrict comment posting');
+              }
+              // Re-throw to let continue-on-error handle it
+              throw error;
+            }
