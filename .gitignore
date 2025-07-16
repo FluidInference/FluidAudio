@@ -72,7 +72,9 @@ Thumbs.db
 
 
 node_modules/
-FluidAudioTests/
+
+# Dataset files - too large for repository
+Datasets/
 
 threshold*.json
 baseline*.json

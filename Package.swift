@@ -1,4 +1,4 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 5.10
 import PackageDescription
 
 let package = Package(
@@ -22,7 +22,8 @@ let package = Package(
         .target(
             name: "FluidAudio",
             dependencies: [],
-            path: "Sources/FluidAudio"
+            path: "Sources/FluidAudio",
+            exclude: []
         ),
         .executableTarget(
             name: "DiarizationCLI",
@@ -31,10 +32,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FluidAudioTests",
-            dependencies: ["FluidAudio"],
-            resources: [
-                .copy("README_BENCHMARKS.md")
-            ]
+            dependencies: ["FluidAudio"]
         ),
     ]
 )

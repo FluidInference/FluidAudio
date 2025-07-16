@@ -11,18 +11,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build and Test Swift Package
+  build-and-test-macos:
+    name: Build and Test Swift Package (macOS)
     runs-on: macos-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Swift 6.1
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.1"
+      - name: Check versions and directory structure
+        run: |
+          swift --version
+          xcodebuild -version
+          echo "=== Repository structure ==="
+          find . -name "Tests" -type d
+          echo "=== Root directory contents ==="
+          ls -la
+          echo "=== Looking for Tests anywhere ==="
+          find . -name "*Tests*" -type d
+          echo "=== Checking if Tests exists ==="
+          if [ -d "Tests" ]; then
+            echo "Tests directory exists"
+            ls -la Tests/
+          else
+            echo "Tests directory does not exist"
+          fi
 
       - name: Build package
         run: swift build
@@ -30,3 +43,40 @@ jobs:
       - name: Run tests
         run: swift test
         timeout-minutes: 10
+
+  build-ios-library:
+    name: Build FluidAudio Library (iOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check versions and debug
+        run: |
+          swift --version
+          xcodebuild -version
+          echo "=== Root directory contents ==="
+          ls -la
+          echo "=== Package.swift contents ==="
+          cat Package.swift
+
+      - name: Clean up any build artifacts
+        run: |
+          rm -rf .swiftpm .build
+          
+      - name: Build iOS library (simulator)
+        run: |
+          set -e
+          echo "Building FluidAudio library for iOS Simulator..."
+          xcodebuild -scheme FluidAudio -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' build
+
+      - name: Clean up build artifacts
+        run: |
+          rm -rf .swiftpm .build
+
+      - name: Build iOS library (device)
+        run: |
+          set -e
+          echo "Building FluidAudio library for iOS Device..."
+          xcodebuild -scheme FluidAudio -destination 'platform=iOS,name=Any iOS Device' build
