@@ -73,6 +73,9 @@ Thumbs.db
 
 node_modules/
 
+# Dataset files - too large for repository
+Datasets/
+
 threshold*.json
 baseline*.json
 .vscode/
