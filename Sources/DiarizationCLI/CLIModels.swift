@@ -160,6 +160,55 @@ enum CLIError: Error {
     case invalidArgument(String)
 }
 
+// MARK: - Performance Assessment
+
+enum PerformanceAssessment {
+    case excellent       // DER < 20.0% - Competitive with state-of-the-art
+    case good           // DER < 30.0% - Above research baseline
+    case needsWork      // DER < 50.0% - Needs parameter tuning
+    case critical       // DER >= 50.0% - Much worse than expected
+    
+    var exitCode: Int32 {
+        switch self {
+        case .excellent, .good:
+            return 0  // Success
+        case .needsWork:
+            return 1  // Warning/needs work
+        case .critical:
+            return 2  // Critical failure
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .excellent:
+            return "🎉 EXCELLENT: Competitive with state-of-the-art research!"
+        case .good:
+            return "✅ GOOD: Above research baseline, room for optimization"
+        case .needsWork:
+            return "⚠️  NEEDS WORK: Significant room for parameter tuning"
+        case .critical:
+            return "🚨 CRITICAL: Check configuration - results much worse than expected"
+        }
+    }
+    
+    static func assess(der: Float, customThreshold: Float? = nil) -> PerformanceAssessment {
+        if let threshold = customThreshold {
+            return der <= threshold ? .excellent : .needsWork
+        } else {
+            if der < 20.0 {
+                return .excellent
+            } else if der < 30.0 {
+                return .good
+            } else if der < 50.0 {
+                return .needsWork
+            } else {
+                return .critical
+            }
+        }
+    }
+}
+
 // MARK: - VAD Benchmark Data Structures
 
 struct VadTestFile {

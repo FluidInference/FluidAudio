@@ -59,6 +59,7 @@
                     --output <file>         Output results to JSON file
                     --auto-download         Automatically download dataset if not found
                     --iterations <num>      Run multiple iterations for consistency testing [default: 1]
+                    --der-threshold <float> Custom DER threshold for pass/fail (job exits with failure if exceeded)
 
                 NOTE: Benchmark now uses real AMI manual annotations from Tests/ami_public_1.6.2/
                       If annotations are not found, falls back to simplified placeholder.
@@ -91,6 +92,9 @@
 
                     # Run benchmark with custom threshold and save results
                     swift run fluidaudio benchmark --threshold 0.8 --output results.json
+                    
+                    # Run benchmark with custom DER threshold for CI (fails if DER > 25%)
+                    swift run fluidaudio benchmark --der-threshold 25.0 --auto-download
 
                     # Run VAD benchmark with mini50 dataset (default, all files)
                     swift run fluidaudio vad-benchmark
@@ -124,6 +128,7 @@
             var autoDownload = false
             var disableVad = false
             var iterations = 1
+            var derThreshold: Float?
 
             // Parse arguments
             var i = 0
@@ -175,6 +180,11 @@
                         iterations = Int(arguments[i + 1]) ?? 1
                         i += 1
                     }
+                case "--der-threshold":
+                    if i + 1 < arguments.count {
+                        derThreshold = Float(arguments[i + 1])
+                        i += 1
+                    }
                 default:
                     print("⚠️ Unknown option: \(arguments[i])")
                 }
@@ -213,17 +223,18 @@
             }
 
             // Run benchmark based on dataset
+            let assessment: PerformanceAssessment
             switch dataset.lowercased() {
             case "ami-sdm":
-                await BenchmarkRunner.runAMISDMBenchmark(
+                assessment = await BenchmarkRunner.runAMISDMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations)
+                    singleFile: singleFile, iterations: iterations, customThreshold: derThreshold)
             case "ami-ihm":
-                await BenchmarkRunner.runAMIIHMBenchmark(
+                assessment = await BenchmarkRunner.runAMIIHMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations)
+                    singleFile: singleFile, iterations: iterations, customThreshold: derThreshold)
             default:
                 print("❌ Unsupported dataset: \(dataset)")
                 print("💡 Supported datasets: ami-sdm, ami-ihm")
@@ -234,6 +245,15 @@
             print(
                 "\n⏱️ Total benchmark execution time: \(String(format: "%.1f", benchmarkElapsed)) seconds"
             )
+            
+            // Exit with appropriate code based on performance assessment
+            if assessment.exitCode != 0 {
+                print("\n❌ Benchmark failed to meet performance standards")
+                print("💡 Exit code: \(assessment.exitCode)")
+                exit(assessment.exitCode)
+            } else {
+                print("\n✅ Benchmark completed successfully")
+            }
         }
 
         static func downloadDataset(arguments: [String]) async {

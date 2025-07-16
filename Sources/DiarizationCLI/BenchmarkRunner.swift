@@ -9,8 +9,8 @@ struct BenchmarkRunner {
     // MARK: - AMI Benchmark Implementation
     
     static func runAMISDMBenchmark(
-        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1
-    ) async {
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThreshold: Float? = nil
+    ) async -> PerformanceAssessment {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
             "FluidAudioDatasets/ami_official/sdm")
@@ -24,7 +24,7 @@ struct BenchmarkRunner {
                 // Check again after download
                 if !FileManager.default.fileExists(atPath: amiDirectory.path) {
                     print("❌ Failed to download AMI SDM dataset")
-                    return
+                    return .critical
                 }
             } else {
                 print("⚠️ AMI SDM dataset not found")
@@ -38,7 +38,7 @@ struct BenchmarkRunner {
                 print("      4. Place files in: \(amiDirectory.path)")
                 print("   Option 3: Use download command:")
                 print("      swift run fluidaudio download --dataset ami-sdm")
-                return
+                return .critical
             }
         }
 
@@ -140,14 +140,14 @@ struct BenchmarkRunner {
 
         guard processedFiles > 0 else {
             print("❌ No files were processed successfully")
-            return
+            return .critical
         }
 
         let avgDER = totalDER / Float(processedFiles)
         let avgJER = totalJER / Float(processedFiles)
 
         // Print detailed results table
-        ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-SDM")
+        let assessment = ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-SDM", customThreshold: customThreshold)
 
         // Save results if requested
         if let outputFile = outputFile {
@@ -167,11 +167,13 @@ struct BenchmarkRunner {
                 print("⚠️ Failed to save results: \(error)")
             }
         }
+        
+        return assessment
     }
 
     static func runAMIIHMBenchmark(
-        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1
-    ) async {
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThreshold: Float? = nil
+    ) async -> PerformanceAssessment {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
             "FluidAudioDatasets/ami_official/ihm")
@@ -185,7 +187,7 @@ struct BenchmarkRunner {
                 // Check again after download
                 if !FileManager.default.fileExists(atPath: amiDirectory.path) {
                     print("❌ Failed to download AMI IHM dataset")
-                    return
+                    return .critical
                 }
             } else {
                 print("⚠️ AMI IHM dataset not found")
@@ -199,7 +201,7 @@ struct BenchmarkRunner {
                 print("      4. Place files in: \(amiDirectory.path)")
                 print("   Option 3: Use download command:")
                 print("      swift run fluidaudio download --dataset ami-ihm")
-                return
+                return .critical
             }
         }
 
@@ -295,14 +297,14 @@ struct BenchmarkRunner {
 
         guard processedFiles > 0 else {
             print("❌ No files were processed successfully")
-            return
+            return .critical
         }
 
         let avgDER = totalDER / Float(processedFiles)
         let avgJER = totalJER / Float(processedFiles)
 
         // Print detailed results table
-        ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-IHM")
+        let assessment = ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-IHM", customThreshold: customThreshold)
 
         // Save results if requested
         if let outputFile = outputFile {
@@ -322,6 +324,8 @@ struct BenchmarkRunner {
                 print("⚠️ Failed to save results: \(error)")
             }
         }
+        
+        return assessment
     }
 }
 

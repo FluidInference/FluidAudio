@@ -50,8 +50,9 @@ struct ResultsFormatter {
     }
 
     static func printBenchmarkResults(
-        _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String
-    ) {
+        _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String, 
+        customThreshold: Float? = nil
+    ) -> PerformanceAssessment {
         print("\n🏆 \(dataset) Benchmark Results")
         let separator = String(repeating: "=", count: 75)
         print("\(separator)")
@@ -140,15 +141,10 @@ struct ResultsFormatter {
         }
 
         // Performance assessment
-        if avgDER < 20.0 {
-            print("\n🎉 EXCELLENT: Competitive with state-of-the-art research!")
-        } else if avgDER < 30.0 {
-            print("\n✅ GOOD: Above research baseline, room for optimization")
-        } else if avgDER < 50.0 {
-            print("\n⚠️  NEEDS WORK: Significant room for parameter tuning")
-        } else {
-            print("\n🚨 CRITICAL: Check configuration - results much worse than expected")
-        }
+        let assessment = PerformanceAssessment.assess(der: avgDER, customThreshold: customThreshold)
+        print("\n\(assessment.description)")
+        
+        return assessment
     }
 
     /// Print detailed timing breakdown for pipeline stages
