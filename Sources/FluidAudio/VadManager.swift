@@ -24,6 +24,26 @@ public struct VadConfig: Sendable {
     public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)  // Expected speech range (Hz)
 
     public static let `default` = VadConfig()
+    
+    /// Platform-optimized configuration for iOS devices
+    #if os(iOS)
+    public static let iosOptimized = VadConfig(
+        threshold: 0.445,  // Optimized threshold for iOS
+        chunkSize: 512,
+        sampleRate: 16000,
+        modelCacheDirectory: nil,
+        debugMode: false,  // Disable debug mode on iOS for performance
+        adaptiveThreshold: true,
+        minThreshold: 0.1,
+        maxThreshold: 0.7,
+        computeUnits: .cpuAndNeuralEngine,  // Prefer Neural Engine on iOS
+        enableSNRFiltering: true,
+        minSNRThreshold: 6.0,
+        noiseFloorWindow: 100,
+        spectralRolloffThreshold: 0.85,
+        spectralCentroidRange: (200.0, 8000.0)
+    )
+    #endif
 
     public init(
         threshold: Float = 0.3,
@@ -716,10 +736,17 @@ public actor VadManager {
         if let customDirectory = config.modelCacheDirectory {
             directory = customDirectory.appendingPathComponent("vad", isDirectory: true)
         } else {
+            #if os(iOS)
+            // Use Documents directory on iOS for better compatibility with sandboxing
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            directory = documents.appendingPathComponent("FluidAudio/models/vad", isDirectory: true)
+            #else
+            // Use Application Support on macOS
             let appSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory, in: .userDomainMask
             ).first!
             directory = appSupport.appendingPathComponent("FluidAudio/vad", isDirectory: true)
+            #endif
         }
 
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

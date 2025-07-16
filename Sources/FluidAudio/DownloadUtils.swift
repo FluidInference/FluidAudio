@@ -10,7 +10,24 @@ public class DownloadUtils {
         modelName: String,
         outputPath: URL
     ) async throws {
-        try FileManager.default.createDirectory(at: outputPath, withIntermediateDirectories: true)
+        // Create directory with proper error handling for iOS sandboxing
+        do {
+            try FileManager.default.createDirectory(at: outputPath, withIntermediateDirectories: true)
+        } catch {
+            #if os(iOS)
+            // On iOS, provide more context for debugging sandboxing issues
+            throw NSError(
+                domain: "FluidAudioDownloadError",
+                code: 1001,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to create model directory on iOS. Path: \(outputPath.path)",
+                    NSUnderlyingErrorKey: error
+                ]
+            )
+            #else
+            throw error
+            #endif
+        }
 
         let bundleFiles = [
             "model.mil",

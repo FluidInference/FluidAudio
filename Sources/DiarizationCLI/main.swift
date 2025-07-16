@@ -1,3 +1,4 @@
+#if os(macOS)
 import AVFoundation
 import FluidAudio
 import Foundation
@@ -2798,5 +2799,4 @@ private class AMIMeetingsXMLDelegate: NSObject, XMLParserDelegate {
         parsingError = parseError
     }
 }
-
-
+#endif
