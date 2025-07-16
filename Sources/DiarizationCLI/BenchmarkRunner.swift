@@ -116,7 +116,7 @@ struct BenchmarkRunner {
                 let rtf = Float(processingTime) / duration
 
                 print(
-                    "     ✅ DER: \(String(format: "%.1f", metrics.der))%, JER: \(String(format: "%.1f", metrics.jer))%, RTF: \(String(format: "%.2f", rtf))x"
+                    "     ✅ DER: \(String(format: "%.1f%%", metrics.der)), JER: \(String(format: "%.1f%%", metrics.jer)), RTF: \(String(format: "%.2f", rtf))x"
                 )
 
                 benchmarkResults.append(
