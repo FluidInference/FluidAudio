@@ -7,14 +7,26 @@ struct AMIParser {
     
     /// Get ground truth speaker count from AMI meetings.xml
     static func getGroundTruthSpeakerCount(for meetingId: String) -> Int {
-        let possibleLocations = [
-            URL(fileURLWithPath: "Tests/ami_public_1.6.2"),
-            URL(fileURLWithPath: "../Tests/ami_public_1.6.2"),
-            URL(fileURLWithPath: "./Tests/ami_public_1.6.2"),
-            URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Tests/ami_public_1.6.2")
+        // Use the same path resolution logic as loadAMIGroundTruth for consistency
+        let possiblePaths = [
+            // Current working directory - NEW Datasets location (after PR #19)
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+                "Datasets/ami_public_1.6.2"),
+            // Relative to source file - NEW Datasets location  
+            URL(fileURLWithPath: #file).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Datasets/ami_public_1.6.2"),
+            // OLD: Current working directory - Tests location (backward compatibility)
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+                "Tests/ami_public_1.6.2"),
+            // OLD: Relative to source file - Tests location (backward compatibility)
+            URL(fileURLWithPath: #file).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Tests/ami_public_1.6.2"),
+            // OLD: Home directory - Tests location (backward compatibility)
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                "code/FluidAudio/Tests/ami_public_1.6.2"),
         ]
 
-        for location in possibleLocations {
+        for location in possiblePaths {
             let meetingsFile = location.appendingPathComponent("corpusResources/meetings.xml")
             if FileManager.default.fileExists(atPath: meetingsFile.path) {
                 do {
