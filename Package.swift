@@ -22,7 +22,8 @@ let package = Package(
         .target(
             name: "FluidAudio",
             dependencies: [],
-            path: "Sources/FluidAudio"
+            path: "Sources/FluidAudio",
+            exclude: []
         ),
         .executableTarget(
             name: "DiarizationCLI",
