@@ -31,10 +31,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FluidAudioTests",
-            dependencies: ["FluidAudio"],
-            resources: [
-                .copy("README_BENCHMARKS.md")
-            ]
+            dependencies: ["FluidAudio"]
         ),
     ]
 )
