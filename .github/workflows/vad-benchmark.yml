@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
@@ -245,13 +249,13 @@ jobs:
           script: |
             const fs = require('fs');
 
-            let reportContent = '## 🎯 VAD Benchmark Results\n\n';
+            let reportContent = '## VAD Benchmark Results\n\n';
 
             try {
               if (fs.existsSync('vad_benchmark_results.json')) {
                 const results = JSON.parse(fs.readFileSync('vad_benchmark_results.json', 'utf8'));
 
-                reportContent += `### 📊 Performance Comparison\n\n`;
+                reportContent += `### Performance Comparison\n\n`;
                 reportContent += `| Metric | FluidAudio VAD | Industry Standard | Status |\n`;
                 reportContent += `|--------|----------------|-------------------|--------|\n`;
                 reportContent += `| **Accuracy** | ${results.accuracy?.toFixed(1) || 'N/A'}% | 85-90% | ${results.accuracy >= 90 ? '✅' : results.accuracy >= 85 ? '✅' : '⚠️'} |\n`;
@@ -298,10 +302,10 @@ jobs:
       - name: Validate performance thresholds
         if: always()
         run: |
-          echo "🎯 Validating performance thresholds..."
+          echo "Validating performance thresholds..."
 
           if [ -f "vad_benchmark_results.json" ]; then
-            echo "📊 Validating CoreML VAD benchmark results..."
+            echo "Validating CoreML VAD benchmark results..."
 
             # Check if benchmark was skipped
             STATUS=$(grep '"status"' vad_benchmark_results.json | sed 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1 || echo "unknown")
@@ -317,7 +321,7 @@ jobs:
               ACCURACY=$(grep '"accuracy"' vad_benchmark_results.json | sed 's/.*: *\([0-9.]*\).*/\1/' | head -1 || echo "0")
               F1_SCORE=$(grep '"f1_score"' vad_benchmark_results.json | sed 's/.*: *\([0-9.]*\).*/\1/' | head -1 || echo "0")
 
-              echo "📊 Performance Summary:"
+              echo "Performance Summary:"
               echo "   CoreML VAD - F1-Score: ${F1_SCORE}%, Accuracy: ${ACCURACY}%"
 
               # Set performance thresholds (F1-score is primary metric for VAD)
