@@ -51,7 +51,7 @@ struct ResultsFormatter {
 
     static func printBenchmarkResults(
         _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String, 
-        customThreshold: Float? = nil
+        customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
     ) -> PerformanceAssessment {
         print("\n🏆 \(dataset) Benchmark Results")
         let separator = String(repeating: "=", count: 75)
@@ -141,7 +141,8 @@ struct ResultsFormatter {
         }
 
         // Performance assessment
-        let assessment = PerformanceAssessment.assess(der: avgDER, customThreshold: customThreshold)
+        let avgRTF = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
+        let assessment = PerformanceAssessment.assess(der: avgDER, jer: avgJER, rtf: avgRTF, customThresholds: customThresholds)
         print("\n\(assessment.description)")
         
         return assessment

@@ -36,23 +36,35 @@ jobs:
 
       - name: Run Single File Benchmark
         id: benchmark
+        env:
+          DER_THRESHOLD: "20.0"
+          JER_THRESHOLD: "23.0"
+          RTF_THRESHOLD: "0.1"
         run: |
-          echo "🚀 Running single file benchmark..."
+          echo "🚀 Running single file benchmark with strict thresholds..."
+          echo "   DER Threshold: ${DER_THRESHOLD}%"
+          echo "   JER Threshold: ${JER_THRESHOLD}%"
+          echo "   RTF Threshold: ${RTF_THRESHOLD}x"
+          echo ""
           echo "Environment info:"
           uname -a
           swift --version
           echo "Hardware info:"
           sysctl -a | grep machdep.cpu || true
+          echo ""
           
-          swift run fluidaudio benchmark --auto-download --single-file ES2004a --output benchmark_results.json
+          # Run benchmark with strict thresholds
+          # Job will fail if any threshold is exceeded
+          swift run fluidaudio benchmark \
+            --auto-download \
+            --single-file ES2004a \
+            --output benchmark_results.json \
+            --der-threshold ${DER_THRESHOLD} \
+            --jer-threshold ${JER_THRESHOLD} \
+            --rtf-threshold ${RTF_THRESHOLD}
 
-          # Check if results file was generated
-          if [ -f benchmark_results.json ]; then
-            echo "SUCCESS=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Benchmark failed - no results file generated"
-            echo "SUCCESS=false" >> $GITHUB_OUTPUT
-          fi
+          # If we reach here, the benchmark passed all thresholds
+          echo "SUCCESS=true" >> $GITHUB_OUTPUT
         timeout-minutes: 25
 
       - name: Show benchmark_results.json
@@ -117,14 +129,21 @@ jobs:
             const embeddingTime = parseFloat('${{ steps.extract.outputs.EMBEDDING_TIME }}');
             const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
 
+            // Get job outcome from workflow
+            const jobOutcome = '${{ job.status }}';
+            const derThreshold = parseFloat('${{ env.DER_THRESHOLD }}');
+            const jerThreshold = parseFloat('${{ env.JER_THRESHOLD }}');
+            const rtfThreshold = parseFloat('${{ env.RTF_THRESHOLD }}');
+            
             let comment = '## 🎯 Single File Benchmark Results\n\n';
-            comment += `**Test File:** ES2004a (${duration}s audio)\n\n`;
+            comment += `**Test File:** ES2004a (${duration}s audio)\n`;
+            comment += `**Overall Result:** ${jobOutcome === 'success' ? '✅ **PASSED**' : '❌ **FAILED**'}\n\n`;
             comment += '### 📊 Accuracy Metrics\n';
-            comment += '| Metric | Value | Target | Status |\n';
+            comment += '| Metric | Value | Threshold | Status |\n';
             comment += '|--------|-------|--------|---------|\n';
-            comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% | < 30% | ${der < 30 ? '✅' : '❌'} |\n`;
-            comment += `| **JER** (Jaccard Error Rate) | ${jer.toFixed(1)}% | < 25% | ${jer < 25 ? '✅' : '❌'} |\n`;
-            comment += `| **RTF** (Real-Time Factor) | ${rtf.toFixed(2)}x | < 1.0x | ${rtf < 1.0 ? '✅' : '❌'} |\n`;
+            comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% | < ${derThreshold}% | ${der < derThreshold ? '✅' : '❌'} |\n`;
+            comment += `| **JER** (Jaccard Error Rate) | ${jer.toFixed(1)}% | < ${jerThreshold}% | ${jer < jerThreshold ? '✅' : '❌'} |\n`;
+            comment += `| **RTF** (Real-Time Factor) | ${rtf.toFixed(2)}x | < ${rtfThreshold}x | ${rtf < rtfThreshold ? '✅' : '❌'} |\n`;
             comment += `| **Speakers Detected** | ${speakerCount} | ${groundTruthSpeakerCount} | ${speakerCount == groundTruthSpeakerCount ? '✅' : '⚠️'} |\n\n`;
             
             comment += '### ⏱️ Performance Timing\n';
@@ -141,13 +160,17 @@ jobs:
             comment += `**Inference Time**: ${inferenceTime.toFixed(3)}s (${(inferenceTime/totalTime*100).toFixed(1)}% of total)\n`;
             comment += `**Setup Overhead**: ${(modelDownloadTime + modelCompileTime).toFixed(3)}s (${((modelDownloadTime + modelCompileTime)/totalTime*100).toFixed(1)}% of total)\n\n`;
 
-            // Performance assessment
-            if (der < 20) {
-              comment += '🎉 **Excellent Performance!** - Competitive with state-of-the-art research\n';
-            } else if (der < 30) {
-              comment += '✅ **Good Performance** - Meeting target benchmarks\n';
+            // Performance assessment based on actual job outcome
+            if (jobOutcome === 'success') {
+              comment += '🎉 **All Thresholds Met!** - Benchmark passed quality gates\n';
+              comment += `- DER: ${der.toFixed(1)}% < ${derThreshold}% ✅\n`;
+              comment += `- JER: ${jer.toFixed(1)}% < ${jerThreshold}% ✅\n`;
+              comment += `- RTF: ${rtf.toFixed(2)}x < ${rtfThreshold}x ✅\n`;
             } else {
-              comment += '⚠️ **Performance Below Target** - Consider parameter optimization\n';
+              comment += '❌ **Quality Gate Failed** - One or more thresholds exceeded\n';
+              comment += `- DER: ${der.toFixed(1)}% ${der < derThreshold ? '✅' : '❌'} (threshold: ${derThreshold}%)\n`;
+              comment += `- JER: ${jer.toFixed(1)}% ${jer < jerThreshold ? '✅' : '❌'} (threshold: ${jerThreshold}%)\n`;
+              comment += `- RTF: ${rtf.toFixed(2)}x ${rtf < rtfThreshold ? '✅' : '❌'} (threshold: ${rtfThreshold}x)\n`;
             }
 
             comment += '\n📊 **Research Comparison:**\n';
@@ -155,7 +178,9 @@ jobs:
             comment += '- EEND (2019): 25.3% DER\n';
             comment += '- x-vector clustering: 28.7% DER\n';
 
-            comment += '\n\n---\n*Automated benchmark using AMI corpus ES2004a test file*';
+            comment += '\n\n---\n';
+            comment += `*Automated benchmark using AMI corpus ES2004a test file*\n`;
+            comment += `*Quality Gates: DER<${derThreshold}%, JER<${jerThreshold}%, RTF<${rtfThreshold}x*`;
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,

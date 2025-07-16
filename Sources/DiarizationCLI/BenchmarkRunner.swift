@@ -9,7 +9,7 @@ struct BenchmarkRunner {
     // MARK: - AMI Benchmark Implementation
     
     static func runAMISDMBenchmark(
-        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThreshold: Float? = nil
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
     ) async -> PerformanceAssessment {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -147,7 +147,7 @@ struct BenchmarkRunner {
         let avgJER = totalJER / Float(processedFiles)
 
         // Print detailed results table
-        let assessment = ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-SDM", customThreshold: customThreshold)
+        let assessment = ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-SDM", customThresholds: customThresholds)
 
         // Save results if requested
         if let outputFile = outputFile {
@@ -172,7 +172,7 @@ struct BenchmarkRunner {
     }
 
     static func runAMIIHMBenchmark(
-        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThreshold: Float? = nil
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
     ) async -> PerformanceAssessment {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -304,7 +304,7 @@ struct BenchmarkRunner {
         let avgJER = totalJER / Float(processedFiles)
 
         // Print detailed results table
-        let assessment = ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-IHM", customThreshold: customThreshold)
+        let assessment = ResultsFormatter.printBenchmarkResults(benchmarkResults, avgDER: avgDER, avgJER: avgJER, dataset: "AMI-IHM", customThresholds: customThresholds)
 
         // Save results if requested
         if let outputFile = outputFile {

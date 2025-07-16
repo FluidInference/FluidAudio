@@ -60,6 +60,8 @@
                     --auto-download         Automatically download dataset if not found
                     --iterations <num>      Run multiple iterations for consistency testing [default: 1]
                     --der-threshold <float> Custom DER threshold for pass/fail (job exits with failure if exceeded)
+                    --jer-threshold <float> Custom JER threshold for pass/fail (job exits with failure if exceeded)
+                    --rtf-threshold <float> Custom RTF threshold for pass/fail (job exits with failure if exceeded)
 
                 NOTE: Benchmark now uses real AMI manual annotations from Tests/ami_public_1.6.2/
                       If annotations are not found, falls back to simplified placeholder.
@@ -95,6 +97,9 @@
                     
                     # Run benchmark with custom DER threshold for CI (fails if DER > 25%)
                     swift run fluidaudio benchmark --der-threshold 25.0 --auto-download
+                    
+                    # Run benchmark with strict thresholds (DER < 20%, JER < 23%, RTF < 0.1x)
+                    swift run fluidaudio benchmark --der-threshold 20.0 --jer-threshold 23.0 --rtf-threshold 0.1 --auto-download
 
                     # Run VAD benchmark with mini50 dataset (default, all files)
                     swift run fluidaudio vad-benchmark
@@ -129,6 +134,8 @@
             var disableVad = false
             var iterations = 1
             var derThreshold: Float?
+            var jerThreshold: Float?
+            var rtfThreshold: Float?
 
             // Parse arguments
             var i = 0
@@ -185,6 +192,16 @@
                         derThreshold = Float(arguments[i + 1])
                         i += 1
                     }
+                case "--jer-threshold":
+                    if i + 1 < arguments.count {
+                        jerThreshold = Float(arguments[i + 1])
+                        i += 1
+                    }
+                case "--rtf-threshold":
+                    if i + 1 < arguments.count {
+                        rtfThreshold = Float(arguments[i + 1])
+                        i += 1
+                    }
                 default:
                     print("⚠️ Unknown option: \(arguments[i])")
                 }
@@ -229,12 +246,14 @@
                 assessment = await BenchmarkRunner.runAMISDMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations, customThreshold: derThreshold)
+                    singleFile: singleFile, iterations: iterations, 
+                    customThresholds: (derThreshold, jerThreshold, rtfThreshold))
             case "ami-ihm":
                 assessment = await BenchmarkRunner.runAMIIHMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations, customThreshold: derThreshold)
+                    singleFile: singleFile, iterations: iterations, 
+                    customThresholds: (derThreshold, jerThreshold, rtfThreshold))
             default:
                 print("❌ Unsupported dataset: \(dataset)")
                 print("💡 Supported datasets: ami-sdm, ami-ihm")

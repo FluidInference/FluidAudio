@@ -192,19 +192,32 @@ enum PerformanceAssessment {
         }
     }
     
-    static func assess(der: Float, customThreshold: Float? = nil) -> PerformanceAssessment {
-        if let threshold = customThreshold {
-            return der <= threshold ? .excellent : .needsWork
+    static func assess(der: Float, jer: Float, rtf: Float, customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)) -> PerformanceAssessment {
+        // Check custom thresholds first
+        if let derThreshold = customThresholds.der, der > derThreshold {
+            return .needsWork
+        }
+        if let jerThreshold = customThresholds.jer, jer > jerThreshold {
+            return .needsWork
+        }
+        if let rtfThreshold = customThresholds.rtf, rtf > rtfThreshold {
+            return .needsWork
+        }
+        
+        // If custom thresholds are set and all pass, return excellent
+        if customThresholds.der != nil || customThresholds.jer != nil || customThresholds.rtf != nil {
+            return .excellent
+        }
+        
+        // Use default thresholds
+        if der < 20.0 {
+            return .excellent
+        } else if der < 30.0 {
+            return .good
+        } else if der < 50.0 {
+            return .needsWork
         } else {
-            if der < 20.0 {
-                return .excellent
-            } else if der < 30.0 {
-                return .good
-            } else if der < 50.0 {
-                return .needsWork
-            } else {
-                return .critical
-            }
+            return .critical
         }
     }
 }
