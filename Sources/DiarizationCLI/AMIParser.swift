@@ -63,23 +63,34 @@ struct AMIParser {
                 "code/FluidAudio/Tests/ami_public_1.6.2"),
         ]
 
+        // Add comprehensive debug logging for path resolution
+        print("🔍 DEBUG: Searching for AMI annotations in \(possiblePaths.count) locations:")
+        print("   Current working directory: \(FileManager.default.currentDirectoryPath)")
+        
         var amiDir: URL?
-        for path in possiblePaths {
+        for (index, path) in possiblePaths.enumerated() {
             let segmentsDir = path.appendingPathComponent("segments")
             let meetingsFile = path.appendingPathComponent("corpusResources/meetings.xml")
-
-            if FileManager.default.fileExists(atPath: segmentsDir.path)
-                && FileManager.default.fileExists(atPath: meetingsFile.path)
-            {
+            
+            let segmentsExists = FileManager.default.fileExists(atPath: segmentsDir.path)
+            let meetingsExists = FileManager.default.fileExists(atPath: meetingsFile.path)
+            
+            print("   \(index + 1). \(path.path)")
+            print("      - segments/: \(segmentsExists ? "✅" : "❌") (\(segmentsDir.path))")
+            print("      - meetings.xml: \(meetingsExists ? "✅" : "❌") (\(meetingsFile.path))")
+            
+            if segmentsExists && meetingsExists {
+                print("      - 🎯 SELECTED: This path will be used")
                 amiDir = path
                 break
             }
         }
 
         guard let validAmiDir = amiDir else {
-            print("   ⚠️ AMI annotations not found in any expected location")
-            print(
-                "      Using simplified placeholder - real annotations expected in Tests/ami_public_1.6.2/")
+            print("   ❌ AMI annotations not found in any expected location")
+            print("      📁 Expected structure: [path]/segments/ AND [path]/corpusResources/meetings.xml")
+            print("      🔧 To download annotations: visit https://groups.inf.ed.ac.uk/ami/download/")
+            print("      📋 Using simplified placeholder ground truth (causes poor DER performance)")
             return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
         }
 
