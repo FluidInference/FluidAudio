@@ -29,6 +29,11 @@ jobs:
       - name: Build package
         run: swift build
 
+      - name: Download AMI annotations
+        run: |
+          echo "📥 Downloading AMI annotations for CI..."
+          swift run fluidaudio download --dataset ami-annotations
+
       - name: Run Single File Benchmark
         id: benchmark
         run: |

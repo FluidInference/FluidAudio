@@ -76,7 +76,7 @@
                     --debug             Enable debug mode
 
                 DOWNLOAD OPTIONS:
-                    --dataset <name>     Dataset to download (ami-sdm, ami-ihm, vad, vad-mini50, vad-mini100, all) [default: all]
+                    --dataset <name>     Dataset to download (ami-sdm, ami-ihm, ami-annotations, vad, vad-mini50, vad-mini100, all) [default: all]
                     --force             Force re-download even if files exist
 
                 EXAMPLES:
@@ -266,6 +266,8 @@
                 await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: forceDownload)
             case "ami-ihm":
                 await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: forceDownload)
+            case "ami-annotations":
+                await DatasetDownloader.downloadAMIAnnotations(force: forceDownload)
             case "vad":
                 await DatasetDownloader.downloadVadDataset(force: forceDownload, dataset: "mini100")  // Default to mini100 for more test data
             case "vad-mini50":
@@ -278,7 +280,7 @@
                 await DatasetDownloader.downloadVadDataset(force: forceDownload, dataset: "mini100")
             default:
                 print("❌ Unsupported dataset: \(dataset)")
-                print("💡 Supported datasets: ami-sdm, ami-ihm, vad, vad-mini50, vad-mini100, all")
+                print("💡 Supported datasets: ami-sdm, ami-ihm, ami-annotations, vad, vad-mini50, vad-mini100, all")
                 exit(1)
             }
         }
