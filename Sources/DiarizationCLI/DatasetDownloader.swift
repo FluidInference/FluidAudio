@@ -41,6 +41,9 @@ struct DatasetDownloader {
 
         print("📥 Downloading AMI \(variant.displayName) dataset...")
         print("   Target directory: \(variantDir.path)")
+        
+        // Download AMI annotations first (required for proper benchmarking)
+        await downloadAMIAnnotations(force: force)
 
         // Core AMI test set - smaller subset for initial benchmarking
         let commonMeetings: [String]
@@ -162,6 +165,126 @@ struct DatasetDownloader {
             let _ = try AVAudioFile(forReading: url)
             return true
         } catch {
+            return false
+        }
+    }
+    
+    /// Download AMI annotations to working directory for benchmarking
+    static func downloadAMIAnnotations(force: Bool = false) async {
+        let workingDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let annotationsDir = workingDir.appendingPathComponent("Datasets/ami_public_1.6.2")
+        
+        // Check if annotations already exist
+        let segmentsDir = annotationsDir.appendingPathComponent("segments")
+        let meetingsFile = annotationsDir.appendingPathComponent("corpusResources/meetings.xml")
+        
+        if !force && FileManager.default.fileExists(atPath: segmentsDir.path) && 
+           FileManager.default.fileExists(atPath: meetingsFile.path) {
+            print("📂 AMI annotations already exist in \(annotationsDir.path)")
+            return
+        }
+        
+        print("📥 Downloading AMI annotations from Edinburgh University...")
+        print("   Target directory: \(annotationsDir.path)")
+        
+        // Create required directories
+        do {
+            try FileManager.default.createDirectory(at: annotationsDir, withIntermediateDirectories: true)
+        } catch {
+            print("❌ Failed to create annotation directories: \(error)")
+            return
+        }
+        
+        // Download and extract AMI manual annotations v1.6.2
+        let zipURL = "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
+        let zipFile = annotationsDir.appendingPathComponent("ami_public_manual_1.6.2.zip")
+        
+        print("📥 Downloading AMI manual annotations archive (22MB)...")
+        let zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
+        
+        if !zipSuccess {
+            print("❌ Failed to download AMI annotations archive")
+            return
+        }
+        
+        print("📦 Extracting AMI annotations archive...")
+        
+        // Extract the ZIP file using the system unzip command
+        let extractSuccess = await extractZipFile(zipFile, to: annotationsDir)
+        
+        if extractSuccess {
+            // Clean up ZIP file
+            try? FileManager.default.removeItem(at: zipFile)
+            
+            // Verify extraction was successful
+            if FileManager.default.fileExists(atPath: segmentsDir.path) && 
+               FileManager.default.fileExists(atPath: meetingsFile.path) {
+                print("✅ AMI annotations download and extraction completed")
+                print("💡 Benchmarks will now use real AMI ground truth data")
+            } else {
+                print("⚠️ Extraction completed but expected files not found")
+                print("   Looking for: \(segmentsDir.path)")
+                print("   Looking for: \(meetingsFile.path)")
+            }
+        } else {
+            print("❌ Failed to extract AMI annotations archive")
+        }
+    }
+    
+    /// Download a single annotation file from AMI corpus
+    static func downloadAnnotationFile(from urlString: String, to outputPath: URL) async -> Bool {
+        guard let url = URL(string: urlString) else {
+            print("     ⚠️ Invalid URL: \(urlString)")
+            return false
+        }
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    try data.write(to: outputPath)
+                    
+                    // Check if it's a ZIP file or XML file
+                    if outputPath.pathExtension.lowercased() == "zip" {
+                        // For ZIP files, just verify it's not empty
+                        return data.count > 0
+                    } else {
+                        // Verify it's valid XML
+                        if let xmlString = String(data: data, encoding: .utf8), 
+                           xmlString.contains("<?xml") || xmlString.contains("<nite:") {
+                            return true
+                        } else {
+                            print("     ⚠️ Downloaded file is not valid XML")
+                            try? FileManager.default.removeItem(at: outputPath)
+                            return false
+                        }
+                    }
+                } else {
+                    print("     ⚠️ HTTP error: \(httpResponse.statusCode)")
+                    return false
+                }
+            }
+        } catch {
+            print("     ⚠️ Download error: \(error.localizedDescription)")
+            return false
+        }
+        
+        return false
+    }
+    
+    /// Extract ZIP file using system unzip command
+    static func extractZipFile(_ zipFile: URL, to targetDir: URL) async -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-q", "-o", zipFile.path, "-d", targetDir.path]
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            print("     ⚠️ Failed to extract ZIP file: \(error)")
             return false
         }
     }
