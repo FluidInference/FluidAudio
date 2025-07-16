@@ -28,7 +28,10 @@ let package = Package(
         .executableTarget(
             name: "DiarizationCLI",
             dependencies: ["FluidAudio"],
-            path: "Sources/DiarizationCLI"
+            path: "Sources/DiarizationCLI",
+            swiftSettings: [
+                .unsafeFlags(["-parse-as-library"])
+            ]
         ),
         .testTarget(
             name: "FluidAudioTests",
