@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build and Test Swift Package
+  build-and-test-macos:
+    name: Build and Test Swift Package (macOS)
     runs-on: macos-latest
 
     steps:
@@ -30,3 +30,28 @@ jobs:
       - name: Run tests
         run: swift test
         timeout-minutes: 10
+
+  build-ios-library:
+    name: Build FluidAudio Library (iOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Swift 6.1
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Build iOS library (simulator)
+        run: |
+          set -e
+          echo "Building FluidAudio library for iOS Simulator..."
+          xcodebuild -scheme FluidAudio -destination 'platform=iOS Simulator,name=iPhone 16' build
+
+      - name: Build iOS library (device)
+        run: |
+          set -e
+          echo "Building FluidAudio library for iOS Device..."
+          xcodebuild -scheme FluidAudio -destination 'platform=iOS,name=Any iOS Device' build

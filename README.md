@@ -195,6 +195,8 @@ let config = DiarizerConfig(
 
 FluidAudio includes a powerful command-line interface for benchmarking and audio processing:
 
+**Note**: The CLI is available on macOS only. For iOS applications, use the FluidAudio library programmatically as shown in the usage examples above.
+
 ### Benchmark with Beautiful Output
 
 ```bash
