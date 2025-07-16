@@ -19,11 +19,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check versions
+      - name: Check versions and directory structure
         run: |
           swift --version
           xcodebuild -version
-          ls -la Tests/
+          echo "=== Repository structure ==="
+          find . -name "Tests" -type d
+          echo "=== Root directory contents ==="
+          ls -la
+          echo "=== Looking for Tests anywhere ==="
+          find . -name "*Tests*" -type d
+          echo "=== Checking if Tests exists ==="
+          if [ -d "Tests" ]; then
+            echo "Tests directory exists"
+            ls -la Tests/
+          else
+            echo "Tests directory does not exist"
+          fi
 
       - name: Build package
         run: swift build
@@ -40,10 +52,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check versions
+      - name: Check versions and debug
         run: |
           swift --version
           xcodebuild -version
+          echo "=== Root directory contents ==="
+          ls -la
+          echo "=== Package.swift contents ==="
+          cat Package.swift
 
       - name: Clean up any build artifacts
         run: |
