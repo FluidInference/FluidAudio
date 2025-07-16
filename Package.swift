@@ -31,8 +31,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FluidAudioTests",
-            dependencies: ["FluidAudio"],
-            path: "Tests/FluidAudioTests"
+            dependencies: ["FluidAudio"]
         ),
     ]
 )
