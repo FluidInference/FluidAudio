@@ -12,6 +12,19 @@ public struct DiarizerConfig: Sendable {
     public var modelCacheDirectory: URL?
 
     public static let `default` = DiarizerConfig()
+    
+    /// Platform-optimized configuration for iOS devices
+    #if os(iOS)
+    public static let iosOptimized = DiarizerConfig(
+        clusteringThreshold: 0.7,
+        minDurationOn: 1.0,
+        minDurationOff: 0.5,
+        numClusters: -1,
+        minActivityThreshold: 10.0,
+        debugMode: false,
+        modelCacheDirectory: nil
+    )
+    #endif
 
     public init(
         clusteringThreshold: Float = 0.7,
@@ -687,11 +700,18 @@ public final class DiarizerManager: @unchecked Sendable {
         if let customDirectory = config.modelCacheDirectory {
             directory = customDirectory.appendingPathComponent("coreml", isDirectory: true)
         } else {
+            #if os(iOS)
+            // Use Documents directory on iOS for better compatibility with sandboxing
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            directory = documents.appendingPathComponent("FluidAudio/models/diarization", isDirectory: true)
+            #else
+            // Use Application Support on macOS
             let appSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory, in: .userDomainMask
             ).first!
             directory = appSupport.appendingPathComponent(
                 "SpeakerKitModels/coreml", isDirectory: true)
+            #endif
         }
 
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
