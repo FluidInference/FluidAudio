@@ -1,0 +1,301 @@
+#if os(macOS)
+import FluidAudio
+import Foundation
+
+/// Results formatting and output handling
+struct ResultsFormatter {
+    
+    static func printResults(_ result: ProcessingResult) async {
+        print("\n📊 Diarization Results:")
+        print("   Audio File: \(result.audioFile)")
+        print("   Duration: \(String(format: "%.1f", result.durationSeconds))s")
+        print("   Processing Time: \(String(format: "%.1f", result.processingTimeSeconds))s")
+        print("   Real-time Factor: \(String(format: "%.2f", result.realTimeFactor))x")
+        print("   Detected Speakers: \(result.speakerCount)")
+        print("\n🎤 Speaker Segments:")
+
+        for (index, segment) in result.segments.enumerated() {
+            let startTime = formatTime(segment.startTimeSeconds)
+            let endTime = formatTime(segment.endTimeSeconds)
+            let duration = segment.endTimeSeconds - segment.startTimeSeconds
+
+            print(
+                "   \(index + 1). \(segment.speakerId): \(startTime) - \(endTime) (\(String(format: "%.1f", duration))s)"
+            )
+        }
+    }
+
+    static func saveResults(_ result: ProcessingResult, to file: String) async throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+
+        let data = try encoder.encode(result)
+        try data.write(to: URL(fileURLWithPath: file))
+    }
+
+    static func saveBenchmarkResults(_ summary: BenchmarkSummary, to file: String) async throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+
+        let data = try encoder.encode(summary)
+        try data.write(to: URL(fileURLWithPath: file))
+    }
+
+    static func formatTime(_ seconds: Float) -> String {
+        let minutes = Int(seconds) / 60
+        let remainingSeconds = Int(seconds) % 60
+        return String(format: "%02d:%02d", minutes, remainingSeconds)
+    }
+
+    static func printBenchmarkResults(
+        _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String, 
+        customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
+    ) -> PerformanceAssessment {
+        print("\n🏆 \(dataset) Benchmark Results")
+        let separator = String(repeating: "=", count: 75)
+        print("\(separator)")
+
+        // Print table header
+        print("│ Meeting ID    │  DER   │  JER   │  RTF   │ Duration │ Speakers │")
+        let headerSep = "├───────────────┼────────┼────────┼────────┼──────────┼──────────┤"
+        print("\(headerSep)")
+
+        // Print individual results
+        for result in results.sorted(by: { $0.meetingId < $1.meetingId }) {
+            let meetingDisplay = String(result.meetingId.prefix(13)).padding(
+                toLength: 13, withPad: " ", startingAt: 0)
+            let derStr = String(format: "%.1f%%", result.der).padding(
+                toLength: 6, withPad: " ", startingAt: 0)
+            let jerStr = String(format: "%.1f%%", result.jer).padding(
+                toLength: 6, withPad: " ", startingAt: 0)
+            let rtfStr = String(format: "%.2fx", result.realTimeFactor).padding(
+                toLength: 6, withPad: " ", startingAt: 0)
+            let durationStr = formatTime(result.durationSeconds).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
+            let speakerStr = String(result.speakerCount).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
+
+            print(
+                "│ \(meetingDisplay) │ \(derStr) │ \(jerStr) │ \(rtfStr) │ \(durationStr) │ \(speakerStr) │"
+            )
+        }
+
+        // Print summary section
+        let midSep = "├───────────────┼────────┼────────┼────────┼──────────┼──────────┤"
+        print("\(midSep)")
+
+        let avgDerStr = String(format: "%.1f%%", avgDER).padding(
+            toLength: 6, withPad: " ", startingAt: 0)
+        let avgJerStr = String(format: "%.1f%%", avgJER).padding(
+            toLength: 6, withPad: " ", startingAt: 0)
+        let avgRtf = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
+        let avgRtfStr = String(format: "%.2fx", avgRtf).padding(
+            toLength: 6, withPad: " ", startingAt: 0)
+        let totalDuration = results.reduce(0.0) { $0 + $1.durationSeconds }
+        let avgDurationStr = formatTime(totalDuration).padding(
+            toLength: 8, withPad: " ", startingAt: 0)
+        let avgSpeakers = results.reduce(0) { $0 + $1.speakerCount } / results.count
+        let avgSpeakerStr = String(format: "%.1f", Float(avgSpeakers)).padding(
+            toLength: 8, withPad: " ", startingAt: 0)
+
+        print(
+            "│ AVERAGE       │ \(avgDerStr) │ \(avgJerStr) │ \(avgRtfStr) │ \(avgDurationStr) │ \(avgSpeakerStr) │"
+        )
+        let bottomSep = "└───────────────┴────────┴────────┴────────┴──────────┴──────────┘"
+        print("\(bottomSep)")
+
+        // Print threshold comparison metrics if custom thresholds are provided
+        if customThresholds.der != nil || customThresholds.jer != nil || customThresholds.rtf != nil {
+            print("\n📊 Accuracy Metrics")
+            let metricsHeader = "Metric    Value    Threshold    Status"
+            print(metricsHeader)
+            
+            // DER threshold check
+            if let derThreshold = customThresholds.der {
+                let derStatus = avgDER < derThreshold ? "✅" : "❌"
+                print("DER (Diarization Error Rate)    \(String(format: "%.1f", avgDER))%    < \(String(format: "%.1f", derThreshold))%    \(derStatus)")
+            }
+            
+            // JER threshold check
+            if let jerThreshold = customThresholds.jer {
+                let jerStatus = avgJER < jerThreshold ? "✅" : "❌"
+                print("JER (Jaccard Error Rate)    \(String(format: "%.1f", avgJER))%    < \(String(format: "%.1f", jerThreshold))%    \(jerStatus)")
+            }
+            
+            // RTF threshold check
+            if let rtfThreshold = customThresholds.rtf {
+                let rtfStatus = avgRtf < rtfThreshold ? "✅" : "❌"
+                print("RTF (Real-Time Factor)    \(String(format: "%.2f", avgRtf))x    < \(String(format: "%.2f", rtfThreshold))x    \(rtfStatus)")
+            }
+            
+            // Speaker count (always shown if we have thresholds)
+            let avgSpeakersFloat = Float(avgSpeakers)
+            let groundTruthSpeakers = results.first?.groundTruthSpeakerCount ?? 0
+            let speakerStatus = abs(avgSpeakersFloat - Float(groundTruthSpeakers)) < 1.0 ? "✅" : "❌"
+            print("Speakers Detected    \(String(format: "%.0f", avgSpeakersFloat))    \(groundTruthSpeakers)    \(speakerStatus)")
+        }
+
+        // Print detailed timing breakdown
+        printTimingBreakdown(results)
+
+        // Print statistics
+        if results.count > 1 {
+            let derValues = results.map { $0.der }
+            let jerValues = results.map { $0.jer }
+            let derStdDev = calculateStandardDeviation(derValues)
+            let jerStdDev = calculateStandardDeviation(jerValues)
+
+            print("\n📊 Statistical Analysis:")
+            print(
+                "   DER: \(String(format: "%.1f", avgDER))% ± \(String(format: "%.1f", derStdDev))% (min: \(String(format: "%.1f", derValues.min()!))%, max: \(String(format: "%.1f", derValues.max()!))%)"
+            )
+            print(
+                "   JER: \(String(format: "%.1f", avgJER))% ± \(String(format: "%.1f", jerStdDev))% (min: \(String(format: "%.1f", jerValues.min()!))%, max: \(String(format: "%.1f", jerValues.max()!))%)"
+            )
+            print("   Files Processed: \(results.count)")
+            print(
+                "   Total Audio: \(formatTime(totalDuration)) (\(String(format: "%.1f", totalDuration/60)) minutes)"
+            )
+        }
+
+        // Print research comparison
+        print("\n📝 Research Comparison:")
+        print("   Your Results:          \(String(format: "%.1f", avgDER))% DER")
+        print("   Powerset BCE (2023):   18.5% DER")
+        print("   EEND (2019):           25.3% DER")
+        print("   x-vector clustering:   28.7% DER")
+
+        if dataset == "AMI-IHM" {
+            print("   Note: IHM typically achieves 5-10% lower DER than SDM")
+        }
+
+        // Performance assessment
+        let avgRTF = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
+        let assessment = PerformanceAssessment.assess(der: avgDER, jer: avgJER, rtf: avgRTF, customThresholds: customThresholds)
+        print("\n\(assessment.description)")
+        
+        return assessment
+    }
+
+    /// Print detailed timing breakdown for pipeline stages
+    static func printTimingBreakdown(_ results: [BenchmarkResult]) {
+        guard !results.isEmpty else { return }
+
+        print("\n⏱️  Pipeline Timing Breakdown")
+        let timingSeparator = String(repeating: "=", count: 95)
+        print("\(timingSeparator)")
+
+        // Calculate average timings across all results
+        let avgTimings = calculateAverageTimings(results)
+        let totalAvgTime = avgTimings.totalProcessingSeconds
+
+        // Print timing table header
+        print("│ Stage                 │   Time   │ Percentage │ Per Audio Minute │")
+        let timingHeaderSep = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
+        print("\(timingHeaderSep)")
+
+        // Print each stage
+        let stages: [(String, TimeInterval)] = [
+            ("Model Download", avgTimings.modelDownloadSeconds),
+            ("Model Compilation", avgTimings.modelCompilationSeconds),
+            ("Audio Loading", avgTimings.audioLoadingSeconds),
+            ("Segmentation", avgTimings.segmentationSeconds),
+            ("Embedding Extraction", avgTimings.embeddingExtractionSeconds),
+            ("Speaker Clustering", avgTimings.speakerClusteringSeconds),
+            ("Post Processing", avgTimings.postProcessingSeconds),
+        ]
+
+        let totalAudioMinutes = results.reduce(0.0) { $0 + Double($1.durationSeconds) } / 60.0
+
+        for (stageName, stageTime) in stages {
+            let stageNamePadded = stageName.padding(toLength: 19, withPad: " ", startingAt: 0)
+            let timeStr = String(format: "%.3fs", stageTime).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
+            let percentage = totalAvgTime > 0 ? (stageTime / totalAvgTime) * 100 : 0
+            let percentageStr = String(format: "%.1f%%", percentage).padding(
+                toLength: 10, withPad: " ", startingAt: 0)
+            let perMinute = totalAudioMinutes > 0 ? stageTime / totalAudioMinutes : 0
+            let perMinuteStr = String(format: "%.3fs/min", perMinute).padding(
+                toLength: 16, withPad: " ", startingAt: 0)
+
+            print("│ \(stageNamePadded) │ \(timeStr) │ \(percentageStr) │ \(perMinuteStr) │")
+        }
+
+        // Print total
+        let totalSep = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
+        print("\(totalSep)")
+        let totalTimeStr = String(format: "%.3fs", totalAvgTime).padding(
+            toLength: 8, withPad: " ", startingAt: 0)
+        let totalPerMinuteStr = String(
+            format: "%.3fs/min", totalAudioMinutes > 0 ? totalAvgTime / totalAudioMinutes : 0
+        ).padding(toLength: 16, withPad: " ", startingAt: 0)
+        print("│ TOTAL                 │ \(totalTimeStr) │ 100.0%     │ \(totalPerMinuteStr) │")
+
+        let timingBottomSep = "└───────────────────────┴──────────┴────────────┴──────────────────┘"
+        print("\(timingBottomSep)")
+
+        // Print bottleneck analysis
+        let bottleneck = avgTimings.bottleneckStage
+        print("\n🔍 Performance Analysis:")
+        print("   Bottleneck Stage: \(bottleneck)")
+        print(
+            "   Inference Only: \(String(format: "%.3f", avgTimings.totalInferenceSeconds))s (\(String(format: "%.1f", (avgTimings.totalInferenceSeconds / totalAvgTime) * 100))% of total)"
+        )
+        print(
+            "   Setup Overhead: \(String(format: "%.3f", avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", ((avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds) / totalAvgTime) * 100))% of total)"
+        )
+
+        // Optimization suggestions
+        if avgTimings.modelDownloadSeconds > avgTimings.totalInferenceSeconds {
+            print(
+                "\n💡 Optimization Suggestion: Model download is dominating execution time - consider model caching"
+            )
+        } else if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
+            print(
+                "\n💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization"
+            )
+        } else if avgTimings.embeddingExtractionSeconds > avgTimings.segmentationSeconds * 2 {
+            print(
+                "\n💡 Optimization Suggestion: Embedding extraction is the bottleneck - consider batch processing"
+            )
+        }
+    }
+
+    /// Calculate average timings across all benchmark results
+    static func calculateAverageTimings(_ results: [BenchmarkResult]) -> PipelineTimings {
+        let count = Double(results.count)
+        guard count > 0 else { return PipelineTimings() }
+
+        let avgModelDownload = results.reduce(0.0) { $0 + $1.timings.modelDownloadSeconds } / count
+        let avgModelCompilation =
+            results.reduce(0.0) { $0 + $1.timings.modelCompilationSeconds } / count
+        let avgAudioLoading = results.reduce(0.0) { $0 + $1.timings.audioLoadingSeconds } / count
+        let avgSegmentation = results.reduce(0.0) { $0 + $1.timings.segmentationSeconds } / count
+        let avgEmbedding =
+            results.reduce(0.0) { $0 + $1.timings.embeddingExtractionSeconds } / count
+        let avgClustering = results.reduce(0.0) { $0 + $1.timings.speakerClusteringSeconds } / count
+        let avgPostProcessing =
+            results.reduce(0.0) { $0 + $1.timings.postProcessingSeconds } / count
+
+        return PipelineTimings(
+            modelDownloadSeconds: avgModelDownload,
+            modelCompilationSeconds: avgModelCompilation,
+            audioLoadingSeconds: avgAudioLoading,
+            segmentationSeconds: avgSegmentation,
+            embeddingExtractionSeconds: avgEmbedding,
+            speakerClusteringSeconds: avgClustering,
+            postProcessingSeconds: avgPostProcessing
+        )
+    }
+
+    static func calculateStandardDeviation(_ values: [Float]) -> Float {
+        guard values.count > 1 else { return 0.0 }
+        let mean = values.reduce(0, +) / Float(values.count)
+        let variance = values.reduce(0) { $0 + pow($1 - mean, 2) } / Float(values.count - 1)
+        return sqrt(variance)
+    }
+}
+
+#endif
