@@ -16,6 +16,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout code
@@ -26,28 +27,62 @@ jobs:
         with:
           swift-version: "6.1"
 
+      - name: Debug permissions
+        run: |
+          echo "🔍 Debugging GitHub Actions permissions..."
+          echo "Event: ${{ github.event_name }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Head ref: ${{ github.head_ref }}"
+          echo "Base ref: ${{ github.base_ref }}"
+          echo "Token permissions debug:"
+          gh auth status || echo "No gh auth available"
+          echo "PR details:"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "  PR number: ${{ github.event.pull_request.number }}"
+            echo "  PR from fork: ${{ github.event.pull_request.head.repo.fork }}"
+            echo "  PR author: ${{ github.event.pull_request.user.login }}"
+          fi
+
       - name: Build package
         run: swift build
 
+      - name: Download AMI annotations
+        run: |
+          echo "📥 Downloading AMI annotations for CI..."
+          swift run fluidaudio download --dataset ami-annotations
+
       - name: Run Single File Benchmark
         id: benchmark
+        env:
+          DER_THRESHOLD: "20.0"
+          JER_THRESHOLD: "23.0"
+          RTF_THRESHOLD: "0.1"
         run: |
-          echo "🚀 Running single file benchmark..."
+          echo "Running single file benchmark with strict thresholds..."
+          echo "   DER Threshold: ${DER_THRESHOLD}%"
+          echo "   JER Threshold: ${JER_THRESHOLD}%"
+          echo "   RTF Threshold: ${RTF_THRESHOLD}x"
+          echo ""
           echo "Environment info:"
           uname -a
           swift --version
           echo "Hardware info:"
           sysctl -a | grep machdep.cpu || true
-          
-          swift run fluidaudio benchmark --auto-download --single-file ES2004a --output benchmark_results.json
+          echo ""
 
-          # Check if results file was generated
-          if [ -f benchmark_results.json ]; then
-            echo "SUCCESS=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Benchmark failed - no results file generated"
-            echo "SUCCESS=false" >> $GITHUB_OUTPUT
-          fi
+          # Run benchmark with strict thresholds
+          # Job will fail if any threshold is exceeded
+          swift run fluidaudio benchmark \
+            --auto-download \
+            --single-file ES2004a \
+            --output benchmark_results.json \
+            --der-threshold ${DER_THRESHOLD} \
+            --jer-threshold ${JER_THRESHOLD} \
+            --rtf-threshold ${RTF_THRESHOLD}
+
+          # If we reach here, the benchmark passed all thresholds
+          echo "SUCCESS=true" >> $GITHUB_OUTPUT
         timeout-minutes: 25
 
       - name: Show benchmark_results.json
@@ -66,7 +101,7 @@ jobs:
           DURATION=$(jq '.results[0].durationSeconds' benchmark_results.json)
           SPEAKER_COUNT=$(jq '.results[0].speakerCount' benchmark_results.json)
           GROUND_TRUTH_SPEAKER_COUNT=$(jq '.results[0].groundTruthSpeakerCount' benchmark_results.json)
-          
+
           # Extract detailed timing information
           TOTAL_TIME=$(jq '.results[0].timings.totalProcessingSeconds' benchmark_results.json)
           MODEL_DOWNLOAD_TIME=$(jq '.results[0].timings.modelDownloadSeconds' benchmark_results.json)
@@ -76,7 +111,7 @@ jobs:
           EMBEDDING_TIME=$(jq '.results[0].timings.embeddingExtractionSeconds' benchmark_results.json)
           CLUSTERING_TIME=$(jq '.results[0].timings.speakerClusteringSeconds' benchmark_results.json)
           INFERENCE_TIME=$(jq '.results[0].timings.totalInferenceSeconds' benchmark_results.json)
-          
+
           echo "DER=${DER}" >> $GITHUB_OUTPUT
           echo "JER=${JER}" >> $GITHUB_OUTPUT
           echo "RTF=${RTF}" >> $GITHUB_OUTPUT
@@ -92,8 +127,9 @@ jobs:
           echo "CLUSTERING_TIME=${CLUSTERING_TIME}" >> $GITHUB_OUTPUT
           echo "INFERENCE_TIME=${INFERENCE_TIME}" >> $GITHUB_OUTPUT
 
-      - name: Comment PR with Benchmark Results
+      - name: Update PR with Benchmark Results
         if: always()
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -112,16 +148,24 @@ jobs:
             const embeddingTime = parseFloat('${{ steps.extract.outputs.EMBEDDING_TIME }}');
             const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
 
-            let comment = '## 🎯 Single File Benchmark Results\n\n';
-            comment += `**Test File:** ES2004a (${duration}s audio)\n\n`;
-            comment += '### 📊 Accuracy Metrics\n';
-            comment += '| Metric | Value | Target | Status |\n';
-            comment += '|--------|-------|--------|---------|\n';
-            comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% | < 30% | ${der < 30 ? '✅' : '❌'} |\n`;
-            comment += `| **JER** (Jaccard Error Rate) | ${jer.toFixed(1)}% | < 25% | ${jer < 25 ? '✅' : '❌'} |\n`;
-            comment += `| **RTF** (Real-Time Factor) | ${rtf.toFixed(2)}x | < 1.0x | ${rtf < 1.0 ? '✅' : '❌'} |\n`;
-            comment += `| **Speakers Detected** | ${speakerCount} | ${groundTruthSpeakerCount} | ${speakerCount == groundTruthSpeakerCount ? '✅' : '⚠️'} |\n\n`;
-            
+            // Get job outcome from workflow
+            const jobOutcome = '${{ job.status }}';
+            const derThreshold = parseFloat('${{ env.DER_THRESHOLD }}');
+            const jerThreshold = parseFloat('${{ env.JER_THRESHOLD }}');
+            const rtfThreshold = parseFloat('${{ env.RTF_THRESHOLD }}');
+
+            // Build the comment body
+            let comment = '## Single File Benchmark Results\n\n';
+            comment += `**Test File:** ES2004a (${duration}s audio)\n`;
+            comment += `**Overall Result:** ${jobOutcome === 'success' ? '✅' : '❌'}\n\n`;
+            comment += '### Accuracy Metrics\n';
+            comment += '| Metric | Value |\n';
+            comment += '|--------|-------|\n';
+            comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% |\n`;
+            comment += `| **JER** (Jaccard Error Rate) | ${jer.toFixed(1)}% |\n`;
+            comment += `| **RTF** (Real-Time Factor) | ${rtf.toFixed(2)}x |\n`;
+            comment += `| **Speakers Detected** | ${speakerCount}/${groundTruthSpeakerCount} |\n\n`;
+
             comment += '### ⏱️ Performance Timing\n';
             comment += '| Stage | Time (s) | % of Total |\n';
             comment += '|-------|----------|------------|\n';
@@ -132,29 +176,64 @@ jobs:
             comment += `| Embedding Extraction | ${embeddingTime.toFixed(3)} | ${(embeddingTime/totalTime*100).toFixed(1)}% |\n`;
             comment += `| Speaker Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)}% |\n`;
             comment += `| **Total Processing** | **${totalTime.toFixed(3)}** | **100%** |\n\n`;
-            
+
             comment += `**Inference Time**: ${inferenceTime.toFixed(3)}s (${(inferenceTime/totalTime*100).toFixed(1)}% of total)\n`;
             comment += `**Setup Overhead**: ${(modelDownloadTime + modelCompileTime).toFixed(3)}s (${((modelDownloadTime + modelCompileTime)/totalTime*100).toFixed(1)}% of total)\n\n`;
 
-            // Performance assessment
-            if (der < 20) {
-              comment += '🎉 **Excellent Performance!** - Competitive with state-of-the-art research\n';
-            } else if (der < 30) {
-              comment += '✅ **Good Performance** - Meeting target benchmarks\n';
-            } else {
-              comment += '⚠️ **Performance Below Target** - Consider parameter optimization\n';
+            // Performance assessment based on actual job outcome
+            if (jobOutcome !== 'success') {
+              comment += 'One or more thresholds exceeded\n';
+              comment += `DER: ${der.toFixed(1)}% ❌\n`;
+              comment += `JER: ${jer.toFixed(1)}% ❌\n`;
+              comment += `RTF: ${rtf.toFixed(2)}x ❌\n`;
             }
 
-            comment += '\n📊 **Research Comparison:**\n';
+            comment += '\nResearch Comparison:\n';
             comment += '- Powerset BCE (2023): 18.5% DER\n';
             comment += '- EEND (2019): 25.3% DER\n';
             comment += '- x-vector clustering: 28.7% DER\n';
 
-            comment += '\n\n---\n*Automated benchmark using AMI corpus ES2004a test file*';
+            try {
+              // First, try to find existing benchmark comment
+              const comments = await github.rest.issues.listComments({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+              // Look for existing benchmark comment (identified by the header)
+              const existingComment = comments.data.find(comment =>
+                comment.body.includes('## Single File Benchmark Results') &&
+                comment.user.type === 'Bot'
+              );
+
+              if (existingComment) {
+                // Update existing comment
+                await github.rest.issues.updateComment({
+                  comment_id: existingComment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Successfully updated existing benchmark comment');
+              } else {
+                // Create new comment if none exists
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Successfully posted new benchmark results comment');
+              }
+            } catch (error) {
+              console.error('❌ Failed to update/post comment:', error.message);
+              if (error.status === 403) {
+                console.error('💡 This is likely a permissions issue. Common causes:');
+                console.error('   - PR from fork without proper permissions');
+                console.error('   - GitHub token lacks issues:write permission');
+                console.error('   - Repository settings restrict comment posting');
+              }
+              // Re-throw to let continue-on-error handle it
+              throw error;
+            }
