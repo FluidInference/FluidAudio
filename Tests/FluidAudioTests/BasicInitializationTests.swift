@@ -191,11 +191,14 @@ final class CoreMLDiarizerTests: XCTestCase {
         do {
             let modelPaths = try await manager.downloadModels()
 
-            XCTAssertFalse(modelPaths.segmentationPath.isEmpty, "Segmentation path should not be empty")
-            XCTAssertFalse(modelPaths.embeddingPath.isEmpty, "Embedding path should not be empty")
+            XCTAssertFalse(modelPaths.segmentationPath.absoluteString.isEmpty, "Segmentation path should not be empty")
+            XCTAssertFalse(modelPaths.embeddingPath.absoluteString.isEmpty, "Embedding path should not be empty")
 
             // Verify CoreML model directories
-            XCTAssertTrue(modelPaths.segmentationPath.contains("coreml"), "CoreML models should be in coreml directory")
+            XCTAssertTrue(modelPaths.segmentationPath.isFileURL)
+            XCTAssertTrue(modelPaths.embeddingPath.isFileURL)
+            XCTAssertTrue(modelPaths.segmentationPath.absoluteString.contains("coreml"), "CoreML models should be in coreml directory")
+            XCTAssertTrue(modelPaths.embeddingPath.absoluteString.contains("coreml"), "CoreML models should be in coreml directory")
 
         } catch {
             // This may fail in test environment without network access - that's expected

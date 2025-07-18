@@ -177,12 +177,12 @@ final class CITests: XCTestCase {
 
     func testModelPathsStructure() {
         let modelPaths = ModelPaths(
-            segmentationPath: "/path/to/segmentation.mlmodelc",
-            embeddingPath: "/path/to/embedding.mlmodelc"
+            segmentationPath: URL(fileURLWithPath: "/path/to/segmentation.mlmodelc"),
+            embeddingPath: URL(fileURLWithPath: "/path/to/embedding.mlmodelc")
         )
 
-        XCTAssertEqual(modelPaths.segmentationPath, "/path/to/segmentation.mlmodelc")
-        XCTAssertEqual(modelPaths.embeddingPath, "/path/to/embedding.mlmodelc")
+        XCTAssertEqual(modelPaths.segmentationPath.absoluteString, "file:///path/to/segmentation.mlmodelc")
+        XCTAssertEqual(modelPaths.embeddingPath.absoluteString, "file:///path/to/embedding.mlmodelc")
     }
 
     // MARK: - Backend Enum Tests

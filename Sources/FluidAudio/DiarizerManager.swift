@@ -114,6 +114,15 @@ public struct PipelineTimings: Sendable, Codable {
     }
 }
 
+extension Duration {
+
+    /// Converts this duration to a Foundation TimeInterval - i.e. a `Double` number of seconds.
+    ///
+    internal var timeInterval: TimeInterval {
+        self / .seconds(1)
+    }
+}
+
 /// Complete diarization result with consistent speaker IDs and embeddings
 public struct DiarizationResult: Sendable {
     public let segments: [TimedSpeakerSegment]
@@ -168,10 +177,10 @@ public struct SpeakerEmbedding: Sendable {
 }
 
 public struct ModelPaths: Sendable {
-    public let segmentationPath: String
-    public let embeddingPath: String
+    public let segmentationPath: URL
+    public let embeddingPath: URL
 
-    public init(segmentationPath: String, embeddingPath: String) {
+    public init(segmentationPath: URL, embeddingPath: URL) {
         self.segmentationPath = segmentationPath
         self.embeddingPath = embeddingPath
     }
@@ -252,124 +261,51 @@ public final class DiarizerManager: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
     private let config: DiarizerConfig
 
-    // ML models
-    private var segmentationModel: MLModel?
-    private var embeddingModel: MLModel?
-
-    // Timing tracking
-    private var modelDownloadTime: TimeInterval = 0
-    private var modelCompilationTime: TimeInterval = 0
+    private var models: DiarizationModels?
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
     }
 
     public var isAvailable: Bool {
-        return segmentationModel != nil && embeddingModel != nil
+        models != nil
     }
 
     /// Get the initialization timing data
     public var initializationTimings: (downloadTime: TimeInterval, compilationTime: TimeInterval) {
-        return (modelDownloadTime, modelCompilationTime)
+        models.map { ($0.downloadTime.timeInterval, $0.compilationTime.timeInterval) } ?? (0, 0)
     }
 
     public func initialize() async throws {
-        let initStartTime = Date()
+
         logger.info("Initializing diarization system")
 
-        try await cleanupBrokenModels()
+        let initializeDuration = try await ContinuousClock().measure {
+            if let customDirectory = config.modelCacheDirectory {
+                let subdir = customDirectory.appendingPathComponent("coreml", isDirectory: true)
+                self.models = try await .download(to: subdir, logger: logger)
+            } else {
+                self.models = try await .download(logger: logger)
+            }
+        }
 
-        let downloadStartTime = Date()
-        let modelPaths = try await downloadModels()
-        self.modelDownloadTime = Date().timeIntervalSince(downloadStartTime)
-
-        let segmentationURL = URL(fileURLWithPath: modelPaths.segmentationPath)
-        let embeddingURL = URL(fileURLWithPath: modelPaths.embeddingPath)
-
-        let compilationStartTime = Date()
-        try await loadModelsWithAutoRecovery(
-            segmentationURL: segmentationURL, embeddingURL: embeddingURL)
-        self.modelCompilationTime = Date().timeIntervalSince(compilationStartTime)
-
-        let totalInitTime = Date().timeIntervalSince(initStartTime)
+        func format(_ d: Duration) -> String {
+            d.formatted(.time(pattern: .minuteSecond(padMinuteToLength: 0, fractionalSecondsLength: 3)))
+        }
         logger.info(
-            "Diarization system initialized successfully in \(String(format: "%.2f", totalInitTime))s (download: \(String(format: "%.2f", self.modelDownloadTime))s, compilation: \(String(format: "%.2f", self.modelCompilationTime))s)"
+            "Diarization system initialized successfully in \(format(initializeDuration)) (download: \(format(self.models!.downloadTime)), compilation: \(format(self.models!.compilationTime))"
         )
     }
 
-    /// Load models with automatic recovery on compilation failures
-    private func loadModelsWithAutoRecovery(
-        segmentationURL: URL, embeddingURL: URL, maxRetries: Int = 2
-    ) async throws {
-        let config: MLModelConfiguration = MLModelConfiguration()
-        config.computeUnits = .cpuAndNeuralEngine
-
-        let modelPaths = [
-            (url: segmentationURL, name: "segmentation"),
-            (url: embeddingURL, name: "embedding")
-        ]
-
-        let models = try await DownloadUtils.loadModelsWithAutoRecovery(
-            modelPaths: modelPaths,
-            config: config,
-            maxRetries: maxRetries,
-            recoveryAction: {
-                try await self.performModelRecovery(
-                    segmentationURL: segmentationURL, 
-                    embeddingURL: embeddingURL
-                )
-            }
-        )
-
-        self.segmentationModel = models[0]
-        self.embeddingModel = models[1]
-    }
-
-    /// Perform model recovery by deleting and re-downloading corrupted models
-    private func performModelRecovery(segmentationURL: URL, embeddingURL: URL) async throws {
-        try await DownloadUtils.performModelRecovery(
-            modelPaths: [segmentationURL, embeddingURL],
-            downloadAction: {
-                // Re-download segmentation model
-                try await DownloadUtils.downloadMLModelBundle(
-                    repoPath: "bweng/speaker-diarization-coreml",
-                    modelName: "pyannote_segmentation.mlmodelc",
-                    outputPath: segmentationURL
-                )
-
-                // Re-download embedding model
-                try await DownloadUtils.downloadMLModelBundle(
-                    repoPath: "bweng/speaker-diarization-coreml",
-                    modelName: "wespeaker.mlmodelc",
-                    outputPath: embeddingURL
-                )
-            }
-        )
-    }
-
-    private func cleanupBrokenModels() async throws {
-        let modelsDirectory = getModelsDirectory()
-        let segmentationModelPath = modelsDirectory.appendingPathComponent(
-            "pyannote_segmentation.mlmodelc")
-        let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc")
-
-        if FileManager.default.fileExists(atPath: segmentationModelPath.path)
-            && !DownloadUtils.isModelCompiled(at: segmentationModelPath)
-        {
-            logger.info("Removing broken segmentation model")
-            try FileManager.default.removeItem(at: segmentationModelPath)
-        }
-
-        if FileManager.default.fileExists(atPath: embeddingModelPath.path)
-            && !DownloadUtils.isModelCompiled(at: embeddingModelPath)
-        {
-            logger.info("Removing broken embedding model")
-            try FileManager.default.removeItem(at: embeddingModelPath)
-        }
+    /// Download required models for diarization
+    public func downloadModels() async throws -> ModelPaths {
+        try await initialize()
+        return models!.paths
     }
 
     private func getSegments(audioChunk: [Float], chunkSize: Int = 160_000) throws -> [[[Float]]] {
-        guard let segmentationModel = self.segmentationModel else {
+
+        guard let models else {
             throw DiarizerError.notInitialized
         }
 
@@ -381,7 +317,7 @@ public final class DiarizerManager: @unchecked Sendable {
 
         let input = try MLDictionaryFeatureProvider(dictionary: ["audio": audioArray])
 
-        let output = try segmentationModel.prediction(from: input)
+        let output = try models.segmentationModel.prediction(from: input)
 
         guard let segmentOutput = output.featureValue(for: "segments")?.multiArrayValue else {
             throw DiarizerError.processingFailed("Missing segments output from segmentation model")
@@ -612,111 +548,6 @@ public final class DiarizerManager: @unchecked Sendable {
         annotation[finalSegment] = currentSpeaker  // Use raw speaker index
     }
 
-    // MARK: - Model Management
-
-    /// Download required models for diarization
-    public func downloadModels() async throws -> ModelPaths {
-        logger.info("Checking for existing diarization models")
-
-        let modelsDirectory = getModelsDirectory()
-
-        let segmentationModelPath = modelsDirectory.appendingPathComponent(
-            "pyannote_segmentation.mlmodelc"
-        ).path
-        let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc").path
-
-        let segmentationURL = URL(fileURLWithPath: segmentationModelPath)
-        let embeddingURL = URL(fileURLWithPath: embeddingModelPath)
-
-        // Check if models already exist and are valid
-        let segmentationExists =
-            FileManager.default.fileExists(atPath: segmentationModelPath)
-            && DownloadUtils.isModelCompiled(at: segmentationURL)
-        let embeddingExists =
-            FileManager.default.fileExists(atPath: embeddingModelPath)
-            && DownloadUtils.isModelCompiled(at: embeddingURL)
-
-        if segmentationExists && embeddingExists {
-            logger.info("Valid models already exist, skipping download")
-            return ModelPaths(
-                segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
-        }
-
-        logger.info("Downloading missing or invalid diarization models from Hugging Face")
-
-        // Download segmentation model if needed
-        if !segmentationExists {
-            logger.info("Downloading segmentation model bundle from Hugging Face")
-            try await DownloadUtils.downloadMLModelBundle(
-                repoPath: "bweng/speaker-diarization-coreml",
-                modelName: "pyannote_segmentation.mlmodelc",
-                outputPath: segmentationURL
-            )
-            logger.info("Downloaded segmentation model bundle from Hugging Face")
-        }
-
-        // Download embedding model if needed
-        if !embeddingExists {
-            logger.info("Downloading embedding model bundle from Hugging Face")
-            try await DownloadUtils.downloadMLModelBundle(
-                repoPath: "bweng/speaker-diarization-coreml",
-                modelName: "wespeaker.mlmodelc",
-                outputPath: embeddingURL
-            )
-            logger.info("Downloaded embedding model bundle from Hugging Face")
-        }
-
-        logger.info("Successfully ensured diarization models are available")
-        return ModelPaths(
-            segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
-    }
-
-
-    /// Compile a model
-    private func compileModel(at sourceURL: URL, outputPath: URL) async throws -> URL {
-        logger.info("Compiling model from \(sourceURL.lastPathComponent)")
-
-        // Remove existing compiled model if it exists
-        if FileManager.default.fileExists(atPath: outputPath.path) {
-            try FileManager.default.removeItem(at: outputPath)
-        }
-
-        // Compile the model
-        let compiledModelURL = try await MLModel.compileModel(at: sourceURL)
-
-        // Move to the desired location
-        try FileManager.default.moveItem(at: compiledModelURL, to: outputPath)
-
-        // Clean up the source file
-        try? FileManager.default.removeItem(at: sourceURL)
-
-        logger.info("Successfully compiled model to \(outputPath.lastPathComponent)")
-        return outputPath
-    }
-
-    private func getModelsDirectory() -> URL {
-        let directory: URL
-
-        if let customDirectory = config.modelCacheDirectory {
-            directory = customDirectory.appendingPathComponent("coreml", isDirectory: true)
-        } else {
-            #if os(iOS)
-            // Use Documents directory on iOS for better compatibility with sandboxing
-            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            directory = documents.appendingPathComponent("FluidAudio/models/diarization", isDirectory: true)
-            #else
-            // Use Application Support on macOS
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            directory = appSupport.appendingPathComponent(
-                "SpeakerKitModels/coreml", isDirectory: true)
-            #endif
-        }
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.standardizedFileURL
-    }
 
     // MARK: - Audio Analysis
 
@@ -879,7 +710,7 @@ public final class DiarizerManager: @unchecked Sendable {
     public func performCompleteDiarization(_ samples: [Float], sampleRate: Int = 16000) async throws
         -> DiarizationResult
     {
-        guard segmentationModel != nil, embeddingModel != nil else {
+        guard let models else {
             throw DiarizerError.notInitialized
         }
 
@@ -921,8 +752,8 @@ public final class DiarizerManager: @unchecked Sendable {
         let totalProcessingTime = Date().timeIntervalSince(processingStartTime)
 
         let timings = PipelineTimings(
-            modelDownloadSeconds: self.modelDownloadTime,
-            modelCompilationSeconds: self.modelCompilationTime,
+            modelDownloadSeconds: models.downloadTime.timeInterval,
+            modelCompilationSeconds: models.compilationTime.timeInterval,
             audioLoadingSeconds: 0,  // Will be set by CLI
             segmentationSeconds: segmentationTime,
             embeddingExtractionSeconds: embeddingTime,
@@ -969,7 +800,7 @@ public final class DiarizerManager: @unchecked Sendable {
         let embeddingStartTime = Date()
 
         // Step 2: Get embeddings using same segmentation results
-        guard let embeddingModel = self.embeddingModel else {
+        guard let models else {
             throw DiarizerError.notInitialized
         }
 
@@ -977,7 +808,7 @@ public final class DiarizerManager: @unchecked Sendable {
             audioChunk: paddedChunk,
             binarizedSegments: binarizedSegments,
             slidingWindowFeature: slidingFeature,
-            embeddingModel: embeddingModel,
+            embeddingModel: models.embeddingModel,
             sampleRate: sampleRate
         )
 
@@ -1210,8 +1041,7 @@ public final class DiarizerManager: @unchecked Sendable {
 
     /// Clean up resources
     public func cleanup() async {
-        segmentationModel = nil
-        embeddingModel = nil
+        models = nil
         logger.info("Diarization resources cleaned up")
     }
 }
