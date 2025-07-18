@@ -94,10 +94,10 @@
 
                     # Run benchmark with custom threshold and save results
                     swift run fluidaudio benchmark --threshold 0.8 --output results.json
-                    
+
                     # Run benchmark with custom DER threshold for CI (fails if DER > 25%)
                     swift run fluidaudio benchmark --der-threshold 25.0 --auto-download
-                    
+
                     # Run benchmark with strict thresholds (DER < 20%, JER < 23%, RTF < 0.1x)
                     swift run fluidaudio benchmark --der-threshold 20.0 --jer-threshold 23.0 --rtf-threshold 0.1 --auto-download
 
@@ -246,13 +246,13 @@
                 assessment = await BenchmarkRunner.runAMISDMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations, 
+                    singleFile: singleFile, iterations: iterations,
                     customThresholds: (derThreshold, jerThreshold, rtfThreshold))
             case "ami-ihm":
                 assessment = await BenchmarkRunner.runAMIIHMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations, 
+                    singleFile: singleFile, iterations: iterations,
                     customThresholds: (derThreshold, jerThreshold, rtfThreshold))
             default:
                 print("❌ Unsupported dataset: \(dataset)")
@@ -264,7 +264,7 @@
             print(
                 "\n⏱️ Total benchmark execution time: \(String(format: "%.1f", benchmarkElapsed)) seconds"
             )
-            
+
             // Exit with appropriate code based on performance assessment
             if assessment.exitCode != 0 {
                 print("\n❌ Benchmark failed to meet performance standards")
