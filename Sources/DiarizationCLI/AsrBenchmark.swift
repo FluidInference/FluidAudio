@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import OSLog
+import FluidAudio
 
 /// ASR evaluation metrics
 public struct ASRMetrics: Sendable {
@@ -224,37 +225,10 @@ public class ASRBenchmark: @unchecked Sendable {
         )
     }
 
-    /// Transcribe audio in chunks to handle long files
+    /// Transcribe audio - now supports long files through ASRManager chunking
     internal func transcribeAudio(asrManager: ASRManager, audioSamples: [Float]) async throws -> ASRResult {
-        // Simple chunking strategy
-        let chunkSize = 160_000 // 10 seconds at 16kHz
-        var allText = ""
-        var totalProcessingTime: TimeInterval = 0
-
-        for chunkStart in stride(from: 0, to: audioSamples.count, by: chunkSize) {
-            let chunkEnd = min(chunkStart + chunkSize, audioSamples.count)
-            let chunk = Array(audioSamples[chunkStart..<chunkEnd])
-
-            // Pad chunk to required size
-            var paddedChunk = chunk
-            if paddedChunk.count < 160_000 {
-                paddedChunk.append(contentsOf: Array(repeating: 0.0, count: 160_000 - paddedChunk.count))
-            }
-
-            let result = try await asrManager.transcribe(paddedChunk)
-            if !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                if !allText.isEmpty { allText += " " }
-                allText += result.text
-            }
-            totalProcessingTime += result.processingTime
-        }
-
-        return ASRResult(
-            text: allText,
-            confidence: 1.0,
-            duration: TimeInterval(audioSamples.count) / 16000.0,
-            processingTime: totalProcessingTime
-        )
+        // ASRManager now handles chunking internally for audio > 10 seconds
+        return try await asrManager.transcribe(audioSamples)
     }
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization

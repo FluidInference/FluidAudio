@@ -172,7 +172,7 @@ public enum ASRError: Error, LocalizedError {
         case .notInitialized:
             return "ASRManager not initialized. Call initialize() first."
         case .invalidAudioData:
-            return "Invalid audio data provided. Must be between 1-10 seconds of 16kHz audio."
+            return "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
         case .modelLoadFailed:
             return "Failed to load Parakeet CoreML models."
         case .processingFailed(let message):
@@ -1728,11 +1728,18 @@ public final class ASRManager: @unchecked Sendable {
 
         let startTime = Date()
 
-        // Validate and pad audio as before
+        // Handle long audio by chunking
+        if audioSamples.count > 160_000 {
+            // Audio is longer than 10 seconds, use chunking
+            return try await transcribeWithChunking(audioSamples, startTime: startTime)
+        }
+
+        // Validate and pad audio (1-10 seconds)
         guard audioSamples.count >= 16_000 && audioSamples.count <= 160_000 else {
             throw ASRError.invalidAudioData
         }
 
+        // Pad to 10 seconds as the model expects 160k samples
         var paddedAudio = audioSamples
         if paddedAudio.count < 160_000 {
             let padding = Array(repeating: Float(0.0), count: 160_000 - paddedAudio.count)
@@ -2078,6 +2085,182 @@ public final class ASRManager: @unchecked Sendable {
         return cleanedTokens
     }
 
+    /// Transcribe long audio using chunking strategy
+    private func transcribeWithChunking(_ audioSamples: [Float], startTime: Date) async throws -> ASRResult {
+        let chunkSize = 160_000  // 10 seconds at 16kHz
+        let overlap = 16_000     // 1 second overlap to avoid boundary issues
+        let stride = chunkSize - overlap  // 9 seconds stride
+        
+        var allTexts: [String] = []
+        var totalProcessingTime: TimeInterval = 0
+        let audioLength = Double(audioSamples.count) / Double(config.sampleRate)
+        
+        if config.enableDebug {
+            logger.info("🔄 Chunking audio: \(String(format: "%.1f", audioLength))s into \(String(format: "%.1f", Double(chunkSize)/16000.0))s chunks with \(String(format: "%.1f", Double(overlap)/16000.0))s overlap")
+        }
+        
+        // Process audio in chunks
+        var position = 0
+        var chunkIndex = 0
+        var previousChunkLastWords: [String] = []
+        
+        while position < audioSamples.count {
+            let endPosition = min(position + chunkSize, audioSamples.count)
+            let chunkSamples = Array(audioSamples[position..<endPosition])
+            
+            // Pad last chunk if needed
+            var paddedChunk = chunkSamples
+            if paddedChunk.count < chunkSize {
+                let padding = Array(repeating: Float(0.0), count: chunkSize - paddedChunk.count)
+                paddedChunk.append(contentsOf: padding)
+            }
+            
+            if config.enableDebug {
+                let chunkDuration = Double(chunkSamples.count) / 16000.0
+                logger.info("   📄 Chunk \(chunkIndex): \(String(format: "%.1f", Double(position)/16000.0))s - \(String(format: "%.1f", Double(endPosition)/16000.0))s (\(String(format: "%.1f", chunkDuration))s)")
+            }
+            
+            // Don't reset state between chunks - maintain context
+            // Only reset state for the first chunk
+            if chunkIndex == 0 {
+                try await resetState()
+            }
+            
+            // Transcribe chunk
+            let chunkResult = try await transcribeSingleChunk(paddedChunk)
+            
+            // Handle chunk boundary overlap intelligently
+            if chunkIndex > 0 && !chunkResult.text.isEmpty {
+                // Smart deduplication: remove repeated words at the beginning of this chunk
+                // that match the end of the previous chunk
+                let chunkWords = chunkResult.text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                var startIndex = 0
+                
+                // Check for overlapping words and find where new content starts
+                if !previousChunkLastWords.isEmpty && !chunkWords.isEmpty {
+                    // Look for the longest matching sequence at the boundary
+                    for overlapSize in Swift.stride(from: Swift.min(previousChunkLastWords.count, chunkWords.count), through: 1, by: -1) {
+                        let previousEnd = previousChunkLastWords.suffix(overlapSize)
+                        let currentStart = chunkWords.prefix(overlapSize)
+                        
+                        if previousEnd.map({ $0.lowercased() }) == currentStart.map({ $0.lowercased() }) {
+                            startIndex = overlapSize
+                            if config.enableDebug {
+                                logger.info("   🔗 Found \(overlapSize) overlapping words at chunk boundary")
+                            }
+                            break
+                        }
+                    }
+                }
+                
+                // Add only the non-overlapping portion
+                let uniqueWords = chunkWords.dropFirst(startIndex)
+                if !uniqueWords.isEmpty {
+                    allTexts.append(uniqueWords.joined(separator: " "))
+                }
+                
+                // Update previous chunk's last words for next iteration
+                previousChunkLastWords = Array(chunkWords.suffix(10)) // Keep last 10 words
+            } else {
+                // First chunk or empty chunk
+                allTexts.append(chunkResult.text)
+                let words = chunkResult.text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                previousChunkLastWords = Array(words.suffix(10))
+            }
+            
+            totalProcessingTime += chunkResult.processingTime
+            
+            // Move to next chunk
+            position += stride
+            chunkIndex += 1
+            
+            // Break if we've processed the last meaningful chunk
+            if position >= audioSamples.count - 8000 {  // Less than 0.5s remaining
+                break
+            }
+        }
+        
+        // Combine all chunk transcriptions
+        let finalText = allTexts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Apply post-processing to clean up any remaining issues
+        let cleanedText = config.enableAdvancedPostProcessing ?
+            applyAdvancedPostProcessing(finalText, tokenTimings: []) :
+            finalText
+        
+        let totalTime = Date().timeIntervalSince(startTime)
+        
+        if config.enableDebug {
+            logger.info("✅ Chunked transcription complete: \(chunkIndex) chunks, \(String(format: "%.1f", audioLength))s audio, \(String(format: "%.3f", totalTime))s processing")
+        }
+        
+        return ASRResult(
+            text: cleanedText,
+            confidence: 1.0,  // Confidence calculation would need refinement for chunks
+            duration: audioLength,
+            processingTime: totalTime,
+            tokenTimings: nil  // Token timings would need special handling for chunks
+        )
+    }
+    
+    /// Transcribe a single chunk without length validation
+    private func transcribeSingleChunk(_ paddedAudio: [Float]) async throws -> ASRResult {
+        let chunkStartTime = Date()
+        
+        do {
+            // Process through mel-spectrogram and encoder
+            let melSpectrogramInput = try prepareMelSpectrogramInput(paddedAudio)
+            
+            guard let melSpectrogramOutput = try melSpectrogramModel?.prediction(from: melSpectrogramInput, options: predictionOptions ?? MLPredictionOptions()) else {
+                throw ASRError.processingFailed("Mel-spectrogram model failed")
+            }
+            
+            let encoderInput = try prepareEncoderInput(melSpectrogramOutput)
+            guard let encoderOutput = try encoderModel?.prediction(from: encoderInput, options: predictionOptions ?? MLPredictionOptions()) else {
+                throw ASRError.processingFailed("Encoder model failed")
+            }
+            
+            // Get encoder hidden states and sequence length
+            guard let rawEncoderOutput = encoderOutput.featureValue(for: "encoder_output")?.multiArrayValue,
+                  let encoderLength = encoderOutput.featureValue(for: "encoder_output_length")?.multiArrayValue else {
+                throw ASRError.processingFailed("Invalid encoder output")
+            }
+            
+            let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
+            let encoderSequenceLength = encoderLength[0].intValue
+            
+            // Use appropriate decoding method
+            let tokenIds: [Int]
+            if config.enableTDT {
+                tokenIds = try await tdtDecode(
+                    encoderOutput: encoderHiddenStates,
+                    encoderSequenceLength: encoderSequenceLength,
+                    originalAudioSamples: paddedAudio
+                )
+            } else {
+                tokenIds = try await improvedDecodeWithRNNT(encoderOutput, originalAudioSamples: paddedAudio)
+            }
+            
+            // Convert tokens to text
+            let (text, _) = convertTokensWithExistingTimings(tokenIds, timings: [])
+            
+            let processingTime = Date().timeIntervalSince(chunkStartTime)
+            
+            return ASRResult(
+                text: text,
+                confidence: 1.0,
+                duration: Double(paddedAudio.count) / Double(config.sampleRate),
+                processingTime: processingTime,
+                tokenTimings: nil
+            )
+            
+        } catch {
+            logger.error("Chunk transcription failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    
     /// Convert tokens to text using existing timing information from TDT
     private func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (text: String, timings: [TokenTiming]) {
         if tokenIds.isEmpty {
