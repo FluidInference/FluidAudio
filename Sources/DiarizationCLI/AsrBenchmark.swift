@@ -1071,6 +1071,7 @@ extension ASRBenchmark {
             let rtfxValues = results.map { Float(1.0 / $0.rtf) }
             let meanRTFx = rtfxValues.reduce(0, +) / Float(rtfxValues.count)
             let medianRTFx = rtfxValues.sorted()[rtfxValues.count / 2]
+            let sumRTFx = rtfxValues.reduce(0, +)
             
             // Calculate median WER
             let werValues = results.map { $0.metrics.wer }
@@ -1086,6 +1087,7 @@ extension ASRBenchmark {
             print("   Average RTF: \(String(format: "%.3f", totalRTF))x")
             print("   Mean RTFx: \(String(format: "%.1f", meanRTFx))x")
             print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+            print("   Sum RTFx: \(String(format: "%.1f", sumRTFx))x")
             
             // Save results
             let encoder = JSONEncoder()
@@ -1105,7 +1107,8 @@ extension ASRBenchmark {
                     "averageCER": totalCER,
                     "averageRTF": totalRTF,
                     "meanRTFx": meanRTFx,
-                    "medianRTFx": medianRTFx
+                    "medianRTFx": medianRTFx,
+                    "sumRTFx": sumRTFx
                 ],
                 "results": results.map { result in
                     [

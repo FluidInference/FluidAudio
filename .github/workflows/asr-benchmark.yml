@@ -37,13 +37,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-spm-
     
-    # Cache Parakeet Models (1.5GB+)
+    # Cache Parakeet Models (CoreML packages)
     - name: Cache Parakeet Models
       uses: actions/cache@v4
       with:
         path: ~/Library/Application Support/FluidAudio/Models/Parakeet
-        key: ${{ runner.os }}-parakeet-models-v2
+        key: ${{ runner.os }}-parakeet-coreml-models-v4
         restore-keys: |
+          ${{ runner.os }}-parakeet-coreml-models-
           ${{ runner.os }}-parakeet-models-
     
     # Cache LibriSpeech Dataset
@@ -56,6 +57,66 @@ jobs:
     # Build in release mode
     - name: Build
       run: swift build -c release
+    
+    # Download Parakeet models if not cached
+    - name: Download Parakeet Models
+      run: |
+        echo "📥 === PARAKEET MODEL DOWNLOAD STEP ==="
+        echo "📥 Ensuring Parakeet models are available..."
+        MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/Parakeet"
+        mkdir -p "$MODELS_DIR"
+        
+        echo "📍 Models directory: $MODELS_DIR"
+        
+        # Check if all required model files exist
+        if [ -d "$MODELS_DIR/Melspectogram.mlpackage" ] && \
+           [ -d "$MODELS_DIR/ParakeetEncoder.mlpackage" ] && \
+           [ -d "$MODELS_DIR/ParakeetDecoder.mlpackage" ] && \
+           [ -d "$MODELS_DIR/RNNTJoint.mlpackage" ]; then
+          echo "✅ All Parakeet models already cached"
+          ls -la "$MODELS_DIR"
+        else
+          echo "📥 Downloading Parakeet models from Hugging Face..."
+          
+          # Download models from FluidInference/parakeet-tdt-0.6b-v2-coreml
+          # Use git to clone the model repository
+          echo "📥 Cloning model repository..."
+          
+          # Create a temporary directory for cloning
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          
+          # Clone the repository with depth 1 to save time
+          git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
+          
+          # Copy the mlpackage directories to the models directory
+          cd parakeet-tdt-0.6b-v2-coreml
+          for model in "Melspectogram" "ParakeetEncoder" "ParakeetDecoder" "RNNTJoint"; do
+            if [ -d "${model}.mlpackage" ]; then
+              echo "📦 Installing ${model}.mlpackage..."
+              cp -r "${model}.mlpackage" "$MODELS_DIR/"
+              echo "✅ Installed ${model}.mlpackage"
+            else
+              echo "❌ ${model}.mlpackage not found in repository"
+            fi
+          done
+          
+          # Clean up
+          cd /
+          rm -rf "$TEMP_DIR"
+          
+          # Verify all models are present
+          if [ -d "$MODELS_DIR/Melspectogram.mlpackage" ] && \
+             [ -d "$MODELS_DIR/ParakeetEncoder.mlpackage" ] && \
+             [ -d "$MODELS_DIR/ParakeetDecoder.mlpackage" ] && \
+             [ -d "$MODELS_DIR/RNNTJoint.mlpackage" ]; then
+            echo "✅ All Parakeet models downloaded successfully"
+            ls -la "$MODELS_DIR"
+          else
+            echo "❌ Failed to download all required models"
+            echo "SKIP_BENCHMARK=true" >> $GITHUB_ENV
+          fi
+        fi
     
     # Determine test size based on changes
     - name: Determine Test Size
@@ -93,6 +154,7 @@ jobs:
     # Run ASR benchmark on test-clean
     - name: Run ASR Benchmark - test-clean
       id: benchmark_clean
+      if: env.SKIP_BENCHMARK != 'true'
       run: |
         MAX_FILES="${{ steps.test_size.outputs.MAX_FILES }}"
         echo "Running ASR benchmark on test-clean with $MAX_FILES files"
@@ -105,8 +167,9 @@ jobs:
         # Extract comprehensive metrics
         WER_AVG=$(grep "Average WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
         WER_MED=$(grep "Median WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
-        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
-        RTFX_MED=$(grep "Median RTFx:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        # Note: Must match exact pattern "Mean RTFx:" not "Average RTF:"
+        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_clean.log | awk '{print $3}' | tr -d 'x' || echo "0")
+        RTFX_MED=$(grep "Median RTFx:" benchmark_clean.log | awk '{print $3}' | tr -d 'x' || echo "0")
         
         echo "CLEAN_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
         echo "CLEAN_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
@@ -116,6 +179,7 @@ jobs:
     # Run ASR benchmark on test-other
     - name: Run ASR Benchmark - test-other
       id: benchmark_other
+      if: env.SKIP_BENCHMARK != 'true'
       run: |
         MAX_FILES="${{ steps.test_size.outputs.MAX_FILES }}"
         echo "Running ASR benchmark on test-other with $MAX_FILES files"
@@ -128,8 +192,9 @@ jobs:
         # Extract comprehensive metrics
         WER_AVG=$(grep "Average WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
         WER_MED=$(grep "Median WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
-        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
-        RTFX_MED=$(grep "Median RTFx:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        # Note: Must match exact pattern "Mean RTFx:" not "Average RTF:"
+        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_other.log | awk '{print $3}' | tr -d 'x' || echo "0")
+        RTFX_MED=$(grep "Median RTFx:" benchmark_other.log | awk '{print $3}' | tr -d 'x' || echo "0")
         
         echo "OTHER_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
         echo "OTHER_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
@@ -139,11 +204,13 @@ jobs:
     # Calculate combined metrics
     - name: Calculate Combined Metrics
       id: combined
+      if: env.SKIP_BENCHMARK != 'true'
       run: |
         # Calculate RTFx sum if jq is available
         if command -v jq >/dev/null 2>&1; then
-          CLEAN_RTFX_SUM=$(jq '[.results[].rtfx] | add' asr_results_clean.json 2>/dev/null || echo "0")
-          OTHER_RTFX_SUM=$(jq '[.results[].rtfx] | add' asr_results_other.json 2>/dev/null || echo "0")
+          # Convert RTF to RTFx (1/RTF) and sum
+          CLEAN_RTFX_SUM=$(jq '[.results[].rtf | 1 / .] | add' asr_results_clean.json 2>/dev/null || echo "0")
+          OTHER_RTFX_SUM=$(jq '[.results[].rtf | 1 / .] | add' asr_results_other.json 2>/dev/null || echo "0")
           TOTAL_RTFX_SUM=$(echo "$CLEAN_RTFX_SUM + $OTHER_RTFX_SUM" | bc -l || echo "0")
           
           CLEAN_FILES=$(jq '.results | length' asr_results_clean.json 2>/dev/null || echo "0")
@@ -241,12 +308,15 @@ jobs:
             // Check if it contains our identifier
             const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-asr -->');
             
-            // Also check for the header as a fallback
+            // Also check for the header as a fallback (with emoji)
             const hasHeader = comment.body.includes('## 🔊 ASR Benchmark Results');
             
-            console.log(`Comment by ${comment.user.login}: isBot=${isBot}, hasIdentifier=${hasIdentifier}, hasHeader=${hasHeader}`);
+            // Additional fallback: check for header without emoji
+            const hasHeaderNoEmoji = comment.body.includes('## ASR Benchmark Results');
             
-            return isBot && (hasIdentifier || hasHeader);
+            console.log(`Comment by ${comment.user.login}: isBot=${isBot}, hasIdentifier=${hasIdentifier}, hasHeader=${hasHeader}, hasHeaderNoEmoji=${hasHeaderNoEmoji}`);
+            
+            return isBot && (hasIdentifier || hasHeader || hasHeaderNoEmoji);
           });
           
           if (botComment) {
