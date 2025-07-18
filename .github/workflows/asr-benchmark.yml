@@ -1,0 +1,314 @@
+name: ASR Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      max_files:
+        description: 'Number of files to test per dataset'
+        required: false
+        default: '100'
+
+jobs:
+  asr-benchmark:
+    name: ASR Benchmark
+    runs-on: macos-14  # M1 Mac for Neural Engine support
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Swift
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: "6.0"
+    
+    # Cache Swift Package Manager
+    - name: Cache SPM
+      uses: actions/cache@v4
+      with:
+        path: .build
+        key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+        restore-keys: |
+          ${{ runner.os }}-spm-
+    
+    # Cache Parakeet Models (1.5GB+)
+    - name: Cache Parakeet Models
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Application Support/FluidAudio/Models/Parakeet
+        key: ${{ runner.os }}-parakeet-models-v2
+        restore-keys: |
+          ${{ runner.os }}-parakeet-models-
+    
+    # Cache LibriSpeech Dataset
+    - name: Cache LibriSpeech Dataset
+      uses: actions/cache@v4
+      with:
+        path: ~/Documents/Datasets/librispeech
+        key: ${{ runner.os }}-librispeech-test-clean-v1
+    
+    # Build in release mode
+    - name: Build
+      run: swift build -c release
+    
+    # Determine test size based on changes
+    - name: Determine Test Size
+      id: test_size
+      run: |
+        # Default to 100 files for both datasets
+        MAX_FILES="${{ github.event.inputs.max_files || '100' }}"
+        
+        # If only minor changes, do quick test
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          # Fetch the base branch
+          git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} || true
+          
+          # Check what files changed
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
+          
+          # If only docs/configs changed, do minimal test
+          if echo "$CHANGED_FILES" | grep -qE "^(README|\.github/|docs/|.*\.md$)" && \
+             ! echo "$CHANGED_FILES" | grep -qE "^Sources/"; then
+            MAX_FILES=10
+            echo "📝 Only documentation changed, running minimal test"
+          # If ASR-related files changed, do full test
+          elif echo "$CHANGED_FILES" | grep -qE "(ASR|Asr|asr|Parakeet|Transcript)"; then
+            MAX_FILES=100
+            echo "🔍 ASR-related changes detected, running comprehensive test"
+          else
+            MAX_FILES=50
+            echo "📊 Standard test size for general changes"
+          fi
+        fi
+        
+        echo "MAX_FILES=$MAX_FILES" >> $GITHUB_OUTPUT
+        echo "📊 Will test with $MAX_FILES files per dataset"
+    
+    # Run ASR benchmark on test-clean
+    - name: Run ASR Benchmark - test-clean
+      id: benchmark_clean
+      run: |
+        MAX_FILES="${{ steps.test_size.outputs.MAX_FILES }}"
+        echo "Running ASR benchmark on test-clean with $MAX_FILES files"
+        
+        swift run -c release fluidaudio asr-benchmark \
+          --subset test-clean \
+          --max-files "$MAX_FILES" \
+          --output asr_results_clean.json 2>&1 | tee benchmark_clean.log
+        
+        # Extract comprehensive metrics
+        WER_AVG=$(grep "Average WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        WER_MED=$(grep "Median WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        RTFX_MED=$(grep "Median RTFx:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        
+        echo "CLEAN_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
+        echo "CLEAN_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
+        echo "CLEAN_RTFX_MEAN=$RTFX_MEAN" >> $GITHUB_OUTPUT
+        echo "CLEAN_RTFX_MED=$RTFX_MED" >> $GITHUB_OUTPUT
+    
+    # Run ASR benchmark on test-other
+    - name: Run ASR Benchmark - test-other
+      id: benchmark_other
+      run: |
+        MAX_FILES="${{ steps.test_size.outputs.MAX_FILES }}"
+        echo "Running ASR benchmark on test-other with $MAX_FILES files"
+        
+        swift run -c release fluidaudio asr-benchmark \
+          --subset test-other \
+          --max-files "$MAX_FILES" \
+          --output asr_results_other.json 2>&1 | tee benchmark_other.log
+        
+        # Extract comprehensive metrics
+        WER_AVG=$(grep "Average WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        WER_MED=$(grep "Median WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        RTFX_MED=$(grep "Median RTFx:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
+        
+        echo "OTHER_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
+        echo "OTHER_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
+        echo "OTHER_RTFX_MEAN=$RTFX_MEAN" >> $GITHUB_OUTPUT
+        echo "OTHER_RTFX_MED=$RTFX_MED" >> $GITHUB_OUTPUT
+    
+    # Calculate combined metrics
+    - name: Calculate Combined Metrics
+      id: combined
+      run: |
+        # Calculate RTFx sum if jq is available
+        if command -v jq >/dev/null 2>&1; then
+          CLEAN_RTFX_SUM=$(jq '[.results[].rtfx] | add' asr_results_clean.json 2>/dev/null || echo "0")
+          OTHER_RTFX_SUM=$(jq '[.results[].rtfx] | add' asr_results_other.json 2>/dev/null || echo "0")
+          TOTAL_RTFX_SUM=$(echo "$CLEAN_RTFX_SUM + $OTHER_RTFX_SUM" | bc -l || echo "0")
+          
+          CLEAN_FILES=$(jq '.results | length' asr_results_clean.json 2>/dev/null || echo "0")
+          OTHER_FILES=$(jq '.results | length' asr_results_other.json 2>/dev/null || echo "0")
+          TOTAL_FILES=$(echo "$CLEAN_FILES + $OTHER_FILES" | bc -l || echo "0")
+        else
+          TOTAL_RTFX_SUM="N/A"
+          TOTAL_FILES="N/A"
+        fi
+        
+        echo "TOTAL_RTFX_SUM=$TOTAL_RTFX_SUM" >> $GITHUB_OUTPUT
+        echo "TOTAL_FILES=$TOTAL_FILES" >> $GITHUB_OUTPUT
+    
+    # Post comment with combined results
+    - name: Comment PR with ASR Results
+      if: github.event_name == 'pull_request' && always()
+      continue-on-error: true
+      uses: actions/github-script@v7
+      with:
+        script: |
+          // Extract all metrics
+          const cleanWerAvg = '${{ steps.benchmark_clean.outputs.CLEAN_WER_AVG }}' || 'N/A';
+          const cleanWerMed = '${{ steps.benchmark_clean.outputs.CLEAN_WER_MED }}' || 'N/A';
+          const cleanRtfxMean = '${{ steps.benchmark_clean.outputs.CLEAN_RTFX_MEAN }}' || 'N/A';
+          const cleanRtfxMed = '${{ steps.benchmark_clean.outputs.CLEAN_RTFX_MED }}' || 'N/A';
+          
+          const otherWerAvg = '${{ steps.benchmark_other.outputs.OTHER_WER_AVG }}' || 'N/A';
+          const otherWerMed = '${{ steps.benchmark_other.outputs.OTHER_WER_MED }}' || 'N/A';
+          const otherRtfxMean = '${{ steps.benchmark_other.outputs.OTHER_RTFX_MEAN }}' || 'N/A';
+          const otherRtfxMed = '${{ steps.benchmark_other.outputs.OTHER_RTFX_MED }}' || 'N/A';
+          
+          const totalRtfxSum = '${{ steps.combined.outputs.TOTAL_RTFX_SUM }}' || 'N/A';
+          const totalFiles = '${{ steps.combined.outputs.TOTAL_FILES }}' || 'N/A';
+          const filesPerDataset = '${{ steps.test_size.outputs.MAX_FILES }}';
+          
+          let body = `## 🔊 ASR Benchmark Results
+          
+          **Last Updated:** ${new Date().toISOString()}
+          **Configuration:** test-clean & test-other | ${filesPerDataset} files per dataset | Total: ${totalFiles} files
+          
+          ### 📈 Performance Metrics
+          
+          | Metric | test-clean | test-other | Delta | Status |
+          |--------|------------|------------|-------|--------|
+          | **WER Average** | ${cleanWerAvg}% | ${otherWerAvg}% | +${(parseFloat(otherWerAvg) - parseFloat(cleanWerAvg)).toFixed(1)}% | ${parseFloat(cleanWerAvg) < 10 && parseFloat(otherWerAvg) < 20 ? '✅' : '⚠️'} |
+          | **WER Median** | ${cleanWerMed}% | ${otherWerMed}% | +${(parseFloat(otherWerMed) - parseFloat(cleanWerMed)).toFixed(1)}% | ${parseFloat(cleanWerMed) < 5 && parseFloat(otherWerMed) < 10 ? '✅' : '⚠️'} |
+          | **RTFx Mean** | ${cleanRtfxMean}x | ${otherRtfxMean}x | ${(parseFloat(otherRtfxMean) - parseFloat(cleanRtfxMean)).toFixed(1)}x | ${parseFloat(cleanRtfxMean) > 20 && parseFloat(otherRtfxMean) > 20 ? '✅' : '⚠️'} |
+          | **RTFx Median** | ${cleanRtfxMed}x | ${otherRtfxMed}x | ${(parseFloat(otherRtfxMed) - parseFloat(cleanRtfxMed)).toFixed(1)}x | ${parseFloat(cleanRtfxMed) > 20 ? '✅' : '⚠️'} |
+          | **RTFx Sum** | — | — | ${parseFloat(totalRtfxSum).toFixed(1)}x | Total processing capacity |
+          
+          ### 🎯 Performance Targets
+          
+          | Target | Status | Result |
+          |--------|--------|--------|
+          | test-clean WER < 10% | ${parseFloat(cleanWerAvg) < 10 ? '✅ PASS' : '❌ FAIL'} | ${cleanWerAvg}% |
+          | test-other WER < 20% | ${parseFloat(otherWerAvg) < 20 ? '✅ PASS' : '❌ FAIL'} | ${otherWerAvg}% |
+          | Processing > 10x real-time | ${parseFloat(cleanRtfxMean) > 10 && parseFloat(otherRtfxMean) > 10 ? '✅ PASS' : '❌ FAIL'} | ${Math.min(parseFloat(cleanRtfxMean), parseFloat(otherRtfxMean)).toFixed(1)}x minimum |
+          
+          ### 📊 Analysis
+          
+          ${parseFloat(cleanWerAvg) < 6 ? 
+            '🎉 **Excellent**: Research-grade accuracy on clean audio.' :
+            parseFloat(cleanWerAvg) < 10 ? 
+            '✅ **Good**: Meets industry standards for clean audio.' :
+            '⚠️ **Needs Improvement**: Consider model tuning or preprocessing improvements.'
+          }
+          
+          ${(parseFloat(otherWerAvg) - parseFloat(cleanWerAvg)) > 15 ? 
+            '⚠️ **Noise Sensitivity**: Large gap between clean/noisy performance. Consider noise-robust training.' :
+            (parseFloat(otherWerAvg) - parseFloat(cleanWerAvg)) < 10 ?
+            '✅ **Excellent Robustness**: Minimal degradation on noisy audio.' :
+            '📊 **Good Robustness**: Acceptable performance across conditions.'
+          }
+          
+          ---
+          <sub>🤖 Automated ASR benchmark by FluidAudio CI</sub>
+          
+          <!-- fluidaudio-benchmark-asr -->`;
+          
+          // Find and update existing comment
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          console.log(`Found ${comments.length} comments on PR`);
+          
+          const botComment = comments.find(comment => {
+            // Check if it's a bot comment (GitHub Actions bot)
+            const isBot = comment.user.type === 'Bot' || 
+                         comment.user.login === 'github-actions[bot]' ||
+                         comment.user.login.includes('[bot]');
+            
+            // Check if it contains our identifier
+            const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-asr -->');
+            
+            // Also check for the header as a fallback
+            const hasHeader = comment.body.includes('## 🔊 ASR Benchmark Results');
+            
+            console.log(`Comment by ${comment.user.login}: isBot=${isBot}, hasIdentifier=${hasIdentifier}, hasHeader=${hasHeader}`);
+            
+            return isBot && (hasIdentifier || hasHeader);
+          });
+          
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: body
+            });
+            console.log('✅ Updated existing ASR benchmark comment');
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+            console.log('✅ Created new ASR benchmark comment');
+          }
+    
+    # Check performance thresholds
+    - name: Check Performance Thresholds
+      run: |
+        CLEAN_WER="${{ steps.benchmark_clean.outputs.CLEAN_WER_AVG }}"
+        OTHER_WER="${{ steps.benchmark_other.outputs.OTHER_WER_AVG }}"
+        MAX_FILES="${{ steps.test_size.outputs.MAX_FILES }}"
+        
+        # Adaptive thresholds based on test size
+        if [[ "$MAX_FILES" -le 10 ]]; then
+          CLEAN_THRESHOLD=25
+          OTHER_THRESHOLD=35
+        else
+          CLEAN_THRESHOLD=10
+          OTHER_THRESHOLD=20
+        fi
+        
+        FAILED=false
+        
+        if (( $(echo "$CLEAN_WER > $CLEAN_THRESHOLD" | bc -l) )); then
+          echo "❌ test-clean WER too high: $CLEAN_WER% (threshold: $CLEAN_THRESHOLD%)"
+          FAILED=true
+        fi
+        
+        if (( $(echo "$OTHER_WER > $OTHER_THRESHOLD" | bc -l) )); then
+          echo "❌ test-other WER too high: $OTHER_WER% (threshold: $OTHER_THRESHOLD%)"
+          FAILED=true
+        fi
+        
+        if [ "$FAILED" = true ]; then
+          exit 1
+        else
+          echo "✅ ASR benchmark passed all thresholds"
+        fi
+    
+    # Upload results
+    - name: Upload Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: asr-results
+        path: |
+          asr_results_clean.json
+          asr_results_other.json
+          benchmark_clean.log
+          benchmark_other.log

@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Swift 6.1
         uses: swift-actions/setup-swift@v2
@@ -150,14 +152,15 @@ jobs:
 
             // Get job outcome from workflow
             const jobOutcome = '${{ job.status }}';
-            const derThreshold = parseFloat('${{ env.DER_THRESHOLD }}');
-            const jerThreshold = parseFloat('${{ env.JER_THRESHOLD }}');
-            const rtfThreshold = parseFloat('${{ env.RTF_THRESHOLD }}');
+            const derThreshold = parseFloat('${{ env.DER_THRESHOLD }}' || '20.0');
+            const jerThreshold = parseFloat('${{ env.JER_THRESHOLD }}' || '23.0');
+            const rtfThreshold = parseFloat('${{ env.RTF_THRESHOLD }}' || '0.1');
 
             // Build the comment body
             let comment = '## Single File Benchmark Results\n\n';
             comment += `**Test File:** ES2004a (${duration}s audio)\n`;
-            comment += `**Overall Result:** ${jobOutcome === 'success' ? '✅' : '❌'}\n\n`;
+            comment += `**Overall Result:** ${jobOutcome === 'success' ? '✅' : '❌'}\n`;
+            comment += `**Last Updated:** ${new Date().toISOString()}\n\n`;
             comment += '### Accuracy Metrics\n';
             comment += '| Metric | Value |\n';
             comment += '|--------|-------|\n';
@@ -192,6 +195,9 @@ jobs:
             comment += '- Powerset BCE (2023): 18.5% DER\n';
             comment += '- EEND (2019): 25.3% DER\n';
             comment += '- x-vector clustering: 28.7% DER\n';
+            
+            // Add hidden identifier for reliable comment detection
+            comment += '\n<!-- fluidaudio-benchmark-single-file -->';
 
             try {
               // First, try to find existing benchmark comment
@@ -201,11 +207,17 @@ jobs:
                 repo: context.repo.repo,
               });
 
-              // Look for existing benchmark comment (identified by the header)
-              const existingComment = comments.data.find(comment =>
-                comment.body.includes('## Single File Benchmark Results') &&
-                comment.user.type === 'Bot'
-              );
+              // Look for existing benchmark comment (identified by the hidden tag)
+              const existingComment = comments.data.find(comment => {
+                const isBot = comment.user.type === 'Bot' || 
+                             comment.user.login === 'github-actions[bot]' ||
+                             comment.user.login.includes('[bot]');
+                
+                const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-single-file -->');
+                const hasHeader = comment.body.includes('## Single File Benchmark Results');
+                
+                return isBot && (hasIdentifier || hasHeader);
+              });
 
               if (existingComment) {
                 // Update existing comment

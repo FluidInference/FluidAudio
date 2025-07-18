@@ -969,3 +969,165 @@ private func editDistance<T: Equatable>(_ seq1: [T], _ seq2: [T]) -> EditDistanc
         substitutions: substitutions
     )
 }
+
+/// Extension to provide CLI entry point
+@available(macOS 13.0, iOS 16.0, *)
+extension ASRBenchmark {
+    public static func runASRBenchmark(arguments: [String]) async {
+        var subset = "test-clean"
+        var maxFiles: Int?
+        var outputFile = "asr_benchmark_results.json"
+        var modelsDir: String?
+        var debugMode = false
+        var autoDownload = true  // Default to true for automatic download
+        
+        // Parse arguments
+        var i = 0
+        while i < arguments.count {
+            switch arguments[i] {
+            case "--subset":
+                if i + 1 < arguments.count {
+                    subset = arguments[i + 1]
+                    i += 1
+                }
+            case "--max-files":
+                if i + 1 < arguments.count {
+                    maxFiles = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--output":
+                if i + 1 < arguments.count {
+                    outputFile = arguments[i + 1]
+                    i += 1
+                }
+            case "--models-dir":
+                if i + 1 < arguments.count {
+                    modelsDir = arguments[i + 1]
+                    i += 1
+                }
+            case "--debug":
+                debugMode = true
+            case "--auto-download":
+                autoDownload = true
+            case "--no-auto-download":
+                autoDownload = false
+            default:
+                print("⚠️ Unknown option: \(arguments[i])")
+            }
+            i += 1
+        }
+        
+        print("🚀 Starting ASR benchmark on LibriSpeech \(subset)")
+        print("   Max files: \(maxFiles?.description ?? "all")")
+        print("   Output file: \(outputFile)")
+        print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
+        print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
+        
+        let config = ASRBenchmarkConfig(
+            dataset: "librispeech",
+            subset: subset,
+            maxFiles: maxFiles,
+            debugMode: debugMode,
+            longAudioOnly: false
+        )
+        
+        let benchmark = ASRBenchmark(config: config)
+        
+        // Initialize ASR manager with optimized settings for benchmark
+        let asrConfig = ASRConfig(
+            modelCacheDirectory: modelsDir.map { URL(fileURLWithPath: $0) },
+            enableDebug: debugMode,
+            enableTDT: true,  // Enable Token Duration Timing for better accuracy
+            enableAdvancedPostProcessing: true,  // Ensure post-processing is enabled
+            vocabularyConstraints: false,  // Disable vocab constraints for open vocabulary
+            tdtConfig: TDTConfig(
+                durations: [0, 1, 2, 3, 4],
+                includeTokenDuration: true,
+                includeDurationConfidence: false,
+                maxSymbolsPerStep: 2
+            )
+        )
+        
+        let asrManager = ASRManager(config: asrConfig)
+        
+        do {
+            // Initialize ASR system
+            print("🔄 Initializing ASR system...")
+            try await asrManager.initialize()
+            print("✅ ASR system initialized")
+            
+            // Download dataset if requested
+            if autoDownload {
+                try await benchmark.downloadLibriSpeech(subset: subset)
+            }
+            
+            // Run benchmark
+            let results = try await benchmark.runLibriSpeechBenchmark(asrManager: asrManager, subset: subset)
+            
+            // Calculate overall metrics
+            let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
+            let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)
+            let totalRTF = results.reduce(0.0) { $0 + $1.rtf } / Double(results.count)
+            let rtfxValues = results.map { Float(1.0 / $0.rtf) }
+            let meanRTFx = rtfxValues.reduce(0, +) / Float(rtfxValues.count)
+            let medianRTFx = rtfxValues.sorted()[rtfxValues.count / 2]
+            
+            // Calculate median WER
+            let werValues = results.map { $0.metrics.wer }
+            let sortedWER = werValues.sorted()
+            let medianWER = sortedWER[sortedWER.count / 2]
+            
+            // Print summary
+            print("\n📊 Benchmark Results Summary:")
+            print("   Files processed: \(results.count)")
+            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
+            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
+            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            print("   Average RTF: \(String(format: "%.3f", totalRTF))x")
+            print("   Mean RTFx: \(String(format: "%.1f", meanRTFx))x")
+            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+            
+            // Save results
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            
+            let output = [
+                "config": [
+                    "dataset": config.dataset,
+                    "subset": config.subset,
+                    "maxFiles": config.maxFiles as Any,
+                    "debugMode": config.debugMode
+                ],
+                "summary": [
+                    "filesProcessed": results.count,
+                    "averageWER": totalWER,
+                    "medianWER": medianWER,
+                    "averageCER": totalCER,
+                    "averageRTF": totalRTF,
+                    "meanRTFx": meanRTFx,
+                    "medianRTFx": medianRTFx
+                ],
+                "results": results.map { result in
+                    [
+                        "fileName": result.fileName,
+                        "wer": result.metrics.wer,
+                        "cer": result.metrics.cer,
+                        "rtf": result.rtf,
+                        "audioLength": result.audioLength,
+                        "processingTime": result.processingTime
+                    ]
+                }
+            ] as [String: Any]
+            
+            let jsonData = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
+            try jsonData.write(to: URL(fileURLWithPath: outputFile))
+            
+            print("\n💾 Results saved to: \(outputFile)")
+            print("✅ ASR benchmark completed successfully")
+            
+        } catch {
+            print("\n❌ ASR benchmark failed: \(error)")
+            exit(1)
+        }
+    }
+}
