@@ -723,12 +723,12 @@ public final class DiarizerManager: @unchecked Sendable {
     /// Compare similarity between two audio samples using efficient diarization
     public func compareSpeakers(audio1: [Float], audio2: [Float]) async throws -> Float {
         // Use the efficient method to get embeddings
-        let result1 = try await performCompleteDiarization(audio1)
-        let result2 = try await performCompleteDiarization(audio2)
+        async let result1 = performCompleteDiarization(audio1)
+        async let result2 = performCompleteDiarization(audio2)
 
         // Get the most representative embedding from each audio
-        guard let segment1 = result1.segments.max(by: { $0.qualityScore < $1.qualityScore }),
-            let segment2 = result2.segments.max(by: { $0.qualityScore < $1.qualityScore })
+        guard let segment1 = try await result1.segments.max(by: { $0.qualityScore < $1.qualityScore }),
+            let segment2 = try await result2.segments.max(by: { $0.qualityScore < $1.qualityScore })
         else {
             throw DiarizerError.embeddingExtractionFailed
         }
@@ -876,7 +876,7 @@ public final class DiarizerManager: @unchecked Sendable {
 
     /// Perform complete diarization with consistent speaker IDs across chunks
     /// This is more efficient than calling performSegmentation + extractEmbedding separately
-    public func performCompleteDiarization(_ samples: [Float], sampleRate: Int = 16000) async throws
+    public func performCompleteDiarization(_ samples: [Float], sampleRate: Int = 16000) throws
         -> DiarizationResult
     {
         guard segmentationModel != nil, embeddingModel != nil else {
@@ -899,7 +899,7 @@ public final class DiarizerManager: @unchecked Sendable {
             let chunk = Array(samples[chunkStart..<chunkEnd])
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
 
-            let (chunkSegments, chunkTimings) = try await processChunkWithSpeakerTracking(
+            let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
                 chunk,
                 chunkOffset: chunkOffset,
                 speakerDB: &speakerDB,
@@ -951,7 +951,7 @@ public final class DiarizerManager: @unchecked Sendable {
         chunkOffset: Double,
         speakerDB: inout [String: [Float]],
         sampleRate: Int = 16000
-    ) async throws -> ([TimedSpeakerSegment], ChunkTimings) {
+    ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
 
         let chunkSize = sampleRate * 10  // 10 seconds
@@ -1209,7 +1209,7 @@ public final class DiarizerManager: @unchecked Sendable {
     }
 
     /// Clean up resources
-    public func cleanup() async {
+    public func cleanup() {
         segmentationModel = nil
         embeddingModel = nil
         logger.info("Diarization resources cleaned up")
