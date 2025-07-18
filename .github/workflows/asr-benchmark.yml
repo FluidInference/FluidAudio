@@ -164,17 +164,14 @@ jobs:
           --max-files "$MAX_FILES" \
           --output asr_results_clean.json 2>&1 | tee benchmark_clean.log
         
-        # Extract comprehensive metrics
+        # Extract WER metrics only
+        # Note: RTFx metrics are not reliable in virtualized CI environments (GitHub Actions)
+        # due to restricted Neural Engine access. See ASRManager.swift for details.
         WER_AVG=$(grep "Average WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
         WER_MED=$(grep "Median WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
-        # Note: Must match exact pattern "Mean RTFx:" not "Average RTF:"
-        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_clean.log | awk '{print $3}' | tr -d 'x' || echo "0")
-        RTFX_MED=$(grep "Median RTFx:" benchmark_clean.log | awk '{print $3}' | tr -d 'x' || echo "0")
         
         echo "CLEAN_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
         echo "CLEAN_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
-        echo "CLEAN_RTFX_MEAN=$RTFX_MEAN" >> $GITHUB_OUTPUT
-        echo "CLEAN_RTFX_MED=$RTFX_MED" >> $GITHUB_OUTPUT
     
     # Run ASR benchmark on test-other
     - name: Run ASR Benchmark - test-other
@@ -189,39 +186,23 @@ jobs:
           --max-files "$MAX_FILES" \
           --output asr_results_other.json 2>&1 | tee benchmark_other.log
         
-        # Extract comprehensive metrics
+        # Extract WER metrics only
+        # Note: RTFx metrics are not reliable in virtualized CI environments (GitHub Actions)
+        # due to restricted Neural Engine access. See ASRManager.swift for details.
         WER_AVG=$(grep "Average WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
         WER_MED=$(grep "Median WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
-        # Note: Must match exact pattern "Mean RTFx:" not "Average RTF:"
-        RTFX_MEAN=$(grep "Mean RTFx:" benchmark_other.log | awk '{print $3}' | tr -d 'x' || echo "0")
-        RTFX_MED=$(grep "Median RTFx:" benchmark_other.log | awk '{print $3}' | tr -d 'x' || echo "0")
         
         echo "OTHER_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
         echo "OTHER_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
-        echo "OTHER_RTFX_MEAN=$RTFX_MEAN" >> $GITHUB_OUTPUT
-        echo "OTHER_RTFX_MED=$RTFX_MED" >> $GITHUB_OUTPUT
     
     # Calculate combined metrics
     - name: Calculate Combined Metrics
       id: combined
       if: env.SKIP_BENCHMARK != 'true'
       run: |
-        # Calculate RTFx sum if jq is available
-        if command -v jq >/dev/null 2>&1; then
-          # Convert RTF to RTFx (1/RTF) and sum
-          CLEAN_RTFX_SUM=$(jq '[.results[].rtf | 1 / .] | add' asr_results_clean.json 2>/dev/null || echo "0")
-          OTHER_RTFX_SUM=$(jq '[.results[].rtf | 1 / .] | add' asr_results_other.json 2>/dev/null || echo "0")
-          TOTAL_RTFX_SUM=$(echo "$CLEAN_RTFX_SUM + $OTHER_RTFX_SUM" | bc -l || echo "0")
-          
-          CLEAN_FILES=$(jq '.results | length' asr_results_clean.json 2>/dev/null || echo "0")
-          OTHER_FILES=$(jq '.results | length' asr_results_other.json 2>/dev/null || echo "0")
-          TOTAL_FILES=$(echo "$CLEAN_FILES + $OTHER_FILES" | bc -l || echo "0")
-        else
-          TOTAL_RTFX_SUM="N/A"
-          TOTAL_FILES="N/A"
-        fi
+        # Count files
+        TOTAL_FILES=$(( ${{ steps.test_size.outputs.MAX_FILES }} * 2 ))
         
-        echo "TOTAL_RTFX_SUM=$TOTAL_RTFX_SUM" >> $GITHUB_OUTPUT
         echo "TOTAL_FILES=$TOTAL_FILES" >> $GITHUB_OUTPUT
     
     # Post comment with combined results
@@ -234,15 +215,10 @@ jobs:
           // Extract all metrics
           const cleanWerAvg = '${{ steps.benchmark_clean.outputs.CLEAN_WER_AVG }}' || 'N/A';
           const cleanWerMed = '${{ steps.benchmark_clean.outputs.CLEAN_WER_MED }}' || 'N/A';
-          const cleanRtfxMean = '${{ steps.benchmark_clean.outputs.CLEAN_RTFX_MEAN }}' || 'N/A';
-          const cleanRtfxMed = '${{ steps.benchmark_clean.outputs.CLEAN_RTFX_MED }}' || 'N/A';
           
           const otherWerAvg = '${{ steps.benchmark_other.outputs.OTHER_WER_AVG }}' || 'N/A';
           const otherWerMed = '${{ steps.benchmark_other.outputs.OTHER_WER_MED }}' || 'N/A';
-          const otherRtfxMean = '${{ steps.benchmark_other.outputs.OTHER_RTFX_MEAN }}' || 'N/A';
-          const otherRtfxMed = '${{ steps.benchmark_other.outputs.OTHER_RTFX_MED }}' || 'N/A';
           
-          const totalRtfxSum = '${{ steps.combined.outputs.TOTAL_RTFX_SUM }}' || 'N/A';
           const totalFiles = '${{ steps.combined.outputs.TOTAL_FILES }}' || 'N/A';
           const filesPerDataset = '${{ steps.test_size.outputs.MAX_FILES }}';
           
@@ -257,9 +233,6 @@ jobs:
           |--------|------------|------------|-------|--------|
           | **WER Average** | ${cleanWerAvg}% | ${otherWerAvg}% | +${(parseFloat(otherWerAvg) - parseFloat(cleanWerAvg)).toFixed(1)}% | ${parseFloat(cleanWerAvg) < 10 && parseFloat(otherWerAvg) < 20 ? '✅' : '⚠️'} |
           | **WER Median** | ${cleanWerMed}% | ${otherWerMed}% | +${(parseFloat(otherWerMed) - parseFloat(cleanWerMed)).toFixed(1)}% | ${parseFloat(cleanWerMed) < 5 && parseFloat(otherWerMed) < 10 ? '✅' : '⚠️'} |
-          | **RTFx Mean** | ${cleanRtfxMean}x | ${otherRtfxMean}x | ${(parseFloat(otherRtfxMean) - parseFloat(cleanRtfxMean)).toFixed(1)}x | ${parseFloat(cleanRtfxMean) > 20 && parseFloat(otherRtfxMean) > 20 ? '✅' : '⚠️'} |
-          | **RTFx Median** | ${cleanRtfxMed}x | ${otherRtfxMed}x | ${(parseFloat(otherRtfxMed) - parseFloat(cleanRtfxMed)).toFixed(1)}x | ${parseFloat(cleanRtfxMed) > 20 ? '✅' : '⚠️'} |
-          | **RTFx Sum** | — | — | ${parseFloat(totalRtfxSum).toFixed(1)}x | Total processing capacity |
           
           ### 🎯 Performance Targets
           
@@ -267,7 +240,6 @@ jobs:
           |--------|--------|--------|
           | test-clean WER < 10% | ${parseFloat(cleanWerAvg) < 10 ? '✅ PASS' : '❌ FAIL'} | ${cleanWerAvg}% |
           | test-other WER < 20% | ${parseFloat(otherWerAvg) < 20 ? '✅ PASS' : '❌ FAIL'} | ${otherWerAvg}% |
-          | Processing > 10x real-time | ${parseFloat(cleanRtfxMean) > 10 && parseFloat(otherRtfxMean) > 10 ? '✅ PASS' : '❌ FAIL'} | ${Math.min(parseFloat(cleanRtfxMean), parseFloat(otherRtfxMean)).toFixed(1)}x minimum |
           
           ### 📊 Analysis
           
@@ -284,6 +256,16 @@ jobs:
             '✅ **Excellent Robustness**: Minimal degradation on noisy audio.' :
             '📊 **Good Robustness**: Acceptable performance across conditions.'
           }
+          
+          ### ⚡ Performance Note
+          
+          **RTFx (Real-Time Factor) benchmarking is not available in CI environments.**
+          
+          GitHub Actions runners use virtualized M1 Macs where Neural Engine access is severely restricted, resulting in ~7x slower performance compared to bare metal. Local benchmarks on physical Apple Silicon show:
+          - **M1/M2 Mac**: ~21x real-time (21x faster than real-time)
+          - **GitHub Actions**: ~3x real-time (virtualization overhead)
+          
+          For accurate performance benchmarking, please run locally on Apple Silicon hardware.
           
           ---
           <sub>🤖 Automated ASR benchmark by FluidAudio CI</sub>

@@ -126,6 +126,19 @@ public class ASRBenchmark: @unchecked Sendable {
 
     /// Run ASR benchmark on LibriSpeech
     public func runLibriSpeechBenchmark(asrManager: ASRManager, subset: String = "test-clean") async throws -> [ASRBenchmarkResult] {
+        // Check if running in release mode and warn if not
+        #if DEBUG
+        print("")
+        print("⚠️  WARNING: Running in DEBUG mode!")
+        print("⚠️  Performance will be significantly slower (~2x).")
+        print("⚠️  For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
+        print("")
+        // Add a small delay so user sees the warning
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        #else
+        print("✅ Running in RELEASE mode - optimal performance")
+        #endif
+        
         // Ensure dataset is downloaded
         try await downloadLibriSpeech(subset: subset)
 
@@ -171,7 +184,7 @@ public class ASRBenchmark: @unchecked Sendable {
                 let result = try await processLibriSpeechFile(asrManager: asrManager, file: audioFile)
                 results.append(result)
 
-                print("   WER: \(String(format: "%.1f", result.metrics.wer * 100))%, RTF: \(String(format: "%.3f", result.rtf))x, Duration: \(String(format: "%.1f", result.audioLength))s")
+                print("   WER: \(String(format: "%.1f", result.metrics.wer * 100))%, RTF: \(String(format: "%.3f", result.rtf))x, RTFx: \(String(format: "%.1f", 1.0/result.rtf))x, Duration: \(String(format: "%.1f", result.audioLength))s")
 
                 // Show text comparison for all files (always visible for better analysis)
                 printTextComparison(result: result, maxLength: 150, showFileNumber: index + 1)
@@ -322,6 +335,11 @@ public class ASRBenchmark: @unchecked Sendable {
 
         🎯 ASR Benchmark Results Summary
         =====================================
+        #if DEBUG
+        ⚠️  Mode: DEBUG (slow performance)
+        #else
+        ✅ Mode: RELEASE (optimal performance)
+        #endif
         Dataset: \(config.dataset.uppercased()) \(config.subset)
         Files Processed: \(totalFiles)
         Total Audio: \(String(format: "%.1f", totalAudioTime / 60)) minutes
@@ -1033,18 +1051,21 @@ extension ASRBenchmark {
         
         let benchmark = ASRBenchmark(config: config)
         
-        // Initialize ASR manager with optimized settings for benchmark
+        // Initialize ASR manager with fast benchmark preset
         let asrConfig = ASRConfig(
+            maxSymbolsPerFrame: 3,
             modelCacheDirectory: modelsDir.map { URL(fileURLWithPath: $0) },
             enableDebug: debugMode,
-            enableTDT: true,  // Enable Token Duration Timing for better accuracy
-            enableAdvancedPostProcessing: true,  // Ensure post-processing is enabled
-            vocabularyConstraints: false,  // Disable vocab constraints for open vocabulary
+            realtimeMode: false,
+            chunkSizeMs: 2000,
+            enableTDT: true,
+            enableAdvancedPostProcessing: true,
+            vocabularyConstraints: false,
             tdtConfig: TDTConfig(
                 durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
                 includeDurationConfidence: false,
-                maxSymbolsPerStep: 2
+                maxSymbolsPerStep: 3
             )
         )
         
@@ -1080,6 +1101,11 @@ extension ASRBenchmark {
             
             // Print summary
             print("\n📊 Benchmark Results Summary:")
+            #if DEBUG
+            print("   ⚠️  Mode: DEBUG (slow performance)")
+            #else
+            print("   ✅ Mode: RELEASE (optimal performance)")
+            #endif
             print("   Files processed: \(results.count)")
             print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
             print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
@@ -1113,6 +1139,8 @@ extension ASRBenchmark {
                 "results": results.map { result in
                     [
                         "fileName": result.fileName,
+                        "hypothesis": result.hypothesis,
+                        "reference": result.reference,
                         "wer": result.metrics.wer,
                         "cer": result.metrics.cer,
                         "rtf": result.rtf,
