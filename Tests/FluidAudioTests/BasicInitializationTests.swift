@@ -47,14 +47,14 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertFalse(manager.isAvailable, "Manager should not be available before initialization")
     }
 
-    func testNotInitializedErrors() async {
+    func testNotInitializedErrors() {
         let testSamples = Array(repeating: Float(0.5), count: 16000)
         let config = DiarizerConfig()
         let manager = DiarizerManager(config: config)
 
         // Test diarization fails when not initialized
         do {
-            _ = try await manager.performCompleteDiarization(testSamples, sampleRate: 16000)
+            _ = try manager.performCompleteDiarization(testSamples, sampleRate: 16000)
             XCTFail("Should have thrown notInitialized error")
         } catch DiarizerError.notInitialized {
             // Expected error
@@ -151,12 +151,12 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertFalse(manager.validateEmbedding(smallEmbedding), "Small magnitude embedding should fail validation")
     }
 
-    func testCleanup() async {
+    func testCleanup() {
         let config = DiarizerConfig()
         let manager = DiarizerManager(config: config)
 
         // Test cleanup doesn't crash
-        await manager.cleanup()
+        manager.cleanup()
         XCTAssertFalse(manager.isAvailable, "Manager should not be available after cleanup")
     }
 
@@ -254,13 +254,13 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
             let testSamples = Array(repeating: Float(0.5), count: 16000)
 
             do {
-                let result = try await diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
+                let result = try diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
                 print("✅ CoreML diarization completed, found \(result.segments.count) segments")
             } catch {
                 print("ℹ️  Segmentation test completed (may need more realistic audio): \(error)")
             }
 
-            await diarizer.cleanup()
+            diarizer.cleanup()
 
         } catch {
             // This is expected in test environment - models might not download
