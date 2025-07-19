@@ -230,4 +230,67 @@ public class DownloadUtils {
 
         return missingModels
     }
+    
+    /// Download vocabulary file synchronously for compatibility with non-async contexts
+    public static func downloadVocabularySync(from urlString: String, to destinationPath: URL) throws {
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        let data = try Data(contentsOf: url)
+        try data.write(to: destinationPath)
+    }
+    
+    /// Download Parakeet ASR models if they don't exist
+    public static func downloadParakeetModelsIfNeeded(to modelsDirectory: URL) async throws {
+        // Model names and their expected locations
+        let models = [
+            ("Melspectogram", modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")),
+            ("ParakeetEncoder", modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")),
+            ("ParakeetDecoder", modelsDirectory.appendingPathComponent("ParakeetDecoder.mlmodelc")),
+            ("RNNTJoint", modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc"))
+        ]
+        
+        // Check which models are missing
+        var missingModels: [String] = []
+        for (name, path) in models {
+            if !FileManager.default.fileExists(atPath: path.path) {
+                missingModels.append(name)
+                print("Model \(name) not found at \(path.path)")
+            }
+        }
+        
+        // Download missing models
+        if !missingModels.isEmpty {
+            print("Downloading \(missingModels.count) missing Parakeet models...")
+            
+            // Create models directory if needed
+            try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+            
+            // Download models from HuggingFace
+            let repoPath = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+            
+            for modelName in missingModels {
+                print("Downloading \(modelName)...")
+                
+                do {
+                    let modelPath = modelsDirectory.appendingPathComponent("\(modelName).mlmodelc")
+                    
+                    // Download the compiled model bundle
+                    try await downloadMLModelBundle(
+                        repoPath: repoPath,
+                        modelName: modelName,
+                        outputPath: modelPath
+                    )
+                    
+                    print("✅ Downloaded \(modelName).mlmodelc")
+                } catch {
+                    print("Failed to download \(modelName): \(error)")
+                    throw error
+                }
+            }
+        } else {
+            print("All Parakeet models already present")
+        }
+    }
 }

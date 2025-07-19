@@ -250,6 +250,7 @@ jobs:
             const fs = require('fs');
 
             let reportContent = '## VAD Benchmark Results\n\n';
+            reportContent += `**Last Updated:** ${new Date().toISOString()}\n\n`;
 
             try {
               if (fs.existsSync('vad_benchmark_results.json')) {
@@ -269,23 +270,59 @@ jobs:
                 reportContent += `- **WebRTC VAD**: ~75-80% F1 (GMM-based, fast but lower accuracy)\n`;
                 reportContent += `- **Sohn's VAD**: 77.5% F1 (traditional approach)\n`;
                 reportContent += `- **Modern DNNs**: 85-97% F1 (varies by SNR conditions)\n\n`;
+                
+                // Add hidden identifier for reliable comment detection
+                reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
               } else {
                 reportContent += `### ❌ Test Failed\n\n`;
                 reportContent += `No benchmark results were generated. Check the logs for details.\n\n`;
+                reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
               }
             } catch (error) {
               reportContent += `### ⚠️ Error Processing Results\n\n`;
               reportContent += `Could not parse benchmark results: ${error.message}\n\n`;
+              reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
             }
 
             try {
-              await github.rest.issues.createComment({
+              // First, try to find existing VAD benchmark comment
+              const comments = await github.rest.issues.listComments({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: reportContent
               });
-              console.log('✅ Successfully posted VAD benchmark results comment');
+
+              // Look for existing VAD benchmark comment (identified by the hidden tag)
+              const existingComment = comments.data.find(comment => {
+                const isBot = comment.user.type === 'Bot' || 
+                             comment.user.login === 'github-actions[bot]' ||
+                             comment.user.login.includes('[bot]');
+                
+                const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-vad -->');
+                const hasHeader = comment.body.includes('## VAD Benchmark Results');
+                
+                return isBot && (hasIdentifier || hasHeader);
+              });
+
+              if (existingComment) {
+                // Update existing comment
+                await github.rest.issues.updateComment({
+                  comment_id: existingComment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: reportContent
+                });
+                console.log('✅ Successfully updated existing VAD benchmark comment');
+              } else {
+                // Create new comment if none exists
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: reportContent
+                });
+                console.log('✅ Successfully posted new VAD benchmark results comment');
+              }
             } catch (error) {
               console.error('❌ Failed to post comment:', error.message);
               if (error.status === 403) {

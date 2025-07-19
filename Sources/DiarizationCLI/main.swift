@@ -20,6 +20,8 @@
                 await runBenchmark(arguments: Array(arguments.dropFirst(2)))
             case "vad-benchmark":
                 await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
+            case "asr-benchmark":
+                await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
             case "process":
                 await processFile(arguments: Array(arguments.dropFirst(2)))
             case "download":
@@ -44,6 +46,7 @@
                 COMMANDS:
                     benchmark       Run AMI SDM benchmark evaluation with real annotations
                     vad-benchmark   Run VAD benchmark with real audio files
+                    asr-benchmark   Run ASR benchmark on LibriSpeech dataset
                     process         Process a single audio file
                     download        Download datasets for benchmarking
                     help            Show this help message
@@ -72,6 +75,14 @@
                     --num-files <int>       Limit number of test files (default: all files)
                     --output <file>         Output results to JSON file [default: vad_benchmark_results.json]
 
+                ASR-BENCHMARK OPTIONS:
+                    --subset <name>         LibriSpeech subset: test-clean, test-other [default: test-clean]
+                    --max-files <int>       Maximum number of files to process [default: all]
+                    --output <file>         Output results to JSON file [default: asr_benchmark_results.json]
+                    --models-dir <path>     Custom models directory path
+                    --debug                 Enable debug mode
+                    --no-auto-download      Disable automatic download of LibriSpeech dataset [auto-download is ON by default]
+
                 PROCESS OPTIONS:
                     <audio-file>         Audio file to process (.wav, .m4a, .mp3)
                     --output <file>      Output results to JSON file [default: stdout]
@@ -94,10 +105,10 @@
 
                     # Run benchmark with custom threshold and save results
                     swift run fluidaudio benchmark --threshold 0.8 --output results.json
-                    
+
                     # Run benchmark with custom DER threshold for CI (fails if DER > 25%)
                     swift run fluidaudio benchmark --der-threshold 25.0 --auto-download
-                    
+
                     # Run benchmark with strict thresholds (DER < 20%, JER < 23%, RTF < 0.1x)
                     swift run fluidaudio benchmark --der-threshold 20.0 --jer-threshold 23.0 --rtf-threshold 0.1 --auto-download
 
@@ -110,6 +121,12 @@
 
                     # Run VAD benchmark with custom threshold and dataset
                     swift run fluidaudio vad-benchmark --threshold 0.45 --dataset mini50
+
+                    # Run ASR benchmark on test-clean subset
+                    swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
+
+                    # Run ASR benchmark on test-other subset with debug mode
+                    swift run fluidaudio asr-benchmark --subset test-other --max-files 100 --debug
 
                     # Process a single audio file
                     swift run fluidaudio process meeting.wav
@@ -246,13 +263,13 @@
                 assessment = await BenchmarkRunner.runAMISDMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations, 
+                    singleFile: singleFile, iterations: iterations,
                     customThresholds: (derThreshold, jerThreshold, rtfThreshold))
             case "ami-ihm":
                 assessment = await BenchmarkRunner.runAMIIHMBenchmark(
                     manager: manager, config: config, outputFile: outputFile,
                     autoDownload: autoDownload,
-                    singleFile: singleFile, iterations: iterations, 
+                    singleFile: singleFile, iterations: iterations,
                     customThresholds: (derThreshold, jerThreshold, rtfThreshold))
             default:
                 print("❌ Unsupported dataset: \(dataset)")
@@ -264,7 +281,7 @@
             print(
                 "\n⏱️ Total benchmark execution time: \(String(format: "%.1f", benchmarkElapsed)) seconds"
             )
-            
+
             // Exit with appropriate code based on performance assessment
             if assessment.exitCode != 0 {
                 print("\n❌ Benchmark failed to meet performance standards")
