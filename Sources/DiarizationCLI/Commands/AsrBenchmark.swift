@@ -46,6 +46,19 @@ public struct ASRBenchmarkResult: Sendable {
 }
 
 /// ASR benchmark configuration
+///
+/// ## LibriSpeech Dataset Subsets
+/// - **test-clean**: Clean, studio-quality recordings with clear speech from native speakers
+///   - Easier benchmark subset with minimal noise/accents
+///   - Expected WER: 2-6% for good ASR systems
+///   - Use for baseline performance evaluation
+///
+/// - **test-other**: More challenging recordings with various acoustic conditions
+///   - Includes accented speech, background noise, and non-native speakers
+///   - Expected WER: 5-15% for good ASR systems  
+///   - Use for robustness testing
+///
+/// Both subsets contain ~5.4 hours of audio from different speakers reading books.
 public struct ASRBenchmarkConfig: Sendable {
     public let dataset: String
     public let subset: String
@@ -95,13 +108,16 @@ public class ASRBenchmark: @unchecked Sendable {
 
             if transcriptCount >= 5 {
                 logger.info("LibriSpeech \(subset) already downloaded")
-                print("✅ LibriSpeech \(subset) already available (dataset found)")
+                print("LibriSpeech \(subset) already available (dataset found)")
                 return
             }
         }
 
         logger.info("Downloading LibriSpeech \(subset)...")
 
+        // LibriSpeech dataset URLs
+        // test-clean: High-quality recordings, easier to transcribe
+        // test-other: Challenging recordings with accents/noise
         let downloadURL: String
         switch subset {
         case "test-clean":
@@ -122,7 +138,7 @@ public class ASRBenchmark: @unchecked Sendable {
             expectedSubpath: "LibriSpeech/\(subset)"
         )
 
-        logger.info("✅ LibriSpeech \(subset) downloaded successfully")
+        logger.info("LibriSpeech \(subset) downloaded successfully")
     }
 
     /// Run ASR benchmark on LibriSpeech
@@ -130,14 +146,14 @@ public class ASRBenchmark: @unchecked Sendable {
         // Check if running in release mode and warn if not
         #if DEBUG
         print("")
-        print("⚠️  WARNING: Running in DEBUG mode!")
-        print("⚠️  Performance will be significantly slower (~2x).")
-        print("⚠️  For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
+        print("WARNING: Running in DEBUG mode!")
+        print("Performance will be significantly slower (~2x).")
+        print("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
         print("")
         // Add a small delay so user sees the warning
         try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
         #else
-        print("✅ Running in RELEASE mode - optimal performance")
+        print("Running in RELEASE mode - optimal performance")
         #endif
 
         // Ensure dataset is downloaded
@@ -150,7 +166,7 @@ public class ASRBenchmark: @unchecked Sendable {
         var filteredFiles = audioFiles
         if config.longAudioOnly {
             filteredFiles = try filterFilesByDuration(audioFiles, minDuration: 4.0, maxDuration: 20.0)
-            print("🎯 Filtered to \(filteredFiles.count) files with duration 4-10 seconds (from \(audioFiles.count) total)")
+            print("Filtered to \(filteredFiles.count) files with duration 4-10 seconds (from \(audioFiles.count) total)")
         }
 
         let maxFiles = config.maxFiles ?? filteredFiles.count // Process all files if not specified
@@ -191,7 +207,7 @@ public class ASRBenchmark: @unchecked Sendable {
 
             } catch {
                 logger.error("Failed to process \(audioFile.fileName): \(error)")
-                print("❌ Failed to process \(audioFile.fileName): \(error)")
+                print("ERROR: Failed to process \(audioFile.fileName): \(error)")
             }
         }
 
@@ -227,7 +243,17 @@ public class ASRBenchmark: @unchecked Sendable {
     /// Transcribe audio - now supports long files through AsrManager chunking
     internal func transcribeAudio(asrManager: AsrManager, audioSamples: [Float]) async throws -> ASRResult {
         // AsrManager now handles chunking internally for audio > 10 seconds
-        return try await asrManager.transcribe(audioSamples)
+        let result = try await asrManager.transcribe(audioSamples)
+        
+        // CI debugging
+        if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
+            print("⚠️ CI: Transcription returned empty text")
+            print("   Audio samples: \(audioSamples.count)")
+            print("   Audio duration: \(Float(audioSamples.count) / 16000.0)s")
+            print("   Result confidence: \(result.confidence)")
+        }
+        
+        return result
     }
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization
@@ -273,29 +299,29 @@ public class ASRBenchmark: @unchecked Sendable {
 
         let filePrefix = showFileNumber != nil ? "[\(showFileNumber!)] " : ""
 
-        print("   📝 \(filePrefix)Text Comparison (Duration: \(String(format: "%.1f", result.audioLength))s):")
-        print("   ✅ Expected: \"\(gtDisplay)\"")
-        print("   🤖 Got:      \"\(moDisplay)\"")
+        print("   \(filePrefix)Text Comparison (Duration: \(String(format: "%.1f", result.audioLength))s):")
+        print("   Expected: \"\(gtDisplay)\"")
+        print("   Got:      \"\(moDisplay)\"")
 
         // Quick analysis with more detailed feedback
         var issues: [String] = []
 
         if modelOutput.isEmpty {
-            issues.append("❌ No output")
+            issues.append("No output")
         } else {
             if modelOutput.count < groundTruth.count / 2 {
-                issues.append("📏 Too short")
+                issues.append("Too short")
             } else if modelOutput.count > groundTruth.count * 2 {
-                issues.append("📏 Too long")
+                issues.append("Too long")
             }
 
             if hasRepetitivePatterns(modelOutput) {
-                issues.append("🔄 Repetition")
+                issues.append("Repetition")
             }
 
             // Check for case issues
             if modelOutput.lowercased() == groundTruth.lowercased() {
-                issues.append("🔤 Case only")
+                issues.append("Case mismatch")
             }
 
             // Check for partial match
@@ -305,14 +331,14 @@ public class ASRBenchmark: @unchecked Sendable {
             let matchPercent = gtWords.isEmpty ? 0 : Double(commonWords) / Double(gtWords.count) * 100
 
             if matchPercent > 50 && matchPercent < 90 {
-                issues.append("🎯 Partial match (\(String(format: "%.0f", matchPercent))%)")
+                issues.append("Partial match (\(String(format: "%.0f", matchPercent))%)")
             } else if matchPercent >= 90 {
-                issues.append("✨ Good match (\(String(format: "%.0f", matchPercent))%)")
+                issues.append("Good match (\(String(format: "%.0f", matchPercent))%)")
             }
         }
 
         if !issues.isEmpty {
-            print("   📊 Issues: \(issues.joined(separator: ", "))")
+            print("   Issues: \(issues.joined(separator: ", "))")
         }
 
         print("   " + String(repeating: "─", count: 80))
@@ -475,12 +501,12 @@ public class ASRBenchmark: @unchecked Sendable {
     private func downloadAndExtractTarGz(url: String, extractTo: URL, expectedSubpath: String) async throws {
         let downloadURL = URL(string: url)!
 
-        print("⬇️ Downloading \(url)...")
+        print("Downloading \(url)...")
         let (tempFile, _) = try await URLSession.shared.download(from: downloadURL)
 
         try FileManager.default.createDirectory(at: extractTo, withIntermediateDirectories: true)
 
-        print("📦 Extracting archive...")
+        print("Extracting archive...")
 
         // Extract tar.gz using system tar command
         let process = Process()
@@ -505,7 +531,7 @@ public class ASRBenchmark: @unchecked Sendable {
             try? FileManager.default.removeItem(at: extractTo.appendingPathComponent("LibriSpeech"))
         }
 
-        print("✅ Dataset extracted successfully")
+        print("Dataset extracted successfully")
     }
 }
 
@@ -632,12 +658,12 @@ extension ASRBenchmark {
             case "--no-auto-download":
                 autoDownload = false
             default:
-                print("⚠️ Unknown option: \(arguments[i])")
+                print("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        print("🚀 Starting ASR benchmark on LibriSpeech \(subset)")
+        print("\nStarting ASR benchmark on LibriSpeech \(subset)")
         print("   Max files: \(maxFiles?.description ?? "all")")
         print("   Output file: \(outputFile)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
@@ -673,9 +699,43 @@ extension ASRBenchmark {
 
         do {
             // Initialize ASR system
-            print("🔄 Initializing ASR system...")
-            try await asrManager.initialize()
-            print("✅ ASR system initialized")
+            print("Initializing ASR system...")
+            do {
+                try await asrManager.initialize()
+                print("ASR system initialized successfully")
+                
+                // Verify models are actually working
+                if ProcessInfo.processInfo.environment["CI"] != nil {
+                    print("🔍 CI: Verifying ASR models with test audio...")
+                    let testSamples = Array(repeating: Float(0.0), count: 16000) // 1 second of silence
+                    let testResult = try await asrManager.transcribe(testSamples)
+                    print("   Test transcription result: '\(testResult.text)'")
+                    print("   Models appear to be working: \(asrManager.isAvailable)")
+                }
+            } catch {
+                print("❌ Failed to initialize ASR system: \(error)")
+                print("   Error type: \(type(of: error))")
+                print("   Error details: \(error.localizedDescription)")
+                
+                // Additional debugging in CI
+                if ProcessInfo.processInfo.environment["CI"] != nil {
+                    print("🔍 CI Debug Information:")
+                    let modelsDir = FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Library/Application Support/FluidAudio/Models/Parakeet")
+                    print("   Models directory: \(modelsDir.path)")
+                    print("   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))")
+                    
+                    if FileManager.default.fileExists(atPath: modelsDir.path) {
+                        do {
+                            let contents = try FileManager.default.contentsOfDirectory(at: modelsDir, includingPropertiesForKeys: nil)
+                            print("   Directory contents: \(contents.map { $0.lastPathComponent })")
+                        } catch {
+                            print("   Failed to list directory contents: \(error)")
+                        }
+                    }
+                }
+                throw error
+            }
 
             // Download dataset if requested
             if autoDownload {
@@ -700,11 +760,11 @@ extension ASRBenchmark {
             let medianWER = sortedWER[sortedWER.count / 2]
 
             // Print summary
-            print("\n📊 Benchmark Results Summary:")
+            print("\n--- Benchmark Results Summary ---")
             #if DEBUG
-            print("   ⚠️  Mode: DEBUG (slow performance)")
+            print("   Mode: DEBUG (slow performance)")
             #else
-            print("   ✅ Mode: RELEASE (optimal performance)")
+            print("   Mode: RELEASE (optimal performance)")
             #endif
             print("   Files processed: \(results.count)")
             print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
@@ -753,11 +813,11 @@ extension ASRBenchmark {
             let jsonData = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
             try jsonData.write(to: URL(fileURLWithPath: outputFile))
 
-            print("\n💾 Results saved to: \(outputFile)")
-            print("✅ ASR benchmark completed successfully")
+            print("\nResults saved to: \(outputFile)")
+            print("ASR benchmark completed successfully")
 
         } catch {
-            print("\n❌ ASR benchmark failed: \(error)")
+            print("\nERROR: ASR benchmark failed: \(error)")
             exit(1)
         }
     }

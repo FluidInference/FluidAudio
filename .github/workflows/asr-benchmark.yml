@@ -42,9 +42,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/Library/Application Support/FluidAudio/Models/Parakeet
-        key: ${{ runner.os }}-parakeet-mlmodelc-v1
+        key: ${{ runner.os }}-parakeet-mlmodelc-v2
         restore-keys: |
-          ${{ runner.os }}-parakeet-mlmodelc-
+          ${{ runner.os }}-parakeet-mlmodelc-v2-
     
     # Cache LibriSpeech Dataset
     - name: Cache LibriSpeech Dataset
@@ -67,110 +67,109 @@ jobs:
         
         echo "📍 Models directory: $MODELS_DIR"
         
-        # Check if all required compiled model files exist
+        # Check if all required files exist (models + vocabulary)
+        VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
+        
         if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
            [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
            [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ]; then
-          echo "✅ All Parakeet compiled models already cached"
+           [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ] && \
+           [ -f "$VOCAB_FILE" ]; then
+          echo "✅ All Parakeet resources already cached"
           ls -la "$MODELS_DIR"
+          echo "✅ Vocabulary file exists at $VOCAB_FILE"
         else
           echo "📥 Downloading Parakeet models from Hugging Face..."
           
-          # Download models from FluidInference/parakeet-tdt-0.6b-v2-coreml
-          # Use git to clone the model repository
-          echo "📥 Cloning model repository..."
-          
-          # Create a temporary directory for cloning
+          # Since .mlmodelc are directories, we need to use git LFS
+          # Clone to a temp directory first
           TEMP_DIR=$(mktemp -d)
           cd "$TEMP_DIR"
           
-          # Clone the repository with depth 1 to save time
-          git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
-          
-          # Copy the mlpackage directories to the models directory and compile them
+          # Clone with LFS support
+          echo "📥 Cloning model repository..."
+          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
           cd parakeet-tdt-0.6b-v2-coreml
+          
+          # Download the specific LFS files we need
+          git lfs pull --include="*.mlmodelc/**"
+          
+          # Move models directly to target directory
           for model in "Melspectogram" "ParakeetEncoder" "ParakeetDecoder" "RNNTJoint"; do
-            if [ -d "${model}.mlpackage" ]; then
-              echo "📦 Installing ${model}.mlpackage..."
-              cp -r "${model}.mlpackage" "$MODELS_DIR/"
-              echo "✅ Installed ${model}.mlpackage"
+            if [ -d "${model}.mlmodelc" ]; then
+              echo "📦 Installing ${model}.mlmodelc..."
+              mv "${model}.mlmodelc" "$MODELS_DIR/"
+              echo "✅ Installed ${model}.mlmodelc"
             else
-              echo "❌ ${model}.mlpackage not found in repository"
+              echo "❌ ${model}.mlmodelc not found"
             fi
           done
+          
+          # Download vocabulary file directly to the correct location
+          VOCAB_DIR="$HOME/Library/Application Support/FluidAudio"
+          mkdir -p "$VOCAB_DIR"
+          if [ -f "parakeet_vocab.json" ]; then
+            echo "📦 Installing vocabulary file..."
+            mv "parakeet_vocab.json" "$VOCAB_DIR/"
+            echo "✅ Installed parakeet_vocab.json"
+          else
+            echo "❌ parakeet_vocab.json not found"
+          fi
           
           # Clean up
           cd /
           rm -rf "$TEMP_DIR"
           
-          # Compile models to .mlmodelc format
-          echo "🔨 Compiling models to .mlmodelc format..."
-          cd "$MODELS_DIR"
+          # Models are already compiled (.mlmodelc format)
+          echo "✅ Models are pre-compiled and ready to use"
           
-          # Use the fluidaudio CLI to download models if they exist
-          echo "🔄 Attempting to download pre-compiled models using fluidaudio CLI..."
-          
-          # Try to download models using the built CLI
-          if swift run -c release fluidaudio download --dataset parakeet-models; then
-            echo "✅ Downloaded Parakeet models using CLI"
-          else
-            echo "⚠️  CLI download failed, attempting manual compilation..."
+        fi
+    
+    # Verify models and vocabulary are ready
+    - name: Verify ASR Resources
+      run: |
+        echo "🧪 Verifying ASR models and vocabulary..."
+        
+        MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/Parakeet"
+        VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
+        FAILED=false
+        
+        # Check models
+        echo "📍 Checking models at: $MODELS_DIR"
+        for model in "Melspectogram" "ParakeetEncoder" "ParakeetDecoder" "RNNTJoint"; do
+          if [ -d "$MODELS_DIR/${model}.mlmodelc" ]; then
+            SIZE=$(du -sh "$MODELS_DIR/${model}.mlmodelc" | cut -f1)
+            echo "✅ ${model}.mlmodelc: $SIZE"
             
-            # Create a Swift script to compile models
-            echo 'import CoreML' > compile_models.swift
-            echo 'import Foundation' >> compile_models.swift
-            echo '' >> compile_models.swift
-            echo 'let modelsPath = FileManager.default.currentDirectoryPath' >> compile_models.swift
-            echo 'let models = ["Melspectogram", "ParakeetEncoder", "ParakeetDecoder", "RNNTJoint"]' >> compile_models.swift
-            echo '' >> compile_models.swift
-            echo 'for modelName in models {' >> compile_models.swift
-            echo '    let packagePath = URL(fileURLWithPath: "\(modelsPath)/\(modelName).mlpackage")' >> compile_models.swift
-            echo '    let compiledPath = URL(fileURLWithPath: "\(modelsPath)/\(modelName).mlmodelc")' >> compile_models.swift
-            echo '    ' >> compile_models.swift
-            echo '    if FileManager.default.fileExists(atPath: compiledPath.path) {' >> compile_models.swift
-            echo '        print("✅ \(modelName).mlmodelc already exists")' >> compile_models.swift
-            echo '        continue' >> compile_models.swift
-            echo '    }' >> compile_models.swift
-            echo '    ' >> compile_models.swift
-            echo '    guard FileManager.default.fileExists(atPath: packagePath.path) else {' >> compile_models.swift
-            echo '        print("❌ \(modelName).mlpackage not found")' >> compile_models.swift
-            echo '        continue' >> compile_models.swift
-            echo '    }' >> compile_models.swift
-            echo '    ' >> compile_models.swift
-            echo '    do {' >> compile_models.swift
-            echo '        print("📦 Compiling \(modelName).mlpackage...")' >> compile_models.swift
-            echo '        let compiledURL = try MLModel.compileModel(at: packagePath)' >> compile_models.swift
-            echo '        try FileManager.default.moveItem(at: compiledURL, to: compiledPath)' >> compile_models.swift
-            echo '        print("✅ Successfully compiled \(modelName).mlmodelc")' >> compile_models.swift
-            echo '    } catch {' >> compile_models.swift
-            echo '        print("❌ Failed to compile \(modelName): \(error)")' >> compile_models.swift
-            echo '    }' >> compile_models.swift
-            echo '}' >> compile_models.swift
-            
-            swift compile_models.swift
-            rm compile_models.swift
-          fi
-          
-          # Remove the original .mlpackage files after compilation to save space
-          for model in "Melspectogram" "ParakeetEncoder" "ParakeetDecoder" "RNNTJoint"; do
-            if [ -d "$MODELS_DIR/${model}.mlpackage" ]; then
-              echo "🧹 Removing ${model}.mlpackage after compilation"
-              rm -rf "$MODELS_DIR/${model}.mlpackage"
+            # Check if model is too small (likely corrupted)
+            SIZE_KB=$(du -sk "$MODELS_DIR/${model}.mlmodelc" | cut -f1)
+            if [ "$SIZE_KB" -lt 10 ]; then
+              echo "❌ ${model}.mlmodelc appears corrupted (too small)"
+              FAILED=true
             fi
-          done
-          
-          # Verify all compiled models are present
-          if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
-             [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
-             [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
-             [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ]; then
-            echo "✅ All Parakeet models compiled successfully"
-            ls -la "$MODELS_DIR"
           else
-            echo "❌ Failed to compile all required models"
-            echo "SKIP_BENCHMARK=true" >> $GITHUB_ENV
+            echo "❌ ${model}.mlmodelc: NOT FOUND"
+            FAILED=true
           fi
+        done
+        
+        # Check vocabulary
+        echo ""
+        echo "📍 Checking vocabulary..."
+        if [ -f "$VOCAB_FILE" ]; then
+          SIZE=$(du -sh "$VOCAB_FILE" | cut -f1)
+          echo "✅ parakeet_vocab.json: $SIZE"
+        else
+          echo "❌ parakeet_vocab.json NOT FOUND"
+          echo "This file is required for converting tokens to text!"
+          FAILED=true
+        fi
+        
+        if [ "$FAILED" = true ]; then
+          echo "❌ ASR resources verification failed"
+          exit 1
+        else
+          echo "✅ All ASR resources verified successfully"
         fi
     
     # Determine test size based on changes

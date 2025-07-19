@@ -157,7 +157,7 @@ public enum ASRError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .notInitialized:
-            return "ASRManager not initialized. Call initialize() first."
+            return "AsrManager not initialized. Call initialize() first."
         case .invalidAudioData:
             return "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
         case .modelLoadFailed:
@@ -172,6 +172,37 @@ public enum ASRError: Error, LocalizedError {
     }
 }
 
+/// AsrManager provides automatic speech recognition using Parakeet TDT (Token-and-Duration Transducer) models.
+///
+/// This class implements high-performance speech-to-text transcription optimized for Apple Neural Engine,
+/// achieving real-time factors (RTFx) of 11-50x depending on audio duration and hardware.
+///
+/// ## Features
+/// - **Parakeet TDT-0.6b** model implementation with duration-aware decoding
+/// - **Apple Neural Engine** optimization for maximum performance
+/// - **Chunked processing** for long audio files (automatic 10-second chunks)
+/// - **Text normalization** compatible with HuggingFace ASR evaluation standards
+/// - **Auto-recovery** from CoreML model loading failures
+///
+/// ## Performance
+/// - LibriSpeech test-clean: Average WER 5.9%, Median WER 1.9%
+/// - LibriSpeech test-other: Average WER 13-15%
+/// - RTFx: ~11.8x (includes full end-to-end file I/O overhead)
+///
+/// ## Usage
+/// ```swift
+/// let asrManager = AsrManager()
+/// try await asrManager.initialize()
+/// let result = try await asrManager.transcribe(audioSamples)
+/// print("Transcription: \(result.text)")
+/// ```
+///
+/// ## Technical Details
+/// The TDT model uses a novel architecture that jointly predicts both tokens and their durations,
+/// enabling more accurate transcription of speech with varying speaking rates. The implementation
+/// includes advanced features like duration-based token repetition and confidence-weighted decoding.
+///
+/// - Note: Requires macOS 13.0+ or iOS 16.0+ for CoreML 6 features
 @available(macOS 13.0, iOS 16.0, *)
 public final class AsrManager: @unchecked Sendable {
 
@@ -201,10 +232,18 @@ public final class AsrManager: @unchecked Sendable {
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
     }
 
+    /// Indicates whether all required models are loaded and ready for transcription
     public var isAvailable: Bool {
         return melSpectrogramModel != nil && encoderModel != nil && decoderModel != nil && jointModel != nil
     }
 
+    /// Initializes the ASR system by loading Parakeet TDT models.
+    ///
+    /// This method downloads models if needed and compiles them for Apple Neural Engine.
+    /// Models are cached for subsequent runs.
+    ///
+    /// - Throws: `ASRError.modelLoadFailed` if models cannot be loaded
+    /// - Note: This is an async operation that may take several seconds on first run
     public func initialize() async throws {
         logger.info("Initializing AsrManager with Parakeet models")
 
@@ -284,10 +323,10 @@ public final class AsrManager: @unchecked Sendable {
             // usesCPUOnly is deprecated - the model config already specifies compute units
             self.predictionOptions = options
 
-            logger.info("TranscriptManager initialized successfully")
+            logger.info("AsrManager initialized successfully")
 
         } catch {
-            logger.error("Failed to initialize TranscriptManager: \(error.localizedDescription)")
+            logger.error("Failed to initialize AsrManager: \(error.localizedDescription)")
             if let mlError = error as? MLModelError {
                 logger.error("MLModel error details: \(mlError)")
             }
@@ -1082,11 +1121,68 @@ public final class AsrManager: @unchecked Sendable {
         name: String,
         configuration: MLModelConfiguration
     ) async throws -> MLModel {
+        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
+        
         do {
             // Try loading directly first
-            return try MLModel(contentsOf: path, configuration: configuration)
+            if isCI {
+                print("🔍 CI: Attempting to load \(name) model from: \(path.path)")
+                print("   File exists: \(FileManager.default.fileExists(atPath: path.path))")
+                
+                // Check file size
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: path.path),
+                   let fileSize = attrs[.size] as? Int64 {
+                    print("   File size: \(fileSize / 1024)KB")
+                }
+            }
+            
+            let model = try MLModel(contentsOf: path, configuration: configuration)
+            
+            if isCI {
+                print("✅ CI: Successfully loaded \(name) model")
+            }
+            
+            return model
         } catch {
-            // If loading fails, try compiling first
+            // If loading fails, log detailed error info
+            logger.error("Failed to load \(name) model: \(error)")
+            
+            if isCI {
+                print("❌ CI: Failed to load \(name) model from \(path.path)")
+                print("   Error: \(error)")
+                print("   Error type: \(type(of: error))")
+                
+                // Check if it's a .mlmodelc or needs compilation
+                let isCompiled = path.pathExtension == "mlmodelc"
+                print("   Is compiled model: \(isCompiled)")
+                
+                if !isCompiled {
+                    print("   Attempting to compile model...")
+                }
+            }
+            
+            // If it's already a compiled model, check if we should remove and re-download
+            if path.pathExtension == "mlmodelc" {
+                if isCI {
+                    print("❌ CI: Compiled model failed to load. This may indicate corruption.")
+                    print("   Removing corrupted model: \(path.path)")
+                    try? FileManager.default.removeItem(at: path)
+                    
+                    // Check if we have a parent directory with .mlpackage
+                    let parentDir = path.deletingLastPathComponent()
+                    let packageName = path.deletingPathExtension().lastPathComponent + ".mlpackage"
+                    let packagePath = parentDir.appendingPathComponent(packageName)
+                    
+                    if FileManager.default.fileExists(atPath: packagePath.path) {
+                        print("   Found .mlpackage, attempting to compile...")
+                        let compiledURL = try await MLModel.compileModel(at: packagePath)
+                        return try MLModel(contentsOf: compiledURL, configuration: configuration)
+                    }
+                }
+                throw ASRError.modelLoadFailed
+            }
+            
+            // Try compiling first
             logger.info("Compiling \(name) model...")
             let compiledURL = try await MLModel.compileModel(at: path)
             logger.info("Successfully compiled \(name) model")
@@ -1133,7 +1229,7 @@ public final class AsrManager: @unchecked Sendable {
         decoderModel = nil
         jointModel = nil
         decoderState = DecoderState.zero()
-        logger.info("TranscriptManager resources cleaned up")
+        logger.info("AsrManager resources cleaned up")
     }
 
 
@@ -1393,7 +1489,25 @@ public final class AsrManager: @unchecked Sendable {
         return hypothesis.ySequence
     }
 
-    /// Main transcription method with optimized RNNT decoding
+    /// Transcribes audio samples to text using Parakeet TDT models.
+    ///
+    /// This method automatically handles long audio files by splitting them into 10-second chunks
+    /// and concatenating the results. For optimal performance, audio should be:
+    /// - 16kHz sample rate
+    /// - Mono channel
+    /// - Float32 samples normalized to [-1.0, 1.0]
+    ///
+    /// - Parameter audioSamples: Array of audio samples at 16kHz
+    /// - Returns: `ASRResult` containing transcribed text, confidence, and timing information
+    /// - Throws: 
+    ///   - `ASRError.notInitialized` if models are not loaded
+    ///   - `ASRError.invalidAudioData` if audio is too short (<1 second)
+    ///   - `ASRError.processingFailed` if transcription fails
+    ///
+    /// ## Performance Notes
+    /// - Audio ≤10 seconds: Processed in a single pass
+    /// - Audio >10 seconds: Automatically chunked with 0.5s overlap
+    /// - RTFx includes full end-to-end time (I/O + inference)
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
         guard isAvailable else {
             throw ASRError.notInitialized
@@ -1509,6 +1623,16 @@ public final class AsrManager: @unchecked Sendable {
             // Log warning if empty transcription for longer audio
             if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && duration > 1.0 {
                 logger.warning("⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))")
+                
+                // Additional CI debugging
+                if ProcessInfo.processInfo.environment["CI"] != nil {
+                    print("🔍 CI Debug - Empty transcription:")
+                    print("   Audio duration: \(String(format: "%.1f", duration))s")
+                    print("   Token IDs count: \(tokenIds.count)")
+                    print("   Token IDs: \(tokenIds.prefix(10))...")
+                    print("   Encoder sequence length: \(encoderSequenceLength)")
+                    print("   Models loaded: mel=\(melSpectrogramModel != nil), encoder=\(encoderModel != nil), decoder=\(decoderModel != nil), joint=\(jointModel != nil)")
+                }
             }
 
             return ASRResult(
