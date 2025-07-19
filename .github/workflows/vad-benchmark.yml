@@ -136,8 +136,12 @@ jobs:
           echo "       - www2.cs.uic.edu (speech and music samples)"
 
       - name: Run VAD Benchmark Tests
+        id: benchmark
         run: |
           echo "🚀 Running VAD Benchmark Tests..."
+
+          # Record start time
+          BENCHMARK_START=$(date +%s)
 
           # Set test parameters
           NUM_FILES="100"
@@ -173,6 +177,14 @@ jobs:
             echo "BENCHMARK_STATUS=FAILED" >> $GITHUB_ENV
             # Don't exit here - let the validation step handle it
           fi
+
+          # Calculate execution time
+          BENCHMARK_END=$(date +%s)
+          EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
+          EXECUTION_MINS=$((EXECUTION_TIME / 60))
+          EXECUTION_SECS=$((EXECUTION_TIME % 60))
+          
+          echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
 
       - name: Collect test results
         if: always()
@@ -250,32 +262,31 @@ jobs:
             const fs = require('fs');
 
             let reportContent = '## VAD Benchmark Results\n\n';
-            reportContent += `**Last Updated:** ${new Date().toISOString()}\n\n`;
+            const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
 
             try {
               if (fs.existsSync('vad_benchmark_results.json')) {
                 const results = JSON.parse(fs.readFileSync('vad_benchmark_results.json', 'utf8'));
 
-                reportContent += `### Performance Comparison\n\n`;
-                reportContent += `| Metric | FluidAudio VAD | Industry Standard | Status |\n`;
-                reportContent += `|--------|----------------|-------------------|--------|\n`;
-                reportContent += `| **Accuracy** | ${results.accuracy?.toFixed(1) || 'N/A'}% | 85-90% | ${results.accuracy >= 90 ? '✅' : results.accuracy >= 85 ? '✅' : '⚠️'} |\n`;
-                reportContent += `| **Precision** | ${results.precision?.toFixed(1) || 'N/A'}% | 85-95% | ${results.precision >= 95 ? '✅' : results.precision >= 85 ? '✅' : '⚠️'} |\n`;
-                reportContent += `| **Recall** | ${results.recall?.toFixed(1) || 'N/A'}% | 80-90% | ${results.recall >= 90 ? '✅' : results.recall >= 80 ? '✅' : '⚠️'} |\n`;
-                reportContent += `| **F1-Score** | ${results.f1_score?.toFixed(1) || 'N/A'}% | 85.9% (Sohn's VAD) | ${results.f1_score >= 85.9 ? '✅' : '⚠️'} |\n`;
-                reportContent += `| **Processing Time** | ${results.processing_time_seconds?.toFixed(1) || 'N/A'}s (${results.total_files || 'N/A'} files) | ~1ms per 30ms chunk | ✅ |\n\n`;
+                reportContent += `| Metric | Value | Target | Status |\n`;
+                reportContent += `|--------|-------|--------|--------|\n`;
+                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1) || 'N/A'}% | >85% | ${results.accuracy >= 85 ? '✅' : '⚠️'} |\n`;
+                reportContent += `| Precision | ${results.precision?.toFixed(1) || 'N/A'}% | >85% | ${results.precision >= 85 ? '✅' : '⚠️'} |\n`;
+                reportContent += `| Recall | ${results.recall?.toFixed(1) || 'N/A'}% | >80% | ${results.recall >= 80 ? '✅' : '⚠️'} |\n`;
+                reportContent += `| F1-Score | ${results.f1_score?.toFixed(1) || 'N/A'}% | >85.9% | ${results.f1_score >= 85.9 ? '✅' : '⚠️'} |\n\n`;
 
                 reportContent += `**Industry Leaders:**\n`;
-                reportContent += `- **Silero VAD**: ~90-95% F1 (DNN-based, 1.8MB model)\n`;
-                reportContent += `- **WebRTC VAD**: ~75-80% F1 (GMM-based, fast but lower accuracy)\n`;
-                reportContent += `- **Sohn's VAD**: 77.5% F1 (traditional approach)\n`;
-                reportContent += `- **Modern DNNs**: 85-97% F1 (varies by SNR conditions)\n\n`;
+                reportContent += `- Silero VAD: ~90-95% F1 (DNN-based, 1.8MB)\n`;
+                reportContent += `- WebRTC VAD: ~75-80% F1 (GMM-based, fast)\n`;
+                reportContent += `- Sohn's VAD: 77.5% F1 (traditional)\n`;
+                reportContent += `- Modern DNNs: 85-97% F1 (varies by SNR)\n\n`;
+
+                reportContent += `<sub>${results.total_files || 'N/A'} files • ${results.processing_time_seconds?.toFixed(1) || 'N/A'}s processing • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
                 
                 // Add hidden identifier for reliable comment detection
                 reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
               } else {
-                reportContent += `### ❌ Test Failed\n\n`;
-                reportContent += `No benchmark results were generated. Check the logs for details.\n\n`;
+                reportContent += `Test failed - no results generated.\n\n`;
                 reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
               }
             } catch (error) {

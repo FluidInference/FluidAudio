@@ -14,7 +14,7 @@ let package = Package(
         ),
         .executable(
             name: "fluidaudio",
-            targets: ["DiarizationCLI"]
+            targets: ["FluidAudioCLI"]
         ),
     ],
     dependencies: [],
@@ -26,9 +26,9 @@ let package = Package(
             exclude: []
         ),
         .executableTarget(
-            name: "DiarizationCLI",
+            name: "FluidAudioCLI",
             dependencies: ["FluidAudio"],
-            path: "Sources/DiarizationCLI",
+            path: "Sources/FluidAudioCLI",
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"])
             ]

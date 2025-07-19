@@ -3,7 +3,7 @@ import RegexBuilder
 
 /// HuggingFace-compatible text normalizer for ASR evaluation
 /// Matches the normalization used in the Open ASR Leaderboard
-public struct TextNormalizer {
+struct TextNormalizer {
     
     // Additional diacritics mapping from HuggingFace normalizer
     private static let additionalDiacritics: [Character: String] = [
@@ -14,7 +14,7 @@ public struct TextNormalizer {
 
     /// Normalize text using HuggingFace ASR leaderboard standards
     /// This matches the normalization used in the official leaderboard evaluation
-    public static func normalize(_ text: String) -> String {
+    static func normalize(_ text: String) -> String {
         var normalized = text
 
         // Step 1: Convert to lowercase (standard for ASR evaluation)
@@ -198,7 +198,7 @@ public struct TextNormalizer {
 
     /// Lightweight normalization (less aggressive)
     /// Use this when you want to preserve more linguistic features
-    public static func lightNormalize(_ text: String) -> String {
+    static func lightNormalize(_ text: String) -> String {
         var normalized = text
 
         // Basic case normalization
@@ -227,7 +227,7 @@ public struct TextNormalizer {
 
     /// Aggressive normalization (maximum compatibility)
     /// Use this for maximum compatibility with various ASR evaluation standards
-    public static func aggressiveNormalize(_ text: String) -> String {
+    static func aggressiveNormalize(_ text: String) -> String {
         var normalized = normalize(text)
 
         // Additional aggressive steps
@@ -270,7 +270,7 @@ public struct TextNormalizer {
 #if DEBUG
 extension TextNormalizer {
     /// Test the normalizer with common ASR evaluation cases
-    public static func runTests() {
+    static func runTests() {
         let testCases = [
             ("Hello, world! This is a test.", "hello world this is a test"),
             ("Can't you see it's working?", "cannot you see it is working"),

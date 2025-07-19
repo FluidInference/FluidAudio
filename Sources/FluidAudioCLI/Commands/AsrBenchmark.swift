@@ -55,7 +55,7 @@ public struct ASRBenchmarkResult: Sendable {
 ///
 /// - **test-other**: More challenging recordings with various acoustic conditions
 ///   - Includes accented speech, background noise, and non-native speakers
-///   - Expected WER: 5-15% for good ASR systems  
+///   - Expected WER: 5-15% for good ASR systems
 ///   - Use for robustness testing
 ///
 /// Both subsets contain ~5.4 hours of audio from different speakers reading books.
@@ -76,8 +76,8 @@ public struct ASRBenchmarkConfig: Sendable {
 }
 
 /// LibriSpeech dataset manager and ASR benchmarking
-@available(macOS 13.0, iOS 16.0, *)
-public class ASRBenchmark: @unchecked Sendable {
+@available(macOS 13.0, *)
+public class ASRBenchmark {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "Benchmark")
     private let config: ASRBenchmarkConfig
@@ -244,7 +244,7 @@ public class ASRBenchmark: @unchecked Sendable {
     internal func transcribeAudio(asrManager: AsrManager, audioSamples: [Float]) async throws -> ASRResult {
         // AsrManager now handles chunking internally for audio > 10 seconds
         let result = try await asrManager.transcribe(audioSamples)
-        
+
         // CI debugging
         if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
             print("⚠️ CI: Transcription returned empty text")
@@ -252,7 +252,7 @@ public class ASRBenchmark: @unchecked Sendable {
             print("   Audio duration: \(Float(audioSamples.count) / 16000.0)s")
             print("   Result confidence: \(result.confidence)")
         }
-        
+
         return result
     }
 
@@ -698,12 +698,15 @@ extension ASRBenchmark {
         let asrManager = AsrManager(config: asrConfig)
 
         do {
+            // Track benchmark start time
+            let startBenchmark = Date()
+            
             // Initialize ASR system
             print("Initializing ASR system...")
             do {
                 try await asrManager.initialize()
                 print("ASR system initialized successfully")
-                
+
                 // Verify models are actually working
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print("🔍 CI: Verifying ASR models with test audio...")
@@ -716,7 +719,7 @@ extension ASRBenchmark {
                 print("❌ Failed to initialize ASR system: \(error)")
                 print("   Error type: \(type(of: error))")
                 print("   Error details: \(error.localizedDescription)")
-                
+
                 // Additional debugging in CI
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print("🔍 CI Debug Information:")
@@ -724,7 +727,7 @@ extension ASRBenchmark {
                         .appendingPathComponent("Library/Application Support/FluidAudio/Models/Parakeet")
                     print("   Models directory: \(modelsDir.path)")
                     print("   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))")
-                    
+
                     if FileManager.default.fileExists(atPath: modelsDir.path) {
                         do {
                             let contents = try FileManager.default.contentsOfDirectory(at: modelsDir, includingPropertiesForKeys: nil)
@@ -753,19 +756,54 @@ extension ASRBenchmark {
             let meanRTFx = rtfxValues.reduce(0, +) / Float(rtfxValues.count)
             let medianRTFx = rtfxValues.sorted()[rtfxValues.count / 2]
             let sumRTFx = rtfxValues.reduce(0, +)
+            
+            // Calculate standard deviation for RTFx
+            let variance = rtfxValues.map { pow($0 - meanRTFx, 2) }.reduce(0, +) / Float(rtfxValues.count)
+            let stdRTFx = sqrt(variance)
+            
+            // Calculate total durations
+            let totalAudioDuration = results.reduce(0.0) { $0 + $1.audioLength }
+            let totalProcessingTime = results.reduce(0.0) { $0 + $1.processingTime }
 
             // Calculate median WER
             let werValues = results.map { $0.metrics.wer }
             let sortedWER = werValues.sorted()
             let medianWER = sortedWER[sortedWER.count / 2]
 
-            // Print summary
-            print("\n--- Benchmark Results Summary ---")
+            // Get current date/time
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "MM/dd/yyyy, h:mm a zzz"
+            let dateString = dateFormatter.string(from: Date())
+            
+            // Calculate test runtime
+            let endTime = Date()
+            let testRuntime = endTime.timeIntervalSince(startBenchmark)
+            let minutes = Int(testRuntime) / 60
+            let seconds = Int(testRuntime) % 60
+            let runtimeString = "\(minutes)m \(seconds)s"
+            
+            // Print summary with improved formatting
+            print("\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
+            print("")
+            print("Inverse Real Time Factor (RTFx)")
+            print("RTFx measures the latency of speech recognition systems - how long it takes to process a given amount of speech.")
+            print("")
+            print("RTFx = (number of seconds of audio inferred) / (compute time in seconds)")
+            print("")
+            print("• RTFx of 1.0 = system processes speech as fast as it's spoken")
+            print("• RTFx of 2.0 = system takes half the time (2x faster than real-time)")
+            print("• Higher RTFx = lower latency = better performance")
+            print("")
+            print("Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files,")
+            print("token-to-text conversion, and file I/O overhead.")
+            print("")
+            print("--- Benchmark Results ---")
             #if DEBUG
             print("   Mode: DEBUG (slow performance)")
             #else
             print("   Mode: RELEASE (optimal performance)")
             #endif
+            print("   Dataset: \(config.dataset) \(config.subset)")
             print("   Files processed: \(results.count)")
             print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
             print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
@@ -773,7 +811,10 @@ extension ASRBenchmark {
             print("   Average RTF: \(String(format: "%.3f", totalRTF))x")
             print("   Mean RTFx: \(String(format: "%.1f", meanRTFx))x")
             print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            print("   Sum RTFx: \(String(format: "%.1f", sumRTFx))x")
+            print("   Std RTFx: \(String(format: "%.1f", stdRTFx))x")
+            print("   Total audio duration: \(String(format: "%.1f", totalAudioDuration))s")
+            print("   Total processing time: \(String(format: "%.1f", totalProcessingTime))s")
+            print("   Overall RTFx: \(String(format: "%.1f", totalAudioDuration/totalProcessingTime))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)")
 
             // Save results
             let encoder = JSONEncoder()
@@ -794,7 +835,10 @@ extension ASRBenchmark {
                     "averageRTF": totalRTF,
                     "meanRTFx": meanRTFx,
                     "medianRTFx": medianRTFx,
-                    "sumRTFx": sumRTFx
+                    "stdRTFx": stdRTFx,
+                    "sumRTFx": sumRTFx,
+                    "totalAudioDuration": totalAudioDuration,
+                    "totalProcessingTime": totalProcessingTime
                 ],
                 "results": results.map { result in
                     [

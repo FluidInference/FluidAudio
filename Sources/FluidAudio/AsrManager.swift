@@ -4,173 +4,7 @@ import OSLog
 import Accelerate
 import AVFoundation
 
-public struct ASRResult: Sendable {
-    public let text: String
-    public let confidence: Float
-    public let duration: TimeInterval
-    public let processingTime: TimeInterval
-    public let tokenTimings: [TokenTiming]?  // TDT support
-
-    public init(text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval, tokenTimings: [TokenTiming]? = nil) {
-        self.text = text
-        self.confidence = confidence
-        self.duration = duration
-        self.processingTime = processingTime
-        self.tokenTimings = tokenTimings
-    }
-}
-
-/// Token Duration Timing for advanced post-processing
-public struct TokenTiming: Sendable {
-    public let token: String
-    public let tokenId: Int
-    public let startTime: TimeInterval
-    public let endTime: TimeInterval
-    public let confidence: Float
-
-    public init(token: String, tokenId: Int, startTime: TimeInterval, endTime: TimeInterval, confidence: Float) {
-        self.token = token
-        self.tokenId = tokenId
-        self.startTime = startTime
-        self.endTime = endTime
-        self.confidence = confidence
-    }
-}
-
-// MARK: - TDT Configuration
-
-public struct TDTConfig: Sendable {
-    public let durations: [Int]
-    public let includeTokenDuration: Bool
-    public let includeDurationConfidence: Bool
-    public let maxSymbolsPerStep: Int?
-
-    public static let `default` = TDTConfig()
-
-    public init(
-        durations: [Int] = [0, 1, 2, 3, 4],  // Fixed: Match notebook training
-        includeTokenDuration: Bool = true,
-        includeDurationConfidence: Bool = false,
-        maxSymbolsPerStep: Int? = nil
-    ) {
-        self.durations = durations
-        self.includeTokenDuration = includeTokenDuration
-        self.includeDurationConfidence = includeDurationConfidence
-        self.maxSymbolsPerStep = maxSymbolsPerStep
-    }
-}
-
-public struct TDTHypothesis: Sendable {
-    public var score: Float
-    public var ySequence: [Int]
-    internal var decState: DecoderState?
-    public var timestamps: [Int]
-    public var tokenDurations: [Int]
-    public var lastToken: Int?
-
-    public init() {
-        self.score = 0.0
-        self.ySequence = []
-        self.decState = nil
-        self.timestamps = []
-        self.tokenDurations = []
-        self.lastToken = nil
-    }
-}
-
-public struct ASRConfig: Sendable {
-    public let sampleRate: Int
-    public let maxSymbolsPerFrame: Int
-    public let modelCacheDirectory: URL?
-    public let enableDebug: Bool
-
-    // iOS Real-Time Optimizations
-    public let realtimeMode: Bool
-    public let chunkSizeMs: Int           // Chunk size in milliseconds
-    public let maxLatencyMs: Int          // Maximum acceptable latency
-
-    // TDT + Post-Processing
-    public let enableAdvancedPostProcessing: Bool  // Vocabulary-based post-processing
-    public let vocabularyConstraints: Bool // Use vocab for token filtering
-    public let tdtConfig: TDTConfig       // TDT-specific configuration
-
-    public static let `default` = ASRConfig()
-
-    // Fast benchmark preset for maximum performance
-    public static let fastBenchmark = ASRConfig(
-        maxSymbolsPerFrame: 3,        // More aggressive decoding
-        realtimeMode: false,          // Batch mode
-        chunkSizeMs: 2000,           // Larger chunks
-        enableAdvancedPostProcessing: true,
-        vocabularyConstraints: false,
-        tdtConfig: TDTConfig(
-            durations: [0, 1, 2, 3, 4],
-            includeTokenDuration: true,
-            includeDurationConfidence: false,
-            maxSymbolsPerStep: 3     // More aggressive
-        )
-    )
-
-    // iOS Real-Time preset with TDT + Post-Processing
-    public static let realtimeIOS = ASRConfig(
-        realtimeMode: true,
-        chunkSizeMs: 200,            // 200ms chunks for responsiveness
-        maxLatencyMs: 100,           // 100ms max latency
-        enableAdvancedPostProcessing: true,  // Vocabulary post-processing
-        vocabularyConstraints: true,  // Use vocab constraints during decoding
-        tdtConfig: TDTConfig(durations: [0, 1, 2, 3, 4], includeTokenDuration: true, includeDurationConfidence: false, maxSymbolsPerStep: 2)
-    )
-
-    public init(
-        sampleRate: Int = 16000,
-        maxSymbolsPerFrame: Int = 3,      // Faster default
-        modelCacheDirectory: URL? = nil,
-        enableDebug: Bool = false,
-        realtimeMode: Bool = false,
-        chunkSizeMs: Int = 1500,          // Larger chunks by default
-        maxLatencyMs: Int = 500,          // Default 500ms latency
-        enableAdvancedPostProcessing: Bool = true,  // Post-processing enabled by default
-        vocabularyConstraints: Bool = false,  // Vocab constraints disabled by default
-        tdtConfig: TDTConfig = .default   // TDT configuration
-    ) {
-        self.sampleRate = sampleRate
-        self.maxSymbolsPerFrame = maxSymbolsPerFrame
-        self.modelCacheDirectory = modelCacheDirectory
-        self.enableDebug = enableDebug
-        self.realtimeMode = realtimeMode
-        self.chunkSizeMs = chunkSizeMs
-        self.maxLatencyMs = maxLatencyMs
-        self.enableAdvancedPostProcessing = enableAdvancedPostProcessing
-        self.vocabularyConstraints = vocabularyConstraints
-        self.tdtConfig = tdtConfig
-    }
-}
-
-public enum ASRError: Error, LocalizedError {
-    case notInitialized
-    case invalidAudioData
-    case modelLoadFailed
-    case processingFailed(String)
-    case invalidDuration
-    case modelCompilationFailed
-
-    public var errorDescription: String? {
-        switch self {
-        case .notInitialized:
-            return "AsrManager not initialized. Call initialize() first."
-        case .invalidAudioData:
-            return "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
-        case .modelLoadFailed:
-            return "Failed to load Parakeet CoreML models."
-        case .processingFailed(let message):
-            return "ASR processing failed: \(message)"
-        case .invalidDuration:
-            return "Audio must be exactly 10 seconds (160,000 samples at 16kHz)."
-        case .modelCompilationFailed:
-            return "CoreML model compilation failed after recovery attempts."
-        }
-    }
-}
+// MARK: - AsrManager
 
 /// AsrManager provides automatic speech recognition using Parakeet TDT (Token-and-Duration Transducer) models.
 ///
@@ -204,19 +38,20 @@ public enum ASRError: Error, LocalizedError {
 ///
 /// - Note: Requires macOS 13.0+ or iOS 16.0+ for CoreML 6 features
 @available(macOS 13.0, iOS 16.0, *)
-public final class AsrManager: @unchecked Sendable {
+public final class AsrManager {
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ASR")
-    private let config: ASRConfig
+    internal let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ASR")
+    internal let config: ASRConfig
+    private let modelsDirectory: URL
 
     // CoreML Models for Parakeet TDT transcription
-    private var melSpectrogramModel: MLModel?
-    private var encoderModel: MLModel?
-    private var decoderModel: MLModel?
-    private var jointModel: MLModel?
+    internal var melSpectrogramModel: MLModel?
+    internal var encoderModel: MLModel?
+    internal var decoderModel: MLModel?
+    internal var jointModel: MLModel?
 
     // Prediction options for faster inference
-    private var predictionOptions: MLPredictionOptions?
+    internal var predictionOptions: MLPredictionOptions?
 
     // Decoder state management
     var decoderState: DecoderState = DecoderState()
@@ -225,8 +60,13 @@ public final class AsrManager: @unchecked Sendable {
     let blankId = 1024  // Verified: this works correctly (not actually "warming" token)
     let sosId = 1024    // Start of sequence token (same as blank for this model)
 
-    public init(config: ASRConfig = .default) {
+    /// Creates a new ASR manager with the specified configuration
+    /// - Parameters:
+    ///   - config: ASR configuration settings
+    ///   - modelsDirectory: Custom directory for CoreML models. If nil, uses default Application Support location
+    public init(config: ASRConfig = .default, modelsDirectory: URL? = nil) {
         self.config = config
+        self.modelsDirectory = modelsDirectory ?? Self.getDefaultModelsDirectory()
 
         // Initialize TDT-specific properties - TDT is always enabled
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
@@ -247,8 +87,7 @@ public final class AsrManager: @unchecked Sendable {
     public func initialize() async throws {
         logger.info("Initializing AsrManager with Parakeet models")
 
-        let modelsDirectory = getModelsDirectory()
-        logger.info("Models directory: \(modelsDirectory.path)")
+        logger.info("Models directory: \(self.modelsDirectory.path)")
 
         let melSpectrogramPath = modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")
         let encoderPath = modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")
@@ -260,33 +99,24 @@ public final class AsrManager: @unchecked Sendable {
             try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDirectory)
 
             let modelConfig = MLModelConfiguration()
-            modelConfig.computeUnits = .cpuAndNeuralEngine
 
             // Enable performance optimizations
             modelConfig.allowLowPrecisionAccumulationOnGPU = true
-            #if os(macOS)
-            // Force CPU and Neural Engine only (no GPU) for consistent performance
-            // GPU can cause issues in virtualized environments like GitHub Actions
-            modelConfig.computeUnits = .cpuAndNeuralEngine
 
-            // Log compute units for debugging
+            // Configure compute units based on environment
             if ProcessInfo.processInfo.environment["CI"] != nil {
-                print("🔧 ASR: Using compute units: cpuAndNeuralEngine (CI environment)")
+                // Force CPU and Neural Engine only (no GPU) in CI environments
+                // GPU can cause issues in virtualized environments like GitHub Actions
+                modelConfig.computeUnits = .cpuAndNeuralEngine
+                logger.info("🔧 ASR: Using compute units: cpuAndNeuralEngine (CI environment)")
+
+            } else {
+                // Use all available compute units for best performance on real hardware
+                modelConfig.computeUnits = .all
             }
 
-            // IMPORTANT: RTFx Performance in CI Environments
-            // GitHub Actions and other CI environments use virtualized M1/M2 Macs where
-            // Neural Engine access is severely restricted. This results in significantly
-            // degraded performance compared to bare metal:
-            // - Physical M1/M2 Mac: ~21x real-time (RTFx)
-            // - GitHub Actions M1: ~3x real-time (7x slower due to virtualization)
-            //
-            // For accurate RTFx benchmarking, always test on physical Apple Silicon hardware.
-            // The WER (Word Error Rate) metrics remain accurate in CI environments.
-            #endif
-
             // Load all models
-            logger.info("Loading Parakeet models from \(modelsDirectory.path)")
+            logger.info("Loading Parakeet models from \(self.modelsDirectory.path)")
 
             // Check all model files exist
             let modelPaths = [
@@ -488,7 +318,7 @@ public final class AsrManager: @unchecked Sendable {
         let hiddenSize = shape[2].intValue
 
         if config.enableDebug && timeIndex == 0 {
-            print("🔍 DEBUG: extractEncoderTimeStep - encoder shape: \(shape), timeIndex: \(timeIndex)")
+            logger.debug("🔍 DEBUG: extractEncoderTimeStep - encoder shape: \(shape), timeIndex: \(timeIndex)")
         }
 
         guard timeIndex < sequenceLength else {
@@ -891,7 +721,7 @@ public final class AsrManager: @unchecked Sendable {
     }
 
     /// Initialize decoder state with a clean blank token pass
-    private func initializeDecoderState() async throws {
+    internal func initializeDecoderState() async throws {
         decoderState = try await createFreshDecoderState()
     }
 
@@ -983,7 +813,7 @@ public final class AsrManager: @unchecked Sendable {
     }
 
     /// Advanced post-processing using vocabulary and timing information
-    func applyAdvancedPostProcessing(_ text: String, tokenTimings: [TokenTiming]) -> String {
+    internal func applyAdvancedPostProcessing(_ text: String, tokenTimings: [TokenTiming]) -> String {
         var processedText = text
 
         // Simple cleanup only - remove consecutive duplicates and fix spacing
@@ -1042,33 +872,6 @@ public final class AsrManager: @unchecked Sendable {
         return corrected
     }
 
-    /// Apply context-aware corrections based on surrounding words
-    private func applyContextCorrections(_ text: String) -> String {
-        var corrected = text
-        let words = text.components(separatedBy: .whitespaces)
-
-        // Context-based word corrections
-        for i in 0..<words.count {
-            let word = words[i].lowercased()
-
-            // Look at surrounding context for better corrections
-            if i > 0 && i < words.count - 1 {
-                let prevWord = words[i-1].lowercased()
-                let nextWord = words[i+1].lowercased()
-
-                // Context-specific corrections
-                if prevWord == "fat" && word == "muton" {
-                    corrected = corrected.replacingOccurrences(of: words[i], with: "mutton")
-                }
-
-                if prevWord == "good" && word == "n" && nextWord == "fresh" {
-                    corrected = corrected.replacingOccurrences(of: " n ", with: " ten ")
-                }
-            }
-        }
-
-        return corrected
-    }
 
     /// Remove consecutive duplicate words
     private func removeConsecutiveDuplicates(_ text: String) -> String {
@@ -1116,72 +919,85 @@ public final class AsrManager: @unchecked Sendable {
         }
     }
 
+    private func calculateDirectorySize(at url: URL) -> Int64 {
+        var size: Int64 = 0
+
+        if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) {
+            for case let fileURL as URL in enumerator {
+                if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    size += Int64(fileSize)
+                }
+            }
+        }
+
+        return size
+    }
+
     private func loadModelWithCompilation(
         path: URL,
         name: String,
         configuration: MLModelConfiguration
     ) async throws -> MLModel {
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        
+
         do {
             // Try loading directly first
             if isCI {
-                print("🔍 CI: Attempting to load \(name) model from: \(path.path)")
-                print("   File exists: \(FileManager.default.fileExists(atPath: path.path))")
-                
-                // Check file size
-                if let attrs = try? FileManager.default.attributesOfItem(atPath: path.path),
-                   let fileSize = attrs[.size] as? Int64 {
-                    print("   File size: \(fileSize / 1024)KB")
+                logger.info("🔍 CI: Attempting to load \(name) model from: \(path.path)")
+                logger.info("   File exists: \(FileManager.default.fileExists(atPath: path.path))")
+
+                // Check directory size for .mlmodelc (which is a directory, not a file)
+                if FileManager.default.fileExists(atPath: path.path) {
+                    let directorySize = calculateDirectorySize(at: path)
+                    logger.info("   Model size: \(directorySize / 1024)KB")
                 }
             }
-            
+
             let model = try MLModel(contentsOf: path, configuration: configuration)
-            
+
             if isCI {
-                print("✅ CI: Successfully loaded \(name) model")
+                logger.info("✅ CI: Successfully loaded \(name) model")
             }
-            
+
             return model
         } catch {
             // If loading fails, log detailed error info
             logger.error("Failed to load \(name) model: \(error)")
+
+            let isCompiled = path.pathExtension == "mlmodelc"
             
             if isCI {
-                print("❌ CI: Failed to load \(name) model from \(path.path)")
-                print("   Error: \(error)")
-                print("   Error type: \(type(of: error))")
-                
-                // Check if it's a .mlmodelc or needs compilation
-                let isCompiled = path.pathExtension == "mlmodelc"
-                print("   Is compiled model: \(isCompiled)")
-                
+                logger.error("❌ CI: Failed to load \(name) model from \(path.path)")
+                logger.error("   Error: \(error)")
+                logger.error("   Error type: \(type(of: error))")
+                logger.error("   Is compiled model: \(isCompiled)")
+
                 if !isCompiled {
-                    print("   Attempting to compile model...")
+                    logger.info("   Attempting to compile model...")
                 }
             }
-            
+
             // If it's already a compiled model, check if we should remove and re-download
-            if path.pathExtension == "mlmodelc" {
+            if isCompiled {
                 if isCI {
-                    print("❌ CI: Compiled model failed to load. This may indicate corruption.")
-                    print("   Removing corrupted model: \(path.path)")
+                    logger.error("❌ CI: Compiled model failed to load. This may indicate corruption.")
+                    logger.error("   Removing corrupted model: \(path.path)")
                     try? FileManager.default.removeItem(at: path)
-                    
+
                     // Check if we have a parent directory with .mlpackage
                     let parentDir = path.deletingLastPathComponent()
                     let packageName = path.deletingPathExtension().lastPathComponent + ".mlpackage"
                     let packagePath = parentDir.appendingPathComponent(packageName)
-                    
+
                     if FileManager.default.fileExists(atPath: packagePath.path) {
-                        print("   Found .mlpackage, attempting to compile...")
+                        logger.info("   Found .mlpackage, attempting to compile...")
                         let compiledURL = try await MLModel.compileModel(at: packagePath)
                         return try MLModel(contentsOf: compiledURL, configuration: configuration)
                     }
                 }
                 throw ASRError.modelLoadFailed
             }
-            
+
             // Try compiling first
             logger.info("Compiling \(name) model...")
             let compiledURL = try await MLModel.compileModel(at: path)
@@ -1207,20 +1023,18 @@ public final class AsrManager: @unchecked Sendable {
         return try await (melSpectrogram, encoder, decoder, joint)
     }
 
-    private func getModelsDirectory() -> URL {
-        let directory: URL
-
-        if let customDirectory = config.modelCacheDirectory {
-            directory = customDirectory.appendingPathComponent("Parakeet", isDirectory: true)
-        } else {
-            // Use Application Support cache directory for better system integration
-            let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let appDirectory = applicationSupportURL.appendingPathComponent("FluidAudio", isDirectory: true)
-            directory = appDirectory.appendingPathComponent("Models/Parakeet", isDirectory: true)
-        }
+    private static func getDefaultModelsDirectory() -> URL {
+        // Use Application Support cache directory for better system integration
+        let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appDirectory = applicationSupportURL.appendingPathComponent("FluidAudio", isDirectory: true)
+        let directory = appDirectory.appendingPathComponent("Models/Parakeet", isDirectory: true)
 
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.standardizedFileURL
+    }
+
+    private func getModelsDirectory() -> URL {
+        return modelsDirectory
     }
 
     public func cleanup() {
@@ -1303,7 +1117,7 @@ public final class AsrManager: @unchecked Sendable {
 
 
     /// TDT decoding algorithm following GreedyTDTInfer logic
-    private func tdtDecode(
+    internal func tdtDecode(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
         originalAudioSamples: [Float]
@@ -1499,7 +1313,7 @@ public final class AsrManager: @unchecked Sendable {
     ///
     /// - Parameter audioSamples: Array of audio samples at 16kHz
     /// - Returns: `ASRResult` containing transcribed text, confidence, and timing information
-    /// - Throws: 
+    /// - Throws:
     ///   - `ASRError.notInitialized` if models are not loaded
     ///   - `ASRError.invalidAudioData` if audio is too short (<1 second)
     ///   - `ASRError.processingFailed` if transcription fails
@@ -1509,144 +1323,8 @@ public final class AsrManager: @unchecked Sendable {
     /// - Audio >10 seconds: Automatically chunked with 0.5s overlap
     /// - RTFx includes full end-to-end time (I/O + inference)
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
-        guard isAvailable else {
-            throw ASRError.notInitialized
-        }
-
-        let startTime = Date()
-
-        // Handle long audio by chunking
-        if audioSamples.count > 160_000 {
-            // Audio is longer than 10 seconds, use chunking
-            return try await transcribeWithChunking(audioSamples, startTime: startTime)
-        }
-
-        // Validate and pad audio (1-10 seconds)
-        guard audioSamples.count >= 16_000 && audioSamples.count <= 160_000 else {
-            throw ASRError.invalidAudioData
-        }
-
-        // Pad to 10 seconds as the model expects 160k samples
-        var paddedAudio = audioSamples
-        if paddedAudio.count < 160_000 {
-            let padding = Array(repeating: Float(0.0), count: 160_000 - paddedAudio.count)
-            paddedAudio.append(contentsOf: padding)
-        }
-
-        do {
-            // Process through mel-spectrogram and encoder
-            let melSpectrogramInput = try prepareMelSpectrogramInput(paddedAudio)
-
-            if config.enableDebug {
-                print("🔍 DEBUG: Audio processing:")
-                print("   - Audio input length: \(paddedAudio.count) samples")
-                print("   - Audio duration: \(String(format: "%.2f", Float(paddedAudio.count) / 16000.0)) seconds")
-            }
-
-            guard let melSpectrogramOutput = try melSpectrogramModel?.prediction(from: melSpectrogramInput, options: predictionOptions ?? MLPredictionOptions()) else {
-                throw ASRError.processingFailed("Mel-spectrogram model failed")
-            }
-
-            if config.enableDebug {
-                print("🔍 DEBUG: Mel-spectrogram output:")
-                for featureName in melSpectrogramOutput.featureNames {
-                    if let value = melSpectrogramOutput.featureValue(for: featureName),
-                       let array = value.multiArrayValue {
-                        print("   - '\(featureName)': shape=\(array.shape)")
-                        if featureName == "melspectogram_length" {
-                            print("   - Mel-spectrogram length value: \(array[0])")
-                        }
-                    }
-                }
-            }
-
-            let encoderInput = try prepareEncoderInput(melSpectrogramOutput)
-            guard let encoderOutput = try encoderModel?.prediction(from: encoderInput, options: predictionOptions ?? MLPredictionOptions()) else {
-                throw ASRError.processingFailed("Encoder model failed")
-            }
-
-            // Debug encoder output
-            if config.enableDebug {
-                print("🔍 DEBUG: Encoder output features:")
-                for featureName in encoderOutput.featureNames {
-                    if let value = encoderOutput.featureValue(for: featureName) {
-                        if let array = value.multiArrayValue {
-                            print("   - '\(featureName)': shape=\(array.shape)")
-                            if featureName == "encoder_output_length" {
-                                print("   - Encoder output length value: \(array[0])")
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Use TDT or improved decoding
-            let tokenIds: [Int]
-            let tokenTimings: [TokenTiming]
-
-            // Get encoder hidden states and sequence length
-            guard let rawEncoderOutput = encoderOutput.featureValue(for: "encoder_output")?.multiArrayValue,
-                  let encoderLength = encoderOutput.featureValue(for: "encoder_output_length")?.multiArrayValue else {
-                throw ASRError.processingFailed("Invalid encoder output")
-            }
-
-            let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
-            let encoderSequenceLength = encoderLength[0].intValue
-
-            if config.enableDebug {
-                print("🔍 DEBUG: Encoder processing:")
-                print("   - Raw encoder output shape: \(rawEncoderOutput.shape)")
-                print("   - Encoder sequence length: \(encoderSequenceLength)")
-                print("   - Encoder hidden states shape after transpose: \(encoderHiddenStates.shape)")
-            }
-
-            // TDT is always enabled - Use TDT decoding
-            tokenIds = try await tdtDecode(
-                encoderOutput: encoderHiddenStates,
-                encoderSequenceLength: encoderSequenceLength,
-                originalAudioSamples: audioSamples
-            )
-            // TDT timings would be created from hypothesis in full implementation
-            tokenTimings = []
-
-            // Convert tokens to text with proper timing handling
-            let (text, finalTimings) = convertTokensWithExistingTimings(tokenIds, timings: tokenTimings)
-
-            let processingTime = Date().timeIntervalSince(startTime)
-            let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
-
-            // Apply advanced post-processing if enabled
-            let finalText = config.enableAdvancedPostProcessing ?
-                applyAdvancedPostProcessing(text, tokenTimings: finalTimings) :
-                text
-
-            // Log warning if empty transcription for longer audio
-            if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && duration > 1.0 {
-                logger.warning("⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))")
-                
-                // Additional CI debugging
-                if ProcessInfo.processInfo.environment["CI"] != nil {
-                    print("🔍 CI Debug - Empty transcription:")
-                    print("   Audio duration: \(String(format: "%.1f", duration))s")
-                    print("   Token IDs count: \(tokenIds.count)")
-                    print("   Token IDs: \(tokenIds.prefix(10))...")
-                    print("   Encoder sequence length: \(encoderSequenceLength)")
-                    print("   Models loaded: mel=\(melSpectrogramModel != nil), encoder=\(encoderModel != nil), decoder=\(decoderModel != nil), joint=\(jointModel != nil)")
-                }
-            }
-
-            return ASRResult(
-                text: finalText,
-                confidence: 1.0,
-                duration: duration,
-                processingTime: processingTime,
-                tokenTimings: finalTimings
-            )
-
-        } catch {
-            logger.error("Improved transcription failed: \(error.localizedDescription)")
-            throw ASRError.processingFailed(error.localizedDescription)
-        }
+        // Use the new unified transcription approach
+        return try await transcribeUnified(audioSamples)
     }
 
     /// Optimized RNNT decoding algorithm with repetition prevention
@@ -1859,7 +1537,8 @@ public final class AsrManager: @unchecked Sendable {
         return cleanedTokens
     }
 
-    /// Transcribe long audio using chunking strategy
+    // DEPRECATED: Moved to TranscriptionStrategy.swift
+    /*
     private func transcribeWithChunking(_ audioSamples: [Float], startTime: Date) async throws -> ASRResult {
         let chunkSize = 160_000  // 10 seconds at 16kHz
         let overlap = 16_000     // 1 second overlap to avoid boundary issues
@@ -1883,11 +1562,7 @@ public final class AsrManager: @unchecked Sendable {
             let chunkSamples = Array(audioSamples[position..<endPosition])
 
             // Pad last chunk if needed
-            var paddedChunk = chunkSamples
-            if paddedChunk.count < chunkSize {
-                let padding = Array(repeating: Float(0.0), count: chunkSize - paddedChunk.count)
-                paddedChunk.append(contentsOf: padding)
-            }
+            let paddedChunk = padAudioIfNeeded(chunkSamples, targetLength: chunkSize)
 
             if config.enableDebug {
                 let chunkDuration = Double(chunkSamples.count) / 16000.0
@@ -1976,51 +1651,28 @@ public final class AsrManager: @unchecked Sendable {
             tokenTimings: nil  // Token timings would need special handling for chunks
         )
     }
+    */
 
-    /// Transcribe a single chunk without length validation
+    // DEPRECATED: Moved to TranscriptionStrategy.swift  
+    /*
     private func transcribeSingleChunk(_ paddedAudio: [Float]) async throws -> ASRResult {
         let chunkStartTime = Date()
 
         do {
-            // Process through mel-spectrogram and encoder
-            let melSpectrogramInput = try prepareMelSpectrogramInput(paddedAudio)
-
-            guard let melSpectrogramOutput = try melSpectrogramModel?.prediction(from: melSpectrogramInput, options: predictionOptions ?? MLPredictionOptions()) else {
-                throw ASRError.processingFailed("Mel-spectrogram model failed")
-            }
-
-            let encoderInput = try prepareEncoderInput(melSpectrogramOutput)
-            guard let encoderOutput = try encoderModel?.prediction(from: encoderInput, options: predictionOptions ?? MLPredictionOptions()) else {
-                throw ASRError.processingFailed("Encoder model failed")
-            }
-
-            // Get encoder hidden states and sequence length
-            guard let rawEncoderOutput = encoderOutput.featureValue(for: "encoder_output")?.multiArrayValue,
-                  let encoderLength = encoderOutput.featureValue(for: "encoder_output_length")?.multiArrayValue else {
-                throw ASRError.processingFailed("Invalid encoder output")
-            }
-
-            let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
-            let encoderSequenceLength = encoderLength[0].intValue
-
-            // Use appropriate decoding method - TDT is always enabled
-            let tokenIds = try await tdtDecode(
-                encoderOutput: encoderHiddenStates,
-                encoderSequenceLength: encoderSequenceLength,
-                originalAudioSamples: paddedAudio
+            // Use shared transcription core
+            let (tokenIds, encoderSequenceLength) = try await transcriptionCore(
+                paddedAudio,
+                enableDebug: false
             )
-
-            // Convert tokens to text
-            let text = convertTokensToSimpleText(tokenIds)
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
 
-            return ASRResult(
-                text: text,
-                confidence: 1.0,
-                duration: Double(paddedAudio.count) / Double(config.sampleRate),
-                processingTime: processingTime,
-                tokenTimings: nil
+            // Process result
+            return processTranscriptionResult(
+                tokenIds: tokenIds,
+                encoderSequenceLength: encoderSequenceLength,
+                audioSamples: paddedAudio,
+                processingTime: processingTime
             )
 
         } catch {
@@ -2028,6 +1680,7 @@ public final class AsrManager: @unchecked Sendable {
             throw error
         }
     }
+    */
 
     /// Convert tokens to simple text without timing information
     private func convertTokensToSimpleText(_ tokenIds: [Int]) -> String {
@@ -2036,7 +1689,7 @@ public final class AsrManager: @unchecked Sendable {
     }
 
     /// Convert tokens to text using existing timing information from TDT
-    private func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (text: String, timings: [TokenTiming]) {
+    internal func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (text: String, timings: [TokenTiming]) {
         if tokenIds.isEmpty {
             return ("", [])
         }
@@ -2098,51 +1751,3 @@ public final class AsrManager: @unchecked Sendable {
     }
 }
 
-// MARK: - Decoder State Management
-struct DecoderState {
-    var hiddenState: MLMultiArray
-    var cellState: MLMultiArray
-
-    init() {
-        // Initialize with zeros for LSTM hidden/cell states
-        // Shape: [num_layers, batch_size, hidden_size] = [2, 1, 640]
-        hiddenState = try! MLMultiArray(shape: [2, 1, 640] as [NSNumber], dataType: .float32)
-        cellState = try! MLMultiArray(shape: [2, 1, 640] as [NSNumber], dataType: .float32)
-
-        // Initialize with zeros
-        for i in 0..<hiddenState.count {
-            hiddenState[i] = NSNumber(value: 0.0)
-        }
-        for i in 0..<cellState.count {
-            cellState[i] = NSNumber(value: 0.0)
-        }
-    }
-
-    mutating func update(from decoderOutput: MLFeatureProvider) {
-        if let newHiddenState = decoderOutput.featureValue(for: "h_out")?.multiArrayValue {
-            hiddenState = newHiddenState
-        }
-        if let newCellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue {
-            cellState = newCellState
-        }
-    }
-
-    /// Create a zero-initialized decoder state
-    static func zero() -> DecoderState {
-        return DecoderState()
-    }
-
-    /// Copy constructor for TDT hypothesis state management
-    init(from other: DecoderState) {
-        self.hiddenState = try! MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
-        self.cellState = try! MLMultiArray(shape: other.cellState.shape, dataType: .float32)
-
-        // Copy values
-        for i in 0..<other.hiddenState.count {
-            self.hiddenState[i] = other.hiddenState[i]
-        }
-        for i in 0..<other.cellState.count {
-            self.cellState[i] = other.cellState[i]
-        }
-    }
-}

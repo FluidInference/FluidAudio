@@ -2,8 +2,8 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Handler for the 'benchmark' command - runs diarization benchmarks
-enum BenchmarkCommand {
+/// Handler for the 'diarization-benchmark' command - runs diarization benchmarks
+enum DiarizationBenchmark {
     static func run(arguments: [String]) async {
         let benchmarkStartTime = Date()
 

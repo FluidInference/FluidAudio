@@ -247,7 +247,7 @@ private struct SlidingWindowFeature {
 
 /// Speaker diarization manager
 @available(macOS 13.0, iOS 16.0, *)
-public final class DiarizerManager: @unchecked Sendable {
+public final class DiarizerManager {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
     private let config: DiarizerConfig

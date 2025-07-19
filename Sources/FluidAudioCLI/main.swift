@@ -4,7 +4,7 @@
     import Foundation
 
     @main
-    struct DiarizationCLI {
+    struct FluidAudioCLI {
 
         static func main() async {
             let arguments = CommandLine.arguments
@@ -18,7 +18,7 @@
 
             switch command {
             case "diarization-benchmark":
-                await BenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
+                await DiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
             case "vad-benchmark":
                 await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
             case "asr-benchmark":
@@ -46,7 +46,7 @@
         static func printUsage() {
             print(
                 """
-                FluidAudio Diarization CLI
+                FluidAudio CLI
 
                 Usage: fluidaudio <command> [options]
 
@@ -77,5 +77,5 @@
         }
     }
 #else
-    #error("DiarizationCLI is only supported on macOS")
+    #error("FluidAudioCLI is only supported on macOS")
 #endif

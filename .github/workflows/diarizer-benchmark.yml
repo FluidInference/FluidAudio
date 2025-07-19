@@ -33,6 +33,10 @@ jobs:
         id: benchmark
         run: |
           echo "🚀 Running single file benchmark..."
+          
+          # Record start time
+          BENCHMARK_START=$(date +%s)
+          
           swift run fluidaudio diarization-benchmark --auto-download --single-file ES2004a --output benchmark_results.json
 
           # Check if results file was generated
@@ -42,6 +46,14 @@ jobs:
             echo "❌ Benchmark failed - no results file generated"
             echo "SUCCESS=false" >> $GITHUB_OUTPUT
           fi
+          
+          # Calculate execution time
+          BENCHMARK_END=$(date +%s)
+          EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
+          EXECUTION_MINS=$((EXECUTION_TIME / 60))
+          EXECUTION_SECS=$((EXECUTION_TIME % 60))
+          
+          echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
         timeout-minutes: 25
 
       - name: Show benchmark_results.json
@@ -102,49 +114,38 @@ jobs:
             const segmentationTime = parseFloat('${{ steps.extract.outputs.SEGMENTATION_TIME }}');
             const embeddingTime = parseFloat('${{ steps.extract.outputs.EMBEDDING_TIME }}');
             const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
+            const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
 
-            let comment = '## 🎯 Single File Benchmark Results\n\n';
-            comment += `**Test File:** ES2004a (${duration}s audio)\n\n`;
-            comment += '### 📊 Accuracy Metrics\n';
+            let comment = '## Diarization Benchmark Results\n\n';
             comment += '| Metric | Value | Target | Status |\n';
             comment += '|--------|-------|--------|---------|\n';
-            comment += `| **DER** (Diarization Error Rate) | ${der.toFixed(1)}% | < 30% | ${der < 30 ? '✅' : '❌'} |\n`;
-            comment += `| **JER** (Jaccard Error Rate) | ${jer.toFixed(1)}% | < 25% | ${jer < 25 ? '✅' : '❌'} |\n`;
-            comment += `| **RTF** (Real-Time Factor) | ${rtf.toFixed(2)}x | < 1.0x | ${rtf < 1.0 ? '✅' : '❌'} |\n`;
-            comment += `| **Speakers Detected** | ${speakerCount} | - | ℹ️ |\n\n`;
+            comment += `| DER | ${der.toFixed(1)}% | <30% | ${der < 30 ? '✅' : '⚠️'} |\n`;
+            comment += `| JER | ${jer.toFixed(1)}% | <25% | ${jer < 25 ? '✅' : '⚠️'} |\n`;
+            comment += `| RTF | ${rtf.toFixed(2)}x | <1.0x | ${rtf < 1.0 ? '✅' : '⚠️'} |\n\n`;
             
-            comment += '### ⏱️ Performance Timing\n';
-            comment += '| Stage | Time (s) | % of Total |\n';
-            comment += '|-------|----------|------------|\n';
-            comment += `| Model Download | ${modelDownloadTime.toFixed(3)} | ${(modelDownloadTime/totalTime*100).toFixed(1)}% |\n`;
-            comment += `| Model Compilation | ${modelCompileTime.toFixed(3)} | ${(modelCompileTime/totalTime*100).toFixed(1)}% |\n`;
-            comment += `| Audio Loading | ${audioLoadTime.toFixed(3)} | ${(audioLoadTime/totalTime*100).toFixed(1)}% |\n`;
-            comment += `| Segmentation | ${segmentationTime.toFixed(3)} | ${(segmentationTime/totalTime*100).toFixed(1)}% |\n`;
-            comment += `| Embedding Extraction | ${embeddingTime.toFixed(3)} | ${(embeddingTime/totalTime*100).toFixed(1)}% |\n`;
-            comment += `| Speaker Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)}% |\n`;
-            comment += `| **Total Processing** | **${totalTime.toFixed(3)}** | **100%** |\n\n`;
+            comment += '### Performance Timing\n';
+            comment += '| Stage | Time (s) | % |\n';
+            comment += '|-------|----------|----|\n';
+            comment += `| Model Download | ${modelDownloadTime.toFixed(3)} | ${(modelDownloadTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Model Compile | ${modelCompileTime.toFixed(3)} | ${(modelCompileTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Audio Load | ${audioLoadTime.toFixed(3)} | ${(audioLoadTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Segmentation | ${segmentationTime.toFixed(3)} | ${(segmentationTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Embedding | ${embeddingTime.toFixed(3)} | ${(embeddingTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| **Total** | **${totalTime.toFixed(3)}** | **100** |\n\n`;
             
-            comment += `**Inference Time**: ${inferenceTime.toFixed(3)}s (${(inferenceTime/totalTime*100).toFixed(1)}% of total)\n`;
-            comment += `**Setup Overhead**: ${(modelDownloadTime + modelCompileTime).toFixed(3)}s (${((modelDownloadTime + modelCompileTime)/totalTime*100).toFixed(1)}% of total)\n\n`;
-
-            // Performance assessment
-            if (der < 20) {
-              comment += '🎉 **Excellent Performance!** - Competitive with state-of-the-art research\n';
-            } else if (der < 30) {
-              comment += '✅ **Good Performance** - Meeting target benchmarks\n';
-            } else {
-              comment += '⚠️ **Performance Below Target** - Consider parameter optimization\n';
-            }
-
-            comment += '\n📊 **Research Comparison:**\n';
-            comment += '- Powerset BCE (2023): 18.5% DER\n';
-            comment += '- EEND (2019): 25.3% DER\n';
-            comment += '- x-vector clustering: 28.7% DER\n';
-
-            comment += '\n\n---\n*Automated benchmark using AMI corpus ES2004a test file*';
+            comment += '### Research Comparison\n';
+            comment += '| Method | DER | Year |\n';
+            comment += '|--------|-----|------|\n';
+            comment += '| **FluidAudio** | **' + der.toFixed(1) + '%** | **2025** |\n';
+            comment += '| Powerset BCE | 18.5% | 2023 |\n';
+            comment += '| EEND | 25.3% | 2019 |\n';
+            comment += '| x-vector clustering | 28.7% | 2018 |\n\n';
+            
+            comment += `<sub>ES2004a • ${duration}s audio • ${inferenceTime.toFixed(1)}s inference • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
             
             // Add hidden identifier for reliable comment detection
-            comment += '\n<!-- fluidaudio-benchmark-single-file -->';
+            comment += '<!-- fluidaudio-benchmark-single-file -->';
 
             try {
               // First, try to find existing benchmark comment
