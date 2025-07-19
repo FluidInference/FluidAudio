@@ -1,0 +1,53 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Direct prompt for automated review (no @claude mention needed)
+          direct_prompt: |
+            Please review this pull request and provide feedback on:
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns
+            - Test coverage
+            
+            Be constructive and helpful in your feedback.
+
+          use_sticky_comment: true
+          
+          # Optional: Customize review based on file types
+          # direct_prompt: |
+          #   Review this PR focusing on:
+          #   - For TypeScript files: Type safety and proper interface usage
+          #   - For API endpoints: Security, input validation, and error handling
+          #   - For React components: Performance, accessibility, and best practices
+          #   - For tests: Coverage, edge cases, and test quality
+          
+          # Optional: Skip review for certain conditions
+           if: |
+             !contains(github.event.pull_request.title, '[skip-review]') &&
+             !contains(github.event.pull_request.title, '[WIP]')
+
