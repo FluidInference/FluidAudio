@@ -126,7 +126,7 @@ public class ASRBenchmark: @unchecked Sendable {
     }
 
     /// Run ASR benchmark on LibriSpeech
-    public func runLibriSpeechBenchmark(asrManager: ASRManager, subset: String = "test-clean") async throws -> [ASRBenchmarkResult] {
+    public func runLibriSpeechBenchmark(asrManager: AsrManager, subset: String = "test-clean") async throws -> [ASRBenchmarkResult] {
         // Check if running in release mode and warn if not
         #if DEBUG
         print("")
@@ -173,14 +173,13 @@ public class ASRBenchmark: @unchecked Sendable {
 
                 // State verification: Check for state persistence between files
                 if config.debugMode && index > 0 {
-                    // Note: We can't directly access decoderState from ASRManager in this context
-                    // State verification is handled within the resetState() method itself
-                    logger.info("   🔍 Verifying state reset between files \(index) and \(index + 1)")
+                    // Note: We can't directly access decoderState from AsrManager in this context
+                    // State verification is handled internally by AsrManager
+                    logger.info("   🔍 Processing file \(index + 1)")
                 }
 
-                // Reset ASR state between files to prevent state leakage
-                // This ensures each transcription starts with a clean decoder state
-                try await asrManager.resetState()
+                // Note: ASR state is managed internally by AsrManager
+                // Each transcription handles its own state initialization
 
                 let result = try await processLibriSpeechFile(asrManager: asrManager, file: audioFile)
                 results.append(result)
@@ -200,7 +199,7 @@ public class ASRBenchmark: @unchecked Sendable {
     }
 
     /// Process a single LibriSpeech file
-    private func processLibriSpeechFile(asrManager: ASRManager, file: LibriSpeechFile) async throws -> ASRBenchmarkResult {
+    private func processLibriSpeechFile(asrManager: AsrManager, file: LibriSpeechFile) async throws -> ASRBenchmarkResult {
         let startTime = Date()
 
         // Load and convert audio to the required format
@@ -225,9 +224,9 @@ public class ASRBenchmark: @unchecked Sendable {
         )
     }
 
-    /// Transcribe audio - now supports long files through ASRManager chunking
-    internal func transcribeAudio(asrManager: ASRManager, audioSamples: [Float]) async throws -> ASRResult {
-        // ASRManager now handles chunking internally for audio > 10 seconds
+    /// Transcribe audio - now supports long files through AsrManager chunking
+    internal func transcribeAudio(asrManager: AsrManager, audioSamples: [Float]) async throws -> ASRResult {
+        // AsrManager now handles chunking internally for audio > 10 seconds
         return try await asrManager.transcribe(audioSamples)
     }
 
@@ -600,10 +599,10 @@ private func editDistance<T: Equatable>(_ seq1: [T], _ seq2: [T]) -> EditDistanc
 @available(macOS 13.0, iOS 16.0, *)
 extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
+        print("DEBUG: Starting runASRBenchmark")
         var subset = "test-clean"
         var maxFiles: Int?
         var outputFile = "asr_benchmark_results.json"
-        var modelsDir: String?
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
 
@@ -624,11 +623,6 @@ extension ASRBenchmark {
             case "--output":
                 if i + 1 < arguments.count {
                     outputFile = arguments[i + 1]
-                    i += 1
-                }
-            case "--models-dir":
-                if i + 1 < arguments.count {
-                    modelsDir = arguments[i + 1]
                     i += 1
                 }
             case "--debug":
@@ -662,7 +656,6 @@ extension ASRBenchmark {
         // Initialize ASR manager with fast benchmark preset
         let asrConfig = ASRConfig(
             maxSymbolsPerFrame: 3,
-            modelCacheDirectory: modelsDir.map { URL(fileURLWithPath: $0) },
             enableDebug: debugMode,
             realtimeMode: false,
             chunkSizeMs: 2000,
@@ -676,7 +669,7 @@ extension ASRBenchmark {
             )
         )
 
-        let asrManager = ASRManager(config: asrConfig)
+        let asrManager = AsrManager(config: asrConfig)
 
         do {
             // Initialize ASR system

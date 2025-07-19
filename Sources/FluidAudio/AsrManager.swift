@@ -88,11 +88,8 @@ public struct ASRConfig: Sendable {
     public let realtimeMode: Bool
     public let chunkSizeMs: Int           // Chunk size in milliseconds
     public let maxLatencyMs: Int          // Maximum acceptable latency
-    public let aggressiveMemoryMode: Bool // For iOS memory constraints
-    public let lowPowerMode: Bool         // Battery optimization
 
     // TDT + Post-Processing
-    public let enableTDT: Bool            // Token Duration Timing
     public let enableAdvancedPostProcessing: Bool  // Vocabulary-based post-processing
     public let vocabularyConstraints: Bool // Use vocab for token filtering
     public let tdtConfig: TDTConfig       // TDT-specific configuration
@@ -104,7 +101,6 @@ public struct ASRConfig: Sendable {
         maxSymbolsPerFrame: 3,        // More aggressive decoding
         realtimeMode: false,          // Batch mode
         chunkSizeMs: 2000,           // Larger chunks
-        enableTDT: true,             // TDT for accuracy
         enableAdvancedPostProcessing: true,
         vocabularyConstraints: false,
         tdtConfig: TDTConfig(
@@ -120,9 +116,6 @@ public struct ASRConfig: Sendable {
         realtimeMode: true,
         chunkSizeMs: 200,            // 200ms chunks for responsiveness
         maxLatencyMs: 100,           // 100ms max latency
-        aggressiveMemoryMode: true,  // iOS memory optimization
-        lowPowerMode: true,          // Battery optimization
-        enableTDT: true,             // TDT enabled with correct duration config
         enableAdvancedPostProcessing: true,  // Vocabulary post-processing
         vocabularyConstraints: true,  // Use vocab constraints during decoding
         tdtConfig: TDTConfig(durations: [0, 1, 2, 3, 4], includeTokenDuration: true, includeDurationConfidence: false, maxSymbolsPerStep: 2)
@@ -136,9 +129,6 @@ public struct ASRConfig: Sendable {
         realtimeMode: Bool = false,
         chunkSizeMs: Int = 1500,          // Larger chunks by default
         maxLatencyMs: Int = 500,          // Default 500ms latency
-        aggressiveMemoryMode: Bool = false,
-        lowPowerMode: Bool = false,
-        enableTDT: Bool = true,           // TDT enabled by default for better accuracy
         enableAdvancedPostProcessing: Bool = true,  // Post-processing enabled by default
         vocabularyConstraints: Bool = false,  // Vocab constraints disabled by default
         tdtConfig: TDTConfig = .default   // TDT configuration
@@ -150,9 +140,6 @@ public struct ASRConfig: Sendable {
         self.realtimeMode = realtimeMode
         self.chunkSizeMs = chunkSizeMs
         self.maxLatencyMs = maxLatencyMs
-        self.aggressiveMemoryMode = aggressiveMemoryMode
-        self.lowPowerMode = lowPowerMode
-        self.enableTDT = enableTDT
         self.enableAdvancedPostProcessing = enableAdvancedPostProcessing
         self.vocabularyConstraints = vocabularyConstraints
         self.tdtConfig = tdtConfig
@@ -186,7 +173,7 @@ public enum ASRError: Error, LocalizedError {
 }
 
 @available(macOS 13.0, iOS 16.0, *)
-public final class ASRManager: @unchecked Sendable {
+public final class AsrManager: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ASR")
     private let config: ASRConfig
@@ -210,10 +197,8 @@ public final class ASRManager: @unchecked Sendable {
     public init(config: ASRConfig = .default) {
         self.config = config
 
-        // Initialize TDT-specific properties if enabled
-        if config.enableTDT {
-            logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
-        }
+        // Initialize TDT-specific properties - TDT is always enabled
+        logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
     }
 
     public var isAvailable: Bool {
@@ -221,8 +206,8 @@ public final class ASRManager: @unchecked Sendable {
     }
 
     public func initialize() async throws {
-        logger.info("Initializing TranscriptManager with Parakeet models")
-        
+        logger.info("Initializing AsrManager with Parakeet models")
+
         let modelsDirectory = getModelsDirectory()
         logger.info("Models directory: \(modelsDirectory.path)")
 
@@ -234,7 +219,7 @@ public final class ASRManager: @unchecked Sendable {
         do {
             // Download models if they don't exist
             try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDirectory)
-            
+
             let modelConfig = MLModelConfiguration()
             modelConfig.computeUnits = .cpuAndNeuralEngine
 
@@ -244,19 +229,19 @@ public final class ASRManager: @unchecked Sendable {
             // Force CPU and Neural Engine only (no GPU) for consistent performance
             // GPU can cause issues in virtualized environments like GitHub Actions
             modelConfig.computeUnits = .cpuAndNeuralEngine
-            
+
             // Log compute units for debugging
             if ProcessInfo.processInfo.environment["CI"] != nil {
                 print("🔧 ASR: Using compute units: cpuAndNeuralEngine (CI environment)")
             }
-            
+
             // IMPORTANT: RTFx Performance in CI Environments
             // GitHub Actions and other CI environments use virtualized M1/M2 Macs where
             // Neural Engine access is severely restricted. This results in significantly
             // degraded performance compared to bare metal:
             // - Physical M1/M2 Mac: ~21x real-time (RTFx)
             // - GitHub Actions M1: ~3x real-time (7x slower due to virtualization)
-            // 
+            //
             // For accurate RTFx benchmarking, always test on physical Apple Silicon hardware.
             // The WER (Word Error Rate) metrics remain accurate in CI environments.
             #endif
@@ -280,30 +265,19 @@ public final class ASRManager: @unchecked Sendable {
                 logger.info("\(name) model found at: \(path.path)")
             }
 
-            // Compile and load models (compile first if needed)
-            melSpectrogramModel = try await loadModelWithCompilation(
-                path: melSpectrogramPath,
-                name: "mel-spectrogram",
+            // Load all models using common pattern
+            let models = try await loadAllModels(
+                melSpectrogramPath: melSpectrogramPath,
+                encoderPath: encoderPath,
+                decoderPath: decoderPath,
+                jointPath: jointPath,
                 configuration: modelConfig
             )
 
-            encoderModel = try await loadModelWithCompilation(
-                path: encoderPath,
-                name: "encoder",
-                configuration: modelConfig
-            )
-
-            decoderModel = try await loadModelWithCompilation(
-                path: decoderPath,
-                name: "decoder",
-                configuration: modelConfig
-            )
-
-            jointModel = try await loadModelWithCompilation(
-                path: jointPath,
-                name: "joint",
-                configuration: modelConfig
-            )
+            melSpectrogramModel = models.melSpectrogram
+            encoderModel = models.encoder
+            decoderModel = models.decoder
+            jointModel = models.joint
 
             // Initialize prediction options for faster inference
             let options = MLPredictionOptions()
@@ -693,51 +667,6 @@ public final class ASRManager: @unchecked Sendable {
         return blankId
     }
 
-    /// Detect filler phrases that indicate runaway generation in short audio
-    private func isFillerPhrase(_ tokens: [Int], vocabulary: [Int: String]) -> Bool {
-        guard tokens.count >= 2 else { return false }
-
-        // Convert tokens to text and check for common filler patterns
-        var words: [String] = []
-        for token in tokens {
-            if let tokenText = vocabulary[token] {
-                let cleanText = tokenText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: "▁", with: " ")
-                if !cleanText.isEmpty {
-                    words.append(cleanText.lowercased())
-                }
-            }
-        }
-
-        let phrase = words.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Common filler patterns that suggest runaway generation
-        let fillerPatterns = [
-            "again again",
-            "um um",
-            "uh uh",
-            "the the",
-            "and and",
-            "i i",
-            "a a",
-            "to to",
-            "is is",
-            "it it"
-        ]
-
-        for pattern in fillerPatterns {
-            if phrase.contains(pattern) {
-                return true
-            }
-        }
-
-        // Check for simple word repetition
-        if words.count == 2 && words[0] == words[1] {
-            return true
-        }
-
-        return false
-    }
 
     /// Check if a token should be emitted based on repetition patterns
     private func shouldEmitToken(_ token: Int, lastEmittedTokens: [Int], maxRepeats: Int) -> Bool {
@@ -801,33 +730,6 @@ public final class ASRManager: @unchecked Sendable {
         return false
     }
 
-    /// Remove patterns like [A, B, A, B, A, B, ...]
-    private func removeLoopPatterns(_ tokens: [Int]) -> [Int] {
-        guard tokens.count > 6 else { return tokens }
-
-        var result: [Int] = []
-        var i = 0
-
-        while i < tokens.count {
-            result.append(tokens[i])
-
-            // Look ahead for potential loop patterns
-            if i + 5 < tokens.count {
-                // Check for A-B-A-B pattern
-                if tokens[i] == tokens[i + 2] && tokens[i + 1] == tokens[i + 3] &&
-                   tokens[i + 2] == tokens[i + 4] && tokens[i + 3] == tokens[i + 5] {
-                    // Found loop, skip ahead
-                    result.append(tokens[i + 1]) // Add B once
-                    i += 6 // Skip the entire loop
-                    continue
-                }
-            }
-
-            i += 1
-        }
-
-        return result
-    }
 
     /// Check if the current token sequence appears unstable
     private func isSequenceUnstable(_ tokens: [Int], vocabulary: [Int: String]) -> Bool {
@@ -921,33 +823,6 @@ public final class ASRManager: @unchecked Sendable {
         return timings
     }
 
-    /// Enhanced joint input preparation for TDT
-    private func prepareTDTJointInput(
-        encoderOutput: MLMultiArray,
-        decoderOutput: MLFeatureProvider,
-        timeIndex: Int
-    ) throws -> MLFeatureProvider {
-        // Use the same logic as standard joint input but ensure proper shapes for TDT
-        return try prepareJointInput(
-            encoderOutput: encoderOutput,
-            decoderOutput: decoderOutput,
-            timeIndex: timeIndex
-        )
-    }
-
-    /// Confidence calculation for TDT predictions
-    private func calculateTDTConfidence(tokenLogits: [Float], durationLogits: [Float]) -> (tokenConf: Float, durationConf: Float) {
-        // Apply softmax to get probabilities
-        let tokenProbs = applySoftmax(tokenLogits)
-        let durationProbs = applySoftmax(durationLogits)
-
-        // Return max probabilities as confidence
-        let tokenConf = tokenProbs.max() ?? 0.0
-        let durationConf = durationProbs.max() ?? 0.0
-
-        return (tokenConf, durationConf)
-    }
-
     /// Apply softmax to logits
     private func applySoftmax(_ logits: [Float]) -> [Float] {
         let maxLogit = logits.max() ?? 0.0
@@ -978,28 +853,35 @@ public final class ASRManager: @unchecked Sendable {
 
     /// Initialize decoder state with a clean blank token pass
     private func initializeDecoderState() async throws {
+        decoderState = try await createFreshDecoderState()
+    }
+
+    /// Create a fresh decoder state with clean initialization
+    private func createFreshDecoderState() async throws -> DecoderState {
         guard let decoderModel = decoderModel else {
             throw ASRError.notInitialized
         }
 
         // Reset decoder state to zeros
-        decoderState = DecoderState.zero()
+        var freshState = DecoderState.zero()
 
         // Run decoder once with blank token to establish clean state
         let initDecoderInput = try prepareDecoderInput(
             targetToken: blankId,
-            hiddenState: decoderState.hiddenState,
-            cellState: decoderState.cellState
+            hiddenState: freshState.hiddenState,
+            cellState: freshState.cellState
         )
 
         let initDecoderOutput = try decoderModel.prediction(from: initDecoderInput, options: predictionOptions ?? MLPredictionOptions())
 
-        // Update decoder state with clean initialization
-        decoderState.update(from: initDecoderOutput)
+        // Update state with initial hidden/cell states
+        freshState.update(from: initDecoderOutput)
 
         if config.enableDebug {
             logger.info("Decoder state initialized cleanly")
         }
+
+        return freshState
     }
 
     /// Detect instability in the first few tokens
@@ -1065,16 +947,10 @@ public final class ASRManager: @unchecked Sendable {
     func applyAdvancedPostProcessing(_ text: String, tokenTimings: [TokenTiming]) -> String {
         var processedText = text
 
-        // Phase 1: Timing-based corrections (if TDT enabled)
-        if config.enableTDT && !tokenTimings.isEmpty {
-            processedText = applyTimingBasedCorrections(processedText, timings: tokenTimings)
-        }
-
-        // Phase 2: Pattern-based corrections
-        processedText = applyPatternCorrections(processedText)
-
-        // Phase 3: Context-aware corrections
-        processedText = applyContextCorrections(processedText)
+        // Simple cleanup only - remove consecutive duplicates and fix spacing
+        processedText = removeConsecutiveDuplicates(processedText)
+        processedText = processedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        processedText = processedText.replacingOccurrences(of: "  +", with: " ", options: .regularExpression)
 
         if config.enableDebug {
             logger.info("Post-processing: '\(text)' → '\(processedText)'")
@@ -1176,18 +1052,9 @@ public final class ASRManager: @unchecked Sendable {
         let vocabPath = appDirectory.appendingPathComponent("parakeet_vocab.json")
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            logger.warning("Vocabulary file not found at \(vocabPath.path), attempting download...")
-
-            let downloadURL = URL(string: "https://huggingface.co/alexwengg/coreml-parakeet-2/resolve/main/parakeet_vocab.json")!
-
-            do {
-                let vocabData = try Data(contentsOf: downloadURL)
-                try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
-                try vocabData.write(to: vocabPath)
-                logger.info("✅ Downloaded parakeet_vocab.json to \(vocabPath.path)")
-            } catch {
-                fatalError("❌ Failed to download vocabulary from Hugging Face: \(error.localizedDescription)")
-            }
+            logger.warning("Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models.")
+            // Return empty vocabulary - the transcription will still work but without some advanced features
+            return [:]
         }
 
         do {
@@ -1204,7 +1071,9 @@ public final class ASRManager: @unchecked Sendable {
             logger.info("✅ Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
             return vocabulary
         } catch {
-            fatalError("❌ Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)")
+            logger.error("Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)")
+            // Return empty vocabulary instead of crashing
+            return [:]
         }
     }
 
@@ -1223,6 +1092,23 @@ public final class ASRManager: @unchecked Sendable {
             logger.info("Successfully compiled \(name) model")
             return try MLModel(contentsOf: compiledURL, configuration: configuration)
         }
+    }
+
+    /// Load all required models in a single operation
+    private func loadAllModels(
+        melSpectrogramPath: URL,
+        encoderPath: URL,
+        decoderPath: URL,
+        jointPath: URL,
+        configuration: MLModelConfiguration
+    ) async throws -> (melSpectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
+        // Load models in parallel for better performance
+        async let melSpectrogram = loadModelWithCompilation(path: melSpectrogramPath, name: "mel-spectrogram", configuration: configuration)
+        async let encoder = loadModelWithCompilation(path: encoderPath, name: "encoder", configuration: configuration)
+        async let decoder = loadModelWithCompilation(path: decoderPath, name: "decoder", configuration: configuration)
+        async let joint = loadModelWithCompilation(path: jointPath, name: "joint", configuration: configuration)
+
+        return try await (melSpectrogram, encoder, decoder, joint)
     }
 
     private func getModelsDirectory() -> URL {
@@ -1246,142 +1132,11 @@ public final class ASRManager: @unchecked Sendable {
         encoderModel = nil
         decoderModel = nil
         jointModel = nil
-        decoderState = DecoderState()
+        decoderState = DecoderState.zero()
         logger.info("TranscriptManager resources cleaned up")
     }
 
-    /// Reset internal state between transcriptions to ensure clean processing
-    /// This is critical for benchmarking to prevent state leakage between audio files
-    public func resetState() async throws {
-        // Reset decoder state to clean zeros
-        decoderState = DecoderState()
 
-        // Reinitialize decoder state with a blank token pass
-        if isAvailable {
-            try await initializeDecoderState()
-        }
-
-        if config.enableDebug {
-            logger.info("ASRManager state reset completed")
-        }
-    }
-
-    /// Fallback transcription with relaxed parameters for empty results
-    private func transcribeWithRelaxedParameters(
-        audioSamples: [Float],
-        originalDuration: TimeInterval,
-        startTime: Date
-    ) async throws -> ASRResult {
-        logger.info("🔄 Attempting fallback transcription with relaxed parameters...")
-
-        // Reset state completely
-        try await resetState()
-
-        // Process audio again but with forced token generation
-        let melSpectrogramInput = try prepareMelSpectrogramInput(audioSamples)
-        guard let melSpectrogramOutput = try melSpectrogramModel?.prediction(from: melSpectrogramInput, options: predictionOptions ?? MLPredictionOptions()) else {
-            throw ASRError.processingFailed("Fallback mel-spectrogram failed")
-        }
-
-        let encoderInput = try prepareEncoderInput(melSpectrogramOutput)
-        guard let encoderOutput = try encoderModel?.prediction(from: encoderInput, options: predictionOptions ?? MLPredictionOptions()) else {
-            throw ASRError.processingFailed("Fallback encoder failed")
-        }
-
-        // Force at least one token generation
-        let fallbackTokens = try await decodeWithMinimumTokens(
-            encoderOutput: encoderOutput,
-            originalAudioSamples: audioSamples,
-            minimumTokens: originalDuration > 1.5 ? 1 : 0
-        )
-
-        let (fallbackText, _) = convertTokensWithExistingTimings(fallbackTokens, timings: [])
-
-        return ASRResult(
-            text: fallbackText,
-            confidence: 0.7, // Lower confidence for fallback
-            duration: originalDuration,
-            processingTime: Date().timeIntervalSince(startTime),
-            tokenTimings: nil
-        )
-    }
-
-    /// Decode with guaranteed minimum token generation
-    private func decodeWithMinimumTokens(
-        encoderOutput: MLFeatureProvider,
-        originalAudioSamples: [Float],
-        minimumTokens: Int
-    ) async throws -> [Int] {
-        guard let rawEncoderOutput = encoderOutput.featureValue(for: "encoder_output")?.multiArrayValue,
-              let encoderLength = encoderOutput.featureValue(for: "encoder_output_length")?.multiArrayValue else {
-            throw ASRError.processingFailed("Invalid fallback encoder output")
-        }
-
-        let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
-        let encoderSequenceLength = encoderLength[0].intValue
-        let _ = Double(originalAudioSamples.count) / 16000.0
-
-        var tokens: [Int] = []
-        var timeIndex = 0
-        var attempts = 0
-        let maxAttempts = min(encoderSequenceLength, 10)
-
-        // Force generation of at least minimumTokens
-        while tokens.count < minimumTokens && timeIndex < encoderSequenceLength && attempts < maxAttempts {
-            attempts += 1
-
-            // Run decoder with current state
-            let decoderInput = try prepareDecoderInput(
-                targetToken: tokens.isEmpty ? sosId : tokens.last ?? sosId,
-                hiddenState: decoderState.hiddenState,
-                cellState: decoderState.cellState
-            )
-
-            guard let decoderOutput = try decoderModel?.prediction(from: decoderInput, options: predictionOptions ?? MLPredictionOptions()) else {
-                break
-            }
-
-            decoderState.update(from: decoderOutput)
-
-            // Run joint network with relaxed thresholds
-            let jointInput = try prepareJointInput(
-                encoderOutput: encoderHiddenStates,
-                decoderOutput: decoderOutput,
-                timeIndex: timeIndex
-            )
-
-            guard let jointOutput = try jointModel?.prediction(from: jointInput, options: predictionOptions ?? MLPredictionOptions()),
-                  let logits = jointOutput.featureValue(for: "logits")?.multiArrayValue else {
-                timeIndex += 1
-                continue
-            }
-
-            // Find best non-blank token with relaxed confidence
-            var bestToken = blankId
-            var bestScore: Float = -Float.infinity
-
-            // Check all non-blank tokens
-            for i in 0..<min(logits.count - 5, blankId) { // Exclude duration tokens
-                let score = logits[i].floatValue
-                if score > bestScore {
-                    bestScore = score
-                    bestToken = i
-                }
-            }
-
-            // Accept any non-blank token if we need more tokens
-            if bestToken != blankId {
-                tokens.append(bestToken)
-                timeIndex += 1
-            } else {
-                // Force progress even with blank
-                timeIndex += 1
-            }
-        }
-
-        logger.info("🔧 Fallback generated \(tokens.count) tokens from \(attempts) attempts")
-        return tokens
-    }
 
     // MARK: - TDT Decoding Implementation
 
@@ -1428,20 +1183,6 @@ public final class ASRManager: @unchecked Sendable {
         return (tokenLogits, durationLogits)
     }
 
-    /// Process token logits and return best token with confidence
-    private func processTokenLogits(_ logits: [Float]) -> (token: Int, confidence: Float) {
-        var maxIndex = 0
-        var maxValue = -Float.infinity
-
-        for (i, value) in logits.enumerated() {
-            if value > maxValue {
-                maxValue = value
-                maxIndex = i
-            }
-        }
-
-        return (maxIndex, maxValue)
-    }
 
     /// Process duration logits and return duration index with skip value
     private func processDurationLogits(_ logits: [Float]) throws -> (index: Int, skip: Int) {
@@ -1463,78 +1204,7 @@ public final class ASRManager: @unchecked Sendable {
         return (maxIndex, durations[maxIndex])
     }
 
-    /// Create MLMultiArray from Float array for TDT token selection
-    private func createMLMultiArrayFromFloats(_ floats: [Float]) throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: [floats.count as NSNumber], dataType: .float32)
-        for (i, value) in floats.enumerated() {
-            array[i] = NSNumber(value: value)
-        }
-        return array
-    }
 
-    /// Enhanced TDT token selection with duration consistency
-    private func getTopKTokensWithDurationConsistency(
-        tokenLogits: [Float],
-        durationLogits: [Float],
-        lastEmittedTokens: [Int],
-        originalAudioSamples: [Float],
-        k: Int
-    ) -> [(token: Int, score: Float)] {
-        let vocabulary = loadVocabulary()
-        let audioLength = Double(originalAudioSamples.count) / 16000.0
-
-        // Get top-k tokens
-        var tokenCandidates: [(token: Int, logit: Float)] = []
-        for (i, logit) in tokenLogits.enumerated() {
-            tokenCandidates.append((token: i, logit: logit))
-        }
-
-        // Sort by logit value and take top-k
-        tokenCandidates.sort { $0.logit > $1.logit }
-        let topKCandidates = Array(tokenCandidates.prefix(k))
-
-        // Apply quality control similar to standard RNNT
-        var scoredCandidates: [(token: Int, score: Float)] = []
-
-        for candidate in topKCandidates {
-            let token = candidate.token
-            var score = candidate.logit
-
-            // Apply repetition penalties (same as RNNT)
-            let recentCount = lastEmittedTokens.suffix(5).filter { $0 == token }.count
-            if recentCount > 0 {
-                let repetitionPenalty = Float(recentCount) * 2.5
-                score -= repetitionPenalty
-            }
-
-            // Extra penalty for immediate repetition
-            if let lastToken = lastEmittedTokens.last, lastToken == token {
-                score -= 3.0
-            }
-
-            // Filter out obviously bad tokens
-            if token != blankId {
-                if let tokenText = vocabulary[token] {
-                    // Skip empty or unknown tokens
-                    if tokenText.isEmpty || tokenText == "<unk>" {
-                        continue
-                    }
-
-                    // Skip very long tokens for short audio
-                    if audioLength < 4.0 && tokenText.count > 8 {
-                        continue
-                    }
-                }
-            }
-
-            scoredCandidates.append((token: token, score: score))
-        }
-
-        // Sort by final score
-        scoredCandidates.sort { $0.score > $1.score }
-
-        return scoredCandidates
-    }
 
     /// TDT decoding algorithm following GreedyTDTInfer logic
     private func tdtDecode(
@@ -1816,20 +1486,14 @@ public final class ASRManager: @unchecked Sendable {
                 print("   - Encoder hidden states shape after transpose: \(encoderHiddenStates.shape)")
             }
 
-            if config.enableTDT {
-                // Use TDT decoding
-                tokenIds = try await tdtDecode(
-                    encoderOutput: encoderHiddenStates,
-                    encoderSequenceLength: encoderSequenceLength,
-                    originalAudioSamples: audioSamples
-                )
-                // TDT timings would be created from hypothesis in full implementation
-                tokenTimings = []
-            } else {
-                // Use standard improved RNNT decoding
-                tokenIds = try await improvedDecodeWithRNNT(encoderOutput, originalAudioSamples: audioSamples)
-                tokenTimings = []
-            }
+            // TDT is always enabled - Use TDT decoding
+            tokenIds = try await tdtDecode(
+                encoderOutput: encoderHiddenStates,
+                encoderSequenceLength: encoderSequenceLength,
+                originalAudioSamples: audioSamples
+            )
+            // TDT timings would be created from hypothesis in full implementation
+            tokenTimings = []
 
             // Convert tokens to text with proper timing handling
             let (text, finalTimings) = convertTokensWithExistingTimings(tokenIds, timings: tokenTimings)
@@ -1842,23 +1506,9 @@ public final class ASRManager: @unchecked Sendable {
                 applyAdvancedPostProcessing(text, tokenTimings: finalTimings) :
                 text
 
-            // EMPTY TRANSCRIPTION FIX: Handle empty results for audio > 1 second
+            // Log warning if empty transcription for longer audio
             if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && duration > 1.0 {
                 logger.warning("⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))")
-
-                // Attempt fallback transcription with relaxed parameters
-                let fallbackResult = try await transcribeWithRelaxedParameters(
-                    audioSamples: audioSamples,
-                    originalDuration: duration,
-                    startTime: startTime
-                )
-
-                if !fallbackResult.text.isEmpty {
-                    logger.info("✅ Fallback transcription successful: \"\(fallbackResult.text.prefix(50))...\"")
-                    return fallbackResult
-                } else {
-                    logger.error("❌ Both normal and fallback transcription failed for \(String(format: "%.1f", duration))s audio")
-                }
             }
 
             return ASRResult(
@@ -1866,7 +1516,7 @@ public final class ASRManager: @unchecked Sendable {
                 confidence: 1.0,
                 duration: duration,
                 processingTime: processingTime,
-                tokenTimings: config.enableTDT ? finalTimings : nil
+                tokenTimings: finalTimings
             )
 
         } catch {
@@ -1887,9 +1537,6 @@ public final class ASRManager: @unchecked Sendable {
         let encoderSequenceLength = encoderLength[0].intValue
 
         // Initialize decoder state with clean reset
-        decoderState = DecoderState()
-
-        // Force clean decoder state initialization
         try await initializeDecoderState()
 
         var tokens: [Int] = []
@@ -2093,59 +1740,59 @@ public final class ASRManager: @unchecked Sendable {
         let chunkSize = 160_000  // 10 seconds at 16kHz
         let overlap = 16_000     // 1 second overlap to avoid boundary issues
         let stride = chunkSize - overlap  // 9 seconds stride
-        
+
         var allTexts: [String] = []
         var totalProcessingTime: TimeInterval = 0
         let audioLength = Double(audioSamples.count) / Double(config.sampleRate)
-        
+
         if config.enableDebug {
             logger.info("🔄 Chunking audio: \(String(format: "%.1f", audioLength))s into \(String(format: "%.1f", Double(chunkSize)/16000.0))s chunks with \(String(format: "%.1f", Double(overlap)/16000.0))s overlap")
         }
-        
+
         // Process audio in chunks
         var position = 0
         var chunkIndex = 0
         var previousChunkLastWords: [String] = []
-        
+
         while position < audioSamples.count {
             let endPosition = min(position + chunkSize, audioSamples.count)
             let chunkSamples = Array(audioSamples[position..<endPosition])
-            
+
             // Pad last chunk if needed
             var paddedChunk = chunkSamples
             if paddedChunk.count < chunkSize {
                 let padding = Array(repeating: Float(0.0), count: chunkSize - paddedChunk.count)
                 paddedChunk.append(contentsOf: padding)
             }
-            
+
             if config.enableDebug {
                 let chunkDuration = Double(chunkSamples.count) / 16000.0
                 logger.info("   📄 Chunk \(chunkIndex): \(String(format: "%.1f", Double(position)/16000.0))s - \(String(format: "%.1f", Double(endPosition)/16000.0))s (\(String(format: "%.1f", chunkDuration))s)")
             }
-            
+
             // Don't reset state between chunks - maintain context
             // Only reset state for the first chunk
             if chunkIndex == 0 {
-                try await resetState()
+                try await initializeDecoderState()
             }
-            
+
             // Transcribe chunk
             let chunkResult = try await transcribeSingleChunk(paddedChunk)
-            
+
             // Handle chunk boundary overlap intelligently
             if chunkIndex > 0 && !chunkResult.text.isEmpty {
                 // Smart deduplication: remove repeated words at the beginning of this chunk
                 // that match the end of the previous chunk
                 let chunkWords = chunkResult.text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
                 var startIndex = 0
-                
+
                 // Check for overlapping words and find where new content starts
                 if !previousChunkLastWords.isEmpty && !chunkWords.isEmpty {
                     // Look for the longest matching sequence at the boundary
                     for overlapSize in Swift.stride(from: Swift.min(previousChunkLastWords.count, chunkWords.count), through: 1, by: -1) {
                         let previousEnd = previousChunkLastWords.suffix(overlapSize)
                         let currentStart = chunkWords.prefix(overlapSize)
-                        
+
                         if previousEnd.map({ $0.lowercased() }) == currentStart.map({ $0.lowercased() }) {
                             startIndex = overlapSize
                             if config.enableDebug {
@@ -2155,13 +1802,13 @@ public final class ASRManager: @unchecked Sendable {
                         }
                     }
                 }
-                
+
                 // Add only the non-overlapping portion
                 let uniqueWords = chunkWords.dropFirst(startIndex)
                 if !uniqueWords.isEmpty {
                     allTexts.append(uniqueWords.joined(separator: " "))
                 }
-                
+
                 // Update previous chunk's last words for next iteration
                 previousChunkLastWords = Array(chunkWords.suffix(10)) // Keep last 10 words
             } else {
@@ -2170,33 +1817,33 @@ public final class ASRManager: @unchecked Sendable {
                 let words = chunkResult.text.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
                 previousChunkLastWords = Array(words.suffix(10))
             }
-            
+
             totalProcessingTime += chunkResult.processingTime
-            
+
             // Move to next chunk
             position += stride
             chunkIndex += 1
-            
+
             // Break if we've processed the last meaningful chunk
             if position >= audioSamples.count - 8000 {  // Less than 0.5s remaining
                 break
             }
         }
-        
+
         // Combine all chunk transcriptions
         let finalText = allTexts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         // Apply post-processing to clean up any remaining issues
         let cleanedText = config.enableAdvancedPostProcessing ?
             applyAdvancedPostProcessing(finalText, tokenTimings: []) :
             finalText
-        
+
         let totalTime = Date().timeIntervalSince(startTime)
-        
+
         if config.enableDebug {
             logger.info("✅ Chunked transcription complete: \(chunkIndex) chunks, \(String(format: "%.1f", audioLength))s audio, \(String(format: "%.3f", totalTime))s processing")
         }
-        
+
         return ASRResult(
             text: cleanedText,
             confidence: 1.0,  // Confidence calculation would need refinement for chunks
@@ -2205,50 +1852,45 @@ public final class ASRManager: @unchecked Sendable {
             tokenTimings: nil  // Token timings would need special handling for chunks
         )
     }
-    
+
     /// Transcribe a single chunk without length validation
     private func transcribeSingleChunk(_ paddedAudio: [Float]) async throws -> ASRResult {
         let chunkStartTime = Date()
-        
+
         do {
             // Process through mel-spectrogram and encoder
             let melSpectrogramInput = try prepareMelSpectrogramInput(paddedAudio)
-            
+
             guard let melSpectrogramOutput = try melSpectrogramModel?.prediction(from: melSpectrogramInput, options: predictionOptions ?? MLPredictionOptions()) else {
                 throw ASRError.processingFailed("Mel-spectrogram model failed")
             }
-            
+
             let encoderInput = try prepareEncoderInput(melSpectrogramOutput)
             guard let encoderOutput = try encoderModel?.prediction(from: encoderInput, options: predictionOptions ?? MLPredictionOptions()) else {
                 throw ASRError.processingFailed("Encoder model failed")
             }
-            
+
             // Get encoder hidden states and sequence length
             guard let rawEncoderOutput = encoderOutput.featureValue(for: "encoder_output")?.multiArrayValue,
                   let encoderLength = encoderOutput.featureValue(for: "encoder_output_length")?.multiArrayValue else {
                 throw ASRError.processingFailed("Invalid encoder output")
             }
-            
+
             let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
             let encoderSequenceLength = encoderLength[0].intValue
-            
-            // Use appropriate decoding method
-            let tokenIds: [Int]
-            if config.enableTDT {
-                tokenIds = try await tdtDecode(
-                    encoderOutput: encoderHiddenStates,
-                    encoderSequenceLength: encoderSequenceLength,
-                    originalAudioSamples: paddedAudio
-                )
-            } else {
-                tokenIds = try await improvedDecodeWithRNNT(encoderOutput, originalAudioSamples: paddedAudio)
-            }
-            
+
+            // Use appropriate decoding method - TDT is always enabled
+            let tokenIds = try await tdtDecode(
+                encoderOutput: encoderHiddenStates,
+                encoderSequenceLength: encoderSequenceLength,
+                originalAudioSamples: paddedAudio
+            )
+
             // Convert tokens to text
-            let (text, _) = convertTokensWithExistingTimings(tokenIds, timings: [])
-            
+            let text = convertTokensToSimpleText(tokenIds)
+
             let processingTime = Date().timeIntervalSince(chunkStartTime)
-            
+
             return ASRResult(
                 text: text,
                 confidence: 1.0,
@@ -2256,14 +1898,19 @@ public final class ASRManager: @unchecked Sendable {
                 processingTime: processingTime,
                 tokenTimings: nil
             )
-            
+
         } catch {
             logger.error("Chunk transcription failed: \(error.localizedDescription)")
             throw error
         }
     }
-    
-    
+
+    /// Convert tokens to simple text without timing information
+    private func convertTokensToSimpleText(_ tokenIds: [Int]) -> String {
+        let (text, _) = convertTokensWithExistingTimings(tokenIds, timings: [])
+        return text
+    }
+
     /// Convert tokens to text using existing timing information from TDT
     private func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (text: String, timings: [TokenTiming]) {
         if tokenIds.isEmpty {
@@ -2328,7 +1975,6 @@ public final class ASRManager: @unchecked Sendable {
 }
 
 // MARK: - Decoder State Management
-
 struct DecoderState {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray

@@ -33,7 +33,7 @@ jobs:
         id: benchmark
         run: |
           echo "🚀 Running single file benchmark..."
-          swift run fluidaudio benchmark --auto-download --single-file ES2004a --output benchmark_results.json
+          swift run fluidaudio diarization-benchmark --auto-download --single-file ES2004a --output benchmark_results.json
 
           # Check if results file was generated
           if [ -f benchmark_results.json ]; then
