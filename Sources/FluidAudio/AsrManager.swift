@@ -226,12 +226,15 @@ public final class ASRManager: @unchecked Sendable {
         let modelsDirectory = getModelsDirectory()
         logger.info("Models directory: \(modelsDirectory.path)")
 
-        let melSpectrogramPath = modelsDirectory.appendingPathComponent("Melspectogram.mlpackage")
-        let encoderPath = modelsDirectory.appendingPathComponent("ParakeetEncoder.mlpackage")
-        let decoderPath = modelsDirectory.appendingPathComponent("ParakeetDecoder.mlpackage")
-        let jointPath = modelsDirectory.appendingPathComponent("RNNTJoint.mlpackage")
+        let melSpectrogramPath = modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")
+        let encoderPath = modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")
+        let decoderPath = modelsDirectory.appendingPathComponent("ParakeetDecoder.mlmodelc")
+        let jointPath = modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc")
 
         do {
+            // Download models if they don't exist
+            try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDirectory)
+            
             let modelConfig = MLModelConfiguration()
             modelConfig.computeUnits = .cpuAndNeuralEngine
 

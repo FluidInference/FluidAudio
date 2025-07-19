@@ -4,6 +4,13 @@ import RegexBuilder
 /// HuggingFace-compatible text normalizer for ASR evaluation
 /// Matches the normalization used in the Open ASR Leaderboard
 public struct TextNormalizer {
+    
+    // Additional diacritics mapping from HuggingFace normalizer
+    private static let additionalDiacritics: [Character: String] = [
+        "œ": "oe", "Œ": "OE", "ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE",
+        "ß": "ss", "ẞ": "SS", "đ": "d", "Đ": "D", "ð": "d", "Ð": "D",
+        "þ": "th", "Þ": "th", "ł": "l", "Ł": "L"
+    ]
 
     /// Normalize text using HuggingFace ASR leaderboard standards
     /// This matches the normalization used in the official leaderboard evaluation
@@ -12,23 +19,50 @@ public struct TextNormalizer {
 
         // Step 1: Convert to lowercase (standard for ASR evaluation)
         normalized = normalized.lowercased()
-
-        // Step 2: Handle common symbols BEFORE removing punctuation
+        
+        // Step 2: Remove content between brackets and parentheses (HuggingFace behavior)
+        // Remove content between angle/square brackets
+        let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]", options: [])
+        normalized = bracketsPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: ""
+        )
+        
+        // Remove content between parentheses
+        let parenthesesPattern = try! NSRegularExpression(pattern: "\\([^)]+?\\)", options: [])
+        normalized = parenthesesPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: ""
+        )
+        
+        // Step 3: Handle diacritics and special characters
+        normalized = normalized.map { char in
+            if let replacement = additionalDiacritics[char] {
+                return replacement
+            }
+            return String(char)
+        }.joined()
+        
+        // Step 4: Handle common symbols BEFORE removing punctuation
         normalized = normalized.replacingOccurrences(of: "$", with: " dollar ")
         normalized = normalized.replacingOccurrences(of: "&", with: " and ")
         normalized = normalized.replacingOccurrences(of: "%", with: " percent ")
 
-        // Step 3: Remove punctuation except apostrophes (keep contractions)
+        // Step 5: Remove punctuation except apostrophes (keep contractions)
         // This preserves linguistic meaning while removing formatting differences
         let punctuationPattern = try! NSRegularExpression(pattern: "[^\\w\\s']", options: [])
         normalized = punctuationPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
             range: NSRange(location: 0, length: normalized.count),
-            withTemplate: ""
+            withTemplate: " "
         )
 
-        // Step 4: Handle contractions consistently
+        // Step 6: Handle contractions consistently
         // This is critical for fair comparison across different ASR systems
         let contractions = [
             "can't": "cannot",
@@ -63,14 +97,45 @@ public struct TextNormalizer {
             "you'd": "you would",
             "we'd": "we would",
             "they'd": "they would",
-            "i'd": "i would"
+            "i'd": "i would",
+            "she's": "she is",
+            "he's": "he is",
+            "she'll": "she will",
+            "he'll": "he will",
+            "she'd": "she would",
+            "he'd": "he would"
         ]
 
         for (contraction, expansion) in contractions {
             normalized = normalized.replacingOccurrences(of: contraction, with: expansion)
         }
 
-        // Step 5: Normalize numbers and symbols
+        // Step 7: Handle abbreviations (matching HuggingFace)
+        let abbreviations = [
+            "mr": "mister",
+            "mrs": "misess",
+            "ms": "miss",
+            "dr": "doctor",
+            "prof": "professor",
+            "st": "saint",
+            "jr": "junior",
+            "sr": "senior",
+            "vs": "versus",
+            "inc": "incorporated",
+            "ltd": "limited",
+            "co": "company"
+        ]
+        
+        for (abbrev, expansion) in abbreviations {
+            let pattern = "\\b" + abbrev + "\\b"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: expansion,
+                options: .regularExpression
+            )
+        }
+        
+        // Step 8: Normalize numbers and symbols
         // Convert written numbers to digits or vice versa based on ASR output patterns
         let numberWords = [
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
@@ -80,7 +145,11 @@ public struct TextNormalizer {
             "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
             "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70",
             "eighty": "80", "ninety": "90", "hundred": "100", "thousand": "1000",
-            "million": "1000000", "billion": "1000000000"
+            "million": "1000000", "billion": "1000000000",
+            // Ordinal numbers
+            "first": "1st", "second": "2nd", "third": "3rd", "fourth": "4th",
+            "fifth": "5th", "sixth": "6th", "seventh": "7th", "eighth": "8th",
+            "ninth": "9th", "tenth": "10th"
         ]
 
         // Apply number normalization (can be made more sophisticated)
@@ -93,11 +162,25 @@ public struct TextNormalizer {
             )
         }
 
-        // Step 6: Handle remaining special characters and symbols (already handled above)
-        normalized = normalized.replacingOccurrences(of: "€", with: "euro")
-        normalized = normalized.replacingOccurrences(of: "£", with: "pound")
+        // Step 9: Handle remaining special characters and symbols
+        normalized = normalized.replacingOccurrences(of: "€", with: " euro ")
+        normalized = normalized.replacingOccurrences(of: "£", with: " pound ")
+        normalized = normalized.replacingOccurrences(of: "¥", with: " yen ")
+        normalized = normalized.replacingOccurrences(of: "©", with: " copyright ")
+        normalized = normalized.replacingOccurrences(of: "®", with: " registered ")
+        normalized = normalized.replacingOccurrences(of: "™", with: " trademark ")
+        
+        // Step 10: Remove any remaining symbols and normalize whitespace
+        // Remove any remaining punctuation and symbols
+        let finalCleanPattern = try! NSRegularExpression(pattern: "[^\\w\\s]", options: [])
+        normalized = finalCleanPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: " "
+        )
 
-        // Step 7: Normalize whitespace
+        // Step 11: Normalize whitespace
         // Replace multiple spaces with single space and trim
         let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
         normalized = whitespacePattern.stringByReplacingMatches(
@@ -107,7 +190,7 @@ public struct TextNormalizer {
             withTemplate: " "
         )
 
-        // Step 7: Trim leading and trailing whitespace
+        // Step 12: Trim leading and trailing whitespace
         normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return normalized
