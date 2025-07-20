@@ -62,7 +62,7 @@ enum ProcessCommand {
             print("✅ Loaded audio: \(audioSamples.count) samples")
 
             let startTime = Date()
-            let result = try await manager.performCompleteDiarization(
+            let result = try manager.performCompleteDiarization(
                 audioSamples, sampleRate: 16000)
             let processingTime = Date().timeIntervalSince(startTime)
 

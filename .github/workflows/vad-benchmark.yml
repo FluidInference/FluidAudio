@@ -13,6 +13,9 @@ jobs:
   vad-benchmark:
     runs-on: macos-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -74,9 +77,29 @@ jobs:
                 reportContent += `| Metric | Value | Target | Status |\n`;
                 reportContent += `|--------|-------|--------|--------|\n`;
                 reportContent += `| F1-Score | ${results.f1_score?.toFixed(1)}% | >70% | ${results.f1_score >= 70 ? '✅' : '❌'} |\n`;
-                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1)}% | >70% | ${results.accuracy >= 70 ? '✅' : '❌'} |\n\n`;
+                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1)}% | >70% | ${results.accuracy >= 70 ? '✅' : '❌'} |\n`;
+                reportContent += `| Precision | ${results.precision?.toFixed(1)}% | - | - |\n`;
+                reportContent += `| Recall | ${results.recall?.toFixed(1)}% | - | - |\n\n`;
 
-                reportContent += `<sub>${results.total_files} files • ${results.processing_time_seconds?.toFixed(1)}s • ${{ steps.benchmark.outputs.EXECUTION_TIME }}</sub>\n`;
+                reportContent += `<sub>${results.total_files} files • ${results.processing_time_seconds?.toFixed(1)}s • ${{ steps.benchmark.outputs.EXECUTION_TIME }}</sub>\n\n`;
+                
+                reportContent += `### Research Paper Comparisons\n\n`;
+                reportContent += `| Paper | Dataset | F1-Score | Method |\n`;
+                reportContent += `|-------|---------|----------|--------|\n`;
+                reportContent += `| Silero VAD (2021) | TEDx | 88.1% | LSTM-based lightweight model |\n`;
+                reportContent += `| WebRTC VAD | MUSAN | 64.4% | GMM-based (traditional) |\n`;
+                reportContent += `| pyannote.audio (2020) | AMI | 85.9% | SincTDNN architecture |\n`;
+                reportContent += `| MarbleNet (2020) | AVA-Speech | 87.8% | 1D time-channel separable CNN |\n`;
+                reportContent += `| **FluidAudio VAD** | **MUSAN-mini** | **${results.f1_score?.toFixed(1)}%** | **CoreML-optimized Silero** |\n\n`;
+                
+                reportContent += `<details>\n`;
+                reportContent += `<summary>📊 Industry Context</summary>\n\n`;
+                reportContent += `- **Silero VAD**: Production-grade, optimized for edge devices\n`;
+                reportContent += `- **WebRTC VAD**: Widely used but lower accuracy baseline\n`;
+                reportContent += `- **pyannote.audio**: State-of-the-art for speaker diarization\n`;
+                reportContent += `- **MarbleNet**: NVIDIA's efficient VAD for edge AI\n\n`;
+                reportContent += `Note: Direct comparisons should consider dataset differences. MUSAN contains challenging noise conditions.\n`;
+                reportContent += `</details>\n`;
               } else {
                 reportContent += `❌ Benchmark failed - no results generated\n`;
               }

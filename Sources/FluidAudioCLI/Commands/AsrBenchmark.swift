@@ -3,78 +3,6 @@ import AVFoundation
 import OSLog
 import FluidAudio
 
-/// ASR evaluation metrics
-public struct ASRMetrics: Sendable {
-    public let wer: Double           // Word Error Rate
-    public let cer: Double           // Character Error Rate
-    public let insertions: Int
-    public let deletions: Int
-    public let substitutions: Int
-    public let totalWords: Int
-    public let totalCharacters: Int
-
-    public init(wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int, totalCharacters: Int) {
-        self.wer = wer
-        self.cer = cer
-        self.insertions = insertions
-        self.deletions = deletions
-        self.substitutions = substitutions
-        self.totalWords = totalWords
-        self.totalCharacters = totalCharacters
-    }
-}
-
-/// Single ASR benchmark result
-public struct ASRBenchmarkResult: Sendable {
-    public let fileName: String
-    public let hypothesis: String
-    public let reference: String
-    public let metrics: ASRMetrics
-    public let processingTime: TimeInterval
-    public let audioLength: TimeInterval
-    public let rtf: Double             // Real-Time Factor
-
-    public init(fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval, audioLength: TimeInterval) {
-        self.fileName = fileName
-        self.hypothesis = hypothesis
-        self.reference = reference
-        self.metrics = metrics
-        self.processingTime = processingTime
-        self.audioLength = audioLength
-        self.rtf = processingTime / audioLength
-    }
-}
-
-/// ASR benchmark configuration
-///
-/// ## LibriSpeech Dataset Subsets
-/// - **test-clean**: Clean, studio-quality recordings with clear speech from native speakers
-///   - Easier benchmark subset with minimal noise/accents
-///   - Expected WER: 2-6% for good ASR systems
-///   - Use for baseline performance evaluation
-///
-/// - **test-other**: More challenging recordings with various acoustic conditions
-///   - Includes accented speech, background noise, and non-native speakers
-///   - Expected WER: 5-15% for good ASR systems
-///   - Use for robustness testing
-///
-/// Both subsets contain ~5.4 hours of audio from different speakers reading books.
-public struct ASRBenchmarkConfig: Sendable {
-    public let dataset: String
-    public let subset: String
-    public let maxFiles: Int?
-    public let debugMode: Bool
-    public let longAudioOnly: Bool
-
-    public init(dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false, longAudioOnly: Bool = false) {
-        self.dataset = dataset
-        self.subset = subset
-        self.maxFiles = maxFiles
-        self.debugMode = debugMode
-        self.longAudioOnly = longAudioOnly
-    }
-}
-
 /// LibriSpeech dataset manager and ASR benchmarking
 @available(macOS 13.0, *)
 public class ASRBenchmark {
@@ -159,8 +87,8 @@ public class ASRBenchmark {
 
         var filteredFiles = audioFiles
         if config.longAudioOnly {
-            filteredFiles = try filterFilesByDuration(audioFiles, minDuration: 4.0, maxDuration: 20.0)
-            print("Filtered to \(filteredFiles.count) files with duration 4-10 seconds (from \(audioFiles.count) total)")
+            filteredFiles = try await filterFilesByDuration(audioFiles, minDuration: 4.0, maxDuration: 20.0)
+            print("Filtered to \(filteredFiles.count) files with duration 4-20 seconds (from \(audioFiles.count) total)")
         }
 
         let maxFiles = config.maxFiles ?? filteredFiles.count // Process all files if not specified
@@ -177,7 +105,6 @@ public class ASRBenchmark {
                 if config.debugMode {
                     logger.info("Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)")
                 }
-                // print("🎵 Processing (\(index + 1)/\(filesToProcess.count)): \(audioFile.fileName)")
 
                 if config.debugMode && index > 0 {
                     logger.info("   🔍 Processing file \(index + 1)")
@@ -185,9 +112,6 @@ public class ASRBenchmark {
 
                 let result = try await processLibriSpeechFile(asrManager: asrManager, file: audioFile)
                 results.append(result)
-
-                // print("   WER: \(String(format: "%.1f", result.metrics.wer * 100))%, RTF: \(String(format: "%.3f", result.rtf))x, RTFx: \(String(format: "%.1f", 1.0/result.rtf))x, Duration: \(String(format: "%.1f", result.audioLength))s")
-
 
             } catch {
                 logger.error("Failed to process \(audioFile.fileName): \(error)")
@@ -202,7 +126,7 @@ public class ASRBenchmark {
     private func processLibriSpeechFile(asrManager: AsrManager, file: LibriSpeechFile) async throws -> ASRBenchmarkResult {
         let startTime = Date()
 
-        let audioSamples = try loadAudioFile(url: file.audioPath)
+        let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
         let asrResult = try await transcribeAudio(asrManager: asrManager, audioSamples: audioSamples)
@@ -262,93 +186,16 @@ public class ASRBenchmark {
         )
     }
 
-    /// Generate benchmark summary statistics
-
-    /// Print text comparison between ground truth and model output
-    private func printTextComparison(result: ASRBenchmarkResult, maxLength: Int = 200, showFileNumber: Int? = nil) {
-        let groundTruth = result.reference
-        let modelOutput = result.hypothesis
-
-        let gtDisplay = groundTruth.count > maxLength ? String(groundTruth.prefix(maxLength)) + "..." : groundTruth
-        let moDisplay = modelOutput.count > maxLength ? String(modelOutput.prefix(maxLength)) + "..." : modelOutput
-
-        let filePrefix = showFileNumber != nil ? "[\(showFileNumber!)] " : ""
-
-        print("   \(filePrefix)Text Comparison (Duration: \(String(format: "%.1f", result.audioLength))s):")
-        print("   Expected: \"\(gtDisplay)\"")
-        print("   Got:      \"\(moDisplay)\"")
-
-        var issues: [String] = []
-
-        if modelOutput.isEmpty {
-            issues.append("No output")
-        } else {
-            if modelOutput.count < groundTruth.count / 2 {
-                issues.append("Too short")
-            } else if modelOutput.count > groundTruth.count * 2 {
-                issues.append("Too long")
-            }
-
-            if hasRepetitivePatterns(modelOutput) {
-                issues.append("Repetition")
-            }
-
-            if modelOutput.lowercased() == groundTruth.lowercased() {
-                issues.append("Case mismatch")
-            }
-
-            let gtWords = groundTruth.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-            let moWords = modelOutput.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-            let commonWords = Set(gtWords).intersection(Set(moWords)).count
-            let matchPercent = gtWords.isEmpty ? 0 : Double(commonWords) / Double(gtWords.count) * 100
-
-            if matchPercent > 50 && matchPercent < 90 {
-                issues.append("Partial match (\(String(format: "%.0f", matchPercent))%)")
-            } else if matchPercent >= 90 {
-                issues.append("Good match (\(String(format: "%.0f", matchPercent))%)")
-            }
-        }
-
-        if !issues.isEmpty {
-            print("   Issues: \(issues.joined(separator: ", "))")
-        }
-
-        print("   " + String(repeating: "─", count: 80))
-    }
-
-    /// Detect repetitive patterns in text that suggest token loops
-    private func hasRepetitivePatterns(_ text: String) -> Bool {
-        let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        guard words.count > 5 else { return false }
-
-        for i in 0..<(words.count - 2) {
-            if words[i] == words[i + 1] && words[i] == words[i + 2] {
-                return true
-            }
-        }
-
-        for phraseLen in 2...min(5, words.count / 3) {
-            for i in 0..<(words.count - phraseLen * 2) {
-                let phrase1 = words[i..<(i + phraseLen)]
-                let phrase2 = words[(i + phraseLen)..<(i + phraseLen * 2)]
-                if Array(phrase1) == Array(phrase2) {
-                    return true
-                }
-            }
-        }
-
-        return false
-    }
 
     // MARK: - Private Helper Methods
 
     /// Filter files by duration range
-    private func filterFilesByDuration(_ files: [LibriSpeechFile], minDuration: Double, maxDuration: Double) throws -> [LibriSpeechFile] {
+    private func filterFilesByDuration(_ files: [LibriSpeechFile], minDuration: Double, maxDuration: Double) async throws -> [LibriSpeechFile] {
         var filteredFiles: [LibriSpeechFile] = []
 
         for file in files {
             do {
-                let audioSamples = try loadAudioFile(url: file.audioPath)
+                let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
                 let duration = Double(audioSamples.count) / 16000.0
 
                 if duration >= minDuration && duration <= maxDuration {
@@ -404,63 +251,6 @@ public class ASRBenchmark {
         return files.sorted { $0.fileName < $1.fileName }
     }
 
-    internal func loadAudioFile(url: URL) throws -> [Float] {
-        let audioFile = try AVAudioFile(forReading: url)
-        let format = audioFile.processingFormat
-        let frameCount = UInt32(audioFile.length)
-
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            throw ASRError.processingFailed("Failed to create audio buffer")
-        }
-
-        try audioFile.read(into: buffer)
-
-        let channelCount = Int(format.channelCount)
-        let sampleRate = format.sampleRate
-
-        var samples: [Float] = []
-
-        if channelCount == 1 {
-            samples = Array(UnsafeBufferPointer(start: buffer.floatChannelData?[0], count: Int(frameCount)))
-        } else {
-            for i in 0..<Int(frameCount) {
-                var sample: Float = 0
-                for channel in 0..<channelCount {
-                    sample += buffer.floatChannelData?[channel][i] ?? 0
-                }
-                samples.append(sample / Float(channelCount))
-            }
-        }
-
-        if sampleRate != 16000 {
-            samples = resampleAudio(samples, fromRate: sampleRate, toRate: 16000)
-        }
-
-        return samples
-    }
-
-    private func resampleAudio(_ samples: [Float], fromRate: Double, toRate: Double) -> [Float] {
-        if fromRate == toRate {
-            return samples
-        }
-
-        let ratio = toRate / fromRate
-        let outputLength = Int(Double(samples.count) * ratio)
-        var resampled = Array<Float>(repeating: 0, count: outputLength)
-
-        for i in 0..<outputLength {
-            let sourceIndex = Double(i) / ratio
-            let leftIndex = Int(floor(sourceIndex))
-            let rightIndex = min(leftIndex + 1, samples.count - 1)
-            let fraction = Float(sourceIndex - Double(leftIndex))
-
-            if leftIndex < samples.count {
-                resampled[i] = samples[leftIndex] * (1 - fraction) + samples[rightIndex] * fraction
-            }
-        }
-
-        return resampled
-    }
 
     private func downloadAndExtractTarGz(url: String, extractTo: URL, expectedSubpath: String) async throws {
         let downloadURL = URL(string: url)!
@@ -494,14 +284,6 @@ public class ASRBenchmark {
 
         print("Dataset extracted successfully")
     }
-}
-
-// MARK: - Supporting Types
-
-public struct LibriSpeechFile {
-    public let fileName: String
-    public let audioPath: URL
-    public let transcript: String
 }
 
 // MARK: - Edit Distance Algorithm
@@ -577,11 +359,20 @@ private func editDistance<T: Equatable>(_ seq1: [T], _ seq2: [T]) -> EditDistanc
     )
 }
 
+// IMPORTANT: RTFx Performance in CI Environments
+// GitHub Actions and other CI environments use virtualized M1/M2 Macs where
+// Neural Engine access is severely restricted. This results in significantly
+// degraded performance compared to bare metal:
+// - Physical M1/M2 Mac: ~21x real-time (RTFx)
+// - GitHub Actions M1: ~3x real-time (7x slower due to virtualization)
+//
+// For accurate RTFx benchmarking, always test on physical Apple Silicon hardware.
+// The WER (Word Error Rate) metrics remain accurate in CI environments.
+
 /// Extension to provide CLI entry point
 @available(macOS 13.0, iOS 16.0, *)
 extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
-        print("DEBUG: Starting runASRBenchmark")
         var subset = "test-clean"
         var maxFiles: Int?
         var outputFile = "asr_benchmark_results.json"
@@ -652,7 +443,7 @@ extension ASRBenchmark {
 
         do {
             let startBenchmark = Date()
-            
+
             print("Initializing ASR system...")
             do {
                 try await asrManager.initialize()
@@ -702,11 +493,8 @@ extension ASRBenchmark {
             let meanRTFx = rtfxValues.reduce(0, +) / Float(rtfxValues.count)
             let medianRTFx = rtfxValues.sorted()[rtfxValues.count / 2]
             let sumRTFx = rtfxValues.reduce(0, +)
-            
-            let deviations = rtfxValues.map { ($0 - meanRTFx) * ($0 - meanRTFx) }
-            let variance = deviations.reduce(0, +) / Float(rtfxValues.count)
-            let stdRTFx = sqrt(variance)
-            
+
+
             let totalAudioDuration = results.reduce(0.0) { $0 + $1.audioLength }
             let totalProcessingTime = results.reduce(0.0) { $0 + $1.processingTime }
 
@@ -717,27 +505,15 @@ extension ASRBenchmark {
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "MM/dd/yyyy, h:mm a zzz"
             let dateString = dateFormatter.string(from: Date())
-            
+
             let endTime = Date()
             let testRuntime = endTime.timeIntervalSince(startBenchmark)
             let minutes = Int(testRuntime) / 60
             let seconds = Int(testRuntime) % 60
             let runtimeString = "\(minutes)m \(seconds)s"
-            
+
             print("\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
-            print("")
-            print("Inverse Real Time Factor (RTFx)")
-            print("RTFx measures the latency of speech recognition systems - how long it takes to process a given amount of speech.")
-            print("")
-            print("RTFx = (number of seconds of audio inferred) / (compute time in seconds)")
-            print("")
-            print("• RTFx of 1.0 = system processes speech as fast as it's spoken")
-            print("• RTFx of 2.0 = system takes half the time (2x faster than real-time)")
-            print("• Higher RTFx = lower latency = better performance")
-            print("")
-            print("Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files,")
-            print("token-to-text conversion, and file I/O overhead.")
-            print("")
+
             print("--- Benchmark Results ---")
             #if DEBUG
             print("   Mode: DEBUG (slow performance)")
@@ -752,7 +528,6 @@ extension ASRBenchmark {
             print("   Average RTF: \(String(format: "%.3f", totalRTF))x")
             print("   Mean RTFx: \(String(format: "%.1f", meanRTFx))x")
             print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            print("   Std RTFx: \(String(format: "%.1f", stdRTFx))x")
             print("   Total audio duration: \(String(format: "%.1f", totalAudioDuration))s")
             print("   Total processing time: \(String(format: "%.1f", totalProcessingTime))s")
             let overallRTFx = totalAudioDuration / totalProcessingTime
@@ -776,7 +551,6 @@ extension ASRBenchmark {
                     "averageRTF": totalRTF,
                     "meanRTFx": meanRTFx,
                     "medianRTFx": medianRTFx,
-                    "stdRTFx": stdRTFx,
                     "sumRTFx": sumRTFx,
                     "totalAudioDuration": totalAudioDuration,
                     "totalProcessingTime": totalProcessingTime
