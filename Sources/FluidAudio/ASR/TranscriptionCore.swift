@@ -89,10 +89,8 @@ extension AsrManager {
         // Convert tokens to text
         let (text, finalTimings) = convertTokensWithExistingTimings(tokenIds, timings: tokenTimings)
         
-        // Apply post-processing if enabled
-        let finalText = config.enableAdvancedPostProcessing ?
-            applyAdvancedPostProcessing(text, tokenTimings: finalTimings) :
-            text
+        // No post-processing needed
+        let finalText = text
         
         let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
         

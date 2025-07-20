@@ -685,8 +685,6 @@ extension ASRBenchmark {
             enableDebug: debugMode,
             realtimeMode: false,
             chunkSizeMs: 2000,
-            enableAdvancedPostProcessing: true,
-            vocabularyConstraints: false,
             tdtConfig: TDTConfig(
                 durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
@@ -758,7 +756,8 @@ extension ASRBenchmark {
             let sumRTFx = rtfxValues.reduce(0, +)
             
             // Calculate standard deviation for RTFx
-            let variance = rtfxValues.map { pow($0 - meanRTFx, 2) }.reduce(0, +) / Float(rtfxValues.count)
+            let deviations = rtfxValues.map { ($0 - meanRTFx) * ($0 - meanRTFx) }
+            let variance = deviations.reduce(0, +) / Float(rtfxValues.count)
             let stdRTFx = sqrt(variance)
             
             // Calculate total durations
@@ -814,7 +813,8 @@ extension ASRBenchmark {
             print("   Std RTFx: \(String(format: "%.1f", stdRTFx))x")
             print("   Total audio duration: \(String(format: "%.1f", totalAudioDuration))s")
             print("   Total processing time: \(String(format: "%.1f", totalProcessingTime))s")
-            print("   Overall RTFx: \(String(format: "%.1f", totalAudioDuration/totalProcessingTime))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)")
+            let overallRTFx = totalAudioDuration / totalProcessingTime
+            print("   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)")
 
             // Save results
             let encoder = JSONEncoder()

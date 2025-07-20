@@ -20,17 +20,17 @@ struct TranscriptionRequest {
     let strategy: TranscriptionStrategy
     let enableDebug: Bool
     
-    var paddedAudio: [Float]? = nil  // For single chunk
-    var chunkSize: Int = 160_000     // 10 seconds at 16kHz
-    var overlap: Int = 16_000        // 1 second overlap
+    var chunkSize: Int = 160_000  // 10 seconds at 16kHz (CoreML constraint)
     
     init(audioSamples: [Float], enableDebug: Bool = false) {
         self.audioSamples = audioSamples
         self.enableDebug = enableDebug
         
-        // Auto-detect strategy based on audio length
+        // CoreML model has fixed constraints: max 160,000 samples (10 seconds)
+        // and encoder output must be shape (1, 128, 1001)
         if audioSamples.count > 160_000 {
             self.strategy = .chunked
+            self.chunkSize = 160_000  // 10 seconds at 16kHz
         } else {
             self.strategy = .single
         }
@@ -77,7 +77,7 @@ extension AsrManager {
     
     /// Execute single chunk transcription
     private func executeSingleTranscription(_ request: TranscriptionRequest, startTime: Date) async throws -> ASRResult {
-        // Pad audio to 10 seconds
+        // Pad audio to 10 seconds - CoreML model requires fixed shape
         let paddedAudio = padAudioIfNeeded(request.audioSamples, targetLength: 160_000)
         
         // Use shared transcription core
@@ -97,12 +97,11 @@ extension AsrManager {
         )
     }
     
-    /// Execute chunked transcription with intelligent overlap handling
+    /// Execute chunked transcription for audio longer than 24 minutes
     private func executeChunkedTranscription(_ request: TranscriptionRequest, startTime: Date) async throws -> ASRResult {
         let chunkProcessor = ChunkProcessor(
             audioSamples: request.audioSamples,
             chunkSize: request.chunkSize,
-            overlap: request.overlap,
             enableDebug: request.enableDebug
         )
         
@@ -114,10 +113,9 @@ extension AsrManager {
 private struct ChunkProcessor {
     let audioSamples: [Float]
     let chunkSize: Int
-    let overlap: Int
     let enableDebug: Bool
     
-    private var stride: Int { chunkSize - overlap }
+    private var stride: Int { chunkSize } // No overlap - just sequential chunks
     
     func process(using manager: AsrManager, startTime: Date) async throws -> ASRResult {
         var allTexts: [String] = []
@@ -130,14 +128,12 @@ private struct ChunkProcessor {
         
         var position = 0
         var chunkIndex = 0
-        var previousChunkLastWords: [String] = []
         
-        // Process chunks
+        // Process chunks sequentially without overlap
         while position < audioSamples.count {
             let chunk = try await processChunk(
                 at: position,
                 chunkIndex: chunkIndex,
-                previousLastWords: &previousChunkLastWords,
                 using: manager
             )
             
@@ -146,18 +142,11 @@ private struct ChunkProcessor {
             
             position += stride
             chunkIndex += 1
-            
-            // Stop if less than 0.5s remaining
-            if position >= audioSamples.count - 8000 {
-                break
-            }
         }
         
         // Combine results
         let finalText = allTexts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanedText = manager.config.enableAdvancedPostProcessing ?
-            manager.applyAdvancedPostProcessing(finalText, tokenTimings: []) :
-            finalText
+        let cleanedText = finalText
         
         let overallProcessingTime = Date().timeIntervalSince(startTime)
         
@@ -178,16 +167,16 @@ private struct ChunkProcessor {
     private func processChunk(
         at position: Int,
         chunkIndex: Int,
-        previousLastWords: inout [String],
         using manager: AsrManager
     ) async throws -> (text: String, processingTime: TimeInterval) {
         
         let endPosition = min(position + chunkSize, audioSamples.count)
         let chunkSamples = Array(audioSamples[position..<endPosition])
+        // Pad chunk to 10 seconds - CoreML requires fixed shape
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: chunkSize)
         
         if enableDebug && chunkIndex == 0 {
-            let chunkDuration = Double(chunkSamples.count) / 16000.0
+            let _ = Double(chunkSamples.count) / 16000.0
             manager.logger.info("   📄 Chunk \(chunkIndex): \(String(format: "%.1f", Double(position)/16000.0))s - \(String(format: "%.1f", Double(endPosition)/16000.0))s")
         }
         
@@ -210,56 +199,7 @@ private struct ChunkProcessor {
             processingTime: Date().timeIntervalSince(chunkStartTime)
         )
         
-        // Handle overlap intelligently
-        let processedText = handleChunkOverlap(
-            chunkText: chunkResult.text,
-            chunkIndex: chunkIndex,
-            previousLastWords: &previousLastWords,
-            using: manager
-        )
-        
-        return (processedText, chunkResult.processingTime)
-    }
-    
-    private func handleChunkOverlap(
-        chunkText: String,
-        chunkIndex: Int,
-        previousLastWords: inout [String],
-        using manager: AsrManager
-    ) -> String {
-        
-        guard chunkIndex > 0 && !chunkText.isEmpty else {
-            // First chunk or empty - return as is
-            let words = chunkText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            previousLastWords = Array(words.suffix(10))
-            return chunkText
-        }
-        
-        // Smart deduplication
-        let chunkWords = chunkText.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        var startIndex = 0
-        
-        if !previousLastWords.isEmpty && !chunkWords.isEmpty {
-            // Find longest matching sequence
-            for overlapSize in Swift.stride(from: min(previousLastWords.count, chunkWords.count), through: 1, by: -1) {
-                let previousEnd = previousLastWords.suffix(overlapSize)
-                let currentStart = chunkWords.prefix(overlapSize)
-                
-                if previousEnd.map({ $0.lowercased() }) == currentStart.map({ $0.lowercased() }) {
-                    startIndex = overlapSize
-                    if enableDebug {
-                        manager.logger.info("   🔗 Found \(overlapSize) overlapping words")
-                    }
-                    break
-                }
-            }
-        }
-        
-        // Update for next iteration
-        previousLastWords = Array(chunkWords.suffix(10))
-        
-        // Return non-overlapping portion
-        let uniqueWords = chunkWords.dropFirst(startIndex)
-        return uniqueWords.isEmpty ? "" : uniqueWords.joined(separator: " ")
+        // No overlap handling needed - just return the text
+        return (chunkResult.text, chunkResult.processingTime)
     }
 }

@@ -37,10 +37,6 @@ struct DecoderState {
         }
     }
 
-    /// Create a zero-initialized decoder state
-    static func zero() -> DecoderState {
-        return DecoderState()
-    }
 
     /// Copy constructor for TDT hypothesis state management
     init(from other: DecoderState) {

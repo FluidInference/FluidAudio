@@ -12,7 +12,6 @@ public enum ASRError: Error, LocalizedError {
     case invalidAudioData
     case modelLoadFailed
     case processingFailed(String)
-    case invalidDuration
     case modelCompilationFailed
     
     public var errorDescription: String? {
@@ -25,8 +24,6 @@ public enum ASRError: Error, LocalizedError {
             return "Failed to load Parakeet CoreML models."
         case .processingFailed(let message):
             return "ASR processing failed: \(message)"
-        case .invalidDuration:
-            return "Audio must be exactly 10 seconds (160,000 samples at 16kHz)."
         case .modelCompilationFailed:
             return "CoreML model compilation failed after recovery attempts."
         }
