@@ -9,55 +9,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-
 jobs:
   vad-benchmark:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Verify checkout
-        run: |
-          echo "🔍 Immediate post-checkout verification:"
-          echo "Branch: $(git branch --show-current)"
-          echo "Commit: $(git rev-parse HEAD)"
-          echo "Commit message: $(git log -1 --pretty=format:'%s')"
-          echo ""
-          echo "Directory contents:"
-          ls -la
-          echo ""
-          echo "ℹ️ VAD models will be downloaded automatically from Hugging Face"
-
-      - name: Setup Swift 6.1
-        uses: swift-actions/setup-swift@v2
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.1"
-
-      - name: Debug permissions
-        run: |
-          echo "🔍 Debugging GitHub Actions permissions..."
-          echo "Event: ${{ github.event_name }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Repository: ${{ github.repository }}"
-          echo "Head ref: ${{ github.head_ref }}"
-          echo "Base ref: ${{ github.base_ref }}"
-          echo "Token permissions debug:"
-          gh auth status || echo "No gh auth available"
-          echo "PR details:"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "  PR number: ${{ github.event.pull_request.number }}"
-            echo "  PR from fork: ${{ github.event.pull_request.head.repo.fork }}"
-            echo "  PR author: ${{ github.event.pull_request.user.login }}"
-          fi
 
       - name: Cache Swift packages
         uses: actions/cache@v4
@@ -66,203 +27,45 @@ jobs:
             .build
             ~/Library/Caches/org.swift.swiftpm
           key: ${{ runner.os }}-swift-6.1-${{ hashFiles('Package.swift') }}
-          restore-keys: |
-            ${{ runner.os }}-swift-6.1-
 
       - name: Cache VAD models
         uses: actions/cache@v4
         with:
-          path: |
-            ~/Library/Application Support/FluidAudio/vad
-          key: ${{ runner.os }}-vad-models-enhanced-v5
-          restore-keys: |
-            ${{ runner.os }}-vad-models-
+          path: ~/Library/Application Support/FluidAudio/vad
+          key: ${{ runner.os }}-vad-models-v5
 
-      - name: Cache test audio data
-        uses: actions/cache@v4
-        with:
-          path: /tmp/vad_test_data
-          key: ${{ runner.os }}-vad-test-data-100
-          restore-keys: |
-            ${{ runner.os }}-vad-test-data-
+      - name: Build
+        run: swift build -c release
 
-      - name: Check models directory
-        run: |
-          echo "📁 Checking for VAD models..."
-          echo "📂 Current directory contents:"
-          ls -la
-          echo ""
-          echo "🔍 Git status and recent commits:"
-          git log --oneline -5
-          echo ""
-          echo "ℹ️ VAD models will be downloaded automatically from Hugging Face"
-          echo "   Model Repository: alexwengg/coreml_silero_vad"
-          echo "   Test Data Repository: alexwengg/musan_mini100 (100 files, comprehensive testing)"
-          echo "   Models: silero_stft.mlmodelc, silero_encoder.mlmodelc, silero_rnn_decoder.mlmodelc"
-          echo "   🎯 Enhanced Features: SNR filtering, spectral analysis, noise detection"
-
-      - name: Install system dependencies
-        run: |
-          # Install any system dependencies if needed
-          echo "📦 Installing system dependencies..."
-          # brew install ffmpeg || true  # Uncomment if needed for audio processing
-
-      - name: Build Swift package
-        run: |
-          echo "🔨 Building Swift package..."
-          echo "Swift version: $(swift --version)"
-          echo "Xcode version: $(xcodebuild -version)"
-
-          # Clean any existing build artifacts
-          swift package clean
-
-          # Build with explicit configuration
-          swift build --configuration release
-
-      - name: Prepare test environment
-        run: |
-          echo "📥 Preparing test environment..."
-
-          # Create test data directory
-          mkdir -p /tmp/vad_test_data
-
-          # Test files will be loaded by VAD benchmark in priority order:
-          # 1. Local datasets (if VADDataset/ directory exists)
-          # 2. Remote downloads from public URLs
-          echo "✅ Test environment prepared"
-          echo "    Test data sources (in priority order):"
-          echo "    1. Local datasets (VADDataset/ directory)"
-          echo "    2. Remote downloads from public URLs:"
-          echo "       - www2.cs.uic.edu (speech and music samples)"
-
-      - name: Run VAD Benchmark Tests
+      - name: Run VAD Benchmark
         id: benchmark
         run: |
-          echo "🚀 Running VAD Benchmark Tests..."
-
-          # Record start time
           BENCHMARK_START=$(date +%s)
 
-          # Set test parameters
-          NUM_FILES="100"
-          echo "📊 Running benchmark with $NUM_FILES test files"
-
-          echo "ℹ️ VAD models and test data will be downloaded automatically from Hugging Face"
-          echo "   Using musan_mini100 dataset for comprehensive performance testing"
-          echo "   Enhanced VAD features: SNR filtering, spectral analysis, noise detection"
-          echo "   Expected performance: 70%+ accuracy, 76%+ F1-Score with optimized thresholds"
-          echo "   This is the expected behavior - no pre-existing files required"
-
-          # Run VAD benchmark using the vad-benchmark command
-          echo ""
-          echo "🔬 Running CoreML VAD benchmark..."
-          echo "=================================="
-
-          set +e  # Don't exit on error
-          # Using optimal threshold 0.445 with enhanced SNR filtering and spectral features
-          # Enhanced VAD achieves F1-Score 78.3% (up from original 64.4%) with aggressive noise filtering
           swift run fluidaudio vad-benchmark \
             --dataset mini100 \
-            --num-files "$NUM_FILES" \
+            --num-files 100 \
             --threshold 0.445
 
-          BENCHMARK_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-
-          if [ $BENCHMARK_EXIT_CODE -eq 0 ]; then
-            echo "✅ VAD Benchmark completed successfully"
-            echo "BENCHMARK_STATUS=SUCCESS" >> $GITHUB_ENV
-          else
-            echo "❌ VAD Benchmark failed with exit code $BENCHMARK_EXIT_CODE"
-            echo "BENCHMARK_STATUS=FAILED" >> $GITHUB_ENV
-            # Don't exit here - let the validation step handle it
-          fi
-
-          # Calculate execution time
           BENCHMARK_END=$(date +%s)
           EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
-          EXECUTION_MINS=$((EXECUTION_TIME / 60))
-          EXECUTION_SECS=$((EXECUTION_TIME % 60))
-          
-          echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
+          echo "EXECUTION_TIME=$((EXECUTION_TIME / 60))m $((EXECUTION_TIME % 60))s" >> $GITHUB_OUTPUT
 
-      - name: Collect test results
-        if: always()
-        run: |
-          echo "📊 Collecting test results..."
-
-          # Look for benchmark results file
-          if [ -f "vad_benchmark_results.json" ]; then
-            echo "✅ Found VAD benchmark results:"
-            cat vad_benchmark_results.json | jq . || cat vad_benchmark_results.json
-          else
-            echo "⚠️ No benchmark results file found"
-            echo "Expected file: vad_benchmark_results.json"
-          fi
-
-          # Look for test logs
-          find . -name "*.log" -o -name "*test*" -type f 2>/dev/null | head -10 | while read logfile; do
-            echo "📄 Found log: $logfile"
-          done
-
-      - name: Generate test report
-        if: always()
-        run: |
-          echo "📋 Generating test report..."
-
-          # Create a simple test report
-          cat > test_report.md << 'EOF'
-          # VAD Benchmark Test Report
-
-          **Run Date:** $(date)
-          **Branch:** ${{ github.ref_name }}
-          **Commit:** ${{ github.sha }}
-          **Test Files:** 100
-
-          ## Results
-
-          EOF
-
-          if [ -f "vad_benchmark_results.json" ]; then
-            echo "### Benchmark Metrics" >> test_report.md
-            echo "" >> test_report.md
-            echo '```json' >> test_report.md
-            cat vad_benchmark_results.json >> test_report.md
-            echo '```' >> test_report.md
-          else
-            echo "### ⚠️ Results Missing" >> test_report.md
-            echo "No benchmark results file was generated." >> test_report.md
-          fi
-
-          echo "" >> test_report.md
-          echo "## Environment" >> test_report.md
-          echo "- **OS:** macOS (GitHub Actions)" >> test_report.md
-          echo "- **Xcode:** 16.1" >> test_report.md
-          echo "- **Swift:** $(swift --version | head -1)" >> test_report.md
-
-          echo "✅ Test report generated: test_report.md"
-
-      - name: Upload test artifacts
+      - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vad-benchmark-results-${{ github.sha }}
-          path: |
-            vad_benchmark_results.json
-            test_report.md
-            .build/debug/codecov/*.json
+          name: vad-benchmark-${{ github.sha }}
+          path: vad_benchmark_results.json
           retention-days: 30
 
       - name: Comment PR with results
         if: github.event_name == 'pull_request' && always()
-        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-
             let reportContent = '## VAD Benchmark Results\n\n';
-            const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
 
             try {
               if (fs.existsSync('vad_benchmark_results.json')) {
@@ -270,145 +73,56 @@ jobs:
 
                 reportContent += `| Metric | Value | Target | Status |\n`;
                 reportContent += `|--------|-------|--------|--------|\n`;
-                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1) || 'N/A'}% | >85% | ${results.accuracy >= 85 ? '✅' : '⚠️'} |\n`;
-                reportContent += `| Precision | ${results.precision?.toFixed(1) || 'N/A'}% | >85% | ${results.precision >= 85 ? '✅' : '⚠️'} |\n`;
-                reportContent += `| Recall | ${results.recall?.toFixed(1) || 'N/A'}% | >80% | ${results.recall >= 80 ? '✅' : '⚠️'} |\n`;
-                reportContent += `| F1-Score | ${results.f1_score?.toFixed(1) || 'N/A'}% | >85.9% | ${results.f1_score >= 85.9 ? '✅' : '⚠️'} |\n\n`;
+                reportContent += `| F1-Score | ${results.f1_score?.toFixed(1)}% | >70% | ${results.f1_score >= 70 ? '✅' : '❌'} |\n`;
+                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1)}% | >70% | ${results.accuracy >= 70 ? '✅' : '❌'} |\n\n`;
 
-                reportContent += `**Industry Leaders:**\n`;
-                reportContent += `- Silero VAD: ~90-95% F1 (DNN-based, 1.8MB)\n`;
-                reportContent += `- WebRTC VAD: ~75-80% F1 (GMM-based, fast)\n`;
-                reportContent += `- Sohn's VAD: 77.5% F1 (traditional)\n`;
-                reportContent += `- Modern DNNs: 85-97% F1 (varies by SNR)\n\n`;
-
-                reportContent += `<sub>${results.total_files || 'N/A'} files • ${results.processing_time_seconds?.toFixed(1) || 'N/A'}s processing • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
-                
-                // Add hidden identifier for reliable comment detection
-                reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
+                reportContent += `<sub>${results.total_files} files • ${results.processing_time_seconds?.toFixed(1)}s • ${{ steps.benchmark.outputs.EXECUTION_TIME }}</sub>\n`;
               } else {
-                reportContent += `Test failed - no results generated.\n\n`;
-                reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
+                reportContent += `❌ Benchmark failed - no results generated\n`;
               }
-            } catch (error) {
-              reportContent += `### ⚠️ Error Processing Results\n\n`;
-              reportContent += `Could not parse benchmark results: ${error.message}\n\n`;
-              reportContent += '<!-- fluidaudio-benchmark-vad -->\n';
-            }
 
-            try {
-              // First, try to find existing VAD benchmark comment
-              const comments = await github.rest.issues.listComments({
+              reportContent += '<!-- fluidaudio-benchmark-vad -->';
+
+              // Find and update existing comment
+              const { data: comments } = await github.rest.issues.listComments({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
               });
 
-              // Look for existing VAD benchmark comment (identified by the hidden tag)
-              const existingComment = comments.data.find(comment => {
-                const isBot = comment.user.type === 'Bot' || 
-                             comment.user.login === 'github-actions[bot]' ||
-                             comment.user.login.includes('[bot]');
-                
-                const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-vad -->');
-                const hasHeader = comment.body.includes('## VAD Benchmark Results');
-                
-                return isBot && (hasIdentifier || hasHeader);
-              });
+              const existingComment = comments.find(c =>
+                c.body.includes('<!-- fluidaudio-benchmark-vad -->')
+              );
 
               if (existingComment) {
-                // Update existing comment
                 await github.rest.issues.updateComment({
                   comment_id: existingComment.id,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   body: reportContent
                 });
-                console.log('✅ Successfully updated existing VAD benchmark comment');
               } else {
-                // Create new comment if none exists
                 await github.rest.issues.createComment({
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   body: reportContent
                 });
-                console.log('✅ Successfully posted new VAD benchmark results comment');
               }
             } catch (error) {
-              console.error('❌ Failed to post comment:', error.message);
-              if (error.status === 403) {
-                console.error('💡 This is likely a permissions issue. Common causes:');
-                console.error('   - PR from fork without proper permissions');
-                console.error('   - GitHub token lacks issues:write permission');
-                console.error('   - Repository settings restrict comment posting');
-                console.error('   - Workflow running on fork without write access');
-              }
-              // Re-throw to let continue-on-error handle it
-              throw error;
+              console.error('Failed to post comment:', error);
             }
 
-      - name: Validate performance thresholds
-        if: always()
+      - name: Validate performance
         run: |
-          echo "Validating performance thresholds..."
-
           if [ -f "vad_benchmark_results.json" ]; then
-            echo "Validating CoreML VAD benchmark results..."
-
-            # Check if benchmark was skipped
-            STATUS=$(grep '"status"' vad_benchmark_results.json | sed 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1 || echo "unknown")
-
-            if [ "$STATUS" = "skipped" ]; then
-              echo "⏭️ Benchmark was skipped - no performance validation needed"
-              REASON=$(grep '"reason"' vad_benchmark_results.json | sed 's/.*"reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1 || echo "Unknown reason")
-              echo "   Reason: $REASON"
-              echo "BENCHMARK_STATUS=SKIPPED" >> $GITHUB_ENV
-              # Don't exit with error for skipped benchmarks
-            else
-              # Extract metrics using simple grep/sed (avoiding jq dependency)
-              ACCURACY=$(grep '"accuracy"' vad_benchmark_results.json | sed 's/.*: *\([0-9.]*\).*/\1/' | head -1 || echo "0")
-              F1_SCORE=$(grep '"f1_score"' vad_benchmark_results.json | sed 's/.*: *\([0-9.]*\).*/\1/' | head -1 || echo "0")
-
-              echo "Performance Summary:"
-              echo "   CoreML VAD - F1-Score: ${F1_SCORE}%, Accuracy: ${ACCURACY}%"
-
-              # Set performance thresholds (F1-score is primary metric for VAD)
-              # Updated thresholds based on enhanced VAD performance improvements
-              MIN_F1_SCORE=70.0
-
-              # Validate thresholds (using bc for floating point comparison)
-              if command -v bc >/dev/null 2>&1; then
-                F1_MEETS_THRESHOLD=$(echo "$F1_SCORE >= $MIN_F1_SCORE" | bc -l)
-
-                if (( $F1_MEETS_THRESHOLD )); then
-                  echo "✅ Performance thresholds met!"
-                  echo "   F1-Score: $F1_SCORE% (≥ $MIN_F1_SCORE%) ✓"
-                  echo "BENCHMARK_STATUS=PASSED" >> $GITHUB_ENV
-                else
-                  echo "❌ Performance below thresholds:"
-                  echo "   F1-Score: $F1_SCORE% (min: $MIN_F1_SCORE%)"
-                  echo "BENCHMARK_STATUS=FAILED" >> $GITHUB_ENV
-                  exit 1
-                fi
-              else
-                echo "⚠️ Cannot validate thresholds (bc not available)"
-                echo "BENCHMARK_STATUS=UNKNOWN" >> $GITHUB_ENV
-              fi
-            fi
-          else
-            echo "❌ No results file to validate"
-            echo "Expected file: vad_benchmark_results.json"
-
-            # Check if this was due to a benchmark failure vs missing results
-            if [ "${BENCHMARK_STATUS:-}" = "FAILED" ]; then
-              echo "   Benchmark failed during execution"
-              echo "   Possible causes: network issues, missing datasets, model compilation problems"
-              echo "   This is not necessarily a performance regression"
-              echo "BENCHMARK_STATUS=EXECUTION_FAILED" >> $GITHUB_ENV
-              # Don't exit with error for infrastructure failures
-            else
-              echo "   No benchmark was attempted"
-              echo "BENCHMARK_STATUS=NO_RESULTS" >> $GITHUB_ENV
+            F1_SCORE=$(grep '"f1_score"' vad_benchmark_results.json | sed 's/.*: *\([0-9.]*\).*/\1/')
+            if (( $(echo "$F1_SCORE < 70" | bc -l) )); then
+              echo "❌ F1-Score $F1_SCORE% is below 70% threshold"
               exit 1
             fi
+            echo "✅ F1-Score $F1_SCORE% meets threshold"
+          else
+            echo "❌ No results file found"
+            exit 1
           fi

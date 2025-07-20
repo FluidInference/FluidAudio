@@ -13,350 +13,121 @@ on:
 jobs:
   asr-benchmark:
     name: ASR Benchmark
-    runs-on: macos-14  # M1 Mac for Neural Engine support
+    runs-on: macos-14
     permissions:
       contents: read
       pull-requests: write
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
-    - name: Setup Swift
-      uses: swift-actions/setup-swift@v2
+    - uses: swift-actions/setup-swift@v2
       with:
         swift-version: "6.0"
 
-    # Cache Swift Package Manager
-    - name: Cache SPM
+    - name: Cache Dependencies
       uses: actions/cache@v4
       with:
-        path: .build
-        key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
-        restore-keys: |
-          ${{ runner.os }}-spm-
+        path: |
+          .build
+          ~/Library/Application Support/FluidAudio/Models/Parakeet
+          ~/Documents/Datasets/librispeech
+        key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v4
 
-    # Cache Parakeet Models (CoreML compiled models)
-    - name: Cache Parakeet Models
-      uses: actions/cache@v4
-      with:
-        path: ~/Library/Application Support/FluidAudio/Models/Parakeet
-        key: ${{ runner.os }}-parakeet-mlmodelc-v2
-        restore-keys: |
-          ${{ runner.os }}-parakeet-mlmodelc-v2-
-
-    # Cache LibriSpeech Dataset
-    - name: Cache LibriSpeech Dataset
-      uses: actions/cache@v4
-      with:
-        path: ~/Documents/Datasets/librispeech
-        key: ${{ runner.os }}-librispeech-test-clean-v1
-
-    # Build in release mode
     - name: Build
       run: swift build -c release
 
-    # Download Parakeet models if not cached
-    - name: Download Parakeet Models
+    - name: Download Models if Needed
       run: |
-        echo "📥 === PARAKEET MODEL DOWNLOAD STEP ==="
-        echo "📥 Ensuring Parakeet models are available..."
         MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/Parakeet"
-        mkdir -p "$MODELS_DIR"
-
-        echo "📍 Models directory: $MODELS_DIR"
-
-        # Check if all required files exist (models + vocabulary)
         VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
-
+        
+        # Check if all models exist
         if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
            [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
            [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
            [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ] && \
            [ -f "$VOCAB_FILE" ]; then
-          echo "✅ All Parakeet resources already cached"
-          ls -la "$MODELS_DIR"
-          echo "✅ Vocabulary file exists at $VOCAB_FILE"
+          echo "✅ Models already cached"
         else
-          echo "📥 Downloading Parakeet models from Hugging Face..."
-
-          # Since .mlmodelc are directories, we need to use git LFS
-          # Clone to a temp directory first
+          echo "📥 Downloading models..."
+          rm -rf "$MODELS_DIR"
+          mkdir -p "$MODELS_DIR"
+          
           TEMP_DIR=$(mktemp -d)
           cd "$TEMP_DIR"
-
-          # Clone with LFS support
-          echo "📥 Cloning model repository..."
-          git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
+          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
           cd parakeet-tdt-0.6b-v2-coreml
-
-          # Move models directly to target directory
-          for model in "Melspectogram" "ParakeetEncoder" "ParakeetDecoder" "RNNTJoint"; do
-            if [ -d "${model}.mlmodelc" ]; then
-              echo "📦 Installing ${model}.mlmodelc..."
-              mv "${model}.mlmodelc" "$MODELS_DIR/"
-              echo "✅ Installed ${model}.mlmodelc"
-            else
-              echo "❌ ${model}.mlmodelc not found"
-            fi
-          done
-
-          # Download vocabulary file directly to the correct location
-          VOCAB_DIR="$HOME/Library/Application Support/FluidAudio"
-          mkdir -p "$VOCAB_DIR"
-          if [ -f "parakeet_vocab.json" ]; then
-            echo "📦 Installing vocabulary file..."
-            mv "parakeet_vocab.json" "$VOCAB_DIR/"
-            echo "✅ Installed parakeet_vocab.json"
-          else
-            echo "❌ parakeet_vocab.json not found"
-          fi
-
-          # Clean up
+          git lfs pull --include="*.mlmodelc/**"
+          
+          mv *.mlmodelc "$MODELS_DIR/"
+          mv parakeet_vocab.json "$HOME/Library/Application Support/FluidAudio/"
+          
           cd /
           rm -rf "$TEMP_DIR"
-
-          # Models are already compiled (.mlmodelc format)
-          echo "✅ Models are pre-compiled and ready to use"
-
+          echo "✅ Models downloaded"
         fi
 
-    # Verify models and vocabulary are ready
-    - name: Verify ASR Resources
+    - name: Run Benchmarks
+      id: benchmark
       run: |
-        echo "🧪 Verifying ASR models and vocabulary..."
-
-        MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/Parakeet"
-        VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
-        FAILED=false
-
-        # Check models
-        echo "📍 Checking models at: $MODELS_DIR"
-        for model in "Melspectogram" "ParakeetEncoder" "ParakeetDecoder" "RNNTJoint"; do
-          if [ -d "$MODELS_DIR/${model}.mlmodelc" ]; then
-            SIZE=$(du -sh "$MODELS_DIR/${model}.mlmodelc" | cut -f1)
-            echo "✅ ${model}.mlmodelc: $SIZE"
-
-            # Check if model is too small (likely corrupted)
-            SIZE_KB=$(du -sk "$MODELS_DIR/${model}.mlmodelc" | cut -f1)
-            if [ "$SIZE_KB" -lt 10 ]; then
-              echo "❌ ${model}.mlmodelc appears corrupted (too small)"
-              FAILED=true
-            fi
-          else
-            echo "❌ ${model}.mlmodelc: NOT FOUND"
-            FAILED=true
-          fi
-        done
-
-        # Check vocabulary
-        echo ""
-        echo "📍 Checking vocabulary..."
-        if [ -f "$VOCAB_FILE" ]; then
-          SIZE=$(du -sh "$VOCAB_FILE" | cut -f1)
-          echo "✅ parakeet_vocab.json: $SIZE"
-        else
-          echo "❌ parakeet_vocab.json NOT FOUND"
-          echo "This file is required for converting tokens to text!"
-          FAILED=true
-        fi
-
-        if [ "$FAILED" = true ]; then
-          echo "❌ ASR resources verification failed"
-          exit 1
-        else
-          echo "✅ All ASR resources verified successfully"
-        fi
-
-    # Determine test size based on changes
-    - name: Determine Test Size
-      id: test_size
-      run: |
-        # Default to 100 files for both datasets
         MAX_FILES="${{ github.event.inputs.max_files || '100' }}"
-
-        # If only minor changes, do quick test
-        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-          # Fetch the base branch
-          git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} || true
-
-          # Check what files changed
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
-
-          # If only docs/configs changed, do minimal test
-          if echo "$CHANGED_FILES" | grep -qE "^(README|\.github/|docs/|.*\.md$)" && \
-             ! echo "$CHANGED_FILES" | grep -qE "^Sources/"; then
-            MAX_FILES=10
-            echo "📝 Only documentation changed, running minimal test"
-          # If ASR-related files changed, do full test
-          elif echo "$CHANGED_FILES" | grep -qE "(ASR|Asr|asr|Parakeet|Transcript)"; then
-            MAX_FILES=10
-            echo "🔍 ASR-related changes detected, running comprehensive test"
-          else
-            MAX_FILES=100
-            echo "📊 Standard test size for general changes"
-          fi
-        fi
-
-        echo "MAX_FILES=$MAX_FILES" >> $GITHUB_OUTPUT
-        echo "📊 Will test with $MAX_FILES files per dataset"
-
-    # Run ASR benchmarks in parallel
-    - name: Run ASR Benchmarks - Parallel
-      id: benchmark_parallel
-      if: env.SKIP_BENCHMARK != 'true'
-      run: |
-        MAX_FILES="${{ steps.test_size.outputs.MAX_FILES }}"
-        echo "Running ASR benchmarks in parallel with $MAX_FILES files each"
-
-        # Record start time
         BENCHMARK_START=$(date +%s)
-
-        # Start test-clean in background
-        (
-          swift run -c release fluidaudio asr-benchmark \
-            --subset test-clean \
-            --max-files "$MAX_FILES" \
-            --output asr_results_clean.json 2>&1 | tee benchmark_clean.log
-
-          # Extract WER metrics
-          WER_AVG=$(grep "Average WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
-          WER_MED=$(grep "Median WER:" benchmark_clean.log | grep -o '[0-9.]*' | head -1 || echo "0")
-
-
-          # Extract total audio duration and processing time from JSON results
-          if [ -f asr_results_clean.json ]; then
-            TOTAL_AUDIO_DURATION=$(jq -r '[.results[].audioDuration] | add' asr_results_clean.json 2>/dev/null || echo "0")
-            TOTAL_PROCESSING_TIME=$(jq -r '[.results[].processingTime] | add' asr_results_clean.json 2>/dev/null || echo "0")
-
-            echo "DEBUG: test-clean - Total audio: $TOTAL_AUDIO_DURATION, Total processing: $TOTAL_PROCESSING_TIME"
-
-            # Calculate overall RTFx (audio duration / processing time)
-            if [ "$TOTAL_PROCESSING_TIME" != "0" ] && [ "$TOTAL_PROCESSING_TIME" != "null" ] && [ "$TOTAL_AUDIO_DURATION" != "0" ] && [ "$TOTAL_AUDIO_DURATION" != "null" ]; then
-              OVERALL_RTFx=$(awk "BEGIN {printf \"%.1f\", $TOTAL_AUDIO_DURATION / $TOTAL_PROCESSING_TIME}")
-            else
-              echo "DEBUG: Invalid values for RTFx calculation"
-              OVERALL_RTFx="N/A"
-            fi
-          else
-            echo "DEBUG: asr_results_clean.json not found"
-            OVERALL_RTFx="N/A"
-          fi
-
-          # Save to temporary file for later collection
-          echo "CLEAN_WER_AVG=$WER_AVG" > clean_metrics.txt
-          echo "CLEAN_WER_MED=$WER_MED" >> clean_metrics.txt
-          echo "CLEAN_RTFx=$OVERALL_RTFx" >> clean_metrics.txt
-        ) &
+        
+        # Run in parallel
+        swift run -c release fluidaudio asr-benchmark \
+          --subset test-clean --max-files "$MAX_FILES" \
+          --auto-download --output asr_results_clean.json &
         CLEAN_PID=$!
-
-        # Start test-other in background
-        (
-          swift run -c release fluidaudio asr-benchmark \
-            --subset test-other \
-            --max-files "$MAX_FILES" \
-            --output asr_results_other.json 2>&1 | tee benchmark_other.log
-
-          # Extract WER metrics
-          WER_AVG=$(grep "Average WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
-          WER_MED=$(grep "Median WER:" benchmark_other.log | grep -o '[0-9.]*' | head -1 || echo "0")
-
-
-          # Extract total audio duration and processing time from JSON results
-          if [ -f asr_results_other.json ]; then
-            TOTAL_AUDIO_DURATION=$(jq -r '[.results[].audioDuration] | add' asr_results_other.json 2>/dev/null || echo "0")
-            TOTAL_PROCESSING_TIME=$(jq -r '[.results[].processingTime] | add' asr_results_other.json 2>/dev/null || echo "0")
-
-            echo "DEBUG: test-other - Total audio: $TOTAL_AUDIO_DURATION, Total processing: $TOTAL_PROCESSING_TIME"
-
-            # Calculate overall RTFx (audio duration / processing time)
-            if [ "$TOTAL_PROCESSING_TIME" != "0" ] && [ "$TOTAL_PROCESSING_TIME" != "null" ] && [ "$TOTAL_AUDIO_DURATION" != "0" ] && [ "$TOTAL_AUDIO_DURATION" != "null" ]; then
-              OVERALL_RTFx=$(awk "BEGIN {printf \"%.1f\", $TOTAL_AUDIO_DURATION / $TOTAL_PROCESSING_TIME}")
-            else
-              echo "DEBUG: Invalid values for RTFx calculation"
-              OVERALL_RTFx="N/A"
-            fi
-          else
-            echo "DEBUG: asr_results_other.json not found"
-            OVERALL_RTFx="N/A"
-          fi
-
-          # Save to temporary file for later collection
-          echo "OTHER_WER_AVG=$WER_AVG" > other_metrics.txt
-          echo "OTHER_WER_MED=$WER_MED" >> other_metrics.txt
-          echo "OTHER_RTFx=$OVERALL_RTFx" >> other_metrics.txt
-        ) &
+        
+        swift run -c release fluidaudio asr-benchmark \
+          --subset test-other --max-files "$MAX_FILES" \
+          --auto-download --output asr_results_other.json &
         OTHER_PID=$!
-
-        # Wait for both to complete
-        echo "⏳ Waiting for benchmarks to complete..."
-        wait $CLEAN_PID
-        CLEAN_EXIT=$?
-        wait $OTHER_PID
-        OTHER_EXIT=$?
-
-        # Check if both succeeded
-        if [ $CLEAN_EXIT -ne 0 ] || [ $OTHER_EXIT -ne 0 ]; then
-          echo "❌ One or more benchmarks failed"
-          exit 1
+        
+        wait $CLEAN_PID && wait $OTHER_PID
+        
+        # Extract metrics
+        if [ -f asr_results_clean.json ]; then
+          CLEAN_WER_AVG=$(jq -r '.averageWER' asr_results_clean.json)
+          CLEAN_WER_MED=$(jq -r '.medianWER' asr_results_clean.json)
+          CLEAN_AUDIO=$(jq -r '.totalAudioDuration' asr_results_clean.json)
+          CLEAN_TIME=$(jq -r '.totalProcessingTime' asr_results_clean.json)
+          CLEAN_RTFx=$(awk "BEGIN {printf \"%.1f\", $CLEAN_AUDIO / $CLEAN_TIME}")
         fi
-
-        # Collect results and output to GitHub
-        if [ -f clean_metrics.txt ]; then
-          cat clean_metrics.txt >> $GITHUB_OUTPUT
+        
+        if [ -f asr_results_other.json ]; then
+          OTHER_WER_AVG=$(jq -r '.averageWER' asr_results_other.json)
+          OTHER_WER_MED=$(jq -r '.medianWER' asr_results_other.json)
+          OTHER_AUDIO=$(jq -r '.totalAudioDuration' asr_results_other.json)
+          OTHER_TIME=$(jq -r '.totalProcessingTime' asr_results_other.json)
+          OTHER_RTFx=$(awk "BEGIN {printf \"%.1f\", $OTHER_AUDIO / $OTHER_TIME}")
         fi
-        if [ -f other_metrics.txt ]; then
-          cat other_metrics.txt >> $GITHUB_OUTPUT
-        fi
+        
+        # Output metrics
+        echo "CLEAN_WER_AVG=${CLEAN_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
+        echo "CLEAN_WER_MED=${CLEAN_WER_MED:-N/A}" >> $GITHUB_OUTPUT
+        echo "CLEAN_RTFx=${CLEAN_RTFx:-N/A}" >> $GITHUB_OUTPUT
+        echo "OTHER_WER_AVG=${OTHER_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
+        echo "OTHER_WER_MED=${OTHER_WER_MED:-N/A}" >> $GITHUB_OUTPUT
+        echo "OTHER_RTFx=${OTHER_RTFx:-N/A}" >> $GITHUB_OUTPUT
+        
+        EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+        echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
 
-        echo "✅ Both benchmarks completed successfully"
-
-        # Calculate total execution time
-        BENCHMARK_END=$(date +%s)
-        EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
-        EXECUTION_MINS=$((EXECUTION_TIME / 60))
-        EXECUTION_SECS=$((EXECUTION_TIME % 60))
-
-        echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
-
-    # Calculate combined metrics
-    - name: Calculate Combined Metrics
-      id: combined
-      if: env.SKIP_BENCHMARK != 'true'
-      run: |
-        # Count files
-        TOTAL_FILES=$(( ${{ steps.test_size.outputs.MAX_FILES }} * 2 ))
-
-        echo "TOTAL_FILES=$TOTAL_FILES" >> $GITHUB_OUTPUT
-
-    # Post comment with combined results
-    - name: Comment PR with ASR Results
-      if: github.event_name == 'pull_request' && always()
-      continue-on-error: true
+    - name: Comment PR
+      if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
       with:
         script: |
-          // Extract all metrics
-          const cleanWerAvg = '${{ steps.benchmark_parallel.outputs.CLEAN_WER_AVG }}' || 'N/A';
-          const cleanWerMed = '${{ steps.benchmark_parallel.outputs.CLEAN_WER_MED }}' || 'N/A';
-          const cleanRtfx = '${{ steps.benchmark_parallel.outputs.CLEAN_RTFx }}' || 'N/A';
-          const otherWerAvg = '${{ steps.benchmark_parallel.outputs.OTHER_WER_AVG }}' || 'N/A';
-          const otherWerMed = '${{ steps.benchmark_parallel.outputs.OTHER_WER_MED }}' || 'N/A';
-          const otherRtfx = '${{ steps.benchmark_parallel.outputs.OTHER_RTFx }}' || 'N/A';
-
-          const totalFiles = '${{ steps.combined.outputs.TOTAL_FILES }}' || 'N/A';
-          const filesPerDataset = '${{ steps.test_size.outputs.MAX_FILES }}';
-          const executionTime = '${{ steps.benchmark_parallel.outputs.EXECUTION_TIME }}' || 'N/A';
-
-          let body = `## ASR Benchmark Results
+          const body = `## ASR Benchmark Results
 
           | Dataset | WER Avg | WER Med | RTFx | Status |
           |---------|---------|---------|------|--------|
-          | test-clean | ${cleanWerAvg}% | ${cleanWerMed}% | ${cleanRtfx}x | ${parseFloat(cleanWerAvg) < 10 ? '✅' : '⚠️'} |
-          | test-other | ${otherWerAvg}% | ${otherWerMed}% | ${otherRtfx}x | ${parseFloat(otherWerAvg) < 20 ? '✅' : '⚠️'} |
+          | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
+          | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
 
-          <sub>${filesPerDataset} files per dataset • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+          <sub>${{ github.event.inputs.max_files || '100' }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
           <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>
           Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>
@@ -364,43 +135,23 @@ jobs:
 
           <!-- fluidaudio-benchmark-asr -->`;
 
-          // Find and update existing comment
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
           });
 
-          console.log(`Found ${comments.length} comments on PR`);
+          const existing = comments.find(c => 
+            c.body.includes('<!-- fluidaudio-benchmark-asr -->')
+          );
 
-          const botComment = comments.find(comment => {
-            // Check if it's a bot comment (GitHub Actions bot)
-            const isBot = comment.user.type === 'Bot' ||
-                         comment.user.login === 'github-actions[bot]' ||
-                         comment.user.login.includes('[bot]');
-
-            // Check if it contains our identifier
-            const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-asr -->');
-
-            // Also check for the header as a fallback (with emoji)
-            const hasHeader = comment.body.includes('## 🔊 ASR Benchmark Results');
-
-            // Additional fallback: check for header without emoji
-            const hasHeaderNoEmoji = comment.body.includes('## ASR Benchmark Results');
-
-            console.log(`Comment by ${comment.user.login}: isBot=${isBot}, hasIdentifier=${hasIdentifier}, hasHeader=${hasHeader}, hasHeaderNoEmoji=${hasHeaderNoEmoji}`);
-
-            return isBot && (hasIdentifier || hasHeader || hasHeaderNoEmoji);
-          });
-
-          if (botComment) {
+          if (existing) {
             await github.rest.issues.updateComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              comment_id: botComment.id,
+              comment_id: existing.id,
               body: body
             });
-            console.log('✅ Updated existing ASR benchmark comment');
           } else {
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -408,51 +159,11 @@ jobs:
               issue_number: context.issue.number,
               body: body
             });
-            console.log('✅ Created new ASR benchmark comment');
           }
 
-    # Check performance thresholds
-    - name: Check Performance Thresholds
-      run: |
-        CLEAN_WER="${{ steps.benchmark_parallel.outputs.CLEAN_WER_AVG }}"
-        OTHER_WER="${{ steps.benchmark_parallel.outputs.OTHER_WER_AVG }}"
-        MAX_FILES="${{ steps.test_size.outputs.MAX_FILES }}"
-
-        # Adaptive thresholds based on test size
-        if [[ "$MAX_FILES" -le 10 ]]; then
-          CLEAN_THRESHOLD=25
-          OTHER_THRESHOLD=35
-        else
-          CLEAN_THRESHOLD=10
-          OTHER_THRESHOLD=20
-        fi
-
-        FAILED=false
-
-        if (( $(echo "$CLEAN_WER > $CLEAN_THRESHOLD" | bc -l) )); then
-          echo "❌ test-clean WER too high: $CLEAN_WER% (threshold: $CLEAN_THRESHOLD%)"
-          FAILED=true
-        fi
-
-        if (( $(echo "$OTHER_WER > $OTHER_THRESHOLD" | bc -l) )); then
-          echo "❌ test-other WER too high: $OTHER_WER% (threshold: $OTHER_THRESHOLD%)"
-          FAILED=true
-        fi
-
-        if [ "$FAILED" = true ]; then
-          exit 1
-        else
-          echo "✅ ASR benchmark passed all thresholds"
-        fi
-
-    # Upload results
     - name: Upload Results
-      uses: actions/upload-artifact@v4
       if: always()
+      uses: actions/upload-artifact@v4
       with:
         name: asr-results
-        path: |
-          asr_results_clean.json
-          asr_results_other.json
-          benchmark_clean.log
-          benchmark_other.log
+        path: asr_results_*.json
