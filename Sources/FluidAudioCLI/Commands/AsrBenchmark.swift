@@ -487,11 +487,10 @@ extension ASRBenchmark {
 
             let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
             let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)
-            let totalRTF = results.reduce(0.0) { $0 + $1.rtf } / Double(results.count)
+            
             let rtfxValues = results.map { Float(1.0 / $0.rtf) }
-            let meanRTFx = rtfxValues.reduce(0, +) / Float(rtfxValues.count)
-            let medianRTFx = rtfxValues.sorted()[rtfxValues.count / 2]
-            let sumRTFx = rtfxValues.reduce(0, +)
+            let sortedRTFx = rtfxValues.sorted()
+            let medianRTFx = sortedRTFx[sortedRTFx.count / 2]
 
 
             let totalAudioDuration = results.reduce(0.0) { $0 + $1.audioLength }
@@ -521,15 +520,12 @@ extension ASRBenchmark {
             #endif
             print("   Dataset: \(config.dataset) \(config.subset)")
             print("   Files processed: \(results.count)")
-            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
-            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
-            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
-            print("   Average RTF: \(String(format: "%.3f", totalRTF))x")
-            print("   Mean RTFx: \(String(format: "%.1f", meanRTFx))x")
-            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            print("   Total audio duration: \(String(format: "%.1f", totalAudioDuration))s")
-            print("   Total processing time: \(String(format: "%.1f", totalProcessingTime))s")
             let overallRTFx = totalAudioDuration / totalProcessingTime
+            
+            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
+            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%") 
+            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
             print("   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)")
 
             let encoder = JSONEncoder()
@@ -547,10 +543,8 @@ extension ASRBenchmark {
                     "averageWER": totalWER,
                     "medianWER": medianWER,
                     "averageCER": totalCER,
-                    "averageRTF": totalRTF,
-                    "meanRTFx": meanRTFx,
                     "medianRTFx": medianRTFx,
-                    "sumRTFx": sumRTFx,
+                    "overallRTFx": overallRTFx,
                     "totalAudioDuration": totalAudioDuration,
                     "totalProcessingTime": totalProcessingTime
                 ],

@@ -88,35 +88,31 @@ public final class AsrManager {
             try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDirectory)
 
             let modelConfig = MLModelConfiguration()
-
             modelConfig.allowLowPrecisionAccumulationOnGPU = true
-
-            if ProcessInfo.processInfo.environment["CI"] != nil {
-                // Force CPU and Neural Engine only (no GPU) in CI environments
-                // GPU can cause issues in virtualized environments like GitHub Actions
-                modelConfig.computeUnits = .cpuAndNeuralEngine
-                logger.info("🔧 ASR: Using compute units: cpuAndNeuralEngine (CI environment)")
-
-            } else {
-                // Use all available compute units for best performance on real hardware
-                modelConfig.computeUnits = .all
+            
+            // Use cpuAndNeuralEngine in CI, all units otherwise
+            let isCI = ProcessInfo.processInfo.environment["CI"] != nil
+            modelConfig.computeUnits = isCI ? .cpuAndNeuralEngine : .all
+            if isCI {
+                logger.info("🔧 ASR: Using cpuAndNeuralEngine (CI environment)")
             }
 
             logger.info("Loading Parakeet models from \(self.modelsDirectory.path)")
 
+            // Validate all model paths exist
             let modelPaths = [
                 ("Mel-spectrogram", melSpectrogramPath),
                 ("Encoder", encoderPath),
                 ("Decoder", decoderPath),
                 ("Joint", jointPath)
             ]
-
-            for (name, path) in modelPaths {
-                if !FileManager.default.fileExists(atPath: path.path) {
+            
+            try modelPaths.forEach { name, path in
+                guard FileManager.default.fileExists(atPath: path.path) else {
                     logger.error("\(name) model not found at: \(path.path)")
                     throw ASRError.modelLoadFailed
                 }
-                logger.info("\(name) model found at: \(path.path)")
+                logger.info("\(name) model found")
             }
 
             let models = try await loadAllModels(

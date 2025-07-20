@@ -70,9 +70,7 @@ internal struct TdtDecoder {
             return []
         }
         
-        var hypothesis = TdtHypothesis()
-        hypothesis.decState = decoderState
-        hypothesis.lastToken = nil
+        var hypothesis = TdtHypothesis(decState: decoderState)
         
         var timeIdx = 0
         
@@ -128,14 +126,10 @@ internal struct TdtDecoder {
                 )
                 break
             }
-            
-            // No skip, check if we should continue processing symbols
-            if symbolsAdded >= maxSymbolsPerFrame {
-                nextTimeIdx = timeIdx + 1
-            }
         }
         
-        return nextTimeIdx
+        // Default to next frame if no skip occurred
+        return nextTimeIdx == timeIdx ? timeIdx + 1 : nextTimeIdx
     }
     
     /// Process a single symbol prediction
@@ -262,13 +256,7 @@ internal struct TdtDecoder {
     
     /// Calculate next time index based on duration prediction
     private func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
-        let actualSkip = min(skip, 4)
-        
-        // Special handling for short sequences
-        if sequenceLength < 10 && actualSkip > 2 {
-            return min(currentIdx + 2, sequenceLength)
-        }
-        
+        let actualSkip = (sequenceLength < 10 && skip > 2) ? 2 : min(skip, 4)
         return min(currentIdx + actualSkip, sequenceLength)
     }
     
