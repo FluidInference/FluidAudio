@@ -2,39 +2,11 @@
 import Foundation
 import OSLog
 
-// MARK: - AsrManager
+public enum AudioSource {
+    case microphone
+    case system
+}
 
-/// AsrManager provides automatic speech recognition using Parakeet TDT (Token-and-Duration Transducer) models.
-///
-/// This class implements high-performance speech-to-text transcription optimized for Apple Neural Engine,
-/// achieving real-time factors (RTFx) of 11-50x depending on audio duration and hardware.
-///
-/// ## Features
-/// - **Parakeet TDT-0.6b** model implementation with duration-aware decoding
-/// - **Apple Neural Engine** optimization for maximum performance
-/// - **Chunked processing** for long audio files (automatic 10-second chunks)
-/// - **Text normalization** compatible with HuggingFace ASR evaluation standards
-/// - **Auto-recovery** from CoreML model loading failures
-///
-/// ## Performance
-/// - LibriSpeech test-clean: Average WER 5.9%, Median WER 1.9%
-/// - LibriSpeech test-other: Average WER 4-6%
-/// - RTFx: ~11.8x (includes full end-to-end file I/O overhead)
-///
-/// ## Usage
-/// ```swift
-/// let asrManager = AsrManager()
-/// try await asrManager.initialize()
-/// let result = try await asrManager.transcribe(audioSamples)
-/// print("Transcription: \(result.text)")
-/// ```
-///
-/// ## Technical Details
-/// The TDT model uses a novel architecture that jointly predicts both tokens and their durations,
-/// enabling more accurate transcription of speech with varying speaking rates. The implementation
-/// includes advanced features like duration-based token repetition and confidence-weighted decoding.
-///
-/// - Note: Requires macOS 13.0+ or iOS 16.0+ for CoreML 6 features
 @available(macOS 13.0, iOS 16.0, *)
 public final class AsrManager {
 
@@ -46,15 +18,13 @@ public final class AsrManager {
     internal var encoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
-    var decoderState: DecoderState = DecoderState()
+    
+    private var microphoneDecoderState = DecoderState()
+    private var systemDecoderState = DecoderState()
 
-    let blankId = 1024  // Verified: this works correctly (not actually "warming" token)
-    let sosId = 1024    // Start of sequence token (same as blank for this model)
+    let blankId = 1024
+    let sosId = 1024
 
-    /// Creates a new ASR manager with the specified configuration
-    /// - Parameters:
-    ///   - config: ASR configuration settings
-    ///   - modelsDirectory: Custom directory for CoreML models. If nil, uses default Application Support location
     public init(config: ASRConfig = .default, modelsDirectory: URL? = nil) {
         self.config = config
         self.modelsDirectory = modelsDirectory ?? Self.getDefaultModelsDirectory()
@@ -62,18 +32,11 @@ public final class AsrManager {
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
     }
 
-    /// Indicates whether all required models are loaded and ready for transcription
+
     public var isAvailable: Bool {
         return melSpectrogramModel != nil && encoderModel != nil && decoderModel != nil && jointModel != nil
     }
 
-    /// Initializes the ASR system by loading Parakeet TDT models.
-    ///
-    /// This method downloads models if needed and compiles them for Apple Neural Engine.
-    /// Models are cached for subsequent runs.
-    ///
-    /// - Throws: `ASRError.modelLoadFailed` if models cannot be loaded
-    /// - Note: This is an async operation that may take several seconds on first run
     public func initialize() async throws {
         logger.info("Initializing AsrManager with Parakeet models")
 
@@ -89,8 +52,7 @@ public final class AsrManager {
 
             let modelConfig = MLModelConfiguration()
             modelConfig.allowLowPrecisionAccumulationOnGPU = true
-            
-            // Use cpuAndNeuralEngine in CI, all units otherwise
+
             let isCI = ProcessInfo.processInfo.environment["CI"] != nil
             modelConfig.computeUnits = isCI ? .cpuAndNeuralEngine : .all
             if isCI {
@@ -99,14 +61,13 @@ public final class AsrManager {
 
             logger.info("Loading Parakeet models from \(self.modelsDirectory.path)")
 
-            // Validate all model paths exist
             let modelPaths = [
                 ("Mel-spectrogram", melSpectrogramPath),
                 ("Encoder", encoderPath),
                 ("Decoder", decoderPath),
                 ("Joint", jointPath)
             ]
-            
+
             try modelPaths.forEach { name, path in
                 guard FileManager.default.fileExists(atPath: path.path) else {
                     logger.error("\(name) model not found at: \(path.path)")
@@ -139,7 +100,6 @@ public final class AsrManager {
         }
     }
 
-    /// Generic helper to create MLFeatureProvider with multiple arrays
     private func createFeatureProvider(features: [(name: String, array: MLMultiArray)]) throws -> MLFeatureProvider {
         var featureDict: [String: MLFeatureValue] = [:]
         for (name, array) in features {
@@ -148,7 +108,6 @@ public final class AsrManager {
         return try MLDictionaryFeatureProvider(dictionary: featureDict)
     }
 
-    /// Helper to create single-value MLMultiArray
     private func createScalarArray(value: Int, shape: [NSNumber] = [1], dataType: MLMultiArrayDataType = .int32) throws -> MLMultiArray {
         let array = try MLMultiArray(shape: shape, dataType: dataType)
         array[0] = NSNumber(value: value)
@@ -182,7 +141,6 @@ public final class AsrManager {
     }
 
     func transposeEncoderOutput(_ encoderOutput: MLMultiArray) throws -> MLMultiArray {
-        // Transpose encoder output from (1, 1024, T) to (1, T, 1024)
         let shape = encoderOutput.shape
         let batchSize = shape[0].intValue
         let featSize = shape[1].intValue
@@ -207,7 +165,7 @@ public final class AsrManager {
         cellState: MLMultiArray
     ) throws -> MLFeatureProvider {
         let targetArray = try createScalarArray(value: targetToken, shape: [1, 1])
-        let targetLengthArray = try createScalarArray(value: 1)  // Always 1 for single token
+        let targetLengthArray = try createScalarArray(value: 1)
 
         return try createFeatureProvider(features: [
             ("targets", targetArray),
@@ -217,10 +175,7 @@ public final class AsrManager {
         ])
     }
 
-    // MARK: - TDT Helper Functions
-
-    /// Initialize decoder state with a clean blank token pass
-    internal func initializeDecoderState() async throws {
+    internal func initializeDecoderState(decoderState: inout DecoderState) async throws {
         guard let decoderModel = decoderModel else {
             throw ASRError.notInitialized
         }
@@ -287,7 +242,6 @@ public final class AsrManager {
         }
     }
 
-    /// Load all required models in a single operation
     private func loadAllModels(
         melSpectrogramPath: URL,
         encoderPath: URL,
@@ -317,19 +271,18 @@ public final class AsrManager {
         encoderModel = nil
         decoderModel = nil
         jointModel = nil
-        decoderState = DecoderState()
+        microphoneDecoderState = DecoderState()
+        systemDecoderState = DecoderState()
         logger.info("AsrManager resources cleaned up")
     }
 
-    // MARK: - TDT Decoding
-
-    /// TDT decoding using the dedicated TdtDecoder
     internal func tdtDecode(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
-        originalAudioSamples: [Float]
+        originalAudioSamples: [Float],
+        decoderState: inout DecoderState
     ) async throws -> [Int] {
-        try await initializeDecoderState()
+        try await initializeDecoderState(decoderState: &decoderState)
 
         let decoder = TdtDecoder(config: config)
         return try await decoder.decode(
@@ -341,25 +294,23 @@ public final class AsrManager {
         )
     }
 
-    /// Transcribes audio samples to text using Parakeet TDT models.
-    ///
-    /// This method automatically handles long audio files by splitting them into 10-second chunks
-    /// and concatenating the results. For optimal performance, audio should be:
-    /// - 16kHz sample rate
-    /// - Mono channel
-    /// - Float32 samples normalized to [-1.0, 1.0]
-    ///
-    /// - Parameter audioSamples: Array of audio samples at 16kHz
-    /// - Returns: `ASRResult` containing transcribed text, confidence, and timing information
-    /// - Audio ≤10 seconds: Processed in a single pass
-    /// - Audio >10 seconds: Automatically chunked with 0.5s overlap
-    /// - RTFx includes full end-to-end time (I/O + inference)
-    /// moved to asrtranscription.swift for better organization
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
-        return try await transcribeUnified(audioSamples)
+        return try await transcribe(audioSamples, source: .microphone)
+    }
+    
+    public func transcribe(_ audioSamples: [Float], source: AudioSource) async throws -> ASRResult {
+        switch source {
+        case .microphone:
+            return try await transcribeWithState(audioSamples, decoderState: &microphoneDecoderState)
+        case .system:
+            return try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
+        }
+    }
+    
+    internal func transcribeWithState(_ audioSamples: [Float], decoderState: inout DecoderState) async throws -> ASRResult {
+        return try await transcribeUnifiedWithState(audioSamples, decoderState: &decoderState)
     }
 
-    /// Convert tokens to text using existing timing information from TDT
     internal func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (text: String, timings: [TokenTiming]) {
         guard !tokenIds.isEmpty else { return ("", []) }
 
@@ -404,18 +355,14 @@ public final class AsrManager {
 
         return (result, adjustedTimings)
     }
-    
-    // MARK: - Error Handling Helpers
-    
-    /// Validates and extracts a required feature value from MLFeatureProvider
+
     internal func extractFeatureValue(from provider: MLFeatureProvider, key: String, errorMessage: String) throws -> MLMultiArray {
         guard let value = provider.featureValue(for: key)?.multiArrayValue else {
             throw ASRError.processingFailed(errorMessage)
         }
         return value
     }
-    
-    /// Validates and extracts multiple feature values from MLFeatureProvider
+
     internal func extractFeatureValues(from provider: MLFeatureProvider, keys: [(key: String, errorSuffix: String)]) throws -> [String: MLMultiArray] {
         var results: [String: MLMultiArray] = [:]
         for (key, errorSuffix) in keys {

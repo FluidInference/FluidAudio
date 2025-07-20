@@ -82,21 +82,31 @@ jobs:
 
         wait $CLEAN_PID && wait $OTHER_PID
 
-        # Extract metrics
+        # Extract metrics with error handling
         if [ -f asr_results_clean.json ]; then
-          CLEAN_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json | xargs printf "%.2f")
-          CLEAN_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json | xargs printf "%.2f")
-          CLEAN_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_clean.json)
-          CLEAN_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_clean.json)
-          CLEAN_RTFx=$(jq -r '.summary.meanRTFx' asr_results_clean.json | xargs printf "%.2f")
+          CLEAN_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json 2>/dev/null)
+          CLEAN_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json 2>/dev/null)
+          CLEAN_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_clean.json 2>/dev/null)
+          CLEAN_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_clean.json 2>/dev/null)
+          CLEAN_RTFx=$(jq -r '.summary.medianRTFx' asr_results_clean.json 2>/dev/null)
+
+          # Format values only if they exist and are not null
+          [ "$CLEAN_WER_AVG" != "null" ] && [ -n "$CLEAN_WER_AVG" ] && CLEAN_WER_AVG=$(printf "%.2f" "$CLEAN_WER_AVG") || CLEAN_WER_AVG="N/A"
+          [ "$CLEAN_WER_MED" != "null" ] && [ -n "$CLEAN_WER_MED" ] && CLEAN_WER_MED=$(printf "%.2f" "$CLEAN_WER_MED") || CLEAN_WER_MED="N/A"
+          [ "$CLEAN_RTFx" != "null" ] && [ -n "$CLEAN_RTFx" ] && CLEAN_RTFx=$(printf "%.2f" "$CLEAN_RTFx") || CLEAN_RTFx="N/A"
         fi
 
         if [ -f asr_results_other.json ]; then
-          OTHER_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json | xargs printf "%.2f")
-          OTHER_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json | xargs printf "%.2f")
-          OTHER_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_other.json)
-          OTHER_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_other.json)
-          OTHER_RTFx=$(jq -r '.summary.meanRTFx' asr_results_other.json | xargs printf "%.2f")
+          OTHER_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json 2>/dev/null)
+          OTHER_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json 2>/dev/null)
+          OTHER_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_other.json 2>/dev/null)
+          OTHER_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_other.json 2>/dev/null)
+          OTHER_RTFx=$(jq -r '.summary.medianRTFx' asr_results_other.json 2>/dev/null)
+
+          # Format values only if they exist and are not null
+          [ "$OTHER_WER_AVG" != "null" ] && [ -n "$OTHER_WER_AVG" ] && OTHER_WER_AVG=$(printf "%.2f" "$OTHER_WER_AVG") || OTHER_WER_AVG="N/A"
+          [ "$OTHER_WER_MED" != "null" ] && [ -n "$OTHER_WER_MED" ] && OTHER_WER_MED=$(printf "%.2f" "$OTHER_WER_MED") || OTHER_WER_MED="N/A"
+          [ "$OTHER_RTFx" != "null" ] && [ -n "$OTHER_RTFx" ] && OTHER_RTFx=$(printf "%.2f" "$OTHER_RTFx") || OTHER_RTFx="N/A"
         fi
 
         # Output metrics
@@ -122,7 +132,7 @@ jobs:
           | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
           | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
 
-          <sub>100 files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+          <sub>10 files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
           <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
 
