@@ -62,8 +62,7 @@ internal struct TdtDecoder {
         encoderSequenceLength: Int,
         decoderModel: MLModel,
         jointModel: MLModel,
-        decoderState: inout DecoderState,
-        predictionOptions: MLPredictionOptions?
+        decoderState: inout DecoderState
     ) async throws -> [Int] {
         
         guard encoderSequenceLength > 1 else {
@@ -84,8 +83,7 @@ internal struct TdtDecoder {
                 encoderSequenceLength: encoderSequenceLength,
                 decoderModel: decoderModel,
                 jointModel: jointModel,
-                hypothesis: &hypothesis,
-                predictionOptions: predictionOptions
+                hypothesis: &hypothesis
             )
             
             timeIdx = result
@@ -101,8 +99,7 @@ internal struct TdtDecoder {
         encoderSequenceLength: Int,
         decoderModel: MLModel,
         jointModel: MLModel,
-        hypothesis: inout TdtHypothesis,
-        predictionOptions: MLPredictionOptions?
+        hypothesis: inout TdtHypothesis
     ) async throws -> Int {
         
         let encoderStep = try extractEncoderTimeStep(encoderOutput, timeIndex: timeIdx)
@@ -117,8 +114,7 @@ internal struct TdtDecoder {
                 timeIdx: timeIdx,
                 decoderModel: decoderModel,
                 jointModel: jointModel,
-                hypothesis: &hypothesis,
-                predictionOptions: predictionOptions
+                hypothesis: &hypothesis
             )
             
             symbolsAdded += 1
@@ -148,8 +144,7 @@ internal struct TdtDecoder {
         timeIdx: Int,
         decoderModel: MLModel,
         jointModel: MLModel,
-        hypothesis: inout TdtHypothesis,
-        predictionOptions: MLPredictionOptions?
+        hypothesis: inout TdtHypothesis
     ) async throws -> Int? {
         
         // Run decoder with current token
@@ -159,16 +154,14 @@ internal struct TdtDecoder {
         let decoderOutput = try runDecoder(
             token: targetToken,
             state: decoderState,
-            model: decoderModel,
-            options: predictionOptions
+            model: decoderModel
         )
         
         // Run joint network
         let logits = try runJointNetwork(
             encoderStep: encoderStep,
             decoderOutput: decoderOutput.output,
-            model: jointModel,
-            options: predictionOptions
+            model: jointModel
         )
         
         // Predict token and duration
@@ -194,8 +187,7 @@ internal struct TdtDecoder {
     private func runDecoder(
         token: Int,
         state: DecoderState,
-        model: MLModel,
-        options: MLPredictionOptions?
+        model: MLModel
     ) throws -> (output: MLFeatureProvider, newState: DecoderState) {
         
         let input = try prepareDecoderInput(
@@ -206,7 +198,7 @@ internal struct TdtDecoder {
         
         let output = try model.prediction(
             from: input,
-            options: options ?? MLPredictionOptions()
+            options: MLPredictionOptions()
         )
         
         var newState = state
@@ -219,8 +211,7 @@ internal struct TdtDecoder {
     private func runJointNetwork(
         encoderStep: MLMultiArray,
         decoderOutput: MLFeatureProvider,
-        model: MLModel,
-        options: MLPredictionOptions?
+        model: MLModel
     ) throws -> MLMultiArray {
         
         let input = try prepareJointInput(
@@ -231,14 +222,10 @@ internal struct TdtDecoder {
         
         let output = try model.prediction(
             from: input,
-            options: options ?? MLPredictionOptions()
+            options: MLPredictionOptions()
         )
         
-        guard let logits = output.featureValue(for: "logits")?.multiArrayValue else {
-            throw ASRError.processingFailed("Joint network output missing logits")
-        }
-        
-        return logits
+        return try extractFeatureValue(from: output, key: "logits", errorMessage: "Joint network output missing logits")
     }
     
     /// Predict token and duration from joint logits
@@ -363,13 +350,21 @@ internal struct TdtDecoder {
         decoderOutput: MLFeatureProvider,
         timeIndex: Int
     ) throws -> MLFeatureProvider {
-        guard let decoderOutputArray = decoderOutput.featureValue(for: "decoder_output")?.multiArrayValue else {
-            throw ASRError.processingFailed("Invalid decoder output")
-        }
+        let decoderOutputArray = try extractFeatureValue(from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
         
         return try MLDictionaryFeatureProvider(dictionary: [
             "encoder_outputs": MLFeatureValue(multiArray: encoderOutput),
             "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray)
         ])
+    }
+    
+    // MARK: - Error Handling Helper
+    
+    /// Validates and extracts a required feature value from MLFeatureProvider
+    private func extractFeatureValue(from provider: MLFeatureProvider, key: String, errorMessage: String) throws -> MLMultiArray {
+        guard let value = provider.featureValue(for: key)?.multiArrayValue else {
+            throw ASRError.processingFailed(errorMessage)
+        }
+        return value
     }
 }

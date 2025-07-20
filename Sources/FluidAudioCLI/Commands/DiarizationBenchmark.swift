@@ -1,6 +1,5 @@
 import AVFoundation
 import FluidAudio
-import Foundation
 
 /// Handler for the 'diarization-benchmark' command - runs diarization benchmarks
 enum DiarizationBenchmark {

@@ -51,7 +51,7 @@ extension AsrManager {
         
         guard let melSpectrogramOutput = try melSpectrogramModel?.prediction(
             from: melSpectrogramInput,
-            options: predictionOptions ?? MLPredictionOptions()
+            options: MLPredictionOptions()
         ) else {
             throw ASRError.processingFailed("Mel-spectrogram model failed")
         }
@@ -59,15 +59,13 @@ extension AsrManager {
         let encoderInput = try prepareEncoderInput(melSpectrogramOutput)
         guard let encoderOutput = try encoderModel?.prediction(
             from: encoderInput,
-            options: predictionOptions ?? MLPredictionOptions()
+            options: MLPredictionOptions()
         ) else {
             throw ASRError.processingFailed("Encoder model failed")
         }
         
-        guard let rawEncoderOutput = encoderOutput.featureValue(for: "encoder_output")?.multiArrayValue,
-              let encoderLength = encoderOutput.featureValue(for: "encoder_output_length")?.multiArrayValue else {
-            throw ASRError.processingFailed("Invalid encoder output")
-        }
+        let rawEncoderOutput = try extractFeatureValue(from: encoderOutput, key: "encoder_output", errorMessage: "Invalid encoder output")
+        let encoderLength = try extractFeatureValue(from: encoderOutput, key: "encoder_output_length", errorMessage: "Invalid encoder output length")
         
         let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
         let encoderSequenceLength = encoderLength[0].intValue

@@ -1,6 +1,5 @@
 import AVFoundation
 import FluidAudio
-import Foundation
 
 /// Handler for the 'process' command - processes a single audio file
 enum ProcessCommand {

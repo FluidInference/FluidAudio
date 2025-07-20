@@ -1,8 +1,6 @@
 @preconcurrency import CoreML
 import Foundation
 import OSLog
-import Accelerate
-import AVFoundation
 
 // MARK: - AsrManager
 
@@ -48,7 +46,6 @@ public final class AsrManager {
     internal var encoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
-    internal var predictionOptions: MLPredictionOptions?
     var decoderState: DecoderState = DecoderState()
 
     let blankId = 1024  // Verified: this works correctly (not actually "warming" token)
@@ -135,10 +132,6 @@ public final class AsrManager {
             decoderModel = models.decoder
             jointModel = models.joint
 
-            let options = MLPredictionOptions()
-            // usesCPUOnly is deprecated - the model config already specifies compute units
-            self.predictionOptions = options
-
             logger.info("AsrManager initialized successfully")
 
         } catch {
@@ -150,6 +143,22 @@ public final class AsrManager {
         }
     }
 
+    /// Generic helper to create MLFeatureProvider with multiple arrays
+    private func createFeatureProvider(features: [(name: String, array: MLMultiArray)]) throws -> MLFeatureProvider {
+        var featureDict: [String: MLFeatureValue] = [:]
+        for (name, array) in features {
+            featureDict[name] = MLFeatureValue(multiArray: array)
+        }
+        return try MLDictionaryFeatureProvider(dictionary: featureDict)
+    }
+
+    /// Helper to create single-value MLMultiArray
+    private func createScalarArray(value: Int, shape: [NSNumber] = [1], dataType: MLMultiArrayDataType = .int32) throws -> MLMultiArray {
+        let array = try MLMultiArray(shape: shape, dataType: dataType)
+        array[0] = NSNumber(value: value)
+        return array
+    }
+
     func prepareMelSpectrogramInput(_ audioSamples: [Float]) throws -> MLFeatureProvider {
         let audioLength = audioSamples.count
 
@@ -158,24 +167,21 @@ public final class AsrManager {
             audioArray[i] = NSNumber(value: audioSamples[i])
         }
 
-        let lengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
-        lengthArray[0] = NSNumber(value: audioLength)
+        let lengthArray = try createScalarArray(value: audioLength)
 
-        return try MLDictionaryFeatureProvider(dictionary: [
-            "audio_signal": MLFeatureValue(multiArray: audioArray),
-            "audio_length": MLFeatureValue(multiArray: lengthArray)
+        return try createFeatureProvider(features: [
+            ("audio_signal", audioArray),
+            ("audio_length", lengthArray)
         ])
     }
 
     func prepareEncoderInput(_ melSpectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
-        guard let melSpectrogram = melSpectrogramOutput.featureValue(for: "melspectogram")?.multiArrayValue,
-              let melSpectrogramLength = melSpectrogramOutput.featureValue(for: "melspectogram_length")?.multiArrayValue else {
-            throw ASRError.processingFailed("Invalid mel-spectrogram output")
-        }
+        let melSpectrogram = try extractFeatureValue(from: melSpectrogramOutput, key: "melspectogram", errorMessage: "Invalid mel-spectrogram output")
+        let melSpectrogramLength = try extractFeatureValue(from: melSpectrogramOutput, key: "melspectogram_length", errorMessage: "Invalid mel-spectrogram length output")
 
-        return try MLDictionaryFeatureProvider(dictionary: [
-            "audio_signal": MLFeatureValue(multiArray: melSpectrogram),
-            "length": MLFeatureValue(multiArray: melSpectrogramLength)
+        return try createFeatureProvider(features: [
+            ("audio_signal", melSpectrogram),
+            ("length", melSpectrogramLength)
         ])
     }
 
@@ -204,23 +210,16 @@ public final class AsrManager {
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
     ) throws -> MLFeatureProvider {
-        let targetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
-        targetArray[0] = NSNumber(value: targetToken)
+        let targetArray = try createScalarArray(value: targetToken, shape: [1, 1])
+        let targetLengthArray = try createScalarArray(value: 1)  // Always 1 for single token
 
-        let targetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
-        targetLengthArray[0] = NSNumber(value: 1)  // Always 1 for single token
-
-        return try MLDictionaryFeatureProvider(dictionary: [
-            "targets": MLFeatureValue(multiArray: targetArray),
-            "target_lengths": MLFeatureValue(multiArray: targetLengthArray),
-            "h_in": MLFeatureValue(multiArray: hiddenState),
-            "c_in": MLFeatureValue(multiArray: cellState)
+        return try createFeatureProvider(features: [
+            ("targets", targetArray),
+            ("target_lengths", targetLengthArray),
+            ("h_in", hiddenState),
+            ("c_in", cellState)
         ])
     }
-
-
-
-
 
     // MARK: - TDT Helper Functions
 
@@ -238,7 +237,7 @@ public final class AsrManager {
             cellState: freshState.cellState
         )
 
-        let initDecoderOutput = try decoderModel.prediction(from: initDecoderInput, options: predictionOptions ?? MLPredictionOptions())
+        let initDecoderOutput = try decoderModel.prediction(from: initDecoderInput, options: MLPredictionOptions())
 
         freshState.update(from: initDecoderOutput)
 
@@ -335,15 +334,14 @@ public final class AsrManager {
         originalAudioSamples: [Float]
     ) async throws -> [Int] {
         try await initializeDecoderState()
-        
+
         let decoder = TdtDecoder(config: config)
         return try await decoder.decode(
             encoderOutput: encoderOutput,
             encoderSequenceLength: encoderSequenceLength,
             decoderModel: decoderModel!,
             jointModel: jointModel!,
-            decoderState: &decoderState,
-            predictionOptions: predictionOptions
+            decoderState: &decoderState
         )
     }
 
@@ -409,6 +407,25 @@ public final class AsrManager {
         }
 
         return (result, adjustedTimings)
+    }
+    
+    // MARK: - Error Handling Helpers
+    
+    /// Validates and extracts a required feature value from MLFeatureProvider
+    internal func extractFeatureValue(from provider: MLFeatureProvider, key: String, errorMessage: String) throws -> MLMultiArray {
+        guard let value = provider.featureValue(for: key)?.multiArrayValue else {
+            throw ASRError.processingFailed(errorMessage)
+        }
+        return value
+    }
+    
+    /// Validates and extracts multiple feature values from MLFeatureProvider
+    internal func extractFeatureValues(from provider: MLFeatureProvider, keys: [(key: String, errorSuffix: String)]) throws -> [String: MLMultiArray] {
+        var results: [String: MLMultiArray] = [:]
+        for (key, errorSuffix) in keys {
+            results[key] = try extractFeatureValue(from: provider, key: key, errorMessage: "Invalid \(errorSuffix)")
+        }
+        return results
     }
 }
 

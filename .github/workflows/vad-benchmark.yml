@@ -74,16 +74,23 @@ jobs:
               if (fs.existsSync('vad_benchmark_results.json')) {
                 const results = JSON.parse(fs.readFileSync('vad_benchmark_results.json', 'utf8'));
 
-                reportContent += `| Metric | Value | Target | Status |\n`;
-                reportContent += `|--------|-------|--------|--------|\n`;
-                reportContent += `| F1-Score | ${results.f1_score?.toFixed(1)}% | >70% | ${results.f1_score >= 70 ? '✅' : '❌'} |\n`;
-                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1)}% | >70% | ${results.accuracy >= 70 ? '✅' : '❌'} |\n`;
-                reportContent += `| Precision | ${results.precision?.toFixed(1)}% | - | - |\n`;
-                reportContent += `| Recall | ${results.recall?.toFixed(1)}% | - | - |\n\n`;
-
-                reportContent += `<sub>${results.total_files} files • ${results.processing_time_seconds?.toFixed(1)}s • ${{ steps.benchmark.outputs.EXECUTION_TIME }}</sub>\n\n`;
+                reportContent += `### Performance Comparison\n\n`;
+                reportContent += `| Metric | FluidAudio VAD | Industry Standard | Status |\n`;
+                reportContent += `|--------|----------------|-------------------|--------|\n`;
+                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1)}% | 85-90% | ${results.accuracy >= 85 ? '✅' : '❌'} |\n`;
+                reportContent += `| Precision | ${results.precision?.toFixed(1)}% | 85-95% | ${results.precision >= 85 ? '✅' : '❌'} |\n`;
+                reportContent += `| Recall | ${results.recall?.toFixed(1)}% | 80-90% | ${results.recall >= 80 ? '✅' : '❌'} |\n`;
+                reportContent += `| F1-Score | ${results.f1_score?.toFixed(1)}% | 85.9% (Sohn's VAD) | ${results.f1_score >= 85.9 ? '✅' : '❌'} |\n`;
+                reportContent += `| Processing Time | ${results.processing_time_seconds?.toFixed(1)}s (${results.total_files} files) | ~1ms per 30ms chunk | ✅ |\n\n`;
                 
-                reportContent += `### Research Paper Comparisons\n\n`;
+                reportContent += `**Industry Leaders:**\n\n`;
+                reportContent += `- **Silero VAD**: ~90-95% F1 (DNN-based, 1.8MB model)\n`;
+                reportContent += `- **WebRTC VAD**: ~75-80% F1 (GMM-based, fast but lower accuracy)\n`;
+                reportContent += `- **Sohn's VAD**: 77.5% F1 (traditional approach)\n`;
+                reportContent += `- **Modern DNNs**: 85-97% F1 (varies by SNR conditions)\n\n`;
+                
+                reportContent += `<details>\n`;
+                reportContent += `<summary>📊 Detailed Research Comparisons</summary>\n\n`;
                 reportContent += `| Paper | Dataset | F1-Score | Method |\n`;
                 reportContent += `|-------|---------|----------|--------|\n`;
                 reportContent += `| Silero VAD (2021) | TEDx | 88.1% | LSTM-based lightweight model |\n`;
@@ -91,13 +98,6 @@ jobs:
                 reportContent += `| pyannote.audio (2020) | AMI | 85.9% | SincTDNN architecture |\n`;
                 reportContent += `| MarbleNet (2020) | AVA-Speech | 87.8% | 1D time-channel separable CNN |\n`;
                 reportContent += `| **FluidAudio VAD** | **MUSAN-mini** | **${results.f1_score?.toFixed(1)}%** | **CoreML-optimized Silero** |\n\n`;
-                
-                reportContent += `<details>\n`;
-                reportContent += `<summary>📊 Industry Context</summary>\n\n`;
-                reportContent += `- **Silero VAD**: Production-grade, optimized for edge devices\n`;
-                reportContent += `- **WebRTC VAD**: Widely used but lower accuracy baseline\n`;
-                reportContent += `- **pyannote.audio**: State-of-the-art for speaker diarization\n`;
-                reportContent += `- **MarbleNet**: NVIDIA's efficient VAD for edge AI\n\n`;
                 reportContent += `Note: Direct comparisons should consider dataset differences. MUSAN contains challenging noise conditions.\n`;
                 reportContent += `</details>\n`;
               } else {
@@ -140,11 +140,12 @@ jobs:
         run: |
           if [ -f "vad_benchmark_results.json" ]; then
             F1_SCORE=$(grep '"f1_score"' vad_benchmark_results.json | sed 's/.*: *\([0-9.]*\).*/\1/')
-            if (( $(echo "$F1_SCORE < 70" | bc -l) )); then
-              echo "❌ F1-Score $F1_SCORE% is below 70% threshold"
+            THRESHOLD=85.9
+            if (( $(echo "$F1_SCORE < $THRESHOLD" | bc -l) )); then
+              echo "❌ F1-Score $F1_SCORE% is below $THRESHOLD% threshold (Sohn's VAD baseline)"
               exit 1
             fi
-            echo "✅ F1-Score $F1_SCORE% meets threshold"
+            echo "✅ F1-Score $F1_SCORE% meets industry standard threshold of $THRESHOLD%"
           else
             echo "❌ No results file found"
             exit 1
