@@ -640,7 +640,7 @@ extension ASRBenchmark {
             enableDebug: debugMode,
             realtimeMode: false,
             chunkSizeMs: 2000,
-            tdtConfig: TDTConfig(
+            tdtConfig: TdtConfig(
                 durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
                 includeDurationConfidence: false,

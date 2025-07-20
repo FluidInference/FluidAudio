@@ -218,70 +218,9 @@ public final class AsrManager {
         ])
     }
 
-    func prepareJointInput(
-        encoderOutput: MLMultiArray,
-        decoderOutput: MLFeatureProvider,
-        timeIndex: Int
-    ) throws -> MLFeatureProvider {
-        guard let decoderOutputArray = decoderOutput.featureValue(for: "decoder_output")?.multiArrayValue else {
-            throw ASRError.processingFailed("Invalid decoder output")
-        }
-
-        let encoderTimeStep: MLMultiArray
-        let encoderShape = encoderOutput.shape
-        if encoderShape.count == 3 && encoderShape[1].intValue == 1 {
-            // Already a single timestep, use as-is
-            encoderTimeStep = encoderOutput
-        } else {
-            // Full sequence, extract single timestep
-            encoderTimeStep = try extractEncoderTimeStep(encoderOutput, timeIndex: timeIndex)
-        }
-
-        return try MLDictionaryFeatureProvider(dictionary: [
-            "encoder_outputs": MLFeatureValue(multiArray: encoderTimeStep),
-            "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray)
-        ])
-    }
 
 
-    private func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws -> MLMultiArray {
-        let shape = encoderOutput.shape
-        let batchSize = shape[0].intValue
-        let sequenceLength = shape[1].intValue
-        let hiddenSize = shape[2].intValue
 
-        if config.enableDebug && timeIndex == 0 {
-            logger.debug("🔍 DEBUG: extractEncoderTimeStep - encoder shape: \(shape), timeIndex: \(timeIndex)")
-        }
-
-        guard timeIndex < sequenceLength else {
-            if config.enableDebug {
-                logger.error("Time index out of bounds: \(timeIndex) >= \(sequenceLength) (shape: \(shape))")
-            }
-            throw ASRError.processingFailed("Time index out of bounds: \(timeIndex) >= \(sequenceLength)")
-        }
-
-        let timeStepArray = try MLMultiArray(shape: [batchSize, 1, hiddenSize] as [NSNumber], dataType: .float32)
-
-        for h in 0..<hiddenSize {
-            let sourceIndex = timeIndex * hiddenSize + h
-            timeStepArray[h] = encoderOutput[sourceIndex]
-        }
-
-        return timeStepArray
-    }
-
-    /// Find argmax in a float array
-    private func argmax(_ values: [Float]) -> Int {
-        guard !values.isEmpty else { return 0 }
-        return values.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
-    }
-
-    /// Simple argmax to find the token with highest probability in MLMultiArray
-    private func argmax(_ logits: MLMultiArray) -> Int {
-        let vocabSize = logits.shape.last!.intValue
-        return (0..<vocabSize).max(by: { logits[$0].floatValue < logits[$1].floatValue }) ?? 0
-    }
 
     // MARK: - TDT Helper Functions
 
@@ -387,118 +326,25 @@ public final class AsrManager {
         logger.info("AsrManager resources cleaned up")
     }
 
-    // MARK: - TDT Decoding Implementation
+    // MARK: - TDT Decoding
 
-    /// Split joint logits into token and duration components
-    private func splitLogits(_ logits: MLMultiArray) throws -> (tokenLogits: [Float], durationLogits: [Float]) {
-        let totalElements = logits.count
-        let durationElements = config.tdtConfig.durations.count
-        let vocabSize = totalElements - durationElements
-
-        guard totalElements >= durationElements else {
-            throw ASRError.processingFailed("Logits dimension mismatch")
-        }
-
-        let tokenLogits = (0..<vocabSize).map { logits[$0].floatValue }
-        let durationLogits = (vocabSize..<totalElements).map { logits[$0].floatValue }
-
-        return (tokenLogits, durationLogits)
-    }
-
-    /// Process duration logits and return duration index with skip value
-    private func processDurationLogits(_ logits: [Float]) throws -> (index: Int, skip: Int) {
-        let maxIndex = argmax(logits)
-        let durations = config.tdtConfig.durations
-        guard maxIndex < durations.count else {
-            throw ASRError.processingFailed("Duration index out of bounds")
-        }
-        return (maxIndex, durations[maxIndex])
-    }
-
-    /// TDT decoding algorithm following GreedyTDTInfer logic
+    /// TDT decoding using the dedicated TdtDecoder
     internal func tdtDecode(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
         originalAudioSamples: [Float]
     ) async throws -> [Int] {
-        guard encoderSequenceLength > 1 else {
-            logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
-            return []
-        }
-
-        var hypothesis = TDTHypothesis()
-        var timeIdx = 0
-        var symbolsAdded = 0
-        let maxSymbolsPerFrame = config.tdtConfig.maxSymbolsPerStep ?? config.maxSymbolsPerFrame
-
         try await initializeDecoderState()
-        hypothesis.decState = decoderState
-        hypothesis.lastToken = nil
-
-        while timeIdx < encoderSequenceLength {
-
-            let encoderStep = try extractEncoderTimeStep(encoderOutput, timeIndex: timeIdx)
-            var needLoop = true
-            symbolsAdded = 0
-
-            while needLoop && symbolsAdded < maxSymbolsPerFrame {
-                let targetToken = hypothesis.lastToken ?? sosId
-
-                let decoderInput = try prepareDecoderInput(
-                    targetToken: targetToken,
-                    hiddenState: hypothesis.decState?.hiddenState ?? decoderState.hiddenState,
-                    cellState: hypothesis.decState?.cellState ?? decoderState.cellState
-                )
-
-                guard let decoderOutput = try decoderModel?.prediction(from: decoderInput, options: predictionOptions ?? MLPredictionOptions()) else {
-                    throw ASRError.processingFailed("Decoder prediction failed")
-                }
-
-                var newDecState = hypothesis.decState ?? decoderState
-                newDecState.update(from: decoderOutput)
-
-                let jointInput = try prepareJointInput(
-                    encoderOutput: encoderStep,
-                    decoderOutput: decoderOutput,
-                    timeIndex: timeIdx
-                )
-
-                guard let jointOutput = try jointModel?.prediction(from: jointInput, options: predictionOptions ?? MLPredictionOptions()),
-                      let logits = jointOutput.featureValue(for: "logits")?.multiArrayValue else {
-                    throw ASRError.processingFailed("Joint prediction failed")
-                }
-
-                let (tokenLogits, durationLogits) = try splitLogits(logits)
-
-                let bestToken = argmax(tokenLogits)
-                let (_, skip) = try processDurationLogits(durationLogits)
-
-                if bestToken != blankId {
-                    hypothesis.ySequence.append(bestToken)
-                    hypothesis.score += tokenLogits[bestToken]
-                    hypothesis.timestamps.append(timeIdx)
-                    hypothesis.decState = newDecState
-                    hypothesis.lastToken = bestToken
-
-                    if config.tdtConfig.includeTokenDuration {
-                        hypothesis.tokenDurations.append(skip)
-                    }
-                }
-
-                symbolsAdded += 1
-
-                if skip > 0 {
-                    let actualSkip = min(skip, 4)
-                    timeIdx = min(timeIdx + ((encoderSequenceLength < 10 && actualSkip > 2) ? 2 : actualSkip), encoderSequenceLength)
-                    needLoop = false
-                } else {
-                    needLoop = symbolsAdded < maxSymbolsPerFrame
-                    if !needLoop { timeIdx += 1 }
-                }
-            }
-        }
-
-        return hypothesis.ySequence
+        
+        let decoder = TdtDecoder(config: config)
+        return try await decoder.decode(
+            encoderOutput: encoderOutput,
+            encoderSequenceLength: encoderSequenceLength,
+            decoderModel: decoderModel!,
+            jointModel: jointModel!,
+            decoderState: &decoderState,
+            predictionOptions: predictionOptions
+        )
     }
 
     /// Transcribes audio samples to text using Parakeet TDT models.
@@ -511,10 +357,10 @@ public final class AsrManager {
     ///
     /// - Parameter audioSamples: Array of audio samples at 16kHz
     /// - Returns: `ASRResult` containing transcribed text, confidence, and timing information
-    /// ## Performance Notes
     /// - Audio ≤10 seconds: Processed in a single pass
     /// - Audio >10 seconds: Automatically chunked with 0.5s overlap
     /// - RTFx includes full end-to-end time (I/O + inference)
+    /// moved to asrtranscription.swift for better organization
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
         return try await transcribeUnified(audioSamples)
     }
