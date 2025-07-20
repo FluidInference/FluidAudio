@@ -4,11 +4,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      max_files:
-        description: 'Number of files to test per dataset'
-        required: false
-        default: '100'
 
 jobs:
   asr-benchmark:
@@ -41,7 +36,7 @@ jobs:
       run: |
         MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/Parakeet"
         VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
-        
+
         # Check if all models exist
         if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
            [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
@@ -53,16 +48,16 @@ jobs:
           echo "📥 Downloading models..."
           rm -rf "$MODELS_DIR"
           mkdir -p "$MODELS_DIR"
-          
+
           TEMP_DIR=$(mktemp -d)
           cd "$TEMP_DIR"
           GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
           cd parakeet-tdt-0.6b-v2-coreml
           git lfs pull --include="*.mlmodelc/**"
-          
+
           mv *.mlmodelc "$MODELS_DIR/"
           mv parakeet_vocab.json "$HOME/Library/Application Support/FluidAudio/"
-          
+
           cd /
           rm -rf "$TEMP_DIR"
           echo "✅ Models downloaded"
@@ -71,39 +66,39 @@ jobs:
     - name: Run Benchmarks
       id: benchmark
       run: |
-        MAX_FILES="${{ github.event.inputs.max_files || '100' }}"
+        MAX_FILES="10"
         BENCHMARK_START=$(date +%s)
-        
+
         # Run in parallel
         swift run -c release fluidaudio asr-benchmark \
           --subset test-clean --max-files "$MAX_FILES" \
           --auto-download --output asr_results_clean.json &
         CLEAN_PID=$!
-        
+
         swift run -c release fluidaudio asr-benchmark \
           --subset test-other --max-files "$MAX_FILES" \
           --auto-download --output asr_results_other.json &
         OTHER_PID=$!
-        
+
         wait $CLEAN_PID && wait $OTHER_PID
-        
+
         # Extract metrics
         if [ -f asr_results_clean.json ]; then
-          CLEAN_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json)
-          CLEAN_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json)
+          CLEAN_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json | xargs printf "%.2f")
+          CLEAN_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json | xargs printf "%.2f")
           CLEAN_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_clean.json)
           CLEAN_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_clean.json)
-          CLEAN_RTFx=$(jq -r '.summary.meanRTFx' asr_results_clean.json)
+          CLEAN_RTFx=$(jq -r '.summary.meanRTFx' asr_results_clean.json | xargs printf "%.2f")
         fi
-        
+
         if [ -f asr_results_other.json ]; then
-          OTHER_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json)
-          OTHER_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json)
+          OTHER_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json | xargs printf "%.2f")
+          OTHER_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json | xargs printf "%.2f")
           OTHER_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_other.json)
           OTHER_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_other.json)
-          OTHER_RTFx=$(jq -r '.summary.meanRTFx' asr_results_other.json)
+          OTHER_RTFx=$(jq -r '.summary.meanRTFx' asr_results_other.json | xargs printf "%.2f")
         fi
-        
+
         # Output metrics
         echo "CLEAN_WER_AVG=${CLEAN_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
         echo "CLEAN_WER_MED=${CLEAN_WER_MED:-N/A}" >> $GITHUB_OUTPUT
@@ -111,7 +106,7 @@ jobs:
         echo "OTHER_WER_AVG=${OTHER_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
         echo "OTHER_WER_MED=${OTHER_WER_MED:-N/A}" >> $GITHUB_OUTPUT
         echo "OTHER_RTFx=${OTHER_RTFx:-N/A}" >> $GITHUB_OUTPUT
-        
+
         EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
         echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
 
@@ -127,11 +122,9 @@ jobs:
           | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
           | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
 
-          <sub>${{ github.event.inputs.max_files || '100' }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+          <sub>100 files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
-          <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>
-          Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>
-          Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
+          <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
 
           <!-- fluidaudio-benchmark-asr -->`;
 
@@ -141,7 +134,7 @@ jobs:
             issue_number: context.issue.number,
           });
 
-          const existing = comments.find(c => 
+          const existing = comments.find(c =>
             c.body.includes('<!-- fluidaudio-benchmark-asr -->')
           );
 

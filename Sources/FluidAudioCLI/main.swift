@@ -61,16 +61,12 @@
                 Run 'fluidaudio <command> --help' for command-specific options.
 
                 Examples:
-                    # Process a single audio file
                     fluidaudio process audio.wav --output results.json
 
-                    # Run AMI SDM diarization benchmark
                     fluidaudio diarization-benchmark --dataset ami-sdm
 
-                    # Run ASR benchmark
                     fluidaudio asr-benchmark --subset test-clean --max-files 100
 
-                    # Download datasets
                     fluidaudio download --dataset ami-sdm
                 """
             )

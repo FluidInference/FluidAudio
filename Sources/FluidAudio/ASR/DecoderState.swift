@@ -14,41 +14,37 @@ struct DecoderState {
     var cellState: MLMultiArray
 
     init() {
-        // Initialize with zeros for LSTM hidden/cell states
-        // Shape: [num_layers, batch_size, hidden_size] = [2, 1, 640]
-        hiddenState = try! MLMultiArray(shape: [2, 1, 640] as [NSNumber], dataType: .float32)
-        cellState = try! MLMultiArray(shape: [2, 1, 640] as [NSNumber], dataType: .float32)
-
-        // Initialize with zeros
-        for i in 0..<hiddenState.count {
-            hiddenState[i] = NSNumber(value: 0.0)
-        }
-        for i in 0..<cellState.count {
-            cellState[i] = NSNumber(value: 0.0)
-        }
+        hiddenState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        cellState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        
+        hiddenState.resetData(to: 0)
+        cellState.resetData(to: 0)
     }
 
     mutating func update(from decoderOutput: MLFeatureProvider) {
-        if let newHiddenState = decoderOutput.featureValue(for: "h_out")?.multiArrayValue {
-            hiddenState = newHiddenState
-        }
-        if let newCellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue {
-            cellState = newCellState
-        }
+        hiddenState = decoderOutput.featureValue(for: "h_out")?.multiArrayValue ?? hiddenState
+        cellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue ?? cellState
     }
 
-
-    /// Copy constructor for TDT hypothesis state management
     init(from other: DecoderState) {
-        self.hiddenState = try! MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
-        self.cellState = try! MLMultiArray(shape: other.cellState.shape, dataType: .float32)
+        hiddenState = try! MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
+        cellState = try! MLMultiArray(shape: other.cellState.shape, dataType: .float32)
+        
+        hiddenState.copyData(from: other.hiddenState)
+        cellState.copyData(from: other.cellState)
+    }
+}
 
-        // Copy values
-        for i in 0..<other.hiddenState.count {
-            self.hiddenState[i] = other.hiddenState[i]
+private extension MLMultiArray {
+    func resetData(to value: NSNumber) {
+        for i in 0..<count {
+            self[i] = value
         }
-        for i in 0..<other.cellState.count {
-            self.cellState[i] = other.cellState[i]
+    }
+    
+    func copyData(from source: MLMultiArray) {
+        for i in 0..<count {
+            self[i] = source[i]
         }
     }
 }

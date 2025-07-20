@@ -17,7 +17,7 @@ public struct TDTConfig: Sendable {
     public static let `default` = TDTConfig()
 
     public init(
-        durations: [Int] = [0, 1, 2, 3, 4],  // Fixed: Match notebook training
+        durations: [Int] = [0, 1, 2, 3, 4],
         includeTokenDuration: Bool = true,
         includeDurationConfidence: Bool = false,
         maxSymbolsPerStep: Int? = nil
@@ -31,19 +31,10 @@ public struct TDTConfig: Sendable {
 
 /// Hypothesis for TDT beam search decoding
 public struct TDTHypothesis: Sendable {
-    public var score: Float
-    public var ySequence: [Int]
+    public var score: Float = 0.0
+    public var ySequence: [Int] = []
     internal var decState: DecoderState?
-    public var timestamps: [Int]
-    public var tokenDurations: [Int]
+    public var timestamps: [Int] = []
+    public var tokenDurations: [Int] = []
     public var lastToken: Int?
-
-    public init() {
-        self.score = 0.0
-        self.ySequence = []
-        self.decState = nil
-        self.timestamps = []
-        self.tokenDurations = []
-        self.lastToken = nil
-    }
 }

@@ -44,19 +44,13 @@ public final class AsrManager {
     internal let config: ASRConfig
     private let modelsDirectory: URL
 
-    // CoreML Models for Parakeet TDT transcription
     internal var melSpectrogramModel: MLModel?
     internal var encoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
-
-    // Prediction options for faster inference
     internal var predictionOptions: MLPredictionOptions?
-
-    // Decoder state management
     var decoderState: DecoderState = DecoderState()
 
-    // Tokenizer for text conversion (from NeMo model)
     let blankId = 1024  // Verified: this works correctly (not actually "warming" token)
     let sosId = 1024    // Start of sequence token (same as blank for this model)
 
@@ -68,7 +62,6 @@ public final class AsrManager {
         self.config = config
         self.modelsDirectory = modelsDirectory ?? Self.getDefaultModelsDirectory()
 
-        // Initialize TDT-specific properties - TDT is always enabled
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
     }
 
@@ -95,15 +88,12 @@ public final class AsrManager {
         let jointPath = modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc")
 
         do {
-            // Download models if they don't exist
             try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDirectory)
 
             let modelConfig = MLModelConfiguration()
 
-            // Enable performance optimizations
             modelConfig.allowLowPrecisionAccumulationOnGPU = true
 
-            // Configure compute units based on environment
             if ProcessInfo.processInfo.environment["CI"] != nil {
                 // Force CPU and Neural Engine only (no GPU) in CI environments
                 // GPU can cause issues in virtualized environments like GitHub Actions
@@ -115,10 +105,8 @@ public final class AsrManager {
                 modelConfig.computeUnits = .all
             }
 
-            // Load all models
             logger.info("Loading Parakeet models from \(self.modelsDirectory.path)")
 
-            // Check all model files exist
             let modelPaths = [
                 ("Mel-spectrogram", melSpectrogramPath),
                 ("Encoder", encoderPath),
@@ -134,7 +122,6 @@ public final class AsrManager {
                 logger.info("\(name) model found at: \(path.path)")
             }
 
-            // Load all models using common pattern
             let models = try await loadAllModels(
                 melSpectrogramPath: melSpectrogramPath,
                 encoderPath: encoderPath,
@@ -148,7 +135,6 @@ public final class AsrManager {
             decoderModel = models.decoder
             jointModel = models.joint
 
-            // Initialize prediction options for faster inference
             let options = MLPredictionOptions()
             // usesCPUOnly is deprecated - the model config already specifies compute units
             self.predictionOptions = options
@@ -167,13 +153,11 @@ public final class AsrManager {
     func prepareMelSpectrogramInput(_ audioSamples: [Float]) throws -> MLFeatureProvider {
         let audioLength = audioSamples.count
 
-        // Create MLMultiArray for audio signal
         let audioArray = try MLMultiArray(shape: [1, audioLength] as [NSNumber], dataType: .float32)
         for i in 0..<audioLength {
             audioArray[i] = NSNumber(value: audioSamples[i])
         }
 
-        // Create MLMultiArray for audio length
         let lengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         lengthArray[0] = NSNumber(value: audioLength)
 
@@ -220,11 +204,9 @@ public final class AsrManager {
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
     ) throws -> MLFeatureProvider {
-        // Create target array for single token (not sequence)
         let targetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
         targetArray[0] = NSNumber(value: targetToken)
 
-        // Create target length array
         let targetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         targetLengthArray[0] = NSNumber(value: 1)  // Always 1 for single token
 
@@ -241,13 +223,10 @@ public final class AsrManager {
         decoderOutput: MLFeatureProvider,
         timeIndex: Int
     ) throws -> MLFeatureProvider {
-        // Use decoder_output from our model
         guard let decoderOutputArray = decoderOutput.featureValue(for: "decoder_output")?.multiArrayValue else {
             throw ASRError.processingFailed("Invalid decoder output")
         }
 
-        // Extract single time step from encoder output
-        // Check if encoderOutput is already a single timestep (for TDT case)
         let encoderTimeStep: MLMultiArray
         let encoderShape = encoderOutput.shape
         if encoderShape.count == 3 && encoderShape[1].intValue == 1 {
@@ -312,10 +291,8 @@ public final class AsrManager {
             throw ASRError.notInitialized
         }
 
-        // Reset decoder state to zeros
         var freshState = DecoderState()
 
-        // Run decoder once with blank token to establish clean state
         let initDecoderInput = try prepareDecoderInput(
             targetToken: blankId,
             hiddenState: freshState.hiddenState,
@@ -324,7 +301,6 @@ public final class AsrManager {
 
         let initDecoderOutput = try decoderModel.prediction(from: initDecoderInput, options: predictionOptions ?? MLPredictionOptions())
 
-        // Update state with initial hidden/cell states
         freshState.update(from: initDecoderOutput)
 
         if config.enableDebug {
@@ -385,7 +361,6 @@ public final class AsrManager {
         jointPath: URL,
         configuration: MLModelConfiguration
     ) async throws -> (melSpectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
-        // Load models in parallel for better performance
         async let melSpectrogram = loadModel(path: melSpectrogramPath, name: "mel-spectrogram", configuration: configuration)
         async let encoder = loadModel(path: encoderPath, name: "encoder", configuration: configuration)
         async let decoder = loadModel(path: decoderPath, name: "decoder", configuration: configuration)
@@ -395,7 +370,6 @@ public final class AsrManager {
     }
 
     private static func getDefaultModelsDirectory() -> URL {
-        // Use Application Support cache directory for better system integration
         let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let appDirectory = applicationSupportURL.appendingPathComponent("FluidAudio", isDirectory: true)
         let directory = appDirectory.appendingPathComponent("Models/Parakeet", isDirectory: true)
@@ -542,7 +516,6 @@ public final class AsrManager {
     /// - Audio >10 seconds: Automatically chunked with 0.5s overlap
     /// - RTFx includes full end-to-end time (I/O + inference)
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
-        // Use the new unified transcription approach
         return try await transcribeUnified(audioSamples)
     }
 
