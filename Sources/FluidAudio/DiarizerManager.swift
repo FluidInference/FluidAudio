@@ -368,15 +368,22 @@ public final class DiarizerManager: @unchecked Sendable {
         }
     }
 
-    private func getSegments(audioChunk: [Float], chunkSize: Int = 160_000) throws -> [[[Float]]] {
+    private func getSegments(audioChunk: ArraySlice<Float>, chunkSize: Int = 160_000) throws -> [[[Float]]] {
         guard let segmentationModel = self.segmentationModel else {
             throw DiarizerError.notInitialized
         }
 
         let audioArray = try MLMultiArray(
-            shape: [1, 1, NSNumber(value: chunkSize)], dataType: .float32)
-        for i in 0..<min(audioChunk.count, chunkSize) {
-            audioArray[i] = NSNumber(value: audioChunk[i])
+            shape: [1, 1, NSNumber(value: chunkSize)],
+            dataType: .float32
+        )
+        var offset = 0
+        for sample in audioChunk.prefix(chunkSize) {
+            audioArray[offset] = NSNumber(value: sample)
+
+            // In order for the loop body to even execute, chunkSize > 0.
+            // Thus, offset begins at 0 and increments by 1 to some positive Int, which can never overflow.
+            offset &+= 1
         }
 
         let input = try MLDictionaryFeatureProvider(dictionary: ["audio": audioArray])
@@ -463,7 +470,7 @@ public final class DiarizerManager: @unchecked Sendable {
     }
 
     private func getEmbedding(
-        audioChunk: [Float],
+        audioChunk: ArraySlice<Float>,
         binarizedSegments: [[[Float]]],
         slidingWindowFeature: SlidingWindowFeature,
         embeddingModel: MLModel,
@@ -497,12 +504,6 @@ public final class DiarizerManager: @unchecked Sendable {
             }
         }
 
-        // Flatten audio tensor to shape (numSpeakers, 160000)
-        var audioBatch: [[Float]] = []
-        for _ in 0..<numSpeakers {
-            audioBatch.append(audioTensor)
-        }
-
         // Transpose mask shape to (numSpeakers, 589)
         var cleanMasks: [[Float]] = Array(
             repeating: Array(repeating: 0.0, count: numFrames), count: numSpeakers)
@@ -524,8 +525,8 @@ public final class DiarizerManager: @unchecked Sendable {
         }
 
         for s in 0..<numSpeakers {
-            for i in 0..<chunkSize {
-                waveformArray[s * chunkSize + i] = NSNumber(value: audioBatch[s][i])
+            for i in 0..<min(chunkSize, audioTensor.count) {
+                waveformArray[s * chunkSize + i] = NSNumber(value: audioTensor[audioTensor.startIndex + i])
             }
         }
 
@@ -896,7 +897,7 @@ public final class DiarizerManager: @unchecked Sendable {
         // Process in 10-second chunks
         for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
-            let chunk = Array(samples[chunkStart..<chunkEnd])
+            let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
 
             let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
@@ -947,7 +948,7 @@ public final class DiarizerManager: @unchecked Sendable {
 
     /// Process a single chunk with speaker tracking and timing
     private func processChunkWithSpeakerTracking(
-        _ chunk: [Float],
+        _ chunk: ArraySlice<Float>,
         chunkOffset: Double,
         speakerDB: inout [String: [Float]],
         sampleRate: Int = 16000
@@ -957,7 +958,9 @@ public final class DiarizerManager: @unchecked Sendable {
         let chunkSize = sampleRate * 10  // 10 seconds
         var paddedChunk = chunk
         if chunk.count < chunkSize {
-            paddedChunk += Array(repeating: 0.0, count: chunkSize - chunk.count)
+            var padded = Array(repeating: 0.0 as Float, count: chunk.count)
+            padded.replaceSubrange(0..<chunk.count, with: chunk)
+            paddedChunk = padded[...]
         }
 
         // Step 1: Get segmentation (when speakers are active)
