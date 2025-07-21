@@ -28,10 +28,7 @@ let package = Package(
         .executableTarget(
             name: "FluidAudioCLI",
             dependencies: ["FluidAudio"],
-            path: "Sources/FluidAudioCLI",
-            swiftSettings: [
-                .unsafeFlags(["-parse-as-library"])
-            ]
+            path: "Sources/FluidAudioCLI"
         ),
         .testTarget(
             name: "FluidAudioTests",

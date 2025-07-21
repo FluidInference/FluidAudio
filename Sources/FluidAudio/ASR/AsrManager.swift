@@ -7,7 +7,7 @@ public enum AudioSource {
     case system
 }
 
-@available(macOS 13.0, iOS 16.0, *)
+@available(macOS 13.0, *)
 public final class AsrManager {
 
     internal let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ASR")
@@ -18,7 +18,7 @@ public final class AsrManager {
     internal var encoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
-    
+
     private var microphoneDecoderState = DecoderState()
     private var systemDecoderState = DecoderState()
 
@@ -297,7 +297,7 @@ public final class AsrManager {
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
         return try await transcribe(audioSamples, source: .microphone)
     }
-    
+
     public func transcribe(_ audioSamples: [Float], source: AudioSource) async throws -> ASRResult {
         switch source {
         case .microphone:
@@ -306,7 +306,7 @@ public final class AsrManager {
             return try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
         }
     }
-    
+
     internal func transcribeWithState(_ audioSamples: [Float], decoderState: inout DecoderState) async throws -> ASRResult {
         return try await transcribeUnifiedWithState(audioSamples, decoderState: &decoderState)
     }
