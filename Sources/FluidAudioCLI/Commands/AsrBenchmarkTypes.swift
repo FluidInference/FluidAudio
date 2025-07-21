@@ -36,7 +36,7 @@ public struct ASRBenchmarkResult: Sendable {
     public let metrics: ASRMetrics
     public let processingTime: TimeInterval
     public let audioLength: TimeInterval
-    public let rtf: Double             // Real-Time Factor
+    public let rtfx: Double            // Real-Time Factor (inverse)
 
     public init(fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval, audioLength: TimeInterval) {
         self.fileName = fileName
@@ -45,7 +45,7 @@ public struct ASRBenchmarkResult: Sendable {
         self.metrics = metrics
         self.processingTime = processingTime
         self.audioLength = audioLength
-        self.rtf = processingTime / audioLength
+        self.rtfx = audioLength / processingTime
     }
 }
 

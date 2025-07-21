@@ -445,7 +445,8 @@ extension ASRBenchmark {
 
             print("Initializing ASR system...")
             do {
-                try await asrManager.initialize()
+                let models = try await AsrModels.downloadAndLoad()
+                try await asrManager.initialize(models: models)
                 print("ASR system initialized successfully")
 
                 if ProcessInfo.processInfo.environment["CI"] != nil {
@@ -487,8 +488,8 @@ extension ASRBenchmark {
 
             let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
             let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)
-            
-            let rtfxValues = results.map { Float(1.0 / $0.rtf) }
+
+            let rtfxValues = results.map { Float($0.rtfx) }
             let sortedRTFx = rtfxValues.sorted()
             let medianRTFx = sortedRTFx[sortedRTFx.count / 2]
 
@@ -521,9 +522,9 @@ extension ASRBenchmark {
             print("   Dataset: \(config.dataset) \(config.subset)")
             print("   Files processed: \(results.count)")
             let overallRTFx = totalAudioDuration / totalProcessingTime
-            
+
             print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
-            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%") 
+            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
             print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
             print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
             print("   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)")
@@ -555,7 +556,7 @@ extension ASRBenchmark {
                         "reference": result.reference,
                         "wer": result.metrics.wer,
                         "cer": result.metrics.cer,
-                        "rtf": result.rtf,
+                        "rtfx": result.rtfx,
                         "audioLength": result.audioLength,
                         "processingTime": result.processingTime
                     ]

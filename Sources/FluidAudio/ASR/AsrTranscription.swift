@@ -186,9 +186,10 @@ private struct ChunkProcessor {
         
         var position = 0
         var chunkIndex = 0
+        var decoderState = DecoderState()
         
         while position < audioSamples.count {
-            let text = try await processChunk(at: position, chunkIndex: chunkIndex, using: manager)
+            let text = try await processChunk(at: position, chunkIndex: chunkIndex, using: manager, decoderState: &decoderState)
             allTexts.append(text)
             position += chunkSize
             chunkIndex += 1
@@ -203,13 +204,13 @@ private struct ChunkProcessor {
         )
     }
     
-    private func processChunk(at position: Int, chunkIndex: Int, using manager: AsrManager) async throws -> String {
+    private func processChunk(at position: Int, chunkIndex: Int, using manager: AsrManager, decoderState: inout DecoderState) async throws -> String {
         let endPosition = min(position + chunkSize, audioSamples.count)
         let chunkSamples = Array(audioSamples[position..<endPosition])
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: chunkSize)
         
         
-        let (tokenIds, _) = try await manager.executeMLInference(paddedChunk, enableDebug: false)
+        let (tokenIds, _) = try await manager.executeMLInferenceWithState(paddedChunk, enableDebug: false, decoderState: &decoderState)
         let (text, _) = manager.convertTokensWithExistingTimings(tokenIds, timings: [])
         
         return text

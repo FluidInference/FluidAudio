@@ -12,12 +12,14 @@ public final class AsrManager {
 
     internal let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ASR")
     internal let config: ASRConfig
-    private let modelsDirectory: URL
-
+    
     internal var melSpectrogramModel: MLModel?
     internal var encoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
+    
+    /// The AsrModels instance if initialized with models
+    private var asrModels: AsrModels?
 
     private var microphoneDecoderState = DecoderState()
     private var systemDecoderState = DecoderState()
@@ -25,77 +27,41 @@ public final class AsrManager {
     let blankId = 1024
     let sosId = 1024
 
-    public init(config: ASRConfig = .default, modelsDirectory: URL? = nil) {
+    public init(config: ASRConfig = .default) {
         self.config = config
-        self.modelsDirectory = modelsDirectory ?? Self.getDefaultModelsDirectory()
-
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
     }
-
 
     public var isAvailable: Bool {
         return melSpectrogramModel != nil && encoderModel != nil && decoderModel != nil && jointModel != nil
     }
-
+    
+    /// Initialize ASR Manager with pre-loaded models
+    /// - Parameter models: Pre-loaded ASR models
+    public func initialize(models: AsrModels) async throws {
+        logger.info("Initializing AsrManager with provided models")
+        
+        self.asrModels = models
+        self.melSpectrogramModel = models.melSpectrogram
+        self.encoderModel = models.encoder
+        self.decoderModel = models.decoder
+        self.jointModel = models.joint
+        
+        logger.info("AsrManager initialized successfully with provided models")
+    }
+    
+    /// Initialize ASR Manager by downloading and loading models from default location
+    /// - Note: This method is deprecated. Use AsrModels.downloadAndLoad() followed by initialize(models:) instead
+    @available(*, deprecated, message: "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading")
     public func initialize() async throws {
-        logger.info("Initializing AsrManager with Parakeet models")
-
-        logger.info("Models directory: \(self.modelsDirectory.path)")
-
-        let melSpectrogramPath = modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")
-        let encoderPath = modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")
-        let decoderPath = modelsDirectory.appendingPathComponent("ParakeetDecoder.mlmodelc")
-        let jointPath = modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc")
-
+        logger.info("Initializing AsrManager with automatic model download (deprecated)")
+        
         do {
-            try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDirectory)
-
-            let modelConfig = MLModelConfiguration()
-            modelConfig.allowLowPrecisionAccumulationOnGPU = true
-
-            let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-            modelConfig.computeUnits = isCI ? .cpuAndNeuralEngine : .all
-            if isCI {
-                logger.info("🔧 ASR: Using cpuAndNeuralEngine (CI environment)")
-            }
-
-            logger.info("Loading Parakeet models from \(self.modelsDirectory.path)")
-
-            let modelPaths = [
-                ("Mel-spectrogram", melSpectrogramPath),
-                ("Encoder", encoderPath),
-                ("Decoder", decoderPath),
-                ("Joint", jointPath)
-            ]
-
-            try modelPaths.forEach { name, path in
-                guard FileManager.default.fileExists(atPath: path.path) else {
-                    logger.error("\(name) model not found at: \(path.path)")
-                    throw ASRError.modelLoadFailed
-                }
-                logger.info("\(name) model found")
-            }
-
-            let models = try await loadAllModels(
-                melSpectrogramPath: melSpectrogramPath,
-                encoderPath: encoderPath,
-                decoderPath: decoderPath,
-                jointPath: jointPath,
-                configuration: modelConfig
-            )
-
-            melSpectrogramModel = models.melSpectrogram
-            encoderModel = models.encoder
-            decoderModel = models.decoder
-            jointModel = models.joint
-
-            logger.info("AsrManager initialized successfully")
-
+            // Download and load models using the new AsrModels API
+            let models = try await AsrModels.downloadAndLoad()
+            try await initialize(models: models)
         } catch {
             logger.error("Failed to initialize AsrManager: \(error.localizedDescription)")
-            if let mlError = error as? MLModelError {
-                logger.error("MLModel error details: \(mlError)")
-            }
             throw ASRError.modelLoadFailed
         }
     }

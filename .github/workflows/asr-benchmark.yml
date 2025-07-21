@@ -119,6 +119,7 @@ jobs:
 
         EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
         echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+        echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
 
     - name: Comment PR
       if: github.event_name == 'pull_request'
@@ -132,9 +133,11 @@ jobs:
           | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
           | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
 
-          <sub>10 files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+          <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
           <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
+
+          <sub>**Note**: CI RTFx degraded by M1/M2 Mac virtualization. M1 Mac test: ~28x (clean), ~25x (other). Testing per [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard).</sub>
 
           <!-- fluidaudio-benchmark-asr -->`;
 
