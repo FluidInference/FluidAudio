@@ -4,7 +4,7 @@
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/8FbwRaDFJR)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/vz7YYZkkJg)
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 
 FluidAudio is a Swift framework for on-device speaker diarization and audio processing, designed to maximize performance per watt by leveraging CoreML models exclusively. Optimized for Apple's Neural Engine, it delivers faster and more efficient processing than CPU or GPU alternatives.
