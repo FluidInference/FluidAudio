@@ -69,9 +69,8 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 - ✅ **Voice Activity Detection (VAD)**: 98% accuracy CoreML-based VAD with adaptive thresholding and noise robustness
 
 **Coming Soon:**
-- **VAD CLI Integration**: Expose VAD commands through command-line interface
-- **ASR Models**: Support for open-source ASR models
-- **System Audio Access**: Tap into system audio via CoreAudio
+- **ASR Models**: Support for open-source ASR models like Parakeet on CoreML 
+- **System Audio Access**: Tap into system audio via CoreAudio for MacOS :) 
 
 ## 🎯 Performance
 
@@ -98,16 +97,12 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 ## 🎙️ Voice Activity Detection (VAD)
 
-**Production-Ready VAD with Research-Grade Performance:**
-
 - **98% Accuracy** on MUSAN dataset at optimal threshold (0.445)
 - **CoreML Pipeline**: STFT → Encoder → RNN → Enhanced Fallback architecture
-- **GPU Acceleration**: Metal Performance Shaders for efficient processing
-- **Adaptive Thresholding**: Dynamic threshold adjustment (0.1-0.7 range)
 - **Noise Robustness**: SNR filtering (6.0 dB threshold), spectral analysis, temporal smoothing
 
 **Model Sources & Datasets:**
-- **CoreML Models**: [`alexwengg/coreml_silero_vad`](https://huggingface.co/FluidInference/silero-vad-coreml)
+- **CoreML Models**: [`FluidInference/coreml_silero_vad`](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **Training Data**: MUSAN dataset (curated subsets)
   - [`alexwengg/musan_mini50`](https://huggingface.co/datasets/alexwengg/musan_mini50) (50 test files)
   - [`alexwengg/musan_mini100`](https://huggingface.co/datasets/alexwengg/musan_mini100) (100 test files)
