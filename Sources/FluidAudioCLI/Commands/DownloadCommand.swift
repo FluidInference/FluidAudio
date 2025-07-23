@@ -57,23 +57,6 @@ enum DownloadCommand {
                 print("❌ Failed to download LibriSpeech test-other: \(error)")
                 exit(1)
             }
-        case "parakeet-models":
-            do {
-                let appSupport = FileManager.default.urls(
-                    for: .applicationSupportDirectory, in: .userDomainMask
-                ).first!
-                let baseDir = appSupport.appendingPathComponent("FluidAudio")
-                
-                _ = try await DownloadUtils.loadModels(
-                    .parakeet,
-                    modelNames: ["Melspectogram.mlmodelc", "ParakeetEncoder.mlmodelc", "ParakeetDecoder.mlmodelc", "RNNTJoint.mlmodelc"],
-                    directory: baseDir
-                )
-                print("✅ Parakeet models downloaded successfully")
-            } catch {
-                print("❌ Failed to download Parakeet models: \(error)")
-                exit(1)
-            }
         case "all":
             await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: forceDownload)
             await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: forceDownload)
@@ -104,7 +87,6 @@ enum DownloadCommand {
                 vad-mini100
                 librispeech-test-clean  LibriSpeech test-clean subset
                 librispeech-test-other  LibriSpeech test-other subset
-                parakeet-models         Parakeet ASR models
                 all                     All diarization datasets
             
             Examples:
