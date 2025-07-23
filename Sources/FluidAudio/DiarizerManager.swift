@@ -619,57 +619,29 @@ public final class DiarizerManager {
     public func downloadModels() async throws -> ModelPaths {
         logger.info("Checking for existing diarization models")
 
+        // Get base directory for repos (go up from SpeakerKitModels/coreml)
         let modelsDirectory = getModelsDirectory()
-
-        let segmentationModelPath = modelsDirectory.appendingPathComponent(
-            "pyannote_segmentation.mlmodelc"
-        ).path
-        let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc").path
-
-        let segmentationURL = URL(fileURLWithPath: segmentationModelPath)
-        let embeddingURL = URL(fileURLWithPath: embeddingModelPath)
-
-        // Check if models already exist and are valid
-        let segmentationExists =
-            FileManager.default.fileExists(atPath: segmentationModelPath)
-            && DownloadUtils.isModelCompiled(at: segmentationURL)
-        let embeddingExists =
-            FileManager.default.fileExists(atPath: embeddingModelPath)
-            && DownloadUtils.isModelCompiled(at: embeddingURL)
-
-        if segmentationExists && embeddingExists {
-            logger.info("Valid models already exist, skipping download")
-            return ModelPaths(
-                segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
-        }
-
-        logger.info("Downloading missing or invalid diarization models from Hugging Face")
-
-        // Download segmentation model if needed
-        if !segmentationExists {
-            logger.info("Downloading segmentation model bundle from Hugging Face")
-            try await DownloadUtils.downloadMLModelBundle(
-                repoPath: "FluidInference/speaker-diarization-coreml",
-                modelName: "pyannote_segmentation.mlmodelc",
-                outputPath: segmentationURL
-            )
-            logger.info("Downloaded segmentation model bundle from Hugging Face")
-        }
-
-        // Download embedding model if needed
-        if !embeddingExists {
-            logger.info("Downloading embedding model bundle from Hugging Face")
-            try await DownloadUtils.downloadMLModelBundle(
-                repoPath: "FluidInference/speaker-diarization-coreml",
-                modelName: "wespeaker.mlmodelc",
-                outputPath: embeddingURL
-            )
-            logger.info("Downloaded embedding model bundle from Hugging Face")
-        }
-
+        let baseDirectory = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
+        
+        // Download the entire repo if needed
+        _ = try await DownloadUtils.loadModels(
+            .diarizer,
+            modelNames: ["pyannote_segmentation.mlmodelc", "wespeaker.mlmodelc"],
+            directory: baseDirectory
+        )
+        
+        // Return paths directly from the repo
+        let repoDir = baseDirectory.appendingPathComponent("speaker-diarization-coreml")
+        let segmentationPath = repoDir.appendingPathComponent("pyannote_segmentation.mlmodelc").path
+        let embeddingPath = repoDir.appendingPathComponent("wespeaker.mlmodelc").path
+        
         logger.info("Successfully ensured diarization models are available")
+        logger.info("Models located at: \(repoDir.path)")
+        
         return ModelPaths(
-            segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
+            segmentationPath: segmentationPath,
+            embeddingPath: embeddingPath
+        )
     }
 
 
