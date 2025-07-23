@@ -354,16 +354,16 @@ public final class DiarizerManager: @unchecked Sendable {
         let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc")
 
         if FileManager.default.fileExists(atPath: segmentationModelPath.path)
-            && !DownloadUtils.isModelCompiled(at: segmentationModelPath)
+            && !DownloadUtils.isMLModelCValid(at: segmentationModelPath)
         {
-            logger.info("Removing broken segmentation model")
+            logger.info("Removing broken/incomplete segmentation model")
             try FileManager.default.removeItem(at: segmentationModelPath)
         }
 
         if FileManager.default.fileExists(atPath: embeddingModelPath.path)
-            && !DownloadUtils.isModelCompiled(at: embeddingModelPath)
+            && !DownloadUtils.isMLModelCValid(at: embeddingModelPath)
         {
-            logger.info("Removing broken embedding model")
+            logger.info("Removing broken/incomplete embedding model")
             try FileManager.default.removeItem(at: embeddingModelPath)
         }
     }
@@ -628,17 +628,22 @@ public final class DiarizerManager: @unchecked Sendable {
 
         let segmentationURL = URL(fileURLWithPath: segmentationModelPath)
         let embeddingURL = URL(fileURLWithPath: embeddingModelPath)
+        
+        logger.info("📁 Diarization models directory: \(modelsDirectory.path)")
 
         // Check if models already exist and are valid
         let segmentationExists =
             FileManager.default.fileExists(atPath: segmentationModelPath)
-            && DownloadUtils.isModelCompiled(at: segmentationURL)
+            && DownloadUtils.isMLModelCValid(at: segmentationURL)
         let embeddingExists =
             FileManager.default.fileExists(atPath: embeddingModelPath)
-            && DownloadUtils.isModelCompiled(at: embeddingURL)
+            && DownloadUtils.isMLModelCValid(at: embeddingURL)
+            
+        logger.info("🔍 Segmentation model: exists=\(FileManager.default.fileExists(atPath: segmentationModelPath)), valid=\(segmentationExists)")
+        logger.info("🔍 Embedding model: exists=\(FileManager.default.fileExists(atPath: embeddingModelPath)), valid=\(embeddingExists)")
 
         if segmentationExists && embeddingExists {
-            logger.info("Valid models already exist, skipping download")
+            logger.info("✅ Valid models already exist, skipping download")
             return ModelPaths(
                 segmentationPath: segmentationModelPath, embeddingPath: embeddingModelPath)
         }

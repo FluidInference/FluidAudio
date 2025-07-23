@@ -324,7 +324,7 @@ public actor VadManager {
         for folderName in modelFolders {
             let folderPath = modelsDirectory.appendingPathComponent(folderName)
 
-            if !FileManager.default.fileExists(atPath: folderPath.path) {
+            if !FileManager.default.fileExists(atPath: folderPath.path) || !DownloadUtils.isMLModelCValid(at: folderPath) {
                 logger.info("📥 Downloading \(folderName)...")
                 print("📥 Downloading \(folderName)...")
                 try await DownloadUtils.downloadVadModelFolder(folderName: folderName, to: folderPath)
