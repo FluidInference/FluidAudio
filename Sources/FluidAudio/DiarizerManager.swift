@@ -247,7 +247,7 @@ private struct SlidingWindowFeature {
 
 /// Speaker diarization manager
 @available(macOS 13.0, iOS 16.0, *)
-public final class DiarizerManager: @unchecked Sendable {
+public final class DiarizerManager {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
     private let config: DiarizerConfig
@@ -332,14 +332,14 @@ public final class DiarizerManager: @unchecked Sendable {
             downloadAction: {
                 // Re-download segmentation model
                 try await DownloadUtils.downloadMLModelBundle(
-                    repoPath: "bweng/speaker-diarization-coreml",
+                    repoPath: "FluidInference/speaker-diarization-coreml",
                     modelName: "pyannote_segmentation.mlmodelc",
                     outputPath: segmentationURL
                 )
 
                 // Re-download embedding model
                 try await DownloadUtils.downloadMLModelBundle(
-                    repoPath: "bweng/speaker-diarization-coreml",
+                    repoPath: "FluidInference/speaker-diarization-coreml",
                     modelName: "wespeaker.mlmodelc",
                     outputPath: embeddingURL
                 )
@@ -649,7 +649,7 @@ public final class DiarizerManager: @unchecked Sendable {
         if !segmentationExists {
             logger.info("Downloading segmentation model bundle from Hugging Face")
             try await DownloadUtils.downloadMLModelBundle(
-                repoPath: "bweng/speaker-diarization-coreml",
+                repoPath: "FluidInference/speaker-diarization-coreml",
                 modelName: "pyannote_segmentation.mlmodelc",
                 outputPath: segmentationURL
             )
@@ -660,7 +660,7 @@ public final class DiarizerManager: @unchecked Sendable {
         if !embeddingExists {
             logger.info("Downloading embedding model bundle from Hugging Face")
             try await DownloadUtils.downloadMLModelBundle(
-                repoPath: "bweng/speaker-diarization-coreml",
+                repoPath: "FluidInference/speaker-diarization-coreml",
                 modelName: "wespeaker.mlmodelc",
                 outputPath: embeddingURL
             )

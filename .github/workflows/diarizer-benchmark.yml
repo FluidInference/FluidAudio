@@ -1,0 +1,192 @@
+name: Performance Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Single File Performance Benchmark
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Swift 6.1
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Build package
+        run: swift build
+
+      - name: Run Single File Benchmark
+        id: benchmark
+        run: |
+          echo "🚀 Running single file benchmark..."
+          
+          # Record start time
+          BENCHMARK_START=$(date +%s)
+          
+          swift run fluidaudio diarization-benchmark --auto-download --single-file ES2004a --output benchmark_results.json
+
+          # Check if results file was generated
+          if [ -f benchmark_results.json ]; then
+            echo "SUCCESS=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Benchmark failed - no results file generated"
+            echo "SUCCESS=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Calculate execution time
+          BENCHMARK_END=$(date +%s)
+          EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
+          EXECUTION_MINS=$((EXECUTION_TIME / 60))
+          EXECUTION_SECS=$((EXECUTION_TIME % 60))
+          
+          echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
+        timeout-minutes: 25
+
+      - name: Show benchmark_results.json
+        if: always()
+        run: |
+          echo "--- benchmark_results.json ---"
+          cat benchmark_results.json || echo "benchmark_results.json not found"
+          echo "-----------------------------"
+
+      - name: Extract benchmark metrics with jq
+        id: extract
+        run: |
+          DER=$(jq '.averageDER' benchmark_results.json)
+          JER=$(jq '.averageJER' benchmark_results.json)
+          RTF=$(jq '.results[0].realTimeFactor' benchmark_results.json)
+          DURATION=$(jq '.results[0].durationSeconds' benchmark_results.json)
+          SPEAKER_COUNT=$(jq '.results[0].speakerCount' benchmark_results.json)
+          
+          # Extract detailed timing information
+          TOTAL_TIME=$(jq '.results[0].timings.totalProcessingSeconds' benchmark_results.json)
+          MODEL_DOWNLOAD_TIME=$(jq '.results[0].timings.modelDownloadSeconds' benchmark_results.json)
+          MODEL_COMPILE_TIME=$(jq '.results[0].timings.modelCompilationSeconds' benchmark_results.json)
+          AUDIO_LOAD_TIME=$(jq '.results[0].timings.audioLoadingSeconds' benchmark_results.json)
+          SEGMENTATION_TIME=$(jq '.results[0].timings.segmentationSeconds' benchmark_results.json)
+          EMBEDDING_TIME=$(jq '.results[0].timings.embeddingExtractionSeconds' benchmark_results.json)
+          CLUSTERING_TIME=$(jq '.results[0].timings.speakerClusteringSeconds' benchmark_results.json)
+          INFERENCE_TIME=$(jq '.results[0].timings.totalInferenceSeconds' benchmark_results.json)
+          
+          echo "DER=${DER}" >> $GITHUB_OUTPUT
+          echo "JER=${JER}" >> $GITHUB_OUTPUT
+          echo "RTF=${RTF}" >> $GITHUB_OUTPUT
+          echo "DURATION=${DURATION}" >> $GITHUB_OUTPUT
+          echo "SPEAKER_COUNT=${SPEAKER_COUNT}" >> $GITHUB_OUTPUT
+          echo "TOTAL_TIME=${TOTAL_TIME}" >> $GITHUB_OUTPUT
+          echo "MODEL_DOWNLOAD_TIME=${MODEL_DOWNLOAD_TIME}" >> $GITHUB_OUTPUT
+          echo "MODEL_COMPILE_TIME=${MODEL_COMPILE_TIME}" >> $GITHUB_OUTPUT
+          echo "AUDIO_LOAD_TIME=${AUDIO_LOAD_TIME}" >> $GITHUB_OUTPUT
+          echo "SEGMENTATION_TIME=${SEGMENTATION_TIME}" >> $GITHUB_OUTPUT
+          echo "EMBEDDING_TIME=${EMBEDDING_TIME}" >> $GITHUB_OUTPUT
+          echo "CLUSTERING_TIME=${CLUSTERING_TIME}" >> $GITHUB_OUTPUT
+          echo "INFERENCE_TIME=${INFERENCE_TIME}" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with Benchmark Results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const der = parseFloat('${{ steps.extract.outputs.DER }}');
+            const jer = parseFloat('${{ steps.extract.outputs.JER }}');
+            const rtf = parseFloat('${{ steps.extract.outputs.RTF }}');
+            const duration = parseFloat('${{ steps.extract.outputs.DURATION }}').toFixed(1);
+            const speakerCount = '${{ steps.extract.outputs.SPEAKER_COUNT }}';
+            const totalTime = parseFloat('${{ steps.extract.outputs.TOTAL_TIME }}');
+            const inferenceTime = parseFloat('${{ steps.extract.outputs.INFERENCE_TIME }}');
+            const modelDownloadTime = parseFloat('${{ steps.extract.outputs.MODEL_DOWNLOAD_TIME }}');
+            const modelCompileTime = parseFloat('${{ steps.extract.outputs.MODEL_COMPILE_TIME }}');
+            const audioLoadTime = parseFloat('${{ steps.extract.outputs.AUDIO_LOAD_TIME }}');
+            const segmentationTime = parseFloat('${{ steps.extract.outputs.SEGMENTATION_TIME }}');
+            const embeddingTime = parseFloat('${{ steps.extract.outputs.EMBEDDING_TIME }}');
+            const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
+            const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
+
+            let comment = '## Diarization Benchmark Results\n\n';
+            comment += '| Metric | Value | Target | Status |\n';
+            comment += '|--------|-------|--------|---------|\n';
+            comment += `| DER | ${der.toFixed(1)}% | <30% | ${der < 30 ? '✅' : '⚠️'} |\n`;
+            comment += `| JER | ${jer.toFixed(1)}% | <25% | ${jer < 25 ? '✅' : '⚠️'} |\n`;
+            comment += `| RTF | ${rtf.toFixed(2)}x | <1.0x | ${rtf < 1.0 ? '✅' : '⚠️'} |\n\n`;
+            
+            comment += '### Performance Timing\n';
+            comment += '| Stage | Time (s) | % |\n';
+            comment += '|-------|----------|----|\n';
+            comment += `| Model Download | ${modelDownloadTime.toFixed(3)} | ${(modelDownloadTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Model Compile | ${modelCompileTime.toFixed(3)} | ${(modelCompileTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Audio Load | ${audioLoadTime.toFixed(3)} | ${(audioLoadTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Segmentation | ${segmentationTime.toFixed(3)} | ${(segmentationTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Embedding | ${embeddingTime.toFixed(3)} | ${(embeddingTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)} |\n`;
+            comment += `| **Total** | **${totalTime.toFixed(3)}** | **100** |\n\n`;
+            
+            comment += '### Research Comparison\n';
+            comment += '| Method | DER | Year |\n';
+            comment += '|--------|-----|------|\n';
+            comment += '| **FluidAudio** | **' + der.toFixed(1) + '%** | **2025** |\n';
+            comment += '| Powerset BCE | 18.5% | 2023 |\n';
+            comment += '| EEND | 25.3% | 2019 |\n';
+            comment += '| x-vector clustering | 28.7% | 2018 |\n\n';
+            
+            comment += `<sub>ES2004a • ${duration}s audio • ${inferenceTime.toFixed(1)}s inference • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
+            
+            // Add hidden identifier for reliable comment detection
+            comment += '<!-- fluidaudio-benchmark-single-file -->';
+
+            try {
+              // First, try to find existing benchmark comment
+              const comments = await github.rest.issues.listComments({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+
+              // Look for existing benchmark comment (identified by the hidden tag)
+              const existingComment = comments.data.find(comment => {
+                const isBot = comment.user.type === 'Bot' || 
+                             comment.user.login === 'github-actions[bot]' ||
+                             comment.user.login.includes('[bot]');
+                
+                const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-single-file -->');
+                const hasHeader = comment.body.includes('## 🎯 Single File Benchmark Results');
+                
+                return isBot && (hasIdentifier || hasHeader);
+              });
+
+              if (existingComment) {
+                // Update existing comment
+                await github.rest.issues.updateComment({
+                  comment_id: existingComment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Successfully updated existing benchmark comment');
+              } else {
+                // Create new comment if none exists
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Successfully posted new benchmark results comment');
+              }
+            } catch (error) {
+              console.error('❌ Failed to update/post comment:', error.message);
+              // Don't fail the workflow just because commenting failed
+            }
