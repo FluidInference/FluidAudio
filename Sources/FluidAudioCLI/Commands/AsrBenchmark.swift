@@ -443,6 +443,16 @@ extension ASRBenchmark {
         do {
             let startBenchmark = Date()
 
+            // CI cleanup: Remove old model locations that might cause conflicts
+            if ProcessInfo.processInfo.environment["CI"] != nil {
+                let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                let oldModelsDir = appSupport.appendingPathComponent("FluidAudio/Models")
+                if FileManager.default.fileExists(atPath: oldModelsDir.path) {
+                    print("🧹 CI: Removing old models directory at \(oldModelsDir.path)")
+                    try? FileManager.default.removeItem(at: oldModelsDir)
+                }
+            }
+
             print("Initializing ASR system...")
             do {
                 let models = try await AsrModels.downloadAndLoad()
@@ -463,17 +473,31 @@ extension ASRBenchmark {
 
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print("🔍 CI Debug Information:")
-                    let modelsDir = FileManager.default.homeDirectoryForCurrentUser
-                        .appendingPathComponent("Library/Application Support/FluidAudio/Models/Parakeet")
-                    print("   Models directory: \(modelsDir.path)")
-                    print("   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))")
-
-                    if FileManager.default.fileExists(atPath: modelsDir.path) {
+                    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                    let fluidAudioDir = appSupport.appendingPathComponent("FluidAudio")
+                    let parakeetDir = fluidAudioDir.appendingPathComponent("parakeet-tdt-0.6b-v2-coreml")
+                    
+                    print("   FluidAudio directory: \(fluidAudioDir.path)")
+                    print("   FluidAudio exists: \(FileManager.default.fileExists(atPath: fluidAudioDir.path))")
+                    
+                    if FileManager.default.fileExists(atPath: fluidAudioDir.path) {
                         do {
-                            let contents = try FileManager.default.contentsOfDirectory(at: modelsDir, includingPropertiesForKeys: nil)
-                            print("   Directory contents: \(contents.map { $0.lastPathComponent })")
+                            let contents = try FileManager.default.contentsOfDirectory(at: fluidAudioDir, includingPropertiesForKeys: nil)
+                            print("   FluidAudio contents: \(contents.map { $0.lastPathComponent })")
                         } catch {
-                            print("   Failed to list directory contents: \(error)")
+                            print("   Failed to list FluidAudio contents: \(error)")
+                        }
+                    }
+                    
+                    print("   Parakeet models directory: \(parakeetDir.path)")
+                    print("   Parakeet directory exists: \(FileManager.default.fileExists(atPath: parakeetDir.path))")
+                    
+                    if FileManager.default.fileExists(atPath: parakeetDir.path) {
+                        do {
+                            let contents = try FileManager.default.contentsOfDirectory(at: parakeetDir, includingPropertiesForKeys: nil)
+                            print("   Parakeet contents: \(contents.map { $0.lastPathComponent })")
+                        } catch {
+                            print("   Failed to list Parakeet contents: \(error)")
                         }
                     }
                 }
