@@ -17,6 +17,7 @@ Our testing demonstrates that CoreML versions deliver significantly more efficie
 
 - **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
 - **Voice Activity Detection (VAD)**: Production-ready VAD with 98% accuracy using CoreML models and adaptive thresholding
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model support for usable accurate on-device transcription
 - **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
@@ -67,10 +68,10 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 **Completed:**
 - ✅ **Voice Activity Detection (VAD)**: 98% accuracy CoreML-based VAD with adaptive thresholding and noise robustness
+- ✅ **ASR Models**: Parakeet TDT-0.6b CoreML integration for on-device speech recognition
 
 **Coming Soon:**
-- **ASR Models**: Support for open-source ASR models like Parakeet on CoreML 
-- **System Audio Access**: Tap into system audio via CoreAudio for MacOS :) 
+- **System Audio Access**: Tap into system audio via CoreAudio for MacOS :)
 
 ## 🎯 Performance
 
@@ -111,6 +112,23 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 - **Model Conversion**: Solved PyTorch → CoreML limitations with custom fallback algorithm
 - **Performance**: Real-time processing with minimal latency overhead
 - **Integration**: Ready for embedding into diarization pipeline
+
+## 🎤 Automatic Speech Recognition (ASR)
+
+- **Parakeet TDT-0.6b Model**: NVIDIA's state-of-the-art Token-and-Duration Transducer architecture
+- **CoreML Optimized**: 600M parameter model converted and optimized for Apple Neural Engine
+- **Real-time Transcription**: Concurrent microphone and system audio support with separate decoder states
+- **LibriSpeech Benchmarking**: Industry-standard WER/CER evaluation on test-clean and test-other datasets
+
+**Model Architecture:**
+- **Token-and-Duration Transducer (TDT)**: Joint prediction of tokens and their durations
+- **Frame-skipping**: Faster decoding with intelligent frame reduction
+- **Chunk-based Processing**: Streaming-ready architecture for long audio files
+
+**Performance Metrics:**
+- **Real-Time Factor (RTFx)**: Efficient processing suitable for real-time applications
+- **Word Error Rate (WER)**: Competitive accuracy on LibriSpeech benchmarks
+- **Apple Silicon Optimized**: Leverages ANE for maximum efficiency
 
 ## 🏢 Real-World Usage
 
@@ -164,13 +182,56 @@ let vadConfig = VADConfig(
 Task {
     let vadManager = VadManager(config: vadConfig)
     try await vadManager.initialize()
-    
+
     let audioSamples: [Float] = // your 16kHz audio data
     let vadResult = try await vadManager.detectVoiceActivity(audioSamples)
-    
+
     print("Voice activity detected: \(vadResult.hasVoice)")
     print("Confidence score: \(vadResult.confidence)")
 }
+```
+
+## ASR (Speech Recognition) Usage
+
+**ASR Library API**:
+
+```swift
+import FluidAudio
+
+// Initialize ASR with Parakeet TDT models
+Task {
+    // Download and load models (cached after first download)
+    let models = try await AsrModels.downloadAndLoad()
+    let asrManager = AsrManager()
+    try await asrManager.initialize(models: models)
+
+    // Transcribe audio
+    let audioSamples: [Float] = // your 16kHz audio data
+    let result = try await asrManager.transcribe(audioSamples)
+
+    print("Transcription: \(result.text)")
+    print("Processing time: \(result.processingTime)s")
+    print("Real-time factor: \(result.rtfx)x")
+
+    // Access token-level timing if needed
+    for token in result.tokens {
+        print("\(token.text) - start: \(token.startTime)s, duration: \(token.duration)s")
+    }
+}
+```
+
+**ASR CLI Usage**:
+
+```bash
+# Run ASR benchmark on LibriSpeech test-clean
+swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
+
+# Benchmark with automatic dataset download
+swift run fluidaudio asr-benchmark --subset test-clean --auto-download
+
+# Test on different LibriSpeech subsets
+swift run fluidaudio asr-benchmark --subset test-other --max-files 50
+swift run fluidaudio asr-benchmark --subset dev-clean --max-files 100
 ```
 
 ## Configuration
@@ -203,7 +264,7 @@ swift run fluidaudio benchmark --auto-download
 # Test with specific parameters
 swift run fluidaudio benchmark --threshold 0.7 --min-duration-on 1.0 --output results.json
 
-# Test a single file for quick parameter tuning  
+# Test a single file for quick parameter tuning
 swift run fluidaudio benchmark --single-file ES2004a --threshold 0.8
 ```
 
@@ -238,13 +299,20 @@ swift run fluidaudio download --dataset ami-sdm
 - **`detectVoiceActivity(_:)`**: Process audio and detect voice activity
 - **`VADAudioProcessor`**: Advanced audio processing with SNR filtering
 
+**Automatic Speech Recognition:**
+- **`AsrManager`**: Speech recognition with Parakeet TDT models
+- **`AsrModels`**: Model loading and management with auto-download
+- **`transcribe(_:)`**: Convert audio to text with timing information
+- **`TdtDecoder`**: Token-and-Duration Transducer implementation
+- **`ASRConfig`**: Configuration for ASR processing parameters
+
 ## License
 
 Apache 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing. 
+This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing.
 
 Pyannote: https://github.com/pyannote/pyannote-audio
 
