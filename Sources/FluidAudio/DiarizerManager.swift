@@ -619,9 +619,11 @@ public final class DiarizerManager {
     public func downloadModels() async throws -> ModelPaths {
         logger.info("Checking for existing diarization models")
 
-        // Get base directory for repos (go up from SpeakerKitModels/coreml)
-        let modelsDirectory = getModelsDirectory()
-        let baseDirectory = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
+        // Get base directory for FluidAudio repos
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let baseDirectory = appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
         
         // Download the entire repo if needed
         _ = try await DownloadUtils.loadModels(
