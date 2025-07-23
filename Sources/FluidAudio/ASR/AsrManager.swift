@@ -12,12 +12,12 @@ public final class AsrManager {
 
     internal let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ASR")
     internal let config: ASRConfig
-    
-    internal var melSpectrogramModel: MLModel?
+
+    internal var melspectrogramModel: MLModel?
     internal var encoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
-    
+
     /// The AsrModels instance if initialized with models
     private var asrModels: AsrModels?
 
@@ -33,29 +33,29 @@ public final class AsrManager {
     }
 
     public var isAvailable: Bool {
-        return melSpectrogramModel != nil && encoderModel != nil && decoderModel != nil && jointModel != nil
+        return melspectrogramModel != nil && encoderModel != nil && decoderModel != nil && jointModel != nil
     }
-    
+
     /// Initialize ASR Manager with pre-loaded models
     /// - Parameter models: Pre-loaded ASR models
     public func initialize(models: AsrModels) async throws {
         logger.info("Initializing AsrManager with provided models")
-        
+
         self.asrModels = models
-        self.melSpectrogramModel = models.melSpectrogram
+        self.melspectrogramModel = models.melspectrogram
         self.encoderModel = models.encoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
-        
+
         logger.info("AsrManager initialized successfully with provided models")
     }
-    
+
     /// Initialize ASR Manager by downloading and loading models from default location
     /// - Note: This method is deprecated. Use AsrModels.downloadAndLoad() followed by initialize(models:) instead
     @available(*, deprecated, message: "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading")
     public func initialize() async throws {
         logger.info("Initializing AsrManager with automatic model download (deprecated)")
-        
+
         do {
             // Download and load models using the new AsrModels API
             let models = try await AsrModels.downloadAndLoad()
@@ -96,13 +96,13 @@ public final class AsrManager {
         ])
     }
 
-    func prepareEncoderInput(_ melSpectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
-        let melSpectrogram = try extractFeatureValue(from: melSpectrogramOutput, key: "melspectogram", errorMessage: "Invalid mel-spectrogram output")
-        let melSpectrogramLength = try extractFeatureValue(from: melSpectrogramOutput, key: "melspectogram_length", errorMessage: "Invalid mel-spectrogram length output")
+    func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
+        let melspectrogram = try extractFeatureValue(from: melspectrogramOutput, key: "melspectogram", errorMessage: "Invalid mel-spectrogram output")
+        let melspectrogramLength = try extractFeatureValue(from: melspectrogramOutput, key: "melspectogram_length", errorMessage: "Invalid mel-spectrogram length output")
 
         return try createFeatureProvider(features: [
-            ("audio_signal", melSpectrogram),
-            ("length", melSpectrogramLength)
+            ("audio_signal", melspectrogram),
+            ("length", melspectrogramLength)
         ])
     }
 
@@ -209,18 +209,18 @@ public final class AsrManager {
     }
 
     private func loadAllModels(
-        melSpectrogramPath: URL,
+        melspectrogramPath: URL,
         encoderPath: URL,
         decoderPath: URL,
         jointPath: URL,
         configuration: MLModelConfiguration
-    ) async throws -> (melSpectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
-        async let melSpectrogram = loadModel(path: melSpectrogramPath, name: "mel-spectrogram", configuration: configuration)
+    ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
+        async let melspectrogram = loadModel(path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
         async let encoder = loadModel(path: encoderPath, name: "encoder", configuration: configuration)
         async let decoder = loadModel(path: decoderPath, name: "decoder", configuration: configuration)
         async let joint = loadModel(path: jointPath, name: "joint", configuration: configuration)
 
-        return try await (melSpectrogram, encoder, decoder, joint)
+        return try await (melspectrogram, encoder, decoder, joint)
     }
 
     private static func getDefaultModelsDirectory() -> URL {
@@ -233,7 +233,7 @@ public final class AsrManager {
     }
 
     public func cleanup() {
-        melSpectrogramModel = nil
+        melspectrogramModel = nil
         encoderModel = nil
         decoderModel = nil
         jointModel = nil

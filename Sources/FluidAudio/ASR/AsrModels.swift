@@ -11,7 +11,7 @@ import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
 public struct AsrModels: @unchecked Sendable {
-    public let melSpectrogram: MLModel
+    public let melspectrogram: MLModel
     public let encoder: MLModel
     public let decoder: MLModel
     public let joint: MLModel
@@ -20,13 +20,13 @@ public struct AsrModels: @unchecked Sendable {
     private static let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "AsrModels")
 
     public init(
-        melSpectrogram: MLModel,
+        melspectrogram: MLModel,
         encoder: MLModel,
         decoder: MLModel,
         joint: MLModel,
         configuration: MLModelConfiguration
     ) {
-        self.melSpectrogram = melSpectrogram
+        self.melspectrogram = melspectrogram
         self.encoder = encoder
         self.decoder = decoder
         self.joint = joint
@@ -39,7 +39,7 @@ public struct AsrModels: @unchecked Sendable {
 extension AsrModels {
 
     public enum ModelNames {
-        public static let melSpectrogram = "Melspectogram.mlmodelc"
+        public static let melspectrogram = "Melspectogram.mlmodelc"
         public static let encoder = "ParakeetEncoder.mlmodelc"
         public static let decoder = "ParakeetDecoder.mlmodelc"
         public static let joint = "RNNTJoint.mlmodelc"
@@ -58,7 +58,7 @@ extension AsrModels {
         logger.info("Loading ASR models from: \(directory.path)")
 
         let config = configuration ?? defaultConfiguration()
-        let melPath = directory.appendingPathComponent(ModelNames.melSpectrogram)
+        let melPath = directory.appendingPathComponent(ModelNames.melspectrogram)
         let encoderPath = directory.appendingPathComponent(ModelNames.encoder)
         let decoderPath = directory.appendingPathComponent(ModelNames.decoder)
         let jointPath = directory.appendingPathComponent(ModelNames.joint)
@@ -81,7 +81,7 @@ extension AsrModels {
         async let jointModel = MLModel.load(contentsOf: jointPath, configuration: config)
 
         let models = try await AsrModels(
-            melSpectrogram: melModel,
+            melspectrogram: melModel,
             encoder: encoderModel,
             decoder: decoderModel,
             joint: jointModel,
@@ -148,7 +148,7 @@ extension AsrModels {
     public static func modelsExist(at directory: URL) -> Bool {
         let fileManager = FileManager.default
         let modelFiles = [
-            ModelNames.melSpectrogram,
+            ModelNames.melspectrogram,
             ModelNames.encoder,
             ModelNames.decoder,
             ModelNames.joint

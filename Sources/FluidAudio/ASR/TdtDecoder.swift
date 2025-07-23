@@ -42,8 +42,13 @@ struct TdtHypothesis: Sendable {
 }
 
 /// Token-and-Duration Transducer (TDT) decoder implementation
+/// 
 /// This decoder jointly predicts both tokens and their durations, enabling accurate
 /// transcription of speech with varying speaking rates.
+/// 
+/// Based on NVIDIA's Parakeet TDT architecture from the NeMo toolkit.
+/// The TDT model extends RNN-T by adding duration prediction, allowing
+/// efficient frame-skipping during inference for faster decoding.
 @available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoder {
 
@@ -73,16 +78,35 @@ internal struct TdtDecoder {
         decoderState: inout DecoderState
     ) async throws -> [Int] {
 
+        // TDT (Token-and-Duration Transducer) jointly predicts tokens AND their durations
+        // This allows the decoder to "skip" frames when it predicts that a token spans multiple frames
+        // For example: if "hello" spans 5 frames, instead of processing each frame individually,
+        // TDT can predict the token once and skip ahead 5 frames, making decoding much faster
+        
+        // We need at least 2 frames because:
+        // 1. Frame 0: Initial state, predicts first token/duration
+        // 2. Frame 1+: Needed to validate duration predictions and continue decoding
+        // With only 1 frame, there's no way to verify if the duration prediction makes sense
         guard encoderSequenceLength > 1 else {
             logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
             return []
         }
 
+        // Initialize hypothesis with the decoder's current state
+        // This maintains context across multiple audio chunks in streaming scenarios
         var hypothesis = TdtHypothesis(decState: decoderState)
 
+        // timeIdx tracks our position in the encoder output sequence
+        // Unlike traditional decoders that process every frame sequentially,
+        // TDT can jump forward based on duration predictions
         var timeIdx = 0
 
+        // Main decoding loop - continues until we've processed the entire audio sequence
         while timeIdx < encoderSequenceLength {
+            // Process the current time step, which may:
+            // 1. Predict multiple tokens (up to maxSymbolsPerFrame)
+            // 2. Predict blank tokens (no speech)
+            // 3. Skip ahead multiple frames based on duration predictions
             let result = try await processTimeStep(
                 timeIdx: timeIdx,
                 encoderOutput: encoderOutput,
@@ -92,9 +116,13 @@ internal struct TdtDecoder {
                 hypothesis: &hypothesis
             )
 
+            // result contains the next timeIdx to process
+            // This could be timeIdx+1 (normal advance) or timeIdx+N (duration skip)
             timeIdx = result
         }
 
+        // Return the decoded token sequence (vocabulary indices)
+        // These will be converted to text by the AsrManager using the vocabulary
         return hypothesis.ySequence
     }
 
@@ -115,6 +143,9 @@ internal struct TdtDecoder {
         var nextTimeIdx = timeIdx
 
         while symbolsAdded < maxSymbolsPerFrame {
+            // processSymbol returns an optional Int:
+            // - nil: predicted a regular token (no frame skip)
+            // - Some(n): predicted a blank token with duration n (skip n frames)
             let result = try await processSymbol(
                 encoderStep: encoderStep,
                 timeIdx: timeIdx,
@@ -125,8 +156,13 @@ internal struct TdtDecoder {
 
             symbolsAdded += 1
 
-            // Handle time advancement based on duration prediction
+            // Swift's "if let" pattern for optional binding:
+            // - If result is nil (no duration), this block doesn't execute
+            // - If result has a value, it's unwrapped and assigned to 'skip'
+            // This is NOT a variable declaration - it's pattern matching!
             if let skip = result {
+                // We only get here if processSymbol returned a duration value
+                // 'skip' is the unwrapped duration value from the optional
                 nextTimeIdx = calculateNextTimeIndex(
                     currentIdx: timeIdx,
                     skip: skip,
@@ -134,6 +170,7 @@ internal struct TdtDecoder {
                 )
                 break
             }
+            // If result was nil, we continue the loop to predict more tokens
         }
 
         // Default to next frame if no skip occurred
@@ -263,8 +300,31 @@ internal struct TdtDecoder {
     }
 
     /// Calculate next time index based on duration prediction
+    ///
+    /// This implementation is based on NVIDIA's NeMo Parakeet TDT decoder optimization.
+    /// The adaptive skip logic ensures stability for both short and long utterances.
+    /// Source: Adapted from NVIDIA NeMo's TDT decoding strategy for production use.
+    ///
+    /// - Parameters:
+    ///   - currentIdx: Current position in the audio sequence
+    ///   - skip: Number of frames to skip (predicted by the model)
+    ///   - sequenceLength: Total number of frames in the audio
+    /// - Returns: The next frame index to process
     private func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
-        let actualSkip = (sequenceLength < 10 && skip > 2) ? 2 : min(skip, 4)
+        // Determine the actual number of frames to skip
+        let actualSkip: Int
+        
+        if sequenceLength < 10 && skip > 2 {
+            // For very short audio (< 10 frames), limit skip to 2 frames max
+            // This ensures we don't miss important tokens in brief utterances
+            actualSkip = 2
+        } else {
+            // For normal audio, allow up to 4 frames skip
+            // Even if model predicts more, cap at 4 for stability
+            actualSkip = min(skip, 4)
+        }
+        
+        // Move forward by actualSkip frames, but don't exceed sequence bounds
         return min(currentIdx + actualSkip, sequenceLength)
     }
 
