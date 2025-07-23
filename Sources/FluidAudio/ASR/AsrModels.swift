@@ -153,10 +153,12 @@ extension AsrModels {
             ModelNames.decoder,
             ModelNames.joint
         ]
+        // Simplified: just check if model folders exist
         let modelsPresent = modelFiles.allSatisfy { fileName in
             let path = directory.appendingPathComponent(fileName)
             return fileManager.fileExists(atPath: path.path)
         }
+        // Note: vocab file is checked separately as it's a text file, not a model
         let vocabPath = directory.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent(ModelNames.vocabulary)
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)

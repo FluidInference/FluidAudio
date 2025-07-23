@@ -193,125 +193,32 @@ public actor VadManager {
     /// Enhanced model management: check compiled models exist, auto-download if missing
     private func loadCoreMLModels() async throws {
         let modelsDirectory = getModelsDirectory()
-        let compiledModelNames = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
-
-        // Check if we need to download any compiled models
-        let missingModels = try DownloadUtils.checkModelFiles(in: modelsDirectory, modelNames: compiledModelNames)
-
-        // Auto-download missing models
-        if !missingModels.isEmpty {
-            logger.info("🔄 Missing VAD models: \(missingModels.joined(separator: ", "))")
-            logger.info("🔄 Auto-downloading VAD models from Hugging Face...")
-            try await downloadMissingVadModels()
-        }
-
-        for modelName in compiledModelNames {
-            let modelPath = modelsDirectory.appendingPathComponent(modelName)
-            if !FileManager.default.fileExists(atPath: modelPath.path) {
-                logger.error("❌ Missing compiled model after download: \(modelName)")
-                throw VadError.modelLoadingFailed
-            }
-        }
-
-        logger.info("🔍 Loading pre-compiled VAD models...")
-        let pathStart = Date()
-        let stftPath = modelsDirectory.appendingPathComponent("silero_stft.mlmodelc")
-        let encoderPath = modelsDirectory.appendingPathComponent("silero_encoder.mlmodelc")
-        let rnnPath = modelsDirectory.appendingPathComponent("silero_rnn_decoder.mlmodelc")
-        logger.info("✓ Model paths resolved in \(String(format: "%.2f", Date().timeIntervalSince(pathStart)))s")
-
-        // Load models with auto-recovery mechanism (similar to DiarizerManager)
-        try await loadModelsWithAutoRecovery(
-            stftPath: stftPath,
-            encoderPath: encoderPath,
-            rnnPath: rnnPath
+        logger.info("🔍 Loading VAD models from: \(modelsDirectory.path)")
+        
+        // Use the new simplified API
+        let models = try await DownloadUtils.loadModelsWithRecovery(
+            at: modelsDirectory,
+            configs: DownloadUtils.ModelConfig.vadModels,
+            computeUnits: config.computeUnits
         )
-    }
-
-    /// Load models with automatic recovery on compilation failures (based on DiarizerManager pattern)
-    private func loadModelsWithAutoRecovery(
-        stftPath: URL, encoderPath: URL, rnnPath: URL, maxRetries: Int = 2
-    ) async throws {
-        var attempt = 0
-
-        while attempt <= maxRetries {
-            do {
-                logger.info("Attempting to load VAD models (attempt \(attempt + 1)/\(maxRetries + 1))")
-
-                let config = MLModelConfiguration()
-                config.computeUnits = self.config.computeUnits
-                logger.info("🔄 Loading with CPU+Neural Engine...")
-
-                let stftStart = Date()
-                let stftModel = try MLModel(contentsOf: stftPath, configuration: config)
-                logger.info("✓ STFT model loaded (\(String(format: "%.2f", Date().timeIntervalSince(stftStart)))s)")
-
-                let encoderStart = Date()
-                let encoderModel = try MLModel(contentsOf: encoderPath, configuration: config)
-                logger.info("✓ Encoder model loaded (\(String(format: "%.2f", Date().timeIntervalSince(encoderStart)))s)")
-
-                let rnnStart = Date()
-                let rnnModel = try MLModel(contentsOf: rnnPath, configuration: config)
-                logger.info("✓ RNN model loaded (\(String(format: "%.2f", Date().timeIntervalSince(rnnStart)))s)")
-
-                // If we get here, all models loaded successfully
-                self.stftModel = stftModel
-                self.encoderModel = encoderModel
-                self.rnnModel = rnnModel
-
-                if attempt > 0 {
-                    logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
-                }
-                logger.info("🎉 VAD models loaded successfully with CPU+Neural Engine")
-
-
-                return
-
-            } catch {
-                logger.warning("Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
-
-                if attempt >= maxRetries {
-                    logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
-                    throw VadError.modelCompilationFailed
-                }
-
-                // Auto-recovery: Delete corrupted models and re-download
-                logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
-                try await performVadModelRecovery(stftPath: stftPath, encoderPath: encoderPath, rnnPath: rnnPath)
-
-                attempt += 1
-            }
+        
+        // Assign loaded models
+        guard let stftModel = models["silero_stft.mlmodelc"],
+              let encoderModel = models["silero_encoder.mlmodelc"],
+              let rnnModel = models["silero_rnn_decoder.mlmodelc"] else {
+            logger.error("Failed to load all required VAD models")
+            throw VadError.modelLoadingFailed
         }
+        
+        self.stftModel = stftModel
+        self.encoderModel = encoderModel
+        self.rnnModel = rnnModel
+        
+        logger.info("🎉 VAD models loaded successfully")
     }
 
-    private func performVadModelRecovery(stftPath: URL, encoderPath: URL, rnnPath: URL) async throws {
-        try await DownloadUtils.performModelRecovery(
-            modelPaths: [stftPath, encoderPath, rnnPath],
-            downloadAction: {
-                try await self.downloadMissingVadModels()
-            }
-        )
-    }
 
-    /// Download missing VAD models from Hugging Face
-    private func downloadMissingVadModels() async throws {
-        let modelsDirectory = getModelsDirectory()
 
-        // Download .mlmodelc folders from Hugging Face
-        let modelFolders = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
-
-        for folderName in modelFolders {
-            let folderPath = modelsDirectory.appendingPathComponent(folderName)
-
-            if !FileManager.default.fileExists(atPath: folderPath.path) {
-                logger.info("📥 Downloading \(folderName)...")
-                print("📥 Downloading \(folderName)...")
-                try await DownloadUtils.downloadVadModelFolder(folderName: folderName, to: folderPath)
-            }
-        }
-
-        logger.info("✅ VAD models downloaded successfully")
-    }
 
 
 
