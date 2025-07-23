@@ -193,16 +193,37 @@ public actor VadManager {
     /// Enhanced model management: check compiled models exist, auto-download if missing
     private func loadCoreMLModels() async throws {
         let modelsDirectory = getModelsDirectory()
+        logger.info("📁 VAD models directory: \(modelsDirectory.path)")
+        
         let compiledModelNames = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
+
+        // Log initial state of model files
+        for modelName in compiledModelNames {
+            let modelPath = modelsDirectory.appendingPathComponent(modelName)
+            let exists = FileManager.default.fileExists(atPath: modelPath.path)
+            let isValid = exists && DownloadUtils.isMLModelCValid(at: modelPath)
+            logger.info("🔍 Model \(modelName): exists=\(exists), valid=\(isValid), path=\(modelPath.path)")
+        }
 
         // Check if we need to download any compiled models
         let missingModels = try DownloadUtils.checkModelFiles(in: modelsDirectory, modelNames: compiledModelNames)
 
         // Auto-download missing models
         if !missingModels.isEmpty {
-            logger.info("🔄 Missing VAD models: \(missingModels.joined(separator: ", "))")
+            logger.info("🔄 Missing/invalid VAD models: \(missingModels.joined(separator: ", "))")
             logger.info("🔄 Auto-downloading VAD models from Hugging Face...")
             try await downloadMissingVadModels()
+            
+            // Log state after download
+            logger.info("📥 Download complete. Verifying models...")
+            for modelName in compiledModelNames {
+                let modelPath = modelsDirectory.appendingPathComponent(modelName)
+                let exists = FileManager.default.fileExists(atPath: modelPath.path)
+                let isValid = exists && DownloadUtils.isMLModelCValid(at: modelPath)
+                logger.info("✅ Model \(modelName) after download: exists=\(exists), valid=\(isValid)")
+            }
+        } else {
+            logger.info("✅ All VAD models present and valid")
         }
 
         for modelName in compiledModelNames {

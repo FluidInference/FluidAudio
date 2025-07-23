@@ -205,6 +205,45 @@ public class DownloadUtils {
         return FileManager.default.fileExists(atPath: coreMLDataPath.path)
     }
 
+    /// Validate that a .mlmodelc folder contains all required files
+    public static func isMLModelCValid(at url: URL) -> Bool {
+        // Check if it's a directory
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return false
+        }
+        
+        // Essential files that must exist in a valid .mlmodelc folder
+        let requiredFiles = [
+            "coremldata.bin",
+            "model.espresso.net",
+            "model.espresso.shape",
+            "model.espresso.weights"
+        ]
+        
+        // Check each required file exists
+        for requiredFile in requiredFiles {
+            let filePath = url.appendingPathComponent(requiredFile)
+            if !FileManager.default.fileExists(atPath: filePath.path) {
+                return false
+            }
+            
+            // Also check file size to ensure it's not empty
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: filePath.path)
+                if let fileSize = attributes[.size] as? Int64, fileSize < 100 {
+                    // File is too small, likely corrupted or empty
+                    return false
+                }
+            } catch {
+                return false
+            }
+        }
+        
+        return true
+    }
+
     /// Check for missing or corrupted models
     public static func checkModelFiles(in directory: URL, modelNames: [String]) throws -> [String] {
         var missingModels: [String] = []
@@ -215,15 +254,23 @@ public class DownloadUtils {
             if !FileManager.default.fileExists(atPath: modelPath.path) {
                 missingModels.append(modelName)
             } else {
-                // Check for corrupted or incomplete downloads
-                do {
-                    let attributes = try FileManager.default.attributesOfItem(atPath: modelPath.path)
-                    if let fileSize = attributes[.size] as? Int64, fileSize < 1000 {
+                // Special handling for .mlmodelc folders
+                if modelName.hasSuffix(".mlmodelc") {
+                    if !isMLModelCValid(at: modelPath) {
                         missingModels.append(modelName)
                         try? FileManager.default.removeItem(at: modelPath)
                     }
-                } catch {
-                    missingModels.append(modelName)
+                } else {
+                    // Check for corrupted or incomplete downloads (regular files)
+                    do {
+                        let attributes = try FileManager.default.attributesOfItem(atPath: modelPath.path)
+                        if let fileSize = attributes[.size] as? Int64, fileSize < 1000 {
+                            missingModels.append(modelName)
+                            try? FileManager.default.removeItem(at: modelPath)
+                        }
+                    } catch {
+                        missingModels.append(modelName)
+                    }
                 }
             }
         }
