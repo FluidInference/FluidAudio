@@ -146,6 +146,14 @@ public class DownloadUtils {
 
         // Move from temp to final location
         let finalPath = directory.appendingPathComponent(repo.folderName)
+        
+        // This should never happen in normal flow, but handle edge cases
+        // where deletion failed or was partial during recovery
+        if FileManager.default.fileExists(atPath: finalPath.path) {
+            logger.warning("⚠️ Unexpected: directory exists at \(finalPath.lastPathComponent) during clone")
+            try FileManager.default.removeItem(at: finalPath)
+        }
+        
         try FileManager.default.moveItem(at: clonedPath, to: finalPath)
 
         logger.info("✅ Downloaded \(repo.folderName)")
