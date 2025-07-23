@@ -135,9 +135,18 @@ jobs:
 
           <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
+          ## ⚡ RTFx Performance
+
+          ### 🚀 Test-Clean: **\`${{ steps.benchmark.outputs.CLEAN_RTFx }}x\`** real-time
+          ### 🚀 Test-Other: **\`${{ steps.benchmark.outputs.OTHER_RTFx }}x\`** real-time
+
           <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
 
-          <sub>**Note**: CI RTFx degraded by M1/M2 Mac virtualization. M1 Mac test: ~28x (clean), ~25x (other). Testing per [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard).</sub>
+          ### 📊 Expected Performance on Physical Hardware:
+          **• M1 Mac: ~28x (clean), ~25x (other)**
+          **• CI shows ~3-5x due to virtualization overhead**
+
+          <sub>Testing methodology follows [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)</sub>
 
           <!-- fluidaudio-benchmark-asr -->`;
 
