@@ -59,9 +59,16 @@ enum DownloadCommand {
             }
         case "parakeet-models":
             do {
-                let modelsDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/FluidAudio/Models/Parakeet")
-                try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDir)
+                let appSupport = FileManager.default.urls(
+                    for: .applicationSupportDirectory, in: .userDomainMask
+                ).first!
+                let baseDir = appSupport.appendingPathComponent("FluidAudio")
+                
+                _ = try await DownloadUtils.loadModels(
+                    .parakeet,
+                    modelNames: ["Melspectogram.mlmodelc", "ParakeetEncoder.mlmodelc", "ParakeetDecoder.mlmodelc", "RNNTJoint.mlmodelc"],
+                    directory: baseDir
+                )
                 print("✅ Parakeet models downloaded successfully")
             } catch {
                 print("❌ Failed to download Parakeet models: \(error)")
