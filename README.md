@@ -1,26 +1,27 @@
 ![banner.png](banner.png)
 
-# FluidAudio - Swift Speaker Diarization on CoreML
+# FluidAudio - Swift Speaker Diarization & ASR on CoreML
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/vz7YYZkkJg)
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 
-FluidAudio is a Swift framework for on-device speaker diarization and audio processing, designed to maximize performance per watt by leveraging CoreML models exclusively. Optimized for Apple's Neural Engine, it delivers faster and more efficient processing than CPU or GPU alternatives.
+FluidAudio is a Swift framework for on-device speaker diarization, automatic speech recognition (ASR), and audio processing, designed to maximize performance per watt by leveraging CoreML models exclusively. Optimized for Apple's Neural Engine, it delivers faster and more efficient processing than CPU or GPU alternatives.
 
-Built to address the need for an open-source solution capable of real-time workloads on iOS and older macOS devices, FluidAudio fills a gap where existing solutions either rely on CPU-only models or remain closed-source behind paid licenses. Since speaker diarization and identification are among the most popular features for voice AI applications, we believe these capabilities should be freely available.
+Built to address the need for an open-source solution capable of real-time workloads on iOS and older macOS devices, FluidAudio fills a gap where existing solutions either rely on CPU-only models or remain closed-source behind paid licenses. Since speaker diarization, identification, and transcription are among the most popular features for voice AI applications, we believe these capabilities should be freely available.
 
 ## Features
 
 Our testing demonstrates that CoreML versions deliver significantly more efficient inference compared to their ONNX counterparts, making them truly suitable for real-time transcription use cases.
 
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for real-time transcription
 - **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
 - **Voice Activity Detection (VAD)**: Production-ready VAD with 98% accuracy using CoreML models and adaptive thresholding
 - **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
-- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference/speaker-diarization-coreml) - converted and optimized by our team. Permissive licenses.
+- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference) - converted and optimized by our team. Permissive licenses.
 - **Real-time Processing**: Designed for real-time workloads but also works for offline processing
 - **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+ and any Apple Sillicon device
 
@@ -67,9 +68,9 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 **Completed:**
 - ✅ **Voice Activity Detection (VAD)**: 98% accuracy CoreML-based VAD with adaptive thresholding and noise robustness
+- ✅ **ASR Models**: Parakeet TDT-0.6b CoreML model with real-time transcription support
 
 **Coming Soon:**
-- **ASR Models**: Support for open-source ASR models like Parakeet on CoreML 
 - **System Audio Access**: Tap into system audio via CoreAudio for MacOS :) 
 
 ## 🎯 Performance
@@ -111,6 +112,24 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 - **Model Conversion**: Solved PyTorch → CoreML limitations with custom fallback algorithm
 - **Performance**: Real-time processing with minimal latency overhead
 - **Integration**: Ready for embedding into diarization pipeline
+
+## 🗣️ Automatic Speech Recognition (ASR)
+
+- **Model**: Parakeet TDT-0.6b v2 - Token Duration Transducer architecture
+- **Real-time Factor**: Optimized for real-time transcription with chunking support
+- **LibriSpeech Benchmark**: Competitive WER (Word Error Rate) performance
+- **Streaming Support**: Process audio in chunks for live transcription
+
+**Model Sources:**
+- **CoreML Models**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
+- **Architecture**: Token Duration Transducer (TDT) with duration prediction
+- **Vocabulary**: BPE tokenization with 1024 tokens + blank token
+
+**Technical Features:**
+- **Chunked Processing**: Support for real-time audio streaming with configurable chunk sizes
+- **Dual Audio Sources**: Separate decoder states for microphone and system audio
+- **Text Normalization**: Post-processing for improved accuracy
+- **ANE Optimization**: Fully optimized for Apple Neural Engine execution
 
 ## 🏢 Real-World Usage
 
@@ -173,6 +192,44 @@ Task {
 }
 ```
 
+## Automatic Speech Recognition Usage
+
+```swift
+import FluidAudio
+
+// Initialize ASR with configuration
+let asrConfig = ASRConfig(
+    maxSymbolsPerFrame: 3,
+    realtimeMode: true,
+    chunkSizeMs: 1500,          // Process in 1.5 second chunks
+    tdtConfig: TdtConfig(
+        durations: [0, 1, 2, 3, 4],
+        maxSymbolsPerStep: 3
+    )
+)
+
+// Transcribe audio
+Task {
+    let asrManager = AsrManager(config: asrConfig)
+    
+    // Load models (automatic download if needed)
+    let models = try await AsrModels.downloadAndLoad()
+    try await asrManager.initialize(models: models)
+    
+    let audioSamples: [Float] = // your 16kHz audio data
+    let result = try await asrManager.transcribe(audioSamples)
+    
+    print("Transcription: \(result.text)")
+    print("Processing time: \(result.processingTime)s")
+    
+    // For streaming/chunked transcription
+    let chunkResult = try await asrManager.transcribeChunk(
+        audioChunk,
+        source: .microphone  // or .system for system audio
+    )
+}
+```
+
 ## Configuration
 
 Customize behavior with `DiarizerConfig`:
@@ -194,7 +251,7 @@ FluidAudio includes a powerful command-line interface for benchmarking and audio
 
 **Note**: The CLI is available on macOS only. For iOS applications, use the FluidAudio library programmatically as shown in the usage examples above.
 
-### Benchmark with Beautiful Output
+### Diarization Benchmark
 
 ```bash
 # Run AMI benchmark with automatic dataset download
@@ -207,10 +264,23 @@ swift run fluidaudio benchmark --threshold 0.7 --min-duration-on 1.0 --output re
 swift run fluidaudio benchmark --single-file ES2004a --threshold 0.8
 ```
 
+### ASR Benchmark
+
+```bash
+# Run LibriSpeech ASR benchmark
+swift run fluidaudio asr-benchmark --subset test-clean --num-files 50
+
+# Benchmark with specific configuration
+swift run fluidaudio asr-benchmark --subset test-other --chunk-size 2000 --output asr_results.json
+
+# Test with automatic download
+swift run fluidaudio asr-benchmark --auto-download --subset test-clean
+```
+
 ### Process Individual Files
 
 ```bash
-# Process a single audio file
+# Process a single audio file for diarization
 swift run fluidaudio process meeting.wav
 
 # Save results to JSON
@@ -220,8 +290,12 @@ swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
 ### Download Datasets
 
 ```bash
-# Download AMI dataset for benchmarking
+# Download AMI dataset for diarization benchmarking
 swift run fluidaudio download --dataset ami-sdm
+
+# Download LibriSpeech for ASR benchmarking
+swift run fluidaudio download --dataset librispeech-test-clean
+swift run fluidaudio download --dataset librispeech-test-other
 ```
 
 ## API Reference
@@ -237,6 +311,14 @@ swift run fluidaudio download --dataset ami-sdm
 - **`VADConfig`**: Configuration for VAD processing with adaptive thresholding
 - **`detectVoiceActivity(_:)`**: Process audio and detect voice activity
 - **`VADAudioProcessor`**: Advanced audio processing with SNR filtering
+
+**Automatic Speech Recognition:**
+- **`AsrManager`**: Main ASR class with TDT decoding
+- **`AsrModels`**: Model loading and management
+- **`ASRConfig`**: Configuration for ASR processing
+- **`transcribe(_:)`**: Process complete audio and return transcription
+- **`transcribeChunk(_:source:)`**: Process audio chunks for streaming
+- **`AudioSource`**: Enum for microphone vs system audio separation
 
 ## License
 
