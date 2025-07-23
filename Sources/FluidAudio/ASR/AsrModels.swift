@@ -46,6 +46,13 @@ extension AsrModels {
         public static let vocabulary = "parakeet_vocab.json"
     }
 
+    /// Get the base FluidAudio directory
+    private static func baseDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("FluidAudio")
+    }
+
     /// Load ASR models from a directory
     /// - Parameters:
     ///   - directory: Directory containing the model files
@@ -95,8 +102,12 @@ extension AsrModels {
     public static func loadFromCache(
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {
-        let cacheDir = defaultCacheDirectory()
-        return try await load(from: cacheDir, configuration: configuration)
+        let repoDir = defaultCacheDirectory()
+        // Ensure repo exists first
+        guard FileManager.default.fileExists(atPath: repoDir.path) else {
+            throw AsrModelsError.modelNotFound("Parakeet models", repoDir)
+        }
+        return try await load(from: repoDir, configuration: configuration)
     }
 
     public static func defaultConfiguration() -> MLModelConfiguration {
@@ -113,65 +124,66 @@ extension AsrModels {
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
 
-    @discardableResult
-    public static func download(
-        to directory: URL? = nil,
-        force: Bool = false
-    ) async throws -> URL {
-        let targetDir = directory ?? defaultCacheDirectory()
-        logger.info("Downloading ASR models to: \(targetDir.path)")
-        if !force && modelsExist(at: targetDir) {
-            logger.info("ASR models already present at: \(targetDir.path)")
-            return targetDir
-        }
-        if force {
-            let fileManager = FileManager.default
-            if fileManager.fileExists(atPath: targetDir.path) {
-                try fileManager.removeItem(at: targetDir)
-            }
-        }
-
-        try await DownloadUtils.downloadParakeetModelsIfNeeded(to: targetDir)
-
-        logger.info("Successfully downloaded ASR models")
-        return targetDir
-    }
-
     public static func downloadAndLoad(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {
-        let targetDir = try await download(to: directory)
-        return try await load(from: targetDir, configuration: configuration)
+        let baseDir = directory ?? baseDirectory()
+
+        // Download/load models
+        let models = try await DownloadUtils.loadModels(
+            .parakeet,
+            modelNames: [ModelNames.melspectrogram, ModelNames.encoder, ModelNames.decoder, ModelNames.joint],
+            directory: baseDir,
+            computeUnits: configuration?.computeUnits ?? defaultConfiguration().computeUnits
+        )
+
+        // Create AsrModels from loaded models
+        guard let melModel = models[ModelNames.melspectrogram],
+              let encoderModel = models[ModelNames.encoder],
+              let decoderModel = models[ModelNames.decoder],
+              let jointModel = models[ModelNames.joint] else {
+            throw AsrModelsError.loadingFailed("Failed to load all ASR models")
+        }
+
+        return AsrModels(
+            melspectrogram: melModel,
+            encoder: encoderModel,
+            decoder: decoderModel,
+            joint: jointModel,
+            configuration: configuration ?? defaultConfiguration()
+        )
     }
 
     public static func modelsExist(at directory: URL) -> Bool {
-        let fileManager = FileManager.default
-        let modelFiles = [
+        // If directory is already the repo, use it; otherwise append repo name
+        let repoPath = directory.lastPathComponent == "parakeet-tdt-0.6b-v2-coreml"
+            ? directory
+            : directory.appendingPathComponent("parakeet-tdt-0.6b-v2-coreml")
+
+        guard FileManager.default.fileExists(atPath: repoPath.path) else {
+            return false
+        }
+
+        // Check all required files exist
+        let requiredFiles = [
             ModelNames.melspectrogram,
             ModelNames.encoder,
             ModelNames.decoder,
-            ModelNames.joint
+            ModelNames.joint,
+            ModelNames.vocabulary
         ]
-        // Simplified: just check if model folders exist
-        let modelsPresent = modelFiles.allSatisfy { fileName in
-            let path = directory.appendingPathComponent(fileName)
-            return fileManager.fileExists(atPath: path.path)
-        }
-        // Note: vocab file is checked separately as it's a text file, not a model
-        let vocabPath = directory.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(ModelNames.vocabulary)
-        let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
 
-        return modelsPresent && vocabPresent
+        return requiredFiles.allSatisfy { fileName in
+            FileManager.default.fileExists(
+                atPath: repoPath.appendingPathComponent(fileName).path
+            )
+        }
     }
 
     public static func defaultCacheDirectory() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport
-            .appendingPathComponent("FluidAudio", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent("Parakeet", isDirectory: true)
+        // Return the repo directory directly
+        return baseDirectory().appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
     }
 }
 

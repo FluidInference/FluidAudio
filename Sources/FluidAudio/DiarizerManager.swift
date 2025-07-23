@@ -12,7 +12,7 @@ public struct DiarizerConfig: Sendable {
     public var modelCacheDirectory: URL?
 
     public static let `default` = DiarizerConfig()
-    
+
     /// Platform-optimized configuration for iOS devices
     #if os(iOS)
     public static let iosOptimized = DiarizerConfig(
@@ -277,8 +277,6 @@ public final class DiarizerManager {
         let initStartTime = Date()
         logger.info("Initializing diarization system")
 
-        try await cleanupBrokenModels()
-
         let downloadStartTime = Date()
         let modelPaths = try await downloadModels()
         self.modelDownloadTime = Date().timeIntervalSince(downloadStartTime)
@@ -304,68 +302,46 @@ public final class DiarizerManager {
         let config: MLModelConfiguration = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
 
-        let modelPaths = [
-            (url: segmentationURL, name: "segmentation"),
-            (url: embeddingURL, name: "embedding")
-        ]
 
-        let models = try await DownloadUtils.loadModelsWithAutoRecovery(
-            modelPaths: modelPaths,
-            config: config,
-            maxRetries: maxRetries,
-            recoveryAction: {
-                try await self.performModelRecovery(
-                    segmentationURL: segmentationURL, 
-                    embeddingURL: embeddingURL
-                )
+        // Try to load models with recovery
+        var lastError: Error?
+
+        for attempt in 0...maxRetries {
+            do {
+                let segmentationModel = try MLModel(contentsOf: segmentationURL, configuration: config)
+                let embeddingModel = try MLModel(contentsOf: embeddingURL, configuration: config)
+
+                self.segmentationModel = segmentationModel
+                self.embeddingModel = embeddingModel
+                return
+            } catch {
+                lastError = error
+                logger.warning("⚠️ Attempt \(attempt + 1) failed: \(error.localizedDescription)")
+
+                if attempt < maxRetries {
+                    logger.info("🔄 Attempting recovery...")
+                    try await performModelRecovery(
+                        segmentationURL: segmentationURL,
+                        embeddingURL: embeddingURL
+                    )
+                }
             }
-        )
+        }
 
-        self.segmentationModel = models[0]
-        self.embeddingModel = models[1]
+        throw lastError ?? DiarizerError.modelCompilationFailed
     }
 
-    /// Perform model recovery by deleting and re-downloading corrupted models
     private func performModelRecovery(segmentationURL: URL, embeddingURL: URL) async throws {
-        try await DownloadUtils.performModelRecovery(
-            modelPaths: [segmentationURL, embeddingURL],
-            downloadAction: {
-                // Re-download segmentation model
-                try await DownloadUtils.downloadMLModelBundle(
-                    repoPath: "FluidInference/speaker-diarization-coreml",
-                    modelName: "pyannote_segmentation.mlmodelc",
-                    outputPath: segmentationURL
-                )
+        logger.info("🔧 Performing model recovery...")
 
-                // Re-download embedding model
-                try await DownloadUtils.downloadMLModelBundle(
-                    repoPath: "FluidInference/speaker-diarization-coreml",
-                    modelName: "wespeaker.mlmodelc",
-                    outputPath: embeddingURL
-                )
-            }
-        )
-    }
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let repoDir = appSupport.appendingPathComponent("FluidAudio/speaker-diarization-coreml")
+        try? FileManager.default.removeItem(at: repoDir)
 
-    private func cleanupBrokenModels() async throws {
-        let modelsDirectory = getModelsDirectory()
-        let segmentationModelPath = modelsDirectory.appendingPathComponent(
-            "pyannote_segmentation.mlmodelc")
-        let embeddingModelPath = modelsDirectory.appendingPathComponent("wespeaker.mlmodelc")
-
-        if FileManager.default.fileExists(atPath: segmentationModelPath.path)
-            && !DownloadUtils.isModelCompiled(at: segmentationModelPath)
-        {
-            logger.info("Removing broken segmentation model")
-            try FileManager.default.removeItem(at: segmentationModelPath)
-        }
-
-        if FileManager.default.fileExists(atPath: embeddingModelPath.path)
-            && !DownloadUtils.isModelCompiled(at: embeddingModelPath)
-        {
-            logger.info("Removing broken embedding model")
-            try FileManager.default.removeItem(at: embeddingModelPath)
-        }
+        // Re-download models
+        _ = try await downloadModels()
     }
 
     private func getSegments(audioChunk: ArraySlice<Float>, chunkSize: Int = 160_000) throws -> [[[Float]]] {
@@ -617,29 +593,27 @@ public final class DiarizerManager {
 
     /// Download required models for diarization
     public func downloadModels() async throws -> ModelPaths {
-        logger.info("Checking for existing diarization models")
+        logger.info("Downloading diarization models if needed")
 
         // Get base directory for FluidAudio repos
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
         let baseDirectory = appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
-        
-        // Download the entire repo if needed
+
         _ = try await DownloadUtils.loadModels(
             .diarizer,
             modelNames: ["pyannote_segmentation.mlmodelc", "wespeaker.mlmodelc"],
             directory: baseDirectory
         )
-        
+
         // Return paths directly from the repo
         let repoDir = baseDirectory.appendingPathComponent("speaker-diarization-coreml")
         let segmentationPath = repoDir.appendingPathComponent("pyannote_segmentation.mlmodelc").path
         let embeddingPath = repoDir.appendingPathComponent("wespeaker.mlmodelc").path
-        
-        logger.info("Successfully ensured diarization models are available")
+
         logger.info("Models located at: \(repoDir.path)")
-        
+
         return ModelPaths(
             segmentationPath: segmentationPath,
             embeddingPath: embeddingPath
@@ -647,51 +621,7 @@ public final class DiarizerManager {
     }
 
 
-    /// Compile a model
-    private func compileModel(at sourceURL: URL, outputPath: URL) async throws -> URL {
-        logger.info("Compiling model from \(sourceURL.lastPathComponent)")
 
-        // Remove existing compiled model if it exists
-        if FileManager.default.fileExists(atPath: outputPath.path) {
-            try FileManager.default.removeItem(at: outputPath)
-        }
-
-        // Compile the model
-        let compiledModelURL = try await MLModel.compileModel(at: sourceURL)
-
-        // Move to the desired location
-        try FileManager.default.moveItem(at: compiledModelURL, to: outputPath)
-
-        // Clean up the source file
-        try? FileManager.default.removeItem(at: sourceURL)
-
-        logger.info("Successfully compiled model to \(outputPath.lastPathComponent)")
-        return outputPath
-    }
-
-    private func getModelsDirectory() -> URL {
-        let directory: URL
-
-        if let customDirectory = config.modelCacheDirectory {
-            directory = customDirectory.appendingPathComponent("coreml", isDirectory: true)
-        } else {
-            #if os(iOS)
-            // Use Documents directory on iOS for better compatibility with sandboxing
-            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            directory = documents.appendingPathComponent("FluidAudio/models/diarization", isDirectory: true)
-            #else
-            // Use Application Support on macOS
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            directory = appSupport.appendingPathComponent(
-                "SpeakerKitModels/coreml", isDirectory: true)
-            #endif
-        }
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.standardizedFileURL
-    }
 
     // MARK: - Audio Analysis
 

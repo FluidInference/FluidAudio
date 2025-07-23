@@ -24,7 +24,7 @@ public struct VadConfig: Sendable {
     public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)  // Expected speech range (Hz)
 
     public static let `default` = VadConfig()
-    
+
     /// Platform-optimized configuration for iOS devices
     #if os(iOS)
     public static let iosOptimized = VadConfig(
@@ -190,18 +190,24 @@ public actor VadManager {
         )
     }
 
-    /// Enhanced model management: check compiled models exist, auto-download if missing
+    /// Load VAD models using the new simplified API
     private func loadCoreMLModels() async throws {
-        let modelsDirectory = getModelsDirectory()
-        logger.info("🔍 Loading VAD models from: \(modelsDirectory.path)")
-        
-        // Use the new simplified API
-        let models = try await DownloadUtils.loadModelsWithRecovery(
-            at: modelsDirectory,
-            configs: DownloadUtils.ModelConfig.vadModels,
+        logger.info("🔍 Loading VAD models...")
+
+        // Get base directory for FluidAudio
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let baseDirectory = appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
+
+        // Load models with recovery
+        let models = try await DownloadUtils.loadModels(
+            .vad,
+            modelNames: ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"],
+            directory: baseDirectory,
             computeUnits: config.computeUnits
         )
-        
+
         // Assign loaded models
         guard let stftModel = models["silero_stft.mlmodelc"],
               let encoderModel = models["silero_encoder.mlmodelc"],
@@ -209,11 +215,11 @@ public actor VadManager {
             logger.error("Failed to load all required VAD models")
             throw VadError.modelLoadingFailed
         }
-        
+
         self.stftModel = stftModel
         self.encoderModel = encoderModel
         self.rnnModel = rnnModel
-        
+
         logger.info("🎉 VAD models loaded successfully")
     }
 

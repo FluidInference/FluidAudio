@@ -167,10 +167,10 @@ public final class AsrManager {
     private func loadVocabulary() -> [Int: String] {
         let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let appDirectory = applicationSupportURL.appendingPathComponent("FluidAudio", isDirectory: true)
-        let vocabPath = appDirectory.appendingPathComponent("parakeet_vocab.json")
+        let vocabPath = appDirectory.appendingPathComponent("parakeet-tdt-0.6b-v2-coreml/parakeet_vocab.json")
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            logger.warning("Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models.")
+            logger.warning("Vocabulary file not found. Please ensure parakeet_vocab.json is downloaded with the models.")
             return [:]
         }
 

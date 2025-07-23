@@ -2,193 +2,154 @@ import Foundation
 import CoreML
 import OSLog
 
-/// Dead simple model downloader
+/// Simple git-based model downloader for HuggingFace repos
 public class DownloadUtils {
-    
+
     private static let logger = Logger(subsystem: "com.fluidaudio", category: "DownloadUtils")
-    
-    /// Model repos
-    public enum Repo: String {
+
+    /// Model repositories on HuggingFace
+    public enum Repo: String, CaseIterable {
         case vad = "FluidInference/silero-vad-coreml"
         case parakeet = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
         case diarizer = "FluidInference/speaker-diarization-coreml"
-        
+
         var url: String { "https://huggingface.co/\(rawValue)" }
         var folderName: String { rawValue.split(separator: "/").last!.description }
     }
-    
-    /// Download repo and load models
+
     public static func loadModels(
         _ repo: Repo,
         modelNames: [String],
-        directory: URL
+        directory: URL,
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) async throws -> [String: MLModel] {
+        do {
+            // 1st attempt: normal load
+            return try await loadModelsOnce(repo, modelNames: modelNames,
+                                            directory: directory, computeUnits: computeUnits)
+        } catch {
+            // 1st attempt failed → wipe cache to signal redownload
+            logger.warning("⚠️ First load failed: \(error.localizedDescription)")
+            logger.info("🔄 Deleting cache and re-downloading…")
+            let repoPath = directory.appendingPathComponent(repo.folderName)
+            try? FileManager.default.removeItem(at: repoPath)
+
+            // 2nd attempt after fresh clone
+            return try await loadModelsOnce(repo, modelNames: modelNames,
+                                            directory: directory, computeUnits: computeUnits)
+        }
+    }
+
+
+    /// Download repo (if needed) and load CoreML models
+    /// - Parameters:
+    ///   - repo: The HuggingFace repository to download
+    ///   - modelNames: Array of model file names to load (e.g., ["model.mlmodelc"])
+    ///   - directory: Base directory to store repos (e.g., ~/Library/Application Support/FluidAudio)
+    ///   - computeUnits: CoreML compute units to use (default: CPU and Neural Engine)
+    /// - Returns: Dictionary mapping model names to loaded MLModel instances
+    public static func loadModelsOnce(
+        _ repo: Repo,
+        modelNames: [String],
+        directory: URL,
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+    ) async throws -> [String: MLModel] {
+        // Ensure base directory exists
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
         // Download repo if needed
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
             try await cloneRepo(repo, to: directory)
         }
-        
-        // Load models
-        var models: [String: MLModel] = [:]
-        let config = MLModelConfiguration()
-        config.computeUnits = .cpuAndNeuralEngine
-        
-        for name in modelNames {
-            let path = repoPath.appendingPathComponent(name)
-            models[name] = try MLModel(contentsOf: path, configuration: config)
-        }
-        
-        return models
-    }
-    
-    /// Clone repo using git
-    private static func cloneRepo(_ repo: Repo, to directory: URL) async throws {
-        logger.info("📥 Downloading \(repo.folderName)...")
-        print("📥 Downloading \(repo.folderName)...")
-        
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["clone", "--depth", "1", repo.url, repo.folderName]
-        process.currentDirectoryURL = directory
-        
-        try process.run()
-        process.waitUntilExit()
-        
-        guard process.terminationStatus == 0 else {
-            throw URLError(.cannotConnectToHost)
-        }
-        
-        logger.info("✅ Downloaded \(repo.folderName)")
-    }
-    
-    // MARK: - Legacy support (keeping existing code working)
-    
-    public struct ModelRepo {
-        let name: String
-        let url: String
-        static let vad = ModelRepo(name: "silero-vad-coreml", url: "https://huggingface.co/FluidInference/silero-vad-coreml")
-        static let parakeet = ModelRepo(name: "parakeet-tdt-0.6b-v2-coreml", url: "https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml")
-        static let diarizer = ModelRepo(name: "speaker-diarization-coreml", url: "https://huggingface.co/FluidInference/speaker-diarization-coreml")
-    }
-    
-    public struct ModelConfig {
-        let repoPath: String
-        let modelName: String
-        let requiredFiles: [String]
-        
-        static let vadModels = [
-            ModelConfig(repoPath: "", modelName: "silero_stft.mlmodelc", requiredFiles: []),
-            ModelConfig(repoPath: "", modelName: "silero_encoder.mlmodelc", requiredFiles: []),
-            ModelConfig(repoPath: "", modelName: "silero_rnn_decoder.mlmodelc", requiredFiles: [])
-        ]
-        
-        static let parakeetModels = [
-            ModelConfig(repoPath: "", modelName: "Melspectogram", requiredFiles: []),
-            ModelConfig(repoPath: "", modelName: "ParakeetEncoder", requiredFiles: []),
-            ModelConfig(repoPath: "", modelName: "ParakeetDecoder", requiredFiles: []),
-            ModelConfig(repoPath: "", modelName: "RNNTJoint", requiredFiles: [])
-        ]
-        
-        static let diarizerModels = [
-            ModelConfig(repoPath: "", modelName: "pyannote_segmentation.mlmodelc", requiredFiles: []),
-            ModelConfig(repoPath: "", modelName: "wespeaker.mlmodelc", requiredFiles: [])
-        ]
-    }
-    
-    public static func downloadRepoIfNeeded(_ repo: ModelRepo, to baseDirectory: URL) async throws -> URL {
-        let repoPath = baseDirectory.appendingPathComponent(repo.name)
-        if !FileManager.default.fileExists(atPath: repoPath.path) {
-            let r = repo.name == "silero-vad-coreml" ? Repo.vad : 
-                    repo.name == "parakeet-tdt-0.6b-v2-coreml" ? Repo.parakeet : Repo.diarizer
-            try await cloneRepo(r, to: baseDirectory)
-        }
-        return repoPath
-    }
-    
-    public static func loadModels(modelNames: [String], from repoDirectory: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) throws -> [String: MLModel] {
-        var models: [String: MLModel] = [:]
+
+        // Configure CoreML
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
-        
+
+        // Load each model
+        var models: [String: MLModel] = [:]
         for name in modelNames {
-            let path = repoDirectory.appendingPathComponent(name)
-            models[name] = try MLModel(contentsOf: path, configuration: config)
+            let modelPath = repoPath.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: modelPath.path) else {
+                throw CocoaError(.fileNoSuchFile, userInfo: [
+                    NSFilePathErrorKey: modelPath.path,
+                    NSLocalizedDescriptionKey: "Model file not found: \(name)"
+                ])
+            }
+
+            do {
+                models[name] = try MLModel(contentsOf: modelPath, configuration: config)
+                logger.info("✅ Loaded model: \(name)")
+            } catch {
+                logger.error("❌ Failed to load model \(name): \(error)")
+                throw error
+            }
         }
+
         return models
     }
-    
-    public static func loadModelsWithRecovery(repo: ModelRepo, modelNames: [String], baseDirectory: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine, maxRetries: Int = 2) async throws -> [String: MLModel] {
-        let r = repo.name == "silero-vad-coreml" ? Repo.vad : 
-                repo.name == "parakeet-tdt-0.6b-v2-coreml" ? Repo.parakeet : Repo.diarizer
-        
-        for attempt in 0...maxRetries {
+
+    /// Clone a HuggingFace repository using git
+    private static func cloneRepo(_ repo: Repo, to directory: URL) async throws {
+        logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
+        print("📥 Downloading \(repo.folderName)...")
+
+        // Use a temporary directory for cloning
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        // Clone to temp directory first
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["clone", "--depth", "1", repo.url]
+        process.currentDirectoryURL = tempDir
+
+        let pipe = Pipe()
+        process.standardError = pipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let errorData = pipe.fileHandleForReading.readDataToEndOfFile()
+            let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+            logger.error("❌ Git clone failed: \(errorMessage)")
+            throw URLError(.cannotConnectToHost, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to clone repository: \(errorMessage)"
+            ])
+        }
+
+        // Check if Git LFS files need to be pulled
+        let clonedPath = tempDir.appendingPathComponent(repo.folderName)
+        let gitAttributesPath = clonedPath.appendingPathComponent(".gitattributes")
+
+        if FileManager.default.fileExists(atPath: gitAttributesPath.path) {
+            logger.info("📦 Pulling Git LFS files...")
+
+            let lfsProcess = Process()
+            lfsProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            lfsProcess.arguments = ["lfs", "pull"]
+            lfsProcess.currentDirectoryURL = clonedPath
+
             do {
-                return try await loadModels(r, modelNames: modelNames, directory: baseDirectory)
+                try lfsProcess.run()
+                lfsProcess.waitUntilExit()
             } catch {
-                if attempt == maxRetries { throw error }
-                try? FileManager.default.removeItem(at: baseDirectory.appendingPathComponent(r.folderName))
+                logger.warning("⚠️ Git LFS pull failed, models might already be included")
             }
         }
-        throw URLError(.unknown)
+
+        // Move from temp to final location
+        let finalPath = directory.appendingPathComponent(repo.folderName)
+        try FileManager.default.moveItem(at: clonedPath, to: finalPath)
+
+        logger.info("✅ Downloaded \(repo.folderName)")
+        print("✅ Download complete")
     }
-    
-    public static func loadModelsWithRecovery(at directory: URL, configs: [ModelConfig], computeUnits: MLComputeUnits = .cpuAndNeuralEngine, maxRetries: Int = 2) async throws -> [String: MLModel] {
-        let repo: ModelRepo = configs.first?.modelName.contains("silero") == true ? .vad :
-                              configs.first?.modelName.contains("Parakeet") == true || configs.first?.modelName == "Melspectogram" ? .parakeet : .diarizer
-        
-        return try await loadModelsWithRecovery(repo: repo, modelNames: configs.map { $0.modelName }, baseDirectory: directory.deletingLastPathComponent(), computeUnits: computeUnits, maxRetries: maxRetries)
-    }
-    
-    public static func checkModelFiles(in directory: URL, modelNames: [String]) throws -> [String] {
-        modelNames.filter { !FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
-    }
-    
-    public static func isModelCompiled(at url: URL) -> Bool {
-        FileManager.default.fileExists(atPath: url.path)
-    }
-    
-    public static func downloadVadModelFolder(folderName: String, to folderPath: URL) async throws {
-        logger.warning("downloadVadModelFolder is deprecated")
-    }
-    
-    public static func performModelRecovery(modelPaths: [URL], downloadAction: @Sendable () async throws -> Void) async throws {
-        try await downloadAction()
-    }
-    
-    public static func downloadMLModelBundle(repoPath: String, modelName: String, outputPath: URL) async throws {
-        logger.warning("downloadMLModelBundle is deprecated")
-    }
-    
-    public static func loadModelsWithAutoRecovery(modelPaths: [(url: URL, name: String)], config: MLModelConfiguration, maxRetries: Int = 2, recoveryAction: @Sendable () async throws -> Void) async throws -> [MLModel] {
-        for attempt in 0...maxRetries {
-            do {
-                return try modelPaths.map { try MLModel(contentsOf: $0.url, configuration: config) }
-            } catch {
-                if attempt == maxRetries { throw error }
-                try await recoveryAction()
-            }
-        }
-        throw URLError(.unknown)
-    }
-    
-    public static func downloadParakeetModelsIfNeeded(to modelsDirectory: URL) async throws {
-        let repoDir = try await downloadRepoIfNeeded(.parakeet, to: modelsDirectory.deletingLastPathComponent())
-        
-        for modelName in ["Melspectogram", "ParakeetEncoder", "ParakeetDecoder", "RNNTJoint"] {
-            let source = repoDir.appendingPathComponent(modelName)
-            let dest = modelsDirectory.appendingPathComponent(modelName)
-            
-            if !FileManager.default.fileExists(atPath: dest.path) && FileManager.default.fileExists(atPath: source.path) {
-                try FileManager.default.copyItem(at: source, to: dest)
-            }
-        }
-    }
-    
-    public static func downloadVocabularySync(from urlString: String, to destinationPath: URL) throws {
-        let data = try Data(contentsOf: URL(string: urlString)!)
-        try data.write(to: destinationPath)
-    }
+
 }
