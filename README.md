@@ -161,7 +161,7 @@ Task {
 
 ## Voice Activity Detection Usage
 
-**VAD Library API** (CLI commands coming soon):
+**VAD Library API**:
 
 ```swift
 import FluidAudio
