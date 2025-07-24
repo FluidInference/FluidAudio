@@ -67,6 +67,9 @@ extension AsrModels {
                 throw AsrModelsError.modelNotFound(name, path)
             }
         }
+
+        // Validate model files before loading
+        try await validateModelFiles(at: directory)
         // Load models with auto-recovery
         let models = try await DownloadUtils.withAutoRecovery(
             maxRetries: 2,
@@ -78,13 +81,21 @@ extension AsrModels {
                     contentsOf: decoderPath, configuration: config)
                 async let jointModel = MLModel.load(contentsOf: jointPath, configuration: config)
 
-                return try await AsrModels(
+                let models = try await AsrModels(
                     melspectrogram: melModel,
                     encoder: encoderModel,
                     decoder: decoderModel,
                     joint: jointModel,
                     configuration: config
                 )
+
+                // Log model descriptions for debugging
+                logModelDescription("Melspectrogram", models.melspectrogram)
+                logModelDescription("Encoder", models.encoder)
+                logModelDescription("Decoder", models.decoder)
+                logModelDescription("Joint", models.joint)
+
+                return models
             },
             recovery: {
                 logger.warning("ASR models appear corrupted, attempting recovery...")
@@ -110,7 +121,30 @@ extension AsrModels {
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {
         let cacheDir = defaultCacheDirectory()
+
+        // Check if we're running in a sandboxed environment
+        if isSandboxed() {
+            logger.info("Running in sandboxed environment, performing additional validation")
+
+            // Try to load and validate models
+            do {
+                return try await load(from: cacheDir, configuration: configuration)
+            } catch AsrModelsError.modelCorrupted(_, _), AsrModelsError.modelValidationFailed(_, _)
+            {
+                logger.warning("Corrupted models detected in sandbox, forcing re-download")
+                // Force re-download if models are corrupted
+                try await download(to: cacheDir, force: true)
+                return try await load(from: cacheDir, configuration: configuration)
+            }
+        }
+
         return try await load(from: cacheDir, configuration: configuration)
+    }
+
+    private static func isSandboxed() -> Bool {
+        // Check if we're running in a sandboxed environment by looking at the path
+        let cacheDir = defaultCacheDirectory()
+        return cacheDir.path.contains("/Library/Containers/")
     }
 
     public static func defaultConfiguration() -> MLModelConfiguration {
@@ -238,12 +272,138 @@ extension AsrModels {
         let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/\(ModelNames.vocabulary)"
         try await DownloadUtils.downloadFile(from: vocabURL, to: vocabPath)
     }
+
+    /// Validate model files to ensure they're properly formatted and not corrupted
+    private static func validateModelFiles(at directory: URL) async throws {
+        let models = [
+            (ModelNames.melspectrogram, "Melspectrogram"),
+            (ModelNames.encoder, "ParakeetEncoder"),
+            (ModelNames.decoder, "ParakeetDecoder"),
+            (ModelNames.joint, "RNNTJoint"),
+        ]
+
+        for (fileName, modelName) in models {
+            let modelPath = directory.appendingPathComponent(fileName)
+
+            // Check if the model bundle exists and has required files
+            let requiredFiles = ["model.mil", "coremldata.bin"]
+            for file in requiredFiles {
+                let filePath = modelPath.appendingPathComponent(file)
+                guard FileManager.default.fileExists(atPath: filePath.path) else {
+                    logger.error("Model \(modelName) missing required file: \(file)")
+                    throw AsrModelsError.modelCorrupted(modelName, modelPath)
+                }
+
+                // Check file size to ensure it's not empty
+                do {
+                    let attributes = try FileManager.default.attributesOfItem(atPath: filePath.path)
+                    if let fileSize = attributes[.size] as? Int64, fileSize < 100 {
+                        logger.error(
+                            "Model \(modelName) file \(file) is suspiciously small: \(fileSize) bytes"
+                        )
+                        throw AsrModelsError.modelCorrupted(modelName, modelPath)
+                    }
+                } catch {
+                    logger.error("Failed to check model file size: \(error)")
+                    throw AsrModelsError.modelValidationFailed(modelName, modelPath)
+                }
+            }
+        }
+
+        logger.info("All ASR models passed validation")
+    }
+
+    /// Compare model files between two directories (useful for debugging)
+    public static func compareModels(cliPath: URL, sandboxPath: URL) {
+        logger.info("Comparing models between CLI and sandbox environments...")
+        logger.info("CLI path: \(cliPath.path)")
+        logger.info("Sandbox path: \(sandboxPath.path)")
+
+        let models = [
+            ModelNames.melspectrogram,
+            ModelNames.encoder,
+            ModelNames.decoder,
+            ModelNames.joint,
+        ]
+
+        for modelName in models {
+            let cliModel = cliPath.appendingPathComponent(modelName)
+            let sandboxModel = sandboxPath.appendingPathComponent(modelName)
+
+            do {
+                // Compare directory sizes
+                let cliSize = try directorySize(at: cliModel)
+                let sandboxSize = try directorySize(at: sandboxModel)
+
+                if abs(cliSize - sandboxSize) > 100 {
+                    logger.warning(
+                        "\(modelName) size mismatch - CLI: \(cliSize) bytes, Sandbox: \(sandboxSize) bytes"
+                    )
+                } else {
+                    logger.info("\(modelName) sizes match: \(cliSize) bytes")
+                }
+            } catch {
+                logger.error("Failed to compare \(modelName): \(error)")
+            }
+        }
+    }
+
+    private static func directorySize(at url: URL) throws -> Int64 {
+        var totalSize: Int64 = 0
+        let fileManager = FileManager.default
+
+        if let enumerator = fileManager.enumerator(
+            at: url, includingPropertiesForKeys: [.fileSizeKey])
+        {
+            for case let fileURL as URL in enumerator {
+                let attributes = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+                totalSize += Int64(attributes.fileSize ?? 0)
+            }
+        }
+
+        return totalSize
+    }
+
+    /// Log model input/output descriptions for debugging
+    private static func logModelDescription(_ name: String, _ model: MLModel) {
+        logger.info("=== \(name) Model Description ===")
+
+        let description = model.modelDescription
+
+        // Log inputs
+        logger.info("Inputs:")
+        for (inputName, inputDesc) in description.inputDescriptionsByName {
+            if let multiArrayConstraint = inputDesc.multiArrayConstraint {
+                let shape = multiArrayConstraint.shape.map { $0.intValue }
+                logger.info(
+                    "  \(inputName): shape=\(shape), dataType=\(multiArrayConstraint.dataType.rawValue)"
+                )
+            } else {
+                logger.info("  \(inputName): type=\(String(describing: inputDesc.type))")
+            }
+        }
+
+        // Log outputs
+        logger.info("Outputs:")
+        for (outputName, outputDesc) in description.outputDescriptionsByName {
+            if let multiArrayConstraint = outputDesc.multiArrayConstraint {
+                let shape = multiArrayConstraint.shape.map { $0.intValue }
+                logger.info(
+                    "  \(outputName): shape=\(shape), dataType=\(multiArrayConstraint.dataType.rawValue)"
+                )
+            } else {
+                logger.info("  \(outputName): type=\(String(describing: outputDesc.type))")
+            }
+        }
+    }
 }
 
 public enum AsrModelsError: LocalizedError {
     case modelNotFound(String, URL)
     case downloadFailed(String)
     case loadingFailed(String)
+    case modelValidationFailed(String, URL)
+    case modelCorrupted(String, URL)
 
     public var errorDescription: String? {
         switch self {
@@ -253,6 +413,10 @@ public enum AsrModelsError: LocalizedError {
             return "Failed to download ASR models: \(reason)"
         case .loadingFailed(let reason):
             return "Failed to load ASR models: \(reason)"
+        case .modelValidationFailed(let name, let path):
+            return "ASR model '\(name)' failed validation at: \(path.path)"
+        case .modelCorrupted(let name, let path):
+            return "ASR model '\(name)' appears corrupted at: \(path.path)"
         }
     }
 }

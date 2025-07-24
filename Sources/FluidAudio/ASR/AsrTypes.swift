@@ -6,7 +6,6 @@ public struct ASRConfig: Sendable {
     public let sampleRate: Int
     public let maxSymbolsPerFrame: Int
     public let enableDebug: Bool
-    public let realtimeMode: Bool
     public let chunkSizeMs: Int
     public let tdtConfig: TdtConfig
 
@@ -14,7 +13,6 @@ public struct ASRConfig: Sendable {
 
     public static let fastBenchmark = ASRConfig(
         maxSymbolsPerFrame: 3,
-        realtimeMode: false,
         chunkSizeMs: 2000,
         tdtConfig: TdtConfig(
             durations: [0, 1, 2, 3, 4],
@@ -28,14 +26,12 @@ public struct ASRConfig: Sendable {
         sampleRate: Int = 16000,
         maxSymbolsPerFrame: Int = 3,
         enableDebug: Bool = false,
-        realtimeMode: Bool = false,
         chunkSizeMs: Int = 1500,
         tdtConfig: TdtConfig = .default
     ) {
         self.sampleRate = sampleRate
         self.maxSymbolsPerFrame = maxSymbolsPerFrame
         self.enableDebug = enableDebug
-        self.realtimeMode = realtimeMode
         self.chunkSizeMs = chunkSizeMs
         self.tdtConfig = tdtConfig
     }

@@ -466,7 +466,6 @@ extension ASRBenchmark {
         let asrConfig = ASRConfig(
             maxSymbolsPerFrame: 3,
             enableDebug: debugMode,
-            realtimeMode: false,
             chunkSizeMs: 2000,
             tdtConfig: TdtConfig(
                 durations: [0, 1, 2, 3, 4],
