@@ -350,6 +350,10 @@ public class DownloadUtils {
                 throw URLError(.badServerResponse)
             }
             
+            // Ensure parent directory exists before moving
+            let parentDir = destination.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+            
             // Move to destination
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: tempFile, to: destination)
