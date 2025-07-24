@@ -83,7 +83,6 @@
             case numClusters
             case minActivityThreshold
             case debugMode
-            case modelCacheDirectory
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -94,7 +93,6 @@
             try container.encode(numClusters, forKey: .numClusters)
             try container.encode(minActivityThreshold, forKey: .minActivityThreshold)
             try container.encode(debugMode, forKey: .debugMode)
-            try container.encodeIfPresent(modelCacheDirectory, forKey: .modelCacheDirectory)
         }
 
         public init(from decoder: Decoder) throws {
@@ -106,8 +104,6 @@
             let minActivityThreshold = try container.decode(
                 Float.self, forKey: .minActivityThreshold)
             let debugMode = try container.decode(Bool.self, forKey: .debugMode)
-            let modelCacheDirectory = try container.decodeIfPresent(
-                URL.self, forKey: .modelCacheDirectory)
 
             self.init(
                 clusteringThreshold: clusteringThreshold,
@@ -115,8 +111,7 @@
                 minDurationOff: minDurationOff,
                 numClusters: numClusters,
                 minActivityThreshold: minActivityThreshold,
-                debugMode: debugMode,
-                modelCacheDirectory: modelCacheDirectory
+                debugMode: debugMode
             )
         }
     }
