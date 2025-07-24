@@ -34,8 +34,8 @@ jobs:
       - name: Cache VAD models
         uses: actions/cache@v4
         with:
-          path: ~/Library/Application Support/FluidAudio/vad
-          key: ${{ runner.os }}-vad-models-v5
+          path: ~/Library/Application Support/FluidAudio/silero-vad-coreml
+          key: ${{ runner.os }}-vad-models-v6
 
       - name: Build
         run: swift build -c release

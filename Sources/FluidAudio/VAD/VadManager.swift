@@ -1,148 +1,14 @@
+//
+//  VadManager.swift
+//  FluidAudio
+//
+//  Copyright © 2025 Brandon Weng. All rights reserved.
+//
+
 import CoreML
 import Foundation
 import OSLog
 import Accelerate
-
-
-/// Configuration for VAD processing
-public struct VadConfig: Sendable {
-    public var threshold: Float = 0.3  // Voice activity threshold (0.0-1.0) - lowered for better sensitivity
-    public var chunkSize: Int = 512   // Audio chunk size for processing
-    public var sampleRate: Int = 16000 // Sample rate for audio processing
-    public var modelCacheDirectory: URL?
-    public var debugMode: Bool = true
-    public var adaptiveThreshold: Bool = false  // Disable adaptive thresholding temporarily
-    public var minThreshold: Float = 0.1       // Minimum threshold for adaptive mode
-    public var maxThreshold: Float = 0.7       // Maximum threshold for adaptive mode
-    public var computeUnits: MLComputeUnits = .cpuAndNeuralEngine  // Preferred compute units
-
-    // SNR and noise detection parameters
-    public var enableSNRFiltering: Bool = true      // Enable SNR-based filtering for better noise rejection
-    public var minSNRThreshold: Float = 6.0         // Minimum SNR for speech detection (dB) - more aggressive
-    public var noiseFloorWindow: Int = 100          // Window size for noise floor estimation
-    public var spectralRolloffThreshold: Float = 0.85  // Threshold for spectral rolloff
-    public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)  // Expected speech range (Hz)
-
-    public static let `default` = VadConfig()
-
-    /// Platform-optimized configuration for iOS devices
-    #if os(iOS)
-    public static let iosOptimized = VadConfig(
-        threshold: 0.445,  // Optimized threshold for iOS
-        chunkSize: 512,
-        sampleRate: 16000,
-        modelCacheDirectory: nil,
-        debugMode: false,  // Disable debug mode on iOS for performance
-        adaptiveThreshold: true,
-        minThreshold: 0.1,
-        maxThreshold: 0.7,
-        computeUnits: .cpuAndNeuralEngine,  // Prefer Neural Engine on iOS
-        enableSNRFiltering: true,
-        minSNRThreshold: 6.0,
-        noiseFloorWindow: 100,
-        spectralRolloffThreshold: 0.85,
-        spectralCentroidRange: (200.0, 8000.0)
-    )
-    #endif
-
-    public init(
-        threshold: Float = 0.3,
-        chunkSize: Int = 512,
-        sampleRate: Int = 16000,
-        modelCacheDirectory: URL? = nil,
-        debugMode: Bool = false,
-        adaptiveThreshold: Bool = false,
-        minThreshold: Float = 0.1,
-        maxThreshold: Float = 0.7,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        enableSNRFiltering: Bool = true,
-        minSNRThreshold: Float = 6.0,
-        noiseFloorWindow: Int = 100,
-        spectralRolloffThreshold: Float = 0.85,
-        spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)
-    ) {
-        self.threshold = threshold
-        self.chunkSize = chunkSize
-        self.sampleRate = sampleRate
-        self.modelCacheDirectory = modelCacheDirectory
-        self.debugMode = debugMode
-        self.adaptiveThreshold = adaptiveThreshold
-        self.minThreshold = minThreshold
-        self.maxThreshold = maxThreshold
-        self.computeUnits = computeUnits
-        self.enableSNRFiltering = enableSNRFiltering
-        self.minSNRThreshold = minSNRThreshold
-        self.noiseFloorWindow = noiseFloorWindow
-        self.spectralRolloffThreshold = spectralRolloffThreshold
-        self.spectralCentroidRange = spectralCentroidRange
-    }
-}
-
-/// VAD processing result
-public struct VadResult: Sendable {
-    public let probability: Float  // Voice activity probability (0.0-1.0)
-    public let isVoiceActive: Bool // Whether voice is detected
-    public let processingTime: TimeInterval
-    public let snrValue: Float?    // Signal-to-Noise Ratio (dB) if calculated
-    public let spectralFeatures: SpectralFeatures?  // Spectral analysis results
-
-    public init(probability: Float, isVoiceActive: Bool, processingTime: TimeInterval, snrValue: Float? = nil, spectralFeatures: SpectralFeatures? = nil) {
-        self.probability = probability
-        self.isVoiceActive = isVoiceActive
-        self.processingTime = processingTime
-        self.snrValue = snrValue
-        self.spectralFeatures = spectralFeatures
-    }
-}
-
-/// Spectral features for enhanced VAD
-public struct SpectralFeatures: Sendable {
-    public let spectralCentroid: Float      // Center frequency of the spectrum
-    public let spectralRolloff: Float       // Frequency below which 85% of energy is contained
-    public let spectralFlux: Float          // Measure of spectral change
-    public let mfccFeatures: [Float]        // MFCC coefficients (first 13)
-    public let zeroCrossingRate: Float      // Zero crossing rate
-    public let spectralEntropy: Float       // Measure of spectral complexity
-
-    public init(spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float], zeroCrossingRate: Float, spectralEntropy: Float) {
-        self.spectralCentroid = spectralCentroid
-        self.spectralRolloff = spectralRolloff
-        self.spectralFlux = spectralFlux
-        self.mfccFeatures = mfccFeatures
-        self.zeroCrossingRate = zeroCrossingRate
-        self.spectralEntropy = spectralEntropy
-    }
-}
-
-/// VAD error types
-public enum VadError: Error, LocalizedError {
-    case notInitialized
-    case modelLoadingFailed
-    case modelProcessingFailed(String)
-    case invalidAudioData
-    case invalidModelPath
-    case modelDownloadFailed
-    case modelCompilationFailed
-
-    public var errorDescription: String? {
-        switch self {
-        case .notInitialized:
-            return "VAD system not initialized. Call initialize() first."
-        case .modelLoadingFailed:
-            return "Failed to load VAD models."
-        case .modelProcessingFailed(let message):
-            return "Model processing failed: \(message)"
-        case .invalidAudioData:
-            return "Invalid audio data provided."
-        case .invalidModelPath:
-            return "Invalid model path provided."
-        case .modelDownloadFailed:
-            return "Failed to download VAD models from Hugging Face."
-        case .modelCompilationFailed:
-            return "Failed to compile VAD models after multiple attempts."
-        }
-    }
-}
 
 /// Voice Activity Detection Manager using CoreML models
 @available(macOS 13.0, iOS 16.0, *)
@@ -165,29 +31,60 @@ public actor VadManager {
     // Audio processing handler
     private var audioProcessor: VadAudioProcessor
 
+    /// Initialize VadManager with configuration only (models will be loaded later)
     public init(config: VadConfig = .default) {
         self.config = config
         self.audioProcessor = VadAudioProcessor(config: config)
+    }
+    
+    /// Initialize VadManager with pre-loaded models
+    public init(config: VadConfig = .default, models: VadModels) {
+        self.config = config
+        self.audioProcessor = VadAudioProcessor(config: config)
+        self.stftModel = models.stft
+        self.encoderModel = models.encoder
+        self.rnnModel = models.rnn
+        logger.info("VadManager initialized with provided models")
     }
 
     public var isAvailable: Bool {
         return stftModel != nil && encoderModel != nil && rnnModel != nil
     }
 
-    /// Initialize VAD system with selected model type
-    public func initialize() async throws {
+    /// Initialize with auto-downloaded models
+    /// - Parameter directory: Optional directory to load models from
+    public func initialize(from directory: URL? = nil) async throws {
         let startTime = Date()
         logger.info("Initializing VAD system with CoreML")
 
-        try await loadCoreMLModels()
-
-        // Initialize states
-        resetState()
+        do {
+            // Download and load models using VadModels
+            let models = try await VadModels.load(from: directory)
+            try await initialize(models: models)
+        } catch {
+            logger.error("Failed to initialize VAD: \(error)")
+            throw error
+        }
 
         let totalInitTime = Date().timeIntervalSince(startTime)
         logger.info(
             "VAD system initialized successfully in \(String(format: "%.2f", totalInitTime))s"
         )
+    }
+    
+    /// Initialize with pre-loaded models
+    /// - Parameter models: Pre-loaded VAD models
+    public func initialize(models: VadModels) async throws {
+        logger.info("Initializing VadManager with provided models")
+        
+        self.stftModel = models.stft
+        self.encoderModel = models.encoder
+        self.rnnModel = models.rnn
+        
+        // Initialize states
+        resetState()
+        
+        logger.info("VadManager initialized successfully with provided models")
     }
 
     /// Load VAD models using the new simplified API

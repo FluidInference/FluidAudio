@@ -26,6 +26,15 @@ jobs:
         with:
           swift-version: "6.1"
 
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/speaker-diarization-coreml
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-diarizer-${{ hashFiles('Package.swift') }}-v1
+
       - name: Build package
         run: swift build
 
@@ -37,7 +46,7 @@ jobs:
           # Record start time
           BENCHMARK_START=$(date +%s)
           
-          swift run fluidaudio diarization-benchmark --auto-download --single-file ES2004a --output benchmark_results.json
+          swift run fluidaudio diarization-benchmark --single-file ES2004a --output benchmark_results.json
 
           # Check if results file was generated
           if [ -f benchmark_results.json ]; then

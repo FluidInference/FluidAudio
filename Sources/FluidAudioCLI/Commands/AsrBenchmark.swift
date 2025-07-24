@@ -376,7 +376,7 @@ extension ASRBenchmark {
         var maxFiles: Int?
         var outputFile = "asr_benchmark_results.json"
         var debugMode = false
-        var autoDownload = true  // Default to true for automatic download
+        // Auto-download is now always enabled
 
         var i = 0
         while i < arguments.count {
@@ -398,10 +398,6 @@ extension ASRBenchmark {
                 }
             case "--debug":
                 debugMode = true
-            case "--auto-download":
-                autoDownload = true
-            case "--no-auto-download":
-                autoDownload = false
             default:
                 print("Unknown option: \(arguments[i])")
             }
@@ -412,7 +408,7 @@ extension ASRBenchmark {
         print("   Max files: \(maxFiles?.description ?? "all")")
         print("   Output file: \(outputFile)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
-        print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
+        print("   Auto-download: enabled (automatic)")
 
         let config = ASRBenchmarkConfig(
             dataset: "librispeech",
@@ -504,9 +500,8 @@ extension ASRBenchmark {
                 throw error
             }
 
-            if autoDownload {
-                try await benchmark.downloadLibriSpeech(subset: subset)
-            }
+            // Always download if needed
+            try await benchmark.downloadLibriSpeech(subset: subset)
 
             let results = try await benchmark.runLibriSpeechBenchmark(asrManager: asrManager, subset: subset)
 

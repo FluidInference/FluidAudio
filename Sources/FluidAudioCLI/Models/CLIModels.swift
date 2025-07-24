@@ -121,42 +121,6 @@
         }
     }
 
-    // Make TimedSpeakerSegment Codable for CLI output
-    extension TimedSpeakerSegment: Codable {
-        enum CodingKeys: String, CodingKey {
-            case speakerId
-            case embedding
-            case startTimeSeconds
-            case endTimeSeconds
-            case qualityScore
-        }
-
-        public func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(speakerId, forKey: .speakerId)
-            try container.encode(embedding, forKey: .embedding)
-            try container.encode(startTimeSeconds, forKey: .startTimeSeconds)
-            try container.encode(endTimeSeconds, forKey: .endTimeSeconds)
-            try container.encode(qualityScore, forKey: .qualityScore)
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            let speakerId = try container.decode(String.self, forKey: .speakerId)
-            let embedding = try container.decode([Float].self, forKey: .embedding)
-            let startTimeSeconds = try container.decode(Float.self, forKey: .startTimeSeconds)
-            let endTimeSeconds = try container.decode(Float.self, forKey: .endTimeSeconds)
-            let qualityScore = try container.decode(Float.self, forKey: .qualityScore)
-
-            self.init(
-                speakerId: speakerId,
-                embedding: embedding,
-                startTimeSeconds: startTimeSeconds,
-                endTimeSeconds: endTimeSeconds,
-                qualityScore: qualityScore
-            )
-        }
-    }
 
     enum CLIError: Error {
         case invalidArgument(String)

@@ -9,7 +9,7 @@ struct BenchmarkRunner {
     // MARK: - AMI Benchmark Implementation
     
     static func runAMISDMBenchmark(
-        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, singleFile: String? = nil, iterations: Int = 1, customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
     ) async -> PerformanceAssessment {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -17,27 +17,12 @@ struct BenchmarkRunner {
 
         // Check if AMI dataset exists, download if needed
         if !FileManager.default.fileExists(atPath: amiDirectory.path) {
-            if autoDownload {
-                print("📥 AMI SDM dataset not found - downloading automatically...")
-                await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: false, singleFile: singleFile)
+            print("📥 AMI SDM dataset not found - downloading automatically...")
+            await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: false, singleFile: singleFile)
 
-                // Check again after download
-                if !FileManager.default.fileExists(atPath: amiDirectory.path) {
-                    print("❌ Failed to download AMI SDM dataset")
-                    return .critical
-                }
-            } else {
-                print("⚠️ AMI SDM dataset not found")
-                print("📥 Download options:")
-                print("   Option 1: Use --auto-download flag")
-                print("   Option 2: Download manually:")
-                print("      1. Visit: https://groups.inf.ed.ac.uk/ami/download/")
-                print(
-                    "      2. Select test meetings: ES2002a, ES2003a, ES2004a, IS1000a, IS1001a")
-                print("      3. Download 'Headset mix' (Mix-Headset.wav files)")
-                print("      4. Place files in: \(amiDirectory.path)")
-                print("   Option 3: Use download command:")
-                print("      swift run fluidaudio download --dataset ami-sdm")
+            // Check again after download
+            if !FileManager.default.fileExists(atPath: amiDirectory.path) {
+                print("❌ Failed to download AMI SDM dataset")
                 return .critical
             }
         }
@@ -172,7 +157,7 @@ struct BenchmarkRunner {
     }
 
     static func runAMIIHMBenchmark(
-        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, autoDownload: Bool, singleFile: String? = nil, iterations: Int = 1, customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
+        manager: DiarizerManager, config: DiarizerConfig, outputFile: String?, singleFile: String? = nil, iterations: Int = 1, customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
     ) async -> PerformanceAssessment {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let amiDirectory = homeDir.appendingPathComponent(
@@ -180,27 +165,12 @@ struct BenchmarkRunner {
 
         // Check if AMI dataset exists, download if needed
         if !FileManager.default.fileExists(atPath: amiDirectory.path) {
-            if autoDownload {
-                print("📥 AMI IHM dataset not found - downloading automatically...")
-                await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: false, singleFile: singleFile)
+            print("📥 AMI IHM dataset not found - downloading automatically...")
+            await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: false, singleFile: singleFile)
 
-                // Check again after download
-                if !FileManager.default.fileExists(atPath: amiDirectory.path) {
-                    print("❌ Failed to download AMI IHM dataset")
-                    return .critical
-                }
-            } else {
-                print("⚠️ AMI IHM dataset not found")
-                print("📥 Download options:")
-                print("   Option 1: Use --auto-download flag")
-                print("   Option 2: Download manually:")
-                print("      1. Visit: https://groups.inf.ed.ac.uk/ami/download/")
-                print(
-                    "      2. Select test meetings: ES2002a, ES2003a, ES2004a, IS1000a, IS1001a")
-                print("      3. Download 'Individual headsets' (Headset-0.wav files)")
-                print("      4. Place files in: \(amiDirectory.path)")
-                print("   Option 3: Use download command:")
-                print("      swift run fluidaudio download --dataset ami-ihm")
+            // Check again after download
+            if !FileManager.default.fileExists(atPath: amiDirectory.path) {
+                print("❌ Failed to download AMI IHM dataset")
                 return .critical
             }
         }

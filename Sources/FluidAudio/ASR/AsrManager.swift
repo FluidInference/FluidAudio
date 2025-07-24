@@ -27,9 +27,22 @@ public final class AsrManager {
     let blankId = 1024
     let sosId = 1024
 
+    /// Initialize AsrManager with configuration only (models will be loaded later)
     public init(config: ASRConfig = .default) {
         self.config = config
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
+    }
+    
+    /// Initialize AsrManager with pre-loaded models
+    public init(config: ASRConfig = .default, models: AsrModels) {
+        self.config = config
+        self.asrModels = models
+        self.melspectrogramModel = models.melspectrogram
+        self.encoderModel = models.encoder
+        self.decoderModel = models.decoder
+        self.jointModel = models.joint
+        logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
+        logger.info("AsrManager initialized with provided models")
     }
 
     public var isAvailable: Bool {
@@ -50,15 +63,14 @@ public final class AsrManager {
         logger.info("AsrManager initialized successfully with provided models")
     }
 
-    /// Initialize ASR Manager by downloading and loading models from default location
-    /// - Note: This method is deprecated. Use AsrModels.downloadAndLoad() followed by initialize(models:) instead
-    @available(*, deprecated, message: "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading")
-    public func initialize() async throws {
-        logger.info("Initializing AsrManager with automatic model download (deprecated)")
+    /// Initialize with auto-downloaded models
+    /// - Parameter directory: Optional directory to load models from
+    public func initialize(from directory: URL? = nil) async throws {
+        logger.info("Initializing AsrManager with automatic model download")
 
         do {
-            // Download and load models using the new AsrModels API
-            let models = try await AsrModels.downloadAndLoad()
+            // Download and load models using AsrModels
+            let models = try await AsrModels.load(from: directory)
             try await initialize(models: models)
         } catch {
             logger.error("Failed to initialize AsrManager: \(error.localizedDescription)")

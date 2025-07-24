@@ -14,7 +14,7 @@ enum DiarizationBenchmark {
         var singleFile: String?
         var debugMode = false
         var outputFile: String?
-        var autoDownload = false
+        // Auto-download is now always enabled
         var disableVad = false
         var iterations = 1
         var derThreshold: Float?
@@ -62,8 +62,6 @@ enum DiarizationBenchmark {
                     outputFile = arguments[i + 1]
                     i += 1
                 }
-            case "--auto-download":
-                autoDownload = true
             case "--disable-vad":
                 disableVad = true
             case "--iterations":
@@ -98,7 +96,7 @@ enum DiarizationBenchmark {
         print("   Min duration off: \(minDurationOff)s")
         print("   Min activity threshold: \(minActivityThreshold)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
-        print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
+        print("   Auto-download: enabled (automatic)")
         print("   VAD: \(disableVad ? "disabled" : "enabled")")
         if iterations > 1 {
             print("   Iterations: \(iterations) (consistency testing)")
@@ -117,6 +115,14 @@ enum DiarizationBenchmark {
         do {
             try await manager.initialize()
             print("✅ Models initialized successfully")
+            
+            // Debug: Check if models are actually available
+            if !manager.isAvailable {
+                print("⚠️ WARNING: Models initialized but not available!")
+                print("💡 This suggests a model loading issue")
+            } else {
+                print("✅ Models are available and ready for inference")
+            }
         } catch {
             print("❌ Failed to initialize models: \(error)")
             print("💡 Make sure you have network access for model downloads")
@@ -129,13 +135,11 @@ enum DiarizationBenchmark {
         case "ami-sdm":
             assessment = await BenchmarkRunner.runAMISDMBenchmark(
                 manager: manager, config: config, outputFile: outputFile,
-                autoDownload: autoDownload,
                 singleFile: singleFile, iterations: iterations,
                 customThresholds: (derThreshold, jerThreshold, rtfThreshold))
         case "ami-ihm":
             assessment = await BenchmarkRunner.runAMIIHMBenchmark(
                 manager: manager, config: config, outputFile: outputFile,
-                autoDownload: autoDownload,
                 singleFile: singleFile, iterations: iterations,
                 customThresholds: (derThreshold, jerThreshold, rtfThreshold))
         default:
@@ -175,7 +179,6 @@ enum DiarizationBenchmark {
                 --single-file <path>       Process single file instead of full dataset
                 --debug                    Enable debug mode
                 --output <file>           Save results to file
-                --auto-download           Auto-download missing datasets
                 --disable-vad             Disable VAD preprocessing
                 --iterations <int>        Number of iterations (default: 1)
                 --der-threshold <float>   Custom DER threshold

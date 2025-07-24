@@ -15,18 +15,15 @@ public class DownloadUtils {
         public let maxRetries: Int
         public let timeout: TimeInterval
         public let chunkSize: Int
-        public let allowsCellular: Bool
         
         public init(
             maxRetries: Int = 3,
-            timeout: TimeInterval = 300,
-            chunkSize: Int = 10 * 1024 * 1024, // 10MB chunks
-            allowsCellular: Bool = true
+            timeout: TimeInterval = 600, // 10 minutes for large models
+            chunkSize: Int = 10 * 1024 * 1024 // 10MB chunks
         ) {
             self.maxRetries = maxRetries
             self.timeout = timeout
             self.chunkSize = chunkSize
-            self.allowsCellular = allowsCellular
         }
         
         public static let `default` = DownloadConfig()
@@ -38,8 +35,9 @@ public class DownloadUtils {
         case parakeet = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
         case diarizer = "FluidInference/speaker-diarization-coreml"
 
-        var url: String { "https://huggingface.co/\(rawValue)" }
-        var folderName: String { rawValue.split(separator: "/").last!.description }
+        var folderName: String { 
+            rawValue.split(separator: "/").last?.description ?? rawValue 
+        }
     }
 
     public static func loadModels(
@@ -115,124 +113,64 @@ public class DownloadUtils {
         return models
     }
 
-    /// Download a HuggingFace repository using git clone
+    /// Download a HuggingFace repository
     private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
         logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
         print("📥 Downloading \(repo.folderName)...")
-
-        // Always use URLSession for better compatibility
-        // Git is not assumed to be available on user machines
-        try await downloadRepoWithURLSession(repo, to: directory)
-    }
-    
-    // DEPRECATED: Git method removed - we don't assume git is installed
-    // All downloads now use URLSession for better compatibility
-    /*
-    /// Download using git (original method)
-    private static func downloadRepoWithGit(_ repo: Repo, to directory: URL, gitPath: String) async throws {
-        // Use a temporary directory for cloning
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-
-        defer {
-            try? FileManager.default.removeItem(at: tempDir)
-        }
-
-        // Download to temp directory first using git clone
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: gitPath)
-        process.arguments = ["clone", "--depth", "1", repo.url]
-        process.currentDirectoryURL = tempDir
-
-        let pipe = Pipe()
-        process.standardError = pipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let errorData = pipe.fileHandleForReading.readDataToEndOfFile()
-            let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
-            logger.error("❌ Git clone failed: \(errorMessage)")
-            throw URLError(.cannotConnectToHost, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to download repository: \(errorMessage)"
-            ])
-        }
-
-        // Check if Git LFS files need to be pulled
-        let downloadedPath = tempDir.appendingPathComponent(repo.folderName)
-        let gitAttributesPath = downloadedPath.appendingPathComponent(".gitattributes")
-
-        if FileManager.default.fileExists(atPath: gitAttributesPath.path) {
-            logger.info("📦 Pulling Git LFS files...")
-
-            let lfsProcess = Process()
-            lfsProcess.executableURL = URL(fileURLWithPath: gitPath)
-            lfsProcess.arguments = ["lfs", "pull"]
-            lfsProcess.currentDirectoryURL = downloadedPath
-
-            do {
-                try lfsProcess.run()
-                lfsProcess.waitUntilExit()
-            } catch {
-                logger.warning("⚠️ Git LFS pull failed, models might already be included")
-            }
-        }
-
-        // Move from temp to final location
-        let finalPath = directory.appendingPathComponent(repo.folderName)
-
-        // This should never happen in normal flow, but handle edge cases
-        // where deletion failed or was partial during recovery
-        if FileManager.default.fileExists(atPath: finalPath.path) {
-            logger.warning("⚠️ Unexpected: directory exists at \(finalPath.lastPathComponent) during download")
-            try FileManager.default.removeItem(at: finalPath)
-        }
-
-        try FileManager.default.moveItem(at: downloadedPath, to: finalPath)
-
-        logger.info("✅ Downloaded \(repo.folderName)")
-        print("✅ Download complete")
-    }
-    */
-    
-    /// Download a HuggingFace repository
-    private static func downloadRepoWithURLSession(_ repo: Repo, to directory: URL) async throws {
-        logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
         
         let repoPath = directory.appendingPathComponent(repo.folderName)
+        
+        // Ensure clean directory
+        try cleanupIncompleteDownloads(at: repoPath)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
         
-        // Get list of files in the repository
+        // Download all repository contents
         let files = try await listRepoFiles(repo)
         
-        // Filter to only model files we need
-        let modelFiles = files.filter { file in
-            file.path.hasSuffix(".mlmodelc") && !file.path.hasPrefix(".")
-        }
-        
-        // Download each model file
-        for file in modelFiles {
-            let fileURL = repoPath.appendingPathComponent(file.path)
-            let expectedSize = file.lfs?.size ?? file.size
-            
-            logger.info("📥 Downloading \(file.path) (\(formatBytes(expectedSize)))")
-            
-            try await downloadFile(
-                from: repo,
-                path: file.path,
-                to: fileURL,
-                expectedSize: expectedSize,
-                config: .default
-            )
+        for file in files {
+            switch file.type {
+            case "directory" where file.path.hasSuffix(".mlmodelc"):
+                logger.info("📥 Downloading model: \(file.path)")
+                try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
+                
+            case "file" where isEssentialFile(file.path):
+                logger.info("📥 Downloading \(file.path)")
+                try await downloadFile(
+                    from: repo,
+                    path: file.path,
+                    to: repoPath.appendingPathComponent(file.path),
+                    expectedSize: file.size,
+                    config: .default
+                )
+                
+            default:
+                break // Skip other files/directories
+            }
         }
         
         logger.info("✅ Downloaded all models for \(repo.folderName)")
     }
     
+    /// Check if a file is essential for model operation
+    private static func isEssentialFile(_ path: String) -> Bool {
+        path.hasSuffix(".json") || path.hasSuffix(".txt") || path == "config.json"
+    }
+    
+    /// Clean up incomplete downloads in a directory
+    private static func cleanupIncompleteDownloads(at directory: URL) throws {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        
+        let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        contents?.filter { $0.pathExtension == "download" }.forEach { file in
+            logger.info("🧹 Cleaning up: \(file.lastPathComponent)")
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+    
     /// List files in a HuggingFace repository
-    private static func listRepoFiles(_ repo: Repo) async throws -> [RepoFile] {
-        let apiURL = URL(string: "https://huggingface.co/api/models/\(repo.rawValue)/tree/main")!
+    private static func listRepoFiles(_ repo: Repo, path: String = "") async throws -> [RepoFile] {
+        let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
+        let apiURL = URL(string: "https://huggingface.co/api/models/\(repo.rawValue)/\(apiPath)")!
         
         var request = URLRequest(url: apiURL)
         request.timeoutInterval = 30
@@ -244,6 +182,68 @@ public class DownloadUtils {
         }
         
         return try JSONDecoder().decode([RepoFile].self, from: data)
+    }
+    
+    /// Download a CoreML model directory and all its contents
+    private static func downloadModelDirectory(repo: Repo, dirPath: String, to destination: URL) async throws {
+        let modelDir = destination.appendingPathComponent(dirPath)
+        try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
+        
+        let files = try await listRepoFiles(repo, path: dirPath)
+        
+        for item in files {
+            switch item.type {
+            case "directory":
+                try await downloadModelDirectory(repo: repo, dirPath: item.path, to: destination)
+                
+            case "file":
+                let expectedSize = item.lfs?.size ?? item.size
+                guard shouldDownloadFile(path: item.path, size: expectedSize) else { continue }
+                
+                logger.info("📥 Downloading \(item.path) (\(formatBytes(expectedSize)))")
+                
+                try await downloadFile(
+                    from: repo,
+                    path: item.path,
+                    to: destination.appendingPathComponent(item.path),
+                    expectedSize: expectedSize,
+                    config: .default,
+                    progressHandler: createProgressHandler(for: item.path, size: expectedSize)
+                )
+                
+            default:
+                break
+            }
+        }
+    }
+    
+    /// Determine if a file should be downloaded based on its path and size
+    private static func shouldDownloadFile(path: String, size: Int) -> Bool {
+        let essentialExtensions = [".bin", ".mlmodel", ".mil", ".json", ".weights"]
+        let isEssential = essentialExtensions.contains { path.hasSuffix($0) }
+        
+        if size < 50 && !isEssential {
+            logger.debug("Skipping small file: \(path) (\(size) bytes)")
+            return false
+        }
+        return true
+    }
+    
+    /// Create a progress handler for large files
+    private static func createProgressHandler(for path: String, size: Int) -> ProgressHandler? {
+        guard size > 50_000_000 else { return nil }
+        
+        let fileName = path.split(separator: "/").last ?? ""
+        var lastReportedPercentage = 0
+        
+        return { progress in
+            let percentage = Int(progress * 100)
+            if percentage >= lastReportedPercentage + 10 {
+                lastReportedPercentage = percentage
+                logger.info("   Progress: \(percentage)% of \(fileName)")
+                print("   ⏳ \(percentage)% downloaded of \(fileName)")
+            }
+        }
     }
     
     /// Download a single file with chunked transfer and resume support
@@ -282,18 +282,13 @@ public class DownloadUtils {
         // Download URL
         let downloadURL = URL(string: "https://huggingface.co/\(repo.rawValue)/resolve/main/\(path)")!
         
-        // Try download with retries
-        var lastError: Error?
+        // Download with retries
         for attempt in 0..<config.maxRetries {
             do {
                 if attempt > 0 {
-                    logger.info("🔄 Retry attempt \(attempt + 1) of \(config.maxRetries)")
-                }
-                
-                // Update start byte for resume
-                if attempt > 0, let attrs = try? FileManager.default.attributesOfItem(atPath: tempURL.path),
-                   let fileSize = attrs[.size] as? Int64 {
-                    startByte = fileSize
+                    logger.info("🔄 Retry \(attempt + 1)/\(config.maxRetries)")
+                    // Get current file size for resume
+                    startByte = (try? FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64) ?? 0
                 }
                 
                 try await performChunkedDownload(
@@ -305,30 +300,24 @@ public class DownloadUtils {
                     progressHandler: progressHandler
                 )
                 
-                // Success - move completed file
+                // Move completed file
                 try? FileManager.default.removeItem(at: destination)
                 try FileManager.default.moveItem(at: tempURL, to: destination)
-                
                 logger.info("✅ Downloaded \(path)")
                 return
                 
+            } catch let error as URLError where error.code == .fileDoesNotExist {
+                throw error // Don't retry 404s
+                
             } catch {
-                lastError = error
-                logger.error("❌ Download attempt \(attempt + 1) failed: \(error)")
-                
-                // Don't retry on certain errors
-                if (error as? URLError)?.code == .fileDoesNotExist {
-                    throw error
-                }
-                
-                // Wait before retry
+                logger.error("❌ Attempt \(attempt + 1) failed: \(error)")
                 if attempt < config.maxRetries - 1 {
-                    try await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 1_000_000_000))
+                    try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_000_000_000)
+                } else {
+                    throw error
                 }
             }
         }
-        
-        throw lastError ?? URLError(.unknown)
     }
     
     /// Perform chunked download with resume support
@@ -425,18 +414,21 @@ public class DownloadUtils {
     
     /// Repository file information
     private struct RepoFile: Codable {
+        let type: String
         let path: String
         let size: Int
         let lfs: LFSInfo?
         
         struct LFSInfo: Codable {
             let size: Int
-            let sha256: String
-            let pointerSize: Int
+            let sha256: String?  // Some repos might have this
+            let oid: String?     // Most use this instead
+            let pointerSize: Int?
             
             enum CodingKeys: String, CodingKey {
                 case size
                 case sha256
+                case oid
                 case pointerSize = "pointer_size"
             }
         }

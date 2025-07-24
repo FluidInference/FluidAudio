@@ -25,43 +25,15 @@ jobs:
       with:
         path: |
           .build
-          ~/Library/Application Support/FluidAudio/Models/Parakeet
+          ~/Library/Application Support/FluidAudio/parakeet-tdt-0.6b-v2-coreml
           ~/Documents/Datasets/librispeech
-        key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v4
+        key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v5
 
     - name: Build
       run: swift build -c release
 
-    - name: Download Models if Needed
-      run: |
-        MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/Parakeet"
-        VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
-
-        # Check if all models exist
-        if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ] && \
-           [ -f "$VOCAB_FILE" ]; then
-          echo "✅ Models already cached"
-        else
-          echo "📥 Downloading models..."
-          rm -rf "$MODELS_DIR"
-          mkdir -p "$MODELS_DIR"
-
-          TEMP_DIR=$(mktemp -d)
-          cd "$TEMP_DIR"
-          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
-          cd parakeet-tdt-0.6b-v2-coreml
-          git lfs pull --include="*.mlmodelc/**"
-
-          mv *.mlmodelc "$MODELS_DIR/"
-          mv parakeet_vocab.json "$HOME/Library/Application Support/FluidAudio/"
-
-          cd /
-          rm -rf "$TEMP_DIR"
-          echo "✅ Models downloaded"
-        fi
+    # Models are now auto-downloaded by DownloadUtils when needed
+    # The --auto-download flag in the benchmark command handles this
 
     - name: Run Benchmarks
       id: benchmark
