@@ -94,6 +94,18 @@ public class DownloadUtils {
     private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
         logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
         print("📥 Downloading \(repo.folderName)...")
+        
+        // Check if git is available
+        let gitPath = "/usr/bin/git"
+        guard FileManager.default.fileExists(atPath: gitPath) else {
+            logger.error("❌ Git not found at \(gitPath)")
+            throw URLError(.cannotFindHost, userInfo: [
+                NSLocalizedDescriptionKey: "Git is not installed. Please install Xcode Command Line Tools by running 'xcode-select --install' in Terminal."
+            ])
+        }
+        
+        // TODO: Consider implementing URLSession-based download as fallback for users without git
+        // This would require downloading individual files from HuggingFace's web API
 
         // Use a temporary directory for cloning
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -105,7 +117,7 @@ public class DownloadUtils {
 
         // Download to temp directory first using git clone
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.executableURL = URL(fileURLWithPath: gitPath)
         process.arguments = ["clone", "--depth", "1", repo.url]
         process.currentDirectoryURL = tempDir
 
@@ -132,7 +144,7 @@ public class DownloadUtils {
             logger.info("📦 Pulling Git LFS files...")
 
             let lfsProcess = Process()
-            lfsProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            lfsProcess.executableURL = URL(fileURLWithPath: gitPath)
             lfsProcess.arguments = ["lfs", "pull"]
             lfsProcess.currentDirectoryURL = downloadedPath
 

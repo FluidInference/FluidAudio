@@ -139,7 +139,7 @@ jobs:
 
           ### 📊 Expected RTFx Performance on Physical M1 Hardware:
           **• M1 Mac: ~28x (clean), ~25x (other)**
-          **• CI shows ~0.5-5x due to virtualization limitations**
+          **• CI shows ~0.5-3x due to virtualization limitations**
 
           <sub>Testing methodology follows [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)</sub>
 
