@@ -31,6 +31,24 @@ public class DownloadUtils {
             #endif
         }
 
+        // Download config.json from the root of the repository if it exists
+        let configURL = URL(
+            string: "https://huggingface.co/\(repoPath)/resolve/main/config.json"
+        )!
+
+        do {
+            let (tempFile, response) = try await URLSession.shared.download(from: configURL)
+
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                let configDestination = outputPath.deletingLastPathComponent()
+                    .appendingPathComponent("config.json")
+                try? FileManager.default.removeItem(at: configDestination)
+                try FileManager.default.moveItem(at: tempFile, to: configDestination)
+            }
+        } catch {
+            // config.json is optional, so we don't throw if it fails
+        }
+
         let bundleFiles = [
             "model.mil",
             "coremldata.bin",
@@ -100,6 +118,18 @@ public class DownloadUtils {
     ) async throws {
         // Create the folder
         try FileManager.default.createDirectory(at: folderPath, withIntermediateDirectories: true)
+
+        // Download config.json from the root of the repository if it exists
+        let configURL =
+            "https://huggingface.co/FluidInference/silero-vad-coreml/resolve/main/config.json"
+        let configDestination = folderPath.deletingLastPathComponent().appendingPathComponent(
+            "config.json")
+
+        do {
+            try await downloadFile(from: configURL, to: configDestination)
+        } catch {
+            // config.json is optional, so we don't throw if it fails
+        }
 
         // Download the main files inside the .mlmodelc folder
         let modelFiles = [
@@ -294,13 +324,27 @@ public class DownloadUtils {
             }
         }
 
+        let repoPath = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+
+        // Download config.json from the root of the repository if it exists
+        let configPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("config.json")
+
+        if !FileManager.default.fileExists(atPath: configPath.path) {
+            let configURL = "https://huggingface.co/\(repoPath)/resolve/main/config.json"
+            do {
+                try await downloadFile(from: configURL, to: configPath)
+                print("✅ Downloaded config.json")
+            } catch {
+                // config.json is optional, so we don't throw if it fails
+            }
+        }
+
         if !missingModels.isEmpty {
             print("Downloading \(missingModels.count) missing Parakeet models...")
 
             try FileManager.default.createDirectory(
                 at: modelsDirectory, withIntermediateDirectories: true)
-
-            let repoPath = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
 
             for modelName in missingModels {
                 print("Downloading \(modelName)...")
@@ -343,7 +387,6 @@ public class DownloadUtils {
         }
 
         // Always check for vocabulary file (outside the if statement)
-        let repoPath = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
         let vocabPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("parakeet_vocab.json")
 
