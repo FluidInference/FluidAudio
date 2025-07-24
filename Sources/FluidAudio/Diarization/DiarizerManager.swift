@@ -11,17 +11,6 @@ import OSLog
 
 // MARK: - Internal Types
 
-/// Model download result
-public struct ModelPaths {
-    public let segmentationPath: String
-    public let embeddingPath: String
-
-    public init(segmentationPath: String, embeddingPath: String) {
-        self.segmentationPath = segmentationPath
-        self.embeddingPath = embeddingPath
-    }
-}
-
 // MARK: - Sliding Window Support
 
 struct Segment {
@@ -128,6 +117,15 @@ public final class DiarizerManager {
     /// Initialize with pre-loaded models using convenience struct
     public func initialize(models: DiarizationModels) async throws {
         try await initialize(segmentationModel: models.segmentation, embeddingModel: models.embedding)
+    }
+    
+    /// Initialize with DiarizerModels (for test compatibility)
+    public func initialize(models: DiarizerModels) {
+        self.segmentationModel = models.segmentationModel
+        self.embeddingModel = models.embeddingModel
+        self.modelDownloadTime = 0 // No download needed
+        self.modelCompilationTime = 0 // Already compiled
+        logger.info("DiarizerManager initialized with DiarizerModels")
     }
 
     /// Load models with automatic recovery on compilation failures

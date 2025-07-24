@@ -7,9 +7,9 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/vz7YYZkkJg)
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 
-FluidAudio is a Swift framework for on-device speaker diarization, automatic speech recognition (ASR), and audio processing, designed to maximize performance per watt by leveraging CoreML models exclusively. Optimized for Apple's Neural Engine, it delivers faster and more efficient processing than CPU or GPU alternatives.
+Fluid Audio is a Swift framework designed for fully local, on-device real-time audio to power real-time audio applications on Apple devices. It currently offers state-of-the-art speaker diarization, automatic speech recognition (ASR), and voice activity detection through models that our team has converted independently. All the models are open-sourced with either MIT or Apache 2.0 licenses.
 
-Built to address the need for an open-source solution capable of real-time workloads on iOS and older macOS devices, FluidAudio fills a gap where existing solutions either rely on CPU-only models or remain closed-source behind paid licenses. Since speaker diarization, identification, and transcription are among the most popular features for voice AI applications, we believe these capabilities should be freely available.
+The models are converted to run mostly on CoreML, and Swift in some cases where it's needed. Our use case requires that the models be able to run in the background, so we intentionally avoid GPU/MPS/Shaders as much as possible. If you need a higher-performance use case, please reach out on Discord, or we welcome new contributors as well.
 
 ## Features
 
@@ -66,17 +66,12 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 ## 🚀 Roadmap
 
-**Completed:**
-- ✅ **Voice Activity Detection (VAD)**: 98% accuracy CoreML-based VAD with adaptive thresholding and noise robustness
-- ✅ **ASR Models**: Parakeet TDT-0.6b CoreML model with real-time transcription support
-
 **Coming Soon:**
-- **System Audio Access**: Tap into system audio via CoreAudio for MacOS :) 
+- **System Audio Access**: Tap into system audio via CoreAudio for MacOS :), don't need to use ScreenCaptureKit or Blackhole
 
 ## 🎯 Performance
 
 **AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
-
 - **DER: 17.7%** - Competitive with Powerset BCE 2023 (18.5%)
 - **JER: 28.0%** - Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
 - **RTF: 0.02x** - Real-time processing with 50x speedup
@@ -148,10 +143,10 @@ import FluidAudio
 // Initialize and process audio
 Task {
     let diarizer = DiarizerManager()
-    try await diarizer.initialize()
+    diarizer.initialize(models: try await .downloadIfNeeded())
 
     let audioSamples: [Float] = // your 16kHz audio data
-    let result = try await diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
+    let result = try diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
 
     for segment in result.segments {
         print("\(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")

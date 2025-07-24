@@ -1,3 +1,6 @@
+import Foundation
+import CoreML
+import System
 import XCTest
 @testable import FluidAudio
 
@@ -31,7 +34,6 @@ final class BasicInitializationTests: XCTestCase {
         XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.numClusters, -1)
         XCTAssertFalse(defaultConfig.debugMode)
-        XCTAssertNil(defaultConfig.modelCacheDirectory)
     }
 }
 
@@ -182,25 +184,143 @@ final class CoreMLDiarizerTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+}
 
-    func testModelDownloadPaths() async {
-        let config = DiarizerConfig()
-        let manager = DiarizerManager(config: config)
+// MARK: - Model Loading Tests
 
-        // Test model download (this might fail in CI/test environment, but should return valid paths)
-        do {
-            let modelPaths = try await manager.downloadModels()
+extension CoreMLDiarizerTests {
 
-            XCTAssertFalse(modelPaths.segmentationPath.isEmpty, "Segmentation path should not be empty")
-            XCTAssertFalse(modelPaths.embeddingPath.isEmpty, "Embedding path should not be empty")
+    /// Tests that we can download model files to a user-specified directory and load them from there.
+    ///
+    func testModelDownloadCustomPath() async throws {
 
-            // Verify CoreML model directories
-            XCTAssertTrue(modelPaths.segmentationPath.contains("coreml"), "CoreML models should be in coreml directory")
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
 
-        } catch {
-            // This may fail in test environment without network access - that's expected
-            print("Model download failed (expected in test environment): \(error)")
-        }
+        // Create a temporary directory.
+
+        let downloadDir = URL.temporaryDirectory.appendingPathComponent("\(Self.self)-testModelDownloadPaths", isDirectory: true)
+        try? FileManager.default.removeItem(at: downloadDir)
+        try FileManager.default.createDirectory(at: downloadDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: downloadDir) }
+
+        // Download the models to that directory.
+
+        let models = try await DiarizerModels.downloadIfNeeded(to: downloadDir)
+
+        // Check that the model paths point to that directory.
+
+        let (downloadedSegmentationModel, downloadedEmbeddingModel) = (models.paths.segmentationPath, models.paths.embeddingPath)
+
+        XCTAssert(downloadedSegmentationModel.absoluteString.starts(with: downloadDir.absoluteString))
+        XCTAssert(downloadedEmbeddingModel.absoluteString.starts(with: downloadDir.absoluteString))
+
+        // Check that the model files are actually there.
+
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedSegmentationModel)!.string, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedSegmentationModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+        XCTAssertFalse(isDirectory.boolValue)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedEmbeddingModel)!.string, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedEmbeddingModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+        XCTAssertFalse(isDirectory.boolValue)
+
+        // Consume the models object; we don't need it any more.
+
+        let _ = consume models
+
+        // Load the downloaded models using the predownloaded loader function.
+        // We already know that the models are there; it's enough to just check that this works to load them.
+
+        let _ = try DiarizerModels.load(
+            localSegmentationModel: downloadedSegmentationModel,
+            localEmbeddingModel: downloadedEmbeddingModel
+        )
+    }
+
+    /// Tests that we can download model files to a framework-managed directory and load them from there.
+    ///
+    func testModelDownloadDefaultPath() async throws {
+
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        // Download the models to the framework-managed directory.
+
+        let models = try await DiarizerModels.downloadIfNeeded()
+
+        // Check that the model paths point to that directory.
+
+        let (downloadedSegmentationModel, downloadedEmbeddingModel) = (models.paths.segmentationPath, models.paths.embeddingPath)
+
+        #if os(iOS)
+            XCTAssert(downloadedSegmentationModel.pathComponents.suffix(4) == ["FluidAudio", "models", "diarization", "pyannote_segmentation.mlmodelc"])
+            XCTAssert(downloadedEmbeddingModel.pathComponents.suffix(4) == ["FluidAudio", "models", "diarization", "wespeaker.mlmodelc"])
+        #else
+            XCTAssert(downloadedSegmentationModel.pathComponents.suffix(3) == ["SpeakerKitModels", "coreml", "pyannote_segmentation.mlmodelc"])
+            XCTAssert(downloadedEmbeddingModel.pathComponents.suffix(3) == ["SpeakerKitModels", "coreml", "wespeaker.mlmodelc"])
+        #endif
+
+        // Check that the model files are actually there.
+
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedSegmentationModel)!.string, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedSegmentationModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+        XCTAssertFalse(isDirectory.boolValue)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedEmbeddingModel)!.string, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: FilePath(downloadedEmbeddingModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+        XCTAssertFalse(isDirectory.boolValue)
+
+        // Consume the models object; we don't need it any more.
+
+        let _ = consume models
+
+        // Load the downloaded models using the predownloaded loader function.
+        // We already know that the models are there; it's enough to just check that this works to load them.
+
+        let _ = try DiarizerModels.load(
+            localSegmentationModel: downloadedSegmentationModel,
+            localEmbeddingModel: downloadedEmbeddingModel
+        )
+    }
+
+    /// Tests that we can load model files with a user-specified configuration.
+    ///
+    func testModelLoadingCustomConfig() async throws {
+
+        XCTExpectFailure("Download might fail in CI environment", strict: false)
+
+        // Create a custom configuration.
+
+        let customConfig = MLModelConfiguration()
+        customConfig.modelDisplayName = "My custom name"
+        customConfig.computeUnits = .cpuOnly
+
+        // Download the models to the framework-managed directory.
+
+        let models = try await DiarizerModels.downloadIfNeeded(configuration: customConfig)
+
+        XCTAssertEqual(models.segmentationModel.configuration.modelDisplayName, customConfig.modelDisplayName)
+        XCTAssertEqual(models.segmentationModel.configuration.computeUnits, customConfig.computeUnits)
+
+        XCTAssertEqual(models.embeddingModel.configuration.modelDisplayName, customConfig.modelDisplayName)
+        XCTAssertEqual(models.embeddingModel.configuration.computeUnits, customConfig.computeUnits)
     }
 }
 
@@ -246,7 +366,7 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
         let diarizer = DiarizerManager(config: config)
 
         do {
-            try await diarizer.initialize()
+            diarizer.initialize(models: try await .downloadIfNeeded())
             XCTAssertTrue(diarizer.isAvailable, "Should be available after successful initialization")
             print("✅ CoreML diarizer initialized successfully!")
 
@@ -274,7 +394,7 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
 
         do {
             // Initialize to download models
-            try await manager.initialize()
+            manager.initialize(models: try await .downloadIfNeeded())
 
             // Get model paths (this is implementation specific)
             // For CoreML, we'll test that the manager initializes properly
