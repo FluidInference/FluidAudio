@@ -59,23 +59,7 @@ extension DiarizerModels {
     public static func downloadIfNeeded(
         configuration: MLModelConfiguration? = nil
     ) async throws -> DiarizerModels {
-
-        let directory: URL
-        #if os(iOS)
-            // Use Documents directory on iOS for better compatibility with sandboxing
-            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
-                .first!
-            directory = documents.appendingPathComponent(
-                "FluidAudio/models/diarization", isDirectory: true)
-        #else
-            // Use Application Support on macOS
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            directory = appSupport.appendingPathComponent(
-                "SpeakerKitModels/coreml", isDirectory: true)
-        #endif
-
+        let directory = DownloadUtils.getModelDirectory(for: "models/diarization")
         return try await downloadIfNeeded(to: directory, configuration: configuration)
     }
 

@@ -176,14 +176,7 @@ extension AsrModels {
     }
 
     public static func defaultCacheDirectory() -> URL {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        return
-            appSupport
-            .appendingPathComponent("FluidAudio", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent("Parakeet", isDirectory: true)
+        return DownloadUtils.getModelDirectory(for: "models/parakeet")
     }
 }
 

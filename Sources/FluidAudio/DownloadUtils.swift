@@ -13,7 +13,7 @@ public class DownloadUtils {
         request.httpMethod = "HEAD"
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            try await URLSession.shared.data(for: request)
         } catch {
             print("config.json does not exist in repository root for \(repoPath)")
         }
@@ -294,6 +294,30 @@ public class DownloadUtils {
 
         let data = try Data(contentsOf: url)
         try data.write(to: destinationPath)
+    }
+
+    /// Get the platform-specific base directory for FluidAudio model storage
+    /// - Returns: The appropriate base directory URL for the current platform
+    public static func getFluidAudioBaseDirectory() -> URL {
+        #if os(iOS)
+            // Use Documents directory on iOS for better compatibility with sandboxing
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+                .first!
+            return documents.appendingPathComponent("FluidAudio", isDirectory: true)
+        #else
+            // Use Application Support on macOS
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            return appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
+        #endif
+    }
+
+    /// Get the platform-specific directory for a specific model type
+    /// - Parameter modelType: The type of model (e.g., "models/diarization", "models/vad", "Models/Parakeet")
+    /// - Returns: The full directory URL for the specified model type
+    public static func getModelDirectory(for modelType: String) -> URL {
+        return getFluidAudioBaseDirectory().appendingPathComponent(modelType, isDirectory: true)
     }
 
 }
