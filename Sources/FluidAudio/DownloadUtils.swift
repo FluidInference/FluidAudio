@@ -32,31 +32,10 @@ public class DownloadUtils {
             logger.warning("⚠️ First load failed: \(error.localizedDescription)")
             logger.info("🔄 Deleting cache and re-downloading…")
             let repoPath = directory.appendingPathComponent(repo.folderName)
-            
-            // Force delete with better error handling
-            do {
-                try FileManager.default.removeItem(at: repoPath)
-                logger.info("✅ Successfully deleted \(repo.folderName)")
-            } catch {
-                logger.error("❌ Failed to delete \(repo.folderName): \(error)")
-                // Continue anyway - download might overwrite
-            }
 
             // 2nd attempt after fresh clone
-            do {
-                return try await loadModelsOnce(repo, modelNames: modelNames,
-                                                directory: directory, computeUnits: computeUnits)
-            } catch {
-                logger.error("❌ Second load attempt also failed: \(error)")
-                // If it's a CoreML compilation error, add more context
-                if let nsError = error as NSError?, nsError.domain == "com.apple.CoreML" {
-                    throw URLError(.cannotDecodeContentData, userInfo: [
-                        NSLocalizedDescriptionKey: "CoreML model compilation failed. The models may be corrupted or incompatible with this macOS version.",
-                        NSUnderlyingErrorKey: error
-                    ])
-                }
-                throw error
-            }
+            return try await loadModelsOnce(repo, modelNames: modelNames,
+                                            directory: directory, computeUnits: computeUnits)
         }
     }
 
@@ -97,13 +76,6 @@ public class DownloadUtils {
                     NSLocalizedDescriptionKey: "Model file not found: \(name)"
                 ])
             }
-            
-            // Verify model size (CoreML models should be > 1KB at minimum)
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: modelPath.path),
-               let fileSize = attrs[.size] as? Int64,
-               fileSize < 1024 {
-                logger.warning("⚠️ Model \(name) seems too small: \(fileSize) bytes")
-            }
 
             do {
                 models[name] = try MLModel(contentsOf: modelPath, configuration: config)
@@ -121,19 +93,22 @@ public class DownloadUtils {
     private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
         logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
         print("📥 Downloading \(repo.folderName)...")
-        
+
         // Check if git is available
         let gitPath = "/usr/bin/git"
-        guard FileManager.default.fileExists(atPath: gitPath) else {
-            logger.error("❌ Git not found at \(gitPath)")
-            throw URLError(.cannotFindHost, userInfo: [
-                NSLocalizedDescriptionKey: "Git is not installed. Please install Xcode Command Line Tools by running 'xcode-select --install' in Terminal."
-            ])
+        if FileManager.default.fileExists(atPath: gitPath) {
+            // Use git if available (faster for large repos with many files)
+            logger.info("Using git for faster download")
+            try await downloadRepoWithGit(repo, to: directory, gitPath: gitPath)
+        } else {
+            // Fallback to URLSession for users without git
+            logger.info("Git not found, using URLSession download method")
+            try await downloadRepoWithURLSession(repo, to: directory)
         }
-        
-        // TODO: Consider implementing URLSession-based download as fallback for users without git
-        // This would require downloading individual files from HuggingFace's web API
-
+    }
+    
+    /// Download using git (original method)
+    private static func downloadRepoWithGit(_ repo: Repo, to directory: URL, gitPath: String) async throws {
         // Use a temporary directory for cloning
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -185,18 +160,92 @@ public class DownloadUtils {
 
         // Move from temp to final location
         let finalPath = directory.appendingPathComponent(repo.folderName)
-        
+
         // This should never happen in normal flow, but handle edge cases
         // where deletion failed or was partial during recovery
         if FileManager.default.fileExists(atPath: finalPath.path) {
             logger.warning("⚠️ Unexpected: directory exists at \(finalPath.lastPathComponent) during download")
             try FileManager.default.removeItem(at: finalPath)
         }
-        
+
         try FileManager.default.moveItem(at: downloadedPath, to: finalPath)
 
         logger.info("✅ Downloaded \(repo.folderName)")
         print("✅ Download complete")
+    }
+    
+    /// Download a HuggingFace repository using URLSession (for users without git)
+    private static func downloadRepoWithURLSession(_ repo: Repo, to directory: URL) async throws {
+        logger.info("📥 Downloading \(repo.folderName) using URLSession...")
+        
+        let repoPath = directory.appendingPathComponent(repo.folderName)
+        try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
+        
+        // HuggingFace API to get file list
+        let apiURL = URL(string: "https://huggingface.co/api/models/\(repo.rawValue)/tree/main")!
+        
+        let (data, response) = try await URLSession.shared.data(from: apiURL)
+        
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        
+        // Parse JSON response
+        struct HFFile: Codable {
+            let path: String
+            let lfs: LFSInfo?
+            
+            struct LFSInfo: Codable {
+                let size: Int
+                let sha256: String
+                let pointer_size: Int
+            }
+        }
+        
+        let files = try JSONDecoder().decode([HFFile].self, from: data)
+        
+        // Download each file
+        for file in files {
+            // Skip non-essential files
+            if file.path.hasPrefix(".") || file.path == "README.md" || file.path == "config.json" {
+                continue
+            }
+            
+            // Only download .mlmodelc files (the actual models we need)
+            guard file.path.hasSuffix(".mlmodelc") else {
+                continue
+            }
+            
+            logger.info("📥 Downloading \(file.path) (\(file.lfs?.size ?? 0) bytes)...")
+            
+            let fileURL = repoPath.appendingPathComponent(file.path)
+            
+            // Create subdirectories if needed
+            let fileDir = fileURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: fileDir, withIntermediateDirectories: true)
+            
+            // Download URL - use resolve endpoint for LFS files
+            let downloadURL = URL(string: "https://huggingface.co/\(repo.rawValue)/resolve/main/\(file.path)")!
+            
+            do {
+                let (fileData, fileResponse) = try await URLSession.shared.data(from: downloadURL)
+                
+                guard let httpFileResponse = fileResponse as? HTTPURLResponse, 
+                      httpFileResponse.statusCode == 200 else {
+                    throw URLError(.badServerResponse, userInfo: [
+                        NSLocalizedDescriptionKey: "Failed to download \(file.path): HTTP \(httpFileResponse.statusCode)"
+                    ])
+                }
+                
+                try fileData.write(to: fileURL)
+                logger.info("✅ Downloaded \(file.path) (\(fileData.count) bytes)")
+            } catch {
+                logger.error("❌ Failed to download \(file.path): \(error)")
+                throw error
+            }
+        }
+        
+        logger.info("✅ Downloaded all files for \(repo.folderName)")
     }
 
 }
