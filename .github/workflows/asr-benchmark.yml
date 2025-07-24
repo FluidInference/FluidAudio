@@ -38,7 +38,7 @@ jobs:
     - name: Run Benchmarks
       id: benchmark
       run: |
-        MAX_FILES="10"
+        MAX_FILES="100"
         BENCHMARK_START=$(date +%s)
 
         # Run in parallel

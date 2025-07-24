@@ -47,7 +47,7 @@ jobs:
 
           swift run fluidaudio vad-benchmark \
             --dataset mini100 \
-            --num-files 10 \
+            --num-files 100 \
             --threshold 0.445
 
           BENCHMARK_END=$(date +%s)
