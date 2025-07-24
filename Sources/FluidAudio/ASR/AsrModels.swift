@@ -10,7 +10,7 @@ import Foundation
 import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
-public struct AsrModels: @unchecked Sendable {
+public struct AsrModels {
     public let melspectrogram: MLModel
     public let encoder: MLModel
     public let decoder: MLModel
@@ -33,7 +33,6 @@ public struct AsrModels: @unchecked Sendable {
         self.configuration = configuration
     }
 }
-
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
@@ -67,7 +66,7 @@ extension AsrModels {
             (melPath, "Mel-spectrogram"),
             (encoderPath, "Encoder"),
             (decoderPath, "Decoder"),
-            (jointPath, "Joint")
+            (jointPath, "Joint"),
         ]
 
         for (path, name) in requiredPaths {
@@ -108,7 +107,6 @@ extension AsrModels {
         return config
     }
 }
-
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
@@ -151,7 +149,7 @@ extension AsrModels {
             ModelNames.melspectrogram,
             ModelNames.encoder,
             ModelNames.decoder,
-            ModelNames.joint
+            ModelNames.joint,
         ]
         let modelsPresent = modelFiles.allSatisfy { fileName in
             let path = directory.appendingPathComponent(fileName)
@@ -165,14 +163,16 @@ extension AsrModels {
     }
 
     public static func defaultCacheDirectory() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        return
+            appSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("Parakeet", isDirectory: true)
     }
 }
-
 
 public enum AsrModelsError: LocalizedError {
     case modelNotFound(String, URL)
