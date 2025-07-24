@@ -29,7 +29,6 @@ public class DownloadUtils {
             if FileManager.default.fileExists(atPath: sourceModelPath.path) {
                 print("✅ Source model found at: \(sourceModelPath.path)")
             } else {
-                print("❌ Source model NOT found at: \(sourceModelPath.path)")
                 // List what's actually in the snapshot directory
                 do {
                     let contents = try FileManager.default.contentsOfDirectory(
@@ -75,7 +74,6 @@ public class DownloadUtils {
 
             // Copy (not move) the downloaded model to the target location to preserve the original
             try FileManager.default.copyItem(at: sourceModelPath, to: outputPath)
-            print("✅ Model copied to: \(outputPath.path)")
 
         } catch {
             throw NSError(
