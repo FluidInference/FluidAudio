@@ -18,7 +18,7 @@ jobs:
 
     - uses: swift-actions/setup-swift@v2
       with:
-        swift-version: "6.0"
+        swift-version: "6.1"
 
     - name: Cache Dependencies
       uses: actions/cache@v4
@@ -34,10 +34,10 @@ jobs:
 
     - name: Download Models if Needed
       run: |
-        # New DownloadUtils uses the actual repo name as folder
         MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
-        
-        # Check if all models exist in the new location
+        VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
+
+        # Check if all models exist
         if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
            [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
            [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
@@ -45,9 +45,22 @@ jobs:
            [ -f "$MODELS_DIR/parakeet_vocab.json" ]; then
           echo "✅ Models already cached"
         else
-          echo "📥 Models not found, will be downloaded by DownloadUtils"
-          # Remove old location if it exists
-          rm -rf "$HOME/Library/Application Support/FluidAudio/Models/Parakeet"
+          echo "📥 Downloading models..."
+          rm -rf "$MODELS_DIR"
+          mkdir -p "$MODELS_DIR"
+
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
+          cd parakeet-tdt-0.6b-v2-coreml
+          git lfs pull --include="*.mlmodelc/**"
+
+          mv *.mlmodelc "$MODELS_DIR/"
+          mv parakeet_vocab.json "$MODELS_DIR/"
+
+          cd /
+          rm -rf "$TEMP_DIR"
+          echo "✅ Models downloaded"
         fi
 
     - name: Run Benchmarks

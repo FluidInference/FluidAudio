@@ -267,9 +267,25 @@ public class DownloadUtils {
                 progressHandler: progressHandler
             )
 
-            // Move completed file
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: tempURL, to: destination)
+            // Verify file size before moving
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: tempURL.path),
+               let fileSize = attrs[.size] as? Int64 {
+                if fileSize != expectedSize {
+                    logger.warning("⚠️ Downloaded file size mismatch for \(path): got \(fileSize), expected \(expectedSize)")
+                }
+            }
+            
+            // Move completed file with better error handling
+            do {
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.moveItem(at: tempURL, to: destination)
+            } catch {
+                // In CI, file operations might fail due to sandbox restrictions
+                // Try copying instead of moving as a fallback
+                logger.warning("Move failed for \(path), attempting copy: \(error)")
+                try FileManager.default.copyItem(at: tempURL, to: destination)
+                try? FileManager.default.removeItem(at: tempURL)
+            }
             logger.info("✅ Downloaded \(path)")
 
         } catch {
@@ -293,74 +309,32 @@ public class DownloadUtils {
         // Use URLSession download task with progress
         let session = URLSession.shared
         
-        // For large files, use delegate-based download for progress
-        if expectedSize > 100_000_000 {
-            // Create download task
-            let (bytes, response) = try await session.bytes(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
-            
-            // Create file for writing
-            FileManager.default.createFile(atPath: destination.path, contents: nil)
-            guard let fileHandle = FileHandle(forWritingAtPath: destination.path) else {
-                throw URLError(.cannotCreateFile)
-            }
-            defer { try? fileHandle.close() }
-            
-            // Download with progress tracking
-            var bytesReceived: Int64 = 0
-            let chunkSize = 200 * 1024 * 1024 // 200MB chunks for progress updates
-            var buffer = Data()
-            buffer.reserveCapacity(chunkSize)
-            
-            for try await byte in bytes {
-                buffer.append(byte)
-                
-                // Write and report progress every 200MB
-                if buffer.count >= chunkSize {
-                    try fileHandle.write(contentsOf: buffer)
-                    bytesReceived += Int64(buffer.count)
-                    buffer.removeAll(keepingCapacity: true)
-                    
-                    // Report progress
-                    let progress = Double(bytesReceived) / Double(expectedSize)
-                    progressHandler?(min(progress, 1.0))
-                    
-                    // Log for very large files
-                    logger.info("Downloaded \(formatBytes(Int(bytesReceived))) / \(formatBytes(Int(expectedSize)))")
-                }
-            }
-            
-            // Write remaining data
-            if !buffer.isEmpty {
-                try fileHandle.write(contentsOf: buffer)
-                bytesReceived += Int64(buffer.count)
-                progressHandler?(1.0)
-            }
-            
-        } else {
-            // For smaller files, just download directly
-            let (tempFile, response) = try await session.download(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
-            
-            // Ensure parent directory exists before moving
-            let parentDir = destination.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
-            
-            // Move to destination
+        // Always use URLSession.download for reliability (proven to work in PR #32)
+        let (tempFile, response) = try await session.download(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        
+        // Ensure parent directory exists before moving
+        let parentDir = destination.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        
+        // Move to destination with better error handling for CI
+        do {
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: tempFile, to: destination)
-            
-            // Report complete
-            progressHandler?(1.0)
+        } catch {
+            // In CI, URLSession might download to a different temp location
+            // Try copying instead of moving as a fallback
+            logger.warning("Move failed, attempting copy: \(error)")
+            try FileManager.default.copyItem(at: tempFile, to: destination)
+            try? FileManager.default.removeItem(at: tempFile)
         }
+        
+        // Report complete
+        progressHandler?(1.0)
     }
 
     /// Format bytes for display
