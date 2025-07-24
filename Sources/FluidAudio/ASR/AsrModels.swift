@@ -53,50 +53,41 @@ extension AsrModels {
             .appendingPathComponent("FluidAudio")
     }
 
-    /// Load ASR models from a directory
+    /// Load ASR models, downloading them if necessary
     /// - Parameters:
-    ///   - directory: Directory containing the model files
+    ///   - directory: Base directory for model storage (defaults to Application Support)
     ///   - configuration: MLModel configuration to use (defaults to optimized settings)
     /// - Returns: Loaded ASR models
     public static func load(
-        from directory: URL,
+        from directory: URL? = nil,
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {
-        logger.info("Loading ASR models from: \(directory.path)")
-
+        let baseDir = directory ?? baseDirectory()
         let config = configuration ?? defaultConfiguration()
-        let melPath = directory.appendingPathComponent(ModelNames.melspectrogram)
-        let encoderPath = directory.appendingPathComponent(ModelNames.encoder)
-        let decoderPath = directory.appendingPathComponent(ModelNames.decoder)
-        let jointPath = directory.appendingPathComponent(ModelNames.joint)
-        let fileManager = FileManager.default
-        let requiredPaths = [
-            (melPath, "Mel-spectrogram"),
-            (encoderPath, "Encoder"),
-            (decoderPath, "Decoder"),
-            (jointPath, "Joint")
-        ]
 
-        for (path, name) in requiredPaths {
-            guard fileManager.fileExists(atPath: path.path) else {
-                throw AsrModelsError.modelNotFound(name, path)
-            }
+        // Download/load models using DownloadUtils (handles caching automatically)
+        let models = try await DownloadUtils.loadModels(
+            .parakeet,
+            modelNames: [ModelNames.melspectrogram, ModelNames.encoder, ModelNames.decoder, ModelNames.joint],
+            directory: baseDir,
+            computeUnits: config.computeUnits
+        )
+
+        // Create AsrModels from loaded models
+        guard let melModel = models[ModelNames.melspectrogram],
+              let encoderModel = models[ModelNames.encoder],
+              let decoderModel = models[ModelNames.decoder],
+              let jointModel = models[ModelNames.joint] else {
+            throw AsrModelsError.loadingFailed("Failed to load all ASR models")
         }
-        async let melModel = MLModel.load(contentsOf: melPath, configuration: config)
-        async let encoderModel = MLModel.load(contentsOf: encoderPath, configuration: config)
-        async let decoderModel = MLModel.load(contentsOf: decoderPath, configuration: config)
-        async let jointModel = MLModel.load(contentsOf: jointPath, configuration: config)
 
-        let models = try await AsrModels(
+        return AsrModels(
             melspectrogram: melModel,
             encoder: encoderModel,
             decoder: decoderModel,
             joint: jointModel,
             configuration: config
         )
-
-        logger.info("Successfully loaded all ASR models")
-        return models
     }
 
 
@@ -114,35 +105,12 @@ extension AsrModels {
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
 
+    /// Alias for load() - kept for backward compatibility
     public static func downloadAndLoad(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {
-        let baseDir = directory ?? baseDirectory()
-
-        // Download/load models
-        let models = try await DownloadUtils.loadModels(
-            .parakeet,
-            modelNames: [ModelNames.melspectrogram, ModelNames.encoder, ModelNames.decoder, ModelNames.joint],
-            directory: baseDir,
-            computeUnits: configuration?.computeUnits ?? defaultConfiguration().computeUnits
-        )
-
-        // Create AsrModels from loaded models
-        guard let melModel = models[ModelNames.melspectrogram],
-              let encoderModel = models[ModelNames.encoder],
-              let decoderModel = models[ModelNames.decoder],
-              let jointModel = models[ModelNames.joint] else {
-            throw AsrModelsError.loadingFailed("Failed to load all ASR models")
-        }
-
-        return AsrModels(
-            melspectrogram: melModel,
-            encoder: encoderModel,
-            decoder: decoderModel,
-            joint: jointModel,
-            configuration: configuration ?? defaultConfiguration()
-        )
+        return try await load(from: directory, configuration: configuration)
     }
 
     public static func modelsExist(at directory: URL) -> Bool {
