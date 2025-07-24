@@ -272,6 +272,7 @@ public final class DiarizerManager {
         models.map { ($0.downloadTime.timeInterval, $0.compilationTime.timeInterval) } ?? (0, 0)
     }
 
+
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
         self.models = consume models

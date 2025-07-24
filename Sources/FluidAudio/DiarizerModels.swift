@@ -110,7 +110,7 @@ extension DiarizerModels {
             d.formatted(.time(pattern: .minuteSecond(padMinuteToLength: 0, fractionalSecondsLength: 3)))
         }
         logger.info(
-            "Models loaded successfully in \(format(downloadTime + compilationTime)) (download: \(format(downloadTime)), compilation: \(format(compilationTime)))"
+            "Models loaded successfully in \(format(downloadTime + compilationTime)) (download: \(format(downloadTime)), compilation: \(format(compilationTime))"
         )
 
         return DiarizerModels(
