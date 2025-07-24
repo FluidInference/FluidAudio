@@ -177,6 +177,38 @@ public struct ModelPaths: Sendable {
     }
 }
 
+/// Convenience struct to hold pre-loaded diarization models
+public struct DiarizationModels {
+    public let segmentation: MLModel
+    public let embedding: MLModel
+    
+    public init(segmentation: MLModel, embedding: MLModel) {
+        self.segmentation = segmentation
+        self.embedding = embedding
+    }
+    
+    /// Load diarization models from default location
+    public static func load() async throws -> DiarizationModels {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let baseDirectory = appSupport.appendingPathComponent("FluidAudio")
+        
+        let models = try await DownloadUtils.loadModels(
+            .diarizer,
+            modelNames: ["pyannote_segmentation.mlmodelc", "wespeaker.mlmodelc"],
+            directory: baseDirectory
+        )
+        
+        guard let segmentation = models["pyannote_segmentation.mlmodelc"],
+              let embedding = models["wespeaker.mlmodelc"] else {
+            throw DiarizerError.modelDownloadFailed
+        }
+        
+        return DiarizationModels(segmentation: segmentation, embedding: embedding)
+    }
+}
+
 /// Audio validation result
 public struct AudioValidationResult: Sendable {
     public let isValid: Bool
@@ -273,6 +305,7 @@ public final class DiarizerManager {
         return (modelDownloadTime, modelCompilationTime)
     }
 
+    /// Initialize with auto-downloaded models
     public func initialize() async throws {
         let initStartTime = Date()
         logger.info("Initializing diarization system")
@@ -293,6 +326,23 @@ public final class DiarizerManager {
         logger.info(
             "Diarization system initialized successfully in \(String(format: "%.2f", totalInitTime))s (download: \(String(format: "%.2f", self.modelDownloadTime))s, compilation: \(String(format: "%.2f", self.modelCompilationTime))s)"
         )
+    }
+    
+    /// Initialize with pre-loaded models
+    public func initialize(segmentationModel: MLModel, embeddingModel: MLModel) async throws {
+        logger.info("Initializing diarization system with pre-loaded models")
+        
+        self.segmentationModel = segmentationModel
+        self.embeddingModel = embeddingModel
+        self.modelDownloadTime = 0 // No download needed
+        self.modelCompilationTime = 0 // Already compiled
+        
+        logger.info("Diarization system initialized with pre-loaded models")
+    }
+    
+    /// Initialize with pre-loaded models using convenience struct
+    public func initialize(models: DiarizationModels) async throws {
+        try await initialize(segmentationModel: models.segmentation, embeddingModel: models.embedding)
     }
 
     /// Load models with automatic recovery on compilation failures
