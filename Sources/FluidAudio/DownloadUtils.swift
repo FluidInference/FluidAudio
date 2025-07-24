@@ -41,14 +41,14 @@ public class DownloadUtils {
     }
 
 
-    /// Download repo (if needed) and load CoreML models
+    /// Internal helper to download repo (if needed) and load CoreML models
     /// - Parameters:
     ///   - repo: The HuggingFace repository to download
     ///   - modelNames: Array of model file names to load (e.g., ["model.mlmodelc"])
     ///   - directory: Base directory to store repos (e.g., ~/Library/Application Support/FluidAudio)
     ///   - computeUnits: CoreML compute units to use (default: CPU and Neural Engine)
     /// - Returns: Dictionary mapping model names to loaded MLModel instances
-    public static func loadModelsOnce(
+    private static func loadModelsOnce(
         _ repo: Repo,
         modelNames: [String],
         directory: URL,
