@@ -1,5 +1,5 @@
-import Foundation
 import FluidAudio
+import Foundation
 
 /// Handler for the 'download' command - downloads benchmark datasets
 enum DownloadCommand {
@@ -44,7 +44,8 @@ enum DownloadCommand {
         case "librispeech-test-clean":
             let benchmark = ASRBenchmark()
             do {
-                try await benchmark.downloadLibriSpeech(subset: "test-clean", forceDownload: forceDownload)
+                try await benchmark.downloadLibriSpeech(
+                    subset: "test-clean", forceDownload: forceDownload)
             } catch {
                 print("❌ Failed to download LibriSpeech test-clean: \(error)")
                 exit(1)
@@ -52,7 +53,8 @@ enum DownloadCommand {
         case "librispeech-test-other":
             let benchmark = ASRBenchmark()
             do {
-                try await benchmark.downloadLibriSpeech(subset: "test-other", forceDownload: forceDownload)
+                try await benchmark.downloadLibriSpeech(
+                    subset: "test-other", forceDownload: forceDownload)
             } catch {
                 print("❌ Failed to download LibriSpeech test-other: \(error)")
                 exit(1)
@@ -60,8 +62,9 @@ enum DownloadCommand {
         case "parakeet-models":
             do {
                 let modelsDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/FluidAudio/Models/Parakeet")
-                try await DownloadUtils.downloadParakeetModelsIfNeeded(to: modelsDir)
+                    .appendingPathComponent(
+                        "Library/Application Support/FluidAudio/Models/Parakeet")
+                try await AsrModels.download(to: modelsDir)
                 print("✅ Parakeet models downloaded successfully")
             } catch {
                 print("❌ Failed to download Parakeet models: \(error)")
@@ -77,18 +80,18 @@ enum DownloadCommand {
             exit(1)
         }
     }
-    
+
     private static func printUsage() {
         print(
             """
-            
+
             Download Command Usage:
                 fluidaudio download [options]
-            
+
             Options:
                 --dataset <name>    Dataset to download (default: all)
                 --force            Force re-download even if exists
-            
+
             Available datasets:
                 ami-sdm                 AMI SDM subset
                 ami-ihm                 AMI IHM subset
@@ -99,7 +102,7 @@ enum DownloadCommand {
                 librispeech-test-other  LibriSpeech test-other subset
                 parakeet-models         Parakeet ASR models
                 all                     All diarization datasets
-            
+
             Examples:
                 fluidaudio download --dataset ami-sdm
                 fluidaudio download --dataset librispeech-test-clean --force

@@ -4,6 +4,21 @@ import Foundation
 /// Utility class for downloading CoreML models from Hugging Face
 public class DownloadUtils {
 
+    public static func checkIfConfigExists(repoPath: String) async {
+        let configURL = URL(
+            string: "https://huggingface.co/\(repoPath)/resolve/main/config.json"
+        )!
+
+        var request = URLRequest(url: configURL)
+        request.httpMethod = "HEAD"
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            print("config.json does not exist in repository root for \(repoPath)")
+        }
+    }
+
     /// Download a complete .mlmodelc bundle from Hugging Face
     public static func downloadMLModelBundle(
         repoPath: String,
@@ -31,23 +46,7 @@ public class DownloadUtils {
             #endif
         }
 
-        // Download config.json from the root of the repository if it exists
-        let configURL = URL(
-            string: "https://huggingface.co/\(repoPath)/resolve/main/config.json"
-        )!
-
-        do {
-            let (tempFile, response) = try await URLSession.shared.download(from: configURL)
-
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                let configDestination = outputPath.deletingLastPathComponent()
-                    .appendingPathComponent("config.json")
-                try? FileManager.default.removeItem(at: configDestination)
-                try FileManager.default.moveItem(at: tempFile, to: configDestination)
-            }
-        } catch {
-            // config.json is optional, so we don't throw if it fails
-        }
+        await checkIfConfigExists(repoPath: repoPath)
 
         let bundleFiles = [
             "model.mil",
@@ -119,17 +118,7 @@ public class DownloadUtils {
         // Create the folder
         try FileManager.default.createDirectory(at: folderPath, withIntermediateDirectories: true)
 
-        // Download config.json from the root of the repository if it exists
-        let configURL =
-            "https://huggingface.co/FluidInference/silero-vad-coreml/resolve/main/config.json"
-        let configDestination = folderPath.deletingLastPathComponent().appendingPathComponent(
-            "config.json")
-
-        do {
-            try await downloadFile(from: configURL, to: configDestination)
-        } catch {
-            // config.json is optional, so we don't throw if it fails
-        }
+        await checkIfConfigExists(repoPath: "FluidInference/silero-vad-coreml")
 
         // Download the main files inside the .mlmodelc folder
         let modelFiles = [
@@ -293,7 +282,6 @@ public class DownloadUtils {
                 }
             }
         }
-
         return missingModels
     }
 
@@ -308,99 +296,4 @@ public class DownloadUtils {
         try data.write(to: destinationPath)
     }
 
-    public static func downloadParakeetModelsIfNeeded(to modelsDirectory: URL) async throws {
-        let models = [
-            ("Melspectogram", modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")),
-            ("ParakeetEncoder", modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")),
-            ("ParakeetDecoder", modelsDirectory.appendingPathComponent("ParakeetDecoder.mlmodelc")),
-            ("RNNTJoint", modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc")),
-        ]
-
-        var missingModels: [String] = []
-        for (name, path) in models {
-            if !FileManager.default.fileExists(atPath: path.path) {
-                missingModels.append(name)
-                print("Model \(name) not found at \(path.path)")
-            }
-        }
-
-        let repoPath = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
-
-        // Download config.json from the root of the repository if it exists
-        let configPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("config.json")
-
-        if !FileManager.default.fileExists(atPath: configPath.path) {
-            let configURL = "https://huggingface.co/\(repoPath)/resolve/main/config.json"
-            do {
-                try await downloadFile(from: configURL, to: configPath)
-                print("✅ Downloaded config.json")
-            } catch {
-                // config.json is optional, so we don't throw if it fails
-            }
-        }
-
-        if !missingModels.isEmpty {
-            print("Downloading \(missingModels.count) missing Parakeet models...")
-
-            try FileManager.default.createDirectory(
-                at: modelsDirectory, withIntermediateDirectories: true)
-
-            for modelName in missingModels {
-                print("Downloading \(modelName)...")
-
-                do {
-                    let modelPath = modelsDirectory.appendingPathComponent("\(modelName).mlmodelc")
-
-                    // Download the compiled model bundle
-                    try await downloadMLModelBundle(
-                        repoPath: repoPath,
-                        modelName: modelName,
-                        outputPath: modelPath
-                    )
-
-                    print("✅ Downloaded \(modelName).mlmodelc")
-                } catch {
-                    print("Failed to download \(modelName): \(error)")
-                    throw error
-                }
-            }
-
-            // Download vocabulary file if missing
-            let vocabPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("parakeet_vocab.json")
-
-            if !FileManager.default.fileExists(atPath: vocabPath.path) {
-                print("Downloading vocabulary file...")
-                let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/parakeet_vocab.json"
-
-                do {
-                    try await downloadFile(from: vocabURL, to: vocabPath)
-                    print("✅ Downloaded vocabulary file")
-                } catch {
-                    print("Failed to download vocabulary: \(error)")
-                    throw error
-                }
-            }
-        } else {
-            print("All Parakeet models already present")
-        }
-
-        // Always check for vocabulary file (outside the if statement)
-        let vocabPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("parakeet_vocab.json")
-
-        if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            print("Downloading vocabulary file...")
-            let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/parakeet_vocab.json"
-
-            do {
-                try await downloadFile(from: vocabURL, to: vocabPath)
-                print("✅ Downloaded vocabulary file")
-            } catch {
-                print("Failed to download vocabulary: \(error)")
-                throw error
-            }
-        }
-    }
 }

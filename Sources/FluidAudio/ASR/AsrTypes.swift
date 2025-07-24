@@ -1,10 +1,3 @@
-//
-//  AsrTypes.swift
-//  FluidAudio
-//
-//  Copyright © 2025 Brandon Weng. All rights reserved.
-//
-
 import Foundation
 
 // MARK: - Configuration
@@ -57,7 +50,10 @@ public struct ASRResult: Sendable {
     public let processingTime: TimeInterval
     public let tokenTimings: [TokenTiming]?
 
-    public init(text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval, tokenTimings: [TokenTiming]? = nil) {
+    public init(
+        text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval,
+        tokenTimings: [TokenTiming]? = nil
+    ) {
         self.text = text
         self.confidence = confidence
         self.duration = duration
@@ -73,7 +69,10 @@ public struct TokenTiming: Sendable {
     public let endTime: TimeInterval
     public let confidence: Float
 
-    public init(token: String, tokenId: Int, startTime: TimeInterval, endTime: TimeInterval, confidence: Float) {
+    public init(
+        token: String, tokenId: Int, startTime: TimeInterval, endTime: TimeInterval,
+        confidence: Float
+    ) {
         self.token = token
         self.tokenId = tokenId
         self.startTime = startTime
@@ -90,7 +89,7 @@ public enum ASRError: Error, LocalizedError {
     case modelLoadFailed
     case processingFailed(String)
     case modelCompilationFailed
-    
+
     public var errorDescription: String? {
         switch self {
         case .notInitialized:

@@ -1,23 +1,19 @@
-//
-//  AsrBenchmarkTypes.swift
-//  FluidAudio
-//
-//  Copyright © 2025 Brandon Weng. All rights reserved.
-//
-
 import Foundation
 
 /// ASR evaluation metrics
 public struct ASRMetrics: Sendable {
-    public let wer: Double           // Word Error Rate
-    public let cer: Double           // Character Error Rate
+    public let wer: Double  // Word Error Rate
+    public let cer: Double  // Character Error Rate
     public let insertions: Int
     public let deletions: Int
     public let substitutions: Int
     public let totalWords: Int
     public let totalCharacters: Int
 
-    public init(wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int, totalCharacters: Int) {
+    public init(
+        wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int,
+        totalWords: Int, totalCharacters: Int
+    ) {
         self.wer = wer
         self.cer = cer
         self.insertions = insertions
@@ -36,9 +32,12 @@ public struct ASRBenchmarkResult: Sendable {
     public let metrics: ASRMetrics
     public let processingTime: TimeInterval
     public let audioLength: TimeInterval
-    public let rtfx: Double            // Real-Time Factor (inverse)
+    public let rtfx: Double  // Real-Time Factor (inverse)
 
-    public init(fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval, audioLength: TimeInterval) {
+    public init(
+        fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics,
+        processingTime: TimeInterval, audioLength: TimeInterval
+    ) {
         self.fileName = fileName
         self.hypothesis = hypothesis
         self.reference = reference
@@ -70,7 +69,10 @@ public struct ASRBenchmarkConfig: Sendable {
     public let debugMode: Bool
     public let longAudioOnly: Bool
 
-    public init(dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false, longAudioOnly: Bool = false) {
+    public init(
+        dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil,
+        debugMode: Bool = false, longAudioOnly: Bool = false
+    ) {
         self.dataset = dataset
         self.subset = subset
         self.maxFiles = maxFiles

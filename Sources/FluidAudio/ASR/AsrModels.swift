@@ -1,10 +1,3 @@
-//
-//  AsrModels.swift
-//  FluidAudio
-//
-//  Copyright © 2025 Brandon Weng. All rights reserved.
-//
-
 @preconcurrency import CoreML
 import Foundation
 import OSLog
@@ -105,7 +98,7 @@ extension AsrModels {
                 }
 
                 // Re-download models
-                try await DownloadUtils.downloadParakeetModelsIfNeeded(to: directory)
+                try await downloadParakeetModelsIfNeeded(to: directory)
             }
         )
 
@@ -144,6 +137,7 @@ extension AsrModels {
             logger.info("ASR models already present at: \(targetDir.path)")
             return targetDir
         }
+
         if force {
             let fileManager = FileManager.default
             if fileManager.fileExists(atPath: targetDir.path) {
@@ -151,7 +145,7 @@ extension AsrModels {
             }
         }
 
-        try await DownloadUtils.downloadParakeetModelsIfNeeded(to: targetDir)
+        try await downloadParakeetModelsIfNeeded(to: targetDir)
 
         logger.info("Successfully downloaded ASR models")
         return targetDir
@@ -193,6 +187,76 @@ extension AsrModels {
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("Parakeet", isDirectory: true)
+    }
+}
+
+// MARK: - Private Download Utilities
+
+@available(macOS 13.0, iOS 16.0, *)
+extension AsrModels {
+
+    fileprivate static func downloadParakeetModelsIfNeeded(
+        to modelsDirectory: URL,
+        from repoPath: String = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+    ) async throws {
+
+        let models = [
+            ("Melspectogram", modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")),
+            ("ParakeetEncoder", modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")),
+            ("ParakeetDecoder", modelsDirectory.appendingPathComponent("ParakeetDecoder.mlmodelc")),
+            ("RNNTJoint", modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc")),
+        ]
+
+        var missingModels: [String] = []
+        for (name, path) in models {
+            if !FileManager.default.fileExists(atPath: path.path) {
+                missingModels.append(name)
+                logger.info("Model \(name) not found at \(path.path)")
+            }
+        }
+
+        await DownloadUtils.checkIfConfigExists(repoPath: repoPath)
+
+        let vocabPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("parakeet_vocab.json")
+
+        let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/parakeet_vocab.json"
+
+        if !FileManager.default.fileExists(atPath: vocabPath.path) {
+            logger.info("Downloading vocabulary file...")
+            do {
+                try await DownloadUtils.downloadFile(from: vocabURL, to: vocabPath)
+            } catch {
+                throw error
+            }
+        }
+
+        if !missingModels.isEmpty {
+            logger.info("Downloading \(missingModels.count) missing Parakeet models...")
+
+            try FileManager.default.createDirectory(
+                at: modelsDirectory, withIntermediateDirectories: true)
+
+            for modelName in missingModels {
+                logger.info("Downloading \(modelName)...")
+
+                do {
+                    let modelPath = modelsDirectory.appendingPathComponent("\(modelName).mlmodelc")
+
+                    // Download the compiled model bundle
+                    try await DownloadUtils.downloadMLModelBundle(
+                        repoPath: repoPath,
+                        modelName: modelName,
+                        outputPath: modelPath
+                    )
+
+                    logger.info("✅ Downloaded \(modelName).mlmodelc")
+                } catch {
+                    logger.error("Failed to download \(modelName): \(error)")
+                    throw error
+                }
+            }
+        }
     }
 }
 
