@@ -1,5 +1,5 @@
-import Foundation
 import CoreML
+import Foundation
 
 /// Utility class for downloading CoreML models from Hugging Face
 public class DownloadUtils {
@@ -12,27 +12,29 @@ public class DownloadUtils {
     ) async throws {
         // Create directory with proper error handling for iOS sandboxing
         do {
-            try FileManager.default.createDirectory(at: outputPath, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: outputPath, withIntermediateDirectories: true)
         } catch {
             #if os(iOS)
-            // On iOS, provide more context for debugging sandboxing issues
-            throw NSError(
-                domain: "FluidAudioDownloadError",
-                code: 1001,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to create model directory on iOS. Path: \(outputPath.path)",
-                    NSUnderlyingErrorKey: error
-                ]
-            )
+                // On iOS, provide more context for debugging sandboxing issues
+                throw NSError(
+                    domain: "FluidAudioDownloadError",
+                    code: 1001,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Failed to create model directory on iOS. Path: \(outputPath.path)",
+                        NSUnderlyingErrorKey: error,
+                    ]
+                )
             #else
-            throw error
+                throw error
             #endif
         }
 
         let bundleFiles = [
             "model.mil",
             "coremldata.bin",
-            "metadata.json"
+            "metadata.json",
         ]
 
         let weightFiles = [
@@ -40,7 +42,10 @@ public class DownloadUtils {
         ]
 
         for fileName in bundleFiles {
-            let fileURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(fileName)")!
+            let fileURL = URL(
+                string:
+                    "https://huggingface.co/\(repoPath)/resolve/main/\(modelName).mlmodelc/\(fileName)"
+            )!
 
             do {
                 let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
@@ -57,27 +62,31 @@ public class DownloadUtils {
                     }
                 }
             } catch {
-                // For critical files, create minimal versions
-                if fileName == "coremldata.bin" {
-                    let destinationPath = outputPath.appendingPathComponent(fileName)
-                    try Data().write(to: destinationPath)
-                } else if fileName == "metadata.json" {
+                // Only create placeholders for truly optional files
+                if fileName == "metadata.json" {
                     let destinationPath = outputPath.appendingPathComponent(fileName)
                     try "{}".write(to: destinationPath, atomically: true, encoding: .utf8)
+                } else {
+                    // For critical files like coremldata.bin and model.mil, let the error propagate
+                    throw error
                 }
             }
         }
 
         // Download weight files
         for weightFile in weightFiles {
-            let fileURL = URL(string: "https://huggingface.co/\(repoPath)/resolve/main/\(modelName)/\(weightFile)")!
+            let fileURL = URL(
+                string:
+                    "https://huggingface.co/\(repoPath)/resolve/main/\(modelName).mlmodelc/\(weightFile)"
+            )!
 
             let (tempFile, response) = try await URLSession.shared.download(from: fileURL)
 
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                 let destinationPath = outputPath.appendingPathComponent(weightFile)
                 let weightsDir = destinationPath.deletingLastPathComponent()
-                try FileManager.default.createDirectory(at: weightsDir, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: weightsDir, withIntermediateDirectories: true)
                 try? FileManager.default.removeItem(at: destinationPath)
                 try FileManager.default.moveItem(at: tempFile, to: destinationPath)
             }
@@ -97,10 +106,11 @@ public class DownloadUtils {
             "coremldata.bin",
             "model.espresso.net",
             "model.espresso.shape",
-            "model.espresso.weights"
+            "model.espresso.weights",
         ]
 
-        let baseURL = "https://huggingface.co/FluidInference/silero-vad-coreml/resolve/main/\(folderName)"
+        let baseURL =
+            "https://huggingface.co/FluidInference/silero-vad-coreml/resolve/main/\(folderName)"
 
         for fileName in modelFiles {
             let fileURL = "\(baseURL)/\(fileName)"
@@ -112,7 +122,8 @@ public class DownloadUtils {
         let subDirs = ["analytics", "model", "neural_network_optionals"]
         for subDir in subDirs {
             let subDirPath = folderPath.appendingPathComponent(subDir)
-            try FileManager.default.createDirectory(at: subDirPath, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: subDirPath, withIntermediateDirectories: true)
 
             let subFileURL = "\(baseURL)/\(subDir)/coremldata.bin"
             let subDestinationPath = subDirPath.appendingPathComponent("coremldata.bin")
@@ -223,8 +234,6 @@ public class DownloadUtils {
         throw URLError(.unknown)
     }
 
-
-
     /// Check if a model is properly compiled
     public static func isModelCompiled(at url: URL) -> Bool {
         let coreMLDataPath = url.appendingPathComponent("coremldata.bin")
@@ -243,7 +252,8 @@ public class DownloadUtils {
             } else {
                 // Check for corrupted or incomplete downloads
                 do {
-                    let attributes = try FileManager.default.attributesOfItem(atPath: modelPath.path)
+                    let attributes = try FileManager.default.attributesOfItem(
+                        atPath: modelPath.path)
                     if let fileSize = attributes[.size] as? Int64, fileSize < 1000 {
                         missingModels.append(modelName)
                         try? FileManager.default.removeItem(at: modelPath)
@@ -257,7 +267,9 @@ public class DownloadUtils {
         return missingModels
     }
 
-    public static func downloadVocabularySync(from urlString: String, to destinationPath: URL) throws {
+    public static func downloadVocabularySync(from urlString: String, to destinationPath: URL)
+        throws
+    {
         guard let url = URL(string: urlString) else {
             throw URLError(.badURL)
         }
@@ -271,7 +283,7 @@ public class DownloadUtils {
             ("Melspectogram", modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")),
             ("ParakeetEncoder", modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")),
             ("ParakeetDecoder", modelsDirectory.appendingPathComponent("ParakeetDecoder.mlmodelc")),
-            ("RNNTJoint", modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc"))
+            ("RNNTJoint", modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc")),
         ]
 
         var missingModels: [String] = []
@@ -285,7 +297,8 @@ public class DownloadUtils {
         if !missingModels.isEmpty {
             print("Downloading \(missingModels.count) missing Parakeet models...")
 
-            try FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: modelsDirectory, withIntermediateDirectories: true)
 
             let repoPath = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
 
@@ -308,8 +321,43 @@ public class DownloadUtils {
                     throw error
                 }
             }
+
+            // Download vocabulary file if missing
+            let vocabPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("parakeet_vocab.json")
+
+            if !FileManager.default.fileExists(atPath: vocabPath.path) {
+                print("Downloading vocabulary file...")
+                let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/parakeet_vocab.json"
+
+                do {
+                    try await downloadFile(from: vocabURL, to: vocabPath)
+                    print("✅ Downloaded vocabulary file")
+                } catch {
+                    print("Failed to download vocabulary: \(error)")
+                    throw error
+                }
+            }
         } else {
             print("All Parakeet models already present")
+        }
+
+        // Always check for vocabulary file (outside the if statement)
+        let repoPath = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+        let vocabPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("parakeet_vocab.json")
+
+        if !FileManager.default.fileExists(atPath: vocabPath.path) {
+            print("Downloading vocabulary file...")
+            let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/parakeet_vocab.json"
+
+            do {
+                try await downloadFile(from: vocabURL, to: vocabPath)
+                print("✅ Downloaded vocabulary file")
+            } catch {
+                print("Failed to download vocabulary: \(error)")
+                throw error
+            }
         }
     }
 }

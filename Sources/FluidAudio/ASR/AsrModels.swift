@@ -74,17 +74,39 @@ extension AsrModels {
                 throw AsrModelsError.modelNotFound(name, path)
             }
         }
-        async let melModel = MLModel.load(contentsOf: melPath, configuration: config)
-        async let encoderModel = MLModel.load(contentsOf: encoderPath, configuration: config)
-        async let decoderModel = MLModel.load(contentsOf: decoderPath, configuration: config)
-        async let jointModel = MLModel.load(contentsOf: jointPath, configuration: config)
+        // Load models with auto-recovery
+        let models = try await DownloadUtils.withAutoRecovery(
+            maxRetries: 2,
+            makeAttempt: {
+                async let melModel = MLModel.load(contentsOf: melPath, configuration: config)
+                async let encoderModel = MLModel.load(
+                    contentsOf: encoderPath, configuration: config)
+                async let decoderModel = MLModel.load(
+                    contentsOf: decoderPath, configuration: config)
+                async let jointModel = MLModel.load(contentsOf: jointPath, configuration: config)
 
-        let models = try await AsrModels(
-            melspectrogram: melModel,
-            encoder: encoderModel,
-            decoder: decoderModel,
-            joint: jointModel,
-            configuration: config
+                return try await AsrModels(
+                    melspectrogram: melModel,
+                    encoder: encoderModel,
+                    decoder: decoderModel,
+                    joint: jointModel,
+                    configuration: config
+                )
+            },
+            recovery: {
+                logger.warning("ASR models appear corrupted, attempting recovery...")
+
+                // Delete corrupted models
+                let modelsToDelete = [melPath, encoderPath, decoderPath, jointPath]
+                for modelPath in modelsToDelete {
+                    if FileManager.default.fileExists(atPath: modelPath.path) {
+                        try FileManager.default.removeItem(at: modelPath)
+                    }
+                }
+
+                // Re-download models
+                try await DownloadUtils.downloadParakeetModelsIfNeeded(to: directory)
+            }
         )
 
         logger.info("Successfully loaded all ASR models")
