@@ -116,9 +116,7 @@ extension AsrModels {
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
         config.computeUnits = .cpuAndNeuralEngine
-
         return config
     }
 }
@@ -171,8 +169,7 @@ extension AsrModels {
             let path = directory.appendingPathComponent(fileName)
             return fileManager.fileExists(atPath: path.path)
         }
-        let vocabPath = directory.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(ModelNames.vocabulary)
+        let vocabPath = directory.appendingPathComponent(ModelNames.vocabulary)
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
 
         return modelsPresent && vocabPresent
@@ -201,10 +198,10 @@ extension AsrModels {
     ) async throws {
 
         let models = [
-            ("Melspectogram", modelsDirectory.appendingPathComponent("Melspectogram.mlmodelc")),
-            ("ParakeetEncoder", modelsDirectory.appendingPathComponent("ParakeetEncoder.mlmodelc")),
-            ("ParakeetDecoder", modelsDirectory.appendingPathComponent("ParakeetDecoder.mlmodelc")),
-            ("RNNTJoint", modelsDirectory.appendingPathComponent("RNNTJoint.mlmodelc")),
+            ("Melspectogram", modelsDirectory.appendingPathComponent(ModelNames.melspectrogram)),
+            ("ParakeetEncoder", modelsDirectory.appendingPathComponent(ModelNames.encoder)),
+            ("ParakeetDecoder", modelsDirectory.appendingPathComponent(ModelNames.decoder)),
+            ("RNNTJoint", modelsDirectory.appendingPathComponent(ModelNames.joint)),
         ]
 
         var missingModels: [String] = []
@@ -216,20 +213,6 @@ extension AsrModels {
         }
 
         await DownloadUtils.checkIfConfigExists(repoPath: repoPath)
-
-        let vocabPath = modelsDirectory.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("parakeet_vocab.json")
-
-        let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/parakeet_vocab.json"
-
-        if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            logger.info("Downloading vocabulary file...")
-            do {
-                try await DownloadUtils.downloadFile(from: vocabURL, to: vocabPath)
-            } catch {
-                throw error
-            }
-        }
 
         if !missingModels.isEmpty {
             logger.info("Downloading \(missingModels.count) missing Parakeet models...")
@@ -257,6 +240,10 @@ extension AsrModels {
                 }
             }
         }
+
+        let vocabPath = modelsDirectory.appendingPathComponent(ModelNames.vocabulary)
+        let vocabURL = "https://huggingface.co/\(repoPath)/resolve/main/\(ModelNames.vocabulary)"
+        try await DownloadUtils.downloadFile(from: vocabURL, to: vocabPath)
     }
 }
 
