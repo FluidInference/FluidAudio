@@ -60,7 +60,7 @@ public class DownloadUtils {
         // Download repo if needed
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
-            try await cloneRepo(repo, to: directory)
+            try await downloadRepo(repo, to: directory)
         }
 
         // Configure CoreML
@@ -90,8 +90,8 @@ public class DownloadUtils {
         return models
     }
 
-    /// Clone a HuggingFace repository using git
-    private static func cloneRepo(_ repo: Repo, to directory: URL) async throws {
+    /// Download a HuggingFace repository using git clone
+    private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
         logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
         print("📥 Downloading \(repo.folderName)...")
 
@@ -103,7 +103,7 @@ public class DownloadUtils {
             try? FileManager.default.removeItem(at: tempDir)
         }
 
-        // Clone to temp directory first
+        // Download to temp directory first using git clone
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["clone", "--depth", "1", repo.url]
@@ -120,13 +120,13 @@ public class DownloadUtils {
             let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
             logger.error("❌ Git clone failed: \(errorMessage)")
             throw URLError(.cannotConnectToHost, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to clone repository: \(errorMessage)"
+                NSLocalizedDescriptionKey: "Failed to download repository: \(errorMessage)"
             ])
         }
 
         // Check if Git LFS files need to be pulled
-        let clonedPath = tempDir.appendingPathComponent(repo.folderName)
-        let gitAttributesPath = clonedPath.appendingPathComponent(".gitattributes")
+        let downloadedPath = tempDir.appendingPathComponent(repo.folderName)
+        let gitAttributesPath = downloadedPath.appendingPathComponent(".gitattributes")
 
         if FileManager.default.fileExists(atPath: gitAttributesPath.path) {
             logger.info("📦 Pulling Git LFS files...")
@@ -134,7 +134,7 @@ public class DownloadUtils {
             let lfsProcess = Process()
             lfsProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             lfsProcess.arguments = ["lfs", "pull"]
-            lfsProcess.currentDirectoryURL = clonedPath
+            lfsProcess.currentDirectoryURL = downloadedPath
 
             do {
                 try lfsProcess.run()
@@ -150,11 +150,11 @@ public class DownloadUtils {
         // This should never happen in normal flow, but handle edge cases
         // where deletion failed or was partial during recovery
         if FileManager.default.fileExists(atPath: finalPath.path) {
-            logger.warning("⚠️ Unexpected: directory exists at \(finalPath.lastPathComponent) during clone")
+            logger.warning("⚠️ Unexpected: directory exists at \(finalPath.lastPathComponent) during download")
             try FileManager.default.removeItem(at: finalPath)
         }
         
-        try FileManager.default.moveItem(at: clonedPath, to: finalPath)
+        try FileManager.default.moveItem(at: downloadedPath, to: finalPath)
 
         logger.info("✅ Downloaded \(repo.folderName)")
         print("✅ Download complete")
