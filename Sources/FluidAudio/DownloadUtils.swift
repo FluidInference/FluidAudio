@@ -32,11 +32,31 @@ public class DownloadUtils {
             logger.warning("⚠️ First load failed: \(error.localizedDescription)")
             logger.info("🔄 Deleting cache and re-downloading…")
             let repoPath = directory.appendingPathComponent(repo.folderName)
-            try? FileManager.default.removeItem(at: repoPath)
+            
+            // Force delete with better error handling
+            do {
+                try FileManager.default.removeItem(at: repoPath)
+                logger.info("✅ Successfully deleted \(repo.folderName)")
+            } catch {
+                logger.error("❌ Failed to delete \(repo.folderName): \(error)")
+                // Continue anyway - download might overwrite
+            }
 
             // 2nd attempt after fresh clone
-            return try await loadModelsOnce(repo, modelNames: modelNames,
-                                            directory: directory, computeUnits: computeUnits)
+            do {
+                return try await loadModelsOnce(repo, modelNames: modelNames,
+                                                directory: directory, computeUnits: computeUnits)
+            } catch {
+                logger.error("❌ Second load attempt also failed: \(error)")
+                // If it's a CoreML compilation error, add more context
+                if let nsError = error as NSError?, nsError.domain == "com.apple.CoreML" {
+                    throw URLError(.cannotDecodeContentData, userInfo: [
+                        NSLocalizedDescriptionKey: "CoreML model compilation failed. The models may be corrupted or incompatible with this macOS version.",
+                        NSUnderlyingErrorKey: error
+                    ])
+                }
+                throw error
+            }
         }
     }
 
@@ -76,6 +96,13 @@ public class DownloadUtils {
                     NSFilePathErrorKey: modelPath.path,
                     NSLocalizedDescriptionKey: "Model file not found: \(name)"
                 ])
+            }
+            
+            // Verify model size (CoreML models should be > 1KB at minimum)
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: modelPath.path),
+               let fileSize = attrs[.size] as? Int64,
+               fileSize < 1024 {
+                logger.warning("⚠️ Model \(name) seems too small: \(fileSize) bytes")
             }
 
             do {
