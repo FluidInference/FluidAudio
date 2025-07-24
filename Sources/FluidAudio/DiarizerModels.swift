@@ -1,6 +1,17 @@
 import CoreML
 import OSLog
 
+/// Model file paths
+public struct ModelPaths {
+    public let segmentationPath: URL
+    public let embeddingPath: URL
+    
+    public init(segmentationPath: URL, embeddingPath: URL) {
+        self.segmentationPath = segmentationPath
+        self.embeddingPath = embeddingPath
+    }
+}
+
 // Ideally this would be a non-copyable struct, but there are lots of missing language features
 // and compiler bugs with non-copyable types at the moment. Something to consider for the future
 // as language and compiler support improves.

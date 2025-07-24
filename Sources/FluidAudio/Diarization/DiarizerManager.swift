@@ -123,8 +123,8 @@ public final class DiarizerManager {
     public func initialize(models: DiarizerModels) {
         self.segmentationModel = models.segmentationModel
         self.embeddingModel = models.embeddingModel
-        self.modelDownloadTime = 0 // No download needed
-        self.modelCompilationTime = 0 // Already compiled
+        self.modelDownloadTime = TimeInterval(models.downloadTime.components.seconds)
+        self.modelCompilationTime = TimeInterval(models.compilationTime.components.seconds)
         logger.info("DiarizerManager initialized with DiarizerModels")
     }
 
@@ -211,8 +211,8 @@ public final class DiarizerManager {
 
         // Construct paths from the downloaded models
         let modelsDir = baseDirectory.appendingPathComponent("speaker-diarization-coreml")
-        let segmentationPath = modelsDir.appendingPathComponent("pyannote_segmentation.mlmodelc").path
-        let embeddingPath = modelsDir.appendingPathComponent("wespeaker.mlmodelc").path
+        let segmentationPath = modelsDir.appendingPathComponent("pyannote_segmentation.mlmodelc")
+        let embeddingPath = modelsDir.appendingPathComponent("wespeaker.mlmodelc")
 
         return ModelPaths(segmentationPath: segmentationPath, embeddingPath: embeddingPath)
     }

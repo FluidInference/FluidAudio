@@ -186,6 +186,52 @@ public class DownloadUtils {
         return FileManager.default.fileExists(atPath: coreMLDataPath.path)
     }
     
+    /// Download a specific ML model bundle from HuggingFace
+    public static func downloadMLModelBundle(
+        repoPath: String,
+        modelName: String,
+        outputPath: URL
+    ) async throws {
+        // Create a temporary repo enum for the download
+        let tempRepo = Repo.diarizer // Use existing repo for now
+        let repoFolder = repoPath.split(separator: "/").last?.description ?? "models"
+        
+        // Download the model directory
+        let parentDir = outputPath.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        
+        // Download the model bundle
+        try await downloadModelDirectory(
+            repo: tempRepo,
+            dirPath: modelName,
+            to: parentDir.appendingPathComponent(repoFolder)
+        )
+        
+        // Move to final location if needed
+        let downloadedPath = parentDir.appendingPathComponent(repoFolder).appendingPathComponent(modelName)
+        if downloadedPath != outputPath {
+            try? FileManager.default.removeItem(at: outputPath)
+            try FileManager.default.moveItem(at: downloadedPath, to: outputPath)
+        }
+    }
+    
+    /// Perform model recovery by deleting and re-downloading
+    public static func performModelRecovery(
+        modelPaths: [URL],
+        downloadAction: () async throws -> Void
+    ) async throws {
+        // Delete corrupted models
+        for path in modelPaths {
+            if FileManager.default.fileExists(atPath: path.path) {
+                logger.info("🗑️ Removing corrupted model: \(path.lastPathComponent)")
+                try FileManager.default.removeItem(at: path)
+            }
+        }
+        
+        // Re-download
+        try await downloadAction()
+    }
+    
     /// Clean up incomplete downloads in a directory
     private static func cleanupIncompleteDownloads(at directory: URL) throws {
         guard FileManager.default.fileExists(atPath: directory.path) else { return }

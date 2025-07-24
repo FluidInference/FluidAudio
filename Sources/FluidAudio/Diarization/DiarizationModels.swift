@@ -97,45 +97,6 @@ extension DiarizationModels {
         return try await load(from: directory, configuration: configuration)
     }
     
-    /// Download models if needed and return DiarizerModels with paths
-    public static func downloadIfNeeded(
-        to directory: URL? = nil,
-        configuration: MLModelConfiguration? = nil
-    ) async throws -> DiarizerModels {
-        let models = try await load(from: directory, configuration: configuration)
-        let baseDir = directory ?? baseDirectory()
-        let repoPath = baseDir.appendingPathComponent("speaker-diarization-coreml")
-        
-        return DiarizerModels(
-            segmentationModel: models.segmentation,
-            embeddingModel: models.embedding,
-            paths: ModelPaths(
-                segmentationPath: repoPath.appendingPathComponent(ModelNames.segmentation),
-                embeddingPath: repoPath.appendingPathComponent(ModelNames.embedding)
-            )
-        )
-    }
-    
-    /// Load pre-downloaded models from specific paths
-    public static func load(
-        localSegmentationModel: URL,
-        localEmbeddingModel: URL,
-        configuration: MLModelConfiguration? = nil
-    ) throws -> DiarizerModels {
-        let config = configuration ?? defaultConfiguration()
-        
-        let segmentationModel = try MLModel(contentsOf: localSegmentationModel, configuration: config)
-        let embeddingModel = try MLModel(contentsOf: localEmbeddingModel, configuration: config)
-        
-        return DiarizerModels(
-            segmentationModel: segmentationModel,
-            embeddingModel: embeddingModel,
-            paths: ModelPaths(
-                segmentationPath: localSegmentationModel,
-                embeddingPath: localEmbeddingModel
-            )
-        )
-    }
     
     public static func modelsExist(at directory: URL) -> Bool {
         // If directory is already the repo, use it; otherwise append repo name
@@ -166,30 +127,6 @@ extension DiarizationModels {
     }
 }
 
-/// Container for diarization models with paths
-@available(macOS 13.0, iOS 16.0, *)
-public struct DiarizerModels: @unchecked Sendable {
-    public let segmentationModel: MLModel
-    public let embeddingModel: MLModel
-    public let paths: ModelPaths
-    
-    public init(segmentationModel: MLModel, embeddingModel: MLModel, paths: ModelPaths) {
-        self.segmentationModel = segmentationModel
-        self.embeddingModel = embeddingModel
-        self.paths = paths
-    }
-}
-
-/// Model paths structure
-public struct ModelPaths {
-    public let segmentationPath: URL
-    public let embeddingPath: URL
-    
-    public init(segmentationPath: URL, embeddingPath: URL) {
-        self.segmentationPath = segmentationPath
-        self.embeddingPath = embeddingPath
-    }
-}
 
 public enum DiarizationModelsError: LocalizedError {
     case modelNotFound(String, URL)
