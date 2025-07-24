@@ -143,10 +143,10 @@ import FluidAudio
 // Initialize and process audio
 Task {
     let diarizer = DiarizerManager()
-    try await diarizer.initialize()
+    diarizer.initialize(models: try await .downloadIfNeeded())
 
     let audioSamples: [Float] = // your 16kHz audio data
-    let result = try await diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
+    let result = try diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
 
     for segment in result.segments {
         print("\(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")

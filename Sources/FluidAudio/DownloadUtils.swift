@@ -199,6 +199,32 @@ public class DownloadUtils {
         throw URLError(.unknown)
     }
 
+    /// Load models with automatic recovery on compilation failures
+    public static func withAutoRecovery<T>(
+        maxRetries: Int = 2,
+        makeAttempt: () async throws -> T,
+        recovery: @Sendable () async throws -> Void
+    ) async throws -> T {
+
+        var attempt = 0
+        while attempt <= maxRetries {
+            do {
+                return try await makeAttempt()
+            } catch {
+                if attempt >= maxRetries {
+                    throw error
+                }
+                try await recovery()
+                attempt += 1
+            }
+        }
+
+        // This should never be reached, but Swift requires it
+        throw URLError(.unknown)
+    }
+
+
+
     /// Check if a model is properly compiled
     public static func isModelCompiled(at url: URL) -> Bool {
         let coreMLDataPath = url.appendingPathComponent("coremldata.bin")

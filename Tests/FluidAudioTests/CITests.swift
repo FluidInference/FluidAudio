@@ -33,7 +33,6 @@ final class CITests: XCTestCase {
         XCTAssertEqual(defaultConfig.numClusters, -1)
         XCTAssertEqual(defaultConfig.minActivityThreshold, 10.0, accuracy: 0.01)
         XCTAssertFalse(defaultConfig.debugMode)
-        XCTAssertNil(defaultConfig.modelCacheDirectory)
     }
 
     func testDiarizerConfigCustom() {
@@ -43,8 +42,7 @@ final class CITests: XCTestCase {
             minDurationOff: 1.0,
             numClusters: 3,
             minActivityThreshold: 15.0,
-            debugMode: true,
-            modelCacheDirectory: URL(fileURLWithPath: "/tmp/test")
+            debugMode: true
         )
 
         XCTAssertEqual(customConfig.clusteringThreshold, 0.8, accuracy: 0.01)
@@ -53,7 +51,6 @@ final class CITests: XCTestCase {
         XCTAssertEqual(customConfig.numClusters, 3)
         XCTAssertEqual(customConfig.minActivityThreshold, 15.0, accuracy: 0.01)
         XCTAssertTrue(customConfig.debugMode)
-        XCTAssertNotNil(customConfig.modelCacheDirectory)
     }
 
     // MARK: - Data Structure Tests
@@ -177,12 +174,12 @@ final class CITests: XCTestCase {
 
     func testModelPathsStructure() {
         let modelPaths = ModelPaths(
-            segmentationPath: "/path/to/segmentation.mlmodelc",
-            embeddingPath: "/path/to/embedding.mlmodelc"
+            segmentationPath: URL(fileURLWithPath: "/path/to/segmentation.mlmodelc"),
+            embeddingPath: URL(fileURLWithPath: "/path/to/embedding.mlmodelc")
         )
 
-        XCTAssertEqual(modelPaths.segmentationPath, "/path/to/segmentation.mlmodelc")
-        XCTAssertEqual(modelPaths.embeddingPath, "/path/to/embedding.mlmodelc")
+        XCTAssertEqual(modelPaths.segmentationPath.absoluteString, "file:///path/to/segmentation.mlmodelc")
+        XCTAssertEqual(modelPaths.embeddingPath.absoluteString, "file:///path/to/embedding.mlmodelc")
     }
 
     // MARK: - Backend Enum Tests
