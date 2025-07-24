@@ -150,7 +150,15 @@ extension AsrModels {
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
-        config.computeUnits = .cpuAndNeuralEngine
+
+        // In sandboxed environments, try CPU-only to avoid E5RT validation issues
+        if isSandboxed() {
+            logger.info("Using CPU-only configuration for sandboxed environment")
+            config.computeUnits = .cpuOnly
+        } else {
+            config.computeUnits = .cpuAndNeuralEngine
+        }
+
         return config
     }
 }
