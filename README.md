@@ -178,10 +178,10 @@ let vadConfig = VADConfig(
 Task {
     let vadManager = VadManager(config: vadConfig)
     try await vadManager.initialize()
-    
+
     let audioSamples: [Float] = // your 16kHz audio data
     let vadResult = try await vadManager.detectVoiceActivity(audioSamples)
-    
+
     print("Voice activity detected: \(vadResult.hasVoice)")
     print("Confidence score: \(vadResult.confidence)")
 }
@@ -206,17 +206,36 @@ let asrConfig = ASRConfig(
 // Transcribe audio
 Task {
     let asrManager = AsrManager(config: asrConfig)
-    
-    // Load models (automatic download if needed)
+
+    // Option 1: Load models (automatic download if needed)
     let models = try await AsrModels.downloadAndLoad()
     try await asrManager.initialize(models: models)
-    
+
+    // Option 2: Load from custom location
+    // let customDir = URL(fileURLWithPath: "/path/to/models")
+    // let models = try await AsrModels.load(from: customDir)
+    // try await asrManager.initialize(models: models)
+
+    // Option 3: Load individual models manually
+    // let melModel = try MLModel(contentsOf: melPath)
+    // let encoderModel = try MLModel(contentsOf: encoderPath)
+    // let decoderModel = try MLModel(contentsOf: decoderPath)
+    // let jointModel = try MLModel(contentsOf: jointPath)
+    // let models = AsrModels(
+    //     melspectrogram: melModel,
+    //     encoder: encoderModel,
+    //     decoder: decoderModel,
+    //     joint: jointModel,
+    //     configuration: config
+    // )
+    // try await asrManager.initialize(models: models)
+
     let audioSamples: [Float] = // your 16kHz audio data
     let result = try await asrManager.transcribe(audioSamples)
-    
+
     print("Transcription: \(result.text)")
     print("Processing time: \(result.processingTime)s")
-    
+
     // For streaming/chunked transcription
     let chunkResult = try await asrManager.transcribeChunk(
         audioChunk,
@@ -255,7 +274,7 @@ swift run fluidaudio benchmark --auto-download
 # Test with specific parameters
 swift run fluidaudio benchmark --threshold 0.7 --min-duration-on 1.0 --output results.json
 
-# Test a single file for quick parameter tuning  
+# Test a single file for quick parameter tuning
 swift run fluidaudio benchmark --single-file ES2004a --threshold 0.8
 ```
 
@@ -321,7 +340,7 @@ Apache 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing. 
+This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing.
 
 Pyannote: https://github.com/pyannote/pyannote-audio
 

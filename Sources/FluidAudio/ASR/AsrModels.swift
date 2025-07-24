@@ -124,7 +124,7 @@ extension AsrModels {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        config.computeUnits = isCI ? .cpuAndNeuralEngine : .all
+        config.computeUnits = .cpuAndNeuralEngine
 
         return config
     }
