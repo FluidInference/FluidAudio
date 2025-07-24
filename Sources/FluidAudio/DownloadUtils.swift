@@ -94,19 +94,14 @@ public class DownloadUtils {
         logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
         print("📥 Downloading \(repo.folderName)...")
 
-        // Check if git is available
-        let gitPath = "/usr/bin/git"
-        if FileManager.default.fileExists(atPath: gitPath) {
-            // Use git if available (faster for large repos with many files)
-            logger.info("Using git for faster download")
-            try await downloadRepoWithGit(repo, to: directory, gitPath: gitPath)
-        } else {
-            // Fallback to URLSession for users without git
-            logger.info("Git not found, using URLSession download method")
-            try await downloadRepoWithURLSession(repo, to: directory)
-        }
+        // Always use URLSession for better compatibility
+        // Git is not assumed to be available on user machines
+        try await downloadRepoWithURLSession(repo, to: directory)
     }
     
+    // DEPRECATED: Git method removed - we don't assume git is installed
+    // All downloads now use URLSession for better compatibility
+    /*
     /// Download using git (original method)
     private static func downloadRepoWithGit(_ repo: Repo, to directory: URL, gitPath: String) async throws {
         // Use a temporary directory for cloning
@@ -173,8 +168,10 @@ public class DownloadUtils {
         logger.info("✅ Downloaded \(repo.folderName)")
         print("✅ Download complete")
     }
+    */
     
-    /// Download a HuggingFace repository using URLSession (for users without git)
+    /// Download a HuggingFace repository using URLSession
+    /// This is the primary download method - we don't assume git is installed
     private static func downloadRepoWithURLSession(_ repo: Repo, to directory: URL) async throws {
         logger.info("📥 Downloading \(repo.folderName) using URLSession...")
         
