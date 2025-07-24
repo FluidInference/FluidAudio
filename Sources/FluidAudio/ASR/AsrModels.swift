@@ -99,16 +99,6 @@ extension AsrModels {
         return models
     }
 
-    public static func loadFromCache(
-        configuration: MLModelConfiguration? = nil
-    ) async throws -> AsrModels {
-        let repoDir = defaultCacheDirectory()
-        // Ensure repo exists first
-        guard FileManager.default.fileExists(atPath: repoDir.path) else {
-            throw AsrModelsError.modelNotFound("Parakeet models", repoDir)
-        }
-        return try await load(from: repoDir, configuration: configuration)
-    }
 
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
