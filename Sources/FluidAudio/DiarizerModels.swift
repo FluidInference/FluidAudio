@@ -38,7 +38,7 @@ public final class DiarizerModels {
     }
 
     /// The default configuration to use when loading models.
-    /// 
+    ///
     private static var DefaultConfiguration: MLModelConfiguration {
         let config = MLModelConfiguration()
         config.computeUnits = .cpuAndNeuralEngine
@@ -63,12 +63,17 @@ extension DiarizerModels {
         let directory: URL
         #if os(iOS)
             // Use Documents directory on iOS for better compatibility with sandboxing
-            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            directory = documents.appendingPathComponent("FluidAudio/models/diarization", isDirectory: true)
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+                .first!
+            directory = documents.appendingPathComponent(
+                "FluidAudio/models/diarization", isDirectory: true)
         #else
             // Use Application Support on macOS
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            directory = appSupport.appendingPathComponent("SpeakerKitModels/coreml", isDirectory: true)
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            directory = appSupport.appendingPathComponent(
+                "SpeakerKitModels/coreml", isDirectory: true)
         #endif
 
         return try await downloadIfNeeded(to: directory, configuration: configuration)
@@ -107,7 +112,8 @@ extension DiarizerModels {
         }
 
         func format(_ d: Duration) -> String {
-            d.formatted(.time(pattern: .minuteSecond(padMinuteToLength: 0, fractionalSecondsLength: 3)))
+            d.formatted(
+                .time(pattern: .minuteSecond(padMinuteToLength: 0, fractionalSecondsLength: 3)))
         }
         logger.info(
             "Models loaded successfully in \(format(downloadTime + compilationTime)) (download: \(format(downloadTime)), compilation: \(format(compilationTime))"
@@ -130,9 +136,11 @@ extension DiarizerModels {
         _ logger: Logger
     ) throws {
 
-        let segmentationModelPath = modelsDirectory
+        let segmentationModelPath =
+            modelsDirectory
             .appendingPathComponent(SegmentationModelFileName, isDirectory: true)
-        let embeddingModelPath = modelsDirectory
+        let embeddingModelPath =
+            modelsDirectory
             .appendingPathComponent(EmbeddingModelFileName, isDirectory: true)
 
         if FileManager.default.fileExists(atPath: segmentationModelPath.path)
@@ -161,9 +169,11 @@ extension DiarizerModels {
 
         logger.info("Checking for existing diarization models")
 
-        let segmentationModelPath = modelsDirectory
+        let segmentationModelPath =
+            modelsDirectory
             .appendingPathComponent(SegmentationModelFileName, isDirectory: true)
-        let embeddingModelPath = modelsDirectory
+        let embeddingModelPath =
+            modelsDirectory
             .appendingPathComponent(EmbeddingModelFileName, isDirectory: true)
 
         // Check if models already exist and are compiled.
@@ -192,7 +202,7 @@ extension DiarizerModels {
             if !segmentationExists {
                 group.addTask {
                     logger.info("Downloading segmentation model bundle from Hugging Face")
-                    try await DownloadUtils.downloadMLModelBundle(
+                    try await DownloadUtils.downloadMLModelBundleSandboxSafe(
                         repoPath: HuggingFaceRepoPath,
                         modelName: SegmentationModelFileName,
                         outputPath: segmentationModelPath
@@ -204,7 +214,7 @@ extension DiarizerModels {
             if !embeddingExists {
                 group.addTask {
                     logger.info("Downloading embedding model bundle from Hugging Face")
-                    try await DownloadUtils.downloadMLModelBundle(
+                    try await DownloadUtils.downloadMLModelBundleSandboxSafe(
                         repoPath: HuggingFaceRepoPath,
                         modelName: EmbeddingModelFileName,
                         outputPath: embeddingModelPath
@@ -245,7 +255,7 @@ extension DiarizerModels {
             try await DownloadUtils.performModelRecovery(
                 modelPaths: [segmentationURL],
                 downloadAction: {
-                    try await DownloadUtils.downloadMLModelBundle(
+                    try await DownloadUtils.downloadMLModelBundleSandboxSafe(
                         repoPath: HuggingFaceRepoPath,
                         modelName: SegmentationModelFileName,
                         outputPath: segmentationURL
@@ -260,7 +270,7 @@ extension DiarizerModels {
             try await DownloadUtils.performModelRecovery(
                 modelPaths: [embeddingURL],
                 downloadAction: {
-                    try await DownloadUtils.downloadMLModelBundle(
+                    try await DownloadUtils.downloadMLModelBundleSandboxSafe(
                         repoPath: HuggingFaceRepoPath,
                         modelName: EmbeddingModelFileName,
                         outputPath: embeddingURL
@@ -298,14 +308,17 @@ extension DiarizerModels {
         var segmentationModel: MLModel!
         var embeddingModel: MLModel!
         let compilationTime = try ContinuousClock().measure {
-            segmentationModel = try MLModel(contentsOf: localSegmentationModel, configuration: configuration)
-            embeddingModel    = try MLModel(contentsOf: localEmbeddingModel, configuration: configuration)
+            segmentationModel = try MLModel(
+                contentsOf: localSegmentationModel, configuration: configuration)
+            embeddingModel = try MLModel(
+                contentsOf: localEmbeddingModel, configuration: configuration)
         }
 
         return DiarizerModels(
             segmentationModel: segmentationModel,
             embeddingModel: embeddingModel,
-            paths: ModelPaths(segmentationPath: localSegmentationModel, embeddingPath: localEmbeddingModel),
+            paths: ModelPaths(
+                segmentationPath: localSegmentationModel, embeddingPath: localEmbeddingModel),
             downloadTime: .zero,
             compilationTime: compilationTime
         )

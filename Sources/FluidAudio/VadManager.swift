@@ -1,48 +1,47 @@
+import Accelerate
 import CoreML
 import Foundation
 import OSLog
-import Accelerate
-
 
 /// Configuration for VAD processing
 public struct VadConfig: Sendable {
     public var threshold: Float = 0.3  // Voice activity threshold (0.0-1.0) - lowered for better sensitivity
-    public var chunkSize: Int = 512   // Audio chunk size for processing
-    public var sampleRate: Int = 16000 // Sample rate for audio processing
+    public var chunkSize: Int = 512  // Audio chunk size for processing
+    public var sampleRate: Int = 16000  // Sample rate for audio processing
     public var modelCacheDirectory: URL?
     public var debugMode: Bool = true
     public var adaptiveThreshold: Bool = false  // Disable adaptive thresholding temporarily
-    public var minThreshold: Float = 0.1       // Minimum threshold for adaptive mode
-    public var maxThreshold: Float = 0.7       // Maximum threshold for adaptive mode
+    public var minThreshold: Float = 0.1  // Minimum threshold for adaptive mode
+    public var maxThreshold: Float = 0.7  // Maximum threshold for adaptive mode
     public var computeUnits: MLComputeUnits = .cpuAndNeuralEngine  // Preferred compute units
 
     // SNR and noise detection parameters
-    public var enableSNRFiltering: Bool = true      // Enable SNR-based filtering for better noise rejection
-    public var minSNRThreshold: Float = 6.0         // Minimum SNR for speech detection (dB) - more aggressive
-    public var noiseFloorWindow: Int = 100          // Window size for noise floor estimation
+    public var enableSNRFiltering: Bool = true  // Enable SNR-based filtering for better noise rejection
+    public var minSNRThreshold: Float = 6.0  // Minimum SNR for speech detection (dB) - more aggressive
+    public var noiseFloorWindow: Int = 100  // Window size for noise floor estimation
     public var spectralRolloffThreshold: Float = 0.85  // Threshold for spectral rolloff
     public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)  // Expected speech range (Hz)
 
     public static let `default` = VadConfig()
-    
+
     /// Platform-optimized configuration for iOS devices
     #if os(iOS)
-    public static let iosOptimized = VadConfig(
-        threshold: 0.445,  // Optimized threshold for iOS
-        chunkSize: 512,
-        sampleRate: 16000,
-        modelCacheDirectory: nil,
-        debugMode: false,  // Disable debug mode on iOS for performance
-        adaptiveThreshold: true,
-        minThreshold: 0.1,
-        maxThreshold: 0.7,
-        computeUnits: .cpuAndNeuralEngine,  // Prefer Neural Engine on iOS
-        enableSNRFiltering: true,
-        minSNRThreshold: 6.0,
-        noiseFloorWindow: 100,
-        spectralRolloffThreshold: 0.85,
-        spectralCentroidRange: (200.0, 8000.0)
-    )
+        public static let iosOptimized = VadConfig(
+            threshold: 0.445,  // Optimized threshold for iOS
+            chunkSize: 512,
+            sampleRate: 16000,
+            modelCacheDirectory: nil,
+            debugMode: false,  // Disable debug mode on iOS for performance
+            adaptiveThreshold: true,
+            minThreshold: 0.1,
+            maxThreshold: 0.7,
+            computeUnits: .cpuAndNeuralEngine,  // Prefer Neural Engine on iOS
+            enableSNRFiltering: true,
+            minSNRThreshold: 6.0,
+            noiseFloorWindow: 100,
+            spectralRolloffThreshold: 0.85,
+            spectralCentroidRange: (200.0, 8000.0)
+        )
     #endif
 
     public init(
@@ -81,12 +80,15 @@ public struct VadConfig: Sendable {
 /// VAD processing result
 public struct VadResult: Sendable {
     public let probability: Float  // Voice activity probability (0.0-1.0)
-    public let isVoiceActive: Bool // Whether voice is detected
+    public let isVoiceActive: Bool  // Whether voice is detected
     public let processingTime: TimeInterval
-    public let snrValue: Float?    // Signal-to-Noise Ratio (dB) if calculated
+    public let snrValue: Float?  // Signal-to-Noise Ratio (dB) if calculated
     public let spectralFeatures: SpectralFeatures?  // Spectral analysis results
 
-    public init(probability: Float, isVoiceActive: Bool, processingTime: TimeInterval, snrValue: Float? = nil, spectralFeatures: SpectralFeatures? = nil) {
+    public init(
+        probability: Float, isVoiceActive: Bool, processingTime: TimeInterval,
+        snrValue: Float? = nil, spectralFeatures: SpectralFeatures? = nil
+    ) {
         self.probability = probability
         self.isVoiceActive = isVoiceActive
         self.processingTime = processingTime
@@ -97,14 +99,17 @@ public struct VadResult: Sendable {
 
 /// Spectral features for enhanced VAD
 public struct SpectralFeatures: Sendable {
-    public let spectralCentroid: Float      // Center frequency of the spectrum
-    public let spectralRolloff: Float       // Frequency below which 85% of energy is contained
-    public let spectralFlux: Float          // Measure of spectral change
-    public let mfccFeatures: [Float]        // MFCC coefficients (first 13)
-    public let zeroCrossingRate: Float      // Zero crossing rate
-    public let spectralEntropy: Float       // Measure of spectral complexity
+    public let spectralCentroid: Float  // Center frequency of the spectrum
+    public let spectralRolloff: Float  // Frequency below which 85% of energy is contained
+    public let spectralFlux: Float  // Measure of spectral change
+    public let mfccFeatures: [Float]  // MFCC coefficients (first 13)
+    public let zeroCrossingRate: Float  // Zero crossing rate
+    public let spectralEntropy: Float  // Measure of spectral complexity
 
-    public init(spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float], zeroCrossingRate: Float, spectralEntropy: Float) {
+    public init(
+        spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float],
+        zeroCrossingRate: Float, spectralEntropy: Float
+    ) {
         self.spectralCentroid = spectralCentroid
         self.spectralRolloff = spectralRolloff
         self.spectralFlux = spectralFlux
@@ -161,7 +166,6 @@ public actor VadManager {
     private var cState: MLMultiArray?
     private var featureBuffer: [MLMultiArray] = []
 
-
     // Audio processing handler
     private var audioProcessor: VadAudioProcessor
 
@@ -193,10 +197,13 @@ public actor VadManager {
     /// Enhanced model management: check compiled models exist, auto-download if missing
     private func loadCoreMLModels() async throws {
         let modelsDirectory = getModelsDirectory()
-        let compiledModelNames = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
+        let compiledModelNames = [
+            "silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc",
+        ]
 
         // Check if we need to download any compiled models
-        let missingModels = try DownloadUtils.checkModelFiles(in: modelsDirectory, modelNames: compiledModelNames)
+        let missingModels = try DownloadUtils.checkModelFiles(
+            in: modelsDirectory, modelNames: compiledModelNames)
 
         // Auto-download missing models
         if !missingModels.isEmpty {
@@ -218,7 +225,9 @@ public actor VadManager {
         let stftPath = modelsDirectory.appendingPathComponent("silero_stft.mlmodelc")
         let encoderPath = modelsDirectory.appendingPathComponent("silero_encoder.mlmodelc")
         let rnnPath = modelsDirectory.appendingPathComponent("silero_rnn_decoder.mlmodelc")
-        logger.info("✓ Model paths resolved in \(String(format: "%.2f", Date().timeIntervalSince(pathStart)))s")
+        logger.info(
+            "✓ Model paths resolved in \(String(format: "%.2f", Date().timeIntervalSince(pathStart)))s"
+        )
 
         // Load models with auto-recovery mechanism (similar to DiarizerManager)
         try await loadModelsWithAutoRecovery(
@@ -236,7 +245,8 @@ public actor VadManager {
 
         while attempt <= maxRetries {
             do {
-                logger.info("Attempting to load VAD models (attempt \(attempt + 1)/\(maxRetries + 1))")
+                logger.info(
+                    "Attempting to load VAD models (attempt \(attempt + 1)/\(maxRetries + 1))")
 
                 let config = MLModelConfiguration()
                 config.computeUnits = self.config.computeUnits
@@ -244,15 +254,21 @@ public actor VadManager {
 
                 let stftStart = Date()
                 let stftModel = try MLModel(contentsOf: stftPath, configuration: config)
-                logger.info("✓ STFT model loaded (\(String(format: "%.2f", Date().timeIntervalSince(stftStart)))s)")
+                logger.info(
+                    "✓ STFT model loaded (\(String(format: "%.2f", Date().timeIntervalSince(stftStart)))s)"
+                )
 
                 let encoderStart = Date()
                 let encoderModel = try MLModel(contentsOf: encoderPath, configuration: config)
-                logger.info("✓ Encoder model loaded (\(String(format: "%.2f", Date().timeIntervalSince(encoderStart)))s)")
+                logger.info(
+                    "✓ Encoder model loaded (\(String(format: "%.2f", Date().timeIntervalSince(encoderStart)))s)"
+                )
 
                 let rnnStart = Date()
                 let rnnModel = try MLModel(contentsOf: rnnPath, configuration: config)
-                logger.info("✓ RNN model loaded (\(String(format: "%.2f", Date().timeIntervalSince(rnnStart)))s)")
+                logger.info(
+                    "✓ RNN model loaded (\(String(format: "%.2f", Date().timeIntervalSince(rnnStart)))s)"
+                )
 
                 // If we get here, all models loaded successfully
                 self.stftModel = stftModel
@@ -264,11 +280,11 @@ public actor VadManager {
                 }
                 logger.info("🎉 VAD models loaded successfully with CPU+Neural Engine")
 
-
                 return
 
             } catch {
-                logger.warning("Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
+                logger.warning(
+                    "Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
 
                 if attempt >= maxRetries {
                     logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
@@ -276,19 +292,22 @@ public actor VadManager {
                 }
 
                 // Auto-recovery: Delete corrupted models and re-download
-                logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
-                try await performVadModelRecovery(stftPath: stftPath, encoderPath: encoderPath, rnnPath: rnnPath)
+                logger.info(
+                    "Initiating auto-recovery: removing corrupted models and re-downloading...")
+                try await performVadModelRecovery(
+                    stftPath: stftPath, encoderPath: encoderPath, rnnPath: rnnPath)
 
                 attempt += 1
             }
         }
     }
 
-    private func performVadModelRecovery(stftPath: URL, encoderPath: URL, rnnPath: URL) async throws {
+    private func performVadModelRecovery(stftPath: URL, encoderPath: URL, rnnPath: URL) async throws
+    {
         try await DownloadUtils.performModelRecovery(
             modelPaths: [stftPath, encoderPath, rnnPath],
             downloadAction: {
-                try await self.downloadMissingVadModels()
+                try await self.downloadMissingVadModelsSandboxSafe()
             }
         )
     }
@@ -298,7 +317,9 @@ public actor VadManager {
         let modelsDirectory = getModelsDirectory()
 
         // Download .mlmodelc folders from Hugging Face
-        let modelFolders = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
+        let modelFolders = [
+            "silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc",
+        ]
 
         for folderName in modelFolders {
             let folderPath = modelsDirectory.appendingPathComponent(folderName)
@@ -306,14 +327,36 @@ public actor VadManager {
             if !FileManager.default.fileExists(atPath: folderPath.path) {
                 logger.info("📥 Downloading \(folderName)...")
                 print("📥 Downloading \(folderName)...")
-                try await DownloadUtils.downloadVadModelFolder(folderName: folderName, to: folderPath)
+                try await DownloadUtils.downloadVadModelFolderSandboxSafe(
+                    folderName: folderName, to: folderPath)
             }
         }
 
         logger.info("✅ VAD models downloaded successfully")
     }
 
+    /// Download missing VAD models from Hugging Face using sandbox-safe method
+    private func downloadMissingVadModelsSandboxSafe() async throws {
+        let modelsDirectory = getModelsDirectory()
 
+        // Download .mlmodelc folders from Hugging Face
+        let modelFolders = [
+            "silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc",
+        ]
+
+        for folderName in modelFolders {
+            let folderPath = modelsDirectory.appendingPathComponent(folderName)
+
+            if !FileManager.default.fileExists(atPath: folderPath.path) {
+                logger.info("📥 Downloading \(folderName)...")
+                print("📥 Downloading \(folderName)...")
+                try await DownloadUtils.downloadVadModelFolderSandboxSafe(
+                    folderName: folderName, to: folderPath)
+            }
+        }
+
+        logger.info("✅ VAD models downloaded successfully")
+    }
 
     /// Reset RNN state and feature buffer
     public func resetState() {
@@ -360,10 +403,11 @@ public actor VadManager {
         rawProbability = try await processCoreMLChunk(audioChunk)
 
         // Post-process raw ML probability (includes temporal smoothing)
-        let (smoothedProbability, snrValue, spectralFeatures) = audioProcessor.processRawProbability(
-            rawProbability,
-            audioChunk: audioChunk
-        )
+        let (smoothedProbability, snrValue, spectralFeatures) =
+            audioProcessor.processRawProbability(
+                rawProbability,
+                audioChunk: audioChunk
+            )
 
         // Apply fixed threshold
         let isVoiceActive = smoothedProbability >= config.threshold
@@ -372,7 +416,8 @@ public actor VadManager {
 
         if config.debugMode {
             let snrString = snrValue.map { String(format: "%.1f", $0) } ?? "N/A"
-            let debugMessage = "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)),  smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", config.threshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
+            let debugMessage =
+                "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)),  smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", config.threshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
             logger.debug("\(debugMessage)")
         }
 
@@ -394,12 +439,16 @@ public actor VadManager {
             if processedChunk.count < config.chunkSize {
                 let paddingSize = config.chunkSize - processedChunk.count
                 if config.debugMode {
-                    logger.debug("Padding audio chunk with \(paddingSize) zeros (original: \(processedChunk.count) samples)")
+                    logger.debug(
+                        "Padding audio chunk with \(paddingSize) zeros (original: \(processedChunk.count) samples)"
+                    )
                 }
                 processedChunk.append(contentsOf: Array(repeating: 0.0, count: paddingSize))
             } else {
                 if config.debugMode {
-                    logger.debug("Truncating audio chunk from \(processedChunk.count) to \(self.config.chunkSize) samples")
+                    logger.debug(
+                        "Truncating audio chunk from \(processedChunk.count) to \(self.config.chunkSize) samples"
+                    )
                 }
                 processedChunk = Array(processedChunk.prefix(config.chunkSize))
             }
@@ -430,7 +479,8 @@ public actor VadManager {
         }
 
         // Create input array with shape (1, chunkSize=512)
-        let audioArray = try MLMultiArray(shape: [1, NSNumber(value: config.chunkSize)], dataType: .float32)
+        let audioArray = try MLMultiArray(
+            shape: [1, NSNumber(value: config.chunkSize)], dataType: .float32)
 
         for i in 0..<audioChunk.count {
             audioArray[i] = NSNumber(value: audioChunk[i])
@@ -454,7 +504,8 @@ public actor VadManager {
 
         // Fallback: use first available output
         guard let outputName = output.featureNames.first,
-              let stftOutput = output.featureValue(for: outputName)?.multiArrayValue else {
+            let stftOutput = output.featureValue(for: outputName)?.multiArrayValue
+        else {
             throw VadError.modelProcessingFailed("No STFT output found")
         }
 
@@ -509,7 +560,9 @@ public actor VadManager {
             logger.debug("Encoder input shape: \(shape)")
         }
 
-        let input = try MLDictionaryFeatureProvider(dictionary: ["stft_features": concatenatedFeatures])
+        let input = try MLDictionaryFeatureProvider(dictionary: [
+            "stft_features": concatenatedFeatures
+        ])
         let output = try encoderModel.prediction(from: input)
 
         // Try to use specific named output first (more robust than shape-based detection)
@@ -528,11 +581,14 @@ public actor VadManager {
         // Fallback: use first available output with warning
         if config.debugMode {
             let availableOutputs = output.featureNames.joined(separator: ", ")
-            logger.warning("None of preferred output names found. Available outputs: [\(availableOutputs)]. Using first available.")
+            logger.warning(
+                "None of preferred output names found. Available outputs: [\(availableOutputs)]. Using first available."
+            )
         }
 
         guard let outputName = output.featureNames.first,
-              let encoderOutput = output.featureValue(for: outputName)?.multiArrayValue else {
+            let encoderOutput = output.featureValue(for: outputName)?.multiArrayValue
+        else {
             throw VadError.modelProcessingFailed("No encoder output found")
         }
 
@@ -574,7 +630,7 @@ public actor VadManager {
         let input = try MLDictionaryFeatureProvider(dictionary: [
             "encoder_features": processedFeatures,
             "h_in": hState,
-            "c_in": cState
+            "c_in": cState,
         ])
 
         let output = try rnnModel.prediction(from: input)
@@ -613,18 +669,26 @@ public actor VadManager {
                         logger.info("✓ Found sequence output: '\(featureName)' shape: \(shape)")
                     } else if shape == [1, 1, 128] {
                         let nameLower = featureName.lowercased()
-                        if newHState == nil && (nameLower.contains("h") || nameLower.contains("hidden")) {
+                        if newHState == nil
+                            && (nameLower.contains("h") || nameLower.contains("hidden"))
+                        {
                             newHState = featureValue
                             logger.info("✓ Found h_state output: '\(featureName)' shape: \(shape)")
-                        } else if newCState == nil && (nameLower.contains("c") || nameLower.contains("cell")) {
+                        } else if newCState == nil
+                            && (nameLower.contains("c") || nameLower.contains("cell"))
+                        {
                             newCState = featureValue
                             logger.info("✓ Found c_state output: '\(featureName)' shape: \(shape)")
                         } else if newHState == nil {
                             newHState = featureValue
-                            logger.info("✓ Found h_state output (fallback): '\(featureName)' shape: \(shape)")
+                            logger.info(
+                                "✓ Found h_state output (fallback): '\(featureName)' shape: \(shape)"
+                            )
                         } else if newCState == nil {
                             newCState = featureValue
-                            logger.info("✓ Found c_state output (fallback): '\(featureName)' shape: \(shape)")
+                            logger.info(
+                                "✓ Found c_state output (fallback): '\(featureName)' shape: \(shape)"
+                            )
                         }
                     }
                 }
@@ -649,7 +713,9 @@ public actor VadManager {
     }
 
     /// Prepare encoder features for RNN input
-    private func prepareEncoderFeaturesForRNN(_ encoderFeatures: MLMultiArray) throws -> MLMultiArray {
+    private func prepareEncoderFeaturesForRNN(_ encoderFeatures: MLMultiArray) throws
+        -> MLMultiArray
+    {
         let shape = encoderFeatures.shape.map { $0.intValue }
 
         // If already in correct shape (1, 4, 128), return as is
@@ -659,7 +725,8 @@ public actor VadManager {
 
         // Log unexpected shape for debugging
         if config.debugMode {
-            logger.debug("Encoder features have unexpected shape: \(shape), reshaping to (1, 4, 128)")
+            logger.debug(
+                "Encoder features have unexpected shape: \(shape), reshaping to (1, 4, 128)")
         }
 
         // Create target shape (1, 4, 128)
@@ -707,7 +774,10 @@ public actor VadManager {
 
         // Create concatenated array with shape (1, 201, 4)
         let concatenatedArray = try MLMultiArray(
-            shape: [NSNumber(value: batchSize), NSNumber(value: featureSize), NSNumber(value: temporalFrames)],
+            shape: [
+                NSNumber(value: batchSize), NSNumber(value: featureSize),
+                NSNumber(value: temporalFrames),
+            ],
             dataType: .float32
         )
 
@@ -718,7 +788,8 @@ public actor VadManager {
             for i in 0..<batchSize {
                 for j in 0..<featureSize {
                     let sourceIndex = i * featureSize + j
-                    let targetIndex = i * (featureSize * temporalFrames) + j * temporalFrames + frameIndex
+                    let targetIndex =
+                        i * (featureSize * temporalFrames) + j * temporalFrames + frameIndex
                     concatenatedArray[targetIndex] = frameFeatures[sourceIndex]
                 }
             }
@@ -726,8 +797,6 @@ public actor VadManager {
 
         return concatenatedArray
     }
-
-
 
     /// Get models directory
     private func getModelsDirectory() -> URL {
@@ -737,15 +806,18 @@ public actor VadManager {
             directory = customDirectory.appendingPathComponent("vad", isDirectory: true)
         } else {
             #if os(iOS)
-            // Use Documents directory on iOS for better compatibility with sandboxing
-            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            directory = documents.appendingPathComponent("FluidAudio/models/vad", isDirectory: true)
+                // Use Documents directory on iOS for better compatibility with sandboxing
+                let documents = FileManager.default.urls(
+                    for: .documentDirectory, in: .userDomainMask
+                ).first!
+                directory = documents.appendingPathComponent(
+                    "FluidAudio/models/vad", isDirectory: true)
             #else
-            // Use Application Support on macOS
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            directory = appSupport.appendingPathComponent("FluidAudio/vad", isDirectory: true)
+                // Use Application Support on macOS
+                let appSupport = FileManager.default.urls(
+                    for: .applicationSupportDirectory, in: .userDomainMask
+                ).first!
+                directory = appSupport.appendingPathComponent("FluidAudio/vad", isDirectory: true)
             #endif
         }
 
