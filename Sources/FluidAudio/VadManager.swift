@@ -24,7 +24,7 @@ public struct VadConfig: Sendable {
     public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)  // Expected speech range (Hz)
 
     public static let `default` = VadConfig()
-    
+
     /// Platform-optimized configuration for iOS devices
     #if os(iOS)
     public static let iosOptimized = VadConfig(
@@ -165,21 +165,39 @@ public actor VadManager {
     // Audio processing handler
     private var audioProcessor: VadAudioProcessor
 
+    /// Initialize VadManager with configuration only (models will be loaded later)
     public init(config: VadConfig = .default) {
         self.config = config
         self.audioProcessor = VadAudioProcessor(config: config)
+    }
+
+    /// Initialize VadManager with pre-loaded models
+    public init(config: VadConfig = .default, stft: MLModel, encoder: MLModel, rnn: MLModel) {
+        self.config = config
+        self.audioProcessor = VadAudioProcessor(config: config)
+        self.stftModel = stft
+        self.encoderModel = encoder
+        self.rnnModel = rnn
+        logger.info("VadManager initialized with provided models")
     }
 
     public var isAvailable: Bool {
         return stftModel != nil && encoderModel != nil && rnnModel != nil
     }
 
-    /// Initialize VAD system with selected model type
-    public func initialize() async throws {
+    /// Initialize with auto-downloaded models
+    /// - Parameter directory: Optional directory to load models from
+    public func initialize(from directory: URL? = nil) async throws {
         let startTime = Date()
         logger.info("Initializing VAD system with CoreML")
 
-        try await loadCoreMLModels()
+        do {
+            // Load models with auto-recovery
+            try await loadCoreMLModelsWithRecovery(from: directory)
+        } catch {
+            logger.error("Failed to initialize VAD: \(error)")
+            throw error
+        }
 
         // Initialize states
         resetState()
@@ -190,128 +208,53 @@ public actor VadManager {
         )
     }
 
-    /// Enhanced model management: check compiled models exist, auto-download if missing
-    private func loadCoreMLModels() async throws {
-        let modelsDirectory = getModelsDirectory()
-        let compiledModelNames = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
+    /// Load VAD models using the new simplified API
+    private func loadCoreMLModelsWithRecovery(from directory: URL? = nil) async throws {
 
-        // Check if we need to download any compiled models
-        let missingModels = try DownloadUtils.checkModelFiles(in: modelsDirectory, modelNames: compiledModelNames)
+        // Get base directory for FluidAudio
+        let baseDirectory = directory ?? getDefaultBaseDirectory()
 
-        // Auto-download missing models
-        if !missingModels.isEmpty {
-            logger.info("🔄 Missing VAD models: \(missingModels.joined(separator: ", "))")
-            logger.info("🔄 Auto-downloading VAD models from Hugging Face...")
-            try await downloadMissingVadModels()
-        }
+        let modelNames = [
+            "silero_stft.mlmodelc",
+            "silero_encoder.mlmodelc",
+            "silero_rnn_decoder.mlmodelc"
+        ]
 
-        for modelName in compiledModelNames {
-            let modelPath = modelsDirectory.appendingPathComponent(modelName)
-            if !FileManager.default.fileExists(atPath: modelPath.path) {
-                logger.error("❌ Missing compiled model after download: \(modelName)")
-                throw VadError.modelLoadingFailed
-            }
-        }
-
-        logger.info("🔍 Loading pre-compiled VAD models...")
-        let pathStart = Date()
-        let stftPath = modelsDirectory.appendingPathComponent("silero_stft.mlmodelc")
-        let encoderPath = modelsDirectory.appendingPathComponent("silero_encoder.mlmodelc")
-        let rnnPath = modelsDirectory.appendingPathComponent("silero_rnn_decoder.mlmodelc")
-        logger.info("✓ Model paths resolved in \(String(format: "%.2f", Date().timeIntervalSince(pathStart)))s")
-
-        // Load models with auto-recovery mechanism (similar to DiarizerManager)
-        try await loadModelsWithAutoRecovery(
-            stftPath: stftPath,
-            encoderPath: encoderPath,
-            rnnPath: rnnPath
+        // Use DownloadUtils.loadModels which already has auto-recovery built in
+        let models = try await DownloadUtils.loadModels(
+            .vad,
+            modelNames: modelNames,
+            directory: baseDirectory,
+            computeUnits: config.computeUnits
         )
-    }
 
-    /// Load models with automatic recovery on compilation failures (based on DiarizerManager pattern)
-    private func loadModelsWithAutoRecovery(
-        stftPath: URL, encoderPath: URL, rnnPath: URL, maxRetries: Int = 2
-    ) async throws {
-        var attempt = 0
-
-        while attempt <= maxRetries {
-            do {
-                logger.info("Attempting to load VAD models (attempt \(attempt + 1)/\(maxRetries + 1))")
-
-                let config = MLModelConfiguration()
-                config.computeUnits = self.config.computeUnits
-                logger.info("🔄 Loading with CPU+Neural Engine...")
-
-                let stftStart = Date()
-                let stftModel = try MLModel(contentsOf: stftPath, configuration: config)
-                logger.info("✓ STFT model loaded (\(String(format: "%.2f", Date().timeIntervalSince(stftStart)))s)")
-
-                let encoderStart = Date()
-                let encoderModel = try MLModel(contentsOf: encoderPath, configuration: config)
-                logger.info("✓ Encoder model loaded (\(String(format: "%.2f", Date().timeIntervalSince(encoderStart)))s)")
-
-                let rnnStart = Date()
-                let rnnModel = try MLModel(contentsOf: rnnPath, configuration: config)
-                logger.info("✓ RNN model loaded (\(String(format: "%.2f", Date().timeIntervalSince(rnnStart)))s)")
-
-                // If we get here, all models loaded successfully
-                self.stftModel = stftModel
-                self.encoderModel = encoderModel
-                self.rnnModel = rnnModel
-
-                if attempt > 0 {
-                    logger.info("Models loaded successfully after \(attempt) recovery attempt(s)")
-                }
-                logger.info("🎉 VAD models loaded successfully with CPU+Neural Engine")
-
-
-                return
-
-            } catch {
-                logger.warning("Model loading failed (attempt \(attempt + 1)): \(error.localizedDescription)")
-
-                if attempt >= maxRetries {
-                    logger.error("Model loading failed after \(maxRetries + 1) attempts, giving up")
-                    throw VadError.modelCompilationFailed
-                }
-
-                // Auto-recovery: Delete corrupted models and re-download
-                logger.info("Initiating auto-recovery: removing corrupted models and re-downloading...")
-                try await performVadModelRecovery(stftPath: stftPath, encoderPath: encoderPath, rnnPath: rnnPath)
-
-                attempt += 1
-            }
-        }
-    }
-
-    private func performVadModelRecovery(stftPath: URL, encoderPath: URL, rnnPath: URL) async throws {
-        try await DownloadUtils.performModelRecovery(
-            modelPaths: [stftPath, encoderPath, rnnPath],
-            downloadAction: {
-                try await self.downloadMissingVadModels()
-            }
-        )
-    }
-
-    /// Download missing VAD models from Hugging Face
-    private func downloadMissingVadModels() async throws {
-        let modelsDirectory = getModelsDirectory()
-
-        // Download .mlmodelc folders from Hugging Face
-        let modelFolders = ["silero_stft.mlmodelc", "silero_encoder.mlmodelc", "silero_rnn_decoder.mlmodelc"]
-
-        for folderName in modelFolders {
-            let folderPath = modelsDirectory.appendingPathComponent(folderName)
-
-            if !FileManager.default.fileExists(atPath: folderPath.path) {
-                logger.info("📥 Downloading \(folderName)...")
-                print("📥 Downloading \(folderName)...")
-                try await DownloadUtils.downloadVadModelFolder(folderName: folderName, to: folderPath)
-            }
+        // Assign loaded models
+        guard let stftModel = models["silero_stft.mlmodelc"],
+              let encoderModel = models["silero_encoder.mlmodelc"],
+              let rnnModel = models["silero_rnn_decoder.mlmodelc"] else {
+            logger.error("Failed to load all required VAD models")
+            throw VadError.modelLoadingFailed
         }
 
-        logger.info("✅ VAD models downloaded successfully")
+        self.stftModel = stftModel
+        self.encoderModel = encoderModel
+        self.rnnModel = rnnModel
+
+        logger.info("VAD models loaded successfully")
     }
+
+    /// Get default base directory for models
+    private func getDefaultBaseDirectory() -> URL {
+        if let customDirectory = config.modelCacheDirectory {
+            return customDirectory
+        }
+
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        return appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
+    }
+
 
 
 
@@ -579,14 +522,16 @@ public actor VadManager {
 
         let output = try rnnModel.prediction(from: input)
 
-        // Debug: Print all available outputs with their shapes for model inspection
-        logger.info("🔍 RNN Model Output Investigation:")
-        for featureName in output.featureNames.sorted() {
-            if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
-                let shape = featureValue.shape.map { $0.intValue }
-                logger.info("  Output '\(featureName)': shape \(shape)")
-            } else {
-                logger.info("  Output '\(featureName)': non-MLMultiArray type")
+        // Debug logging (only in debug mode)
+        if config.debugMode {
+            logger.info("🔍 RNN Model Output Investigation:")
+            for featureName in output.featureNames.sorted() {
+                if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
+                    let shape = featureValue.shape.map { $0.intValue }
+                    logger.info("  Output '\(featureName)': shape \(shape)")
+                } else {
+                    logger.info("  Output '\(featureName)': non-MLMultiArray type")
+                }
             }
         }
 
@@ -602,7 +547,9 @@ public actor VadManager {
 
         // If that fails, discover actual output names
         if rnnFeatures == nil || newHState == nil || newCState == nil {
-            logger.info("⚠️ Expected output names not found, discovering actual names...")
+            if config.debugMode {
+                logger.info("⚠️ Expected output names not found, discovering actual names...")
+            }
 
             for featureName in output.featureNames {
                 if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
@@ -610,21 +557,31 @@ public actor VadManager {
 
                     if rnnFeatures == nil && shape.count == 3 && shape[1] > 1 {
                         rnnFeatures = featureValue
-                        logger.info("✓ Found sequence output: '\(featureName)' shape: \(shape)")
+                        if config.debugMode {
+                            logger.info("✓ Found sequence output: '\(featureName)' shape: \(shape)")
+                        }
                     } else if shape == [1, 1, 128] {
                         let nameLower = featureName.lowercased()
                         if newHState == nil && (nameLower.contains("h") || nameLower.contains("hidden")) {
                             newHState = featureValue
-                            logger.info("✓ Found h_state output: '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found h_state output: '\(featureName)' shape: \(shape)")
+                            }
                         } else if newCState == nil && (nameLower.contains("c") || nameLower.contains("cell")) {
                             newCState = featureValue
-                            logger.info("✓ Found c_state output: '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found c_state output: '\(featureName)' shape: \(shape)")
+                            }
                         } else if newHState == nil {
                             newHState = featureValue
-                            logger.info("✓ Found h_state output (fallback): '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found h_state output (fallback): '\(featureName)' shape: \(shape)")
+                            }
                         } else if newCState == nil {
                             newCState = featureValue
-                            logger.info("✓ Found c_state output (fallback): '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found c_state output (fallback): '\(featureName)' shape: \(shape)")
+                            }
                         }
                     }
                 }
@@ -729,29 +686,6 @@ public actor VadManager {
 
 
 
-    /// Get models directory
-    private func getModelsDirectory() -> URL {
-        let directory: URL
-
-        if let customDirectory = config.modelCacheDirectory {
-            directory = customDirectory.appendingPathComponent("vad", isDirectory: true)
-        } else {
-            #if os(iOS)
-            // Use Documents directory on iOS for better compatibility with sandboxing
-            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            directory = documents.appendingPathComponent("FluidAudio/models/vad", isDirectory: true)
-            #else
-            // Use Application Support on macOS
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            directory = appSupport.appendingPathComponent("FluidAudio/vad", isDirectory: true)
-            #endif
-        }
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.standardizedFileURL
-    }
 
     /// Process audio file and return VAD results
     public func processAudioFile(_ audioData: [Float]) async throws -> [VadResult] {
