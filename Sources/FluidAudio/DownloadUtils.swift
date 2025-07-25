@@ -75,7 +75,10 @@ public class DownloadUtils {
         // Download repo if needed
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
+            logger.info("Models not found in cache at \(repoPath.path)")
             try await downloadRepo(repo, to: directory)
+        } else {
+            logger.info("Found \(repo.folderName) locally, no download needed")
         }
 
         // Configure CoreML
@@ -103,7 +106,7 @@ public class DownloadUtils {
                         NSLocalizedDescriptionKey: "Model path is not a directory: \(name)"
                     ])
                 }
-                
+
                 // Check for essential model files
                 let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
                 guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
@@ -113,17 +116,17 @@ public class DownloadUtils {
                         NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)"
                     ])
                 }
-                
+
                 models[name] = try MLModel(contentsOf: modelPath, configuration: config)
                 logger.info("✅ Loaded model: \(name)")
             } catch {
                 logger.error("❌ Failed to load model \(name): \(error)")
-                
+
                 // List directory contents for debugging
                 if let contents = try? FileManager.default.contentsOfDirectory(at: modelPath, includingPropertiesForKeys: nil) {
                     logger.error("   Model directory contents: \(contents.map { $0.lastPathComponent })")
                 }
-                
+
                 throw error
             }
         }
@@ -204,7 +207,7 @@ public class DownloadUtils {
 
             case "file":
                 let expectedSize = item.lfs?.size ?? item.size
-                
+
                 // Only log large files (>10MB) to reduce noise
                 if expectedSize > 10_000_000 {
                     logger.info("📥 Downloading \(item.path) (\(formatBytes(expectedSize)))")
@@ -300,7 +303,7 @@ public class DownloadUtils {
                     logger.warning("⚠️ Downloaded file size mismatch for \(path): got \(fileSize), expected \(expectedSize)")
                 }
             }
-            
+
             // Move completed file with better error handling
             do {
                 try? FileManager.default.removeItem(at: destination)
@@ -334,19 +337,19 @@ public class DownloadUtils {
 
         // Use URLSession download task with progress
         let session = URLSession.shared
-        
+
         // Always use URLSession.download for reliability (proven to work in PR #32)
         let (tempFile, response) = try await session.download(for: request)
-        
+
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
-        
+
         // Ensure parent directory exists before moving
         let parentDir = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
-        
+
         // Move to destination with better error handling for CI
         do {
             try? FileManager.default.removeItem(at: destination)
@@ -358,7 +361,7 @@ public class DownloadUtils {
             try FileManager.default.copyItem(at: tempFile, to: destination)
             try? FileManager.default.removeItem(at: tempFile)
         }
-        
+
         // Report complete
         progressHandler?(1.0)
     }
