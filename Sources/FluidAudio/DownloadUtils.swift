@@ -94,10 +94,36 @@ public class DownloadUtils {
             }
 
             do {
+                // Validate model directory structure before loading
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: modelPath.path, isDirectory: &isDirectory),
+                      isDirectory.boolValue else {
+                    throw CocoaError(.fileReadCorruptFile, userInfo: [
+                        NSFilePathErrorKey: modelPath.path,
+                        NSLocalizedDescriptionKey: "Model path is not a directory: \(name)"
+                    ])
+                }
+                
+                // Check for essential model files
+                let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
+                guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
+                    logger.error("❌ Missing coremldata.bin in \(name)")
+                    throw CocoaError(.fileReadCorruptFile, userInfo: [
+                        NSFilePathErrorKey: coremlDataPath.path,
+                        NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)"
+                    ])
+                }
+                
                 models[name] = try MLModel(contentsOf: modelPath, configuration: config)
                 logger.info("✅ Loaded model: \(name)")
             } catch {
                 logger.error("❌ Failed to load model \(name): \(error)")
+                
+                // List directory contents for debugging
+                if let contents = try? FileManager.default.contentsOfDirectory(at: modelPath, includingPropertiesForKeys: nil) {
+                    logger.error("   Model directory contents: \(contents.map { $0.lastPathComponent })")
+                }
+                
                 throw error
             }
         }

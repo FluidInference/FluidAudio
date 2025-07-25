@@ -24,7 +24,7 @@ public struct VadConfig: Sendable {
     public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)  // Expected speech range (Hz)
 
     public static let `default` = VadConfig()
-    
+
     /// Platform-optimized configuration for iOS devices
     #if os(iOS)
     public static let iosOptimized = VadConfig(
@@ -170,7 +170,7 @@ public actor VadManager {
         self.config = config
         self.audioProcessor = VadAudioProcessor(config: config)
     }
-    
+
     /// Initialize VadManager with pre-loaded models
     public init(config: VadConfig = .default, stft: MLModel, encoder: MLModel, rnn: MLModel) {
         self.config = config
@@ -210,17 +210,16 @@ public actor VadManager {
 
     /// Load VAD models using the new simplified API
     private func loadCoreMLModelsWithRecovery(from directory: URL? = nil) async throws {
-        logger.info("🔍 Loading VAD models...")
 
         // Get base directory for FluidAudio
         let baseDirectory = directory ?? getDefaultBaseDirectory()
-        
+
         let modelNames = [
             "silero_stft.mlmodelc",
-            "silero_encoder.mlmodelc", 
+            "silero_encoder.mlmodelc",
             "silero_rnn_decoder.mlmodelc"
         ]
-        
+
         // Use DownloadUtils.loadModels which already has auto-recovery built in
         let models = try await DownloadUtils.loadModels(
             .vad,
@@ -241,15 +240,15 @@ public actor VadManager {
         self.encoderModel = encoderModel
         self.rnnModel = rnnModel
 
-        logger.info("🎉 VAD models loaded successfully")
+        logger.info("VAD models loaded successfully")
     }
-    
+
     /// Get default base directory for models
     private func getDefaultBaseDirectory() -> URL {
         if let customDirectory = config.modelCacheDirectory {
             return customDirectory
         }
-        
+
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
@@ -523,14 +522,16 @@ public actor VadManager {
 
         let output = try rnnModel.prediction(from: input)
 
-        // Debug: Print all available outputs with their shapes for model inspection
-        logger.info("🔍 RNN Model Output Investigation:")
-        for featureName in output.featureNames.sorted() {
-            if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
-                let shape = featureValue.shape.map { $0.intValue }
-                logger.info("  Output '\(featureName)': shape \(shape)")
-            } else {
-                logger.info("  Output '\(featureName)': non-MLMultiArray type")
+        // Debug logging (only in debug mode)
+        if config.debugMode {
+            logger.info("🔍 RNN Model Output Investigation:")
+            for featureName in output.featureNames.sorted() {
+                if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
+                    let shape = featureValue.shape.map { $0.intValue }
+                    logger.info("  Output '\(featureName)': shape \(shape)")
+                } else {
+                    logger.info("  Output '\(featureName)': non-MLMultiArray type")
+                }
             }
         }
 
@@ -546,7 +547,9 @@ public actor VadManager {
 
         // If that fails, discover actual output names
         if rnnFeatures == nil || newHState == nil || newCState == nil {
-            logger.info("⚠️ Expected output names not found, discovering actual names...")
+            if config.debugMode {
+                logger.info("⚠️ Expected output names not found, discovering actual names...")
+            }
 
             for featureName in output.featureNames {
                 if let featureValue = output.featureValue(for: featureName)?.multiArrayValue {
@@ -554,21 +557,31 @@ public actor VadManager {
 
                     if rnnFeatures == nil && shape.count == 3 && shape[1] > 1 {
                         rnnFeatures = featureValue
-                        logger.info("✓ Found sequence output: '\(featureName)' shape: \(shape)")
+                        if config.debugMode {
+                            logger.info("✓ Found sequence output: '\(featureName)' shape: \(shape)")
+                        }
                     } else if shape == [1, 1, 128] {
                         let nameLower = featureName.lowercased()
                         if newHState == nil && (nameLower.contains("h") || nameLower.contains("hidden")) {
                             newHState = featureValue
-                            logger.info("✓ Found h_state output: '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found h_state output: '\(featureName)' shape: \(shape)")
+                            }
                         } else if newCState == nil && (nameLower.contains("c") || nameLower.contains("cell")) {
                             newCState = featureValue
-                            logger.info("✓ Found c_state output: '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found c_state output: '\(featureName)' shape: \(shape)")
+                            }
                         } else if newHState == nil {
                             newHState = featureValue
-                            logger.info("✓ Found h_state output (fallback): '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found h_state output (fallback): '\(featureName)' shape: \(shape)")
+                            }
                         } else if newCState == nil {
                             newCState = featureValue
-                            logger.info("✓ Found c_state output (fallback): '\(featureName)' shape: \(shape)")
+                            if config.debugMode {
+                                logger.info("✓ Found c_state output (fallback): '\(featureName)' shape: \(shape)")
+                            }
                         }
                     }
                 }

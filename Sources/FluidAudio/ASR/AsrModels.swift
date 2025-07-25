@@ -36,6 +36,12 @@ public struct AsrModels {
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
+    
+    /// Helper to get the repo path from a models directory
+    private static func repoPath(from modelsDirectory: URL) -> URL {
+        return modelsDirectory.deletingLastPathComponent()
+            .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
+    }
 
     public enum ModelNames {
         public static let melspectrogram = "Melspectogram.mlmodelc"
@@ -127,9 +133,8 @@ extension AsrModels {
         force: Bool = false
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory()
-        let parentDir = targetDir.deletingLastPathComponent()
-        
         logger.info("Downloading ASR models to: \(targetDir.path)")
+        let parentDir = targetDir.deletingLastPathComponent()
         
         if !force && modelsExist(at: targetDir) {
             logger.info("ASR models already present at: \(targetDir.path)")
@@ -182,8 +187,7 @@ extension AsrModels {
         ]
         
         // Check in the DownloadUtils repo structure
-        let repoPath = directory.deletingLastPathComponent()
-            .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
+        let repoPath = repoPath(from: directory)
         
         let modelsPresent = modelFiles.allSatisfy { fileName in
             let path = repoPath.appendingPathComponent(fileName)
