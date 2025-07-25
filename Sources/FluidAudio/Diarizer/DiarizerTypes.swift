@@ -9,17 +9,6 @@ public struct DiarizerConfig: Sendable {
     public var debugMode: Bool = false
 
     public static let `default` = DiarizerConfig()
-    
-    #if os(iOS)
-    public static let iosOptimized = DiarizerConfig(
-        clusteringThreshold: 0.7,
-        minDurationOn: 1.0,
-        minDurationOff: 0.5,
-        numClusters: -1,
-        minActivityThreshold: 10.0,
-        debugMode: false
-    )
-    #endif
 
     public init(
         clusteringThreshold: Float = 0.7,

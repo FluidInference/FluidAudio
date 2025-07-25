@@ -73,9 +73,11 @@ internal struct SpeakerClustering {
     
     func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else {
-            logger.debug(
-                "🔍 CLUSTERING DEBUG: Invalid embeddings for distance calculation - a.count: \(a.count), b.count: \(b.count)"
-            )
+            if config.debugMode {
+                logger.debug(
+                    "🔍 CLUSTERING DEBUG: Invalid embeddings for distance calculation - a.count: \(a.count), b.count: \(b.count)"
+                )
+            }
             return Float.infinity
         }
         
@@ -102,9 +104,11 @@ internal struct SpeakerClustering {
         let similarity = dotProduct / (magnitudeA * magnitudeB)
         let distance = 1 - similarity
         
-        logger.debug(
-            "🔍 CLUSTERING DEBUG: cosineDistance - similarity: \(String(format: "%.4f", similarity)), distance: \(String(format: "%.4f", distance)), magA: \(String(format: "%.4f", magnitudeA)), magB: \(String(format: "%.4f", magnitudeB))"
-        )
+        if config.debugMode {
+            logger.debug(
+                "🔍 CLUSTERING DEBUG: cosineDistance - similarity: \(String(format: "%.4f", similarity)), distance: \(String(format: "%.4f", distance)), magA: \(String(format: "%.4f", magnitudeA)), magB: \(String(format: "%.4f", magnitudeB))"
+            )
+        }
         
         return distance
     }

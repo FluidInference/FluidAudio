@@ -221,8 +221,6 @@ public final class DiarizerManager {
     {
         return segments.filter { segment in
             segment.durationSeconds >= self.config.minDurationOn
-        }.compactMap { segment in
-            return segment
         }
     }
 }

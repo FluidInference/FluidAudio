@@ -20,8 +20,7 @@ public struct VadConfig: Sendable {
 
     public static let `default` = VadConfig()
 
-    #if os(iOS)
-    public static let iosOptimized = VadConfig(
+    public static let optimized = VadConfig(
         threshold: 0.445,
         chunkSize: 512,
         sampleRate: 16000,
@@ -37,7 +36,6 @@ public struct VadConfig: Sendable {
         spectralRolloffThreshold: 0.85,
         spectralCentroidRange: (200.0, 8000.0)
     )
-    #endif
 
     public init(
         threshold: Float = 0.3,
