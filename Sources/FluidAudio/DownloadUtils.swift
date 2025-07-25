@@ -75,7 +75,11 @@ public class DownloadUtils {
         // Download repo if needed
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
+            logger.info("📦 Models not found in cache at \(repoPath.path)")
             try await downloadRepo(repo, to: directory)
+        } else {
+            logger.info("✅ Found models locally at \(repoPath.path)")
+            print("✅ Found \(repo.folderName) locally, no download needed")
         }
 
         // Configure CoreML

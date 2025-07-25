@@ -37,7 +37,7 @@ extension DiarizerModels {
         configuration: MLModelConfiguration? = nil
     ) async throws -> DiarizerModels {
         let logger = Logger(subsystem: "FluidAudio", category: "DiarizerModels")
-        logger.info("Starting model download")
+        logger.info("Checking for diarizer models...")
 
         let directory = directory ?? defaultModelsDirectory()
         let config = configuration ?? defaultConfiguration()

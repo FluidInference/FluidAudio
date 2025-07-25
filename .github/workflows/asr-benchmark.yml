@@ -137,7 +137,11 @@ jobs:
 
           <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
 
-          <sub>**Note**: CI RTFx degraded by M1/M2 Mac virtualization. M1 Mac test: ~28x (clean), ~25x (other). Testing per [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard).</sub>
+          ### Expected RTFx Performance on Physical M1 Hardware:
+          **• M1 Mac: ~28x (clean), ~25x (other)**
+          **• CI shows ~0.5-3x due to virtualization limitations**
+
+          <sub>Testing methodology follows [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)</sub>
 
           <!-- fluidaudio-benchmark-asr -->`;
 
