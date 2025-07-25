@@ -11,6 +11,7 @@ concurrency:
 
 jobs:
   vad-benchmark:
+    name: VAD Benchmark
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
@@ -82,13 +83,13 @@ jobs:
                 reportContent += `| Recall | ${results.recall?.toFixed(1)}% | 80-90% | ${results.recall >= 80 ? '✅' : '❌'} |\n`;
                 reportContent += `| F1-Score | ${results.f1_score?.toFixed(1)}% | 85.9% (Sohn's VAD) | ${results.f1_score >= 85.9 ? '✅' : '❌'} |\n`;
                 reportContent += `| Processing Time | ${results.processing_time_seconds?.toFixed(1)}s (${results.total_files} files) | ~1ms per 30ms chunk | ✅ |\n\n`;
-                
+
                 reportContent += `**Industry Leaders:**\n\n`;
                 reportContent += `- **Silero VAD**: ~90-95% F1 (DNN-based, 1.8MB model)\n`;
                 reportContent += `- **WebRTC VAD**: ~75-80% F1 (GMM-based, fast but lower accuracy)\n`;
                 reportContent += `- **Sohn's VAD**: 77.5% F1 (traditional approach)\n`;
                 reportContent += `- **Modern DNNs**: 85-97% F1 (varies by SNR conditions)\n\n`;
-                
+
                 reportContent += `<details>\n`;
                 reportContent += `<summary>📊 Detailed Research Comparisons</summary>\n\n`;
                 reportContent += `| Paper | Dataset | F1-Score | Method |\n`;
