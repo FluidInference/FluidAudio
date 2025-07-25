@@ -12,14 +12,14 @@ public struct DiarizerModels {
 
     public let segmentationModel: CoreMLDiarizer.SegmentationModel
     public let embeddingModel: CoreMLDiarizer.EmbeddingModel
-    public let downloadTime: Date
-    public let compilationTime: Date
+    public let downloadDuration: TimeInterval
+    public let compilationDuration: TimeInterval
 
-    init(segmentation: MLModel, embedding: MLModel, downloadTime: Date = Date(), compilationTime: Date = Date()) {
+    init(segmentation: MLModel, embedding: MLModel, downloadDuration: TimeInterval = 0, compilationDuration: TimeInterval = 0) {
         self.segmentationModel = segmentation
         self.embeddingModel = embedding
-        self.downloadTime = downloadTime
-        self.compilationTime = compilationTime
+        self.downloadDuration = downloadDuration
+        self.compilationDuration = compilationDuration
     }
 }
 
@@ -39,6 +39,7 @@ extension DiarizerModels {
         let logger = Logger(subsystem: "FluidAudio", category: "DiarizerModels")
         logger.info("Checking for diarizer models...")
 
+        let startTime = Date()
         let directory = directory ?? defaultModelsDirectory()
         let config = configuration ?? defaultConfiguration()
 
@@ -59,8 +60,14 @@ extension DiarizerModels {
             throw DiarizerError.modelDownloadFailed
         }
 
-        let downloadEndTime = Date()
-        return DiarizerModels(segmentation: segmentationModel, embedding: embeddingModel, downloadTime: Date(), compilationTime: downloadEndTime)
+        let endTime = Date()
+        let totalDuration = endTime.timeIntervalSince(startTime)
+        // For now, we don't have separate download vs compilation times, so we'll estimate
+        // In reality, if models are cached, download time is 0
+        let downloadDuration: TimeInterval = 0 // Models are typically cached
+        let compilationDuration = totalDuration // Most time is spent on compilation
+        
+        return DiarizerModels(segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: downloadDuration, compilationDuration: compilationDuration)
     }
 
     public static func load(
@@ -99,12 +106,6 @@ extension DiarizerModels {
 // MARK: - Predownloaded models.
 // -----------------------------
 
-extension Date {
-    var timeInterval: TimeInterval {
-        self.timeIntervalSinceReferenceDate
-    }
-}
-
 extension DiarizerModels {
 
     /// Load the models from the given local files.
@@ -122,10 +123,12 @@ extension DiarizerModels {
 
         let configuration = configuration ?? defaultConfiguration()
 
+        let startTime = Date()
         let segmentationModel = try MLModel(contentsOf: localSegmentationModel, configuration: configuration)
         let embeddingModel = try MLModel(contentsOf: localEmbeddingModel, configuration: configuration)
 
-        let downloadEndTime = Date()
-        return DiarizerModels(segmentation: segmentationModel, embedding: embeddingModel, downloadTime: Date(), compilationTime: downloadEndTime)
+        let endTime = Date()
+        let loadDuration = endTime.timeIntervalSince(startTime)
+        return DiarizerModels(segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: 0, compilationDuration: loadDuration)
     }
 }

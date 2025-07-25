@@ -1,5 +1,4 @@
 name: Diarizer Performance Benchmark
-
 on:
   pull_request:
     branches: [main]
@@ -11,7 +10,7 @@ concurrency:
 
 jobs:
   benchmark:
-    name: Diarizer Single File Performance Benchmark
+    name: Single File Performance Benchmark
     runs-on: macos-latest
     permissions:
       contents: read

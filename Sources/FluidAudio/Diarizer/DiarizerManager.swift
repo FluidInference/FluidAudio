@@ -2,11 +2,6 @@ import CoreML
 import Foundation
 import OSLog
 
-extension Duration {
-    internal var timeInterval: TimeInterval {
-        self / .seconds(1)
-    }
-}
 
 @available(macOS 13.0, iOS 16.0, *)
 public final class DiarizerManager {
@@ -30,7 +25,7 @@ public final class DiarizerManager {
     }
 
     public var initializationTimings: (downloadTime: TimeInterval, compilationTime: TimeInterval) {
-        models.map { ($0.downloadTime.timeInterval, $0.compilationTime.timeInterval) } ?? (0, 0)
+        models.map { ($0.downloadDuration, $0.compilationDuration) } ?? (0, 0)
     }
 
     public func initialize(models: consuming DiarizerModels) {
@@ -117,8 +112,8 @@ public final class DiarizerManager {
         let totalProcessingTime = Date().timeIntervalSince(processingStartTime)
 
         let timings = PipelineTimings(
-            modelDownloadSeconds: models.downloadTime.timeInterval,
-            modelCompilationSeconds: models.compilationTime.timeInterval,
+            modelDownloadSeconds: models.downloadDuration,
+            modelCompilationSeconds: models.compilationDuration,
             audioLoadingSeconds: 0,
             segmentationSeconds: segmentationTime,
             embeddingExtractionSeconds: embeddingTime,
