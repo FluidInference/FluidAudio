@@ -21,6 +21,9 @@ public final class AsrManager {
     /// The AsrModels instance if initialized with models
     private var asrModels: AsrModels?
 
+    /// Cached vocabulary loaded once during initialization
+    private var vocabulary: [Int: String] = [:]
+
     private var microphoneDecoderState = DecoderState()
     private var systemDecoderState = DecoderState()
 
@@ -30,6 +33,9 @@ public final class AsrManager {
     public init(config: ASRConfig = .default) {
         self.config = config
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
+
+        // Load vocabulary once during initialization
+        self.vocabulary = loadVocabulary()
     }
 
     public var isAvailable: Bool {
@@ -280,7 +286,11 @@ public final class AsrManager {
     internal func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (text: String, timings: [TokenTiming]) {
         guard !tokenIds.isEmpty else { return ("", []) }
 
-        let vocabulary = loadVocabulary()
+        // Fallback: if vocabulary is empty (failed to load during init), try loading it now
+        if vocabulary.isEmpty {
+            vocabulary = loadVocabulary()
+        }
+
         var result = ""
         var lastWasSpace = false
         var adjustedTimings: [TokenTiming] = []
