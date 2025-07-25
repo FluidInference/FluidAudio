@@ -42,7 +42,6 @@ extension DiarizerModels {
         let directory = directory ?? defaultModelsDirectory()
         let config = configuration ?? defaultConfiguration()
 
-        // Use new DownloadUtils system
         let modelNames = [
             SegmentationModelFileName + ".mlmodelc",
             EmbeddingModelFileName + ".mlmodelc"
