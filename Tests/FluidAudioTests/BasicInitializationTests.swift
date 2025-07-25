@@ -207,30 +207,32 @@ extension CoreMLDiarizerTests {
 
         let models = try await DiarizerModels.downloadIfNeeded(to: downloadDir)
 
-        // Check that the model paths point to that directory.
-
-        let (downloadedSegmentationModel, downloadedEmbeddingModel) = (models.paths.segmentationPath, models.paths.embeddingPath)
-
-        XCTAssert(downloadedSegmentationModel.absoluteString.starts(with: downloadDir.absoluteString))
-        XCTAssert(downloadedEmbeddingModel.absoluteString.starts(with: downloadDir.absoluteString))
-
-        // Check that the model files are actually there.
-
+        // Check that the models were downloaded successfully
+        XCTAssertNotNil(models.segmentationModel)
+        XCTAssertNotNil(models.embeddingModel)
+        
+        // Check that the model files exist in the download directory
+        let repoPath = downloadDir.deletingLastPathComponent()
+            .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName)
+        
+        let segmentationPath = repoPath.appendingPathComponent("pyannote_segmentation.mlmodelc")
+        let embeddingPath = repoPath.appendingPathComponent("wespeaker.mlmodelc")
+        
         var isDirectory: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedSegmentationModel)!.string, isDirectory: &isDirectory))
+            atPath: segmentationPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-
+        
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedSegmentationModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+            atPath: segmentationPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
-
+        
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedEmbeddingModel)!.string, isDirectory: &isDirectory))
+            atPath: embeddingPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-
+        
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedEmbeddingModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+            atPath: embeddingPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
         // Consume the models object; we don't need it any more.
@@ -240,9 +242,9 @@ extension CoreMLDiarizerTests {
         // Load the downloaded models using the predownloaded loader function.
         // We already know that the models are there; it's enough to just check that this works to load them.
 
-        let _ = try DiarizerModels.load(
-            localSegmentationModel: downloadedSegmentationModel,
-            localEmbeddingModel: downloadedEmbeddingModel
+        let _ = try await DiarizerModels.load(
+            localSegmentationModel: segmentationPath,
+            localEmbeddingModel: embeddingPath
         )
     }
 
@@ -256,35 +258,36 @@ extension CoreMLDiarizerTests {
 
         let models = try await DiarizerModels.downloadIfNeeded()
 
-        // Check that the model paths point to that directory.
-
-        let (downloadedSegmentationModel, downloadedEmbeddingModel) = (models.paths.segmentationPath, models.paths.embeddingPath)
-
-        #if os(iOS)
-            XCTAssert(downloadedSegmentationModel.pathComponents.suffix(4) == ["FluidAudio", "models", "diarization", "pyannote_segmentation.mlmodelc"])
-            XCTAssert(downloadedEmbeddingModel.pathComponents.suffix(4) == ["FluidAudio", "models", "diarization", "wespeaker.mlmodelc"])
-        #else
-            XCTAssert(downloadedSegmentationModel.pathComponents.suffix(3) == ["SpeakerKitModels", "coreml", "pyannote_segmentation.mlmodelc"])
-            XCTAssert(downloadedEmbeddingModel.pathComponents.suffix(3) == ["SpeakerKitModels", "coreml", "wespeaker.mlmodelc"])
-        #endif
-
+        // Check that the models were downloaded successfully
+        XCTAssertNotNil(models.segmentationModel)
+        XCTAssertNotNil(models.embeddingModel)
+        
+        // Get the default models directory
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let modelsDir = appSupport
+            .appendingPathComponent("FluidAudio", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+            .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
+        
+        let segmentationPath = modelsDir.appendingPathComponent("pyannote_segmentation.mlmodelc")
+        let embeddingPath = modelsDir.appendingPathComponent("wespeaker.mlmodelc")
+        
         // Check that the model files are actually there.
-
         var isDirectory: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedSegmentationModel)!.string, isDirectory: &isDirectory))
+            atPath: segmentationPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-
+        
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedSegmentationModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+            atPath: segmentationPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
-
+        
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedEmbeddingModel)!.string, isDirectory: &isDirectory))
+            atPath: embeddingPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-
+        
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: FilePath(downloadedEmbeddingModel.appendingPathComponent("coremldata.bin", isDirectory: false))!.string, isDirectory: &isDirectory))
+            atPath: embeddingPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
         // Consume the models object; we don't need it any more.
@@ -294,9 +297,9 @@ extension CoreMLDiarizerTests {
         // Load the downloaded models using the predownloaded loader function.
         // We already know that the models are there; it's enough to just check that this works to load them.
 
-        let _ = try DiarizerModels.load(
-            localSegmentationModel: downloadedSegmentationModel,
-            localEmbeddingModel: downloadedEmbeddingModel
+        let _ = try await DiarizerModels.load(
+            localSegmentationModel: segmentationPath,
+            localEmbeddingModel: embeddingPath
         )
     }
 

@@ -62,7 +62,7 @@
             print("   Test files: \(numFiles)")
             print("   VAD threshold: \(vadThreshold)")
 
-            let VadManager = VadManager(
+            let vadManager = VadManager(
                 config: VadConfig(
                     threshold: vadThreshold,
                     chunkSize: 512,
@@ -74,7 +74,7 @@
 
             do {
                 print("🔧 Initializing VAD manager...")
-                try await VadManager.initialize()
+                try await vadManager.initialize()
                 print("✅ VAD system initialized")
             } catch {
                 print("❌ Failed to initialize VAD: \(error)")
@@ -92,7 +92,7 @@
 
             // Run benchmark
             let result = try await runVadBenchmarkInternal(
-                VadManager: VadManager, testFiles: testFiles, threshold: vadThreshold)
+                vadManager: vadManager, testFiles: testFiles, threshold: vadThreshold)
 
             // Print results
             print("\nVAD Benchmark Results:")
@@ -379,7 +379,7 @@
         }
 
         static func runVadBenchmarkInternal(
-            VadManager: VadManager, testFiles: [VadTestFile], threshold: Float
+            vadManager: VadManager, testFiles: [VadTestFile], threshold: Float
         ) async throws -> VadBenchmarkResult {
             print("\n🔍 Running VAD benchmark on \(testFiles.count) files...")
 
@@ -396,7 +396,7 @@
                     let audioData = try await loadVadAudioData(audioFile)
 
                     // Process with VAD
-                    let vadResults = try await VadManager.processAudioFile(audioData)
+                    let vadResults = try await vadManager.processAudioFile(audioData)
 
                     // Free audio data immediately after processing
                     // This helps with GitHub Actions memory constraints

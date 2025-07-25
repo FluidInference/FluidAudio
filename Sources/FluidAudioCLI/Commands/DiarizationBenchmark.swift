@@ -115,7 +115,8 @@ enum DiarizationBenchmark {
         let manager = DiarizerManager(config: config)
 
         do {
-            try await manager.initialize()
+            let models = try await DiarizerModels.downloadIfNeeded()
+            manager.initialize(models: models)
             print("✅ Models initialized successfully")
         } catch {
             print("❌ Failed to initialize models: \(error)")
