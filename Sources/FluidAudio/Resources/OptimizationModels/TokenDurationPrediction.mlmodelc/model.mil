@@ -1,0 +1,23 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3405.2.1"}, {"coremlc-version", "3404.23.1"}, {"coremltools-component-torch", "2.7.1"}, {"coremltools-source-dialect", "TorchScript"}, {"coremltools-version", "8.3.0"}})]
+{
+    func main<ios16>(tensor<fp16, [1030]> logits) {
+            tensor<int32, [1]> token_logits_begin_0 = const()[name = tensor<string, []>("token_logits_begin_0"), val = tensor<int32, [1]>([0])];
+            tensor<int32, [1]> token_logits_end_0 = const()[name = tensor<string, []>("token_logits_end_0"), val = tensor<int32, [1]>([1025])];
+            tensor<bool, [1]> token_logits_end_mask_0 = const()[name = tensor<string, []>("token_logits_end_mask_0"), val = tensor<bool, [1]>([false])];
+            tensor<fp16, [1025]> token_logits_cast_fp16 = slice_by_index(begin = token_logits_begin_0, end = token_logits_end_0, end_mask = token_logits_end_mask_0, x = logits)[name = tensor<string, []>("token_logits_cast_fp16")];
+            tensor<int32, [1]> duration_logits_begin_0 = const()[name = tensor<string, []>("duration_logits_begin_0"), val = tensor<int32, [1]>([1025])];
+            tensor<int32, [1]> duration_logits_end_0 = const()[name = tensor<string, []>("duration_logits_end_0"), val = tensor<int32, [1]>([1030])];
+            tensor<bool, [1]> duration_logits_end_mask_0 = const()[name = tensor<string, []>("duration_logits_end_mask_0"), val = tensor<bool, [1]>([true])];
+            tensor<fp16, [5]> duration_logits_cast_fp16 = slice_by_index(begin = duration_logits_begin_0, end = duration_logits_end_0, end_mask = duration_logits_end_mask_0, x = logits)[name = tensor<string, []>("duration_logits_cast_fp16")];
+            tensor<int32, []> var_14_axis_0 = const()[name = tensor<string, []>("op_14_axis_0"), val = tensor<int32, []>(-1)];
+            tensor<bool, []> var_14_keep_dims_0 = const()[name = tensor<string, []>("op_14_keep_dims_0"), val = tensor<bool, []>(true)];
+            tensor<int32, [1]> token_id = reduce_argmax(axis = var_14_axis_0, keep_dims = var_14_keep_dims_0, x = token_logits_cast_fp16)[name = tensor<string, []>("op_14_cast_fp16")];
+            tensor<int32, [1]> reduce_max_0_axes_0 = const()[name = tensor<string, []>("reduce_max_0_axes_0"), val = tensor<int32, [1]>([-1])];
+            tensor<bool, []> reduce_max_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_max_0_keep_dims_0"), val = tensor<bool, []>(true)];
+            tensor<fp16, [1]> token_score = reduce_max(axes = reduce_max_0_axes_0, keep_dims = reduce_max_0_keep_dims_0, x = token_logits_cast_fp16)[name = tensor<string, []>("reduce_max_0_cast_fp16")];
+            tensor<int32, []> var_21_axis_0 = const()[name = tensor<string, []>("op_21_axis_0"), val = tensor<int32, []>(-1)];
+            tensor<bool, []> var_21_keep_dims_0 = const()[name = tensor<string, []>("op_21_keep_dims_0"), val = tensor<bool, []>(true)];
+            tensor<int32, [1]> duration_index = reduce_argmax(axis = var_21_axis_0, keep_dims = var_21_keep_dims_0, x = duration_logits_cast_fp16)[name = tensor<string, []>("op_21_cast_fp16")];
+        } -> (token_id, token_score, duration_index);
+}

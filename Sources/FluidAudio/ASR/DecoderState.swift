@@ -1,10 +1,3 @@
-//
-//  DecoderState.swift
-//  FluidAudio
-//
-//  Copyright © 2025 Brandon Weng. All rights reserved.
-//
-
 import CoreML
 import Foundation
 
@@ -16,7 +9,7 @@ struct DecoderState {
     init() {
         hiddenState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
         cellState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        
+
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
     }
@@ -29,19 +22,19 @@ struct DecoderState {
     init(from other: DecoderState) {
         hiddenState = try! MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
         cellState = try! MLMultiArray(shape: other.cellState.shape, dataType: .float32)
-        
+
         hiddenState.copyData(from: other.hiddenState)
         cellState.copyData(from: other.cellState)
     }
 }
 
-internal extension MLMultiArray {
+extension MLMultiArray {
     func resetData(to value: NSNumber) {
         for i in 0..<count {
             self[i] = value
         }
     }
-    
+
     func copyData(from source: MLMultiArray) {
         for i in 0..<count {
             self[i] = source[i]

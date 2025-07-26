@@ -1,10 +1,3 @@
-//
-//  AsrModels.swift
-//  FluidAudio
-//
-//  Copyright © 2025 Brandon Weng. All rights reserved.
-//
-
 @preconcurrency import CoreML
 import Foundation
 import OSLog
@@ -36,7 +29,7 @@ public struct AsrModels {
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
-    
+
     /// Helper to get the repo path from a models directory
     private static func repoPath(from modelsDirectory: URL) -> URL {
         return modelsDirectory.deletingLastPathComponent()
@@ -63,26 +56,27 @@ extension AsrModels {
         logger.info("Loading ASR models from: \(directory.path)")
 
         let config = configuration ?? defaultConfiguration()
-        
+
         // Use DownloadUtils to load models with auto-recovery
         let modelNames = [
             ModelNames.melspectrogram,
             ModelNames.encoder,
             ModelNames.decoder,
-            ModelNames.joint
+            ModelNames.joint,
         ]
-        
+
         let models = try await DownloadUtils.loadModels(
             .parakeet,
             modelNames: modelNames,
             directory: directory.deletingLastPathComponent(),
             computeUnits: config.computeUnits
         )
-        
+
         guard let melModel = models[ModelNames.melspectrogram],
-              let encoderModel = models[ModelNames.encoder],
-              let decoderModel = models[ModelNames.decoder],
-              let jointModel = models[ModelNames.joint] else {
+            let encoderModel = models[ModelNames.encoder],
+            let decoderModel = models[ModelNames.decoder],
+            let jointModel = models[ModelNames.joint]
+        else {
             throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
         }
 
@@ -104,7 +98,7 @@ extension AsrModels {
         let cacheDir = defaultCacheDirectory()
         return try await load(from: cacheDir, configuration: configuration)
     }
-    
+
     /// Load models with automatic recovery on compilation failures
     public static func loadWithAutoRecovery(
         from directory: URL? = nil,
@@ -135,28 +129,28 @@ extension AsrModels {
         let targetDir = directory ?? defaultCacheDirectory()
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
-        
+
         if !force && modelsExist(at: targetDir) {
             logger.info("ASR models already present at: \(targetDir.path)")
             return targetDir
         }
-        
+
         if force {
             let fileManager = FileManager.default
             if fileManager.fileExists(atPath: targetDir.path) {
                 try fileManager.removeItem(at: targetDir)
             }
         }
-        
+
         // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v2-coreml/
         // by DownloadUtils.loadModels, so we don't need to download separately
         let modelNames = [
             ModelNames.melspectrogram,
             ModelNames.encoder,
             ModelNames.decoder,
-            ModelNames.joint
+            ModelNames.joint,
         ]
-        
+
         // Download models using DownloadUtils (this will download if needed)
         _ = try await DownloadUtils.loadModels(
             .parakeet,
@@ -164,7 +158,7 @@ extension AsrModels {
             directory: parentDir,
             computeUnits: defaultConfiguration().computeUnits
         )
-        
+
         logger.info("Successfully downloaded ASR models")
         return targetDir
     }
@@ -185,15 +179,15 @@ extension AsrModels {
             ModelNames.decoder,
             ModelNames.joint,
         ]
-        
+
         // Check in the DownloadUtils repo structure
         let repoPath = repoPath(from: directory)
-        
+
         let modelsPresent = modelFiles.allSatisfy { fileName in
             let path = repoPath.appendingPathComponent(fileName)
             return fileManager.fileExists(atPath: path.path)
         }
-        
+
         // Also check for vocabulary file
         let vocabPath = repoPath.appendingPathComponent(ModelNames.vocabulary)
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
@@ -228,7 +222,8 @@ public enum AsrModelsError: LocalizedError {
         case .loadingFailed(let reason):
             return "Failed to load ASR models: \(reason)"
         case .modelCompilationFailed(let reason):
-            return "Failed to compile ASR models: \(reason). Try deleting the models and re-downloading."
+            return
+                "Failed to compile ASR models: \(reason). Try deleting the models and re-downloading."
         }
     }
 }
