@@ -268,7 +268,7 @@ internal struct TdtDecoder {
     }
 
     /// Predict token and duration from joint logits
-    private func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (token: Int, score: Float, duration: Int) {
+    internal func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (token: Int, score: Float, duration: Int) {
         let (tokenLogits, durationLogits) = try splitLogits(logits)
 
         let bestToken = argmax(tokenLogits)
@@ -280,7 +280,7 @@ internal struct TdtDecoder {
     }
 
     /// Update hypothesis with new token
-    private func updateHypothesis(
+    internal func updateHypothesis(
         _ hypothesis: inout TdtHypothesis,
         token: Int,
         score: Float,
@@ -310,7 +310,7 @@ internal struct TdtDecoder {
     ///   - skip: Number of frames to skip (predicted by the model)
     ///   - sequenceLength: Total number of frames in the audio
     /// - Returns: The next frame index to process
-    private func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
+    internal func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
         // Determine the actual number of frames to skip
         let actualSkip: Int
         
@@ -331,7 +331,7 @@ internal struct TdtDecoder {
     // MARK: - Private Helper Methods
 
     /// Split joint logits into token and duration components
-    private func splitLogits(_ logits: MLMultiArray) throws -> (tokenLogits: [Float], durationLogits: [Float]) {
+    internal func splitLogits(_ logits: MLMultiArray) throws -> (tokenLogits: [Float], durationLogits: [Float]) {
         let totalElements = logits.count
         let durationElements = config.tdtConfig.durations.count
         let vocabSize = totalElements - durationElements
@@ -347,7 +347,7 @@ internal struct TdtDecoder {
     }
 
     /// Process duration logits and return duration index with skip value
-    private func processDurationLogits(_ logits: [Float]) throws -> (index: Int, skip: Int) {
+    internal func processDurationLogits(_ logits: [Float]) throws -> (index: Int, skip: Int) {
         let maxIndex = argmax(logits)
         let durations = config.tdtConfig.durations
         guard maxIndex < durations.count else {
@@ -357,12 +357,12 @@ internal struct TdtDecoder {
     }
 
     /// Find argmax in a float array
-    private func argmax(_ values: [Float]) -> Int {
+    internal func argmax(_ values: [Float]) -> Int {
         guard !values.isEmpty else { return 0 }
         return values.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
     }
 
-    private func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws -> MLMultiArray {
+    internal func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws -> MLMultiArray {
         let shape = encoderOutput.shape
         let batchSize = shape[0].intValue
         let sequenceLength = shape[1].intValue
@@ -382,7 +382,7 @@ internal struct TdtDecoder {
         return timeStepArray
     }
 
-    private func prepareDecoderInput(
+    internal func prepareDecoderInput(
         targetToken: Int,
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
@@ -401,7 +401,7 @@ internal struct TdtDecoder {
         ])
     }
 
-    private func prepareJointInput(
+    internal func prepareJointInput(
         encoderOutput: MLMultiArray,
         decoderOutput: MLFeatureProvider,
         timeIndex: Int

@@ -35,7 +35,7 @@ struct DecoderState {
     }
 }
 
-private extension MLMultiArray {
+internal extension MLMultiArray {
     func resetData(to value: NSNumber) {
         for i in 0..<count {
             self[i] = value

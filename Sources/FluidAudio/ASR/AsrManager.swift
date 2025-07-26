@@ -22,7 +22,13 @@ public final class AsrManager {
     private var asrModels: AsrModels?
 
     /// Cached vocabulary loaded once during initialization
-    private var vocabulary: [Int: String] = [:]
+    internal var vocabulary: [Int: String] = [:]
+    #if DEBUG
+    // Test-only setter
+    internal func setVocabularyForTesting(_ vocab: [Int: String]) {
+        vocabulary = vocab
+    }
+    #endif
 
     private var microphoneDecoderState = DecoderState()
     private var systemDecoderState = DecoderState()
@@ -80,7 +86,7 @@ public final class AsrManager {
         return try MLDictionaryFeatureProvider(dictionary: featureDict)
     }
 
-    private func createScalarArray(value: Int, shape: [NSNumber] = [1], dataType: MLMultiArrayDataType = .int32) throws -> MLMultiArray {
+    internal func createScalarArray(value: Int, shape: [NSNumber] = [1], dataType: MLMultiArrayDataType = .int32) throws -> MLMultiArray {
         let array = try MLMultiArray(shape: shape, dataType: dataType)
         array[0] = NSNumber(value: value)
         return array
