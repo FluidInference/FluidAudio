@@ -274,7 +274,6 @@ internal struct TdtDecoder {
 
             let output = try tokenDurationModel.prediction(from: input)
 
-            // Try both old and new output names for compatibility
             let tokenIdValue = output.featureValue(for: "var_17")?.multiArrayValue
             let tokenScoreValue = output.featureValue(for: "reduce_max_0")?.multiArrayValue
             let durationIndexValue = output.featureValue(for: "var_24")?.multiArrayValue
