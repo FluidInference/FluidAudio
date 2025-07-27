@@ -142,31 +142,6 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
-        // First, check repository availability using HEAD request to config.json
-        let configURL = URL(string: "https://huggingface.co/\(repo.rawValue)/resolve/main/config.json")!
-        var configRequest = URLRequest(url: configURL)
-        configRequest.httpMethod = "HEAD"
-        configRequest.timeoutInterval = 10
-        
-        do {
-            let (_, response) = try await URLSession.shared.data(for: configRequest)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw URLError(.badServerResponse)
-            }
-            
-            // Check if we got a valid response (200 or 404 are both OK - repo exists)
-            if httpResponse.statusCode != 200 && httpResponse.statusCode != 404 {
-                throw URLError(.badServerResponse, userInfo: [
-                    NSLocalizedDescriptionKey: "Repository not accessible. HTTP status: \(httpResponse.statusCode)"
-                ])
-            }
-            
-            logger.info("✅ Repository is accessible (status: \(httpResponse.statusCode))")
-        } catch {
-            logger.error("❌ Failed to access repository: \(error)")
-            throw error
-        }
-
         // Download all repository contents
         let files = try await listRepoFiles(repo)
 
