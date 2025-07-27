@@ -14,166 +14,166 @@ jobs:
       pull-requests: write
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - uses: swift-actions/setup-swift@v2
-      with:
-        swift-version: "6.1"
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
 
-    - name: Cache Dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          .build
-          ~/Library/Application Support/FluidAudio/Models/Parakeet
-          ~/Documents/Datasets/librispeech
-        key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v4
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/Parakeet
+            ~/Documents/Datasets/librispeech
+          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v4
 
-    - name: Build
-      run: swift build -c release
+      - name: Build
+        run: swift build -c release
 
-    - name: Download Models if Needed
-      run: |
-        MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
-        VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
+      - name: Download Models if Needed
+        run: |
+          MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
+          VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
 
-        # Check if all models exist
-        if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ] && \
-           [ -f "$MODELS_DIR/parakeet_vocab.json" ]; then
-          echo "✅ Models already cached"
-        else
-          echo "📥 Downloading models..."
-          rm -rf "$MODELS_DIR"
-          mkdir -p "$MODELS_DIR"
+          # Check if all models exist
+          if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
+             [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
+             [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
+             [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ] && \
+             [ -f "$MODELS_DIR/parakeet_vocab.json" ]; then
+            echo "✅ Models already cached"
+          else
+            echo "📥 Downloading models..."
+            rm -rf "$MODELS_DIR"
+            mkdir -p "$MODELS_DIR"
 
-          TEMP_DIR=$(mktemp -d)
-          cd "$TEMP_DIR"
-          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
-          cd parakeet-tdt-0.6b-v2-coreml
-          git lfs pull --include="*.mlmodelc/**"
+            TEMP_DIR=$(mktemp -d)
+            cd "$TEMP_DIR"
+            GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
+            cd parakeet-tdt-0.6b-v2-coreml
+            git lfs pull --include="*.mlmodelc/**"
 
-          mv *.mlmodelc "$MODELS_DIR/"
-          mv parakeet_vocab.json "$MODELS_DIR/"
+            mv *.mlmodelc "$MODELS_DIR/"
+            mv parakeet_vocab.json "$MODELS_DIR/"
 
-          cd /
-          rm -rf "$TEMP_DIR"
-          echo "✅ Models downloaded"
-        fi
+            cd /
+            rm -rf "$TEMP_DIR"
+            echo "✅ Models downloaded"
+          fi
 
-    - name: Run Benchmarks
-      id: benchmark
-      run: |
-        MAX_FILES="100"
-        BENCHMARK_START=$(date +%s)
+      - name: Run Benchmarks
+        id: benchmark
+        run: |
+          MAX_FILES="500"
+          BENCHMARK_START=$(date +%s)
 
-        # Run in parallel
-        swift run -c release fluidaudio asr-benchmark \
-          --subset test-clean --max-files "$MAX_FILES" \
-          --auto-download --output asr_results_clean.json &
-        CLEAN_PID=$!
+          # Run in parallel
+          swift run -c release fluidaudio asr-benchmark \
+            --subset test-clean --max-files "$MAX_FILES" \
+            --auto-download --output asr_results_clean.json &
+          CLEAN_PID=$!
 
-        swift run -c release fluidaudio asr-benchmark \
-          --subset test-other --max-files "$MAX_FILES" \
-          --auto-download --output asr_results_other.json &
-        OTHER_PID=$!
+          swift run -c release fluidaudio asr-benchmark \
+            --subset test-other --max-files "$MAX_FILES" \
+            --auto-download --output asr_results_other.json &
+          OTHER_PID=$!
 
-        wait $CLEAN_PID && wait $OTHER_PID
+          wait $CLEAN_PID && wait $OTHER_PID
 
-        # Extract metrics with error handling
-        if [ -f asr_results_clean.json ]; then
-          CLEAN_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json 2>/dev/null)
-          CLEAN_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json 2>/dev/null)
-          CLEAN_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_clean.json 2>/dev/null)
-          CLEAN_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_clean.json 2>/dev/null)
-          CLEAN_RTFx=$(jq -r '.summary.medianRTFx' asr_results_clean.json 2>/dev/null)
+          # Extract metrics with error handling
+          if [ -f asr_results_clean.json ]; then
+            CLEAN_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json 2>/dev/null)
+            CLEAN_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json 2>/dev/null)
+            CLEAN_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_clean.json 2>/dev/null)
+            CLEAN_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_clean.json 2>/dev/null)
+            CLEAN_RTFx=$(jq -r '.summary.medianRTFx' asr_results_clean.json 2>/dev/null)
 
-          # Format values only if they exist and are not null
-          [ "$CLEAN_WER_AVG" != "null" ] && [ -n "$CLEAN_WER_AVG" ] && CLEAN_WER_AVG=$(printf "%.2f" "$CLEAN_WER_AVG") || CLEAN_WER_AVG="N/A"
-          [ "$CLEAN_WER_MED" != "null" ] && [ -n "$CLEAN_WER_MED" ] && CLEAN_WER_MED=$(printf "%.2f" "$CLEAN_WER_MED") || CLEAN_WER_MED="N/A"
-          [ "$CLEAN_RTFx" != "null" ] && [ -n "$CLEAN_RTFx" ] && CLEAN_RTFx=$(printf "%.2f" "$CLEAN_RTFx") || CLEAN_RTFx="N/A"
-        fi
+            # Format values only if they exist and are not null
+            [ "$CLEAN_WER_AVG" != "null" ] && [ -n "$CLEAN_WER_AVG" ] && CLEAN_WER_AVG=$(printf "%.2f" "$CLEAN_WER_AVG") || CLEAN_WER_AVG="N/A"
+            [ "$CLEAN_WER_MED" != "null" ] && [ -n "$CLEAN_WER_MED" ] && CLEAN_WER_MED=$(printf "%.2f" "$CLEAN_WER_MED") || CLEAN_WER_MED="N/A"
+            [ "$CLEAN_RTFx" != "null" ] && [ -n "$CLEAN_RTFx" ] && CLEAN_RTFx=$(printf "%.2f" "$CLEAN_RTFx") || CLEAN_RTFx="N/A"
+          fi
 
-        if [ -f asr_results_other.json ]; then
-          OTHER_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json 2>/dev/null)
-          OTHER_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json 2>/dev/null)
-          OTHER_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_other.json 2>/dev/null)
-          OTHER_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_other.json 2>/dev/null)
-          OTHER_RTFx=$(jq -r '.summary.medianRTFx' asr_results_other.json 2>/dev/null)
+          if [ -f asr_results_other.json ]; then
+            OTHER_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json 2>/dev/null)
+            OTHER_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json 2>/dev/null)
+            OTHER_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_other.json 2>/dev/null)
+            OTHER_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_other.json 2>/dev/null)
+            OTHER_RTFx=$(jq -r '.summary.medianRTFx' asr_results_other.json 2>/dev/null)
 
-          # Format values only if they exist and are not null
-          [ "$OTHER_WER_AVG" != "null" ] && [ -n "$OTHER_WER_AVG" ] && OTHER_WER_AVG=$(printf "%.2f" "$OTHER_WER_AVG") || OTHER_WER_AVG="N/A"
-          [ "$OTHER_WER_MED" != "null" ] && [ -n "$OTHER_WER_MED" ] && OTHER_WER_MED=$(printf "%.2f" "$OTHER_WER_MED") || OTHER_WER_MED="N/A"
-          [ "$OTHER_RTFx" != "null" ] && [ -n "$OTHER_RTFx" ] && OTHER_RTFx=$(printf "%.2f" "$OTHER_RTFx") || OTHER_RTFx="N/A"
-        fi
+            # Format values only if they exist and are not null
+            [ "$OTHER_WER_AVG" != "null" ] && [ -n "$OTHER_WER_AVG" ] && OTHER_WER_AVG=$(printf "%.2f" "$OTHER_WER_AVG") || OTHER_WER_AVG="N/A"
+            [ "$OTHER_WER_MED" != "null" ] && [ -n "$OTHER_WER_MED" ] && OTHER_WER_MED=$(printf "%.2f" "$OTHER_WER_MED") || OTHER_WER_MED="N/A"
+            [ "$OTHER_RTFx" != "null" ] && [ -n "$OTHER_RTFx" ] && OTHER_RTFx=$(printf "%.2f" "$OTHER_RTFx") || OTHER_RTFx="N/A"
+          fi
 
-        # Output metrics
-        echo "CLEAN_WER_AVG=${CLEAN_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
-        echo "CLEAN_WER_MED=${CLEAN_WER_MED:-N/A}" >> $GITHUB_OUTPUT
-        echo "CLEAN_RTFx=${CLEAN_RTFx:-N/A}" >> $GITHUB_OUTPUT
-        echo "OTHER_WER_AVG=${OTHER_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
-        echo "OTHER_WER_MED=${OTHER_WER_MED:-N/A}" >> $GITHUB_OUTPUT
-        echo "OTHER_RTFx=${OTHER_RTFx:-N/A}" >> $GITHUB_OUTPUT
+          # Output metrics
+          echo "CLEAN_WER_AVG=${CLEAN_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
+          echo "CLEAN_WER_MED=${CLEAN_WER_MED:-N/A}" >> $GITHUB_OUTPUT
+          echo "CLEAN_RTFx=${CLEAN_RTFx:-N/A}" >> $GITHUB_OUTPUT
+          echo "OTHER_WER_AVG=${OTHER_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
+          echo "OTHER_WER_MED=${OTHER_WER_MED:-N/A}" >> $GITHUB_OUTPUT
+          echo "OTHER_RTFx=${OTHER_RTFx:-N/A}" >> $GITHUB_OUTPUT
 
-        EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
-        echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
-        echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+          echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
 
-    - name: Comment PR
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const body = `## ASR Benchmark Results
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `## ASR Benchmark Results
 
-          | Dataset | WER Avg | WER Med | RTFx | Status |
-          |---------|---------|---------|------|--------|
-          | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
-          | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
+            | Dataset | WER Avg | WER Med | RTFx | Status |
+            |---------|---------|---------|------|--------|
+            | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
+            | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
 
-          <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+            <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
-          <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
+            <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
 
-          ### Expected RTFx Performance on Physical M1 Hardware:
-          **• M1 Mac: ~28x (clean), ~25x (other)**
-          **• CI shows ~0.5-3x due to virtualization limitations**
+            ### Expected RTFx Performance on Physical M1 Hardware:
+            **• M1 Mac: ~28x (clean), ~25x (other)**
+            **• CI shows ~0.5-3x due to virtualization limitations**
 
-          <sub>Testing methodology follows [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)</sub>
+            <sub>Testing methodology follows [HuggingFace Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)</sub>
 
-          <!-- fluidaudio-benchmark-asr -->`;
+            <!-- fluidaudio-benchmark-asr -->`;
 
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          });
-
-          const existing = comments.find(c =>
-            c.body.includes('<!-- fluidaudio-benchmark-asr -->')
-          );
-
-          if (existing) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: existing.id,
-              body: body
-            });
-          } else {
-            await github.rest.issues.createComment({
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: body
             });
-          }
 
-    - name: Upload Results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: asr-results
-        path: asr_results_*.json
+            const existing = comments.find(c =>
+              c.body.includes('<!-- fluidaudio-benchmark-asr -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-results
+          path: asr_results_*.json
