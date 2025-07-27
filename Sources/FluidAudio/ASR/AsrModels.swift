@@ -8,6 +8,7 @@ public struct AsrModels {
     public let encoder: MLModel
     public let decoder: MLModel
     public let joint: MLModel
+    public let tokenDuration: MLModel
     public let configuration: MLModelConfiguration
 
     private static let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "AsrModels")
@@ -17,12 +18,14 @@ public struct AsrModels {
         encoder: MLModel,
         decoder: MLModel,
         joint: MLModel,
+        tokenDuration: MLModel,
         configuration: MLModelConfiguration
     ) {
         self.melspectrogram = melspectrogram
         self.encoder = encoder
         self.decoder = decoder
         self.joint = joint
+        self.tokenDuration = tokenDuration
         self.configuration = configuration
     }
 }
@@ -77,7 +80,8 @@ extension AsrModels {
         guard let melModel = models[ModelNames.melspectrogram],
             let encoderModel = models[ModelNames.encoder],
             let decoderModel = models[ModelNames.decoder],
-            let jointModel = models[ModelNames.joint]
+            let jointModel = models[ModelNames.joint],
+            let tokenDurationModel = models[ModelNames.tokenDuration]
         else {
             throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
         }
@@ -87,6 +91,7 @@ extension AsrModels {
             encoder: encoderModel,
             decoder: decoderModel,
             joint: jointModel,
+            tokenDuration: tokenDurationModel,
             configuration: config
         )
 

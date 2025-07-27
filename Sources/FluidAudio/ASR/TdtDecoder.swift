@@ -47,7 +47,7 @@ internal struct TdtDecoder {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
-    private let optimizationModels: ASROptimizationModels?
+    private let tokenDurationModel: MLModel?
 
     // Special token Indexes matching Parakeet TDT model's vocabulary (1024 word tokens)
     // OUTPUT from joint network during decoding
@@ -59,9 +59,9 @@ internal struct TdtDecoder {
     // sosId is INPUT when there's no real previous token
     private let sosId = 1024
 
-    init(config: ASRConfig, optimizationModels: ASROptimizationModels? = nil) {
+    init(config: ASRConfig, tokenDurationModel: MLModel? = nil) {
         self.config = config
-        self.optimizationModels = optimizationModels
+        self.tokenDurationModel = tokenDurationModel
     }
 
     /// Execute TDT decoding on encoder output
@@ -268,7 +268,7 @@ internal struct TdtDecoder {
         token: Int, score: Float, duration: Int
     ) {
         // Try to use CoreML optimization model first
-        if let tokenDurationModel = optimizationModels?.tokenDuration {
+        if let tokenDurationModel = tokenDurationModel {
             do {
                 let input = try MLDictionaryFeatureProvider(dictionary: [
                     "logits": MLFeatureValue(multiArray: logits)
