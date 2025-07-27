@@ -33,6 +33,7 @@ struct TdtHypothesis: Sendable {
     var ySequence: [Int] = []
     var decState: DecoderState?
     var timestamps: [Int] = []
+    var tokenDurations: [Int] = []
     var lastToken: Int?
 }
 
@@ -192,16 +193,28 @@ internal struct TdtDecoder {
     /// Pre-process encoder output into contiguous memory for faster access
     private func preProcessEncoderOutput(_ encoderOutput: MLMultiArray, length: Int) throws -> EncoderFrameArray {
         let shape = encoderOutput.shape
+        guard shape.count >= 3 else {
+            throw ASRError.processingFailed("Invalid encoder output shape: \(shape)")
+        }
         let hiddenSize = shape[2].intValue
 
         var frames = EncoderFrameArray()
         frames.reserveCapacity(length)
 
-        let encoderPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
-
+        // Safer approach: iterate through the MLMultiArray directly
         for timeIdx in 0..<length {
-            let offset = timeIdx * hiddenSize
-            let frame = Array(UnsafeBufferPointer(start: encoderPtr + offset, count: hiddenSize))
+            var frame = [Float]()
+            frame.reserveCapacity(hiddenSize)
+            
+            for h in 0..<hiddenSize {
+                let index = timeIdx * hiddenSize + h
+                if index < encoderOutput.count {
+                    frame.append(encoderOutput[index].floatValue)
+                } else {
+                    throw ASRError.processingFailed("Index out of bounds in encoder output")
+                }
+            }
+            
             frames.append(frame)
         }
 
@@ -249,11 +262,10 @@ internal struct TdtDecoder {
 
         // Create encoder MLMultiArray from pre-processed data
         let encoderArray = try MLMultiArray(shape: [1, 1, encoderStep.count as NSNumber], dataType: .float32)
-        encoderStep.withUnsafeBufferPointer { buffer in
-            let dst = encoderArray.dataPointer.bindMemory(to: Float.self, capacity: encoderStep.count)
-            if let baseAddress = buffer.baseAddress {
-                dst.initialize(from: baseAddress, count: encoderStep.count)
-            }
+        
+        // Safer approach: set values directly
+        for (index, value) in encoderStep.enumerated() {
+            encoderArray[index] = NSNumber(value: value)
         }
 
         let decoderOutputArray = try extractFeatureValue(from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
