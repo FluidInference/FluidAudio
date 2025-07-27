@@ -6,13 +6,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  asr-benchmark:
-    name: ASR Benchmark
+  build:
+    name: Build Release Binary
     runs-on: macos-14
-    permissions:
-      contents: read
-      pull-requests: write
-
+    outputs:
+      cache-key: ${{ steps.cache-key.outputs.key }}
     steps:
     - uses: actions/checkout@v4
 
@@ -20,120 +18,296 @@ jobs:
       with:
         swift-version: "6.1"
 
-    - name: Cache Dependencies
+    - name: Generate cache key
+      id: cache-key
+      run: |
+        echo "key=${{ runner.os }}-build-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+    - name: Cache Swift Build
       uses: actions/cache@v4
       with:
-        path: |
-          .build
-          ~/Library/Application Support/FluidAudio/Models/Parakeet
-          ~/Documents/Datasets/librispeech
-        key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v4
+        path: .build
+        key: ${{ steps.cache-key.outputs.key }}
+        restore-keys: |
+          ${{ runner.os }}-build-${{ hashFiles('Package.resolved', 'Package.swift') }}-
+          ${{ runner.os }}-build-
 
-    - name: Build
-      run: swift build -c release
+    - name: Build Release Binary
+      run: |
+        echo "::group::Building release binary"
+        swift build -c release --product fluidaudio
+        echo "Binary size: $(du -h .build/release/fluidaudio | cut -f1)"
+        echo "::endgroup::"
+
+    - name: Upload Binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: fluidaudio-binary
+        path: .build/release/fluidaudio
+        retention-days: 1
+
+  download-models:
+    name: Download Models
+    runs-on: macos-14
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache Models
+      id: cache-models
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Application Support/FluidAudio/Models
+        key: ${{ runner.os }}-models-parakeet-v2-${{ hashFiles('.github/workflows/asr-benchmark.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-models-parakeet-v2-
 
     - name: Download Models if Needed
+      if: steps.cache-models.outputs.cache-hit != 'true'
       run: |
+        set -e
         MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
-        VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
+        
+        echo "::group::Downloading models"
+        
+        rm -rf "$MODELS_DIR"
+        mkdir -p "$MODELS_DIR"
+        
+        # Use parallel downloads with retry logic
+        TEMP_DIR=$(mktemp -d)
+        cd "$TEMP_DIR"
+        
+        # Clone with minimal overhead
+        GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --filter=blob:none --sparse \
+          https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
+        
+        cd parakeet-tdt-0.6b-v2-coreml
+        
+        # Download LFS files with parallel connections
+        git lfs pull --include="*.mlmodelc/**" --batch-size=5
+        
+        # Verify downloads
+        MODEL_FILES=("Melspectogram.mlmodelc" "ParakeetEncoder.mlmodelc" "ParakeetDecoder.mlmodelc" "RNNTJoint.mlmodelc")
+        for model in "${MODEL_FILES[@]}"; do
+          if [ ! -d "$model" ]; then
+            echo "❌ Download failed for $model"
+            exit 1
+          fi
+        done
+        
+        # Move models atomically
+        mv *.mlmodelc parakeet_vocab.json "$MODELS_DIR/"
+        
+        cd /
+        rm -rf "$TEMP_DIR"
+        
+        echo "✅ Models downloaded and verified"
+        echo "::endgroup::"
 
-        # Check if all models exist
-        if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
-           [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ] && \
-           [ -f "$MODELS_DIR/parakeet_vocab.json" ]; then
-          echo "✅ Models already cached"
-        else
-          echo "📥 Downloading models..."
-          rm -rf "$MODELS_DIR"
-          mkdir -p "$MODELS_DIR"
+  benchmark-clean:
+    name: Benchmark test-clean
+    needs: [build, download-models]
+    runs-on: macos-14
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+    - uses: actions/checkout@v4
 
-          TEMP_DIR=$(mktemp -d)
-          cd "$TEMP_DIR"
-          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
-          cd parakeet-tdt-0.6b-v2-coreml
-          git lfs pull --include="*.mlmodelc/**"
+    - name: Restore Build Cache
+      uses: actions/cache@v4
+      with:
+        path: .build
+        key: ${{ needs.build.outputs.cache-key }}
+        restore-keys: |
+          ${{ runner.os }}-build-
 
-          mv *.mlmodelc "$MODELS_DIR/"
-          mv parakeet_vocab.json "$MODELS_DIR/"
+    - name: Restore Models Cache
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Application Support/FluidAudio/Models
+        key: ${{ runner.os }}-models-parakeet-v2-${{ hashFiles('.github/workflows/asr-benchmark.yml') }}
 
-          cd /
-          rm -rf "$TEMP_DIR"
-          echo "✅ Models downloaded"
-        fi
+    - name: Cache LibriSpeech test-clean
+      uses: actions/cache@v4
+      with:
+        path: ~/Documents/Datasets/librispeech/test-clean
+        key: ${{ runner.os }}-librispeech-test-clean-v1
 
-    - name: Run Benchmarks
+    - name: Download Binary
+      uses: actions/download-artifact@v4
+      with:
+        name: fluidaudio-binary
+        path: .build/release
+
+    - name: Make Binary Executable
+      run: chmod +x .build/release/fluidaudio
+
+    - name: Run test-clean Benchmark
       id: benchmark
+      timeout-minutes: 20
       run: |
-        MAX_FILES="100"
+        set -euo pipefail
+        MAX_FILES="500"
         BENCHMARK_START=$(date +%s)
-
-        # Run in parallel
-        swift run -c release fluidaudio asr-benchmark \
+        
+        echo "::group::Running test-clean benchmark"
+        
+        .build/release/fluidaudio asr-benchmark \
           --subset test-clean --max-files "$MAX_FILES" \
-          --auto-download --output asr_results_clean.json &
-        CLEAN_PID=$!
-
-        swift run -c release fluidaudio asr-benchmark \
-          --subset test-other --max-files "$MAX_FILES" \
-          --auto-download --output asr_results_other.json &
-        OTHER_PID=$!
-
-        wait $CLEAN_PID && wait $OTHER_PID
-
-        # Extract metrics with error handling
+          --auto-download --output asr_results_clean.json \
+          2>&1 | tee benchmark_clean.log
+        
+        echo "::endgroup::"
+        
+        # Extract metrics
         if [ -f asr_results_clean.json ]; then
-          CLEAN_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json 2>/dev/null)
-          CLEAN_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json 2>/dev/null)
-          CLEAN_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_clean.json 2>/dev/null)
-          CLEAN_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_clean.json 2>/dev/null)
-          CLEAN_RTFx=$(jq -r '.summary.medianRTFx' asr_results_clean.json 2>/dev/null)
-
-          # Format values only if they exist and are not null
-          [ "$CLEAN_WER_AVG" != "null" ] && [ -n "$CLEAN_WER_AVG" ] && CLEAN_WER_AVG=$(printf "%.2f" "$CLEAN_WER_AVG") || CLEAN_WER_AVG="N/A"
-          [ "$CLEAN_WER_MED" != "null" ] && [ -n "$CLEAN_WER_MED" ] && CLEAN_WER_MED=$(printf "%.2f" "$CLEAN_WER_MED") || CLEAN_WER_MED="N/A"
-          [ "$CLEAN_RTFx" != "null" ] && [ -n "$CLEAN_RTFx" ] && CLEAN_RTFx=$(printf "%.2f" "$CLEAN_RTFx") || CLEAN_RTFx="N/A"
+          WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_clean.json | xargs printf "%.2f")
+          WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_clean.json | xargs printf "%.2f")
+          RTFx=$(jq -r '.summary.medianRTFx' asr_results_clean.json | xargs printf "%.2f")
+          
+          echo "CLEAN_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
+          echo "CLEAN_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
+          echo "CLEAN_RTFx=$RTFx" >> $GITHUB_OUTPUT
+          
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+          
+          echo "### test-clean Results"
+          echo "- WER Average: ${WER_AVG}%"
+          echo "- WER Median: ${WER_MED}%"
+          echo "- RTFx: ${RTFx}x"
+          echo "- Execution Time: $EXECUTION_TIME"
         fi
 
+    - name: Upload test-clean Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: asr-results-clean-${{ github.run_id }}
+        path: |
+          asr_results_clean.json
+          benchmark_clean.log
+        retention-days: 30
+
+  benchmark-other:
+    name: Benchmark test-other
+    needs: [build, download-models]
+    runs-on: macos-14
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore Build Cache
+      uses: actions/cache@v4
+      with:
+        path: .build
+        key: ${{ needs.build.outputs.cache-key }}
+        restore-keys: |
+          ${{ runner.os }}-build-
+
+    - name: Restore Models Cache
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Application Support/FluidAudio/Models
+        key: ${{ runner.os }}-models-parakeet-v2-${{ hashFiles('.github/workflows/asr-benchmark.yml') }}
+
+    - name: Cache LibriSpeech test-other
+      uses: actions/cache@v4
+      with:
+        path: ~/Documents/Datasets/librispeech/test-other
+        key: ${{ runner.os }}-librispeech-test-other-v1
+
+    - name: Download Binary
+      uses: actions/download-artifact@v4
+      with:
+        name: fluidaudio-binary
+        path: .build/release
+
+    - name: Make Binary Executable
+      run: chmod +x .build/release/fluidaudio
+
+    - name: Run test-other Benchmark
+      id: benchmark
+      timeout-minutes: 20
+      run: |
+        set -euo pipefail
+        MAX_FILES="500"
+        BENCHMARK_START=$(date +%s)
+        
+        echo "::group::Running test-other benchmark"
+        
+        .build/release/fluidaudio asr-benchmark \
+          --subset test-other --max-files "$MAX_FILES" \
+          --auto-download --output asr_results_other.json \
+          2>&1 | tee benchmark_other.log
+        
+        echo "::endgroup::"
+        
+        # Extract metrics
         if [ -f asr_results_other.json ]; then
-          OTHER_WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json 2>/dev/null)
-          OTHER_WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json 2>/dev/null)
-          OTHER_AUDIO=$(jq -r '.summary.totalAudioDuration' asr_results_other.json 2>/dev/null)
-          OTHER_TIME=$(jq -r '.summary.totalProcessingTime' asr_results_other.json 2>/dev/null)
-          OTHER_RTFx=$(jq -r '.summary.medianRTFx' asr_results_other.json 2>/dev/null)
-
-          # Format values only if they exist and are not null
-          [ "$OTHER_WER_AVG" != "null" ] && [ -n "$OTHER_WER_AVG" ] && OTHER_WER_AVG=$(printf "%.2f" "$OTHER_WER_AVG") || OTHER_WER_AVG="N/A"
-          [ "$OTHER_WER_MED" != "null" ] && [ -n "$OTHER_WER_MED" ] && OTHER_WER_MED=$(printf "%.2f" "$OTHER_WER_MED") || OTHER_WER_MED="N/A"
-          [ "$OTHER_RTFx" != "null" ] && [ -n "$OTHER_RTFx" ] && OTHER_RTFx=$(printf "%.2f" "$OTHER_RTFx") || OTHER_RTFx="N/A"
+          WER_AVG=$(jq -r '.summary.averageWER * 100' asr_results_other.json | xargs printf "%.2f")
+          WER_MED=$(jq -r '.summary.medianWER * 100' asr_results_other.json | xargs printf "%.2f")
+          RTFx=$(jq -r '.summary.medianRTFx' asr_results_other.json | xargs printf "%.2f")
+          
+          echo "OTHER_WER_AVG=$WER_AVG" >> $GITHUB_OUTPUT
+          echo "OTHER_WER_MED=$WER_MED" >> $GITHUB_OUTPUT
+          echo "OTHER_RTFx=$RTFx" >> $GITHUB_OUTPUT
+          
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+          
+          echo "### test-other Results"
+          echo "- WER Average: ${WER_AVG}%"
+          echo "- WER Median: ${WER_MED}%"
+          echo "- RTFx: ${RTFx}x"
+          echo "- Execution Time: $EXECUTION_TIME"
         fi
 
-        # Output metrics
-        echo "CLEAN_WER_AVG=${CLEAN_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
-        echo "CLEAN_WER_MED=${CLEAN_WER_MED:-N/A}" >> $GITHUB_OUTPUT
-        echo "CLEAN_RTFx=${CLEAN_RTFx:-N/A}" >> $GITHUB_OUTPUT
-        echo "OTHER_WER_AVG=${OTHER_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
-        echo "OTHER_WER_MED=${OTHER_WER_MED:-N/A}" >> $GITHUB_OUTPUT
-        echo "OTHER_RTFx=${OTHER_RTFx:-N/A}" >> $GITHUB_OUTPUT
+    - name: Upload test-other Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: asr-results-other-${{ github.run_id }}
+        path: |
+          asr_results_other.json
+          benchmark_other.log
+        retention-days: 30
 
-        EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
-        echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
-        echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
-
+  report-results:
+    name: Report Results
+    needs: [benchmark-clean, benchmark-other]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
     - name: Comment PR
-      if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
       with:
         script: |
+          const cleanStatus = '${{ needs.benchmark-clean.result }}';
+          const otherStatus = '${{ needs.benchmark-other.result }}';
+          
+          // Get outputs with defaults
+          const getOutput = (job, key, defaultValue = 'N/A') => {
+            try {
+              const value = '${{ needs.' + job + '.outputs.' + key + '}}';
+              return value || defaultValue;
+            } catch {
+              return defaultValue;
+            }
+          };
+          
           const body = `## ASR Benchmark Results
 
-          | Dataset | WER Avg | WER Med | RTFx | Status |
-          |---------|---------|---------|------|--------|
-          | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
-          | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
+          | Dataset | WER Avg | WER Med | RTFx | Status | Job Status |
+          |---------|---------|---------|------|--------|------------|
+          | test-clean | ${getOutput('benchmark-clean', 'CLEAN_WER_AVG')}% | ${getOutput('benchmark-clean', 'CLEAN_WER_MED')}% | ${getOutput('benchmark-clean', 'CLEAN_RTFx')}x | ${parseFloat(getOutput('benchmark-clean', 'CLEAN_WER_AVG', '100')) < 10 ? '✅' : '⚠️'} | ${cleanStatus === 'success' ? '✅' : '❌'} ${cleanStatus} |
+          | test-other | ${getOutput('benchmark-other', 'OTHER_WER_AVG')}% | ${getOutput('benchmark-other', 'OTHER_WER_MED')}% | ${getOutput('benchmark-other', 'OTHER_RTFx')}x | ${parseFloat(getOutput('benchmark-other', 'OTHER_WER_AVG', '100')) < 20 ? '✅' : '⚠️'} | ${otherStatus === 'success' ? '✅' : '❌'} ${otherStatus} |
 
-          <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+          <sub>500 files per dataset • test-clean: ${getOutput('benchmark-clean', 'EXECUTION_TIME', 'N/A')} • test-other: ${getOutput('benchmark-other', 'EXECUTION_TIME', 'N/A')} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
           <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
 
@@ -170,10 +344,3 @@ jobs:
               body: body
             });
           }
-
-    - name: Upload Results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: asr-results
-        path: asr_results_*.json
