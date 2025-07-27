@@ -63,9 +63,10 @@ enum DownloadCommand {
                     .appendingPathComponent("Library/Application Support/FluidAudio/Models")
                 let modelNames = [
                     "Melspectogram.mlmodelc",
-                    "ParakeetEncoder.mlmodelc",
+                    "ParakeetEncoder_v2.mlmodelc",
                     "ParakeetDecoder.mlmodelc",
-                    "RNNTJoint.mlmodelc"
+                    "RNNTJoint.mlmodelc",
+                    "TokenDurationPrediction.mlmodelc"
                 ]
                 _ = try await DownloadUtils.loadModels(
                     .parakeet,
