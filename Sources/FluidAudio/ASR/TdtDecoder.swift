@@ -8,7 +8,6 @@
 import CoreML
 import Foundation
 import OSLog
-import Accelerate
 
 public struct TdtConfig: Sendable {
     public let durations: [Int]
@@ -37,32 +36,21 @@ struct TdtHypothesis: Sendable {
     var lastToken: Int?
 }
 
-/// Statistics for TDT decoding performance
-struct TdtDecodingStats: Sendable, CustomStringConvertible {
-    let totalFrames: Int
-    let framesProcessed: Int
-    let framesSkipped: Int
-    let tokensGenerated: Int
-    let blankTokens: Int
-    let averageSkipLength: Double
-    let skipRate: Double
-
-    var description: String {
-        """
-        Frames: \(framesProcessed)/\(totalFrames) (skip rate: \(String(format: "%.1f", skipRate * 100))%)
-        Tokens: \(tokensGenerated) (blanks: \(blankTokens))
-        Avg skip: \(String(format: "%.1f", averageSkipLength)) frames
-        """
-    }
-}
-
 /// Optimized TDT decoder with hybrid CoreML + Metal acceleration
 @available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoder {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
+
+    // Special token Indexes matching Parakeet TDT model's vocabulary (1024 word tokens)
+    // OUTPUT from joint network during decoding
+    // 0-1023 represents characters, numbers, punctuations
+    // 1024 represents, BLANK or nonexistent
     private let blankId = 1024
+
+    // sosId (Start-of-Sequence)
+    // sosId is INPUT when there's no real previous token
     private let sosId = 1024
 
 
@@ -76,13 +64,12 @@ internal struct TdtDecoder {
         encoderSequenceLength: Int,
         decoderModel: MLModel,
         jointModel: MLModel,
-        decoderState: inout DecoderState,
-        collectStats: Bool = false
-    ) async throws -> (tokens: [Int], stats: TdtDecodingStats?) {
+        decoderState: inout DecoderState
+    ) async throws -> [Int] {
 
         guard encoderSequenceLength > 1 else {
             logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
-            return (tokens: [], stats: nil)
+            return []
         }
 
         // Pre-process encoder output for faster access
@@ -98,13 +85,8 @@ internal struct TdtDecoder {
         var lastTimestamp = -1
         var lastTimestampCount = 0
 
-        var framesProcessed = 0
-        var totalSkips = 0
-        var blankTokenCount = 0
-
         // Main decoding loop with optimizations
         while activeMask {
-            framesProcessed += 1
             var label = hypothesis.lastToken ?? sosId
 
             // Use cached decoder inputs
@@ -169,9 +151,6 @@ internal struct TdtDecoder {
                 }
 
                 timeIndices += actualDuration
-                if actualDuration > 0 {
-                    totalSkips += actualDuration
-                }
                 safeTimeIndices = min(timeIndices, lastTimestep)
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && blankMask
@@ -184,8 +163,6 @@ internal struct TdtDecoder {
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.decState = decoderResult.newState
                 hypothesis.lastToken = label
-            } else {
-                blankTokenCount += 1
             }
 
             // Force blank logic
@@ -209,30 +186,7 @@ internal struct TdtDecoder {
             decoderState = finalState
         }
 
-        let stats: TdtDecodingStats?
-        if collectStats {
-            let framesSkipped = encoderSequenceLength - framesProcessed
-            let avgSkipLength = framesProcessed > 0 ? Double(totalSkips) / Double(framesProcessed) : 0.0
-            let skipRate = Double(framesSkipped) / Double(encoderSequenceLength)
-
-            stats = TdtDecodingStats(
-                totalFrames: encoderSequenceLength,
-                framesProcessed: framesProcessed,
-                framesSkipped: framesSkipped,
-                tokensGenerated: hypothesis.ySequence.count,
-                blankTokens: blankTokenCount,
-                averageSkipLength: avgSkipLength,
-                skipRate: skipRate
-            )
-
-            if config.enableDebug {
-                logger.info("TDT-Optimized Stats: \(stats!.description)")
-            }
-        } else {
-            stats = nil
-        }
-
-        return (tokens: hypothesis.ySequence, stats: stats)
+        return hypothesis.ySequence
     }
 
     /// Pre-process encoder output into contiguous memory for faster access
@@ -398,17 +352,21 @@ internal struct TdtDecoder {
         return (tokenLogits, durationLogits)
     }
 
-    /// SIMD-accelerated argmax
+    /// Find index of maximum value
     private func argmaxSIMD(_ values: [Float]) -> Int {
         guard !values.isEmpty else { return 0 }
 
         var maxIndex = 0
         var maxValue = values[0]
 
-        // Use vDSP for finding maximum
-        vDSP_maxvi(values, 1, &maxValue, &maxIndex, vDSP_Length(values.count))
+        for i in 1..<values.count {
+            if values[i] > maxValue {
+                maxValue = values[i]
+                maxIndex = i
+            }
+        }
 
-        return Int(maxIndex)
+        return maxIndex
     }
     
     /// Non-SIMD argmax for compatibility
