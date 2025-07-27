@@ -7,23 +7,23 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/vz7YYZkkJg)
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 
-Fluid Audio is a Swift framework designed for fully local, on-device real-time audio to power real-time audio applications on Apple devices. It currently offers state-of-the-art speaker diarization, automatic speech recognition (ASR), and voice activity detection through models that our team has converted independently. All the models are open-sourced with either MIT or Apache 2.0 licenses.
+Fluid Audio is a Swift framework for fully local, real-time audio processing on Apple devices. It provides state-of-the-art speaker diarization, ASR, and voice activity detection through open-source models (MIT/Apache 2.0 licensed) that we've converted to Core ML.
 
-The models are converted to run mostly on CoreML, and Swift in some cases where it's needed. Our use case requires that the models be able to run in the background, so we intentionally avoid GPU/MPS/Shaders as much as possible. If you need a higher-performance use case, please reach out on Discord, or we welcome new contributors as well.
+Our models are optimized for background processing on CPU, avoiding GPU/MPS/Shaders to ensure reliable performance. While we've tested CPU/GPU-based alternatives, they proved too slow or resource-intensive for our real-time requirements. 
+
+For custom use cases and feedback, reach out on Discord.
 
 ## Features
 
-Our testing demonstrates that CoreML versions deliver significantly more efficient inference compared to their ONNX counterparts, making them truly suitable for real-time transcription use cases.
-
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for real-time transcription
-- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
+- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping 
 - **Voice Activity Detection (VAD)**: Production-ready VAD with 98% accuracy using CoreML models and adaptive thresholding
-- **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
 - **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference) - converted and optimized by our team. Permissive licenses.
 - **Real-time Processing**: Designed for real-time workloads but also works for offline processing
-- **Cross-platform**: Full support for macOS 13.0+ and iOS 16.0+ and any Apple Sillicon device
+- **Cross-platform**: Full support for macOS 14.0+ and iOS 17.0+ and any Apple Sillicon device 
+- **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 
 ## Installation
 
