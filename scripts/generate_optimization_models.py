@@ -42,39 +42,6 @@ def create_transpose_model():
 
     return coreml_model
 
-def create_argmax_model(vocab_size=1025):
-    """Create a model for argmax operation on logits"""
-    
-    import torch
-    import torch.nn as nn
-    
-    class ArgmaxModel(nn.Module):
-        def forward(self, input):
-            # Get argmax index
-            argmax_index = torch.argmax(input, dim=0, keepdim=True)
-            return argmax_index
-    
-    # Create and trace the model
-    model = ArgmaxModel()
-    model.eval()
-    
-    # Example input
-    example_input = torch.randn(vocab_size)
-    traced_model = torch.jit.trace(model, example_input)
-    
-    # Convert to Core ML
-    coreml_model = ct.convert(
-        traced_model,
-        inputs=[ct.TensorType(name="input", shape=(vocab_size,))],
-        minimum_deployment_target=ct.target.macOS13
-    )
-    
-    # Set metadata
-    coreml_model.author = 'FluidAudio'
-    coreml_model.short_description = 'Argmax operation for token prediction'
-    coreml_model.version = '1.0'
-    
-    return coreml_model
 
 def create_padding_model(max_length=160000):
     """Create a model that pads variable length audio to fixed length"""
@@ -198,18 +165,11 @@ def main():
     transpose_model.save(transpose_path)
     print(f"   Saved to: {transpose_path}")
 
-    # Generate argmax model
-    print("2. Creating argmax model...")
-    argmax_model = create_argmax_model()
-    argmax_path = os.path.join(output_dir, 'Argmax.mlpackage')
-    argmax_model.save(argmax_path)
-    print(f"   Saved to: {argmax_path}")
-
     # Generate padding model
-    print("3. Skipping padding model (not needed for current issue)")
+    print("2. Skipping padding model (not needed for current issue)")
 
     # Generate token/duration model
-    print("4. Creating token/duration model...")
+    print("3. Creating token/duration model...")
     token_duration_model = create_token_duration_model()
     token_duration_path = os.path.join(output_dir, 'TokenDurationPrediction.mlpackage')
     token_duration_model.save(token_duration_path)
