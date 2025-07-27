@@ -47,7 +47,7 @@ internal struct TdtDecoder {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
-    private let tokenDurationModel: MLModel?
+    private let tokenDurationModel: MLModel
 
     // Special token Indexes matching Parakeet TDT model's vocabulary (1024 word tokens)
     // OUTPUT from joint network during decoding
@@ -59,7 +59,7 @@ internal struct TdtDecoder {
     // sosId is INPUT when there's no real previous token
     private let sosId = 1024
 
-    init(config: ASRConfig, tokenDurationModel: MLModel? = nil) {
+    init(config: ASRConfig, tokenDurationModel: MLModel) {
         self.config = config
         self.tokenDurationModel = tokenDurationModel
     }
@@ -267,46 +267,41 @@ internal struct TdtDecoder {
     internal func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (
         token: Int, score: Float, duration: Int
     ) {
-        // Try to use CoreML optimization model first
-        if let tokenDurationModel = tokenDurationModel {
-            do {
-                let input = try MLDictionaryFeatureProvider(dictionary: [
-                    "logits": MLFeatureValue(multiArray: logits)
-                ])
+        do {
+            let input = try MLDictionaryFeatureProvider(dictionary: [
+                "logits": MLFeatureValue(multiArray: logits)
+            ])
 
-                let output = try tokenDurationModel.prediction(from: input)
+            let output = try tokenDurationModel.prediction(from: input)
 
-                // Try both old and new output names for compatibility
-                let tokenIdValue = output.featureValue(for: "var_17")?.multiArrayValue
-                let tokenScoreValue = output.featureValue(for: "reduce_max_0")?.multiArrayValue
-                let durationIndexValue = output.featureValue(for: "var_24")?.multiArrayValue
+            // Try both old and new output names for compatibility
+            let tokenIdValue = output.featureValue(for: "var_17")?.multiArrayValue
+            let tokenScoreValue = output.featureValue(for: "reduce_max_0")?.multiArrayValue
+            let durationIndexValue = output.featureValue(for: "var_24")?.multiArrayValue
 
-                if let tokenId = tokenIdValue,
-                    let tokenScore = tokenScoreValue,
-                    let durationIndex = durationIndexValue
-                {
-
-                    let token = tokenId[0].intValue
-                    let score = tokenScore[0].floatValue
-                    let durIndex = durationIndex[0].intValue
-
-                    // Map duration index to actual duration value
-                    let durations = config.tdtConfig.durations
-                    guard durIndex < durations.count else {
-                        throw ASRError.processingFailed("Duration index out of bounds")
-                    }
-
-                    return (token: token, score: score, duration: durations[durIndex])
-                }
-            } catch {
-                logger.error("CoreML token/duration prediction failed: \(error)")
-                throw ASRError.processingFailed(
-                    "CoreML token/duration prediction failed: \(error.localizedDescription)")
+            guard let tokenId = tokenIdValue,
+                  let tokenScore = tokenScoreValue,
+                  let durationIndex = durationIndexValue
+            else {
+                throw ASRError.processingFailed("CoreML model output missing required features")
             }
-        }
 
-        // No fallback - CoreML only approach
-        throw ASRError.processingFailed("CoreML token/duration prediction failed")
+            let token = tokenId[0].intValue
+            let score = tokenScore[0].floatValue
+            let durIndex = durationIndex[0].intValue
+
+            // Map duration index to actual duration value
+            let durations = config.tdtConfig.durations
+            guard durIndex < durations.count else {
+                throw ASRError.processingFailed("Duration index out of bounds")
+            }
+
+            return (token: token, score: score, duration: durations[durIndex])
+        } catch {
+            logger.error("CoreML token/duration prediction failed: \(error)")
+            throw ASRError.processingFailed(
+                "CoreML token/duration prediction failed: \(error.localizedDescription)")
+        }
     }
 
     /// Update hypothesis with new token

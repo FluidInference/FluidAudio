@@ -22,7 +22,7 @@ public final class AsrManager {
     private var asrModels: AsrModels?
 
     /// Token duration optimization model  
-    internal var tokenDurationModel: MLModel?
+    internal var tokenDurationModel: MLModel!
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
