@@ -291,23 +291,24 @@ jobs:
           const otherStatus = '${{ needs.benchmark-other.result }}';
           
           // Get outputs with defaults
-          const getOutput = (job, key, defaultValue = 'N/A') => {
-            try {
-              const value = '${{ needs.' + job + '.outputs.' + key + '}}';
-              return value || defaultValue;
-            } catch {
-              return defaultValue;
-            }
-          };
+          const cleanWerAvg = '${{ needs.benchmark-clean.outputs.CLEAN_WER_AVG }}' || 'N/A';
+          const cleanWerMed = '${{ needs.benchmark-clean.outputs.CLEAN_WER_MED }}' || 'N/A';
+          const cleanRtfx = '${{ needs.benchmark-clean.outputs.CLEAN_RTFx }}' || 'N/A';
+          const cleanTime = '${{ needs.benchmark-clean.outputs.EXECUTION_TIME }}' || 'N/A';
+          
+          const otherWerAvg = '${{ needs.benchmark-other.outputs.OTHER_WER_AVG }}' || 'N/A';
+          const otherWerMed = '${{ needs.benchmark-other.outputs.OTHER_WER_MED }}' || 'N/A';
+          const otherRtfx = '${{ needs.benchmark-other.outputs.OTHER_RTFx }}' || 'N/A';
+          const otherTime = '${{ needs.benchmark-other.outputs.EXECUTION_TIME }}' || 'N/A';
           
           const body = `## ASR Benchmark Results
 
           | Dataset | WER Avg | WER Med | RTFx | Status | Job Status |
           |---------|---------|---------|------|--------|------------|
-          | test-clean | ${getOutput('benchmark-clean', 'CLEAN_WER_AVG')}% | ${getOutput('benchmark-clean', 'CLEAN_WER_MED')}% | ${getOutput('benchmark-clean', 'CLEAN_RTFx')}x | ${parseFloat(getOutput('benchmark-clean', 'CLEAN_WER_AVG', '100')) < 10 ? '✅' : '⚠️'} | ${cleanStatus === 'success' ? '✅' : '❌'} ${cleanStatus} |
-          | test-other | ${getOutput('benchmark-other', 'OTHER_WER_AVG')}% | ${getOutput('benchmark-other', 'OTHER_WER_MED')}% | ${getOutput('benchmark-other', 'OTHER_RTFx')}x | ${parseFloat(getOutput('benchmark-other', 'OTHER_WER_AVG', '100')) < 20 ? '✅' : '⚠️'} | ${otherStatus === 'success' ? '✅' : '❌'} ${otherStatus} |
+          | test-clean | ${cleanWerAvg}% | ${cleanWerMed}% | ${cleanRtfx}x | ${parseFloat(cleanWerAvg) < 10 ? '✅' : '⚠️'} | ${cleanStatus === 'success' ? '✅' : '❌'} ${cleanStatus} |
+          | test-other | ${otherWerAvg}% | ${otherWerMed}% | ${otherRtfx}x | ${parseFloat(otherWerAvg) < 20 ? '✅' : '⚠️'} | ${otherStatus === 'success' ? '✅' : '❌'} ${otherStatus} |
 
-          <sub>500 files per dataset • test-clean: ${getOutput('benchmark-clean', 'EXECUTION_TIME', 'N/A')} • test-other: ${getOutput('benchmark-other', 'EXECUTION_TIME', 'N/A')} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+          <sub>500 files per dataset • test-clean: ${cleanTime} • test-other: ${otherTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
           <sub>**RTFx** = Real-Time Factor (higher is better) • Calculated as: Total audio duration ÷ Total processing time<br>Processing time includes: Model inference on Apple Neural Engine, audio preprocessing, state resets between files, token-to-text conversion, and file I/O<br>Example: RTFx of 2.0x means 10 seconds of audio processed in 5 seconds (2x faster than real-time)</sub>
 
