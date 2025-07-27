@@ -22,7 +22,7 @@ public final class AsrManager {
     private var asrModels: AsrModels?
 
     /// ASR optimization models  
-    internal var optimizationModels: ASROptimizationModels
+    internal var optimizationModels: ASROptimizationModels?
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
@@ -43,8 +43,8 @@ public final class AsrManager {
         self.config = config
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
 
-        self.optimizationModels = ASRModelLoader.loadOptimizationModels()
-
+        // Optimization models will be loaded during initialize()
+        
         // Load vocabulary once during initialization
         self.vocabulary = loadVocabulary()
     }
@@ -65,7 +65,14 @@ public final class AsrManager {
         self.decoderModel = models.decoder
         self.jointModel = models.joint
 
-        logger.info("CoreML optimization models loaded successfully")
+        // Load optimization models asynchronously
+        do {
+            self.optimizationModels = try await ASRModelLoader.loadOptimizationModels()
+            logger.info("CoreML optimization models loaded successfully")
+        } catch {
+            logger.error("Failed to load optimization models: \(error)")
+            throw error
+        }
 
         logger.info("AsrManager initialized successfully with provided models")
     }
@@ -140,31 +147,6 @@ public final class AsrManager {
         ])
     }
 
-    func transposeEncoderOutput(_ encoderOutput: MLMultiArray) throws -> MLMultiArray {
-        let input = try MLDictionaryFeatureProvider(dictionary: [
-            "x": MLFeatureValue(multiArray: encoderOutput)
-        ])
-
-        let output = try optimizationModels.transpose.prediction(from: input)
-
-        // Try different possible output names
-        var transposed: MLMultiArray?
-        for outputName in ["output", "var_4", "4"] {
-            if let result = output.featureValue(for: outputName)?.multiArrayValue {
-                transposed = result
-                break
-            }
-        }
-
-        if let transposed = transposed {
-            if config.enableDebug {
-                logger.debug("✅ Used CoreML transpose optimization")
-            }
-            return transposed
-        }
-
-        throw ASRError.processingFailed("Failed to transpose encoder output")
-    }
 
     func prepareDecoderInput(
         targetToken: Int,
@@ -310,7 +292,10 @@ public final class AsrManager {
     ) async throws -> [Int] {
         try await initializeDecoderState(decoderState: &decoderState)
 
-        let decoder = TdtDecoder(config: config, optimizationModels: optimizationModels)
+        guard let optModels = optimizationModels else {
+            throw ASRError.modelLoadFailed
+        }
+        let decoder = TdtDecoder(config: config, optimizationModels: optModels)
         return try await decoder.decode(
             encoderOutput: encoderOutput,
             encoderSequenceLength: encoderSequenceLength,

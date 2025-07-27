@@ -38,9 +38,10 @@ extension AsrModels {
 
     public enum ModelNames {
         public static let melspectrogram = "Melspectogram.mlmodelc"
-        public static let encoder = "ParakeetEncoder.mlmodelc"
+        public static let encoder = "ParakeetEncoder_v2.mlmodelc"
         public static let decoder = "ParakeetDecoder.mlmodelc"
         public static let joint = "RNNTJoint.mlmodelc"
+        public static let tokenDuration = "TokenDurationPrediction.mlmodelc"
         public static let vocabulary = "parakeet_vocab.json"
     }
 
@@ -63,6 +64,7 @@ extension AsrModels {
             ModelNames.encoder,
             ModelNames.decoder,
             ModelNames.joint,
+            ModelNames.tokenDuration,
         ]
 
         let models = try await DownloadUtils.loadModels(
@@ -149,6 +151,7 @@ extension AsrModels {
             ModelNames.encoder,
             ModelNames.decoder,
             ModelNames.joint,
+            ModelNames.tokenDuration,
         ]
 
         // Download models using DownloadUtils (this will download if needed)
@@ -178,6 +181,7 @@ extension AsrModels {
             ModelNames.encoder,
             ModelNames.decoder,
             ModelNames.joint,
+            ModelNames.tokenDuration,
         ]
 
         // Check in the DownloadUtils repo structure

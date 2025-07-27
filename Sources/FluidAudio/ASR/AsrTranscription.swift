@@ -94,7 +94,8 @@ extension AsrManager {
             from: encoderOutput, key: "encoder_output_length",
             errorMessage: "Invalid encoder output length")
 
-        let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
+        // Encoder_v2 already outputs in the correct format (B, T, D)
+        let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
         var tempDecoderState = DecoderState()
@@ -141,7 +142,8 @@ extension AsrManager {
             from: encoderOutput, key: "encoder_output_length",
             errorMessage: "Invalid encoder output length")
 
-        let encoderHiddenStates = try transposeEncoderOutput(rawEncoderOutput)
+        // Encoder_v2 already outputs in the correct format (B, T, D)
+        let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
         let tokenIds = try await tdtDecode(

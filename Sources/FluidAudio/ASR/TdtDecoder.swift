@@ -277,16 +277,13 @@ internal struct TdtDecoder {
                 let output = try tokenDurationModel.prediction(from: input)
 
                 // Try both old and new output names for compatibility
-                let tokenIdValue = output.featureValue(for: "token_id")?.multiArrayValue ?? 
-                                 output.featureValue(for: "var_17")?.multiArrayValue
-                let tokenScoreValue = output.featureValue(for: "token_score")?.multiArrayValue ?? 
-                                    output.featureValue(for: "reduce_max_0")?.multiArrayValue  
-                let durationIndexValue = output.featureValue(for: "duration_index")?.multiArrayValue ?? 
-                                       output.featureValue(for: "var_24")?.multiArrayValue
-                
+                let tokenIdValue = output.featureValue(for: "var_17")?.multiArrayValue
+                let tokenScoreValue = output.featureValue(for: "reduce_max_0")?.multiArrayValue
+                let durationIndexValue = output.featureValue(for: "var_24")?.multiArrayValue
+
                 if let tokenId = tokenIdValue,
-                   let tokenScore = tokenScoreValue,
-                   let durationIndex = durationIndexValue
+                    let tokenScore = tokenScoreValue,
+                    let durationIndex = durationIndexValue
                 {
 
                     let token = tokenId[0].intValue
@@ -362,23 +359,6 @@ internal struct TdtDecoder {
     }
 
     // MARK: - Private Helper Methods
-
-    /// Flatten 4D logits array to 1D for CoreML models that expect flattened input
-    internal func flattenLogits(_ logits: MLMultiArray) throws -> MLMultiArray {
-        let shape = logits.shape
-        let totalElements = shape.reduce(1) { $0 * $1.intValue }
-
-        let flattenedArray = try MLMultiArray(
-            shape: [totalElements] as [NSNumber], dataType: logits.dataType)
-
-        for i in 0..<totalElements {
-            flattenedArray[i] = logits[i]
-        }
-
-        return flattenedArray
-    }
-
-
     internal func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws
         -> MLMultiArray
     {

@@ -23,10 +23,7 @@ let package = Package(
             name: "FluidAudio",
             dependencies: [],
             path: "Sources/FluidAudio",
-            exclude: [],
-            resources: [
-                .copy("Resources/OptimizationModels")
-            ]
+            exclude: []
         ),
         .executableTarget(
             name: "FluidAudioCLI",

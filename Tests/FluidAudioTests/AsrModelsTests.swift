@@ -10,9 +10,10 @@ final class AsrModelsTests: XCTestCase {
     
     func testModelNames() {
         XCTAssertEqual(AsrModels.ModelNames.melspectrogram, "Melspectogram.mlmodelc")
-        XCTAssertEqual(AsrModels.ModelNames.encoder, "ParakeetEncoder.mlmodelc")
+        XCTAssertEqual(AsrModels.ModelNames.encoder, "ParakeetEncoder_v2.mlmodelc")
         XCTAssertEqual(AsrModels.ModelNames.decoder, "ParakeetDecoder.mlmodelc")
         XCTAssertEqual(AsrModels.ModelNames.joint, "RNNTJoint.mlmodelc")
+        XCTAssertEqual(AsrModels.ModelNames.tokenDuration, "TokenDurationPrediction.mlmodelc")
         XCTAssertEqual(AsrModels.ModelNames.vocabulary, "parakeet_vocab.json")
     }
     
