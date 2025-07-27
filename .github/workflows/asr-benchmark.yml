@@ -83,7 +83,7 @@ jobs:
         cd parakeet-tdt-0.6b-v2-coreml
         
         # Download LFS files with parallel connections
-        git lfs pull --include="*.mlmodelc/**" --batch-size=5
+        git lfs pull  
         
         # Verify downloads
         MODEL_FILES=("Melspectogram.mlmodelc" "ParakeetEncoder.mlmodelc" "ParakeetDecoder.mlmodelc" "RNNTJoint.mlmodelc")
