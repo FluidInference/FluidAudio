@@ -9,14 +9,12 @@ import CoreML
 import Foundation
 import OSLog
 import Accelerate
-import Metal
 
 // MARK: - Types
 
 public struct TdtConfig: Sendable {
     public let durations: [Int]
     public let includeTokenDuration: Bool
-    public let includeDurationConfidence: Bool
     public let maxSymbolsPerStep: Int?
 
     public static let `default` = TdtConfig()
@@ -24,12 +22,10 @@ public struct TdtConfig: Sendable {
     public init(
         durations: [Int] = [0, 1, 2, 3, 4],
         includeTokenDuration: Bool = true,
-        includeDurationConfidence: Bool = false,
         maxSymbolsPerStep: Int? = nil
     ) {
         self.durations = durations
         self.includeTokenDuration = includeTokenDuration
-        self.includeDurationConfidence = includeDurationConfidence
         self.maxSymbolsPerStep = maxSymbolsPerStep
     }
 }
@@ -40,7 +36,6 @@ struct TdtHypothesis: Sendable {
     var ySequence: [Int] = []
     var decState: DecoderState?
     var timestamps: [Int] = []
-    var tokenDurations: [Int] = []
     var lastToken: Int?
 }
 
@@ -53,7 +48,7 @@ struct TdtDecodingStats: Sendable, CustomStringConvertible {
     let blankTokens: Int
     let averageSkipLength: Double
     let skipRate: Double
-    
+
     var description: String {
         """
         Frames: \(framesProcessed)/\(totalFrames) (skip rate: \(String(format: "%.1f", skipRate * 100))%)
@@ -71,29 +66,13 @@ internal struct TdtDecoder {
     private let config: ASRConfig
     private let blankId = 1024
     private let sosId = 1024
-    
+
     // Pre-allocated buffers to reduce memory allocation overhead
-    private let encoderCache: EncoderFrameCache
     private var decoderInputCache: DecoderInputCache
-    
-    // Metal resources for GPU acceleration
-    private let metalDevice: MTLDevice?
-    private let metalCommandQueue: MTLCommandQueue?
 
     init(config: ASRConfig) {
         self.config = config
-        
-        // Initialize caches
-        self.encoderCache = EncoderFrameCache(maxFrames: 1000)
         self.decoderInputCache = DecoderInputCache()
-        
-        // Initialize Metal for GPU acceleration
-        self.metalDevice = MTLCreateSystemDefaultDevice()
-        self.metalCommandQueue = metalDevice?.makeCommandQueue()
-        
-        if metalDevice != nil {
-            logger.info("TDT-Optimized: Metal GPU acceleration enabled")
-        }
     }
 
     /// Execute optimized TDT decoding
@@ -113,66 +92,66 @@ internal struct TdtDecoder {
 
         // Pre-process encoder output for faster access
         let encoderFrames = try preProcessEncoderOutput(encoderOutput, length: encoderSequenceLength)
-        
+
         var hypothesis = TdtHypothesis(decState: decoderState)
         var timeIndices = 0
         var safeTimeIndices = 0
         var timeIndicesCurrentLabels = 0
         var activeMask = true
         let lastTimestep = encoderSequenceLength - 1
-        
+
         var lastTimestamp = -1
         var lastTimestampCount = 0
-        
+
         var framesProcessed = 0
         var totalSkips = 0
         var blankTokenCount = 0
-        
+
         // Main decoding loop with optimizations
         while activeMask {
             framesProcessed += 1
             var label = hypothesis.lastToken ?? sosId
-            
+
             // Use cached decoder inputs
             let decoderResult = try runDecoderOptimized(
                 token: label,
                 state: hypothesis.decState ?? decoderState,
                 model: decoderModel
             )
-            
+
             // Fast encoder frame access
             let encoderStep = encoderFrames[safeTimeIndices]
-            
+
             // Batch process joint network if possible
             let logits = try runJointOptimized(
                 encoderStep: encoderStep,
                 decoderOutput: decoderResult.output,
                 model: jointModel
             )
-            
+
             // Optimized token/duration prediction
             let (tokenLogits, durationLogits) = try splitLogits(logits)
             label = argmaxSIMD(tokenLogits)
             var score = tokenLogits[label]
             let duration = config.tdtConfig.durations[argmaxSIMD(durationLogits)]
-            
+
             var blankMask = label == blankId
             var actualDuration = duration
-            
+
             if blankMask && duration == 0 {
                 actualDuration = 1
             }
-            
+
             timeIndicesCurrentLabels = timeIndices
             timeIndices += actualDuration
             safeTimeIndices = min(timeIndices, lastTimestep)
             activeMask = timeIndices < encoderSequenceLength
             var advanceMask = activeMask && blankMask
-            
+
             // Optimized inner loop
             while advanceMask {
                 timeIndicesCurrentLabels = timeIndices
-                
+
                 let innerEncoderStep = encoderFrames[safeTimeIndices]
                 let innerLogits = try runJointOptimized(
                     encoderStep: innerEncoderStep,
@@ -184,16 +163,16 @@ internal struct TdtDecoder {
                 let moreLabel = argmaxSIMD(innerTokenLogits)
                 let moreScore = innerTokenLogits[moreLabel]
                 let moreDuration = config.tdtConfig.durations[argmaxSIMD(innerDurationLogits)]
-                
+
                 label = moreLabel
                 score = moreScore
                 actualDuration = moreDuration
-                
+
                 blankMask = label == blankId
                 if blankMask && actualDuration == 0 {
                     actualDuration = 1
                 }
-                
+
                 timeIndices += actualDuration
                 if actualDuration > 0 {
                     totalSkips += actualDuration
@@ -202,7 +181,7 @@ internal struct TdtDecoder {
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && blankMask
             }
-            
+
             // Update hypothesis
             if label != blankId {
                 hypothesis.ySequence.append(label)
@@ -210,14 +189,10 @@ internal struct TdtDecoder {
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.decState = decoderResult.newState
                 hypothesis.lastToken = label
-                
-                if config.tdtConfig.includeTokenDuration {
-                    hypothesis.tokenDurations.append(actualDuration)
-                }
             } else {
                 blankTokenCount += 1
             }
-            
+
             // Force blank logic
             if let maxSymbols = config.tdtConfig.maxSymbolsPerStep {
                 if label != blankId && lastTimestamp == timeIndices && lastTimestampCount >= maxSymbols {
@@ -226,7 +201,7 @@ internal struct TdtDecoder {
                     activeMask = timeIndices < encoderSequenceLength
                 }
             }
-            
+
             if lastTimestamp == timeIndices {
                 lastTimestampCount += 1
             } else {
@@ -234,7 +209,7 @@ internal struct TdtDecoder {
                 lastTimestampCount = 1
             }
         }
-        
+
         if let finalState = hypothesis.decState {
             decoderState = finalState
         }
@@ -244,7 +219,7 @@ internal struct TdtDecoder {
             let framesSkipped = encoderSequenceLength - framesProcessed
             let avgSkipLength = framesProcessed > 0 ? Double(totalSkips) / Double(framesProcessed) : 0.0
             let skipRate = Double(framesSkipped) / Double(encoderSequenceLength)
-            
+
             stats = TdtDecodingStats(
                 totalFrames: encoderSequenceLength,
                 framesProcessed: framesProcessed,
@@ -254,86 +229,87 @@ internal struct TdtDecoder {
                 averageSkipLength: avgSkipLength,
                 skipRate: skipRate
             )
-            
+
             if config.enableDebug {
                 logger.info("TDT-Optimized Stats: \(stats!.description)")
             }
         } else {
             stats = nil
         }
-        
+
         return (tokens: hypothesis.ySequence, stats: stats)
     }
-    
+
     // MARK: - Optimized Operations
-    
+
     /// Pre-process encoder output into contiguous memory for faster access
     private func preProcessEncoderOutput(_ encoderOutput: MLMultiArray, length: Int) throws -> EncoderFrameArray {
         let shape = encoderOutput.shape
         let hiddenSize = shape[2].intValue
-        
+
         var frames = EncoderFrameArray()
         frames.reserveCapacity(length)
-        
-        // Use vDSP for efficient copying
+
         let encoderPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
-        
+
         for timeIdx in 0..<length {
             let offset = timeIdx * hiddenSize
             let frame = Array(UnsafeBufferPointer(start: encoderPtr + offset, count: hiddenSize))
             frames.append(frame)
         }
-        
+
         return frames
     }
-    
+
     /// Optimized decoder execution with input caching
     private mutating func runDecoderOptimized(
         token: Int,
         state: DecoderState,
         model: MLModel
     ) throws -> (output: MLFeatureProvider, newState: DecoderState) {
-        
+
         // Use cached input arrays
         let input = try decoderInputCache.getInput(token: token, state: state)
-        
+
         let output = try model.prediction(
             from: input,
             options: MLPredictionOptions()
         )
-        
+
         var newState = state
         newState.update(from: output)
-        
+
         return (output, newState)
     }
-    
+
     /// Optimized joint network execution
     private func runJointOptimized(
         encoderStep: [Float],
         decoderOutput: MLFeatureProvider,
         model: MLModel
     ) throws -> MLMultiArray {
-        
+
         // Create encoder MLMultiArray from pre-processed data
         let encoderArray = try MLMultiArray(shape: [1, 1, encoderStep.count as NSNumber], dataType: .float32)
         encoderStep.withUnsafeBufferPointer { buffer in
             let dst = encoderArray.dataPointer.bindMemory(to: Float.self, capacity: encoderStep.count)
-            dst.initialize(from: buffer.baseAddress!, count: encoderStep.count)
+            if let baseAddress = buffer.baseAddress {
+                dst.initialize(from: baseAddress, count: encoderStep.count)
+            }
         }
-        
+
         let decoderOutputArray = try extractFeatureValue(from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
-        
+
         let input = try MLDictionaryFeatureProvider(dictionary: [
             "encoder_outputs": MLFeatureValue(multiArray: encoderArray),
             "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray)
         ])
-        
+
         let output = try model.prediction(
             from: input,
             options: MLPredictionOptions()
         )
-        
+
         return try extractFeatureValue(from: output, key: "logits", errorMessage: "Joint network output missing logits")
     }
     /// Predict token and duration from joint logits
@@ -404,30 +380,30 @@ internal struct TdtDecoder {
         let totalElements = logits.count
         let durationElements = config.tdtConfig.durations.count
         let vocabSize = totalElements - durationElements
-        
+
         guard totalElements >= durationElements else {
             throw ASRError.processingFailed("Logits dimension mismatch")
         }
-        
+
         // Use contiguous memory access
         let logitsPtr = logits.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
-        
+
         let tokenLogits = Array(UnsafeBufferPointer(start: logitsPtr, count: vocabSize))
         let durationLogits = Array(UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
-        
+
         return (tokenLogits, durationLogits)
     }
-    
+
     /// SIMD-accelerated argmax
     private func argmaxSIMD(_ values: [Float]) -> Int {
         guard !values.isEmpty else { return 0 }
-        
+
         var maxIndex = 0
         var maxValue = values[0]
-        
+
         // Use vDSP for finding maximum
         vDSP_maxvi(values, 1, &maxValue, &maxIndex, vDSP_Length(values.count))
-        
+
         return Int(maxIndex)
     }
     
@@ -510,30 +486,21 @@ internal struct TdtDecoder {
 /// Pre-processed encoder frames for fast access
 private typealias EncoderFrameArray = [[Float]]
 
-/// Cache for encoder frames
-private struct EncoderFrameCache {
-    let maxFrames: Int
-    
-    init(maxFrames: Int) {
-        self.maxFrames = maxFrames
-    }
-}
-
 /// Cache for decoder inputs to avoid repeated allocations
 private struct DecoderInputCache {
     private var targetArray: MLMultiArray?
     private var targetLengthArray: MLMultiArray?
-    
+
     mutating func getInput(token: Int, state: DecoderState) throws -> MLFeatureProvider {
         // Reuse arrays if possible
         if targetArray == nil {
             targetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
             targetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         }
-        
+
         targetArray![0] = NSNumber(value: token)
         targetLengthArray![0] = NSNumber(value: 1)
-        
+
         return try MLDictionaryFeatureProvider(dictionary: [
             "targets": MLFeatureValue(multiArray: targetArray!),
             "target_lengths": MLFeatureValue(multiArray: targetLengthArray!),
