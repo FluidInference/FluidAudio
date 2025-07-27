@@ -182,20 +182,10 @@ final class AsrTranscriptionTests: XCTestCase {
         let microphoneSource = AudioSource.microphone
         let systemSource = AudioSource.system
         
-        // Test that they are different cases
-        switch microphoneSource {
-        case .microphone:
-            XCTAssertTrue(true, "Microphone source exists")
-        case .system:
-            XCTFail("Microphone source should not be system")
-        }
-        
-        switch systemSource {
-        case .system:
-            XCTAssertTrue(true, "System source exists")
-        case .microphone:
-            XCTFail("System source should not be microphone")
-        }
+        // Test that they are different
+        XCTAssertTrue(microphoneSource == .microphone, "Microphone source should be microphone")
+        XCTAssertTrue(systemSource == .system, "System source should be system")
+        XCTAssertFalse(microphoneSource == systemSource, "Sources should be different")
     }
     
     // MARK: - Performance Tests

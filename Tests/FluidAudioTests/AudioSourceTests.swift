@@ -9,7 +9,8 @@ final class AudioSourceTests: XCTestCase {
         let asrManager = AsrManager()
 
         do {
-            try await asrManager.initialize()
+            let models = try await AsrModels.downloadAndLoad()
+            try await asrManager.initialize(models: models)
 
             let testAudio = Array(repeating: Float(0.0), count: 16000)
 
@@ -32,7 +33,8 @@ final class AudioSourceTests: XCTestCase {
         let asrManager = AsrManager()
 
         do {
-            try await asrManager.initialize()
+            let models = try await AsrModels.downloadAndLoad()
+            try await asrManager.initialize(models: models)
 
             let testAudio = Array(repeating: Float(0.0), count: 16000)
 
@@ -50,7 +52,8 @@ final class AudioSourceTests: XCTestCase {
         let asrManager = AsrManager()
 
         do {
-            try await asrManager.initialize()
+            let models = try await AsrModels.downloadAndLoad()
+            try await asrManager.initialize(models: models)
 
             let testAudio = Array(repeating: Float(0.0), count: 16000)
 

@@ -104,55 +104,6 @@ final class AsrManagerTests: XCTestCase {
     
     // MARK: - Encoder Output Transpose Tests
     
-    func testTransposeEncoderOutput() throws {
-        // Create a test encoder output: [batch=1, features=3, time=4]
-        let encoderOutput = try MLMultiArray(shape: [1, 3, 4], dataType: .float32)
-        
-        // Fill with test data: feature * 10 + time
-        for f in 0..<3 {
-            for t in 0..<4 {
-                let index = f * 4 + t
-                encoderOutput[index] = NSNumber(value: Float(f * 10 + t))
-            }
-        }
-        
-        // Transpose to [batch=1, time=4, features=3]
-        let transposed = try manager.transposeEncoderOutput(encoderOutput)
-        
-        XCTAssertEqual(transposed.shape, [1, 4, 3] as [NSNumber])
-        
-        // Verify transposition
-        for t in 0..<4 {
-            for f in 0..<3 {
-                let expectedValue = Float(f * 10 + t)
-                let actualValue = transposed[t * 3 + f].floatValue
-                XCTAssertEqual(actualValue, expectedValue, accuracy: 0.0001,
-                              "Mismatch at time=\(t), feature=\(f)")
-            }
-        }
-    }
-    
-    func testTransposeEncoderOutputLargeArray() throws {
-        // Test with larger dimensions
-        let encoderOutput = try MLMultiArray(shape: [1, 256, 100], dataType: .float32)
-        
-        // Fill with sequential values
-        for i in 0..<encoderOutput.count {
-            encoderOutput[i] = NSNumber(value: Float(i))
-        }
-        
-        let transposed = try manager.transposeEncoderOutput(encoderOutput)
-        XCTAssertEqual(transposed.shape, [1, 100, 256] as [NSNumber])
-        
-        // Spot check a few values
-        // Original: feature=0, time=0 should be at index 0
-        // Transposed: time=0, feature=0 should be at index 0
-        XCTAssertEqual(transposed[0].floatValue, 0.0, accuracy: 0.0001)
-        
-        // Original: feature=1, time=0 should be at index 100
-        // Transposed: time=0, feature=1 should be at index 1
-        XCTAssertEqual(transposed[1].floatValue, 100.0, accuracy: 0.0001)
-    }
     
     // MARK: - Decoder Input Preparation Tests
     

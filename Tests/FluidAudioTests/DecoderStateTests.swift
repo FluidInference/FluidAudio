@@ -31,7 +31,7 @@ final class DecoderStateTests: XCTestCase {
     
     func testDecoderStateCopyConstructor() throws {
         // Create original state with test values
-        var originalState = DecoderState()
+        let originalState = DecoderState()
         
         // Fill with test data
         for i in 0..<originalState.hiddenState.count {

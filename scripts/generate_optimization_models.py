@@ -1,46 +1,13 @@
 #!/usr/bin/env python3
 """
 Generate CoreML optimization models for ASR pipeline
+Note: Transpose model removed as it's now handled in the CoreML encoder
 """
 
 import coremltools as ct
 from coremltools.models.neural_network import NeuralNetworkBuilder
 from coremltools.models import MLModel
 import os
-
-def create_transpose_model():
-    """Create a model that transposes encoder output from [1, hidden_dim, T] to [1, T, hidden_dim]"""
-
-    # Create flexible transpose using PyTorch approach
-    import torch
-    import torch.nn as nn
-
-    class TransposeModel(nn.Module):
-        def forward(self, x):
-            # x shape: [batch, hidden_dim, time] -> [batch, time, hidden_dim]
-            return x.transpose(1, 2)
-
-    # Create and trace the model
-    model = TransposeModel()
-    model.eval()
-
-    # Use flexible shapes
-    example_input = torch.randn(1, 1024, 100)  # Example with actual encoder dimensions
-    traced_model = torch.jit.trace(model, example_input)
-
-    # Convert to Core ML with flexible shapes
-    coreml_model = ct.convert(
-        traced_model,
-        inputs=[ct.TensorType(name="x", shape=(1, ct.RangeDim(1, 2048), ct.RangeDim(1, 2048)))],
-        minimum_deployment_target=ct.target.macOS13
-    )
-
-    # Set metadata
-    coreml_model.author = 'FluidAudio'
-    coreml_model.short_description = 'Efficient tensor transpose for ASR encoder output'
-    coreml_model.version = '1.0'
-
-    return coreml_model
 
 
 def create_padding_model(max_length=160000):
@@ -158,18 +125,11 @@ def main():
 
     print("Generating CoreML optimization models...")
 
-    # Generate transpose model
-    print("1. Creating transpose model...")
-    transpose_model = create_transpose_model()
-    transpose_path = os.path.join(output_dir, 'TransposeEncoder.mlpackage')
-    transpose_model.save(transpose_path)
-    print(f"   Saved to: {transpose_path}")
-
     # Generate padding model
-    print("2. Skipping padding model (not needed for current issue)")
+    print("1. Skipping padding model (not needed for current issue)")
 
     # Generate token/duration model
-    print("3. Creating token/duration model...")
+    print("2. Creating token/duration model...")
     token_duration_model = create_token_duration_model()
     token_duration_path = os.path.join(output_dir, 'TokenDurationPrediction.mlpackage')
     token_duration_model.save(token_duration_path)
