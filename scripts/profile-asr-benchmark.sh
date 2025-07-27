@@ -96,19 +96,7 @@ if [ ! -f "$COMMAND_PATH" ]; then
     exit 1
 fi
 
-# Create a simple launcher script that adds a small delay
-# This helps ensure the process stays alive long enough for Instruments
-LAUNCHER_SCRIPT="$OUTPUT_DIR/launcher.sh"
-cat > "$LAUNCHER_SCRIPT" << EOF
-#!/bin/bash
-# Small delay to ensure Instruments can attach
-sleep 0.5
-exec "$COMMAND_PATH" asr-benchmark --subset "$SUBSET" --max-files "$MAX_FILES" --auto-download
-EOF
-chmod +x "$LAUNCHER_SCRIPT"
-
 # Run with all relevant instruments including Neural Engine and memory tracking
-# Using a launcher script to ensure proper attachment
 xcrun xctrace record \
     --output "$OUTPUT_DIR/${TRACE_NAME}.trace" \
     --template "Time Profiler" \
@@ -122,52 +110,4 @@ xcrun xctrace record \
     --instrument "os_log" \
     --time-limit 300s \
     --launch -- \
-    "$LAUNCHER_SCRIPT"
-
-# Clean up launcher script
-rm -f "$LAUNCHER_SCRIPT"
-
-echo ""
-echo "✅ Profiling complete!"
-echo "sudo chown -R $(whoami):staff profiling-results/asr-benchmark.trace"
-
-echo ""
-echo "📊 Trace file saved to: $OUTPUT_DIR/${TRACE_NAME}.trace"
-echo ""
-echo "🔍 To analyze the results:"
-echo ""
-echo "1. Open the trace file:"
-echo "   open $OUTPUT_DIR/${TRACE_NAME}.trace"
-echo ""
-echo "2. Key metrics to examine:"
-echo ""
-echo "   📱 Neural Engine (ANE):"
-echo "   - Look for 'Neural Engine' track in the timeline"
-echo "   - Check 'com.apple.ane' processes for ANE activity"
-echo "   - Monitor ANE utilization percentage"
-echo ""
-echo "   🎮 GPU/Metal Performance:"
-echo "   - Check 'GPU' track for utilization"
-echo "   - Look for Metal Performance Shaders (MPS) activity"
-echo "   - Monitor GPU memory usage"
-echo ""
-echo "   💾 Memory Usage:"
-echo "   - Check 'Memory' track for allocation patterns"
-echo "   - Look for spikes during model loading"
-echo "   - Monitor total memory footprint"
-echo ""
-echo "   ⚡ CPU Performance:"
-echo "   - Check 'CPU' tracks for each core"
-echo "   - Look for CoreML framework activity"
-echo "   - Identify performance bottlenecks"
-echo ""
-echo "   🔋 System Impact:"
-echo "   - Monitor thermal state changes"
-echo "   - Check power consumption"
-echo "   - Look for process priority changes"
-echo ""
-echo "3. Pro tips:"
-echo "   - Use the timeline to correlate different metrics"
-echo "   - Filter by process name 'fluidaudio' for focused analysis"
-echo "   - Check the 'Points of Interest' track for custom signposts"
-echo "   - Use the statistics view for aggregate data"
+    "$COMMAND_PATH" asr-benchmark --subset "$SUBSET" --max-files "$MAX_FILES" --auto-download
