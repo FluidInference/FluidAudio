@@ -1,3 +1,10 @@
+//
+//  TdtDecoder.swift
+//  FluidAudio
+//
+//  Copyright © 2025 Brandon Weng. All rights reserved.
+//
+
 import CoreML
 import Foundation
 import OSLog
@@ -35,10 +42,10 @@ struct TdtHypothesis: Sendable {
 }
 
 /// Token-and-Duration Transducer (TDT) decoder implementation
-///
+/// 
 /// This decoder jointly predicts both tokens and their durations, enabling accurate
 /// transcription of speech with varying speaking rates.
-///
+/// 
 /// Based on NVIDIA's Parakeet TDT architecture from the NeMo toolkit.
 /// The TDT model extends RNN-T by adding duration prediction, allowing
 /// efficient frame-skipping during inference for faster decoding.
@@ -47,7 +54,6 @@ internal struct TdtDecoder {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
-    private let tokenDurationModel: MLModel
 
     // Special token Indexes matching Parakeet TDT model's vocabulary (1024 word tokens)
     // OUTPUT from joint network during decoding
@@ -59,9 +65,8 @@ internal struct TdtDecoder {
     // sosId is INPUT when there's no real previous token
     private let sosId = 1024
 
-    init(config: ASRConfig, tokenDurationModel: MLModel) {
+    init(config: ASRConfig) {
         self.config = config
-        self.tokenDurationModel = tokenDurationModel
     }
 
     /// Execute TDT decoding on encoder output
@@ -77,7 +82,7 @@ internal struct TdtDecoder {
         // This allows the decoder to "skip" frames when it predicts that a token spans multiple frames
         // For example: if "hello" spans 5 frames, instead of processing each frame individually,
         // TDT can predict the token once and skip ahead 5 frames, making decoding much faster
-
+        
         // We need at least 2 frames because:
         // 1. Frame 0: Initial state, predicts first token/duration
         // 2. Frame 1+: Needed to validate duration predictions and continue decoding
@@ -259,52 +264,23 @@ internal struct TdtDecoder {
             options: MLPredictionOptions()
         )
 
-        return try extractFeatureValue(
-            from: output, key: "logits", errorMessage: "Joint network output missing logits")
+        return try extractFeatureValue(from: output, key: "logits", errorMessage: "Joint network output missing logits")
     }
 
     /// Predict token and duration from joint logits
-    internal func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (
-        token: Int, score: Float, duration: Int
-    ) {
-        do {
-            let input = try MLDictionaryFeatureProvider(dictionary: [
-                "logits": MLFeatureValue(multiArray: logits)
-            ])
+    private func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (token: Int, score: Float, duration: Int) {
+        let (tokenLogits, durationLogits) = try splitLogits(logits)
 
-            let output = try tokenDurationModel.prediction(from: input)
+        let bestToken = argmax(tokenLogits)
+        let tokenScore = tokenLogits[bestToken]
 
-            let tokenIdValue = output.featureValue(for: "var_17")?.multiArrayValue
-            let tokenScoreValue = output.featureValue(for: "reduce_max_0")?.multiArrayValue
-            let durationIndexValue = output.featureValue(for: "var_24")?.multiArrayValue
+        let (_, duration) = try processDurationLogits(durationLogits)
 
-            guard let tokenId = tokenIdValue,
-                  let tokenScore = tokenScoreValue,
-                  let durationIndex = durationIndexValue
-            else {
-                throw ASRError.processingFailed("CoreML model output missing required features")
-            }
-
-            let token = tokenId[0].intValue
-            let score = tokenScore[0].floatValue
-            let durIndex = durationIndex[0].intValue
-
-            // Map duration index to actual duration value
-            let durations = config.tdtConfig.durations
-            guard durIndex < durations.count else {
-                throw ASRError.processingFailed("Duration index out of bounds")
-            }
-
-            return (token: token, score: score, duration: durations[durIndex])
-        } catch {
-            logger.error("CoreML token/duration prediction failed: \(error)")
-            throw ASRError.processingFailed(
-                "CoreML token/duration prediction failed: \(error.localizedDescription)")
-        }
+        return (token: bestToken, score: tokenScore, duration: duration)
     }
 
     /// Update hypothesis with new token
-    internal func updateHypothesis(
+    private func updateHypothesis(
         _ hypothesis: inout TdtHypothesis,
         token: Int,
         score: Float,
@@ -334,10 +310,10 @@ internal struct TdtDecoder {
     ///   - skip: Number of frames to skip (predicted by the model)
     ///   - sequenceLength: Total number of frames in the audio
     /// - Returns: The next frame index to process
-    internal func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
+    private func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
         // Determine the actual number of frames to skip
         let actualSkip: Int
-
+        
         if sequenceLength < 10 && skip > 2 {
             // For very short audio (< 10 frames), limit skip to 2 frames max
             // This ensures we don't miss important tokens in brief utterances
@@ -347,27 +323,56 @@ internal struct TdtDecoder {
             // Even if model predicts more, cap at 4 for stability
             actualSkip = min(skip, 4)
         }
-
+        
         // Move forward by actualSkip frames, but don't exceed sequence bounds
         return min(currentIdx + actualSkip, sequenceLength)
     }
 
     // MARK: - Private Helper Methods
-    internal func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws
-        -> MLMultiArray
-    {
+
+    /// Split joint logits into token and duration components
+    private func splitLogits(_ logits: MLMultiArray) throws -> (tokenLogits: [Float], durationLogits: [Float]) {
+        let totalElements = logits.count
+        let durationElements = config.tdtConfig.durations.count
+        let vocabSize = totalElements - durationElements
+
+        guard totalElements >= durationElements else {
+            throw ASRError.processingFailed("Logits dimension mismatch")
+        }
+
+        let tokenLogits = (0..<vocabSize).map { logits[$0].floatValue }
+        let durationLogits = (vocabSize..<totalElements).map { logits[$0].floatValue }
+
+        return (tokenLogits, durationLogits)
+    }
+
+    /// Process duration logits and return duration index with skip value
+    private func processDurationLogits(_ logits: [Float]) throws -> (index: Int, skip: Int) {
+        let maxIndex = argmax(logits)
+        let durations = config.tdtConfig.durations
+        guard maxIndex < durations.count else {
+            throw ASRError.processingFailed("Duration index out of bounds")
+        }
+        return (maxIndex, durations[maxIndex])
+    }
+
+    /// Find argmax in a float array
+    private func argmax(_ values: [Float]) -> Int {
+        guard !values.isEmpty else { return 0 }
+        return values.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
+    }
+
+    private func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws -> MLMultiArray {
         let shape = encoderOutput.shape
         let batchSize = shape[0].intValue
         let sequenceLength = shape[1].intValue
         let hiddenSize = shape[2].intValue
 
         guard timeIndex < sequenceLength else {
-            throw ASRError.processingFailed(
-                "Time index out of bounds: \(timeIndex) >= \(sequenceLength)")
+            throw ASRError.processingFailed("Time index out of bounds: \(timeIndex) >= \(sequenceLength)")
         }
 
-        let timeStepArray = try MLMultiArray(
-            shape: [batchSize, 1, hiddenSize] as [NSNumber], dataType: .float32)
+        let timeStepArray = try MLMultiArray(shape: [batchSize, 1, hiddenSize] as [NSNumber], dataType: .float32)
 
         for h in 0..<hiddenSize {
             let sourceIndex = timeIndex * hiddenSize + h
@@ -377,7 +382,7 @@ internal struct TdtDecoder {
         return timeStepArray
     }
 
-    internal func prepareDecoderInput(
+    private func prepareDecoderInput(
         targetToken: Int,
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
@@ -392,30 +397,27 @@ internal struct TdtDecoder {
             "targets": MLFeatureValue(multiArray: targetArray),
             "target_lengths": MLFeatureValue(multiArray: targetLengthArray),
             "h_in": MLFeatureValue(multiArray: hiddenState),
-            "c_in": MLFeatureValue(multiArray: cellState),
+            "c_in": MLFeatureValue(multiArray: cellState)
         ])
     }
 
-    internal func prepareJointInput(
+    private func prepareJointInput(
         encoderOutput: MLMultiArray,
         decoderOutput: MLFeatureProvider,
         timeIndex: Int
     ) throws -> MLFeatureProvider {
-        let decoderOutputArray = try extractFeatureValue(
-            from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
+        let decoderOutputArray = try extractFeatureValue(from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
 
         return try MLDictionaryFeatureProvider(dictionary: [
             "encoder_outputs": MLFeatureValue(multiArray: encoderOutput),
-            "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray),
+            "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray)
         ])
     }
 
     // MARK: - Error Handling Helper
 
     /// Validates and extracts a required feature value from MLFeatureProvider
-    private func extractFeatureValue(
-        from provider: MLFeatureProvider, key: String, errorMessage: String
-    ) throws -> MLMultiArray {
+    private func extractFeatureValue(from provider: MLFeatureProvider, key: String, errorMessage: String) throws -> MLMultiArray {
         guard let value = provider.featureValue(for: key)?.multiArrayValue else {
             throw ASRError.processingFailed(errorMessage)
         }

@@ -22,7 +22,6 @@ public final class AsrManager {
     private var asrModels: AsrModels?
 
     /// Token duration optimization model  
-    internal var tokenDurationModel: MLModel!
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
@@ -65,8 +64,6 @@ public final class AsrManager {
         self.decoderModel = models.decoder
         self.jointModel = models.joint
 
-        // Set the token duration model from the provided models
-        self.tokenDurationModel = models.tokenDuration
         logger.info("Token duration optimization model loaded successfully")
 
         logger.info("AsrManager initialized successfully with provided models")
@@ -287,7 +284,7 @@ public final class AsrManager {
     ) async throws -> [Int] {
         try await initializeDecoderState(decoderState: &decoderState)
 
-        let decoder = TdtDecoder(config: config, tokenDurationModel: tokenDurationModel)
+        let decoder = TdtDecoder(config: config)
         return try await decoder.decode(
             encoderOutput: encoderOutput,
             encoderSequenceLength: encoderSequenceLength,
