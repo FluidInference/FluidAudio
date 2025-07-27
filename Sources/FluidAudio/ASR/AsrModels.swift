@@ -1,4 +1,4 @@
-@preconcurrency import CoreML
+import CoreML
 import Foundation
 import OSLog
 
