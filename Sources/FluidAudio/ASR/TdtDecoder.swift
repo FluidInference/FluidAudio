@@ -10,8 +10,6 @@ import Foundation
 import OSLog
 import Accelerate
 
-// MARK: - Types
-
 public struct TdtConfig: Sendable {
     public let durations: [Int]
     public let includeTokenDuration: Bool
@@ -67,16 +65,13 @@ internal struct TdtDecoder {
     private let blankId = 1024
     private let sosId = 1024
 
-    // Pre-allocated buffers to reduce memory allocation overhead
-    private var decoderInputCache: DecoderInputCache
 
     init(config: ASRConfig) {
         self.config = config
-        self.decoderInputCache = DecoderInputCache()
     }
 
     /// Execute optimized TDT decoding
-    mutating func decode(
+    func decode(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
         decoderModel: MLModel,
@@ -240,8 +235,6 @@ internal struct TdtDecoder {
         return (tokens: hypothesis.ySequence, stats: stats)
     }
 
-    // MARK: - Optimized Operations
-
     /// Pre-process encoder output into contiguous memory for faster access
     private func preProcessEncoderOutput(_ encoderOutput: MLMultiArray, length: Int) throws -> EncoderFrameArray {
         let shape = encoderOutput.shape
@@ -261,15 +254,26 @@ internal struct TdtDecoder {
         return frames
     }
 
-    /// Optimized decoder execution with input caching
-    private mutating func runDecoderOptimized(
+    /// Optimized decoder execution
+    private func runDecoderOptimized(
         token: Int,
         state: DecoderState,
         model: MLModel
     ) throws -> (output: MLFeatureProvider, newState: DecoderState) {
 
-        // Use cached input arrays
-        let input = try decoderInputCache.getInput(token: token, state: state)
+        // Create input arrays
+        let targetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
+        targetArray[0] = NSNumber(value: token)
+
+        let targetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
+        targetLengthArray[0] = NSNumber(value: 1)
+
+        let input = try MLDictionaryFeatureProvider(dictionary: [
+            "targets": MLFeatureValue(multiArray: targetArray),
+            "target_lengths": MLFeatureValue(multiArray: targetLengthArray),
+            "h_in": MLFeatureValue(multiArray: state.hiddenState),
+            "c_in": MLFeatureValue(multiArray: state.cellState)
+        ])
 
         let output = try model.prediction(
             from: input,
@@ -481,31 +485,5 @@ internal struct TdtDecoder {
     }
 }
 
-// MARK: - Cache Structures
-
 /// Pre-processed encoder frames for fast access
 private typealias EncoderFrameArray = [[Float]]
-
-/// Cache for decoder inputs to avoid repeated allocations
-private struct DecoderInputCache {
-    private var targetArray: MLMultiArray?
-    private var targetLengthArray: MLMultiArray?
-
-    mutating func getInput(token: Int, state: DecoderState) throws -> MLFeatureProvider {
-        // Reuse arrays if possible
-        if targetArray == nil {
-            targetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
-            targetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
-        }
-
-        targetArray![0] = NSNumber(value: token)
-        targetLengthArray![0] = NSNumber(value: 1)
-
-        return try MLDictionaryFeatureProvider(dictionary: [
-            "targets": MLFeatureValue(multiArray: targetArray!),
-            "target_lengths": MLFeatureValue(multiArray: targetLengthArray!),
-            "h_in": MLFeatureValue(multiArray: state.hiddenState),
-            "c_in": MLFeatureValue(multiArray: state.cellState)
-        ])
-    }
-}
