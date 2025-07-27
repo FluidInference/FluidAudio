@@ -276,9 +276,17 @@ internal struct TdtDecoder {
 
                 let output = try tokenDurationModel.prediction(from: input)
 
-                if let tokenId = output.featureValue(for: "token_id")?.multiArrayValue,
-                    let tokenScore = output.featureValue(for: "token_score")?.multiArrayValue,
-                    let durationIndex = output.featureValue(for: "duration_index")?.multiArrayValue
+                // Try both old and new output names for compatibility
+                let tokenIdValue = output.featureValue(for: "token_id")?.multiArrayValue ?? 
+                                 output.featureValue(for: "var_17")?.multiArrayValue
+                let tokenScoreValue = output.featureValue(for: "token_score")?.multiArrayValue ?? 
+                                    output.featureValue(for: "reduce_max_0")?.multiArrayValue  
+                let durationIndexValue = output.featureValue(for: "duration_index")?.multiArrayValue ?? 
+                                       output.featureValue(for: "var_24")?.multiArrayValue
+                
+                if let tokenId = tokenIdValue,
+                   let tokenScore = tokenScoreValue,
+                   let durationIndex = durationIndexValue
                 {
 
                     let token = tokenId[0].intValue
@@ -294,20 +302,14 @@ internal struct TdtDecoder {
                     return (token: token, score: score, duration: durations[durIndex])
                 }
             } catch {
-                logger.warning(
-                    "CoreML token/duration prediction failed, falling back to manual: \(error)")
+                logger.error("CoreML token/duration prediction failed: \(error)")
+                throw ASRError.processingFailed(
+                    "CoreML token/duration prediction failed: \(error.localizedDescription)")
             }
         }
 
-        // Fallback to manual implementation
-        let (tokenLogits, durationLogits) = try splitLogits(logits)
-
-        let bestToken = argmax(tokenLogits)
-        let tokenScore = tokenLogits[bestToken]
-
-        let (_, duration) = try processDurationLogits(durationLogits)
-
-        return (token: bestToken, score: tokenScore, duration: duration)
+        // No fallback - CoreML only approach
+        throw ASRError.processingFailed("CoreML token/duration prediction failed")
     }
 
     /// Update hypothesis with new token
@@ -361,39 +363,21 @@ internal struct TdtDecoder {
 
     // MARK: - Private Helper Methods
 
-    /// Split joint logits into token and duration components
-    internal func splitLogits(_ logits: MLMultiArray) throws -> (
-        tokenLogits: [Float], durationLogits: [Float]
-    ) {
-        let totalElements = logits.count
-        let durationElements = config.tdtConfig.durations.count
-        let vocabSize = totalElements - durationElements
+    /// Flatten 4D logits array to 1D for CoreML models that expect flattened input
+    internal func flattenLogits(_ logits: MLMultiArray) throws -> MLMultiArray {
+        let shape = logits.shape
+        let totalElements = shape.reduce(1) { $0 * $1.intValue }
 
-        guard totalElements >= durationElements else {
-            throw ASRError.processingFailed("Logits dimension mismatch")
+        let flattenedArray = try MLMultiArray(
+            shape: [totalElements] as [NSNumber], dataType: logits.dataType)
+
+        for i in 0..<totalElements {
+            flattenedArray[i] = logits[i]
         }
 
-        let tokenLogits = (0..<vocabSize).map { logits[$0].floatValue }
-        let durationLogits = (vocabSize..<totalElements).map { logits[$0].floatValue }
-
-        return (tokenLogits, durationLogits)
+        return flattenedArray
     }
 
-    /// Process duration logits and return duration index with skip value
-    internal func processDurationLogits(_ logits: [Float]) throws -> (index: Int, skip: Int) {
-        let maxIndex = argmax(logits)
-        let durations = config.tdtConfig.durations
-        guard maxIndex < durations.count else {
-            throw ASRError.processingFailed("Duration index out of bounds")
-        }
-        return (maxIndex, durations[maxIndex])
-    }
-
-    /// Find argmax in a float array
-    internal func argmax(_ values: [Float]) -> Int {
-        guard !values.isEmpty else { return 0 }
-        return values.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
-    }
 
     internal func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws
         -> MLMultiArray

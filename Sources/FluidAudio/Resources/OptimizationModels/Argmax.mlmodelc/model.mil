@@ -1,12 +1,9 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3405.2.1"}, {"coremlc-version", "3404.23.1"}, {"coremltools-component-torch", "2.7.1"}, {"coremltools-source-dialect", "TorchScript"}, {"coremltools-version", "8.3.0"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3405.2.1"}, {"coremlc-version", "3404.23.1"}, {"coremltools-component-torch", "2.5.0"}, {"coremltools-source-dialect", "TorchScript"}, {"coremltools-version", "8.3.0"}})]
 {
-    func main<ios16>(tensor<fp16, [1025]> logits) {
-            tensor<int32, []> var_4_axis_0 = const()[name = tensor<string, []>("op_4_axis_0"), val = tensor<int32, []>(-1)];
+    func main<ios16>(tensor<fp16, [1025]> input) {
+            tensor<int32, []> var_4_axis_0 = const()[name = tensor<string, []>("op_4_axis_0"), val = tensor<int32, []>(0)];
             tensor<bool, []> var_4_keep_dims_0 = const()[name = tensor<string, []>("op_4_keep_dims_0"), val = tensor<bool, []>(true)];
-            tensor<int32, [1]> index = reduce_argmax(axis = var_4_axis_0, keep_dims = var_4_keep_dims_0, x = logits)[name = tensor<string, []>("op_4_cast_fp16")];
-            tensor<int32, [1]> reduce_max_0_axes_0 = const()[name = tensor<string, []>("reduce_max_0_axes_0"), val = tensor<int32, [1]>([-1])];
-            tensor<bool, []> reduce_max_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_max_0_keep_dims_0"), val = tensor<bool, []>(true)];
-            tensor<fp16, [1]> score = reduce_max(axes = reduce_max_0_axes_0, keep_dims = reduce_max_0_keep_dims_0, x = logits)[name = tensor<string, []>("reduce_max_0_cast_fp16")];
-        } -> (index, score);
+            tensor<int32, [1]> var_4 = reduce_argmax(axis = var_4_axis_0, keep_dims = var_4_keep_dims_0, x = input)[name = tensor<string, []>("op_4_cast_fp16")];
+        } -> (var_4);
 }

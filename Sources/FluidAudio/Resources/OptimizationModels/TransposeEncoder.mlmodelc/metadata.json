@@ -54,9 +54,9 @@
       }
     ],
     "userDefinedMetadata" : {
-      "com.github.apple.coremltools.version" : "8.3.0",
-      "com.github.apple.coremltools.source" : "torch==2.7.1",
-      "com.github.apple.coremltools.source_dialect" : "TorchScript"
+      "com.github.apple.coremltools.source_dialect" : "TorchScript",
+      "com.github.apple.coremltools.source" : "torch==2.5.0",
+      "com.github.apple.coremltools.version" : "8.3.0"
     },
     "generatedClassName" : "TransposeEncoder",
     "method" : "predict"

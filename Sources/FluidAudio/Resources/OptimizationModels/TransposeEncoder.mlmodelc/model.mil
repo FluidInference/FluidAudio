@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3405.2.1"}, {"coremlc-version", "3404.23.1"}, {"coremltools-component-torch", "2.7.1"}, {"coremltools-source-dialect", "TorchScript"}, {"coremltools-version", "8.3.0"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3405.2.1"}, {"coremlc-version", "3404.23.1"}, {"coremltools-component-torch", "2.5.0"}, {"coremltools-source-dialect", "TorchScript"}, {"coremltools-version", "8.3.0"}})]
 {
     func main<ios16>(tensor<fp16, [1, ?, ?]> x) [FlexibleShapeInformation = tuple<tuple<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>, tuple<tensor<string, []>, dict<tensor<string, []>, list<tensor<int32, [2]>, ?>>>>((("DefaultShapes", {{"x", [1, 1, 1]}}), ("RangeDims", {{"x", [[1, 1], [1, 2048], [1, 2048]]}})))] {
             tensor<int32, [3]> var_4_perm_0 = const()[name = tensor<string, []>("op_4_perm_0"), val = tensor<int32, [3]>([0, 2, 1])];

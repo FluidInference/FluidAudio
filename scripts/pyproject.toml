@@ -1,0 +1,17 @@
+[project]
+name = "fluidaudio-scripts"
+version = "0.1.0"
+description = "Model generation scripts for FluidAudio"
+requires-python = ">=3.8"
+dependencies = [
+    "coremltools>=7.0",
+    "numpy>=1.24.0",
+    "torch==2.5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []

@@ -23,7 +23,6 @@ public enum ASRModelLoader {
 
         // Model URLs - using .mlmodelc extension (compiled models)
         let transposeURL = modelsDirectory.appendingPathComponent("TransposeEncoder.mlmodelc")
-        let argmaxURL = modelsDirectory.appendingPathComponent("Argmax.mlmodelc")
         let tokenDurationURL = modelsDirectory.appendingPathComponent(
             "TokenDurationPrediction.mlmodelc")
 
@@ -37,9 +36,6 @@ public enum ASRModelLoader {
             let transposeModel = try loadModel(
                 at: transposeURL, name: "TransposeEncoder", configuration: configuration,
                 logger: logger, loadedCount: &loadedModels)
-            let argmaxModel = try loadModel(
-                at: argmaxURL, name: "Argmax", configuration: configuration, logger: logger,
-                loadedCount: &loadedModels)
             let tokenDurationModel = try loadModel(
                 at: tokenDurationURL, name: "TokenDurationPrediction", configuration: configuration,
                 logger: logger, loadedCount: &loadedModels)
@@ -48,7 +44,6 @@ public enum ASRModelLoader {
 
             return ASROptimizationModels(
                 transpose: transposeModel,
-                argmax: argmaxModel,
                 tokenDuration: tokenDurationModel
             )
         } catch {
@@ -73,17 +68,15 @@ public enum ASRModelLoader {
     }
 }
 
-/// Container for ASR optimization models (Transpose, Argmax, Token Duration Prediction)
+/// Container for ASR optimization models (Transpose, Token Duration Prediction)
 public final class ASROptimizationModels {
     public let transpose: MLModel
-    public let argmax: MLModel
     public let tokenDuration: MLModel
 
     public init(
-        transpose: MLModel, argmax: MLModel, tokenDuration: MLModel
+        transpose: MLModel, tokenDuration: MLModel
     ) {
         self.transpose = transpose
-        self.argmax = argmax
         self.tokenDuration = tokenDuration
     }
 }

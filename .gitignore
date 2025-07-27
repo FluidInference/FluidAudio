@@ -93,3 +93,5 @@ baseline*.json
 FluidAudioDatasets/
 
 *.wav
+
+Resources/

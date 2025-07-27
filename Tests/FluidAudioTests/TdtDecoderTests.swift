@@ -80,6 +80,7 @@ final class TdtDecoderTests: XCTestCase {
     
     // MARK: - Split Logits Tests
     
+    /* // Commented out - splitLogits method removed
     func SplitLogits() throws {
         // TDT config has 5 durations by default: [0, 1, 2, 3, 4]
         let vocabSize = 1025
@@ -111,7 +112,9 @@ final class TdtDecoderTests: XCTestCase {
         XCTAssertEqual(durationLogits[0], 1000.0, accuracy: 0.0001)
         XCTAssertEqual(durationLogits[4], 1004.0, accuracy: 0.0001)
     }
+    */
     
+    /* // Commented out - splitLogits method removed
     func SplitLogitsEdgeCases() throws {
         // Test with minimum size
         let minLogits = try MLMultiArray(shape: [5], dataType: .float32)
@@ -127,9 +130,11 @@ final class TdtDecoderTests: XCTestCase {
         let tooSmall = try MLMultiArray(shape: [3], dataType: .float32)
         XCTAssertThrowsError(try decoder.splitLogits(tooSmall))
     }
+    */
     
     // MARK: - Argmax Tests
     
+    /* // Commented out - argmax method removed
     func Argmax() {
         // Test normal case
         let values: [Float] = [0.1, 0.5, 0.9, 0.3, 0.7]
@@ -156,9 +161,11 @@ final class TdtDecoderTests: XCTestCase {
         let singleMaxIndex = decoder.argmax(singleValue)
         XCTAssertEqual(singleMaxIndex, 0)
     }
+    */
     
     // MARK: - Process Duration Logits Tests
     
+    /* // Commented out - processDurationLogits method removed
     func ProcessDurationLogits() throws {
         // Test with clear winner
         let logits: [Float] = [0.1, 0.2, 0.9, 0.3, 0.1]
@@ -167,7 +174,9 @@ final class TdtDecoderTests: XCTestCase {
         XCTAssertEqual(index, 2)
         XCTAssertEqual(skip, config.tdtConfig.durations[2]) // Should be 2
     }
+    */
     
+    /* // Commented out - processDurationLogits method removed
     func ProcessDurationLogitsEdgeCases() throws {
         // Test with first duration selected (no skip)
         let noSkipLogits: [Float] = [0.9, 0.1, 0.1, 0.1, 0.1]
@@ -183,6 +192,7 @@ final class TdtDecoderTests: XCTestCase {
         XCTAssertEqual(maxIndex, 4)
         XCTAssertEqual(maxSkip, 4) // Maximum skip
     }
+    */
     
     // MARK: - Calculate Next Time Index Tests
     
