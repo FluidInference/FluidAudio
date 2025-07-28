@@ -433,7 +433,6 @@ extension ASRBenchmark {
             tdtConfig: TdtConfig(
                 durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
-                includeDurationConfidence: false,
                 maxSymbolsPerStep: 3
             )
         )
