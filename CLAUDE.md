@@ -53,10 +53,10 @@ DiarizerConfig(
 ### Benchmarking
 ```bash
 # Full AMI benchmark
-swift run fluidaudio benchmark --auto-download
+swift run fluidaudio diarization-benchmark --auto-download
 
 # Single file with custom parameters
-swift run fluidaudio benchmark --single-file ES2004a --threshold 0.7 --output results.json
+swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7 --output results.json
 
 # Process individual audio
 swift run fluidaudio process meeting.wav --output results.json
@@ -66,7 +66,6 @@ swift run fluidaudio process meeting.wav --output results.json
 ```bash
 # Once integrated:
 swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.445
-swift run fluidaudio vad-compare --threshold 0.3
 ```
 
 ### Development
