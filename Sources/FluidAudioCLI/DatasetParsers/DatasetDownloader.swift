@@ -552,6 +552,210 @@ struct DatasetDownloader {
 
         return destination
     }
+    
+    /// Download full MUSAN dataset from OpenSLR
+    static func downloadFullMusanDataset(force: Bool) async {
+        let cacheDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("FluidAudio/musanFull", isDirectory: true)
+        
+        print("📥 Downloading full MUSAN dataset from OpenSLR...")
+        print("   Target directory: \(cacheDir.path)")
+        print("   Expected size: ~600MB compressed, ~4.5GB uncompressed")
+        
+        // Create cache directory
+        do {
+            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        } catch {
+            print("❌ Failed to create cache directory: \(error)")
+            return
+        }
+        
+        // Check if already downloaded
+        let musanDir = cacheDir.appendingPathComponent("musan")
+        if !force && FileManager.default.fileExists(atPath: musanDir.path) {
+            let subdirs = ["speech", "music", "noise"]
+            var allExist = true
+            for subdir in subdirs {
+                if !FileManager.default.fileExists(atPath: musanDir.appendingPathComponent(subdir).path) {
+                    allExist = false
+                    break
+                }
+            }
+            
+            if allExist {
+                print("📂 Full MUSAN dataset already exists (use --force to re-download)")
+                print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+                return
+            }
+        }
+        
+        // Download from OpenSLR
+        let musanURL = "https://www.openslr.org/resources/17/musan.tar.gz"
+        let downloadPath = cacheDir.appendingPathComponent("musan.tar.gz")
+        
+        print("🌐 Downloading from: \(musanURL)")
+        
+        do {
+            // Download the tar.gz file
+            let (downloadURL, response) = try await URLSession.shared.download(from: URL(string: musanURL)!)
+            
+            // Check response
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                print("❌ Download failed with status code: \(httpResponse.statusCode)")
+                return
+            }
+            
+            // Move downloaded file
+            try FileManager.default.moveItem(at: downloadURL, to: downloadPath)
+            print("✅ Download complete")
+            
+            // Extract tar.gz
+            print("📦 Extracting archive...")
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+            task.arguments = ["-xzf", downloadPath.path, "-C", cacheDir.path]
+            
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                print("✅ Extraction complete")
+                
+                // Clean up tar file
+                try? FileManager.default.removeItem(at: downloadPath)
+                
+                // Count files
+                let speechFiles = countFiles(in: musanDir.appendingPathComponent("speech"))
+                let musicFiles = countFiles(in: musanDir.appendingPathComponent("music"))
+                let noiseFiles = countFiles(in: musanDir.appendingPathComponent("noise"))
+                
+                print("\n📊 Full MUSAN Dataset Summary:")
+                print("   Speech files: \(speechFiles)")
+                print("   Music files: \(musicFiles)")
+                print("   Noise files: \(noiseFiles)")
+                print("   Total files: \(speechFiles + musicFiles + noiseFiles)")
+                print("\n✅ Full MUSAN dataset ready for benchmarking")
+                print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+            } else {
+                print("❌ Extraction failed")
+                try? FileManager.default.removeItem(at: downloadPath)
+            }
+            
+        } catch {
+            print("❌ Download failed: \(error)")
+            try? FileManager.default.removeItem(at: downloadPath)
+        }
+    }
+    
+    /// Count files recursively in a directory
+    private static func countFiles(in directory: URL) -> Int {
+        var count = 0
+        if let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey]) {
+            for case let fileURL as URL in enumerator {
+                if let isFile = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile, isFile {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+    
+    /// Download VOiCES subset dataset from GitHub
+    static func downloadVoicesSubset(force: Bool) async {
+        let cacheDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("FluidAudio/voicesSubset", isDirectory: true)
+        
+        print("📥 Downloading VOiCES subset from GitHub...")
+        print("   Target directory: \(cacheDir.path)")
+        
+        // Create cache directory
+        do {
+            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        } catch {
+            print("❌ Failed to create cache directory: \(error)")
+            return
+        }
+        
+        // Check if already downloaded
+        let cleanDir = cacheDir.appendingPathComponent("clean")
+        let noisyDir = cacheDir.appendingPathComponent("noisy")
+        
+        if !force && FileManager.default.fileExists(atPath: cleanDir.path) && FileManager.default.fileExists(atPath: noisyDir.path) {
+            let cleanFiles = (try? FileManager.default.contentsOfDirectory(at: cleanDir, includingPropertiesForKeys: nil)) ?? []
+            let noisyFiles = (try? FileManager.default.contentsOfDirectory(at: noisyDir, includingPropertiesForKeys: nil)) ?? []
+            
+            if !cleanFiles.isEmpty || !noisyFiles.isEmpty {
+                print("📂 VOiCES subset already exists (use --force to re-download)")
+                print("   Clean files: \(cleanFiles.count)")
+                print("   Noisy files: \(noisyFiles.count)")
+                print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+                return
+            }
+        }
+        
+        // Clone the repository
+        print("🌐 Cloning VOiCES-subset repository...")
+        let cloneDir = cacheDir.appendingPathComponent("temp_clone")
+        
+        do {
+            // Remove any existing temp directory
+            try? FileManager.default.removeItem(at: cloneDir)
+            
+            // Clone the repository
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            task.arguments = ["clone", "--depth", "1", "https://github.com/Lab41/VOiCES-subset.git", cloneDir.path]
+            
+            try task.run()
+            task.waitUntilExit()
+            
+            if task.terminationStatus == 0 {
+                print("✅ Repository cloned successfully")
+                
+                // Move the audio files to our cache structure
+                let sourceCleanDir = cloneDir.appendingPathComponent("clean")
+                let sourceNoisyDir = cloneDir.appendingPathComponent("noisy") 
+                
+                // Create destination directories
+                try FileManager.default.createDirectory(at: cleanDir, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: noisyDir, withIntermediateDirectories: true)
+                
+                // Move clean files
+                if FileManager.default.fileExists(atPath: sourceCleanDir.path) {
+                    let cleanFiles = try FileManager.default.contentsOfDirectory(at: sourceCleanDir, includingPropertiesForKeys: nil)
+                    for file in cleanFiles where file.pathExtension == "wav" {
+                        let destination = cleanDir.appendingPathComponent(file.lastPathComponent)
+                        try FileManager.default.moveItem(at: file, to: destination)
+                    }
+                    print("   ✅ Moved \(cleanFiles.filter { $0.pathExtension == "wav" }.count) clean files")
+                }
+                
+                // Move noisy files
+                if FileManager.default.fileExists(atPath: sourceNoisyDir.path) {
+                    let noisyFiles = try FileManager.default.contentsOfDirectory(at: sourceNoisyDir, includingPropertiesForKeys: nil)
+                    for file in noisyFiles where file.pathExtension == "wav" {
+                        let destination = noisyDir.appendingPathComponent(file.lastPathComponent)
+                        try FileManager.default.moveItem(at: file, to: destination)
+                    }
+                    print("   ✅ Moved \(noisyFiles.filter { $0.pathExtension == "wav" }.count) noisy files")
+                }
+                
+                // Clean up clone directory
+                try? FileManager.default.removeItem(at: cloneDir)
+                
+                print("\n✅ VOiCES subset ready for benchmarking")
+                print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+                
+            } else {
+                print("❌ Git clone failed")
+                try? FileManager.default.removeItem(at: cloneDir)
+            }
+            
+        } catch {
+            print("❌ Download failed: \(error)")
+            try? FileManager.default.removeItem(at: cloneDir)
+        }
+    }
 }
 
 #endif
