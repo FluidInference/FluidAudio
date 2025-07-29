@@ -44,29 +44,43 @@ jobs:
           path: ~/Library/Application Support/FluidAudio/voicesSubset
           key: ${{ runner.os }}-voices-subset-v1
 
+      - name: Cache MUSAN noise samples
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/FluidAudio/vadDataset
+          key: ${{ runner.os }}-vad-dataset-mini50-v1
+
       - name: Build
         run: swift build -c release
 
-      - name: Run VAD Benchmark
-        id: benchmark
+      - name: Run MUSAN VAD Benchmark
+        id: musan_benchmark
         run: |
-          BENCHMARK_START=$(date +%s)
+          echo "🎯 Running MUSAN benchmark..."
+          swift run fluidaudio vad-benchmark \
+            --dataset mini50 \
+            --all-files \
+            --threshold 0.445 \
+            --output musan_vad_results.json
 
+      - name: Run VOiCES VAD Benchmark
+        id: voices_benchmark
+        run: |
+          echo "🎯 Running VOiCES benchmark..."
           swift run fluidaudio vad-benchmark \
             --dataset voices-subset \
             --all-files \
-            --threshold 0.445
-
-          BENCHMARK_END=$(date +%s)
-          EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
-          echo "EXECUTION_TIME=$((EXECUTION_TIME / 60))m $((EXECUTION_TIME % 60))s" >> $GITHUB_OUTPUT
+            --threshold 0.445 \
+            --output voices_vad_results.json
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vad-benchmark-${{ github.sha }}
-          path: vad_benchmark_results.json
+          path: |
+            musan_vad_results.json
+            voices_vad_results.json
           retention-days: 30
 
       - name: Comment PR with results
@@ -78,17 +92,52 @@ jobs:
             let reportContent = '## VAD Benchmark Results\n\n';
 
             try {
-              if (fs.existsSync('vad_benchmark_results.json')) {
-                const results = JSON.parse(fs.readFileSync('vad_benchmark_results.json', 'utf8'));
+              // Read MUSAN results
+              let musanResults = null;
+              if (fs.existsSync('musan_vad_results.json')) {
+                musanResults = JSON.parse(fs.readFileSync('musan_vad_results.json', 'utf8'));
+              }
 
+              // Read VOiCES results
+              let voicesResults = null;
+              if (fs.existsSync('voices_vad_results.json')) {
+                voicesResults = JSON.parse(fs.readFileSync('voices_vad_results.json', 'utf8'));
+              }
+
+              if (musanResults || voicesResults) {
                 reportContent += `### Performance Comparison\n\n`;
-                reportContent += `| Metric | FluidAudio VAD | Status |\n`;
-                reportContent += `|--------|----------------|--------|\n`;
-                reportContent += `| Accuracy | ${results.accuracy?.toFixed(1)}% | ✅ |\n`;
-                reportContent += `| Precision | ${results.precision?.toFixed(1)}% | ✅ |\n`;
-                reportContent += `| Recall | ${results.recall?.toFixed(1)}% | ✅ |\n`;
-                reportContent += `| F1-Score | ${results.f1_score?.toFixed(1)}% | ✅ |\n`;
-                reportContent += `| Processing Time | ${results.processing_time_seconds?.toFixed(1)}s (${results.total_files} files) | ✅ |\n\n`;
+                reportContent += `| Dataset | Accuracy | Precision | Recall | F1-Score | RTFx | Files |\n`;
+                reportContent += `|---------|----------|-----------|--------|----------|------|-------|\n`;
+                
+                if (musanResults) {
+                  const rtfx = musanResults.rtfx < 1 && musanResults.rtfx > 0 ? 
+                    `${(1.0/musanResults.rtfx).toFixed(1)}x faster` : 
+                    `${musanResults.rtfx?.toFixed(1)}x slower`;
+                  reportContent += `| MUSAN | ${musanResults.accuracy?.toFixed(1)}% | ${musanResults.precision?.toFixed(1)}% | ${musanResults.recall?.toFixed(1)}% | ${musanResults.f1_score?.toFixed(1)}% | ${rtfx} | ${musanResults.total_files} |\n`;
+                }
+                
+                if (voicesResults) {
+                  const rtfx = voicesResults.rtfx < 1 && voicesResults.rtfx > 0 ? 
+                    `${(1.0/voicesResults.rtfx).toFixed(1)}x faster` : 
+                    `${voicesResults.rtfx?.toFixed(1)}x slower`;
+                  reportContent += `| VOiCES | ${voicesResults.accuracy?.toFixed(1)}% | ${voicesResults.precision?.toFixed(1)}% | ${voicesResults.recall?.toFixed(1)}% | ${voicesResults.f1_score?.toFixed(1)}% | ${rtfx} | ${voicesResults.total_files} |\n`;
+                }
+                
+                reportContent += `\n### Dataset Details\n\n`;
+                reportContent += `- **MUSAN**: Music, Speech, and Noise dataset - standard VAD evaluation\n`;
+                reportContent += `- **VOiCES**: Voices Obscured in Complex Environmental Settings - tests robustness in real-world conditions\n\n`;
+                
+                // Add performance assessment
+                const avgF1 = ((musanResults?.f1_score || 0) + (voicesResults?.f1_score || 0)) / 
+                              ((musanResults ? 1 : 0) + (voicesResults ? 1 : 0));
+                
+                if (avgF1 >= 70.0) {
+                  reportContent += `✅ **EXCELLENT**: Average F1-Score above 70%\n`;
+                } else if (avgF1 >= 60.0) {
+                  reportContent += `⚠️ **ACCEPTABLE**: Average F1-Score above 60%\n`;
+                } else {
+                  reportContent += `❌ **NEEDS IMPROVEMENT**: Average F1-Score below 60%\n`;
+                }
 
               } else {
                 reportContent += `❌ Benchmark failed - no results generated\n`;

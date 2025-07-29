@@ -447,9 +447,17 @@
 
                     let fileProcessingTime = Date().timeIntervalSince(fileStartTime)
                     fileDurations.append(fileProcessingTime)
+                    
+                    // Calculate RTFx for this file
+                    let fileRTFx = audioDuration > 0 ? fileProcessingTime / audioDuration : 0
+                    let rtfxDisplay = if fileRTFx < 1.0 && fileRTFx > 0 {
+                        String(format: "%.1fx", 1.0/fileRTFx)
+                    } else {
+                        String(format: "%.1fx", fileRTFx)
+                    }
 
                     print(
-                        "      Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s"
+                        "      Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)"
                     )
 
                 } catch {
@@ -613,29 +621,65 @@
                 return nil
             }
             
-            print("🗂️ Loading VOiCES subset...")
+            print("🗂️ Loading VOiCES subset with mixed speech/non-speech samples...")
             
             var testFiles: [VadTestFile] = []
             
-            // Load clean files (speech)
+            // Load clean and noisy speech files
             let cleanDir = voicesDir.appendingPathComponent("clean")
+            let noisyDir = voicesDir.appendingPathComponent("noisy")
+            
+            // For a balanced VAD test, we need both speech and non-speech samples
+            // VOiCES only has speech, so we'll also load non-speech from MUSAN
+            let requestedSpeechCount = count == -1 ? 25 : count / 2
+            
             if FileManager.default.fileExists(atPath: cleanDir.path) {
                 let cleanFiles = try loadAudioFiles(
-                    from: cleanDir, expectedLabel: 1, maxCount: count == -1 ? Int.max : count / 2)
+                    from: cleanDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
                 testFiles.append(contentsOf: cleanFiles)
                 print("   ✅ Loaded \(cleanFiles.count) clean speech files")
             }
             
-            // For VOiCES, we'll use clean files as ground truth for speech
-            // and test how well VAD performs on the noisy versions
-            // This tests robustness to acoustic conditions
+            if FileManager.default.fileExists(atPath: noisyDir.path) {
+                let noisyFiles = try loadAudioFiles(
+                    from: noisyDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
+                testFiles.append(contentsOf: noisyFiles)
+                print("   ✅ Loaded \(noisyFiles.count) noisy speech files")
+            }
+            
+            // Load non-speech samples from MUSAN mini dataset
+            print("   📥 Loading non-speech samples from MUSAN...")
+            let vadCacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset")
+            let noiseDir = vadCacheDir.appendingPathComponent("noise")
+            
+            if FileManager.default.fileExists(atPath: noiseDir.path) {
+                let requestedNoiseCount = count == -1 ? 25 : count - testFiles.count
+                let noiseFiles = try loadAudioFiles(
+                    from: noiseDir, expectedLabel: 0, maxCount: requestedNoiseCount)
+                testFiles.append(contentsOf: noiseFiles)
+                print("   ✅ Loaded \(noiseFiles.count) non-speech files from MUSAN")
+            } else {
+                // If MUSAN noise samples aren't available, download them
+                print("   🌐 Downloading non-speech samples from MUSAN...")
+                if let musanFiles = try await downloadHuggingFaceVadDataset(count: testFiles.count, dataset: "mini50") {
+                    // Filter only non-speech samples
+                    let nonSpeechFiles = musanFiles.filter { $0.expectedLabel == 0 }
+                    testFiles.append(contentsOf: nonSpeechFiles)
+                    print("   ✅ Downloaded \(nonSpeechFiles.count) non-speech files")
+                }
+            }
             
             if testFiles.isEmpty {
                 return nil
             }
             
-            print("📂 Using VOiCES subset: \(testFiles.count) files")
-            print("💡 Note: VOiCES tests VAD robustness in reverberant/noisy conditions")
+            // Shuffle to mix speech and non-speech samples
+            testFiles.shuffle()
+            
+            print("📂 Using VOiCES + MUSAN mixed dataset: \(testFiles.count) files total")
+            print("   Speech samples: \(testFiles.filter { $0.expectedLabel == 1 }.count)")
+            print("   Non-speech samples: \(testFiles.filter { $0.expectedLabel == 0 }.count)")
+            print("💡 This tests VAD robustness in real-world acoustic conditions")
             return testFiles
         }
         
