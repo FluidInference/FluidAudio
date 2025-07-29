@@ -38,6 +38,12 @@ jobs:
           path: ~/Library/Application Support/FluidAudio/vad
           key: ${{ runner.os }}-vad-models-v5
 
+      - name: Cache VOiCES dataset
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/FluidAudio/voicesSubset
+          key: ${{ runner.os }}-voices-subset-v1
+
       - name: Build
         run: swift build -c release
 
@@ -47,8 +53,8 @@ jobs:
           BENCHMARK_START=$(date +%s)
 
           swift run fluidaudio vad-benchmark \
-            --dataset mini100 \
-            --num-files 100 \
+            --dataset voices-subset \
+            --all-files \
             --threshold 0.445
 
           BENCHMARK_END=$(date +%s)
@@ -98,8 +104,8 @@ jobs:
                 reportContent += `| WebRTC VAD | MUSAN | 64.4% | GMM-based (traditional) |\n`;
                 reportContent += `| pyannote.audio (2020) | AMI | 85.9% | SincTDNN architecture |\n`;
                 reportContent += `| MarbleNet (2020) | AVA-Speech | 87.8% | 1D time-channel separable CNN |\n`;
-                reportContent += `| **FluidAudio VAD** | **MUSAN-mini** | **${results.f1_score?.toFixed(1)}%** | **CoreML-optimized Silero** |\n\n`;
-                reportContent += `Note: Direct comparisons should consider dataset differences. MUSAN contains challenging noise conditions.\n`;
+                reportContent += `| **FluidAudio VAD** | **VOiCES** | **${results.f1_score?.toFixed(1)}%** | **CoreML-optimized Silero** |\n\n`;
+                reportContent += `Note: Direct comparisons should consider dataset differences. VOiCES contains real-world speech in reverberant and noisy environments.\n`;
                 reportContent += `</details>\n`;
               } else {
                 reportContent += `❌ Benchmark failed - no results generated\n`;
