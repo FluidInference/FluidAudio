@@ -115,7 +115,7 @@ jobs:
             const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
             const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
 
-            let comment = '## 🗣️ Speaker Diarization Benchmark Results\n\n';
+            let comment = '## Speaker Diarization Benchmark Results\n\n';
             comment += '### Speaker Diarization Performance\n';
             comment += '_Evaluating "who spoke when" detection accuracy_\n\n';
             comment += '| Metric | Value | Target | Status | Description |\n';
@@ -124,7 +124,7 @@ jobs:
             comment += `| **JER** | **${jer.toFixed(1)}%** | <25% | ${jer < 25 ? '✅' : '⚠️'} | Jaccard Error Rate |\n`;
             comment += `| **RTF** | **${rtf.toFixed(2)}x** | <1.0x | ${rtf < 1.0 ? '✅' : '⚠️'} | Real-Time Factor (lower is faster) |\n\n`;
 
-            comment += '### ⏱️ Diarization Pipeline Timing Breakdown\n';
+            comment += '### Diarization Pipeline Timing Breakdown\n';
             comment += '_Time spent in each stage of speaker diarization_\n\n';
             comment += '| Stage | Time (s) | % | Description |\n';
             comment += '|-------|----------|---|-------------|\n';
@@ -136,14 +136,12 @@ jobs:
             comment += `| Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)} | Grouping same speakers |\n`;
             comment += `| **Total** | **${totalTime.toFixed(3)}** | **100** | **Full pipeline** |\n\n`;
 
-            comment += '### 📊 Speaker Diarization Research Comparison\n';
-            comment += '_Comparing against state-of-the-art diarization methods_\n\n';
-            comment += '| Method | DER | Year | Notes |\n';
-            comment += '|--------|-----|------|-------|\n';
-            comment += '| **FluidAudio** | **' + der.toFixed(1) + '%** | **2025** | **On-device CoreML** |\n';
-            comment += '| Powerset BCE | 18.5% | 2023 | Research baseline |\n';
-            comment += '| EEND | 25.3% | 2019 | End-to-end neural |\n';
-            comment += '| x-vector clustering | 28.7% | 2018 | Traditional approach |\n\n';
+            comment += '### Speaker Diarization Research Comparison\n';
+            comment += '_Research baselines typically achieve 18-30% DER on standard datasets_\n\n';
+            comment += '| Method | DER | Notes |\n';
+            comment += '|--------|-----|-------|\n';
+            comment += '| **FluidAudio** | **' + der.toFixed(1) + '%** | **On-device CoreML** |\n';
+            comment += '| Research baseline | 18-30% | Standard dataset performance |\n\n';
 
             comment += `<sub>🎯 **Speaker Diarization Test** • AMI Corpus ES2004a • ${duration}s meeting audio • ${inferenceTime.toFixed(1)}s diarization time • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
 

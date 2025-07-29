@@ -41,6 +41,10 @@ enum DownloadCommand {
             await DatasetDownloader.downloadVadDataset(force: forceDownload, dataset: "mini50")
         case "vad-mini100":
             await DatasetDownloader.downloadVadDataset(force: forceDownload, dataset: "mini100")
+        case "musan-full":
+            await DatasetDownloader.downloadFullMusanDataset(force: forceDownload)
+        case "voices-subset":
+            await DatasetDownloader.downloadVoicesSubset(force: forceDownload)
         case "librispeech-test-clean":
             let benchmark = ASRBenchmark()
             do {
@@ -107,6 +111,8 @@ enum DownloadCommand {
                 ami-annotations         AMI annotation files
                 vad, vad-mini50,       VAD evaluation datasets
                 vad-mini100
+                musan-full              Full MUSAN dataset (~109 hours)
+                voices-subset           VOiCES small subset (clean/noisy pairs)
                 librispeech-test-clean  LibriSpeech test-clean subset
                 librispeech-test-other  LibriSpeech test-other subset
                 parakeet-models         Parakeet ASR models
