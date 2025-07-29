@@ -13,6 +13,7 @@
             Commands:
                 process                 Process a single audio file for diarization
                 diarization-benchmark   Run diarization benchmark on evaluation datasets
+                openbench-benchmark     Run benchmark on OpenBench datasets
                 vad-benchmark           Run VAD-specific benchmark
                 asr-benchmark           Run ASR benchmark on LibriSpeech
                 transcribe              Transcribe audio file using streaming ASR
@@ -54,6 +55,8 @@
         switch command {
         case "diarization-benchmark":
             await DiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "openbench-benchmark":
+            await OpenBenchBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "vad-benchmark":
             await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
         case "asr-benchmark":
