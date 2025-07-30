@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -8,7 +8,7 @@ public enum CoreMLDiarizer {
 }
 
 @available(macOS 13.0, iOS 16.0, *)
-public struct DiarizerModels {
+public struct DiarizerModels: Sendable {
 
     public let segmentationModel: CoreMLDiarizer.SegmentationModel
     public let embeddingModel: CoreMLDiarizer.EmbeddingModel

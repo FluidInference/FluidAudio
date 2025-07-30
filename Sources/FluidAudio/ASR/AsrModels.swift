@@ -1,9 +1,9 @@
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
-public struct AsrModels {
+public struct AsrModels: Sendable {
     public let melspectrogram: MLModel
     public let encoder: MLModel
     public let decoder: MLModel
