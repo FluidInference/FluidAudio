@@ -1,32 +1,26 @@
-import Foundation
-import CoreML
 import Accelerate
+import CoreML
+import Foundation
 import Metal
 
 /// Neural Engine optimization utilities for ASR pipeline
 @available(macOS 13.0, iOS 16.0, *)
 public enum ANEOptimizer {
-    
+
     /// ANE requires 64-byte alignment for optimal DMA transfers
     public static let aneAlignment = 64
-    
+
     /// ANE tile size for matrix operations
     public static let aneTileSize = 16
-    
+
     /// Create ANE-aligned MLMultiArray with optimized memory layout
     public static func createANEAlignedArray(
         shape: [NSNumber],
         dataType: MLMultiArrayDataType
     ) throws -> MLMultiArray {
-        // In CI environment, use standard MLMultiArray to avoid memory issues
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        if isCI {
-            return try MLMultiArray(shape: shape, dataType: dataType)
-        }
-        
         // Calculate total elements
         let totalElements = shape.map { $0.intValue }.reduce(1, *)
-        
+
         // Calculate stride to ensure ANE alignment
         let elementSize: Int
         switch dataType {
@@ -43,20 +37,21 @@ public enum ANEOptimizer {
         @unknown default:
             elementSize = 4
         }
-        
+
         // Align the allocation size to ANE requirements
         let bytesNeeded = totalElements * elementSize
         let alignedBytes = ((bytesNeeded + aneAlignment - 1) / aneAlignment) * aneAlignment
-        
+
         // Allocate page-aligned memory for ANE DMA
         var alignedPointer: UnsafeMutableRawPointer?
         let result = posix_memalign(&alignedPointer, aneAlignment, alignedBytes)
-        
+
         guard result == 0, let pointer = alignedPointer else {
-            throw NSError(domain: "ANEOptimizer", code: -1, 
-                         userInfo: [NSLocalizedDescriptionKey: "Failed to allocate ANE-aligned memory"])
+            throw NSError(
+                domain: "ANEOptimizer", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to allocate ANE-aligned memory"])
         }
-        
+
         // Create MLMultiArray with aligned memory
         let array = try MLMultiArray(
             dataPointer: pointer,
@@ -67,10 +62,10 @@ public enum ANEOptimizer {
                 bytes.deallocate()
             }
         )
-        
+
         return array
     }
-    
+
     /// Calculate optimal strides for ANE tile processing
     public static func calculateOptimalStrides(
         for shape: [NSNumber],
@@ -78,12 +73,12 @@ public enum ANEOptimizer {
     ) -> [NSNumber] {
         var strides: [Int] = []
         var currentStride = 1
-        
+
         // Calculate strides from last dimension to first
         for i in (0..<shape.count).reversed() {
             strides.insert(currentStride, at: 0)
             let dimSize = shape[i].intValue
-            
+
             // Align dimension stride to ANE tile boundaries when beneficial
             if i == shape.count - 1 && dimSize % aneTileSize != 0 {
                 // Pad the innermost dimension to tile boundary
@@ -93,10 +88,10 @@ public enum ANEOptimizer {
                 currentStride *= dimSize
             }
         }
-        
+
         return strides.map { NSNumber(value: $0) }
     }
-    
+
     /// Configure optimal compute units for each model type
     public static func optimalComputeUnits(for modelType: ModelType) -> MLComputeUnits {
         switch modelType {
@@ -122,7 +117,7 @@ public enum ANEOptimizer {
             return .cpuAndNeuralEngine
         }
     }
-    
+
     /// Create zero-copy memory view between models
     public static func createZeroCopyView(
         from sourceArray: MLMultiArray,
@@ -132,12 +127,13 @@ public enum ANEOptimizer {
         // Ensure we have enough data
         let sourceElements = sourceArray.shape.map { $0.intValue }.reduce(1, *)
         let viewElements = shape.map { $0.intValue }.reduce(1, *)
-        
+
         guard offset + viewElements <= sourceElements else {
-            throw NSError(domain: "ANEOptimizer", code: -2,
-                         userInfo: [NSLocalizedDescriptionKey: "View exceeds source array bounds"])
+            throw NSError(
+                domain: "ANEOptimizer", code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "View exceeds source array bounds"])
         }
-        
+
         // Calculate byte offset
         let elementSize: Int
         switch sourceArray.dataType {
@@ -154,10 +150,10 @@ public enum ANEOptimizer {
         @unknown default:
             elementSize = 4
         }
-        
+
         let byteOffset = offset * elementSize
         let offsetPointer = sourceArray.dataPointer.advanced(by: byteOffset)
-        
+
         // Create view with same data but new shape
         return try MLMultiArray(
             dataPointer: offsetPointer,
@@ -167,7 +163,7 @@ public enum ANEOptimizer {
             deallocator: nil  // No deallocation since it's a view
         )
     }
-    
+
     /// Prefetch data to Neural Engine
     @available(macOS 14.0, iOS 17.0, *)
     public static func prefetchToNeuralEngine(_ array: MLMultiArray) {
@@ -178,39 +174,44 @@ public enum ANEOptimizer {
             _ = array[array.count - 1]
         }
     }
-    
+
     /// Convert float32 array to float16 for ANE efficiency
     public static func convertToFloat16(_ input: MLMultiArray) throws -> MLMultiArray {
         guard input.dataType == .float32 else {
-            throw NSError(domain: "ANEOptimizer", code: -3,
-                         userInfo: [NSLocalizedDescriptionKey: "Input must be float32"])
+            throw NSError(
+                domain: "ANEOptimizer", code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "Input must be float32"])
         }
-        
-        // In CI environment, return copy to avoid Float16 issues
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        if isCI {
-            // Return a Float32 copy instead of Float16 in CI
-            let copyArray = try MLMultiArray(shape: input.shape, dataType: .float32)
-            for i in 0..<input.count {
-                copyArray[i] = input[i]
-            }
-            return copyArray
-        }
-        
+
         // Create float16 array with ANE alignment
         let float16Array = try createANEAlignedArray(
             shape: input.shape,
             dataType: .float16
         )
-        
-        // Convert using simple loop (MLMultiArray handles the Float16 conversion internally)
-        for i in 0..<input.count {
-            float16Array[i] = input[i]
-        }
-        
+
+        // Convert using Accelerate
+        let sourcePtr = input.dataPointer.bindMemory(to: Float.self, capacity: input.count)
+        let destPtr = float16Array.dataPointer.bindMemory(to: Float16.self, capacity: input.count)
+
+        var sourceBuffer = vImage_Buffer(
+            data: sourcePtr,
+            height: 1,
+            width: vImagePixelCount(input.count),
+            rowBytes: input.count * MemoryLayout<Float>.stride
+        )
+
+        var destBuffer = vImage_Buffer(
+            data: destPtr,
+            height: 1,
+            width: vImagePixelCount(input.count),
+            rowBytes: input.count * MemoryLayout<Float16>.stride
+        )
+
+        vImageConvert_PlanarFtoPlanar16F(&sourceBuffer, &destBuffer, 0)
+
         return float16Array
     }
-    
+
     /// Model type enumeration for compute unit selection
     public enum ModelType {
         case melSpectrogram
@@ -225,20 +226,20 @@ public enum ANEOptimizer {
 @available(macOS 13.0, iOS 16.0, *)
 public class ZeroCopyFeatureProvider: NSObject, MLFeatureProvider {
     private let features: [String: MLFeatureValue]
-    
+
     public init(features: [String: MLFeatureValue]) {
         self.features = features
         super.init()
     }
-    
+
     public var featureNames: Set<String> {
         Set(features.keys)
     }
-    
+
     public func featureValue(for featureName: String) -> MLFeatureValue? {
         features[featureName]
     }
-    
+
     /// Create a provider that chains output from one model to input of another
     public static func chain(
         from outputProvider: MLFeatureProvider,
@@ -248,7 +249,7 @@ public class ZeroCopyFeatureProvider: NSObject, MLFeatureProvider {
         guard let outputValue = outputProvider.featureValue(for: outputName) else {
             return nil
         }
-        
+
         return ZeroCopyFeatureProvider(features: [inputName: outputValue])
     }
 }
