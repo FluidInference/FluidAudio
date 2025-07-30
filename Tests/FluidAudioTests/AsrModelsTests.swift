@@ -207,22 +207,39 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Neural Engine Optimization Tests
     
     func testOptimizedConfiguration() {
+        // In CI environment, all compute units are overridden to .cpuOnly
+        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
+        
         // Test mel-spectrogram configuration
         let melConfig = AsrModels.optimizedConfiguration(for: .melSpectrogram)
-        XCTAssertEqual(melConfig.computeUnits, .cpuAndGPU)
+        if isCI {
+            XCTAssertEqual(melConfig.computeUnits, .cpuOnly)
+        } else {
+            XCTAssertEqual(melConfig.computeUnits, .cpuAndGPU)
+        }
         XCTAssertTrue(melConfig.allowLowPrecisionAccumulationOnGPU)
         
         // Test encoder configuration
         let encoderConfig = AsrModels.optimizedConfiguration(for: .encoder)
-        XCTAssertEqual(encoderConfig.computeUnits, .cpuAndNeuralEngine)
+        if isCI {
+            XCTAssertEqual(encoderConfig.computeUnits, .cpuOnly)
+        } else {
+            XCTAssertEqual(encoderConfig.computeUnits, .cpuAndNeuralEngine)
+        }
         
         // Test decoder configuration
         let decoderConfig = AsrModels.optimizedConfiguration(for: .decoder)
-        XCTAssertEqual(decoderConfig.computeUnits, .cpuAndNeuralEngine)
+        if isCI {
+            XCTAssertEqual(decoderConfig.computeUnits, .cpuOnly)
+        } else {
+            XCTAssertEqual(decoderConfig.computeUnits, .cpuAndNeuralEngine)
+        }
         
         // Test joint configuration
         let jointConfig = AsrModels.optimizedConfiguration(for: .joint)
-        if #available(macOS 14.0, iOS 17.0, *) {
+        if isCI {
+            XCTAssertEqual(jointConfig.computeUnits, .cpuOnly)
+        } else if #available(macOS 14.0, iOS 17.0, *) {
             XCTAssertEqual(jointConfig.computeUnits, .all)
         } else {
             XCTAssertEqual(jointConfig.computeUnits, .cpuAndNeuralEngine)
