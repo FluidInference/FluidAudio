@@ -186,25 +186,10 @@ public enum ANEOptimizer {
             dataType: .float16
         )
         
-        // Convert using Accelerate
-        let sourcePtr = input.dataPointer.bindMemory(to: Float.self, capacity: input.count)
-        let destPtr = float16Array.dataPointer.bindMemory(to: Float16.self, capacity: input.count)
-        
-        var sourceBuffer = vImage_Buffer(
-            data: sourcePtr,
-            height: 1,
-            width: vImagePixelCount(input.count),
-            rowBytes: input.count * MemoryLayout<Float>.stride
-        )
-        
-        var destBuffer = vImage_Buffer(
-            data: destPtr,
-            height: 1,
-            width: vImagePixelCount(input.count),
-            rowBytes: input.count * MemoryLayout<Float16>.stride
-        )
-        
-        vImageConvert_PlanarFtoPlanar16F(&sourceBuffer, &destBuffer, 0)
+        // Convert using simple loop (MLMultiArray handles the Float16 conversion internally)
+        for i in 0..<input.count {
+            float16Array[i] = input[i]
+        }
         
         return float16Array
     }

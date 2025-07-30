@@ -1,0 +1,237 @@
+import Foundation
+import CoreML
+import XCTest
+@testable import FluidAudio
+
+@available(macOS 13.0, iOS 16.0, *)
+final class MLArrayCacheTests: XCTestCase {
+    
+    var cache: MLArrayCache!
+    
+    override func setUp() async throws {
+        cache = MLArrayCache(maxCacheSize: 10)
+    }
+    
+    // MARK: - Basic Cache Operations
+    
+    func testGetArrayCreatesANEAligned() async throws {
+        let shape: [NSNumber] = [1, 100]
+        let array = try await cache.getArray(shape: shape, dataType: .float32)
+        
+        XCTAssertEqual(array.shape, shape)
+        XCTAssertEqual(array.dataType, .float32)
+        
+        // Verify ANE alignment
+        let pointerValue = Int(bitPattern: array.dataPointer)
+        XCTAssertEqual(pointerValue % ANEOptimizer.aneAlignment, 0)
+    }
+    
+    func testCacheHitOnSecondRequest() async throws {
+        let shape: [NSNumber] = [2, 50]
+        
+        // First request - cache miss
+        let array1 = try await cache.getArray(shape: shape, dataType: .float32)
+        
+        // Return array to cache
+        await cache.returnArray(array1)
+        
+        // Second request - should be cache hit
+        let array2 = try await cache.getArray(shape: shape, dataType: .float32)
+        
+        // Arrays should have same shape and type
+        XCTAssertEqual(array2.shape, shape)
+        XCTAssertEqual(array2.dataType, .float32)
+    }
+    
+    func testReturnArrayResetsData() async throws {
+        let shape: [NSNumber] = [10]
+        let array = try await cache.getArray(shape: shape, dataType: .float32)
+        
+        // Set some values
+        for i in 0..<array.count {
+            array[i] = NSNumber(value: Float(i) * 2.0)
+        }
+        
+        // Return to cache
+        await cache.returnArray(array)
+        
+        // Get from cache again
+        let cachedArray = try await cache.getArray(shape: shape, dataType: .float32)
+        
+        // Data should be reset to zero
+        for i in 0..<cachedArray.count {
+            XCTAssertEqual(cachedArray[i].floatValue, 0.0)
+        }
+    }
+    
+    // MARK: - Cache Size Management
+    
+    func testCacheSizeLimit() async throws {
+        // Create cache with small size
+        let smallCache = MLArrayCache(maxCacheSize: 4)
+        
+        // Create arrays with same shape
+        let shape: [NSNumber] = [100]
+        var arrays: [MLMultiArray] = []
+        
+        // Get 4 arrays
+        for _ in 0..<4 {
+            arrays.append(try await smallCache.getArray(shape: shape, dataType: .float32))
+        }
+        
+        // Return all to cache
+        for array in arrays {
+            await smallCache.returnArray(array)
+        }
+        
+        // Try to return one more - should not exceed limit
+        let extraArray = try await smallCache.getArray(shape: shape, dataType: .float32)
+        await smallCache.returnArray(extraArray)
+        
+        // Cache should still work
+        let finalArray = try await smallCache.getArray(shape: shape, dataType: .float32)
+        XCTAssertNotNil(finalArray)
+    }
+    
+    // MARK: - Float16 Support
+    
+    func testGetFloat16ArrayFromScratch() async throws {
+        let shape: [NSNumber] = [1, 64, 64]
+        let fp16Array = try await cache.getFloat16Array(shape: shape)
+        
+        XCTAssertEqual(fp16Array.shape, shape)
+        XCTAssertEqual(fp16Array.dataType, .float16)
+        
+        // Verify ANE alignment
+        let pointerValue = Int(bitPattern: fp16Array.dataPointer)
+        XCTAssertEqual(pointerValue % ANEOptimizer.aneAlignment, 0)
+    }
+    
+    func testGetFloat16ArrayFromFloat32() async throws {
+        // Create Float32 array
+        let shape: [NSNumber] = [100]
+        let float32Array = try MLMultiArray(shape: shape, dataType: .float32)
+        
+        // Fill with test values
+        for i in 0..<float32Array.count {
+            float32Array[i] = NSNumber(value: Float(i) * 0.1)
+        }
+        
+        // Convert to Float16
+        let float16Array = try await cache.getFloat16Array(shape: shape, from: float32Array)
+        
+        XCTAssertEqual(float16Array.shape, shape)
+        XCTAssertEqual(float16Array.dataType, .float16)
+        
+        // Verify conversion
+        for i in 0..<min(10, float16Array.count) {
+            XCTAssertEqual(float16Array[i].floatValue, Float(i) * 0.1, accuracy: 0.01)
+        }
+    }
+    
+    // MARK: - Pre-warming Tests
+    
+    func testPrewarmCache() async {
+        let shapes: [(shape: [NSNumber], dataType: MLMultiArrayDataType)] = [
+            ([1, 100], .float32),
+            ([2, 50], .float32),
+            ([1, 1024], .float16)
+        ]
+        
+        await cache.prewarm(shapes: shapes)
+        
+        // Arrays should be available from cache
+        for (shape, dataType) in shapes {
+            do {
+                let array = try await cache.getArray(shape: shape, dataType: dataType)
+                XCTAssertEqual(array.shape, shape)
+                XCTAssertEqual(array.dataType, dataType)
+            } catch {
+                XCTFail("Failed to get pre-warmed array: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Clear Cache Tests
+    
+    func testClearCache() async throws {
+        let shape: [NSNumber] = [50]
+        
+        // Add array to cache
+        let array = try await cache.getArray(shape: shape, dataType: .float32)
+        await cache.returnArray(array)
+        
+        // Clear cache
+        await cache.clear()
+        
+        // Next request should be cache miss (new array)
+        let newArray = try await cache.getArray(shape: shape, dataType: .float32)
+        XCTAssertNotNil(newArray)
+    }
+    
+    // MARK: - Different Data Types
+    
+    func testDifferentDataTypes() async throws {
+        let shape: [NSNumber] = [10, 10]
+        
+        // Test different data types
+        let float32 = try await cache.getArray(shape: shape, dataType: .float32)
+        XCTAssertEqual(float32.dataType, .float32)
+        
+        let float16 = try await cache.getArray(shape: shape, dataType: .float16)
+        XCTAssertEqual(float16.dataType, .float16)
+        
+        let int32 = try await cache.getArray(shape: shape, dataType: .int32)
+        XCTAssertEqual(int32.dataType, .int32)
+        
+        // Return all to cache
+        await cache.returnArray(float32)
+        await cache.returnArray(float16)
+        await cache.returnArray(int32)
+        
+        // Should get correct types back
+        let cachedFloat32 = try await cache.getArray(shape: shape, dataType: .float32)
+        XCTAssertEqual(cachedFloat32.dataType, .float32)
+    }
+    
+    // MARK: - Thread Safety Tests
+    
+    func testConcurrentAccess() async throws {
+        let shape: [NSNumber] = [10]
+        
+        // Perform limited concurrent operations
+        await withTaskGroup(of: Void.self) { group in
+            // Reduced number of concurrent tasks
+            for i in 0..<3 {
+                group.addTask {
+                    do {
+                        let array = try await self.cache.getArray(shape: shape, dataType: .float32)
+                        array[0] = NSNumber(value: Float(i))
+                        await self.cache.returnArray(array)
+                    } catch {
+                        XCTFail("Concurrent access failed: \(error)")
+                    }
+                }
+            }
+        }
+        
+        // Cache should still be functional
+        let finalArray = try await cache.getArray(shape: shape, dataType: .float32)
+        XCTAssertNotNil(finalArray)
+    }
+    
+    // Removed performance test - can cause timing issues
+    
+    // MARK: - Global Cache Tests
+    
+    func testSharedCacheInstance() async throws {
+        // Test the global shared instance
+        let shape: [NSNumber] = [256]
+        let array = try await sharedMLArrayCache.getArray(shape: shape, dataType: .float32)
+        
+        XCTAssertEqual(array.shape, shape)
+        
+        // Return to shared cache
+        await sharedMLArrayCache.returnArray(array)
+    }
+}
