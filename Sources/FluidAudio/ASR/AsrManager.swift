@@ -32,8 +32,8 @@ public final class AsrManager {
         }
     #endif
 
-    private var microphoneDecoderState = DecoderState()
-    private var systemDecoderState = DecoderState()
+    private var microphoneDecoderState: DecoderState
+    private var systemDecoderState: DecoderState
 
     let blankId = 1024
     let sosId = 1024
@@ -48,6 +48,18 @@ public final class AsrManager {
     
     public init(config: ASRConfig = .default) {
         self.config = config
+        
+        // Initialize decoder states with fallback
+        do {
+            self.microphoneDecoderState = try DecoderState()
+            self.systemDecoderState = try DecoderState()
+        } catch {
+            logger.warning("Failed to create ANE-aligned decoder states, using standard allocation")
+            // This should rarely happen, but if it does, we'll create them during first use
+            self.microphoneDecoderState = DecoderState(fallback: true)
+            self.systemDecoderState = DecoderState(fallback: true)
+        }
+        
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
 
         // Optimization models will be loaded during initialize()
@@ -225,7 +237,7 @@ public final class AsrManager {
             throw ASRError.notInitialized
         }
 
-        var freshState = DecoderState()
+        var freshState = try DecoderState()
 
         let initDecoderInput = try prepareDecoderInput(
             targetToken: blankId,
@@ -335,8 +347,9 @@ public final class AsrManager {
         encoderModel = nil
         decoderModel = nil
         jointModel = nil
-        microphoneDecoderState = DecoderState()
-        systemDecoderState = DecoderState()
+        // Reset decoder states - use fallback initializer that won't throw
+        microphoneDecoderState = DecoderState(fallback: true)
+        systemDecoderState = DecoderState(fallback: true)
         logger.info("AsrManager resources cleaned up")
     }
     

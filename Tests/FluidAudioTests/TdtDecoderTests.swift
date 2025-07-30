@@ -312,10 +312,10 @@ final class TdtDecoderTests: XCTestCase {
     
     // MARK: - Update Hypothesis Tests
     
-    func testUpdateHypothesis() {
+    func testUpdateHypothesis() throws {
         
         var hypothesis = TdtHypothesis()
-        let newState = DecoderState()
+        let newState = try DecoderState()
         
         decoder.updateHypothesis(
             &hypothesis,

@@ -77,7 +77,7 @@ extension AsrManager {
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
         
-        var tempDecoderState = DecoderState()
+        var tempDecoderState = try DecoderState()
         let tokenIds = try await tdtDecode(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
@@ -182,7 +182,7 @@ extension AsrManager {
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
-        var tempDecoderState = DecoderState()
+        var tempDecoderState = try DecoderState()
         let tokenIds = try await tdtDecode(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
@@ -283,7 +283,7 @@ private struct ChunkProcessor {
 
         var position = 0
         var chunkIndex = 0
-        var decoderState = DecoderState()
+        var decoderState = try DecoderState()
 
         while position < audioSamples.count {
             let text = try await processChunk(

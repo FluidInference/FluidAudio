@@ -6,16 +6,27 @@ struct DecoderState {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
 
-    init() {
+    enum InitError: Error {
+        case aneAllocationFailed(String)
+    }
+
+    init() throws {
         // Use ANE-aligned arrays for optimal performance
-        hiddenState = try! ANEOptimizer.createANEAlignedArray(
-            shape: [2, 1, 640], 
-            dataType: .float32
-        )
-        cellState = try! ANEOptimizer.createANEAlignedArray(
-            shape: [2, 1, 640], 
-            dataType: .float32
-        )
+        do {
+            hiddenState = try ANEOptimizer.createANEAlignedArray(
+                shape: [2, 1, 640], 
+                dataType: .float32
+            )
+            cellState = try ANEOptimizer.createANEAlignedArray(
+                shape: [2, 1, 640], 
+                dataType: .float32
+            )
+        } catch {
+            // Fall back to standard MLMultiArray if ANE allocation fails
+            print("Warning: ANE-aligned allocation failed, falling back to standard MLMultiArray: \(error)")
+            hiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+            cellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        }
         
         // Initialize to zeros using Accelerate
         hiddenState.resetData(to: 0)
@@ -27,12 +38,23 @@ struct DecoderState {
         cellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue ?? cellState
     }
 
-    init(from other: DecoderState) {
-        hiddenState = try! MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
-        cellState = try! MLMultiArray(shape: other.cellState.shape, dataType: .float32)
+    init(from other: DecoderState) throws {
+        hiddenState = try MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
+        cellState = try MLMultiArray(shape: other.cellState.shape, dataType: .float32)
 
         hiddenState.copyData(from: other.hiddenState)
         cellState.copyData(from: other.cellState)
+    }
+    
+    /// Fallback initializer that never fails (for use in critical paths)
+    init(fallback: Bool) {
+        // Standard MLMultiArray allocation without ANE optimization
+        hiddenState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        cellState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        
+        // Initialize to zeros
+        hiddenState.resetData(to: 0)
+        cellState.resetData(to: 0)
     }
 }
 
