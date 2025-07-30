@@ -28,16 +28,37 @@ struct DecoderState {
     }
 }
 
+import Accelerate
+
 extension MLMultiArray {
     func resetData(to value: NSNumber) {
-        for i in 0..<count {
-            self[i] = value
+        guard dataType == .float32 else {
+            // Fallback for non-float types
+            for i in 0..<count {
+                self[i] = value
+            }
+            return
+        }
+        
+        // Use vDSP for optimized memory fill
+        var floatValue = value.floatValue
+        self.dataPointer.withMemoryRebound(to: Float.self, capacity: count) { ptr in
+            vDSP_vfill(&floatValue, ptr, 1, vDSP_Length(count))
         }
     }
 
     func copyData(from source: MLMultiArray) {
-        for i in 0..<count {
-            self[i] = source[i]
+        guard dataType == .float32 && source.dataType == .float32 else {
+            // Fallback for non-float types
+            for i in 0..<count {
+                self[i] = source[i]
+            }
+            return
         }
+        
+        // Use optimized memory copy
+        let destPtr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
+        let srcPtr = source.dataPointer.bindMemory(to: Float.self, capacity: count)
+        memcpy(destPtr, srcPtr, count * MemoryLayout<Float>.stride)
     }
 }

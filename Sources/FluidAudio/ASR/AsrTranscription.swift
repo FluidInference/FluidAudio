@@ -72,7 +72,7 @@ extension AsrManager {
         guard
             let melspectrogramOutput = try melspectrogramModel?.prediction(
                 from: melspectrogramInput,
-                options: MLPredictionOptions()
+                options: predictionOptions
             )
         else {
             throw ASRError.processingFailed("Mel-spectrogram model failed")
@@ -82,7 +82,7 @@ extension AsrManager {
         guard
             let encoderOutput = try encoderModel?.prediction(
                 from: encoderInput,
-                options: MLPredictionOptions()
+                options: predictionOptions
             )
         else {
             throw ASRError.processingFailed("Encoder model failed")
@@ -120,7 +120,7 @@ extension AsrManager {
         guard
             let melspectrogramOutput = try melspectrogramModel?.prediction(
                 from: melspectrogramInput,
-                options: MLPredictionOptions()
+                options: predictionOptions
             )
         else {
             throw ASRError.processingFailed("Mel-spectrogram model failed")
@@ -130,7 +130,7 @@ extension AsrManager {
         guard
             let encoderOutput = try encoderModel?.prediction(
                 from: encoderInput,
-                options: MLPredictionOptions()
+                options: predictionOptions
             )
         else {
             throw ASRError.processingFailed("Encoder model failed")

@@ -38,6 +38,11 @@ public final class AsrManager {
     let blankId = 1024
     let sosId = 1024
 
+    // Cached prediction options for reuse
+    internal lazy var predictionOptions: MLPredictionOptions = {
+        AsrModels.optimizedPredictionOptions()
+    }()
+    
     public init(config: ASRConfig = .default) {
         self.config = config
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
@@ -46,6 +51,15 @@ public final class AsrManager {
         
         // Load vocabulary once during initialization
         self.vocabulary = loadVocabulary()
+        
+        // Pre-warm caches if possible
+        Task {
+            await sharedMLArrayCache.prewarm(shapes: [
+                ([1, 160000], .float32),
+                ([1], .int32),
+                ([2, 1, 640], .float32)
+            ])
+        }
     }
 
     public var isAvailable: Bool {
@@ -170,7 +184,7 @@ public final class AsrManager {
         )
 
         let initDecoderOutput = try decoderModel.prediction(
-            from: initDecoderInput, options: MLPredictionOptions())
+            from: initDecoderInput, options: predictionOptions)
 
         freshState.update(from: initDecoderOutput)
 

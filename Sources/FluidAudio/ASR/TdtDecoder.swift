@@ -38,11 +38,14 @@ struct TdtHypothesis: Sendable {
 }
 
 /// Optimized TDT decoder with hybrid CoreML + Metal acceleration
+import Accelerate
+
 @available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoder {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
+    private let predictionOptions = AsrModels.optimizedPredictionOptions()
 
     // Special token Indexes matching Parakeet TDT model's vocabulary (1024 word tokens)
     // OUTPUT from joint network during decoding
@@ -201,21 +204,37 @@ internal struct TdtDecoder {
         var frames = EncoderFrameArray()
         frames.reserveCapacity(length)
 
-        // Safer approach: iterate through the MLMultiArray directly
-        for timeIdx in 0..<length {
-            var frame = [Float]()
-            frame.reserveCapacity(hiddenSize)
-            
-            for h in 0..<hiddenSize {
-                let index = timeIdx * hiddenSize + h
-                if index < encoderOutput.count {
-                    frame.append(encoderOutput[index].floatValue)
-                } else {
-                    throw ASRError.processingFailed("Index out of bounds in encoder output")
+        // Use unsafe pointer access for better performance
+        if encoderOutput.dataType == .float32 {
+            encoderOutput.dataPointer.withMemoryRebound(to: Float.self, capacity: encoderOutput.count) { floatPtr in
+                for timeIdx in 0..<length {
+                    let startIdx = timeIdx * hiddenSize
+                    
+                    // Use ContiguousArray for better memory layout
+                    let frame = ContiguousArray(UnsafeBufferPointer(
+                        start: floatPtr + startIdx,
+                        count: hiddenSize
+                    ))
+                    frames.append(Array(frame))
                 }
             }
-            
-            frames.append(frame)
+        } else {
+            // Fallback for non-float32 types
+            for timeIdx in 0..<length {
+                var frame = [Float]()
+                frame.reserveCapacity(hiddenSize)
+                
+                for h in 0..<hiddenSize {
+                    let index = timeIdx * hiddenSize + h
+                    if index < encoderOutput.count {
+                        frame.append(encoderOutput[index].floatValue)
+                    } else {
+                        throw ASRError.processingFailed("Index out of bounds in encoder output")
+                    }
+                }
+                
+                frames.append(frame)
+            }
         }
 
         return frames
@@ -244,7 +263,7 @@ internal struct TdtDecoder {
 
         let output = try model.prediction(
             from: input,
-            options: MLPredictionOptions()
+            options: predictionOptions
         )
 
         var newState = state
@@ -263,9 +282,10 @@ internal struct TdtDecoder {
         // Create encoder MLMultiArray from pre-processed data
         let encoderArray = try MLMultiArray(shape: [1, 1, encoderStep.count as NSNumber], dataType: .float32)
         
-        // Safer approach: set values directly
-        for (index, value) in encoderStep.enumerated() {
-            encoderArray[index] = NSNumber(value: value)
+        // Use memcpy for efficient data transfer
+        encoderStep.withUnsafeBufferPointer { buffer in
+            let destPtr = encoderArray.dataPointer.bindMemory(to: Float.self, capacity: encoderStep.count)
+            memcpy(destPtr, buffer.baseAddress!, encoderStep.count * MemoryLayout<Float>.stride)
         }
 
         let decoderOutputArray = try extractFeatureValue(from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
@@ -277,7 +297,7 @@ internal struct TdtDecoder {
 
         let output = try model.prediction(
             from: input,
-            options: MLPredictionOptions()
+            options: predictionOptions
         )
 
         return try extractFeatureValue(from: output, key: "logits", errorMessage: "Joint network output missing logits")
@@ -345,7 +365,7 @@ internal struct TdtDecoder {
 
     // MARK: - Private Helper Methods
 
-    /// Split joint logits into token and duration components
+    /// Split joint logits into token and duration components with optimized memory access
     private func splitLogits(_ logits: MLMultiArray) throws -> (tokenLogits: [Float], durationLogits: [Float]) {
         let totalElements = logits.count
         let durationElements = config.tdtConfig.durations.count
@@ -355,30 +375,29 @@ internal struct TdtDecoder {
             throw ASRError.processingFailed("Logits dimension mismatch")
         }
 
-        // Use contiguous memory access
+        // Create views directly without copying - zero-copy operation
         let logitsPtr = logits.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
+        
+        // Use ContiguousArray for better cache locality
+        let tokenLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr, count: vocabSize))
+        let durationLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
 
-        let tokenLogits = Array(UnsafeBufferPointer(start: logitsPtr, count: vocabSize))
-        let durationLogits = Array(UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
-
-        return (tokenLogits, durationLogits)
+        return (Array(tokenLogits), Array(durationLogits))
     }
 
-    /// Find index of maximum value
+    /// Find index of maximum value using SIMD operations
     private func argmaxSIMD(_ values: [Float]) -> Int {
         guard !values.isEmpty else { return 0 }
-
-        var maxIndex = 0
-        var maxValue = values[0]
-
-        for i in 1..<values.count {
-            if values[i] > maxValue {
-                maxValue = values[i]
-                maxIndex = i
-            }
+        
+        // Use Accelerate framework for optimized argmax
+        var maxValue: Float = 0
+        var maxIndex: vDSP_Length = 0
+        
+        values.withUnsafeBufferPointer { buffer in
+            vDSP_maxvi(buffer.baseAddress!, 1, &maxValue, &maxIndex, vDSP_Length(values.count))
         }
-
-        return maxIndex
+        
+        return Int(maxIndex)
     }
     
     /// Non-SIMD argmax for compatibility

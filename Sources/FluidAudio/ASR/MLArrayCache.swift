@@ -1,0 +1,91 @@
+import CoreML
+import Foundation
+import os
+
+/// Thread-safe cache for MLMultiArray instances to reduce allocation overhead
+@available(macOS 13.0, iOS 16.0, *)
+actor MLArrayCache {
+    private var cache: [CacheKey: [MLMultiArray]] = [:]
+    private let maxCacheSize: Int
+    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "MLArrayCache")
+    
+    struct CacheKey: Hashable {
+        let shape: [Int]
+        let dataType: MLMultiArrayDataType
+    }
+    
+    init(maxCacheSize: Int = 100) {
+        self.maxCacheSize = maxCacheSize
+    }
+    
+    /// Get a cached array or create a new one
+    func getArray(shape: [NSNumber], dataType: MLMultiArrayDataType) throws -> MLMultiArray {
+        let key = CacheKey(
+            shape: shape.map { $0.intValue },
+            dataType: dataType
+        )
+        
+        // Check if we have a cached array
+        if var arrays = cache[key], !arrays.isEmpty {
+            logger.debug("Cache hit for shape: \(shape)")
+            return arrays.removeLast()
+        }
+        
+        // Create new array
+        logger.debug("Cache miss for shape: \(shape), creating new")
+        return try MLMultiArray(shape: shape, dataType: dataType)
+    }
+    
+    /// Return an array to the cache for reuse
+    func returnArray(_ array: MLMultiArray) {
+        let key = CacheKey(
+            shape: array.shape.map { $0.intValue },
+            dataType: array.dataType
+        )
+        
+        var arrays = cache[key] ?? []
+        
+        // Limit cache size per key
+        if arrays.count < maxCacheSize / max(cache.count, 1) {
+            // Reset the array data before caching
+            if array.dataType == .float32 {
+                array.resetData(to: 0)
+            }
+            arrays.append(array)
+            cache[key] = arrays
+            logger.debug("Returned array to cache for shape: \(array.shape)")
+        }
+    }
+    
+    /// Pre-warm the cache with commonly used shapes
+    func prewarm(shapes: [(shape: [NSNumber], dataType: MLMultiArrayDataType)]) async {
+        logger.info("Pre-warming cache with \(shapes.count) shapes")
+        
+        for (shape, dataType) in shapes {
+            do {
+                var arrays: [MLMultiArray] = []
+                let prewarmCount = min(5, maxCacheSize / max(shapes.count, 1))
+                
+                for _ in 0..<prewarmCount {
+                    let array = try MLMultiArray(shape: shape, dataType: dataType)
+                    arrays.append(array)
+                }
+                
+                let key = CacheKey(shape: shape.map { $0.intValue }, dataType: dataType)
+                cache[key] = arrays
+            } catch {
+                logger.error("Failed to pre-warm shape \(shape): \(error)")
+            }
+        }
+    }
+    
+    /// Clear the cache
+    func clear() {
+        cache.removeAll()
+        logger.info("Cache cleared")
+    }
+}
+
+/// Global shared cache instance
+@available(macOS 13.0, iOS 16.0, *)
+let sharedMLArrayCache = MLArrayCache()
