@@ -7,6 +7,8 @@ public struct SegmentationProcessor {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Segmentation")
 
+    public init() {}
+
     func getSegments(
         audioChunk: ArraySlice<Float>, segmentationModel: MLModel, chunkSize: Int = 160_000
     ) throws -> [[[Float]]] {
