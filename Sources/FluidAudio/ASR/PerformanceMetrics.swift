@@ -47,9 +47,9 @@ public actor PerformanceMonitor {
         let startMemory = getCurrentMemoryUsage()
         
         // Track individual components
-        var melTime: TimeInterval = 0
-        var encoderTime: TimeInterval = 0
-        var decoderTime: TimeInterval = 0
+        let melTime: TimeInterval = 0
+        let encoderTime: TimeInterval = 0
+        let decoderTime: TimeInterval = 0
         
         // Execute the operation
         let result = try await block()
