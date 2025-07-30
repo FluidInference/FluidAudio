@@ -7,9 +7,17 @@ struct DecoderState {
     var cellState: MLMultiArray
 
     init() {
-        hiddenState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        cellState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-
+        // Use ANE-aligned arrays for optimal performance
+        hiddenState = try! ANEOptimizer.createANEAlignedArray(
+            shape: [2, 1, 640], 
+            dataType: .float32
+        )
+        cellState = try! ANEOptimizer.createANEAlignedArray(
+            shape: [2, 1, 640], 
+            dataType: .float32
+        )
+        
+        // Initialize to zeros using Accelerate
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
     }

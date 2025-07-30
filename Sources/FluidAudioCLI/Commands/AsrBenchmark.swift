@@ -146,7 +146,8 @@ public class ASRBenchmark {
 
     /// Transcribe audio - now supports long files through AsrManager chunking
     internal func transcribeAudio(asrManager: AsrManager, audioSamples: [Float]) async throws -> ASRResult {
-        let result = try await asrManager.transcribe(audioSamples)
+        // Use optimized transcription with Neural Engine optimizations
+        let result = try await asrManager.transcribeWithFP16(audioSamples)
 
         if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
             print("⚠️ CI: Transcription returned empty text")
@@ -447,6 +448,9 @@ extension ASRBenchmark {
                 let models = try await AsrModels.downloadAndLoad()
                 try await asrManager.initialize(models: models)
                 print("ASR system initialized successfully")
+                
+                // Profile Neural Engine optimizations
+                asrManager.profilePerformance()
 
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print("🔍 CI: Verifying ASR models with test audio...")
