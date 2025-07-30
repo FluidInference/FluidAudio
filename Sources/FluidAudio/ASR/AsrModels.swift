@@ -216,7 +216,7 @@ extension AsrModels {
     }
 }
 
-public enum AsrModelsError: LocalizedError {
+public enum AsrModelsError: LocalizedError, Sendable {
     case modelNotFound(String, URL)
     case downloadFailed(String)
     case loadingFailed(String)

@@ -2,7 +2,7 @@ import CoreML
 import Foundation
 import OSLog
 
-public enum AudioSource {
+public enum AudioSource: Sendable {
     case microphone
     case system
 }
