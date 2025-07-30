@@ -3,7 +3,7 @@ import Foundation
 import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
-internal struct SegmentationProcessor {
+struct SegmentationProcessor {
     
     private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Segmentation")
     
