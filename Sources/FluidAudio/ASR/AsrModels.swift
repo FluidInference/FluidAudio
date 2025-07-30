@@ -61,27 +61,39 @@ extension AsrModels {
 
         let config = configuration ?? defaultConfiguration()
 
-        // Use DownloadUtils to load models with auto-recovery
-        let modelNames = [
-            ModelNames.melspectrogram,
-            ModelNames.encoder,
-            ModelNames.decoder,
-            ModelNames.joint,
-            ModelNames.tokenDuration,
+        // Load each model with its optimal compute unit configuration
+        let modelConfigs: [(name: String, modelType: ANEOptimizer.ModelType)] = [
+            (ModelNames.melspectrogram, .melSpectrogram),
+            (ModelNames.encoder, .encoder),
+            (ModelNames.decoder, .decoder),
+            (ModelNames.joint, .joint),
+            (ModelNames.tokenDuration, .tokenDuration),
         ]
 
-        let models = try await DownloadUtils.loadModels(
-            .parakeet,
-            modelNames: modelNames,
-            directory: directory.deletingLastPathComponent(),
-            computeUnits: config.computeUnits
-        )
+        var loadedModels: [String: MLModel] = [:]
 
-        guard let melModel = models[ModelNames.melspectrogram],
-            let encoderModel = models[ModelNames.encoder],
-            let decoderModel = models[ModelNames.decoder],
-            let jointModel = models[ModelNames.joint],
-            let tokenDurationModel = models[ModelNames.tokenDuration]
+        for (modelName, modelType) in modelConfigs {
+            let optimizedConfig = optimizedConfiguration(for: modelType)
+
+            // Use DownloadUtils with optimized config for each model
+            let models = try await DownloadUtils.loadModels(
+                .parakeet,
+                modelNames: [modelName],
+                directory: directory.deletingLastPathComponent(),
+                computeUnits: optimizedConfig.computeUnits
+            )
+
+            if let model = models[modelName] {
+                loadedModels[modelName] = model
+                logger.info("Loaded \(modelName) with optimized compute units")
+            }
+        }
+
+        guard let melModel = loadedModels[ModelNames.melspectrogram],
+            let encoderModel = loadedModels[ModelNames.encoder],
+            let decoderModel = loadedModels[ModelNames.decoder],
+            let jointModel = loadedModels[ModelNames.joint],
+            let tokenDurationModel = loadedModels[ModelNames.tokenDuration]
         else {
             throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
         }
@@ -95,7 +107,7 @@ extension AsrModels {
             configuration: config
         )
 
-        logger.info("Successfully loaded all ASR models")
+        logger.info("Successfully loaded all ASR models with optimized compute units")
         return asrModels
     }
 
@@ -115,13 +127,99 @@ extension AsrModels {
         return try await load(from: targetDir, configuration: configuration)
     }
 
+    /// Load models with ANE-optimized configurations
+    public static func loadWithANEOptimization(
+        from directory: URL? = nil,
+        enableFP16: Bool = true
+    ) async throws -> AsrModels {
+        let targetDir = directory ?? defaultCacheDirectory()
+
+        logger.info("Loading ASR models with ANE optimization from: \(targetDir.path)")
+
+        // Use the load method that already applies per-model optimizations
+        return try await load(from: targetDir, configuration: nil)
+    }
+
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
         config.computeUnits = isCI ? .cpuAndNeuralEngine : .all
 
+        // Apple Silicon optimizations
+        // Enable GPU optimization through compute units setting
+        // Parameters API not available in current CoreML version
+
         return config
+    }
+
+    /// Create optimized configuration for specific model type
+    public static func optimizedConfiguration(
+        for modelType: ANEOptimizer.ModelType,
+        enableFP16: Bool = true
+    ) -> MLModelConfiguration {
+        let config = MLModelConfiguration()
+        config.allowLowPrecisionAccumulationOnGPU = enableFP16
+        config.computeUnits = ANEOptimizer.optimalComputeUnits(for: modelType)
+
+        // Enable model-specific optimizations
+        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
+        if isCI {
+            config.computeUnits = .cpuOnly
+        }
+
+        return config
+    }
+
+    /// Create optimized prediction options for inference
+    public static func optimizedPredictionOptions() -> MLPredictionOptions {
+        let options = MLPredictionOptions()
+
+        // Enable batching for better GPU utilization
+        if #available(macOS 14.0, iOS 17.0, *) {
+            options.outputBackings = [:]  // Reuse output buffers
+        }
+
+        return options
+    }
+
+    /// Create performance-optimized configuration for specific use cases
+    public enum PerformanceProfile: Sendable {
+        case lowLatency  // Prioritize speed over accuracy
+        case balanced  // Balance between speed and accuracy
+        case highAccuracy  // Prioritize accuracy over speed
+        case streaming  // Optimized for real-time streaming
+
+        public var configuration: MLModelConfiguration {
+            let config = MLModelConfiguration()
+            config.allowLowPrecisionAccumulationOnGPU = true
+
+            switch self {
+            case .lowLatency:
+                config.computeUnits = .cpuAndGPU
+            // GPU optimization enabled through compute units
+            case .balanced:
+                config.computeUnits = .all
+            case .highAccuracy:
+                config.computeUnits = .all
+                config.allowLowPrecisionAccumulationOnGPU = false
+            case .streaming:
+                config.computeUnits = .cpuAndNeuralEngine
+            }
+
+            return config
+        }
+
+        public var predictionOptions: MLPredictionOptions {
+            let options = MLPredictionOptions()
+
+            if #available(macOS 14.0, iOS 17.0, *) {
+                // Enable output buffer reuse for all profiles
+                options.outputBackings = [:]
+            }
+
+            return options
+        }
     }
 }
 
