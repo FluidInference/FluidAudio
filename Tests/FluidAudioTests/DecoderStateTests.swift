@@ -7,8 +7,8 @@ final class DecoderStateTests: XCTestCase {
     
     // MARK: - Initialization Tests
     
-    func testDecoderStateInitialization() {
-        let state = DecoderState()
+    func testDecoderStateInitialization() throws {
+        let state = try DecoderState()
         
         // Check shapes
         XCTAssertEqual(state.hiddenState.shape, [2, 1, 640] as [NSNumber])
@@ -31,7 +31,7 @@ final class DecoderStateTests: XCTestCase {
     
     func testDecoderStateCopyConstructor() throws {
         // Create original state with test values
-        let originalState = DecoderState()
+        let originalState = try DecoderState()
         
         // Fill with test data
         for i in 0..<originalState.hiddenState.count {
@@ -40,7 +40,7 @@ final class DecoderStateTests: XCTestCase {
         }
         
         // Create copy
-        let copiedState = DecoderState(from: originalState)
+        let copiedState = try DecoderState(from: originalState)
         
         // Verify shapes match
         XCTAssertEqual(copiedState.hiddenState.shape, originalState.hiddenState.shape)
@@ -67,7 +67,7 @@ final class DecoderStateTests: XCTestCase {
     // MARK: - Update Tests
     
     func testDecoderStateUpdate() throws {
-        var state = DecoderState()
+        var state = try DecoderState()
         
         // Create mock decoder output
         let newHiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
@@ -93,7 +93,7 @@ final class DecoderStateTests: XCTestCase {
     }
     
     func testDecoderStateUpdateWithMissingFeatures() throws {
-        var state = DecoderState()
+        var state = try DecoderState()
         
         // Store original references
         let originalHidden = state.hiddenState
@@ -110,7 +110,7 @@ final class DecoderStateTests: XCTestCase {
     }
     
     func testDecoderStateUpdatePartialFeatures() throws {
-        var state = DecoderState()
+        var state = try DecoderState()
         
         let originalHidden = state.hiddenState
         
@@ -209,8 +209,8 @@ final class DecoderStateTests: XCTestCase {
     
     // MARK: - State Size Tests
     
-    func testDecoderStateMemorySize() {
-        let state = DecoderState()
+    func testDecoderStateMemorySize() throws {
+        let state = try DecoderState()
         
         // Each state has shape [2, 1, 640] with float32
         let expectedElements = 2 * 1 * 640
@@ -225,7 +225,7 @@ final class DecoderStateTests: XCTestCase {
     // MARK: - Thread Safety Tests
     
     func testDecoderStateConcurrentAccess() throws {
-        let state = DecoderState()
+        let state = try DecoderState()
         let iterations = 100
         let expectation = self.expectation(description: "Concurrent access")
         expectation.expectedFulfillmentCount = 2

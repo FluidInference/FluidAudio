@@ -1,6 +1,6 @@
 import AVFoundation
-import OSLog
 import FluidAudio
+import OSLog
 
 /// LibriSpeech dataset manager and ASR benchmarking
 @available(macOS 13.0, *)
@@ -14,19 +14,22 @@ public class ASRBenchmark {
     }
 
     /// Download LibriSpeech test datasets
-    public func downloadLibriSpeech(subset: String = "test-clean", forceDownload: Bool = false) async throws {
+    public func downloadLibriSpeech(subset: String = "test-clean", forceDownload: Bool = false)
+        async throws
+    {
         let datasetsDirectory = getLibriSpeechDirectory()
         let subsetDirectory = datasetsDirectory.appendingPathComponent(subset)
 
         // Check if already downloaded by looking for transcript files (which indicate complete download)
         if !forceDownload && FileManager.default.fileExists(atPath: subsetDirectory.path) {
-            let enumerator = FileManager.default.enumerator(at: subsetDirectory, includingPropertiesForKeys: nil)
+            let enumerator = FileManager.default.enumerator(
+                at: subsetDirectory, includingPropertiesForKeys: nil)
             var transcriptCount = 0
 
             while let url = enumerator?.nextObject() as? URL {
                 if url.pathExtension == "txt" && url.lastPathComponent.contains(".trans.") {
                     transcriptCount += 1
-                    if transcriptCount >= 5 { // Found enough transcript files, dataset exists
+                    if transcriptCount >= 5 {  // Found enough transcript files, dataset exists
                         break
                     }
                 }
@@ -65,17 +68,19 @@ public class ASRBenchmark {
     }
 
     /// Run ASR benchmark on LibriSpeech
-    public func runLibriSpeechBenchmark(asrManager: AsrManager, subset: String = "test-clean") async throws -> [ASRBenchmarkResult] {
+    public func runLibriSpeechBenchmark(asrManager: AsrManager, subset: String = "test-clean")
+        async throws -> [ASRBenchmarkResult]
+    {
         #if DEBUG
-        print("")
-        print("WARNING: Running in DEBUG mode!")
-        print("Performance will be significantly slower (~2x).")
-        print("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
-        print("")
-        // Add a small delay so user sees the warning
-        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            print("")
+            print("WARNING: Running in DEBUG mode!")
+            print("Performance will be significantly slower (~2x).")
+            print("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
+            print("")
+            // Add a small delay so user sees the warning
+            try? await Task.sleep(nanoseconds: 2_000_000_000)  // 2 seconds
         #else
-        print("Running in RELEASE mode - optimal performance")
+            print("Running in RELEASE mode - optimal performance")
         #endif
 
         // Ensure dataset is downloaded
@@ -86,30 +91,39 @@ public class ASRBenchmark {
 
         var filteredFiles = audioFiles
         if config.longAudioOnly {
-            filteredFiles = try await filterFilesByDuration(audioFiles, minDuration: 4.0, maxDuration: 20.0)
-            print("Filtered to \(filteredFiles.count) files with duration 4-20 seconds (from \(audioFiles.count) total)")
+            filteredFiles = try await filterFilesByDuration(
+                audioFiles, minDuration: 4.0, maxDuration: 20.0)
+            print(
+                "Filtered to \(filteredFiles.count) files with duration 4-20 seconds (from \(audioFiles.count) total)"
+            )
         }
 
-        let maxFiles = config.maxFiles ?? filteredFiles.count // Process all files if not specified
+        let maxFiles = config.maxFiles ?? filteredFiles.count  // Process all files if not specified
         let filesToProcess = Array(filteredFiles.prefix(maxFiles))
 
-        print("📋 Processing \(filesToProcess.count) files (max files limit: \(config.maxFiles?.description ?? "unlimited"))")
+        print(
+            "📋 Processing \(filesToProcess.count) files (max files limit: \(config.maxFiles?.description ?? "unlimited"))"
+        )
 
-        logger.info("Running ASR benchmark on \(filesToProcess.count) files from LibriSpeech \(subset)")
+        logger.info(
+            "Running ASR benchmark on \(filesToProcess.count) files from LibriSpeech \(subset)")
 
         var results: [ASRBenchmarkResult] = []
 
         for (index, audioFile) in filesToProcess.enumerated() {
             do {
                 if config.debugMode {
-                    logger.info("Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)")
+                    logger.info(
+                        "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)"
+                    )
                 }
 
                 if config.debugMode && index > 0 {
                     logger.info("   🔍 Processing file \(index + 1)")
                 }
 
-                let result = try await processLibriSpeechFile(asrManager: asrManager, file: audioFile)
+                let result = try await processLibriSpeechFile(
+                    asrManager: asrManager, file: audioFile)
                 results.append(result)
 
             } catch {
@@ -122,13 +136,16 @@ public class ASRBenchmark {
     }
 
     /// Process a single LibriSpeech file
-    private func processLibriSpeechFile(asrManager: AsrManager, file: LibriSpeechFile) async throws -> ASRBenchmarkResult {
+    private func processLibriSpeechFile(asrManager: AsrManager, file: LibriSpeechFile) async throws
+        -> ASRBenchmarkResult
+    {
         let startTime = Date()
 
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
-        let asrResult = try await transcribeAudio(asrManager: asrManager, audioSamples: audioSamples)
+        let asrResult = try await transcribeAudio(
+            asrManager: asrManager, audioSamples: audioSamples)
 
         let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
 
@@ -145,8 +162,11 @@ public class ASRBenchmark {
     }
 
     /// Transcribe audio - now supports long files through AsrManager chunking
-    internal func transcribeAudio(asrManager: AsrManager, audioSamples: [Float]) async throws -> ASRResult {
-        let result = try await asrManager.transcribe(audioSamples)
+    internal func transcribeAudio(asrManager: AsrManager, audioSamples: [Float]) async throws
+        -> ASRResult
+    {
+        // Use optimized transcription with Neural Engine optimizations
+        let result = try await asrManager.transcribeWithFP16(audioSamples)
 
         if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
             print("⚠️ CI: Transcription returned empty text")
@@ -163,8 +183,11 @@ public class ASRBenchmark {
         let normalizedHypothesis = TextNormalizer.normalize(hypothesis)
         let normalizedReference = TextNormalizer.normalize(reference)
 
-        let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter
+        { !$0.isEmpty }
+        let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
+            !$0.isEmpty
+        }
 
         let wordEditDistance = editDistance(hypWords, refWords)
         let wer = refWords.isEmpty ? 0.0 : Double(wordEditDistance.total) / Double(refWords.count)
@@ -185,11 +208,12 @@ public class ASRBenchmark {
         )
     }
 
-
     // MARK: - Private Helper Methods
 
     /// Filter files by duration range
-    private func filterFilesByDuration(_ files: [LibriSpeechFile], minDuration: Double, maxDuration: Double) async throws -> [LibriSpeechFile] {
+    private func filterFilesByDuration(
+        _ files: [LibriSpeechFile], minDuration: Double, maxDuration: Double
+    ) async throws -> [LibriSpeechFile] {
         var filteredFiles: [LibriSpeechFile] = []
 
         for file in files {
@@ -201,7 +225,8 @@ public class ASRBenchmark {
                     filteredFiles.append(file)
                 }
             } catch {
-                logger.warning("Could not load audio file \(file.fileName): \(error.localizedDescription)")
+                logger.warning(
+                    "Could not load audio file \(file.fileName): \(error.localizedDescription)")
                 continue
             }
         }
@@ -210,8 +235,11 @@ public class ASRBenchmark {
     }
 
     private func getLibriSpeechDirectory() -> URL {
-        let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDirectory = applicationSupportURL.appendingPathComponent("FluidAudio", isDirectory: true)
+        let applicationSupportURL = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let appDirectory = applicationSupportURL.appendingPathComponent(
+            "FluidAudio", isDirectory: true)
         return appDirectory.appendingPathComponent("Datasets/LibriSpeech", isDirectory: true)
     }
 
@@ -224,7 +252,9 @@ public class ASRBenchmark {
         while let url = enumerator?.nextObject() as? URL {
             if url.pathExtension == "txt" && url.lastPathComponent.contains(".trans.") {
                 let transcriptContent = try String(contentsOf: url)
-                let lines = transcriptContent.components(separatedBy: .newlines).filter { !$0.isEmpty }
+                let lines = transcriptContent.components(separatedBy: .newlines).filter {
+                    !$0.isEmpty
+                }
 
                 for line in lines {
                     let parts = line.components(separatedBy: " ")
@@ -234,14 +264,16 @@ public class ASRBenchmark {
                     let transcript = parts.dropFirst().joined(separator: " ")
 
                     let audioFileName = "\(audioId).flac"
-                    let audioPath = url.deletingLastPathComponent().appendingPathComponent(audioFileName)
+                    let audioPath = url.deletingLastPathComponent().appendingPathComponent(
+                        audioFileName)
 
                     if fileManager.fileExists(atPath: audioPath.path) {
-                        files.append(LibriSpeechFile(
-                            fileName: audioFileName,
-                            audioPath: audioPath,
-                            transcript: transcript
-                        ))
+                        files.append(
+                            LibriSpeechFile(
+                                fileName: audioFileName,
+                                audioPath: audioPath,
+                                transcript: transcript
+                            ))
                     }
                 }
             }
@@ -250,8 +282,9 @@ public class ASRBenchmark {
         return files.sorted { $0.fileName < $1.fileName }
     }
 
-
-    private func downloadAndExtractTarGz(url: String, extractTo: URL, expectedSubpath: String) async throws {
+    private func downloadAndExtractTarGz(url: String, extractTo: URL, expectedSubpath: String)
+        async throws
+    {
         let downloadURL = URL(string: url)!
 
         print("Downloading \(url)...")
@@ -274,7 +307,8 @@ public class ASRBenchmark {
 
         let extractedPath = extractTo.appendingPathComponent(expectedSubpath)
         if FileManager.default.fileExists(atPath: extractedPath.path) {
-            let targetPath = extractTo.appendingPathComponent(expectedSubpath.components(separatedBy: "/").last!)
+            let targetPath = extractTo.appendingPathComponent(
+                expectedSubpath.components(separatedBy: "/").last!)
             try? FileManager.default.removeItem(at: targetPath)
             try FileManager.default.moveItem(at: extractedPath, to: targetPath)
 
@@ -316,33 +350,38 @@ private func editDistance<T: Equatable>(_ seq1: [T], _ seq2: [T]) -> EditDistanc
 
     for i in 1...m {
         for j in 1...n {
-            if seq1[i-1] == seq2[j-1] {
-                dp[i][j] = dp[i-1][j-1]
+            if seq1[i - 1] == seq2[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1]
             } else {
-                dp[i][j] = 1 + min(
-                    dp[i-1][j],     // deletion
-                    dp[i][j-1],     // insertion
-                    dp[i-1][j-1]    // substitution
-                )
+                dp[i][j] =
+                    1
+                    + min(
+                        dp[i - 1][j],  // deletion
+                        dp[i][j - 1],  // insertion
+                        dp[i - 1][j - 1]  // substitution
+                    )
             }
         }
     }
 
-    var i = m, j = n
-    var insertions = 0, deletions = 0, substitutions = 0
+    var i = m
+    var j = n
+    var insertions = 0
+    var deletions = 0
+    var substitutions = 0
 
     while i > 0 || j > 0 {
-        if i > 0 && j > 0 && seq1[i-1] == seq2[j-1] {
+        if i > 0 && j > 0 && seq1[i - 1] == seq2[j - 1] {
             i -= 1
             j -= 1
-        } else if i > 0 && j > 0 && dp[i][j] == dp[i-1][j-1] + 1 {
+        } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
             substitutions += 1
             i -= 1
             j -= 1
-        } else if i > 0 && dp[i][j] == dp[i-1][j] + 1 {
+        } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
             deletions += 1
             i -= 1
-        } else if j > 0 && dp[i][j] == dp[i][j-1] + 1 {
+        } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
             insertions += 1
             j -= 1
         } else {
@@ -448,9 +487,12 @@ extension ASRBenchmark {
                 try await asrManager.initialize(models: models)
                 print("ASR system initialized successfully")
 
+                // Profile Neural Engine optimizations
+                asrManager.profilePerformance()
+
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print("🔍 CI: Verifying ASR models with test audio...")
-                    let testSamples = Array(repeating: Float(0.0), count: 16000) // 1 second of silence
+                    let testSamples = Array(repeating: Float(0.0), count: 16000)  // 1 second of silence
                     let testResult = try await asrManager.transcribe(testSamples)
                     print("   Test transcription result: '\(testResult.text)'")
                     print("   Models appear to be working: \(asrManager.isAvailable)")
@@ -463,13 +505,18 @@ extension ASRBenchmark {
                 if ProcessInfo.processInfo.environment["CI"] != nil {
                     print("🔍 CI Debug Information:")
                     let modelsDir = FileManager.default.homeDirectoryForCurrentUser
-                        .appendingPathComponent("Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml")
+                        .appendingPathComponent(
+                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
+                        )
                     print("   Models directory: \(modelsDir.path)")
-                    print("   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))")
+                    print(
+                        "   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))"
+                    )
 
                     if FileManager.default.fileExists(atPath: modelsDir.path) {
                         do {
-                            let contents = try FileManager.default.contentsOfDirectory(at: modelsDir, includingPropertiesForKeys: nil)
+                            let contents = try FileManager.default.contentsOfDirectory(
+                                at: modelsDir, includingPropertiesForKeys: nil)
                             print("   Directory contents: \(contents.map { $0.lastPathComponent })")
                         } catch {
                             print("   Failed to list directory contents: \(error)")
@@ -483,7 +530,8 @@ extension ASRBenchmark {
                 try await benchmark.downloadLibriSpeech(subset: subset)
             }
 
-            let results = try await benchmark.runLibriSpeechBenchmark(asrManager: asrManager, subset: subset)
+            let results = try await benchmark.runLibriSpeechBenchmark(
+                asrManager: asrManager, subset: subset)
 
             let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
             let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)
@@ -491,7 +539,6 @@ extension ASRBenchmark {
             let rtfxValues = results.map { Float($0.rtfx) }
             let sortedRTFx = rtfxValues.sorted()
             let medianRTFx = sortedRTFx[sortedRTFx.count / 2]
-
 
             let totalAudioDuration = results.reduce(0.0) { $0 + $1.audioLength }
             let totalProcessingTime = results.reduce(0.0) { $0 + $1.processingTime }
@@ -510,13 +557,15 @@ extension ASRBenchmark {
             let seconds = Int(testRuntime) % 60
             let runtimeString = "\(minutes)m \(seconds)s"
 
-            print("\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
+            print(
+                "\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)"
+            )
 
             print("--- Benchmark Results ---")
             #if DEBUG
-            print("   Mode: DEBUG (slow performance)")
+                print("   Mode: DEBUG (slow performance)")
             #else
-            print("   Mode: RELEASE (optimal performance)")
+                print("   Mode: RELEASE (optimal performance)")
             #endif
             print("   Dataset: \(config.dataset) \(config.subset)")
             print("   Files processed: \(results.count)")
@@ -526,43 +575,47 @@ extension ASRBenchmark {
             print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
             print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
             print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            print("   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)")
+            print(
+                "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
+            )
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
-            let output = [
-                "config": [
-                    "dataset": config.dataset,
-                    "subset": config.subset,
-                    "maxFiles": config.maxFiles as Any,
-                    "debugMode": config.debugMode
-                ],
-                "summary": [
-                    "filesProcessed": results.count,
-                    "averageWER": totalWER,
-                    "medianWER": medianWER,
-                    "averageCER": totalCER,
-                    "medianRTFx": medianRTFx,
-                    "overallRTFx": overallRTFx,
-                    "totalAudioDuration": totalAudioDuration,
-                    "totalProcessingTime": totalProcessingTime
-                ],
-                "results": results.map { result in
-                    [
-                        "fileName": result.fileName,
-                        "hypothesis": result.hypothesis,
-                        "reference": result.reference,
-                        "wer": result.metrics.wer,
-                        "cer": result.metrics.cer,
-                        "rtfx": result.rtfx,
-                        "audioLength": result.audioLength,
-                        "processingTime": result.processingTime
-                    ]
-                }
-            ] as [String: Any]
+            let output =
+                [
+                    "config": [
+                        "dataset": config.dataset,
+                        "subset": config.subset,
+                        "maxFiles": config.maxFiles as Any,
+                        "debugMode": config.debugMode,
+                    ],
+                    "summary": [
+                        "filesProcessed": results.count,
+                        "averageWER": totalWER,
+                        "medianWER": medianWER,
+                        "averageCER": totalCER,
+                        "medianRTFx": medianRTFx,
+                        "overallRTFx": overallRTFx,
+                        "totalAudioDuration": totalAudioDuration,
+                        "totalProcessingTime": totalProcessingTime,
+                    ],
+                    "results": results.map { result in
+                        [
+                            "fileName": result.fileName,
+                            "hypothesis": result.hypothesis,
+                            "reference": result.reference,
+                            "wer": result.metrics.wer,
+                            "cer": result.metrics.cer,
+                            "rtfx": result.rtfx,
+                            "audioLength": result.audioLength,
+                            "processingTime": result.processingTime,
+                        ]
+                    },
+                ] as [String: Any]
 
-            let jsonData = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
+            let jsonData = try JSONSerialization.data(
+                withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
             try jsonData.write(to: URL(fileURLWithPath: outputFile))
 
             print("\nResults saved to: \(outputFile)")
