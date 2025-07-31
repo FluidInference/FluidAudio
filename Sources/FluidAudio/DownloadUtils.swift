@@ -1,5 +1,5 @@
-import Foundation
 import CoreML
+import Foundation
 import OSLog
 
 /// HuggingFace model downloader based on swift-transformers implementation
@@ -14,7 +14,7 @@ public class DownloadUtils {
     public struct DownloadConfig {
         public let timeout: TimeInterval
 
-        public init(timeout: TimeInterval = 1800) { // 30 minutes for large models
+        public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
             self.timeout = timeout
         }
 
@@ -40,8 +40,9 @@ public class DownloadUtils {
     ) async throws -> [String: MLModel] {
         do {
             // 1st attempt: normal load
-            return try await loadModelsOnce(repo, modelNames: modelNames,
-                                            directory: directory, computeUnits: computeUnits)
+            return try await loadModelsOnce(
+                repo, modelNames: modelNames,
+                directory: directory, computeUnits: computeUnits)
         } catch {
             // 1st attempt failed → wipe cache to signal redownload
             logger.warning("⚠️ First load failed: \(error.localizedDescription)")
@@ -50,11 +51,11 @@ public class DownloadUtils {
             try? FileManager.default.removeItem(at: repoPath)
 
             // 2nd attempt after fresh download
-            return try await loadModelsOnce(repo, modelNames: modelNames,
-                                            directory: directory, computeUnits: computeUnits)
+            return try await loadModelsOnce(
+                repo, modelNames: modelNames,
+                directory: directory, computeUnits: computeUnits)
         }
     }
-
 
     /// Internal helper to download repo (if needed) and load CoreML models
     /// - Parameters:
@@ -90,41 +91,53 @@ public class DownloadUtils {
         for name in modelNames {
             let modelPath = repoPath.appendingPathComponent(name)
             guard FileManager.default.fileExists(atPath: modelPath.path) else {
-                throw CocoaError(.fileNoSuchFile, userInfo: [
-                    NSFilePathErrorKey: modelPath.path,
-                    NSLocalizedDescriptionKey: "Model file not found: \(name)"
-                ])
+                throw CocoaError(
+                    .fileNoSuchFile,
+                    userInfo: [
+                        NSFilePathErrorKey: modelPath.path,
+                        NSLocalizedDescriptionKey: "Model file not found: \(name)",
+                    ])
             }
 
             do {
                 // Validate model directory structure before loading
                 var isDirectory: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: modelPath.path, isDirectory: &isDirectory),
-                      isDirectory.boolValue else {
-                    throw CocoaError(.fileReadCorruptFile, userInfo: [
-                        NSFilePathErrorKey: modelPath.path,
-                        NSLocalizedDescriptionKey: "Model path is not a directory: \(name)"
-                    ])
+                guard
+                    FileManager.default.fileExists(
+                        atPath: modelPath.path, isDirectory: &isDirectory),
+                    isDirectory.boolValue
+                else {
+                    throw CocoaError(
+                        .fileReadCorruptFile,
+                        userInfo: [
+                            NSFilePathErrorKey: modelPath.path,
+                            NSLocalizedDescriptionKey: "Model path is not a directory: \(name)",
+                        ])
                 }
 
                 // Check for essential model files
                 let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
                 guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
-                    logger.error("❌ Missing coremldata.bin in \(name)")
-                    throw CocoaError(.fileReadCorruptFile, userInfo: [
-                        NSFilePathErrorKey: coremlDataPath.path,
-                        NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)"
-                    ])
+                    logger.error("Missing coremldata.bin in \(name)")
+                    throw CocoaError(
+                        .fileReadCorruptFile,
+                        userInfo: [
+                            NSFilePathErrorKey: coremlDataPath.path,
+                            NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
+                        ])
                 }
 
                 models[name] = try MLModel(contentsOf: modelPath, configuration: config)
-                logger.info("✅ Loaded model: \(name)")
+                logger.info("Loaded model: \(name)")
             } catch {
-                logger.error("❌ Failed to load model \(name): \(error)")
+                logger.error("Failed to load model \(name): \(error)")
 
                 // List directory contents for debugging
-                if let contents = try? FileManager.default.contentsOfDirectory(at: modelPath, includingPropertiesForKeys: nil) {
-                    logger.error("   Model directory contents: \(contents.map { $0.lastPathComponent })")
+                if let contents = try? FileManager.default.contentsOfDirectory(
+                    at: modelPath, includingPropertiesForKeys: nil)
+                {
+                    logger.error(
+                        "   Model directory contents: \(contents.map { $0.lastPathComponent })")
                 }
 
                 throw error
@@ -162,19 +175,17 @@ public class DownloadUtils {
                 )
 
             default:
-                break // Skip other files/directories
+                break  // Skip other files/directories
             }
         }
 
-        logger.info("✅ Downloaded all models for \(repo.folderName)")
+        logger.info("Downloaded all models for \(repo.folderName)")
     }
 
     /// Check if a file is essential for model operation
     private static func isEssentialFile(_ path: String) -> Bool {
         path.hasSuffix(".json") || path.hasSuffix(".txt") || path == "config.json"
     }
-
-
 
     /// List files in a HuggingFace repository
     private static func listRepoFiles(_ repo: Repo, path: String = "") async throws -> [RepoFile] {
@@ -194,7 +205,9 @@ public class DownloadUtils {
     }
 
     /// Download a CoreML model directory and all its contents
-    private static func downloadModelDirectory(repo: Repo, dirPath: String, to destination: URL) async throws {
+    private static func downloadModelDirectory(repo: Repo, dirPath: String, to destination: URL)
+        async throws
+    {
         let modelDir = destination.appendingPathComponent(dirPath)
         try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
 
@@ -230,7 +243,6 @@ public class DownloadUtils {
         }
     }
 
-
     /// Create a progress handler for large files
     private static func createProgressHandler(for path: String, size: Int) -> ProgressHandler? {
         // Only show progress for files over 100MB (most files are under this)
@@ -264,9 +276,10 @@ public class DownloadUtils {
 
         // Check if file already exists and is complete
         if let attrs = try? FileManager.default.attributesOfItem(atPath: destination.path),
-           let fileSize = attrs[.size] as? Int64,
-           fileSize == expectedSize {
-            logger.info("✅ File already downloaded: \(path)")
+            let fileSize = attrs[.size] as? Int64,
+            fileSize == expectedSize
+        {
+            logger.info("File already downloaded: \(path)")
             progressHandler?(1.0)
             return
         }
@@ -277,13 +290,15 @@ public class DownloadUtils {
         // Check if we can resume a partial download
         var startByte: Int64 = 0
         if let attrs = try? FileManager.default.attributesOfItem(atPath: tempURL.path),
-           let fileSize = attrs[.size] as? Int64 {
+            let fileSize = attrs[.size] as? Int64
+        {
             startByte = fileSize
             logger.info("⏸️ Resuming download from \(formatBytes(Int(startByte)))")
         }
 
         // Download URL
-        let downloadURL = URL(string: "https://huggingface.co/\(repo.rawValue)/resolve/main/\(path)")!
+        let downloadURL = URL(
+            string: "https://huggingface.co/\(repo.rawValue)/resolve/main/\(path)")!
 
         // Download the file (no retries)
         do {
@@ -298,9 +313,12 @@ public class DownloadUtils {
 
             // Verify file size before moving
             if let attrs = try? FileManager.default.attributesOfItem(atPath: tempURL.path),
-               let fileSize = attrs[.size] as? Int64 {
+                let fileSize = attrs[.size] as? Int64
+            {
                 if fileSize != expectedSize {
-                    logger.warning("⚠️ Downloaded file size mismatch for \(path): got \(fileSize), expected \(expectedSize)")
+                    logger.warning(
+                        "⚠️ Downloaded file size mismatch for \(path): got \(fileSize), expected \(expectedSize)"
+                    )
                 }
             }
 
@@ -315,10 +333,10 @@ public class DownloadUtils {
                 try FileManager.default.copyItem(at: tempURL, to: destination)
                 try? FileManager.default.removeItem(at: tempURL)
             }
-            logger.info("✅ Downloaded \(path)")
+            logger.info("Downloaded \(path)")
 
         } catch {
-            logger.error("❌ Download failed: \(error)")
+            logger.error("Download failed: \(error)")
             throw error
         }
     }
@@ -342,7 +360,8 @@ public class DownloadUtils {
         let (tempFile, response) = try await session.download(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+            httpResponse.statusCode == 200
+        else {
             throw URLError(.badServerResponse)
         }
 
@@ -383,7 +402,7 @@ public class DownloadUtils {
         struct LFSInfo: Codable {
             let size: Int
             let sha256: String?  // Some repos might have this
-            let oid: String?     // Most use this instead
+            let oid: String?  // Most use this instead
             let pointerSize: Int?
 
             enum CodingKeys: String, CodingKey {
@@ -395,4 +414,3 @@ public class DownloadUtils {
         }
     }
 }
-

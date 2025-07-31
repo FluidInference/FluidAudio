@@ -1,7 +1,8 @@
-import Foundation
 import CoreML
+import Foundation
 import System
 import XCTest
+
 @testable import FluidAudio
 
 final class BasicInitializationTests: XCTestCase {
@@ -10,7 +11,7 @@ final class BasicInitializationTests: XCTestCase {
         // Test CoreML diarizer creation
         let config = DiarizerConfig()
         let manager = DiarizerManager(config: config)
-        XCTAssertFalse(manager.isAvailable) // Not initialized yet
+        XCTAssertFalse(manager.isAvailable)  // Not initialized yet
     }
 
     func testDiarizerWithCustomConfig() {
@@ -23,7 +24,7 @@ final class BasicInitializationTests: XCTestCase {
             debugMode: true
         )
         let manager = DiarizerManager(config: config)
-        XCTAssertFalse(manager.isAvailable) // Not initialized yet
+        XCTAssertFalse(manager.isAvailable)  // Not initialized yet
     }
 
     func testDiarizerConfigDefaults() {
@@ -75,7 +76,7 @@ final class CoreMLDiarizerTests: XCTestCase {
         }
 
         // Test invalid audio (too short)
-        let shortSamples = Array(repeating: Float(0.5), count: 8000) // 0.5 seconds
+        let shortSamples = Array(repeating: Float(0.5), count: 8000)  // 0.5 seconds
 
         // Test silent audio
         let silentSamples = Array(repeating: Float(0.0), count: 16000)
@@ -86,23 +87,29 @@ final class CoreMLDiarizerTests: XCTestCase {
         // Test valid audio
         let validResult = manager.validateAudio(validSamples)
         XCTAssertTrue(validResult.isValid, "Valid audio should pass validation")
-        XCTAssertEqual(validResult.durationSeconds, 1.0, accuracy: 0.1, "Duration should be ~1 second")
+        XCTAssertEqual(
+            validResult.durationSeconds, 1.0, accuracy: 0.1, "Duration should be ~1 second")
         XCTAssertTrue(validResult.issues.isEmpty, "Valid audio should have no issues")
 
         // Test short audio
         let shortResult = manager.validateAudio(shortSamples)
         XCTAssertFalse(shortResult.isValid, "Short audio should fail validation")
-        XCTAssertTrue(shortResult.issues.contains("Audio too short (minimum 1 second)"), "Short audio should have correct error")
+        XCTAssertTrue(
+            shortResult.issues.contains("Audio too short (minimum 1 second)"),
+            "Short audio should have correct error")
 
         // Test silent audio
         let silentResult = manager.validateAudio(silentSamples)
         XCTAssertFalse(silentResult.isValid, "Silent audio should fail validation")
-        XCTAssertTrue(silentResult.issues.contains("Audio too quiet or silent"), "Silent audio should have correct error")
+        XCTAssertTrue(
+            silentResult.issues.contains("Audio too quiet or silent"),
+            "Silent audio should have correct error")
 
         // Test empty audio
         let emptyResult = manager.validateAudio(emptySamples)
         XCTAssertFalse(emptyResult.isValid, "Empty audio should fail validation")
-        XCTAssertTrue(emptyResult.issues.contains("No audio data"), "Empty audio should have correct error")
+        XCTAssertTrue(
+            emptyResult.issues.contains("No audio data"), "Empty audio should have correct error")
     }
 
     func testCosineDistance() {
@@ -113,19 +120,22 @@ final class CoreMLDiarizerTests: XCTestCase {
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [1.0, 0.0, 0.0]
         let distance1 = manager.cosineDistance(embedding1, embedding2)
-        XCTAssertEqual(distance1, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
+        XCTAssertEqual(
+            distance1, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
 
         // Test orthogonal embeddings
         let embedding3: [Float] = [1.0, 0.0, 0.0]
         let embedding4: [Float] = [0.0, 1.0, 0.0]
         let distance2 = manager.cosineDistance(embedding3, embedding4)
-        XCTAssertEqual(distance2, 1.0, accuracy: 0.001, "Orthogonal embeddings should have distance 1")
+        XCTAssertEqual(
+            distance2, 1.0, accuracy: 0.001, "Orthogonal embeddings should have distance 1")
 
         // Test opposite embeddings
         let embedding5: [Float] = [1.0, 0.0, 0.0]
         let embedding6: [Float] = [-1.0, 0.0, 0.0]
         let distance3 = manager.cosineDistance(embedding5, embedding6)
-        XCTAssertEqual(distance3, 2.0, accuracy: 0.001, "Opposite embeddings should have distance 2")
+        XCTAssertEqual(
+            distance3, 2.0, accuracy: 0.001, "Opposite embeddings should have distance 2")
     }
 
     func testEmbeddingValidation() {
@@ -134,23 +144,29 @@ final class CoreMLDiarizerTests: XCTestCase {
 
         // Test valid embedding
         let validEmbedding: [Float] = [0.5, 0.3, -0.2, 0.8]
-        XCTAssertTrue(manager.validateEmbedding(validEmbedding), "Valid embedding should pass validation")
+        XCTAssertTrue(
+            manager.validateEmbedding(validEmbedding), "Valid embedding should pass validation")
 
         // Test empty embedding
         let emptyEmbedding: [Float] = []
-        XCTAssertFalse(manager.validateEmbedding(emptyEmbedding), "Empty embedding should fail validation")
+        XCTAssertFalse(
+            manager.validateEmbedding(emptyEmbedding), "Empty embedding should fail validation")
 
         // Test embedding with NaN
         let nanEmbedding: [Float] = [0.5, Float.nan, 0.3]
-        XCTAssertFalse(manager.validateEmbedding(nanEmbedding), "NaN embedding should fail validation")
+        XCTAssertFalse(
+            manager.validateEmbedding(nanEmbedding), "NaN embedding should fail validation")
 
         // Test embedding with infinity
         let infEmbedding: [Float] = [0.5, Float.infinity, 0.3]
-        XCTAssertFalse(manager.validateEmbedding(infEmbedding), "Infinite embedding should fail validation")
+        XCTAssertFalse(
+            manager.validateEmbedding(infEmbedding), "Infinite embedding should fail validation")
 
         // Test very small magnitude embedding
         let smallEmbedding: [Float] = [0.01, 0.01, 0.01]
-        XCTAssertFalse(manager.validateEmbedding(smallEmbedding), "Small magnitude embedding should fail validation")
+        XCTAssertFalse(
+            manager.validateEmbedding(smallEmbedding),
+            "Small magnitude embedding should fail validation")
     }
 
     func testCleanup() {
@@ -198,7 +214,8 @@ extension CoreMLDiarizerTests {
 
         // Create a temporary directory.
 
-        let downloadDir = URL.temporaryDirectory.appendingPathComponent("\(Self.self)-testModelDownloadPaths", isDirectory: true)
+        let downloadDir = URL.temporaryDirectory.appendingPathComponent(
+            "\(Self.self)-testModelDownloadPaths", isDirectory: true)
         try? FileManager.default.removeItem(at: downloadDir)
         try FileManager.default.createDirectory(at: downloadDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: downloadDir) }
@@ -210,29 +227,35 @@ extension CoreMLDiarizerTests {
         // Check that the models were downloaded successfully
         XCTAssertNotNil(models.segmentationModel)
         XCTAssertNotNil(models.embeddingModel)
-        
+
         // Check that the model files exist in the download directory
         let repoPath = downloadDir.deletingLastPathComponent()
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName)
-        
+
         let segmentationPath = repoPath.appendingPathComponent("pyannote_segmentation.mlmodelc")
         let embeddingPath = repoPath.appendingPathComponent("wespeaker.mlmodelc")
-        
+
         var isDirectory: ObjCBool = false
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: segmentationPath.path, isDirectory: &isDirectory))
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: segmentationPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-        
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: segmentationPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: segmentationPath.appendingPathComponent("coremldata.bin").path,
+                isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
-        
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: embeddingPath.path, isDirectory: &isDirectory))
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: embeddingPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-        
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: embeddingPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: embeddingPath.appendingPathComponent("coremldata.bin").path,
+                isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
         // Consume the models object; we don't need it any more.
@@ -261,33 +284,42 @@ extension CoreMLDiarizerTests {
         // Check that the models were downloaded successfully
         XCTAssertNotNil(models.segmentationModel)
         XCTAssertNotNil(models.embeddingModel)
-        
+
         // Get the default models directory
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let modelsDir = appSupport
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let modelsDir =
+            appSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
-        
+
         let segmentationPath = modelsDir.appendingPathComponent("pyannote_segmentation.mlmodelc")
         let embeddingPath = modelsDir.appendingPathComponent("wespeaker.mlmodelc")
-        
+
         // Check that the model files are actually there.
         var isDirectory: ObjCBool = false
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: segmentationPath.path, isDirectory: &isDirectory))
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: segmentationPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-        
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: segmentationPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: segmentationPath.appendingPathComponent("coremldata.bin").path,
+                isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
-        
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: embeddingPath.path, isDirectory: &isDirectory))
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: embeddingPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
-        
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: embeddingPath.appendingPathComponent("coremldata.bin").path, isDirectory: &isDirectory))
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: embeddingPath.appendingPathComponent("coremldata.bin").path,
+                isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
         // Consume the models object; we don't need it any more.
@@ -319,10 +351,13 @@ extension CoreMLDiarizerTests {
 
         let models = try await DiarizerModels.downloadIfNeeded(configuration: customConfig)
 
-        XCTAssertEqual(models.segmentationModel.configuration.modelDisplayName, customConfig.modelDisplayName)
-        XCTAssertEqual(models.segmentationModel.configuration.computeUnits, customConfig.computeUnits)
+        XCTAssertEqual(
+            models.segmentationModel.configuration.modelDisplayName, customConfig.modelDisplayName)
+        XCTAssertEqual(
+            models.segmentationModel.configuration.computeUnits, customConfig.computeUnits)
 
-        XCTAssertEqual(models.embeddingModel.configuration.modelDisplayName, customConfig.modelDisplayName)
+        XCTAssertEqual(
+            models.embeddingModel.configuration.modelDisplayName, customConfig.modelDisplayName)
         XCTAssertEqual(models.embeddingModel.configuration.computeUnits, customConfig.computeUnits)
     }
 }
@@ -354,13 +389,15 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
 
         let validationResult = diarizer.validateAudio(validSamples)
         XCTAssertTrue(validationResult.isValid, "Valid audio should pass validation")
-        XCTAssertEqual(validationResult.durationSeconds, 1.0, accuracy: 0.1, "Duration should be ~1 second")
+        XCTAssertEqual(
+            validationResult.durationSeconds, 1.0, accuracy: 0.1, "Duration should be ~1 second")
 
         // Test cosine distance calculation
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [1.0, 0.0, 0.0]
         let distance = diarizer.cosineDistance(embedding1, embedding2)
-        XCTAssertEqual(distance, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
+        XCTAssertEqual(
+            distance, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
     }
 
     func testDiarizerInitializationAttempt() async {
@@ -370,24 +407,26 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
 
         do {
             diarizer.initialize(models: try await .downloadIfNeeded())
-            XCTAssertTrue(diarizer.isAvailable, "Should be available after successful initialization")
-            print("✅ CoreML diarizer initialized successfully!")
+            XCTAssertTrue(
+                diarizer.isAvailable, "Should be available after successful initialization")
+            print("CoreML diarizer initialized successfully!")
 
             // Test that we can perform basic operations
             let testSamples = Array(repeating: Float(0.5), count: 16000)
 
             do {
                 let result = try diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
-                print("✅ CoreML diarization completed, found \(result.segments.count) segments")
+                print("CoreML diarization completed, found \(result.segments.count) segments")
             } catch {
-                print("ℹ️  Segmentation test completed (may need more realistic audio): \(error)")
+                print("Segmentation test completed (may need more realistic audio): \(error)")
             }
 
             diarizer.cleanup()
 
         } catch {
             // This is expected in test environment - models might not download
-            print("ℹ️  CoreML initialization test completed (expected in test environment): \(error)")
+            print(
+                "CoreML initialization test completed (expected in test environment): \(error)")
             XCTAssertFalse(diarizer.isAvailable, "Should not be available if initialization failed")
         }
     }
@@ -404,7 +443,8 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
             XCTAssertTrue(manager.isAvailable)
         } catch {
             // This is expected in CI/test environment where models might not be available
-            XCTAssertFalse(manager.isAvailable, "Manager should not be available if initialization failed")
+            XCTAssertFalse(
+                manager.isAvailable, "Manager should not be available if initialization failed")
         }
     }
 }

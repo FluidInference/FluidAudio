@@ -1,0 +1,73 @@
+name: Streaming ASR Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  streaming-asr-test:
+    name: Streaming ASR Test
+    runs-on: macos-14
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/Parakeet
+            ~/Documents/Datasets/librispeech
+          key: ${{ runner.os }}-streaming-asr-${{ hashFiles('Package.resolved') }}-v1
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Download Test Audio
+        run: |
+          # Download a sample from LibriSpeech for testing
+          mkdir -p test-audio
+          curl -L "https://huggingface.co/datasets/librispeech_asr/resolve/main/data/test-clean/1089/134686/1089-134686-0000.flac" \
+            -o test-audio/test.flac
+
+      - name: Test Streaming Transcription
+        run: |
+          echo "Testing streaming transcription with different configurations..."
+          
+          # Test default configuration
+          echo "1. Testing default configuration..."
+          swift run -c release fluidaudio transcribe test-audio/test.flac --config default
+          
+          # Test low-latency configuration
+          echo "2. Testing low-latency configuration..."
+          swift run -c release fluidaudio transcribe test-audio/test.flac --config low-latency
+          
+          # Test high-accuracy configuration
+          echo "3. Testing high-accuracy configuration..."
+          swift run -c release fluidaudio transcribe test-audio/test.flac --config high-accuracy
+
+      - name: Test Multi-Stream
+        run: |
+          echo "Testing multi-stream transcription..."
+          
+          # Download additional test files
+          curl -L "https://huggingface.co/datasets/librispeech_asr/resolve/main/data/test-clean/1089/134686/1089-134686-0001.flac" \
+            -o test-audio/test2.flac
+          
+          # Run multi-stream test
+          swift run -c release fluidaudio multi-stream test-audio/test.flac test-audio/test2.flac
+
+      - name: Run Unit Tests
+        run: |
+          echo "Running streaming ASR unit tests..."
+          swift test --filter StreamingAsrManagerTests
+          swift test --filter StreamingAsrSessionTests

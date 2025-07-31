@@ -62,21 +62,21 @@
                 print("DEBUG: macOS version check passed")
                 await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
             } else {
-                print("❌ ASR benchmark requires macOS 13.0 or later")
+                print("ASR benchmark requires macOS 13.0 or later")
                 exit(1)
             }
         case "transcribe":
             if #available(macOS 13.0, *) {
                 await StreamingTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
             } else {
-                print("❌ Transcribe requires macOS 13.0 or later")
+                print("Transcribe requires macOS 13.0 or later")
                 exit(1)
             }
         case "multi-stream":
             if #available(macOS 13.0, *) {
                 await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
             } else {
-                print("❌ Multi-stream requires macOS 13.0 or later")
+                print("Multi-stream requires macOS 13.0 or later")
                 exit(1)
             }
         case "process":
@@ -87,11 +87,11 @@
             printUsage()
             exit(0)
         default:
-            print("❌ Unknown command: \(command)")
+            print("Unknown command: \(command)")
             printUsage()
             exit(1)
         }
-        
+
         semaphore.signal()
     }
 

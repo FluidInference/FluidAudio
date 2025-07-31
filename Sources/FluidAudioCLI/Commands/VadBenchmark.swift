@@ -10,7 +10,7 @@
             do {
                 try await runVadBenchmarkWithErrorHandling(arguments: arguments)
             } catch {
-                print("❌ VAD Benchmark failed: \(error)")
+                print("VAD Benchmark failed: \(error)")
                 // Don't exit - return gracefully so comparison can continue
             }
         }
@@ -75,9 +75,9 @@
             do {
                 print("🔧 Initializing VAD manager...")
                 try await vadManager.initialize()
-                print("✅ VAD system initialized")
+                print("VAD system initialized")
             } catch {
-                print("❌ Failed to initialize VAD: \(error)")
+                print("Failed to initialize VAD: \(error)")
                 print("   Error type: \(type(of: error))")
                 if let vadError = error as? VadError {
                     print("   VAD Error: \(vadError.localizedDescription)")
@@ -97,7 +97,7 @@
             // Print results
             // Calculate RTFx for display
             let rtfx = try await calculateRTFx(result: result, testFiles: testFiles)
-            
+
             print("\n📊 VAD Benchmark Results:")
             print("   Accuracy: \(String(format: "%.1f", result.accuracy))%")
             print("   Precision: \(String(format: "%.1f", result.precision))%")
@@ -112,24 +112,28 @@
                 print("   RTFx: N/A")
             }
             print("   Files Processed: \(result.totalFiles)")
-            print("   Avg Time per File: \(String(format: "%.3f", result.processingTime / Double(result.totalFiles)))s")
+            print(
+                "   Avg Time per File: \(String(format: "%.3f", result.processingTime / Double(result.totalFiles)))s"
+            )
 
             // Save results with RTFx
             if let outputFile = outputFile {
-                try await saveVadBenchmarkResultsWithRTFx(result, testFiles: testFiles, to: outputFile)
+                try await saveVadBenchmarkResultsWithRTFx(
+                    result, testFiles: testFiles, to: outputFile)
                 print("💾 Results saved to: \(outputFile)")
             } else {
-                try await saveVadBenchmarkResultsWithRTFx(result, testFiles: testFiles, to: "vad_benchmark_results.json")
+                try await saveVadBenchmarkResultsWithRTFx(
+                    result, testFiles: testFiles, to: "vad_benchmark_results.json")
                 print("💾 Results saved to: vad_benchmark_results.json")
             }
 
             // Performance assessment
             if result.f1Score >= 70.0 {
-                print("\n✅ EXCELLENT: F1-Score above 70%")
+                print("\nEXCELLENT: F1-Score above 70%")
             } else if result.f1Score >= 60.0 {
                 print("\n⚠️ ACCEPTABLE: F1-Score above 60%")
             } else {
-                print("\n❌ NEEDS IMPROVEMENT: F1-Score below 60%")
+                print("\nNEEDS IMPROVEMENT: F1-Score below 60%")
                 // Don't exit - just report the poor performance
             }
         }
@@ -149,14 +153,14 @@
                     return musanFiles
                 }
             }
-            
+
             // Check if this is VOiCES subset
             if dataset == "voices-subset" {
                 if let voicesFiles = try await loadVoicesSubset(count: count) {
                     return voicesFiles
                 }
             }
-            
+
             // First try to load from local dataset directory
             if let localFiles = try await loadLocalDataset(count: count) {
                 return localFiles
@@ -176,7 +180,7 @@
             }
 
             // No fallback to mock data - fail cleanly
-            print("❌ Failed to load VAD dataset from all sources:")
+            print("Failed to load VAD dataset from all sources:")
             print("   • Local dataset not found")
             print("   • Hugging Face cache empty")
             print("   • Hugging Face download failed")
@@ -218,7 +222,7 @@
                     let speechFiles = try loadAudioFiles(
                         from: speechDir, expectedLabel: 1, maxCount: maxSpeechFiles)
                     testFiles.append(contentsOf: speechFiles)
-                    print("   ✅ Loaded \(speechFiles.count) speech files")
+                    print("   Loaded \(speechFiles.count) speech files")
                 }
 
                 if FileManager.default.fileExists(atPath: nonSpeechDir.path) {
@@ -226,7 +230,7 @@
                     let nonSpeechFiles = try loadAudioFiles(
                         from: nonSpeechDir, expectedLabel: 0, maxCount: maxNoiseFiles)
                     testFiles.append(contentsOf: nonSpeechFiles)
-                    print("   ✅ Loaded \(nonSpeechFiles.count) non-speech files")
+                    print("   Loaded \(nonSpeechFiles.count) non-speech files")
                 }
 
                 if !testFiles.isEmpty {
@@ -376,12 +380,12 @@
                 testFiles.append(contentsOf: noiseFiles)
 
                 if !testFiles.isEmpty {
-                    print("✅ Downloaded VAD dataset from Hugging Face: \(testFiles.count) files")
+                    print("Downloaded VAD dataset from Hugging Face: \(testFiles.count) files")
                     return testFiles
                 }
 
             } catch {
-                print("❌ Failed to download from Hugging Face: \(error)")
+                print("Failed to download from Hugging Face: \(error)")
                 // Clean up partial downloads
                 try? FileManager.default.removeItem(at: cacheDir)
             }
@@ -425,9 +429,10 @@
                     let audioFile = try AVAudioFile(forReading: testFile.url)
                     let audioData = try await loadVadAudioData(audioFile)
                     loadingTime += Date().timeIntervalSince(loadStartTime)
-                    
+
                     // Calculate audio duration
-                    let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+                    let audioDuration =
+                        Double(audioFile.length) / audioFile.processingFormat.sampleRate
                     totalAudioDuration += audioDuration
 
                     // Process with VAD
@@ -447,21 +452,22 @@
 
                     let fileProcessingTime = Date().timeIntervalSince(fileStartTime)
                     fileDurations.append(fileProcessingTime)
-                    
+
                     // Calculate RTFx for this file
                     let fileRTFx = audioDuration > 0 ? fileProcessingTime / audioDuration : 0
-                    let rtfxDisplay = if fileRTFx < 1.0 && fileRTFx > 0 {
-                        String(format: "%.1fx", 1.0/fileRTFx)
-                    } else {
-                        String(format: "%.1fx", fileRTFx)
-                    }
+                    let rtfxDisplay =
+                        if fileRTFx < 1.0 && fileRTFx > 0 {
+                            String(format: "%.1fx", 1.0 / fileRTFx)
+                        } else {
+                            String(format: "%.1fx", fileRTFx)
+                        }
 
                     print(
                         "      Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)"
                     )
 
                 } catch {
-                    print("      ❌ Error: \(error)")
+                    print("      Error: \(error)")
                     // Use default prediction on error
                     predictions.append(0)
                     groundTruth.append(testFile.expectedLabel)
@@ -475,10 +481,11 @@
             let metrics = calculateVadMetrics(predictions: predictions, groundTruth: groundTruth)
 
             // Calculate timing statistics
-            let avgProcessingTime = fileDurations.isEmpty ? 0 : fileDurations.reduce(0, +) / Double(fileDurations.count)
+            let avgProcessingTime =
+                fileDurations.isEmpty ? 0 : fileDurations.reduce(0, +) / Double(fileDurations.count)
             let minProcessingTime = fileDurations.min() ?? 0
             let maxProcessingTime = fileDurations.max() ?? 0
-            
+
             // Calculate RTFx (Real-Time Factor)
             let rtfx = totalAudioDuration > 0 ? processingTime / totalAudioDuration : 0
 
@@ -492,8 +499,12 @@
             } else {
                 print("   RTFx: N/A")
             }
-            print("   Audio loading time: \(String(format: "%.2f", loadingTime))s (\(String(format: "%.1f", loadingTime/processingTime*100))%)")
-            print("   VAD inference time: \(String(format: "%.2f", inferenceTime))s (\(String(format: "%.1f", inferenceTime/processingTime*100))%)")
+            print(
+                "   Audio loading time: \(String(format: "%.2f", loadingTime))s (\(String(format: "%.1f", loadingTime/processingTime*100))%)"
+            )
+            print(
+                "   VAD inference time: \(String(format: "%.2f", inferenceTime))s (\(String(format: "%.1f", inferenceTime/processingTime*100))%)"
+            )
             print("   Average per file: \(String(format: "%.3f", avgProcessingTime))s")
             print("   Min per file: \(String(format: "%.3f", minProcessingTime))s")
             print("   Max per file: \(String(format: "%.3f", maxProcessingTime))s")
@@ -594,160 +605,177 @@
             return (accuracy, precision, recall, f1Score)
         }
 
-        static func calculateRTFx(result: VadBenchmarkResult, testFiles: [VadTestFile]) async throws -> Double {
+        static func calculateRTFx(result: VadBenchmarkResult, testFiles: [VadTestFile]) async throws
+            -> Double
+        {
             var totalAudioDuration: TimeInterval = 0
-            
+
             for testFile in testFiles {
                 do {
                     let audioFile = try AVAudioFile(forReading: testFile.url)
-                    let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+                    let audioDuration =
+                        Double(audioFile.length) / audioFile.processingFormat.sampleRate
                     totalAudioDuration += audioDuration
                 } catch {
                     // Skip files that can't be read
                     continue
                 }
             }
-            
+
             return totalAudioDuration > 0 ? result.processingTime / totalAudioDuration : 0
         }
-        
+
         /// Load VOiCES subset dataset
         static func loadVoicesSubset(count: Int) async throws -> [VadTestFile]? {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
             let voicesDir = appSupport.appendingPathComponent("FluidAudio/voicesSubset")
-            
+
             guard FileManager.default.fileExists(atPath: voicesDir.path) else {
-                print("❌ VOiCES subset not found. Run: swift run fluidaudio download --dataset voices-subset")
+                print(
+                    "VOiCES subset not found. Run: swift run fluidaudio download --dataset voices-subset"
+                )
                 return nil
             }
-            
+
             print("🗂️ Loading VOiCES subset with mixed speech/non-speech samples...")
-            
+
             var testFiles: [VadTestFile] = []
-            
+
             // Load clean and noisy speech files
             let cleanDir = voicesDir.appendingPathComponent("clean")
             let noisyDir = voicesDir.appendingPathComponent("noisy")
-            
+
             // For a balanced VAD test, we need both speech and non-speech samples
             // VOiCES only has speech, so we'll also load non-speech from MUSAN
             let requestedSpeechCount = count == -1 ? 25 : count / 2
-            
+
             if FileManager.default.fileExists(atPath: cleanDir.path) {
                 let cleanFiles = try loadAudioFiles(
                     from: cleanDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
                 testFiles.append(contentsOf: cleanFiles)
-                print("   ✅ Loaded \(cleanFiles.count) clean speech files")
+                print("   Loaded \(cleanFiles.count) clean speech files")
             }
-            
+
             if FileManager.default.fileExists(atPath: noisyDir.path) {
                 let noisyFiles = try loadAudioFiles(
                     from: noisyDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
                 testFiles.append(contentsOf: noisyFiles)
-                print("   ✅ Loaded \(noisyFiles.count) noisy speech files")
+                print("   Loaded \(noisyFiles.count) noisy speech files")
             }
-            
+
             // Load non-speech samples from MUSAN mini dataset
             print("   📥 Loading non-speech samples from MUSAN...")
             let vadCacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset")
             let noiseDir = vadCacheDir.appendingPathComponent("noise")
-            
+
             if FileManager.default.fileExists(atPath: noiseDir.path) {
                 let requestedNoiseCount = count == -1 ? 25 : count - testFiles.count
                 let noiseFiles = try loadAudioFiles(
                     from: noiseDir, expectedLabel: 0, maxCount: requestedNoiseCount)
                 testFiles.append(contentsOf: noiseFiles)
-                print("   ✅ Loaded \(noiseFiles.count) non-speech files from MUSAN")
+                print("   Loaded \(noiseFiles.count) non-speech files from MUSAN")
             } else {
                 // If MUSAN noise samples aren't available, download them
                 print("   🌐 Downloading non-speech samples from MUSAN...")
-                if let musanFiles = try await downloadHuggingFaceVadDataset(count: testFiles.count, dataset: "mini50") {
+                if let musanFiles = try await downloadHuggingFaceVadDataset(
+                    count: testFiles.count, dataset: "mini50")
+                {
                     // Filter only non-speech samples
                     let nonSpeechFiles = musanFiles.filter { $0.expectedLabel == 0 }
                     testFiles.append(contentsOf: nonSpeechFiles)
-                    print("   ✅ Downloaded \(nonSpeechFiles.count) non-speech files")
+                    print("   Downloaded \(nonSpeechFiles.count) non-speech files")
                 }
             }
-            
+
             if testFiles.isEmpty {
                 return nil
             }
-            
+
             // Shuffle to mix speech and non-speech samples
             testFiles.shuffle()
-            
+
             print("📂 Using VOiCES + MUSAN mixed dataset: \(testFiles.count) files total")
             print("   Speech samples: \(testFiles.filter { $0.expectedLabel == 1 }.count)")
             print("   Non-speech samples: \(testFiles.filter { $0.expectedLabel == 0 }.count)")
             print("💡 This tests VAD robustness in real-world acoustic conditions")
             return testFiles
         }
-        
+
         /// Load full MUSAN dataset
         static func loadFullMusanDataset(count: Int) async throws -> [VadTestFile]? {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
             let musanDir = appSupport.appendingPathComponent("FluidAudio/musanFull/musan")
-            
+
             guard FileManager.default.fileExists(atPath: musanDir.path) else {
-                print("❌ Full MUSAN dataset not found. Run: swift run fluidaudio download --dataset musan-full")
+                print(
+                    "Full MUSAN dataset not found. Run: swift run fluidaudio download --dataset musan-full"
+                )
                 return nil
             }
-            
+
             print("🗂️ Loading full MUSAN dataset...")
-            
+
             var testFiles: [VadTestFile] = []
-            
+
             // Load speech files
             let speechDir = musanDir.appendingPathComponent("speech")
             if FileManager.default.fileExists(atPath: speechDir.path) {
                 let speechFiles = try loadAudioFiles(
                     from: speechDir, expectedLabel: 1, maxCount: count == -1 ? Int.max : count / 3)
                 testFiles.append(contentsOf: speechFiles)
-                print("   ✅ Loaded \(speechFiles.count) speech files")
+                print("   Loaded \(speechFiles.count) speech files")
             }
-            
+
             // Load music files (treat as non-speech for VAD)
             let musicDir = musanDir.appendingPathComponent("music")
             if FileManager.default.fileExists(atPath: musicDir.path) {
                 let musicFiles = try loadAudioFiles(
                     from: musicDir, expectedLabel: 0, maxCount: count == -1 ? Int.max : count / 3)
                 testFiles.append(contentsOf: musicFiles)
-                print("   ✅ Loaded \(musicFiles.count) music files")
+                print("   Loaded \(musicFiles.count) music files")
             }
-            
+
             // Load noise files
             let noiseDir = musanDir.appendingPathComponent("noise")
             if FileManager.default.fileExists(atPath: noiseDir.path) {
                 let noiseFiles = try loadAudioFiles(
-                    from: noiseDir, expectedLabel: 0, maxCount: count == -1 ? Int.max : count - testFiles.count)
+                    from: noiseDir, expectedLabel: 0,
+                    maxCount: count == -1 ? Int.max : count - testFiles.count)
                 testFiles.append(contentsOf: noiseFiles)
-                print("   ✅ Loaded \(noiseFiles.count) noise files")
+                print("   Loaded \(noiseFiles.count) noise files")
             }
-            
+
             if testFiles.isEmpty {
                 return nil
             }
-            
+
             print("📂 Using full MUSAN dataset: \(testFiles.count) files total")
             return testFiles.shuffled()  // Shuffle to mix different types
         }
-        
-        static func saveVadBenchmarkResultsWithRTFx(_ result: VadBenchmarkResult, testFiles: [VadTestFile], to file: String) async throws {
+
+        static func saveVadBenchmarkResultsWithRTFx(
+            _ result: VadBenchmarkResult, testFiles: [VadTestFile], to file: String
+        ) async throws {
             var totalAudioDuration: TimeInterval = 0
-            
+
             for testFile in testFiles {
                 do {
                     let audioFile = try AVAudioFile(forReading: testFile.url)
-                    let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+                    let audioDuration =
+                        Double(audioFile.length) / audioFile.processingFormat.sampleRate
                     totalAudioDuration += audioDuration
                 } catch {
                     // Skip files that can't be read
                     continue
                 }
             }
-            
+
             let rtfx = totalAudioDuration > 0 ? result.processingTime / totalAudioDuration : 0
-            
+
             let resultsDict: [String: Any] = [
                 "test_name": result.testName,
                 "accuracy": result.accuracy,

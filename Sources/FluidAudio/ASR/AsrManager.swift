@@ -297,7 +297,7 @@ public final class AsrManager {
             }
 
             logger.info(
-                "✅ Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
+                "Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
             return vocabulary
         } catch {
             logger.error(
@@ -446,7 +446,9 @@ public final class AsrManager {
             let hiddenBefore = (
                 decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
             )
-            let cellBefore = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
+            let cellBefore = (
+                decoderState.cellState[0].intValue, decoderState.cellState[1].intValue
+            )
             logger.debug(
                 "Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]"
             )
@@ -492,7 +494,7 @@ public final class AsrManager {
         // 1. Convert token IDs to token strings
         var tokens: [String] = []
         var tokenInfos: [(token: String, tokenId: Int, timing: TokenTiming?)] = []
-        
+
         for (index, tokenId) in tokenIds.enumerated() {
             if let token = vocabulary[tokenId], !token.isEmpty {
                 tokens.append(token)
@@ -500,14 +502,14 @@ public final class AsrManager {
                 tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
             }
         }
-        
+
         // 2. Concatenate all tokens (this is how SentencePiece works)
         let concatenated = tokens.joined()
-        
+
         // 3. Replace ▁ with space (SentencePiece standard)
         let text = concatenated.replacingOccurrences(of: "▁", with: " ")
             .trimmingCharacters(in: .whitespaces)
-        
+
         // 4. For now, return original timings as-is
         // Note: Proper timing alignment would require tracking character positions
         // through the concatenation and replacement process
@@ -522,7 +524,7 @@ public final class AsrManager {
                 )
             }
         }
-        
+
         return (text, adjustedTimings)
     }
 

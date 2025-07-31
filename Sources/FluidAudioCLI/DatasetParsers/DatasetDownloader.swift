@@ -1,761 +1,829 @@
 #if os(macOS)
-import AVFoundation
-import Foundation
+    import AVFoundation
+    import Foundation
 
-/// Dataset downloading functionality for AMI and VAD datasets
-struct DatasetDownloader {
-    
-    enum AMIVariant: String, CaseIterable {
-        case sdm = "sdm"  // Single Distant Microphone (Mix-Headset.wav)
-        case ihm = "ihm"  // Individual Headset Microphones (Headset-0.wav)
+    /// Dataset downloading functionality for AMI and VAD datasets
+    struct DatasetDownloader {
 
-        var displayName: String {
-            switch self {
-            case .sdm: return "Single Distant Microphone"
-            case .ihm: return "Individual Headset Microphones"
+        enum AMIVariant: String, CaseIterable {
+            case sdm = "sdm"  // Single Distant Microphone (Mix-Headset.wav)
+            case ihm = "ihm"  // Individual Headset Microphones (Headset-0.wav)
+
+            var displayName: String {
+                switch self {
+                case .sdm: return "Single Distant Microphone"
+                case .ihm: return "Individual Headset Microphones"
+                }
+            }
+
+            var filePattern: String {
+                switch self {
+                case .sdm: return "Mix-Headset.wav"
+                case .ihm: return "Headset-0.wav"
+                }
             }
         }
 
-        var filePattern: String {
-            switch self {
-            case .sdm: return "Mix-Headset.wav"
-            case .ihm: return "Headset-0.wav"
-            }
-        }
-    }
+        static func downloadAMIDataset(variant: AMIVariant, force: Bool, singleFile: String? = nil)
+            async
+        {
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            let baseDir = homeDir.appendingPathComponent("FluidAudioDatasets")
+            let amiDir = baseDir.appendingPathComponent("ami_official")
+            let variantDir = amiDir.appendingPathComponent(variant.rawValue)
 
-    static func downloadAMIDataset(variant: AMIVariant, force: Bool, singleFile: String? = nil) async {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let baseDir = homeDir.appendingPathComponent("FluidAudioDatasets")
-        let amiDir = baseDir.appendingPathComponent("ami_official")
-        let variantDir = amiDir.appendingPathComponent(variant.rawValue)
-
-        // Create directories if needed
-        do {
-            try FileManager.default.createDirectory(
-                at: variantDir, withIntermediateDirectories: true)
-        } catch {
-            print("❌ Failed to create directory: \(error)")
-            return
-        }
-
-        print("📥 Downloading AMI \(variant.displayName) dataset...")
-        print("   Target directory: \(variantDir.path)")
-        
-        // Download AMI annotations first (required for proper benchmarking)
-        await downloadAMIAnnotations(force: force)
-
-        // Core AMI test set - smaller subset for initial benchmarking
-        let commonMeetings: [String]
-        if let singleFile = singleFile {
-            commonMeetings = [singleFile]
-            print("📋 Downloading single file: \(singleFile)")
-        } else {
-            commonMeetings = [
-                "ES2002a",
-                "ES2003a",
-                "ES2004a",
-                "ES2005a",
-                "IS1000a",
-                "IS1001a",
-                "IS1002b",
-                "TS3003a",
-                "TS3004a",
-            ]
-        }
-
-        var downloadedFiles = 0
-        var skippedFiles = 0
-
-        for meetingId in commonMeetings {
-            let fileName = "\(meetingId).\(variant.filePattern)"
-            let filePath = variantDir.appendingPathComponent(fileName)
-
-            // Skip if file exists and not forcing download
-            if !force && FileManager.default.fileExists(atPath: filePath.path) {
-                print("   ⏭️ Skipping \(fileName) (already exists)")
-                skippedFiles += 1
-                continue
+            // Create directories if needed
+            do {
+                try FileManager.default.createDirectory(
+                    at: variantDir, withIntermediateDirectories: true)
+            } catch {
+                print("Failed to create directory: \(error)")
+                return
             }
 
-            // Try to download from AMI corpus mirror
-            let success = await downloadAMIFile(
-                meetingId: meetingId,
-                variant: variant,
-                outputPath: filePath
-            )
+            print("📥 Downloading AMI \(variant.displayName) dataset...")
+            print("   Target directory: \(variantDir.path)")
 
-            if success {
-                downloadedFiles += 1
-                print("   ✅ Downloaded \(fileName)")
+            // Download AMI annotations first (required for proper benchmarking)
+            await downloadAMIAnnotations(force: force)
+
+            // Core AMI test set - smaller subset for initial benchmarking
+            let commonMeetings: [String]
+            if let singleFile = singleFile {
+                commonMeetings = [singleFile]
+                print("📋 Downloading single file: \(singleFile)")
             } else {
-                print("   ❌ Failed to download \(fileName)")
+                commonMeetings = [
+                    "ES2002a",
+                    "ES2003a",
+                    "ES2004a",
+                    "ES2005a",
+                    "IS1000a",
+                    "IS1001a",
+                    "IS1002b",
+                    "TS3003a",
+                    "TS3004a",
+                ]
+            }
+
+            var downloadedFiles = 0
+            var skippedFiles = 0
+
+            for meetingId in commonMeetings {
+                let fileName = "\(meetingId).\(variant.filePattern)"
+                let filePath = variantDir.appendingPathComponent(fileName)
+
+                // Skip if file exists and not forcing download
+                if !force && FileManager.default.fileExists(atPath: filePath.path) {
+                    print("   ⏭️ Skipping \(fileName) (already exists)")
+                    skippedFiles += 1
+                    continue
+                }
+
+                // Try to download from AMI corpus mirror
+                let success = await downloadAMIFile(
+                    meetingId: meetingId,
+                    variant: variant,
+                    outputPath: filePath
+                )
+
+                if success {
+                    downloadedFiles += 1
+                    print("   Downloaded \(fileName)")
+                } else {
+                    print("   Failed to download \(fileName)")
+                }
+            }
+
+            print("🎉 AMI \(variant.displayName) download completed")
+            print("   Downloaded: \(downloadedFiles) files")
+            print("   Skipped: \(skippedFiles) files")
+            print("   Total files: \(downloadedFiles + skippedFiles)/\(commonMeetings.count)")
+
+            if downloadedFiles == 0 && skippedFiles == 0 {
+                print("⚠️ No files were downloaded. You may need to download manually from:")
+                print("   https://groups.inf.ed.ac.uk/ami/download/")
             }
         }
 
-        print("🎉 AMI \(variant.displayName) download completed")
-        print("   Downloaded: \(downloadedFiles) files")
-        print("   Skipped: \(skippedFiles) files")
-        print("   Total files: \(downloadedFiles + skippedFiles)/\(commonMeetings.count)")
+        static func downloadAMIFile(meetingId: String, variant: AMIVariant, outputPath: URL) async
+            -> Bool
+        {
+            // Try multiple URL patterns - the AMI corpus mirror structure has some variations
+            let baseURLs = [
+                "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror//amicorpus",  // Double slash pattern (from user's working example)
+                "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus",  // Single slash pattern
+                "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror//amicorpus",  // Alternative with extra slash
+            ]
 
-        if downloadedFiles == 0 && skippedFiles == 0 {
-            print("⚠️ No files were downloaded. You may need to download manually from:")
-            print("   https://groups.inf.ed.ac.uk/ami/download/")
+            for (_, baseURL) in baseURLs.enumerated() {
+                let urlString = "\(baseURL)/\(meetingId)/audio/\(meetingId).\(variant.filePattern)"
+
+                guard let url = URL(string: urlString) else {
+                    print("     ⚠️ Invalid URL: \(urlString)")
+                    continue
+                }
+
+                do {
+                    print("     📥 Downloading from: \(urlString)")
+                    let (data, response) = try await URLSession.shared.data(from: url)
+
+                    if let httpResponse = response as? HTTPURLResponse {
+                        if httpResponse.statusCode == 200 {
+                            try data.write(to: outputPath)
+
+                            // Verify it's a valid audio file
+                            if await isValidAudioFile(outputPath) {
+                                let fileSizeMB = Double(data.count) / (1024 * 1024)
+                                print(
+                                    "     Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
+                                return true
+                            } else {
+                                print("     ⚠️ Downloaded file is not valid audio")
+                                try? FileManager.default.removeItem(at: outputPath)
+                                // Try next URL
+                                continue
+                            }
+                        } else if httpResponse.statusCode == 404 {
+                            print("     ⚠️ File not found (HTTP 404) - trying next URL...")
+                            continue
+                        } else {
+                            print(
+                                "     ⚠️ HTTP error: \(httpResponse.statusCode) - trying next URL..."
+                            )
+                            continue
+                        }
+                    }
+                } catch {
+                    print(
+                        "     ⚠️ Download error: \(error.localizedDescription) - trying next URL...")
+                    continue
+                }
+            }
+
+            print("     Failed to download from all available URLs")
+            return false
         }
-    }
 
-    static func downloadAMIFile(meetingId: String, variant: AMIVariant, outputPath: URL) async -> Bool {
-        // Try multiple URL patterns - the AMI corpus mirror structure has some variations
-        let baseURLs = [
-            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror//amicorpus",  // Double slash pattern (from user's working example)
-            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus",  // Single slash pattern
-            "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror//amicorpus",  // Alternative with extra slash
-        ]
+        static func isValidAudioFile(_ url: URL) async -> Bool {
+            do {
+                let _ = try AVAudioFile(forReading: url)
+                return true
+            } catch {
+                return false
+            }
+        }
 
-        for (_, baseURL) in baseURLs.enumerated() {
-            let urlString = "\(baseURL)/\(meetingId)/audio/\(meetingId).\(variant.filePattern)"
+        /// Download AMI annotations to working directory for benchmarking
+        static func downloadAMIAnnotations(force: Bool = false) async {
+            let workingDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            let annotationsDir = workingDir.appendingPathComponent("Datasets/ami_public_1.6.2")
 
+            // Check if annotations already exist
+            let segmentsDir = annotationsDir.appendingPathComponent("segments")
+            let meetingsFile = annotationsDir.appendingPathComponent("corpusResources/meetings.xml")
+
+            if !force && FileManager.default.fileExists(atPath: segmentsDir.path)
+                && FileManager.default.fileExists(atPath: meetingsFile.path)
+            {
+                print("📂 AMI annotations already exist in \(annotationsDir.path)")
+                return
+            }
+
+            print("📥 Downloading AMI annotations from Edinburgh University...")
+            print("   Target directory: \(annotationsDir.path)")
+
+            // Create required directories
+            do {
+                try FileManager.default.createDirectory(
+                    at: annotationsDir, withIntermediateDirectories: true)
+            } catch {
+                print("Failed to create annotation directories: \(error)")
+                return
+            }
+
+            // Download and extract AMI manual annotations v1.6.2
+            let zipURL =
+                "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
+            let zipFile = annotationsDir.appendingPathComponent("ami_public_manual_1.6.2.zip")
+
+            print("📥 Downloading AMI manual annotations archive (22MB)...")
+            let zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
+
+            if !zipSuccess {
+                print("Failed to download AMI annotations archive")
+                return
+            }
+
+            print("📦 Extracting AMI annotations archive...")
+
+            // Extract the ZIP file using the system unzip command
+            let extractSuccess = await extractZipFile(zipFile, to: annotationsDir)
+
+            if extractSuccess {
+                // Clean up ZIP file
+                try? FileManager.default.removeItem(at: zipFile)
+
+                // Verify extraction was successful
+                if FileManager.default.fileExists(atPath: segmentsDir.path)
+                    && FileManager.default.fileExists(atPath: meetingsFile.path)
+                {
+                    print("AMI annotations download and extraction completed")
+                    print("💡 Benchmarks will now use real AMI ground truth data")
+                } else {
+                    print("⚠️ Extraction completed but expected files not found")
+                    print("   Looking for: \(segmentsDir.path)")
+                    print("   Looking for: \(meetingsFile.path)")
+                }
+            } else {
+                print("Failed to extract AMI annotations archive")
+            }
+        }
+
+        /// Download a single annotation file from AMI corpus
+        static func downloadAnnotationFile(from urlString: String, to outputPath: URL) async -> Bool
+        {
             guard let url = URL(string: urlString) else {
                 print("     ⚠️ Invalid URL: \(urlString)")
-                continue
+                return false
             }
 
             do {
-                print("     📥 Downloading from: \(urlString)")
                 let (data, response) = try await URLSession.shared.data(from: url)
 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
                         try data.write(to: outputPath)
 
-                        // Verify it's a valid audio file
-                        if await isValidAudioFile(outputPath) {
-                            let fileSizeMB = Double(data.count) / (1024 * 1024)
-                            print(
-                                "     ✅ Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
-                            return true
+                        // Check if it's a ZIP file or XML file
+                        if outputPath.pathExtension.lowercased() == "zip" {
+                            // For ZIP files, just verify it's not empty
+                            return data.count > 0
                         } else {
-                            print("     ⚠️ Downloaded file is not valid audio")
-                            try? FileManager.default.removeItem(at: outputPath)
-                            // Try next URL
-                            continue
+                            // Verify it's valid XML
+                            if let xmlString = String(data: data, encoding: .utf8),
+                                xmlString.contains("<?xml") || xmlString.contains("<nite:")
+                            {
+                                return true
+                            } else {
+                                print("     ⚠️ Downloaded file is not valid XML")
+                                try? FileManager.default.removeItem(at: outputPath)
+                                return false
+                            }
                         }
-                    } else if httpResponse.statusCode == 404 {
-                        print("     ⚠️ File not found (HTTP 404) - trying next URL...")
-                        continue
                     } else {
-                        print(
-                            "     ⚠️ HTTP error: \(httpResponse.statusCode) - trying next URL...")
-                        continue
+                        print("     ⚠️ HTTP error: \(httpResponse.statusCode)")
+                        return false
                     }
                 }
             } catch {
-                print(
-                    "     ⚠️ Download error: \(error.localizedDescription) - trying next URL...")
-                continue
+                print("     ⚠️ Download error: \(error.localizedDescription)")
+                return false
+            }
+
+            return false
+        }
+
+        /// Extract ZIP file using system unzip command
+        static func extractZipFile(_ zipFile: URL, to targetDir: URL) async -> Bool {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+            process.arguments = ["-q", "-o", zipFile.path, "-d", targetDir.path]
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+                return process.terminationStatus == 0
+            } catch {
+                print("     ⚠️ Failed to extract ZIP file: \(error)")
+                return false
             }
         }
 
-        print("     ❌ Failed to download from all available URLs")
-        return false
-    }
+        /// Download VAD dataset from Hugging Face
+        static func downloadVadDataset(force: Bool, dataset: String = "mini50") async {
+            let cacheDir = getVadDatasetCacheDirectory()
 
-    static func isValidAudioFile(_ url: URL) async -> Bool {
-        do {
-            let _ = try AVAudioFile(forReading: url)
-            return true
-        } catch {
-            return false
-        }
-    }
-    
-    /// Download AMI annotations to working directory for benchmarking
-    static func downloadAMIAnnotations(force: Bool = false) async {
-        let workingDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        let annotationsDir = workingDir.appendingPathComponent("Datasets/ami_public_1.6.2")
-        
-        // Check if annotations already exist
-        let segmentsDir = annotationsDir.appendingPathComponent("segments")
-        let meetingsFile = annotationsDir.appendingPathComponent("corpusResources/meetings.xml")
-        
-        if !force && FileManager.default.fileExists(atPath: segmentsDir.path) && 
-           FileManager.default.fileExists(atPath: meetingsFile.path) {
-            print("📂 AMI annotations already exist in \(annotationsDir.path)")
-            return
-        }
-        
-        print("📥 Downloading AMI annotations from Edinburgh University...")
-        print("   Target directory: \(annotationsDir.path)")
-        
-        // Create required directories
-        do {
-            try FileManager.default.createDirectory(at: annotationsDir, withIntermediateDirectories: true)
-        } catch {
-            print("❌ Failed to create annotation directories: \(error)")
-            return
-        }
-        
-        // Download and extract AMI manual annotations v1.6.2
-        let zipURL = "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
-        let zipFile = annotationsDir.appendingPathComponent("ami_public_manual_1.6.2.zip")
-        
-        print("📥 Downloading AMI manual annotations archive (22MB)...")
-        let zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
-        
-        if !zipSuccess {
-            print("❌ Failed to download AMI annotations archive")
-            return
-        }
-        
-        print("📦 Extracting AMI annotations archive...")
-        
-        // Extract the ZIP file using the system unzip command
-        let extractSuccess = await extractZipFile(zipFile, to: annotationsDir)
-        
-        if extractSuccess {
-            // Clean up ZIP file
-            try? FileManager.default.removeItem(at: zipFile)
-            
-            // Verify extraction was successful
-            if FileManager.default.fileExists(atPath: segmentsDir.path) && 
-               FileManager.default.fileExists(atPath: meetingsFile.path) {
-                print("✅ AMI annotations download and extraction completed")
-                print("💡 Benchmarks will now use real AMI ground truth data")
-            } else {
-                print("⚠️ Extraction completed but expected files not found")
-                print("   Looking for: \(segmentsDir.path)")
-                print("   Looking for: \(meetingsFile.path)")
-            }
-        } else {
-            print("❌ Failed to extract AMI annotations archive")
-        }
-    }
-    
-    /// Download a single annotation file from AMI corpus
-    static func downloadAnnotationFile(from urlString: String, to outputPath: URL) async -> Bool {
-        guard let url = URL(string: urlString) else {
-            print("     ⚠️ Invalid URL: \(urlString)")
-            return false
-        }
-        
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 200 {
-                    try data.write(to: outputPath)
-                    
-                    // Check if it's a ZIP file or XML file
-                    if outputPath.pathExtension.lowercased() == "zip" {
-                        // For ZIP files, just verify it's not empty
-                        return data.count > 0
-                    } else {
-                        // Verify it's valid XML
-                        if let xmlString = String(data: data, encoding: .utf8), 
-                           xmlString.contains("<?xml") || xmlString.contains("<nite:") {
-                            return true
-                        } else {
-                            print("     ⚠️ Downloaded file is not valid XML")
-                            try? FileManager.default.removeItem(at: outputPath)
-                            return false
-                        }
-                    }
-                } else {
-                    print("     ⚠️ HTTP error: \(httpResponse.statusCode)")
-                    return false
-                }
-            }
-        } catch {
-            print("     ⚠️ Download error: \(error.localizedDescription)")
-            return false
-        }
-        
-        return false
-    }
-    
-    /// Extract ZIP file using system unzip command
-    static func extractZipFile(_ zipFile: URL, to targetDir: URL) async -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-q", "-o", zipFile.path, "-d", targetDir.path]
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            print("     ⚠️ Failed to extract ZIP file: \(error)")
-            return false
-        }
-    }
+            print("📥 Downloading VAD dataset from Hugging Face...")
+            print("   Target directory: \(cacheDir.path)")
 
-    /// Download VAD dataset from Hugging Face
-    static func downloadVadDataset(force: Bool, dataset: String = "mini50") async {
-        let cacheDir = getVadDatasetCacheDirectory()
+            // Create cache directories
+            let speechDir = cacheDir.appendingPathComponent("speech")
+            let noiseDir = cacheDir.appendingPathComponent("noise")
 
-        print("📥 Downloading VAD dataset from Hugging Face...")
-        print("   Target directory: \(cacheDir.path)")
-
-        // Create cache directories
-        let speechDir = cacheDir.appendingPathComponent("speech")
-        let noiseDir = cacheDir.appendingPathComponent("noise")
-
-        do {
-            try FileManager.default.createDirectory(at: speechDir, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: noiseDir, withIntermediateDirectories: true)
-        } catch {
-            print("❌ Failed to create cache directories: \(error)")
-            return
-        }
-
-        // Check if we should skip download
-        if !force {
-            let existingSpeechFiles = (try? FileManager.default.contentsOfDirectory(at: speechDir, includingPropertiesForKeys: nil)) ?? []
-            let existingNoiseFiles = (try? FileManager.default.contentsOfDirectory(at: noiseDir, includingPropertiesForKeys: nil)) ?? []
-
-            if !existingSpeechFiles.isEmpty && !existingNoiseFiles.isEmpty {
-                print("📂 VAD dataset already exists (use --force to re-download)")
-                print("   Speech files: \(existingSpeechFiles.count)")
-                print("   Noise files: \(existingNoiseFiles.count)")
+            do {
+                try FileManager.default.createDirectory(
+                    at: speechDir, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(
+                    at: noiseDir, withIntermediateDirectories: true)
+            } catch {
+                print("Failed to create cache directories: \(error)")
                 return
             }
-        } else {
-            // Force download - clean existing files
-            try? FileManager.default.removeItem(at: speechDir)
-            try? FileManager.default.removeItem(at: noiseDir)
-            try? FileManager.default.createDirectory(at: speechDir, withIntermediateDirectories: true)
-            try? FileManager.default.createDirectory(at: noiseDir, withIntermediateDirectories: true)
-        }
 
-        // Use specified dataset for download command
-        let repoName = dataset == "mini100" ? "musan_mini100" : "musan_mini50"
-        let repoBase = "https://huggingface.co/datasets/alexwengg/\(repoName)/resolve/main"
+            // Check if we should skip download
+            if !force {
+                let existingSpeechFiles =
+                    (try? FileManager.default.contentsOfDirectory(
+                        at: speechDir, includingPropertiesForKeys: nil)) ?? []
+                let existingNoiseFiles =
+                    (try? FileManager.default.contentsOfDirectory(
+                        at: noiseDir, includingPropertiesForKeys: nil)) ?? []
 
-        var downloadedFiles = 0
-        var failedFiles = 0
-
-        // Download speech files
-        print("📢 Downloading speech samples...")
-        let speechCount = dataset == "mini100" ? 50 : 25
-        do {
-            let speechFiles = try await downloadVadFilesFromHF(
-                baseUrl: "\(repoBase)/speech",
-                targetDir: speechDir,
-                expectedLabel: 1,
-                count: speechCount,
-                filePrefix: "speech",
-                repoName: repoName
-            )
-            downloadedFiles += speechFiles.count
-            print("   ✅ Downloaded \(speechFiles.count) speech files")
-        } catch {
-            print("   ❌ Failed to download speech files: \(error)")
-            failedFiles += 1
-        }
-
-        // Download noise files
-        print("🔇 Downloading noise samples...")
-        let noiseCount = dataset == "mini100" ? 50 : 25
-        do {
-            let noiseFiles = try await downloadVadFilesFromHF(
-                baseUrl: "\(repoBase)/noise",
-                targetDir: noiseDir,
-                expectedLabel: 0,
-                count: noiseCount,
-                filePrefix: "noise",
-                repoName: repoName
-            )
-            downloadedFiles += noiseFiles.count
-            print("   ✅ Downloaded \(noiseFiles.count) noise files")
-        } catch {
-            print("   ❌ Failed to download noise files: \(error)")
-            failedFiles += 1
-        }
-
-        print("\n📊 VAD Dataset Download Summary:")
-        print("   Downloaded: \(downloadedFiles) files")
-        print("   Failed: \(failedFiles) categories")
-
-        if downloadedFiles > 0 {
-            print("✅ VAD dataset download completed")
-            print("💡 You can now run VAD benchmarks with the downloaded dataset")
-        } else {
-            print("❌ No files were downloaded successfully")
-            print("⚠️ VAD benchmarks will fall back to legacy URLs")
-        }
-    }
-
-    /// Download VAD audio files from Hugging Face
-    static func downloadVadFilesFromHF(
-        baseUrl: String,
-        targetDir: URL,
-        expectedLabel: Int,
-        count: Int,
-        filePrefix: String,
-        repoName: String
-    ) async throws -> [VadTestFile] {
-        var testFiles: [VadTestFile] = []
-
-        // Get files directly from the directory (simplified structure in dataset)
-        let repoApiUrl = "https://huggingface.co/api/datasets/alexwengg/\(repoName)/tree/main/\(filePrefix)"
-        var allFiles: [String] = []
-
-        do {
-            let directoryFiles = try await getHuggingFaceFileList(apiUrl: repoApiUrl)
-            let audioFiles = directoryFiles.filter { fileName in
-                let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
-                return ["wav", "mp3", "flac", "m4a"].contains(ext)
-            }
-            allFiles.append(contentsOf: audioFiles)
-        } catch {
-            print("      ⚠️ Could not access \(filePrefix): \(error)")
-        }
-
-        print("      Found \(allFiles.count) audio files in \(filePrefix)/ directory")
-        print("      Debug: requesting \(count) files from \(allFiles.count) available")
-
-        if !allFiles.isEmpty {
-            let filesToDownload = Array(allFiles.prefix(count))
-            var downloadedCount = 0
-
-            for fileName in filesToDownload {
-                let fileUrl = "\(baseUrl)/\(fileName)"
-                let destination = targetDir.appendingPathComponent(fileName)
-
-                do {
-                    let downloadedFile = try await downloadAudioFile(from: fileUrl, to: destination)
-                    testFiles.append(VadTestFile(
-                        name: fileName,
-                        expectedLabel: expectedLabel,
-                        url: downloadedFile
-                    ))
-                    downloadedCount += 1
-                    print("      ✅ Downloaded: \(fileName)")
-
-                } catch {
-                    print("      ⚠️ Failed to download \(fileName): \(error)")
-                    continue
+                if !existingSpeechFiles.isEmpty && !existingNoiseFiles.isEmpty {
+                    print("📂 VAD dataset already exists (use --force to re-download)")
+                    print("   Speech files: \(existingSpeechFiles.count)")
+                    print("   Noise files: \(existingNoiseFiles.count)")
+                    return
                 }
+            } else {
+                // Force download - clean existing files
+                try? FileManager.default.removeItem(at: speechDir)
+                try? FileManager.default.removeItem(at: noiseDir)
+                try? FileManager.default.createDirectory(
+                    at: speechDir, withIntermediateDirectories: true)
+                try? FileManager.default.createDirectory(
+                    at: noiseDir, withIntermediateDirectories: true)
             }
-        } else {
-            print("      No audio files found in subdirectories")
+
+            // Use specified dataset for download command
+            let repoName = dataset == "mini100" ? "musan_mini100" : "musan_mini50"
+            let repoBase = "https://huggingface.co/datasets/alexwengg/\(repoName)/resolve/main"
+
+            var downloadedFiles = 0
+            var failedFiles = 0
+
+            // Download speech files
+            print("📢 Downloading speech samples...")
+            let speechCount = dataset == "mini100" ? 50 : 25
+            do {
+                let speechFiles = try await downloadVadFilesFromHF(
+                    baseUrl: "\(repoBase)/speech",
+                    targetDir: speechDir,
+                    expectedLabel: 1,
+                    count: speechCount,
+                    filePrefix: "speech",
+                    repoName: repoName
+                )
+                downloadedFiles += speechFiles.count
+                print("   Downloaded \(speechFiles.count) speech files")
+            } catch {
+                print("   Failed to download speech files: \(error)")
+                failedFiles += 1
+            }
+
+            // Download noise files
+            print("🔇 Downloading noise samples...")
+            let noiseCount = dataset == "mini100" ? 50 : 25
+            do {
+                let noiseFiles = try await downloadVadFilesFromHF(
+                    baseUrl: "\(repoBase)/noise",
+                    targetDir: noiseDir,
+                    expectedLabel: 0,
+                    count: noiseCount,
+                    filePrefix: "noise",
+                    repoName: repoName
+                )
+                downloadedFiles += noiseFiles.count
+                print("   Downloaded \(noiseFiles.count) noise files")
+            } catch {
+                print("   Failed to download noise files: \(error)")
+                failedFiles += 1
+            }
+
+            print("\n📊 VAD Dataset Download Summary:")
+            print("   Downloaded: \(downloadedFiles) files")
+            print("   Failed: \(failedFiles) categories")
+
+            if downloadedFiles > 0 {
+                print("VAD dataset download completed")
+                print("💡 You can now run VAD benchmarks with the downloaded dataset")
+            } else {
+                print("No files were downloaded successfully")
+                print("⚠️ VAD benchmarks will fall back to legacy URLs")
+            }
         }
 
-        // If no files downloaded via API, try pattern-based download
-        if testFiles.isEmpty {
-            print("      ⚠️ API method failed or no files found, trying pattern-based download...")
+        /// Download VAD audio files from Hugging Face
+        static func downloadVadFilesFromHF(
+            baseUrl: String,
+            targetDir: URL,
+            expectedLabel: Int,
+            count: Int,
+            filePrefix: String,
+            repoName: String
+        ) async throws -> [VadTestFile] {
+            var testFiles: [VadTestFile] = []
 
-            // Fallback to pattern-based download
-            let extensions = ["wav", "mp3", "flac"]
-            let patterns = [
-                // Common MUSAN file patterns
-                "\(filePrefix)-music-",
-                "\(filePrefix)-speech-",
-                "\(filePrefix)-noise-",
-                "musan-\(filePrefix)-",
-                // Simple numbered patterns
-                "\(filePrefix)-",
-                "\(filePrefix)_",
-            ]
+            // Get files directly from the directory (simplified structure in dataset)
+            let repoApiUrl =
+                "https://huggingface.co/api/datasets/alexwengg/\(repoName)/tree/main/\(filePrefix)"
+            var allFiles: [String] = []
 
-            var downloadedCount = 0
+            do {
+                let directoryFiles = try await getHuggingFaceFileList(apiUrl: repoApiUrl)
+                let audioFiles = directoryFiles.filter { fileName in
+                    let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+                    return ["wav", "mp3", "flac", "m4a"].contains(ext)
+                }
+                allFiles.append(contentsOf: audioFiles)
+            } catch {
+                print("      ⚠️ Could not access \(filePrefix): \(error)")
+            }
 
-            for pattern in patterns {
-                if downloadedCount >= count { break }
+            print("      Found \(allFiles.count) audio files in \(filePrefix)/ directory")
+            print("      Debug: requesting \(count) files from \(allFiles.count) available")
 
-                for i in 0..<(count * 2) { // Try more files than needed
-                    if downloadedCount >= count { break }
+            if !allFiles.isEmpty {
+                let filesToDownload = Array(allFiles.prefix(count))
+                var downloadedCount = 0
 
-                    for ext in extensions {
-                        if downloadedCount >= count { break }
+                for fileName in filesToDownload {
+                    let fileUrl = "\(baseUrl)/\(fileName)"
+                    let destination = targetDir.appendingPathComponent(fileName)
 
-                        let fileName = "\(pattern)\(String(format: "%04d", i)).\(ext)"
-                        let fileUrl = "\(baseUrl)/\(fileName)"
-                        let destination = targetDir.appendingPathComponent(fileName)
-
-                        do {
-                            let downloadedFile = try await downloadAudioFile(from: fileUrl, to: destination)
-                            testFiles.append(VadTestFile(
+                    do {
+                        let downloadedFile = try await downloadAudioFile(
+                            from: fileUrl, to: destination)
+                        testFiles.append(
+                            VadTestFile(
                                 name: fileName,
                                 expectedLabel: expectedLabel,
                                 url: downloadedFile
                             ))
-                            downloadedCount += 1
-                            print("      ✅ Downloaded: \(fileName)")
+                        downloadedCount += 1
+                        print("      Downloaded: \(fileName)")
 
-                        } catch {
-                            // File doesn't exist, continue trying
-                            continue
+                    } catch {
+                        print("      ⚠️ Failed to download \(fileName): \(error)")
+                        continue
+                    }
+                }
+            } else {
+                print("      No audio files found in subdirectories")
+            }
+
+            // If no files downloaded via API, try pattern-based download
+            if testFiles.isEmpty {
+                print(
+                    "      ⚠️ API method failed or no files found, trying pattern-based download...")
+
+                // Fallback to pattern-based download
+                let extensions = ["wav", "mp3", "flac"]
+                let patterns = [
+                    // Common MUSAN file patterns
+                    "\(filePrefix)-music-",
+                    "\(filePrefix)-speech-",
+                    "\(filePrefix)-noise-",
+                    "musan-\(filePrefix)-",
+                    // Simple numbered patterns
+                    "\(filePrefix)-",
+                    "\(filePrefix)_",
+                ]
+
+                var downloadedCount = 0
+
+                for pattern in patterns {
+                    if downloadedCount >= count { break }
+
+                    for i in 0..<(count * 2) {  // Try more files than needed
+                        if downloadedCount >= count { break }
+
+                        for ext in extensions {
+                            if downloadedCount >= count { break }
+
+                            let fileName = "\(pattern)\(String(format: "%04d", i)).\(ext)"
+                            let fileUrl = "\(baseUrl)/\(fileName)"
+                            let destination = targetDir.appendingPathComponent(fileName)
+
+                            do {
+                                let downloadedFile = try await downloadAudioFile(
+                                    from: fileUrl, to: destination)
+                                testFiles.append(
+                                    VadTestFile(
+                                        name: fileName,
+                                        expectedLabel: expectedLabel,
+                                        url: downloadedFile
+                                    ))
+                                downloadedCount += 1
+                                print("      Downloaded: \(fileName)")
+
+                            } catch {
+                                // File doesn't exist, continue trying
+                                continue
+                            }
                         }
                     }
                 }
             }
+
+            return testFiles
         }
 
-        return testFiles
-    }
-
-    /// Get file list from HuggingFace API
-    static func getHuggingFaceFileList(apiUrl: String) async throws -> [String] {
-        guard let url = URL(string: apiUrl) else {
-            throw NSError(domain: "APIError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid API URL"])
-        }
-
-        let (data, _) = try await URLSession.shared.data(from: url)
-
-        // Parse the JSON response to extract file names
-        if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            return json.compactMap { item in
-                if let type = item["type"] as? String,
-                   let path = item["path"] as? String,
-                   type == "file" {
-                    // Extract just the filename from the path
-                    return URL(fileURLWithPath: path).lastPathComponent
-                }
-                return nil
+        /// Get file list from HuggingFace API
+        static func getHuggingFaceFileList(apiUrl: String) async throws -> [String] {
+            guard let url = URL(string: apiUrl) else {
+                throw NSError(
+                    domain: "APIError", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid API URL"])
             }
+
+            let (data, _) = try await URLSession.shared.data(from: url)
+
+            // Parse the JSON response to extract file names
+            if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                return json.compactMap { item in
+                    if let type = item["type"] as? String,
+                        let path = item["path"] as? String,
+                        type == "file"
+                    {
+                        // Extract just the filename from the path
+                        return URL(fileURLWithPath: path).lastPathComponent
+                    }
+                    return nil
+                }
+            }
+
+            return []
         }
 
-        return []
-    }
+        /// Get VAD dataset cache directory
+        static func getVadDatasetCacheDirectory() -> URL {
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            let cacheDir = appSupport.appendingPathComponent(
+                "FluidAudio/vadDataset", isDirectory: true)
 
-    /// Get VAD dataset cache directory
-    static func getVadDatasetCacheDirectory() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let cacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: cacheDir, withIntermediateDirectories: true)
+            return cacheDir
+        }
 
-        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        return cacheDir
-    }
+        static func downloadAudioFile(from urlString: String, to destination: URL) async throws
+            -> URL
+        {
+            // Skip if already exists
+            if FileManager.default.fileExists(atPath: destination.path) {
+                return destination
+            }
 
-    static func downloadAudioFile(from urlString: String, to destination: URL) async throws -> URL {
-        // Skip if already exists
-        if FileManager.default.fileExists(atPath: destination.path) {
+            guard let url = URL(string: urlString) else {
+                throw NSError(
+                    domain: "DownloadError", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
+            }
+
+            let (data, _) = try await URLSession.shared.data(from: url)
+            try data.write(to: destination)
+
+            // Verify it's valid audio
+            do {
+                let _ = try AVAudioFile(forReading: destination)
+            } catch {
+                throw NSError(
+                    domain: "DownloadError", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Downloaded file is not valid audio"])
+            }
+
             return destination
         }
 
-        guard let url = URL(string: urlString) else {
-            throw NSError(domain: "DownloadError", code: 1,
-                         userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
-        }
-
-        let (data, _) = try await URLSession.shared.data(from: url)
-        try data.write(to: destination)
-
-        // Verify it's valid audio
-        do {
-            let _ = try AVAudioFile(forReading: destination)
-        } catch {
-            throw NSError(domain: "DownloadError", code: 2,
-                         userInfo: [NSLocalizedDescriptionKey: "Downloaded file is not valid audio"])
-        }
-
-        return destination
-    }
-    
-    /// Download full MUSAN dataset from OpenSLR
-    static func downloadFullMusanDataset(force: Bool) async {
-        let cacheDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        /// Download full MUSAN dataset from OpenSLR
+        static func downloadFullMusanDataset(force: Bool) async {
+            let cacheDir = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
             .appendingPathComponent("FluidAudio/musanFull", isDirectory: true)
-        
-        print("📥 Downloading full MUSAN dataset from OpenSLR...")
-        print("   Target directory: \(cacheDir.path)")
-        print("   Expected size: ~600MB compressed, ~4.5GB uncompressed")
-        
-        // Create cache directory
-        do {
-            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        } catch {
-            print("❌ Failed to create cache directory: \(error)")
-            return
-        }
-        
-        // Check if already downloaded
-        let musanDir = cacheDir.appendingPathComponent("musan")
-        if !force && FileManager.default.fileExists(atPath: musanDir.path) {
-            let subdirs = ["speech", "music", "noise"]
-            var allExist = true
-            for subdir in subdirs {
-                if !FileManager.default.fileExists(atPath: musanDir.appendingPathComponent(subdir).path) {
-                    allExist = false
-                    break
-                }
-            }
-            
-            if allExist {
-                print("📂 Full MUSAN dataset already exists (use --force to re-download)")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+
+            print("📥 Downloading full MUSAN dataset from OpenSLR...")
+            print("   Target directory: \(cacheDir.path)")
+            print("   Expected size: ~600MB compressed, ~4.5GB uncompressed")
+
+            // Create cache directory
+            do {
+                try FileManager.default.createDirectory(
+                    at: cacheDir, withIntermediateDirectories: true)
+            } catch {
+                print("Failed to create cache directory: \(error)")
                 return
             }
-        }
-        
-        // Download from OpenSLR
-        let musanURL = "https://www.openslr.org/resources/17/musan.tar.gz"
-        let downloadPath = cacheDir.appendingPathComponent("musan.tar.gz")
-        
-        print("🌐 Downloading from: \(musanURL)")
-        
-        do {
-            // Download the tar.gz file
-            let (downloadURL, response) = try await URLSession.shared.download(from: URL(string: musanURL)!)
-            
-            // Check response
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                print("❌ Download failed with status code: \(httpResponse.statusCode)")
-                return
-            }
-            
-            // Move downloaded file
-            try FileManager.default.moveItem(at: downloadURL, to: downloadPath)
-            print("✅ Download complete")
-            
-            // Extract tar.gz
-            print("📦 Extracting archive...")
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            task.arguments = ["-xzf", downloadPath.path, "-C", cacheDir.path]
-            
-            try task.run()
-            task.waitUntilExit()
-            
-            if task.terminationStatus == 0 {
-                print("✅ Extraction complete")
-                
-                // Clean up tar file
-                try? FileManager.default.removeItem(at: downloadPath)
-                
-                // Count files
-                let speechFiles = countFiles(in: musanDir.appendingPathComponent("speech"))
-                let musicFiles = countFiles(in: musanDir.appendingPathComponent("music"))
-                let noiseFiles = countFiles(in: musanDir.appendingPathComponent("noise"))
-                
-                print("\n📊 Full MUSAN Dataset Summary:")
-                print("   Speech files: \(speechFiles)")
-                print("   Music files: \(musicFiles)")
-                print("   Noise files: \(noiseFiles)")
-                print("   Total files: \(speechFiles + musicFiles + noiseFiles)")
-                print("\n✅ Full MUSAN dataset ready for benchmarking")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
-            } else {
-                print("❌ Extraction failed")
-                try? FileManager.default.removeItem(at: downloadPath)
-            }
-            
-        } catch {
-            print("❌ Download failed: \(error)")
-            try? FileManager.default.removeItem(at: downloadPath)
-        }
-    }
-    
-    /// Count files recursively in a directory
-    private static func countFiles(in directory: URL) -> Int {
-        var count = 0
-        if let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey]) {
-            for case let fileURL as URL in enumerator {
-                if let isFile = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile, isFile {
-                    count += 1
+
+            // Check if already downloaded
+            let musanDir = cacheDir.appendingPathComponent("musan")
+            if !force && FileManager.default.fileExists(atPath: musanDir.path) {
+                let subdirs = ["speech", "music", "noise"]
+                var allExist = true
+                for subdir in subdirs {
+                    if !FileManager.default.fileExists(
+                        atPath: musanDir.appendingPathComponent(subdir).path)
+                    {
+                        allExist = false
+                        break
+                    }
+                }
+
+                if allExist {
+                    print("📂 Full MUSAN dataset already exists (use --force to re-download)")
+                    print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+                    return
                 }
             }
+
+            // Download from OpenSLR
+            let musanURL = "https://www.openslr.org/resources/17/musan.tar.gz"
+            let downloadPath = cacheDir.appendingPathComponent("musan.tar.gz")
+
+            print("🌐 Downloading from: \(musanURL)")
+
+            do {
+                // Download the tar.gz file
+                let (downloadURL, response) = try await URLSession.shared.download(
+                    from: URL(string: musanURL)!)
+
+                // Check response
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    print("Download failed with status code: \(httpResponse.statusCode)")
+                    return
+                }
+
+                // Move downloaded file
+                try FileManager.default.moveItem(at: downloadURL, to: downloadPath)
+                print("Download complete")
+
+                // Extract tar.gz
+                print("📦 Extracting archive...")
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+                task.arguments = ["-xzf", downloadPath.path, "-C", cacheDir.path]
+
+                try task.run()
+                task.waitUntilExit()
+
+                if task.terminationStatus == 0 {
+                    print("Extraction complete")
+
+                    // Clean up tar file
+                    try? FileManager.default.removeItem(at: downloadPath)
+
+                    // Count files
+                    let speechFiles = countFiles(in: musanDir.appendingPathComponent("speech"))
+                    let musicFiles = countFiles(in: musanDir.appendingPathComponent("music"))
+                    let noiseFiles = countFiles(in: musanDir.appendingPathComponent("noise"))
+
+                    print("\n📊 Full MUSAN Dataset Summary:")
+                    print("   Speech files: \(speechFiles)")
+                    print("   Music files: \(musicFiles)")
+                    print("   Noise files: \(noiseFiles)")
+                    print("   Total files: \(speechFiles + musicFiles + noiseFiles)")
+                    print("\nFull MUSAN dataset ready for benchmarking")
+                    print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+                } else {
+                    print("Extraction failed")
+                    try? FileManager.default.removeItem(at: downloadPath)
+                }
+
+            } catch {
+                print("Download failed: \(error)")
+                try? FileManager.default.removeItem(at: downloadPath)
+            }
         }
-        return count
-    }
-    
-    /// Download VOiCES subset dataset from GitHub
-    static func downloadVoicesSubset(force: Bool) async {
-        let cacheDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+
+        /// Count files recursively in a directory
+        private static func countFiles(in directory: URL) -> Int {
+            var count = 0
+            if let enumerator = FileManager.default.enumerator(
+                at: directory, includingPropertiesForKeys: [.isRegularFileKey])
+            {
+                for case let fileURL as URL in enumerator {
+                    if let isFile = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+                        .isRegularFile, isFile
+                    {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+
+        /// Download VOiCES subset dataset from GitHub
+        static func downloadVoicesSubset(force: Bool) async {
+            let cacheDir = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
             .appendingPathComponent("FluidAudio/voicesSubset", isDirectory: true)
-        
-        print("📥 Downloading VOiCES subset from GitHub...")
-        print("   Target directory: \(cacheDir.path)")
-        
-        // Create cache directory
-        do {
-            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        } catch {
-            print("❌ Failed to create cache directory: \(error)")
-            return
-        }
-        
-        // Check if already downloaded
-        let cleanDir = cacheDir.appendingPathComponent("clean")
-        let noisyDir = cacheDir.appendingPathComponent("noisy")
-        
-        if !force && FileManager.default.fileExists(atPath: cleanDir.path) && FileManager.default.fileExists(atPath: noisyDir.path) {
-            let cleanFiles = (try? FileManager.default.contentsOfDirectory(at: cleanDir, includingPropertiesForKeys: nil)) ?? []
-            let noisyFiles = (try? FileManager.default.contentsOfDirectory(at: noisyDir, includingPropertiesForKeys: nil)) ?? []
-            
-            if !cleanFiles.isEmpty || !noisyFiles.isEmpty {
-                print("📂 VOiCES subset already exists (use --force to re-download)")
-                print("   Clean files: \(cleanFiles.count)")
-                print("   Noisy files: \(noisyFiles.count)")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+
+            print("📥 Downloading VOiCES subset from GitHub...")
+            print("   Target directory: \(cacheDir.path)")
+
+            // Create cache directory
+            do {
+                try FileManager.default.createDirectory(
+                    at: cacheDir, withIntermediateDirectories: true)
+            } catch {
+                print("Failed to create cache directory: \(error)")
                 return
             }
-        }
-        
-        // Clone the repository
-        print("🌐 Cloning VOiCES-subset repository...")
-        let cloneDir = cacheDir.appendingPathComponent("temp_clone")
-        
-        do {
-            // Remove any existing temp directory
-            try? FileManager.default.removeItem(at: cloneDir)
-            
+
+            // Check if already downloaded
+            let cleanDir = cacheDir.appendingPathComponent("clean")
+            let noisyDir = cacheDir.appendingPathComponent("noisy")
+
+            if !force && FileManager.default.fileExists(atPath: cleanDir.path)
+                && FileManager.default.fileExists(atPath: noisyDir.path)
+            {
+                let cleanFiles =
+                    (try? FileManager.default.contentsOfDirectory(
+                        at: cleanDir, includingPropertiesForKeys: nil)) ?? []
+                let noisyFiles =
+                    (try? FileManager.default.contentsOfDirectory(
+                        at: noisyDir, includingPropertiesForKeys: nil)) ?? []
+
+                if !cleanFiles.isEmpty || !noisyFiles.isEmpty {
+                    print("📂 VOiCES subset already exists (use --force to re-download)")
+                    print("   Clean files: \(cleanFiles.count)")
+                    print("   Noisy files: \(noisyFiles.count)")
+                    print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+                    return
+                }
+            }
+
             // Clone the repository
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            task.arguments = ["clone", "--depth", "1", "https://github.com/Lab41/VOiCES-subset.git", cloneDir.path]
-            
-            try task.run()
-            task.waitUntilExit()
-            
-            if task.terminationStatus == 0 {
-                print("✅ Repository cloned successfully")
-                
-                // Move the audio files to our cache structure
-                let sourceCleanDir = cloneDir.appendingPathComponent("clean")
-                let sourceNoisyDir = cloneDir.appendingPathComponent("noisy") 
-                
-                // Create destination directories
-                try FileManager.default.createDirectory(at: cleanDir, withIntermediateDirectories: true)
-                try FileManager.default.createDirectory(at: noisyDir, withIntermediateDirectories: true)
-                
-                // Move clean files
-                if FileManager.default.fileExists(atPath: sourceCleanDir.path) {
-                    let cleanFiles = try FileManager.default.contentsOfDirectory(at: sourceCleanDir, includingPropertiesForKeys: nil)
-                    for file in cleanFiles where file.pathExtension == "wav" {
-                        let destination = cleanDir.appendingPathComponent(file.lastPathComponent)
-                        try FileManager.default.moveItem(at: file, to: destination)
-                    }
-                    print("   ✅ Moved \(cleanFiles.filter { $0.pathExtension == "wav" }.count) clean files")
-                }
-                
-                // Move noisy files
-                if FileManager.default.fileExists(atPath: sourceNoisyDir.path) {
-                    let noisyFiles = try FileManager.default.contentsOfDirectory(at: sourceNoisyDir, includingPropertiesForKeys: nil)
-                    for file in noisyFiles where file.pathExtension == "wav" {
-                        let destination = noisyDir.appendingPathComponent(file.lastPathComponent)
-                        try FileManager.default.moveItem(at: file, to: destination)
-                    }
-                    print("   ✅ Moved \(noisyFiles.filter { $0.pathExtension == "wav" }.count) noisy files")
-                }
-                
-                // Clean up clone directory
+            print("🌐 Cloning VOiCES-subset repository...")
+            let cloneDir = cacheDir.appendingPathComponent("temp_clone")
+
+            do {
+                // Remove any existing temp directory
                 try? FileManager.default.removeItem(at: cloneDir)
-                
-                print("\n✅ VOiCES subset ready for benchmarking")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
-                
-            } else {
-                print("❌ Git clone failed")
+
+                // Clone the repository
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                task.arguments = [
+                    "clone", "--depth", "1", "https://github.com/Lab41/VOiCES-subset.git",
+                    cloneDir.path,
+                ]
+
+                try task.run()
+                task.waitUntilExit()
+
+                if task.terminationStatus == 0 {
+                    print("Repository cloned successfully")
+
+                    // Move the audio files to our cache structure
+                    let sourceCleanDir = cloneDir.appendingPathComponent("clean")
+                    let sourceNoisyDir = cloneDir.appendingPathComponent("noisy")
+
+                    // Create destination directories
+                    try FileManager.default.createDirectory(
+                        at: cleanDir, withIntermediateDirectories: true)
+                    try FileManager.default.createDirectory(
+                        at: noisyDir, withIntermediateDirectories: true)
+
+                    // Move clean files
+                    if FileManager.default.fileExists(atPath: sourceCleanDir.path) {
+                        let cleanFiles = try FileManager.default.contentsOfDirectory(
+                            at: sourceCleanDir, includingPropertiesForKeys: nil)
+                        for file in cleanFiles where file.pathExtension == "wav" {
+                            let destination = cleanDir.appendingPathComponent(
+                                file.lastPathComponent)
+                            try FileManager.default.moveItem(at: file, to: destination)
+                        }
+                        print(
+                            "   Moved \(cleanFiles.filter { $0.pathExtension == "wav" }.count) clean files"
+                        )
+                    }
+
+                    // Move noisy files
+                    if FileManager.default.fileExists(atPath: sourceNoisyDir.path) {
+                        let noisyFiles = try FileManager.default.contentsOfDirectory(
+                            at: sourceNoisyDir, includingPropertiesForKeys: nil)
+                        for file in noisyFiles where file.pathExtension == "wav" {
+                            let destination = noisyDir.appendingPathComponent(
+                                file.lastPathComponent)
+                            try FileManager.default.moveItem(at: file, to: destination)
+                        }
+                        print(
+                            "   Moved \(noisyFiles.filter { $0.pathExtension == "wav" }.count) noisy files"
+                        )
+                    }
+
+                    // Clean up clone directory
+                    try? FileManager.default.removeItem(at: cloneDir)
+
+                    print("\nVOiCES subset ready for benchmarking")
+                    print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+
+                } else {
+                    print("Git clone failed")
+                    try? FileManager.default.removeItem(at: cloneDir)
+                }
+
+            } catch {
+                print("Download failed: \(error)")
                 try? FileManager.default.removeItem(at: cloneDir)
             }
-            
-        } catch {
-            print("❌ Download failed: \(error)")
-            try? FileManager.default.removeItem(at: cloneDir)
         }
     }
-}
 
 #endif

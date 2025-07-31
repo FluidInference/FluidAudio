@@ -13,6 +13,10 @@ FluidAudio is a speaker diarization system for Apple platforms using Core ML mod
 - Use actors, `@MainActor`, or proper locking mechanisms instead
 - If you encounter Sendable conformance issues, fix them properly rather than bypassing with `@unchecked`
 
+### DO NOT USE EMOJIs
+
+- Avoid using emojis as much as possible
+
 ## Current Performance Status
 
 - **Achieved**: 17.7% DER

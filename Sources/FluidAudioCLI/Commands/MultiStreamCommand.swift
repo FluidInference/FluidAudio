@@ -10,7 +10,7 @@
         static func run(arguments: [String]) async {
             // Parse arguments
             guard !arguments.isEmpty else {
-                print("❌ No audio files specified")
+                print("No audio files specified")
                 printUsage()
                 exit(1)
             }
@@ -62,7 +62,7 @@
                     let micBuffer = AVAudioPCMBuffer(
                         pcmFormat: micFormat, frameCapacity: micFrameCount)
                 else {
-                    print("❌ Failed to create microphone audio buffer")
+                    print("Failed to create microphone audio buffer")
                     return
                 }
                 try micFileHandle.read(into: micBuffer)
@@ -77,7 +77,7 @@
                     let systemBuffer = AVAudioPCMBuffer(
                         pcmFormat: systemFormat, frameCapacity: systemFrameCount)
                 else {
-                    print("❌ Failed to create system audio buffer")
+                    print("Failed to create system audio buffer")
                     return
                 }
                 try systemFileHandle.read(into: systemBuffer)
@@ -90,7 +90,7 @@
                     "  Duration: \(String(format: "%.2f", Double(micFileHandle.length) / micFormat.sampleRate)) seconds"
                 )
 
-                print("\n💻 System audio file:")
+                print("\nSystem audio file:")
                 print("  Sample rate: \(systemFormat.sampleRate) Hz")
                 print("  Channels: \(systemFormat.channelCount)")
                 print(
@@ -98,29 +98,29 @@
                 )
 
                 // Create a streaming session
-                print("🔄 Creating streaming session...")
+                print("Creating streaming session...")
                 let session = StreamingAsrSession()
 
                 // Initialize models once
-                print("📦 Loading ASR models (shared across streams)...")
+                print("Loading ASR models (shared across streams)...")
                 let startTime = Date()
                 try await session.initialize()
                 let loadTime = Date().timeIntervalSince(startTime)
-                print("✅ Models loaded in \(String(format: "%.2f", loadTime))s\n")
+                print("Models loaded in \(String(format: "%.2f", loadTime))s\n")
 
                 // Create streams for different sources
-                print("🎙️ Creating streams for different audio sources...")
+                print("Creating streams for different audio sources...")
                 let micStream = try await session.createStream(
                     source: .microphone,
                     config: .default
                 )
-                print("✅ Created microphone stream")
+                print("Created microphone stream")
 
                 let systemStream = try await session.createStream(
                     source: .system,
                     config: .default
                 )
-                print("✅ Created system audio stream\n")
+                print("Created system audio stream\n")
 
                 // Listen for updates from both streams (only if debug enabled)
                 let micTask = Task {
@@ -136,7 +136,7 @@
                     }
                 }
 
-                print("🎵 Streaming audio files in parallel...")
+                print("Streaming audio files in parallel...")
                 print("  Both streams using default config (10.0s chunks)\n")
 
                 // Process both files in parallel
@@ -162,7 +162,7 @@
                 await micProcessingTask.value
                 await systemProcessingTask.value
 
-                print("⏳ Finalizing transcriptions...")
+                print("Finalizing transcriptions...")
 
                 // Get final results
                 let micFinal = try await micStream.finish()
@@ -173,30 +173,26 @@
                 systemTask.cancel()
 
                 // Print results
-                print("\n" + String(repeating: "=", count: 60))
-                print("📝 TRANSCRIPTION RESULTS")
-                print(String(repeating: "=", count: 60))
+                print("\n" + String(repeating: "=", count: 60) + "\n")
+                print("TRANSCRIPTION RESULTS\n")
+                print(String(repeating: "=", count: 60) + "\n")
 
-                print("\n🎙️ MICROPHONE STREAM:")
+                print("\nMICROPHONE STREAM:")
                 print("\(micFinal)")
 
-                print("\n💻 SYSTEM AUDIO STREAM:")
+                print("\nSYSTEM AUDIO STREAM:")
                 print("\(systemFinal)")
 
-                // Show active streams
-                print("\n🔍 Session info:")
+                print("\nSession info:")
                 let activeStreams = await session.activeStreams
                 print("Active streams: \(activeStreams.count)")
                 for (source, stream) in activeStreams {
                     print("  - \(source): \(await stream.source)")
                 }
 
-                // Cleanup
                 await session.cleanup()
-                print("\n✅ Session cleaned up")
-
             } catch {
-                print("❌ Error: \(error)")
+                print("Error: \(error)")
             }
         }
 

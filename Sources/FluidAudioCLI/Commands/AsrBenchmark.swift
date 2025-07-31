@@ -121,7 +121,7 @@ public class ASRBenchmark {
                 if config.debugMode && index > 0 {
                     logger.info("   🔍 Processing file \(index + 1)")
                 }
-                
+
                 // Reset decoder state for each new file
                 try await asrManager.resetDecoderState(for: .microphone)
 
@@ -501,7 +501,7 @@ extension ASRBenchmark {
                     print("   Models appear to be working: \(asrManager.isAvailable)")
                 }
             } catch {
-                print("❌ Failed to initialize ASR system: \(error)")
+                print("Failed to initialize ASR system: \(error)")
                 print("   Error type: \(type(of: error))")
                 print("   Error details: \(error.localizedDescription)")
 
