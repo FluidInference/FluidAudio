@@ -54,7 +54,7 @@ let finalTranscript = try await streamingAsr.finish()
 ### Default Configuration
 ```swift
 let streamingAsr = StreamingAsrManager(config: .default)
-// Chunk duration: 2.5s
+// Chunk duration: 10.0s (optimized for TDT decoder)
 // Confirmation threshold: 0.85
 // Balanced accuracy and latency
 ```
@@ -62,7 +62,7 @@ let streamingAsr = StreamingAsrManager(config: .default)
 ### Low Latency Configuration
 ```swift
 let streamingAsr = StreamingAsrManager(config: .lowLatency)
-// Chunk duration: 2.0s
+// Chunk duration: 5.0s (minimum viable for TDT decoder)
 // Confirmation threshold: 0.75
 // Faster updates with slightly lower accuracy
 ```
@@ -70,7 +70,7 @@ let streamingAsr = StreamingAsrManager(config: .lowLatency)
 ### High Accuracy Configuration
 ```swift
 let streamingAsr = StreamingAsrManager(config: .highAccuracy)
-// Chunk duration: 3.0s
+// Chunk duration: 10.0s (optimal for TDT decoder accuracy)
 // Confirmation threshold: 0.90
 // More accurate with slightly higher latency
 ```
@@ -174,10 +174,15 @@ do {
 
 ## Performance Considerations
 
-- **Chunk Duration**: Longer chunks (2.5-3.0s) provide better accuracy but higher latency
+- **Chunk Duration**: The TDT (Token Duration Transducer) decoder requires longer chunks for optimal performance:
+  - Minimum viable: 5.0s (may still produce some empty results)
+  - Recommended: 10.0s (optimal balance of latency and accuracy)
+  - Note: This is a significant increase from typical streaming ASR systems due to TDT's architecture
 - **Confirmation Threshold**: Higher thresholds (0.85-0.90) reduce false confirmations
 - **Buffer Size**: Internal buffer holds up to 10 seconds of audio
 - **Model Download**: First use downloads ~40MB of models (cached afterward)
+
+> **Migration Note**: Chunk durations have increased significantly from earlier versions to support the TDT decoder. If you need lower latency, consider using custom configuration, but be aware that chunks shorter than 5.0s may result in empty or poor transcriptions.
 
 ## Comparison with RealtimeAsrManager
 

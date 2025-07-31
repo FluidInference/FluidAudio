@@ -440,27 +440,31 @@ public final class AsrManager {
     internal func transcribeWithState(_ audioSamples: [Float], decoderState: inout DecoderState)
         async throws -> ASRResult
     {
-        logger.debug("transcribeWithState: processing \(audioSamples.count) samples")
-        // Log decoder state values before processing
-        let hiddenBefore = (
-            decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
-        )
-        let cellBefore = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
-        logger.debug(
-            "Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]"
-        )
+        if config.enableDebug {
+            logger.debug("transcribeWithState: processing \(audioSamples.count) samples")
+            // Log decoder state values before processing
+            let hiddenBefore = (
+                decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
+            )
+            let cellBefore = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
+            logger.debug(
+                "Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]"
+            )
+        }
 
         let result = try await transcribeUnifiedWithState(audioSamples, decoderState: &decoderState)
 
-        // Log decoder state values after processing
-        let hiddenAfter = (
-            decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
-        )
-        let cellAfter = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
-        logger.debug(
-            "Decoder state after: hidden[\(hiddenAfter.0),\(hiddenAfter.1)], cell[\(cellAfter.0),\(cellAfter.1)]"
-        )
-        logger.debug("Transcription result: '\(result.text)'")
+        if config.enableDebug {
+            // Log decoder state values after processing
+            let hiddenAfter = (
+                decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
+            )
+            let cellAfter = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
+            logger.debug(
+                "Decoder state after: hidden[\(hiddenAfter.0),\(hiddenAfter.1)], cell[\(cellAfter.0),\(cellAfter.1)]"
+            )
+            logger.debug("Transcription result: '\(result.text)'")
+        }
 
         return result
     }

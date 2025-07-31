@@ -3,6 +3,29 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+/// Thread-safe tracker for updates from multiple streams
+@available(macOS 13.0, *)
+actor UpdateTracker {
+    private var micUpdates: [String] = []
+    private var systemUpdates: [String] = []
+    
+    func addMicUpdate(_ text: String) {
+        micUpdates.append(text)
+    }
+    
+    func addSystemUpdate(_ text: String) {
+        systemUpdates.append(text)
+    }
+    
+    func getMicUpdateCount() -> Int {
+        return micUpdates.count
+    }
+    
+    func getSystemUpdateCount() -> Int {
+        return systemUpdates.count
+    }
+}
+
 /// Command to demonstrate multi-stream ASR with shared model loading
 @available(macOS 13.0, *)
 enum MultiStreamCommand {
@@ -115,9 +138,8 @@ enum MultiStreamCommand {
             )
             print("✅ Created system audio stream\n")
             
-            // Set up update tracking
-            var micUpdates: [String] = []
-            var systemUpdates: [String] = []
+            // Set up update tracking with thread-safe actor
+            let updateTracker = UpdateTracker()
             
             // Listen for updates from both streams
             let micTask = Task {
@@ -125,7 +147,7 @@ enum MultiStreamCommand {
                     if showDebug {
                         print("[MIC] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                     }
-                    micUpdates.append(update.text)
+                    await updateTracker.addMicUpdate(update.text)
                 }
             }
             
@@ -134,13 +156,13 @@ enum MultiStreamCommand {
                     if showDebug {
                         print("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                     }
-                    systemUpdates.append(update.text)
+                    await updateTracker.addSystemUpdate(update.text)
                 }
             }
             
             print("🎵 Streaming audio files in parallel...")
-            print("  Microphone stream: Low-latency config (2.0s chunks)")
-            print("  System stream: Default config (2.5s chunks)\n")
+            print("  Microphone stream: Low-latency config (5.0s chunks)")
+            print("  System stream: Default config (10.0s chunks)\n")
             
             // Process both files in parallel
             let micProcessingTask = Task {
@@ -184,13 +206,13 @@ enum MultiStreamCommand {
             
             print("\n🎙️ MICROPHONE STREAM (Low-latency):")
             print("Final: \(micFinal)")
-            print("Updates received: \(micUpdates.count)")
+            print("Updates received: \(await updateTracker.getMicUpdateCount())")
             print("Confirmed: \(await micStream.confirmedTranscript)")
             print("Volatile: \(await micStream.volatileTranscript)")
             
             print("\n💻 SYSTEM AUDIO STREAM (Default):")
             print("Final: \(systemFinal)")
-            print("Updates received: \(systemUpdates.count)")
+            print("Updates received: \(await updateTracker.getSystemUpdateCount())")
             print("Confirmed: \(await systemStream.confirmedTranscript)")
             print("Volatile: \(await systemStream.volatileTranscript)")
             

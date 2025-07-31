@@ -5,11 +5,11 @@
 //  Copyright © 2025 Brandon Weng. All rights reserved.
 //
 
-/// Optimized TDT decoder with hybrid CoreML + Metal acceleration
-import Accelerate
 import CoreML
 import Foundation
 import OSLog
+/// Optimized TDT decoder with hybrid CoreML + Metal acceleration
+import Accelerate
 
 public struct TdtConfig: Sendable {
     public let durations: [Int]

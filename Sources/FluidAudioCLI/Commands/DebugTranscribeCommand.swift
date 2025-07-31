@@ -94,7 +94,6 @@ enum DebugTranscribeCommand {
                 while position < audioSamples.count {
                     let endPos = min(position + chunkSize, audioSamples.count)
                     let chunk = Array(audioSamples[position..<endPos])
-                    let chunkDuration = Float(chunk.count) / 16000.0
                     
                     let result = try await asrManager.transcribe(chunk)
                     

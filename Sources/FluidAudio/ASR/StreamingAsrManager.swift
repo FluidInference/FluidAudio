@@ -4,6 +4,11 @@ import OSLog
 
 /// A high-level streaming ASR manager that provides a simple API for real-time transcription
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
+///
+/// - Important: Chunk durations have been increased significantly from earlier versions to support
+///   the TDT (Token Duration Transducer) decoder. The minimum viable chunk duration is 5.0 seconds.
+///   Use the `.legacy` configuration preset if you need the old behavior, but be aware that
+///   transcription quality may suffer.
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "StreamingASR")
@@ -89,7 +94,7 @@ public actor StreamingAsrManager {
 
             logger.info("Recognition task started, waiting for audio...")
 
-            for await pcmBuffer in await inputSequence {
+            for await pcmBuffer in await self.inputSequence {
                 do {
                     // Convert to 16kHz mono
                     let samples = try await audioConverter.convertToAsrFormat(pcmBuffer)
@@ -286,6 +291,14 @@ public struct StreamingAsrConfig: Sendable {
     public static let highAccuracy = StreamingAsrConfig(
         confirmationThreshold: 0.9,
         chunkDuration: 10.0,  // Increased from 3.0s for best accuracy
+        enableDebug: false
+    )
+    
+    /// Legacy configuration with pre-TDT chunk durations
+    /// - Warning: These shorter chunks may result in empty or poor quality transcriptions with the TDT decoder
+    public static let legacy = StreamingAsrConfig(
+        confirmationThreshold: 0.85,
+        chunkDuration: 2.5,  // Original duration - may not work well with TDT
         enableDebug: false
     )
 

@@ -171,6 +171,8 @@ try audioEngine.start()
 let finalText = try await streamingAsr.finish()
 ```
 
+> **Note**: The default configuration uses 10-second chunks optimized for the TDT decoder. For lower latency, use `.lowLatency` config (5s chunks) or see the [documentation](Documentation/StreamingASR.md) for custom configurations.
+
 ### Speaker Diarization
 
 ```swift

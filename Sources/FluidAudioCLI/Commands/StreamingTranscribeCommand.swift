@@ -3,6 +3,29 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+/// Thread-safe tracker for transcription updates
+@available(macOS 13.0, *)
+actor TranscriptionTracker {
+    private var volatileUpdates: [String] = []
+    private var confirmedUpdates: [String] = []
+    
+    func addVolatileUpdate(_ text: String) {
+        volatileUpdates.append(text)
+    }
+    
+    func addConfirmedUpdate(_ text: String) {
+        confirmedUpdates.append(text)
+    }
+    
+    func getVolatileCount() -> Int {
+        return volatileUpdates.count
+    }
+    
+    func getConfirmedCount() -> Int {
+        return confirmedUpdates.count
+    }
+}
+
 /// Command to transcribe audio files using StreamingAsrManager
 @available(macOS 13.0, *)
 enum StreamingTranscribeCommand {
@@ -138,8 +161,7 @@ enum StreamingTranscribeCommand {
             try audioFileHandle.read(into: buffer)
             
             // Track transcription updates
-            var volatileUpdates: [String] = []
-            var confirmedUpdates: [String] = []
+            let tracker = TranscriptionTracker()
             let startTime = Date()
             
             // Listen for updates
@@ -152,10 +174,10 @@ enum StreamingTranscribeCommand {
                     
                     if update.isConfirmed {
                         print("✓ Confirmed: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))")
-                        confirmedUpdates.append(update.text)
+                        await tracker.addConfirmedUpdate(update.text)
                     } else {
                         print("~ Volatile: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))")
-                        volatileUpdates.append(update.text)
+                        await tracker.addVolatileUpdate(update.text)
                     }
                 }
             }
@@ -210,8 +232,8 @@ enum StreamingTranscribeCommand {
             print("\nFinal transcription:")
             print(finalText)
             print("\nStatistics:")
-            print("  Total volatile updates: \(volatileUpdates.count)")
-            print("  Total confirmed updates: \(confirmedUpdates.count)")
+            print("  Total volatile updates: \(await tracker.getVolatileCount())")
+            print("  Total confirmed updates: \(await tracker.getConfirmedCount())")
             print("  Final confirmed text: \(await streamingAsr.confirmedTranscript)")
             print("  Final volatile text: \(await streamingAsr.volatileTranscript)")
             
