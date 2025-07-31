@@ -71,7 +71,7 @@
             // Test transcription with StreamingAsrManager
             await testStreamingTranscription(
                 audioFile: audioFile,
-                configType: configType,
+                configType: configType
             )
 
             // Compare with legacy API if requested

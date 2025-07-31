@@ -145,7 +145,7 @@
                         buffer: micBuffer,
                         format: micFormat,
                         to: micStream,
-                        label: "MIC",
+                        label: "MIC"
                     )
                 }
 
@@ -154,7 +154,7 @@
                         buffer: systemBuffer,
                         format: systemFormat,
                         to: systemStream,
-                        label: "SYS",
+                        label: "SYS"
                     )
                 }
 
@@ -201,7 +201,7 @@
             buffer: AVAudioPCMBuffer,
             format: AVAudioFormat,
             to stream: StreamingAsrManager,
-            label: String,
+            label: String
         ) async {
             let chunkDuration = 0.5  // 500ms chunks
             let samplesPerChunk = Int(chunkDuration * format.sampleRate)
