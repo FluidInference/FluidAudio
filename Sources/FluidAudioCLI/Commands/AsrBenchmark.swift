@@ -121,6 +121,9 @@ public class ASRBenchmark {
                 if config.debugMode && index > 0 {
                     logger.info("   🔍 Processing file \(index + 1)")
                 }
+                
+                // Reset decoder state for each new file
+                try await asrManager.resetDecoderState(for: .microphone)
 
                 let result = try await processLibriSpeechFile(
                     asrManager: asrManager, file: audioFile)

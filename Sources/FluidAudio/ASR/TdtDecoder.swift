@@ -70,6 +70,8 @@ internal struct TdtDecoder {
         decoderState: inout DecoderState
     ) async throws -> [Int] {
 
+        logger.debug("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
+        
         guard encoderSequenceLength > 1 else {
             logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
             return []
@@ -79,6 +81,7 @@ internal struct TdtDecoder {
         let encoderFrames = try preProcessEncoderOutput(encoderOutput, length: encoderSequenceLength)
 
         var hypothesis = TdtHypothesis(decState: decoderState)
+        hypothesis.lastToken = decoderState.lastToken  // Preserve last token from previous chunk
         var timeIndices = 0
         var safeTimeIndices = 0
         var timeIndicesCurrentLabels = 0
@@ -87,10 +90,18 @@ internal struct TdtDecoder {
 
         var lastTimestamp = -1
         var lastTimestampCount = 0
+        
+        logger.debug("TDT: Starting decoding loop, lastTimestep=\(lastTimestep)")
+        print("DEBUG TDT: Starting with decoder state present: \(decoderState.hiddenState[0].floatValue != 0)")
+        print("DEBUG TDT: Previous last token: \(hypothesis.lastToken ?? -1)")
 
         // Main decoding loop with optimizations
         while activeMask {
             var label = hypothesis.lastToken ?? sosId
+            
+            if timeIndices < 5 || timeIndices > lastTimestep - 5 {
+                logger.debug("TDT: timeIndices=\(timeIndices), label=\(label), tokens so far: \(hypothesis.ySequence)")
+            }
 
             // Use cached decoder inputs
             let decoderResult = try runDecoderOptimized(
@@ -161,6 +172,7 @@ internal struct TdtDecoder {
 
             // Update hypothesis
             if label != blankId {
+                logger.debug("TDT: Adding token \(label) at timeIndices=\(timeIndices) (actualDuration=\(actualDuration))")
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
@@ -188,6 +200,11 @@ internal struct TdtDecoder {
         if let finalState = hypothesis.decState {
             decoderState = finalState
         }
+        
+        // Save the last token for the next chunk
+        decoderState.lastToken = hypothesis.lastToken
+        
+        logger.debug("TDT: Decoding complete. Final tokens: \(hypothesis.ySequence)")
 
         return hypothesis.ySequence
     }

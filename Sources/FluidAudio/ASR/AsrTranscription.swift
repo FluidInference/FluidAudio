@@ -12,9 +12,11 @@ extension AsrManager {
         let startTime = Date()
         
         if audioSamples.count <= 160_000 {
+            let originalLength = audioSamples.count
             let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
             let (tokenIds, encoderSequenceLength) = try await executeMLInferenceWithFP16(
-                paddedAudio, 
+                paddedAudio,
+                originalLength: originalLength,
                 enableDebug: config.enableDebug
             )
             
@@ -37,11 +39,12 @@ extension AsrManager {
     /// Execute ML inference with FP16 optimization
     internal func executeMLInferenceWithFP16(
         _ paddedAudio: [Float],
+        originalLength: Int? = nil,
         enableDebug: Bool = false
     ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
         
         // Prepare input with ANE-aligned arrays and optionally convert to FP16
-        let melspectrogramInput = try await prepareMelSpectrogramInputFP16(paddedAudio)
+        let melspectrogramInput = try await prepareMelSpectrogramInputFP16(paddedAudio, actualLength: originalLength)
         
         // Prefetch for ANE if available
         if #available(macOS 14.0, iOS 17.0, *),
@@ -95,9 +98,10 @@ extension AsrManager {
         let startTime = Date()
 
         if audioSamples.count <= 160_000 {
+            let originalLength = audioSamples.count
             let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
             let (tokenIds, encoderSequenceLength) = try await executeMLInference(
-                paddedAudio, enableDebug: config.enableDebug)
+                paddedAudio, originalLength: originalLength, enableDebug: config.enableDebug)
 
             return processTranscriptionResult(
                 tokenIds: tokenIds,
@@ -123,9 +127,11 @@ extension AsrManager {
         let startTime = Date()
 
         if audioSamples.count <= 160_000 {
+            let originalLength = audioSamples.count
             let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
             let (tokenIds, encoderSequenceLength) = try await executeMLInferenceWithState(
                 paddedAudio,
+                originalLength: originalLength,
                 enableDebug: config.enableDebug,
                 decoderState: &decoderState
             )
@@ -148,10 +154,11 @@ extension AsrManager {
 
     internal func executeMLInference(
         _ paddedAudio: [Float],
+        originalLength: Int? = nil,
         enableDebug: Bool = false
     ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
 
-        let melspectrogramInput = try await prepareMelSpectrogramInput(paddedAudio)
+        let melspectrogramInput = try await prepareMelSpectrogramInput(paddedAudio, actualLength: originalLength)
 
         guard
             let melspectrogramOutput = try melspectrogramModel?.prediction(
@@ -195,11 +202,14 @@ extension AsrManager {
 
     internal func executeMLInferenceWithState(
         _ paddedAudio: [Float],
+        originalLength: Int? = nil,
         enableDebug: Bool = false,
         decoderState: inout DecoderState
     ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
+        
+        logger.debug("executeMLInferenceWithState: paddedAudio=\(paddedAudio.count), originalLength=\(originalLength ?? paddedAudio.count)")
 
-        let melspectrogramInput = try await prepareMelSpectrogramInput(paddedAudio)
+        let melspectrogramInput = try await prepareMelSpectrogramInput(paddedAudio, actualLength: originalLength)
 
         guard
             let melspectrogramOutput = try melspectrogramModel?.prediction(
@@ -229,6 +239,8 @@ extension AsrManager {
         // Encoder_v2 already outputs in the correct format (B, T, D)
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
+        
+        logger.debug("Encoder output: sequenceLength=\(encoderSequenceLength)")
 
         let tokenIds = try await tdtDecode(
             encoderOutput: encoderHiddenStates,
@@ -236,6 +248,9 @@ extension AsrManager {
             originalAudioSamples: paddedAudio,
             decoderState: &decoderState
         )
+        
+        logger.debug("Generated token IDs: \(tokenIds)")
+        print("DEBUG: executeMLInferenceWithState generated \(tokenIds.count) tokens: \(tokenIds)")
 
         return (tokenIds, encoderSequenceLength)
     }

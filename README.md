@@ -16,6 +16,7 @@ For custom use cases and feedback, reach out on Discord.
 ## Features
 
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for real-time transcription
+- **NEW: StreamingAsrManager**: High-level streaming API with automatic audio conversion, AsyncStream support, and confidence-based transcription (similar to Apple's Speech API)
 - **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping 
 - **Voice Activity Detection (VAD)**: Production-ready VAD with 98% accuracy using CoreML models and adaptive thresholding
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
@@ -136,6 +137,41 @@ FluidAudio powers production applications including:
 Make a PR if you want to add your app!
 
 ## Quick Start
+
+### Real-time ASR with StreamingAsrManager (NEW - Recommended)
+
+```swift
+import AVFoundation
+import FluidAudio
+
+// Simple streaming ASR - handles everything automatically
+let streamingAsr = StreamingAsrManager()
+try await streamingAsr.start()
+
+// Set up audio capture (any format - auto-converts to 16kHz mono)
+let audioEngine = AVAudioEngine()
+let inputNode = audioEngine.inputNode
+inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputNode.outputFormat(forBus: 0)) { buffer, _ in
+    streamingAsr.streamAudio(buffer)  // No conversion needed!
+}
+
+// Listen for transcription updates
+Task {
+    for await update in streamingAsr.transcriptionUpdates {
+        if update.isConfirmed {
+            print("✓ \(update.text)")  // High confidence
+        } else {
+            print("~ \(update.text)")  // Low confidence (show in purple)
+        }
+    }
+}
+
+try audioEngine.start()
+// ... recording ...
+let finalText = try await streamingAsr.finish()
+```
+
+### Speaker Diarization
 
 ```swift
 import FluidAudio

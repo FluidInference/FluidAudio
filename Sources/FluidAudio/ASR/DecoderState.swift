@@ -5,6 +5,7 @@ import Foundation
 struct DecoderState {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
+    var lastToken: Int?
 
     enum InitError: Error {
         case aneAllocationFailed(String)
@@ -41,6 +42,7 @@ struct DecoderState {
     init(from other: DecoderState) throws {
         hiddenState = try MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
         cellState = try MLMultiArray(shape: other.cellState.shape, dataType: .float32)
+        lastToken = other.lastToken
 
         hiddenState.copyData(from: other.hiddenState)
         cellState.copyData(from: other.cellState)
