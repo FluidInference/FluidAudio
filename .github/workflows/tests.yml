@@ -41,7 +41,7 @@ jobs:
         run: swift build
 
       - name: Run tests
-        run: swift test --parallel
+        run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 10
 
   build-ios-library:
