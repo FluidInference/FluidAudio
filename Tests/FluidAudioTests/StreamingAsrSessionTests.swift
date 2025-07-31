@@ -64,17 +64,17 @@ final class StreamingAsrSessionTests: XCTestCase {
             "A stream already exists for source: microphone"
         )
 
-        let systemStreamExistsError = StreamingAsrError.streamAlreadyExists(.systemAudio)
+        let systemStreamExistsError = StreamingAsrError.streamAlreadyExists(.system)
         XCTAssertEqual(
             systemStreamExistsError.errorDescription,
-            "A stream already exists for source: systemAudio"
+            "A stream already exists for source: system"
         )
     }
 
     // MARK: - Configuration Tests
 
     func testSessionWithDifferentConfigurations() async throws {
-        let session = StreamingAsrSession()
+        _ = StreamingAsrSession()
 
         // Test that session can be created with different configs
         let configs = [
@@ -96,7 +96,7 @@ final class StreamingAsrSessionTests: XCTestCase {
 
     func testAudioSourceValues() {
         // Ensure audio sources are properly defined
-        let sources: [AudioSource] = [.microphone, .systemAudio]
+        let sources: [AudioSource] = [.microphone, .system]
         
         for source in sources {
             // Test that sources can be used as dictionary keys
@@ -158,7 +158,7 @@ final class StreamingAsrSessionTests: XCTestCase {
         let micStream = await session.getStream(for: .microphone)
         XCTAssertNil(micStream) // Should be nil before creation
         
-        let systemStream = await session.getStream(for: .systemAudio)
+        let systemStream = await session.getStream(for: .system)
         XCTAssertNil(systemStream) // Should be nil before creation
     }
 }

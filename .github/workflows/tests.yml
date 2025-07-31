@@ -41,7 +41,7 @@ jobs:
         run: swift build
 
       - name: Run tests
-        run: swift test
+        run: swift test --parallel
         timeout-minutes: 10
 
   build-ios-library:
@@ -64,7 +64,7 @@ jobs:
       - name: Clean up any build artifacts
         run: |
           rm -rf .swiftpm .build
-          
+
       - name: Build iOS library (simulator)
         run: |
           set -e
