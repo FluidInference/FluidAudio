@@ -20,10 +20,16 @@ public actor StreamingAsrManager {
     // ASR components
     private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
+    private var audioSource: AudioSource = .microphone
     
     // Two-tier transcription state (like Apple's Speech API)
     public private(set) var volatileTranscript: String = ""
     public private(set) var confirmedTranscript: String = ""
+    
+    /// The audio source this stream is configured for
+    public var source: AudioSource {
+        return audioSource
+    }
     
     // Metrics
     private var startTime: Date?
@@ -44,13 +50,30 @@ public actor StreamingAsrManager {
     
     /// Start the streaming ASR engine
     /// This will download models if needed and begin processing
-    public func start() async throws {
-        logger.info("Starting streaming ASR engine...")
+    /// - Parameter source: The audio source to use (default: microphone)
+    public func start(source: AudioSource = .microphone) async throws {
+        logger.info("Starting streaming ASR engine for source: \(String(describing: source))...")
         
         // Initialize ASR models
         let models = try await AsrModels.downloadAndLoad()
+        try await start(models: models, source: source)
+    }
+    
+    /// Start the streaming ASR engine with pre-loaded models
+    /// - Parameters:
+    ///   - models: Pre-loaded ASR models to use
+    ///   - source: The audio source to use (default: microphone)
+    public func start(models: AsrModels, source: AudioSource = .microphone) async throws {
+        logger.info("Starting streaming ASR engine with pre-loaded models for source: \(String(describing: source))...")
+        
+        self.audioSource = source
+        
+        // Initialize ASR manager with provided models
         asrManager = AsrManager(config: config.asrConfig)
         try await asrManager?.initialize(models: models)
+        
+        // Reset decoder state for the specific source
+        try await asrManager?.resetDecoderState(for: source)
         
         startTime = Date()
         
@@ -141,12 +164,18 @@ public actor StreamingAsrManager {
     }
     
     /// Reset the transcriber for a new session
-    public func reset() {
+    public func reset() async throws {
         volatileTranscript = ""
         confirmedTranscript = ""
         processedChunks = 0
         startTime = Date()
-        logger.info("StreamingAsrManager reset")
+        
+        // Reset decoder state for the current audio source
+        if let asrManager = asrManager {
+            try await asrManager.resetDecoderState(for: audioSource)
+        }
+        
+        logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
     
     /// Cancel streaming without getting results
@@ -171,8 +200,8 @@ public actor StreamingAsrManager {
         do {
             let chunkStartTime = Date()
             
-            // Transcribe the chunk
-            let result = try await asrManager.transcribe(chunk, source: .microphone)
+            // Transcribe the chunk using the configured audio source
+            let result = try await asrManager.transcribe(chunk, source: audioSource)
             
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1

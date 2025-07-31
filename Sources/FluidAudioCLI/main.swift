@@ -17,6 +17,7 @@
                 asr-benchmark           Run ASR benchmark on LibriSpeech
                 realtime-transcribe     Realtime transcription simulation
                 streaming-transcribe    Test new StreamingAsrManager API
+                multi-stream            Test multi-stream ASR with shared models
                 download                Download evaluation datasets
                 help                    Show this help message
 
@@ -82,6 +83,13 @@
                 await StreamingTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
             } else {
                 print("❌ Streaming transcribe requires macOS 13.0 or later")
+                exit(1)
+            }
+        case "multi-stream":
+            if #available(macOS 13.0, *) {
+                await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
+            } else {
+                print("❌ Multi-stream requires macOS 13.0 or later")
                 exit(1)
             }
         case "process":

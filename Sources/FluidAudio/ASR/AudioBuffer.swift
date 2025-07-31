@@ -1,6 +1,18 @@
 import Foundation
 import OSLog
 
+/// Audio buffer error types
+enum AudioBufferError: Error, LocalizedError {
+    case bufferOverflow
+    
+    var errorDescription: String? {
+        switch self {
+        case .bufferOverflow:
+            return "Audio buffer overflow - not enough space for new samples"
+        }
+    }
+}
+
 /// Thread-safe circular audio buffer using Swift concurrency
 @available(macOS 13.0, iOS 16.0, *)
 actor AudioBuffer {
@@ -28,7 +40,7 @@ actor AudioBuffer {
     /// Append audio samples to the buffer
     func append(_ samples: [Float]) throws {
         guard samples.count <= capacity - count else {
-            throw RealtimeAsrError.bufferOverflow
+            throw AudioBufferError.bufferOverflow
         }
         
         for sample in samples {
@@ -55,7 +67,7 @@ actor AudioBuffer {
         chunk.reserveCapacity(size)
         
         var pos = readPosition
-        for i in 0..<size {
+        for _ in 0..<size {
             chunk.append(buffer[pos])
             pos = (pos + 1) % capacity
         }

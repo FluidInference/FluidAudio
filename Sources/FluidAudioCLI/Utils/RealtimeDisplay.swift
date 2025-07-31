@@ -161,6 +161,8 @@ actor RealtimeDisplay {
             return ANSI.yellow
         case .confirmed:
             return ""  // Default color
+        case .finalized:
+            return ANSI.green
         }
     }
     
