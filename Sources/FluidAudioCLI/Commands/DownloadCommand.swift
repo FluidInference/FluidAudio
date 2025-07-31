@@ -72,7 +72,6 @@ enum DownloadCommand {
                     "ParakeetEncoder_v2.mlmodelc",
                     "ParakeetDecoder.mlmodelc",
                     "RNNTJoint.mlmodelc",
-                    "TokenDurationPrediction.mlmodelc",
                 ]
                 _ = try await DownloadUtils.loadModels(
                     .parakeet,
