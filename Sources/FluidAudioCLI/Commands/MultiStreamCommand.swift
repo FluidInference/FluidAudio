@@ -3,28 +3,6 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Thread-safe tracker for updates from multiple streams
-@available(macOS 13.0, *)
-actor UpdateTracker {
-    private var micUpdates: [String] = []
-    private var systemUpdates: [String] = []
-    
-    func addMicUpdate(_ text: String) {
-        micUpdates.append(text)
-    }
-    
-    func addSystemUpdate(_ text: String) {
-        systemUpdates.append(text)
-    }
-    
-    func getMicUpdateCount() -> Int {
-        return micUpdates.count
-    }
-    
-    func getSystemUpdateCount() -> Int {
-        return systemUpdates.count
-    }
-}
 
 /// Command to demonstrate multi-stream ASR with shared model loading
 @available(macOS 13.0, *)
@@ -128,7 +106,7 @@ enum MultiStreamCommand {
             print("🎙️ Creating streams for different audio sources...")
             let micStream = try await session.createStream(
                 source: .microphone,
-                config: .lowLatency
+                config: .default
             )
             print("✅ Created microphone stream")
             
@@ -138,31 +116,25 @@ enum MultiStreamCommand {
             )
             print("✅ Created system audio stream\n")
             
-            // Set up update tracking with thread-safe actor
-            let updateTracker = UpdateTracker()
-            
-            // Listen for updates from both streams
+            // Listen for updates from both streams (only if debug enabled)
             let micTask = Task {
-                for await update in await micStream.transcriptionUpdates {
-                    if showDebug {
+                if showDebug {
+                    for await update in await micStream.transcriptionUpdates {
                         print("[MIC] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                     }
-                    await updateTracker.addMicUpdate(update.text)
                 }
             }
             
             let systemTask = Task {
-                for await update in await systemStream.transcriptionUpdates {
-                    if showDebug {
+                if showDebug {
+                    for await update in await systemStream.transcriptionUpdates {
                         print("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                     }
-                    await updateTracker.addSystemUpdate(update.text)
                 }
             }
             
             print("🎵 Streaming audio files in parallel...")
-            print("  Microphone stream: Low-latency config (5.0s chunks)")
-            print("  System stream: Default config (10.0s chunks)\n")
+            print("  Both streams using default config (10.0s chunks)\n")
             
             // Process both files in parallel
             let micProcessingTask = Task {
@@ -204,20 +176,11 @@ enum MultiStreamCommand {
             print("📝 TRANSCRIPTION RESULTS")
             print(String(repeating: "=", count: 60))
             
-            print("\n🎙️ MICROPHONE STREAM (Low-latency):")
-            print("Final: \(micFinal)")
-            print("Updates received: \(await updateTracker.getMicUpdateCount())")
-            print("Confirmed: \(await micStream.confirmedTranscript)")
-            print("Volatile: \(await micStream.volatileTranscript)")
+            print("\n🎙️ MICROPHONE STREAM:")
+            print("\(micFinal)")
             
-            print("\n💻 SYSTEM AUDIO STREAM (Default):")
-            print("Final: \(systemFinal)")
-            print("Updates received: \(await updateTracker.getSystemUpdateCount())")
-            print("Confirmed: \(await systemStream.confirmedTranscript)")
-            print("Volatile: \(await systemStream.volatileTranscript)")
-            
-            print("\n📊 COMPARISON:")
-            print("Match: \(micFinal == systemFinal ? "✅ YES" : "❌ NO")")
+            print("\n💻 SYSTEM AUDIO STREAM:")
+            print("\(systemFinal)")
             
             // Show active streams
             print("\n🔍 Session info:")
@@ -314,7 +277,6 @@ enum MultiStreamCommand {
             This command demonstrates:
             - Loading ASR models once and sharing across streams
             - Creating separate streams for microphone and system audio
-            - Different configurations for each stream
             - Parallel transcription with shared resources
             """
         )
