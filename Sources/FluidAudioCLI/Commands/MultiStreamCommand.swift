@@ -18,7 +18,6 @@ enum MultiStreamCommand {
         let audioFile1 = arguments[0]
         var audioFile2: String? = nil
         var showDebug = false
-        var simulateRealtime = true
         
         // Parse options
         var i = 1
@@ -26,8 +25,6 @@ enum MultiStreamCommand {
             switch arguments[i] {
             case "--debug":
                 showDebug = true
-            case "--no-simulate":
-                simulateRealtime = false
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -152,8 +149,7 @@ enum MultiStreamCommand {
                     format: micFormat,
                     to: micStream,
                     label: "MIC",
-                    showDebug: showDebug,
-                    simulateRealtime: simulateRealtime
+                    showDebug: showDebug
                 )
             }
             
@@ -163,8 +159,7 @@ enum MultiStreamCommand {
                     format: systemFormat,
                     to: systemStream,
                     label: "SYS",
-                    showDebug: showDebug,
-                    simulateRealtime: simulateRealtime
+                    showDebug: showDebug
                 )
             }
             
@@ -225,13 +220,11 @@ enum MultiStreamCommand {
         format: AVAudioFormat,
         to stream: StreamingAsrManager,
         label: String,
-        showDebug: Bool,
-        simulateRealtime: Bool
+        showDebug: Bool
     ) async {
         let chunkDuration = 0.5 // 500ms chunks
         let samplesPerChunk = Int(chunkDuration * format.sampleRate)
         var position = 0
-        let startTime = Date()
         
         while position < Int(buffer.frameLength) {
             let remainingSamples = Int(buffer.frameLength) - position
@@ -264,15 +257,7 @@ enum MultiStreamCommand {
                 print("[\(label)] Progress: \(String(format: "%.1f", progress))%")
             }
             
-            // Simulate real-time if requested
-            if simulateRealtime {
-                let expectedTime = TimeInterval(position) / TimeInterval(format.sampleRate)
-                let actualTime = Date().timeIntervalSince(startTime)
-                if expectedTime > actualTime {
-                    let sleepTime = expectedTime - actualTime
-                    try? await Task.sleep(nanoseconds: UInt64(sleepTime * 1_000_000_000))
-                }
-            }
+            // Process as fast as possible
             
             position += chunkSize
         }
@@ -291,7 +276,6 @@ enum MultiStreamCommand {
             
             Options:
                 --debug            Show debug information
-                --no-simulate      Process as fast as possible (no real-time simulation)
                 --help, -h         Show this help message
             
             Examples:
@@ -304,8 +288,6 @@ enum MultiStreamCommand {
                 # With debug output
                 fluidaudio multi-stream audio1.wav audio2.wav --debug
                 
-                # Process as fast as possible
-                fluidaudio multi-stream audio1.wav audio2.wav --no-simulate
             
             This command demonstrates:
             - Loading ASR models once and sharing across streams

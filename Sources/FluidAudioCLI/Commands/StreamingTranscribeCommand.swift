@@ -3,7 +3,7 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Command to test the new StreamingAsrManager interface
+/// Command to transcribe audio files using StreamingAsrManager
 @available(macOS 13.0, *)
 enum StreamingTranscribeCommand {
     
@@ -19,7 +19,6 @@ enum StreamingTranscribeCommand {
         var showDebug = false
         var compareWithLegacy = false
         var configType = "default"
-        var simulateRealtime = true
         
         // Parse options
         var i = 1
@@ -34,8 +33,6 @@ enum StreamingTranscribeCommand {
                     configType = arguments[i + 1]
                     i += 1
                 }
-            case "--no-simulate":
-                simulateRealtime = false
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -45,8 +42,8 @@ enum StreamingTranscribeCommand {
             i += 1
         }
         
-        print("🎤 StreamingAsrManager Test")
-        print("========================\n")
+        print("🎤 Audio Transcription")
+        print("=====================\n")
         
         // Test loading audio at different sample rates
         await testAudioConversion(audioFile: audioFile)
@@ -55,8 +52,7 @@ enum StreamingTranscribeCommand {
         await testStreamingTranscription(
             audioFile: audioFile,
             configType: configType,
-            showDebug: showDebug,
-            simulateRealtime: simulateRealtime
+            showDebug: showDebug
         )
         
         // Compare with legacy API if requested
@@ -95,8 +91,7 @@ enum StreamingTranscribeCommand {
     private static func testStreamingTranscription(
         audioFile: String,
         configType: String,
-        showDebug: Bool,
-        simulateRealtime: Bool = true
+        showDebug: Bool
     ) async {
         print("🎙️ Testing Streaming Transcription")
         print("----------------------------------")
@@ -121,7 +116,7 @@ enum StreamingTranscribeCommand {
         print()
         
         // Create StreamingAsrManager
-        let streamingAsr = await StreamingAsrManager(config: config)
+        let streamingAsr = StreamingAsrManager(config: config)
         
         do {
             // Start the engine
@@ -197,10 +192,7 @@ enum StreamingTranscribeCommand {
                 // Stream the chunk
                 await streamingAsr.streamAudio(chunkBuffer)
                 
-                // Simulate real-time streaming if requested
-                if simulateRealtime {
-                    try await Task.sleep(nanoseconds: UInt64(chunkDuration * 1_000_000_000))
-                }
+                // Process as fast as possible - no artificial delays
                 
                 position += chunkSize
             }
@@ -278,7 +270,7 @@ enum StreamingTranscribeCommand {
             
             try audioFileHandle.read(into: buffer)
             
-            let streamingAsr = await StreamingAsrManager()
+            let streamingAsr = StreamingAsrManager()
             try await streamingAsr.start()
             
             let streamingStart = Date()
@@ -311,27 +303,26 @@ enum StreamingTranscribeCommand {
         print(
             """
             
-            Streaming Transcribe Command Usage:
-                fluidaudio streaming-transcribe <audio_file> [options]
+            Transcribe Command Usage:
+                fluidaudio transcribe <audio_file> [options]
             
             Options:
                 --config <type>    Configuration type: default, low-latency, high-accuracy
                 --debug            Show debug information
-                --compare          Compare with legacy AsrManager API
-                --no-simulate      Disable real-time simulation (process as fast as possible)
+                --compare          Compare with direct AsrManager API
                 --help, -h         Show this help message
             
             Examples:
-                fluidaudio streaming-transcribe audio.wav
-                fluidaudio streaming-transcribe audio.wav --config low-latency
-                fluidaudio streaming-transcribe audio.wav --compare
-                fluidaudio streaming-transcribe audio.wav --debug
+                fluidaudio transcribe audio.wav
+                fluidaudio transcribe audio.wav --config low-latency
+                fluidaudio transcribe audio.wav --compare
+                fluidaudio transcribe audio.wav --debug
             
-            This command tests the new StreamingAsrManager API which provides:
-            - Automatic audio format conversion
-            - AsyncStream-based transcription updates
-            - Volatile/confirmed text states
-            - Simplified integration
+            This command uses StreamingAsrManager which provides:
+            - Automatic audio format conversion to 16kHz mono
+            - Real-time transcription updates
+            - Volatile (unconfirmed) and confirmed text states
+            - AsyncStream-based API for easy integration
             """
         )
     }
