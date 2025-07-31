@@ -17,6 +17,8 @@
                 asr-benchmark           Run ASR benchmark on LibriSpeech
                 transcribe              Transcribe audio file using streaming ASR
                 multi-stream            Transcribe multiple audio files in parallel
+                compare                 Compare streaming vs non-streaming ASR
+                debug-transcribe        Debug transcription issues with different chunk sizes
                 download                Download evaluation datasets
                 help                    Show this help message
 
@@ -77,6 +79,20 @@
                 await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
             } else {
                 print("❌ Multi-stream requires macOS 13.0 or later")
+                exit(1)
+            }
+        case "compare":
+            if #available(macOS 13.0, *) {
+                await CompareCommand.run(arguments: Array(arguments.dropFirst(2)))
+            } else {
+                print("❌ Compare requires macOS 13.0 or later")
+                exit(1)
+            }
+        case "debug-transcribe":
+            if #available(macOS 13.0, *) {
+                await DebugTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+            } else {
+                print("❌ Debug transcribe requires macOS 13.0 or later")
                 exit(1)
             }
         case "process":

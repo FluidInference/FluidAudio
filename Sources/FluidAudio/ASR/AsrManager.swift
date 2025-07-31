@@ -484,47 +484,42 @@ public final class AsrManager {
             }
         }
 
-        var result = ""
-        var lastWasSpace = false
-        var adjustedTimings: [TokenTiming] = []
-
+        // SentencePiece-compatible decoding algorithm:
+        // 1. Convert token IDs to token strings
+        var tokens: [String] = []
+        var tokenInfos: [(token: String, tokenId: Int, timing: TokenTiming?)] = []
+        
         for (index, tokenId) in tokenIds.enumerated() {
-            guard let token = vocabulary[tokenId], !token.isEmpty else { continue }
-
-            let timing = index < timings.count ? timings[index] : nil
-
-            if token.hasPrefix("▁") {
-                let cleanToken = String(token.dropFirst())
-                if !cleanToken.isEmpty {
-                    if !result.isEmpty && !lastWasSpace { result += " " }
-                    result += cleanToken
-                    lastWasSpace = false
-
-                    if let timing = timing {
-                        adjustedTimings.append(
-                            TokenTiming(
-                                token: cleanToken, tokenId: tokenId,
-                                startTime: timing.startTime, endTime: timing.endTime,
-                                confidence: timing.confidence
-                            ))
-                    }
-                }
-            } else {
-                result += token
-                lastWasSpace = false
-
-                if let timing = timing {
-                    adjustedTimings.append(
-                        TokenTiming(
-                            token: token, tokenId: tokenId,
-                            startTime: timing.startTime, endTime: timing.endTime,
-                            confidence: timing.confidence
-                        ))
-                }
+            if let token = vocabulary[tokenId], !token.isEmpty {
+                tokens.append(token)
+                let timing = index < timings.count ? timings[index] : nil
+                tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
             }
         }
-
-        return (result, adjustedTimings)
+        
+        // 2. Concatenate all tokens (this is how SentencePiece works)
+        let concatenated = tokens.joined()
+        
+        // 3. Replace ▁ with space (SentencePiece standard)
+        let text = concatenated.replacingOccurrences(of: "▁", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        
+        // 4. For now, return original timings as-is
+        // Note: Proper timing alignment would require tracking character positions
+        // through the concatenation and replacement process
+        let adjustedTimings = tokenInfos.compactMap { info in
+            info.timing.map { timing in
+                TokenTiming(
+                    token: info.token.replacingOccurrences(of: "▁", with: ""),
+                    tokenId: info.tokenId,
+                    startTime: timing.startTime,
+                    endTime: timing.endTime,
+                    confidence: timing.confidence
+                )
+            }
+        }
+        
+        return (text, adjustedTimings)
     }
 
     internal func extractFeatureValue(

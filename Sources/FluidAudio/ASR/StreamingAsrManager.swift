@@ -271,32 +271,46 @@ public struct StreamingAsrConfig: Sendable {
     /// Default configuration with balanced settings
     public static let `default` = StreamingAsrConfig(
         confirmationThreshold: 0.85,
-        chunkDuration: 2.5,
+        chunkDuration: 10.0,  // Increased from 2.5s to ensure TDT decoder has sufficient context
         enableDebug: false
     )
 
     /// Low latency configuration with faster updates
     public static let lowLatency = StreamingAsrConfig(
         confirmationThreshold: 0.75,
-        chunkDuration: 2.0,
+        chunkDuration: 5.0,  // Increased from 2.0s - minimum viable for TDT
         enableDebug: false
     )
 
     /// High accuracy configuration with conservative confirmation
     public static let highAccuracy = StreamingAsrConfig(
         confirmationThreshold: 0.9,
-        chunkDuration: 3.0,
+        chunkDuration: 10.0,  // Increased from 3.0s for best accuracy
         enableDebug: false
     )
 
     public init(
         confirmationThreshold: Float = 0.85,
-        chunkDuration: TimeInterval = 2.5,
+        chunkDuration: TimeInterval = 10.0,  // Updated default to 10s for TDT decoder compatibility
         enableDebug: Bool = false
     ) {
         self.confirmationThreshold = confirmationThreshold
         self.chunkDuration = chunkDuration
         self.enableDebug = enableDebug
+    }
+    
+    /// Custom configuration with specified chunk duration
+    /// - Note: For TDT decoder, chunk sizes below 5.0s may result in empty transcriptions
+    public static func custom(
+        chunkDuration: TimeInterval,
+        confirmationThreshold: Float = 0.85,
+        enableDebug: Bool = false
+    ) -> StreamingAsrConfig {
+        StreamingAsrConfig(
+            confirmationThreshold: confirmationThreshold,
+            chunkDuration: chunkDuration,
+            enableDebug: enableDebug
+        )
     }
 
     // Internal ASR configuration
