@@ -10,13 +10,15 @@ enum MultiStreamCommand {
     static func run(arguments: [String]) async {
         // Parse arguments
         guard !arguments.isEmpty else {
-            print("❌ No audio file specified")
+            print("❌ No audio files specified")
             printUsage()
             exit(1)
         }
         
-        let audioFile = arguments[0]
+        let audioFile1 = arguments[0]
+        var audioFile2: String? = nil
         var showDebug = false
+        var simulateRealtime = true
         
         // Parse options
         var i = 1
@@ -24,36 +26,72 @@ enum MultiStreamCommand {
             switch arguments[i] {
             case "--debug":
                 showDebug = true
+            case "--no-simulate":
+                simulateRealtime = false
             case "--help", "-h":
                 printUsage()
                 exit(0)
             default:
-                print("⚠️  Unknown option: \(arguments[i])")
+                // Check if it's a second audio file
+                if audioFile2 == nil && arguments[i].hasSuffix(".wav") {
+                    audioFile2 = arguments[i]
+                } else {
+                    print("⚠️  Unknown option: \(arguments[i])")
+                }
             }
             i += 1
         }
         
+        // Use same file for both streams if only one provided
+        let micAudioFile = audioFile1
+        let systemAudioFile = audioFile2 ?? audioFile1
+        
         print("🎤 Multi-Stream ASR Test")
         print("========================\n")
         
+        if audioFile2 != nil {
+            print("📁 Processing two different files:")
+            print("  Microphone: \(micAudioFile)")
+            print("  System: \(systemAudioFile)\n")
+        } else {
+            print("📁 Processing single file on both streams: \(audioFile1)\n")
+        }
+        
         do {
-            // Load audio file
-            let audioFileURL = URL(fileURLWithPath: audioFile)
-            let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
-            let format = audioFileHandle.processingFormat
-            let frameCount = AVAudioFrameCount(audioFileHandle.length)
+            // Load first audio file (microphone)
+            let micFileURL = URL(fileURLWithPath: micAudioFile)
+            let micFileHandle = try AVAudioFile(forReading: micFileURL)
+            let micFormat = micFileHandle.processingFormat
+            let micFrameCount = AVAudioFrameCount(micFileHandle.length)
             
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-                print("❌ Failed to create audio buffer")
+            guard let micBuffer = AVAudioPCMBuffer(pcmFormat: micFormat, frameCapacity: micFrameCount) else {
+                print("❌ Failed to create microphone audio buffer")
                 return
             }
+            try micFileHandle.read(into: micBuffer)
             
-            try audioFileHandle.read(into: buffer)
+            // Load second audio file (system)
+            let systemFileURL = URL(fileURLWithPath: systemAudioFile)
+            let systemFileHandle = try AVAudioFile(forReading: systemFileURL)
+            let systemFormat = systemFileHandle.processingFormat
+            let systemFrameCount = AVAudioFrameCount(systemFileHandle.length)
+            
+            guard let systemBuffer = AVAudioPCMBuffer(pcmFormat: systemFormat, frameCapacity: systemFrameCount) else {
+                print("❌ Failed to create system audio buffer")
+                return
+            }
+            try systemFileHandle.read(into: systemBuffer)
             
             print("📊 Audio file info:")
-            print("  Sample rate: \(format.sampleRate) Hz")
-            print("  Channels: \(format.channelCount)")
-            print("  Duration: \(String(format: "%.2f", Double(audioFileHandle.length) / format.sampleRate)) seconds\n")
+            print("🎙️ Microphone file:")
+            print("  Sample rate: \(micFormat.sampleRate) Hz")
+            print("  Channels: \(micFormat.channelCount)")
+            print("  Duration: \(String(format: "%.2f", Double(micFileHandle.length) / micFormat.sampleRate)) seconds")
+            
+            print("\n💻 System audio file:")
+            print("  Sample rate: \(systemFormat.sampleRate) Hz")
+            print("  Channels: \(systemFormat.channelCount)")
+            print("  Duration: \(String(format: "%.2f", Double(systemFileHandle.length) / systemFormat.sampleRate)) seconds\n")
             
             // Create a streaming session
             print("🔄 Creating streaming session...")
@@ -103,44 +141,36 @@ enum MultiStreamCommand {
                 }
             }
             
-            print("🎵 Streaming same audio to both sources...")
+            print("🎵 Streaming audio files in parallel...")
             print("  Microphone stream: Low-latency config (2.0s chunks)")
             print("  System stream: Default config (2.5s chunks)\n")
             
-            // Stream the audio to both
-            let chunkDuration = 0.5 // 500ms chunks
-            let samplesPerChunk = Int(chunkDuration * format.sampleRate)
-            var position = 0
-            
-            while position < Int(buffer.frameLength) {
-                let remainingSamples = Int(buffer.frameLength) - position
-                let chunkSize = min(samplesPerChunk, remainingSamples)
-                
-                // Create chunk buffer
-                guard let chunkBuffer = AVAudioPCMBuffer(
-                    pcmFormat: format,
-                    frameCapacity: AVAudioFrameCount(chunkSize)
-                ) else {
-                    break
-                }
-                
-                // Copy samples
-                for channel in 0..<Int(format.channelCount) {
-                    if let sourceData = buffer.floatChannelData?[channel],
-                       let destData = chunkBuffer.floatChannelData?[channel] {
-                        for i in 0..<chunkSize {
-                            destData[i] = sourceData[position + i]
-                        }
-                    }
-                }
-                chunkBuffer.frameLength = AVAudioFrameCount(chunkSize)
-                
-                // Stream to both
-                await micStream.streamAudio(chunkBuffer)
-                await systemStream.streamAudio(chunkBuffer)
-                
-                position += chunkSize
+            // Process both files in parallel
+            let micProcessingTask = Task {
+                await streamAudioFile(
+                    buffer: micBuffer,
+                    format: micFormat,
+                    to: micStream,
+                    label: "MIC",
+                    showDebug: showDebug,
+                    simulateRealtime: simulateRealtime
+                )
             }
+            
+            let systemProcessingTask = Task {
+                await streamAudioFile(
+                    buffer: systemBuffer,
+                    format: systemFormat,
+                    to: systemStream,
+                    label: "SYS",
+                    showDebug: showDebug,
+                    simulateRealtime: simulateRealtime
+                )
+            }
+            
+            // Wait for both to complete
+            await micProcessingTask.value
+            await systemProcessingTask.value
             
             print("⏳ Finalizing transcriptions...")
             
@@ -189,20 +219,93 @@ enum MultiStreamCommand {
         }
     }
     
+    /// Helper function to stream an audio file to a stream
+    private static func streamAudioFile(
+        buffer: AVAudioPCMBuffer,
+        format: AVAudioFormat,
+        to stream: StreamingAsrManager,
+        label: String,
+        showDebug: Bool,
+        simulateRealtime: Bool
+    ) async {
+        let chunkDuration = 0.5 // 500ms chunks
+        let samplesPerChunk = Int(chunkDuration * format.sampleRate)
+        var position = 0
+        let startTime = Date()
+        
+        while position < Int(buffer.frameLength) {
+            let remainingSamples = Int(buffer.frameLength) - position
+            let chunkSize = min(samplesPerChunk, remainingSamples)
+            
+            // Create chunk buffer
+            guard let chunkBuffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(chunkSize)
+            ) else {
+                break
+            }
+            
+            // Copy samples
+            for channel in 0..<Int(format.channelCount) {
+                if let sourceData = buffer.floatChannelData?[channel],
+                   let destData = chunkBuffer.floatChannelData?[channel] {
+                    for i in 0..<chunkSize {
+                        destData[i] = sourceData[position + i]
+                    }
+                }
+            }
+            chunkBuffer.frameLength = AVAudioFrameCount(chunkSize)
+            
+            // Stream the chunk
+            await stream.streamAudio(chunkBuffer)
+            
+            if showDebug {
+                let progress = Float(position) / Float(buffer.frameLength) * 100
+                print("[\(label)] Progress: \(String(format: "%.1f", progress))%")
+            }
+            
+            // Simulate real-time if requested
+            if simulateRealtime {
+                let expectedTime = TimeInterval(position) / TimeInterval(format.sampleRate)
+                let actualTime = Date().timeIntervalSince(startTime)
+                if expectedTime > actualTime {
+                    let sleepTime = expectedTime - actualTime
+                    try? await Task.sleep(nanoseconds: UInt64(sleepTime * 1_000_000_000))
+                }
+            }
+            
+            position += chunkSize
+        }
+        
+        if showDebug {
+            print("[\(label)] Streaming complete")
+        }
+    }
+    
     private static func printUsage() {
         print(
             """
             
             Multi-Stream Command Usage:
-                fluidaudio multi-stream <audio_file> [options]
+                fluidaudio multi-stream <audio_file1> [audio_file2] [options]
             
             Options:
                 --debug            Show debug information
+                --no-simulate      Process as fast as possible (no real-time simulation)
                 --help, -h         Show this help message
             
             Examples:
+                # Process same file on both streams
                 fluidaudio multi-stream audio.wav
-                fluidaudio multi-stream audio.wav --debug
+                
+                # Process two different files in parallel
+                fluidaudio multi-stream mic_audio.wav system_audio.wav
+                
+                # With debug output
+                fluidaudio multi-stream audio1.wav audio2.wav --debug
+                
+                # Process as fast as possible
+                fluidaudio multi-stream audio1.wav audio2.wav --no-simulate
             
             This command demonstrates:
             - Loading ASR models once and sharing across streams

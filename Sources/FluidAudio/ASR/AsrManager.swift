@@ -21,7 +21,7 @@ public final class AsrManager {
     /// The AsrModels instance if initialized with models
     private var asrModels: AsrModels?
 
-    /// Token duration optimization model  
+    /// Token duration optimization model
 
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
@@ -42,13 +42,13 @@ public final class AsrManager {
     internal lazy var predictionOptions: MLPredictionOptions = {
         AsrModels.optimizedPredictionOptions()
     }()
-    
+
     // Persistent feature providers for zero-copy model chaining
     private var zeroCopyProviders: [String: ZeroCopyFeatureProvider] = [:]
-    
+
     public init(config: ASRConfig = .default) {
         self.config = config
-        
+
         // Initialize decoder states with fallback
         do {
             self.microphoneDecoderState = try DecoderState()
@@ -59,20 +59,20 @@ public final class AsrManager {
             self.microphoneDecoderState = DecoderState(fallback: true)
             self.systemDecoderState = DecoderState(fallback: true)
         }
-        
+
         logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
 
         // Optimization models will be loaded during initialize()
-        
+
         // Load vocabulary once during initialization
         self.vocabulary = loadVocabulary()
-        
+
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
                 ([1, 160000], .float32),
                 ([1], .int32),
-                ([2, 1, 640], .float32)
+                ([2, 1, 640], .float32),
             ])
         }
     }
@@ -136,16 +136,18 @@ public final class AsrManager {
         return array
     }
 
-    func prepareMelSpectrogramInput(_ audioSamples: [Float], actualLength: Int? = nil) async throws -> MLFeatureProvider {
+    func prepareMelSpectrogramInput(_ audioSamples: [Float], actualLength: Int? = nil) async throws
+        -> MLFeatureProvider
+    {
         let audioLength = audioSamples.count
         let actualAudioLength = actualLength ?? audioLength  // Use provided actual length or default to sample count
 
         // Use ANE-aligned array from cache
         let audioArray = try await sharedMLArrayCache.getArray(
-            shape: [1, audioLength] as [NSNumber], 
+            shape: [1, audioLength] as [NSNumber],
             dataType: .float32
         )
-        
+
         // Use optimized memory copy
         audioSamples.withUnsafeBufferPointer { buffer in
             let destPtr = audioArray.dataPointer.bindMemory(to: Float.self, capacity: audioLength)
@@ -154,38 +156,41 @@ public final class AsrManager {
 
         // Pass the actual audio length, not the padded length
         let lengthArray = try createScalarArray(value: actualAudioLength)
-        
+
         return try createFeatureProvider(features: [
             ("audio_signal", audioArray),
-            ("audio_length", lengthArray)
+            ("audio_length", lengthArray),
         ])
     }
-    
-    func prepareMelSpectrogramInputFP16(_ audioSamples: [Float], actualLength: Int? = nil) async throws -> MLFeatureProvider {
+
+    func prepareMelSpectrogramInputFP16(_ audioSamples: [Float], actualLength: Int? = nil)
+        async throws -> MLFeatureProvider
+    {
         let audioLength = audioSamples.count
         let actualAudioLength = actualLength ?? audioLength  // Use provided actual length or default to sample count
 
         // Create FP32 array first
         let audioArrayFP32 = try await sharedMLArrayCache.getArray(
-            shape: [1, audioLength] as [NSNumber], 
+            shape: [1, audioLength] as [NSNumber],
             dataType: .float32
         )
-        
+
         // Copy audio data
         audioSamples.withUnsafeBufferPointer { buffer in
-            let destPtr = audioArrayFP32.dataPointer.bindMemory(to: Float.self, capacity: audioLength)
+            let destPtr = audioArrayFP32.dataPointer.bindMemory(
+                to: Float.self, capacity: audioLength)
             memcpy(destPtr, buffer.baseAddress!, audioLength * MemoryLayout<Float>.stride)
         }
-        
+
         // Convert to FP16 for Neural Engine
         let audioArrayFP16 = try ANEOptimizer.convertToFloat16(audioArrayFP32)
-        
+
         // Pass the actual audio length, not the padded length
         let lengthArray = try createScalarArray(value: actualAudioLength)
-        
+
         return try createFeatureProvider(features: [
             ("audio_signal", audioArrayFP16),
-            ("audio_length", lengthArray)
+            ("audio_length", lengthArray),
         ])
     }
 
@@ -199,12 +204,14 @@ public final class AsrManager {
         ) {
             // Also need to chain the length
             if let melLength = melspectrogramOutput.featureValue(for: "melspectogram_length") {
-                let features = ["audio_signal": provider.featureValue(for: "audio_signal")!,
-                               "length": melLength]
+                let features = [
+                    "audio_signal": provider.featureValue(for: "audio_signal")!,
+                    "length": melLength,
+                ]
                 return ZeroCopyFeatureProvider(features: features)
             }
         }
-        
+
         // Fallback to copying if zero-copy fails
         let melspectrogram = try extractFeatureValue(
             from: melspectrogramOutput, key: "melspectogram",
@@ -215,10 +222,9 @@ public final class AsrManager {
 
         return try createFeatureProvider(features: [
             ("audio_signal", melspectrogram),
-            ("length", melspectrogramLength)
+            ("length", melspectrogramLength),
         ])
     }
-
 
     func prepareDecoderInput(
         targetToken: Int,
@@ -356,11 +362,11 @@ public final class AsrManager {
         systemDecoderState = DecoderState(fallback: true)
         logger.info("AsrManager resources cleaned up")
     }
-    
+
     /// Profile Neural Engine utilization and memory efficiency
     public func profilePerformance() {
         logger.info("=== ASR Pipeline Performance Profile ===")
-        
+
         // Log compute unit assignments
         if asrModels != nil {
             logger.info("Compute Unit Configuration:")
@@ -370,14 +376,14 @@ public final class AsrManager {
             logger.info("  Joint: ANE only (Dense layers)")
             logger.info("  Token Duration: ANE only (Classification)")
         }
-        
+
         // Log memory optimizations
         logger.info("Memory Optimizations:")
         logger.info("  ANE-aligned buffers: Enabled (64-byte alignment)")
         logger.info("  Zero-copy chaining: Enabled (persistent providers)")
         logger.info("  FP16 inference: Enabled (Neural Engine)")
         logger.info("  Memory pool reuse: Active")
-        
+
         // Log expected performance gains
         logger.info("Expected Performance Gains:")
         logger.info("  Compute unit optimization: 2-3x")
@@ -394,7 +400,7 @@ public final class AsrManager {
     ) async throws -> [Int] {
         // Note: Decoder state initialization is now handled by the caller
         // Use resetDecoderState() to explicitly reset when needed
-        
+
         let decoder = TdtDecoder(config: config)
         return try await decoder.decode(
             encoderOutput: encoderOutput,
@@ -418,7 +424,7 @@ public final class AsrManager {
             return try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
         }
     }
-    
+
     /// Reset the decoder state for a specific audio source
     /// This should be called when starting a new transcription session or switching between different audio files
     public func resetDecoderState(for source: AudioSource) async throws {
@@ -436,18 +442,26 @@ public final class AsrManager {
     {
         logger.debug("transcribeWithState: processing \(audioSamples.count) samples")
         // Log decoder state values before processing
-        let hiddenBefore = (decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue)
+        let hiddenBefore = (
+            decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
+        )
         let cellBefore = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
-        logger.debug("Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]")
-        
+        logger.debug(
+            "Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]"
+        )
+
         let result = try await transcribeUnifiedWithState(audioSamples, decoderState: &decoderState)
-        
+
         // Log decoder state values after processing
-        let hiddenAfter = (decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue)
+        let hiddenAfter = (
+            decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
+        )
         let cellAfter = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
-        logger.debug("Decoder state after: hidden[\(hiddenAfter.0),\(hiddenAfter.1)], cell[\(cellAfter.0),\(cellAfter.1)]")
+        logger.debug(
+            "Decoder state after: hidden[\(hiddenAfter.0),\(hiddenAfter.1)], cell[\(cellAfter.0),\(cellAfter.1)]"
+        )
         logger.debug("Transcription result: '\(result.text)'")
-        
+
         return result
     }
 
@@ -460,10 +474,9 @@ public final class AsrManager {
         if vocabulary.isEmpty {
             vocabulary = loadVocabulary()
         }
-        
+
         // Debug: print token mappings
         if config.enableDebug {
-            print("DEBUG: Converting tokens to text:")
             for tokenId in tokenIds {
                 if let token = vocabulary[tokenId] {
                     print("  Token \(tokenId) -> '\(token)'")
