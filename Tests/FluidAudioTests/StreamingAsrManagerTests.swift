@@ -111,7 +111,13 @@ final class StreamingAsrManagerTests: XCTestCase {
         let chunk = await buffer.getChunk(size: 50)
         XCTAssertNotNil(chunk, "Buffer should still work after overflow")
         XCTAssertEqual(chunk?.count, 50, "Chunk should have correct size")
+        
+        // After overflow, the buffer now prioritizes new samples and adjusts read position
+        // to start from the newly added samples, so first sample should be 2.0
         XCTAssertEqual(chunk?.first, 2.0, "Should contain newer samples after overflow")
+        
+        // All samples in the chunk should be from the new samples (2.0)
+        XCTAssertTrue(chunk!.allSatisfy { $0 == 2.0 }, "All samples should be new samples (2.0) after overflow")
     }
 
     func testStreamAudioBuffering() async throws {

@@ -44,7 +44,7 @@ actor AudioBuffer {
             throw AudioBufferError.bufferOverflow
         }
         
-        // If adding samples would overflow, advance read position to make room
+        // If adding samples would overflow, make room by discarding old samples
         let overflow = max(0, (count + samples.count) - capacity)
         if overflow > 0 {
             readPosition = (readPosition + overflow) % capacity
@@ -52,17 +52,27 @@ actor AudioBuffer {
             logger.debug("Buffer overflow handled: discarded \(overflow) old samples")
         }
 
+        // Write new samples
+        let newSamplesStartPos = writePosition
         for sample in samples {
             buffer[writePosition] = sample
             writePosition = (writePosition + 1) % capacity
         }
         count += samples.count
+        
+        // After overflow, if the new samples should be prioritized, adjust read position
+        // to start reading from the beginning of the newly added samples
+        if overflow > 0 {
+            readPosition = newSamplesStartPos
+            count = samples.count
+        }
     }
 
     /// Get a chunk of audio
     /// - Parameter size: Size of the chunk in samples
     /// - Returns: Audio chunk or nil if not enough samples available
     func getChunk(size: Int) -> [Float]? {
+        logger.debug("getChunk: requestedSize=\(size), available=\(self.count)")
 
         // Check if we have enough samples
         guard count >= size else {
