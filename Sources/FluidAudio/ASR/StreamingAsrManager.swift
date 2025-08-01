@@ -4,11 +4,6 @@ import OSLog
 
 /// A high-level streaming ASR manager that provides a simple API for real-time transcription
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
-///
-/// - Important: Chunk durations have been increased significantly from earlier versions to support
-///   the TDT (Token Duration Transducer) decoder. The minimum viable chunk duration is 5.0 seconds.
-///   Use the `.legacy` configuration preset if you need the old behavior, but be aware that
-///   transcription quality may suffer.
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "StreamingASR")
@@ -87,8 +82,7 @@ public actor StreamingAsrManager {
         startTime = Date()
 
         // Start background recognition task
-        recognizerTask = Task { [weak self] in
-            guard let self = self else { return }
+        recognizerTask = Task {
 
             let audioBuffer = AudioBuffer(capacity: config.bufferCapacity)
 
@@ -110,7 +104,10 @@ public actor StreamingAsrManager {
                         }
                     }
                 } catch {
-                    logger.error("Error processing audio buffer: \(error)")
+                    let streamingError = StreamingAsrError.audioBufferProcessingFailed(error)
+                    logger.error(
+                        "Audio buffer processing error: \(streamingError.localizedDescription)")
+                    await attemptErrorRecovery(error: streamingError)
                 }
             }
 
@@ -188,10 +185,14 @@ public actor StreamingAsrManager {
     }
 
     /// Cancel streaming without getting results
-    public func cancel() {
+    public func cancel() async {
         inputBuilder.finish()
         recognizerTask?.cancel()
         updateContinuation?.finish()
+
+        // Cleanup audio converter state
+        await audioConverter.cleanup()
+
         logger.info("StreamingAsrManager cancelled")
     }
 
@@ -233,7 +234,11 @@ public actor StreamingAsrManager {
             updateContinuation?.yield(update)
 
         } catch {
-            logger.error("Failed to process chunk: \(error)")
+            let streamingError = StreamingAsrError.modelProcessingFailed(error)
+            logger.error("Model processing error: \(streamingError.localizedDescription)")
+
+            // Attempt error recovery
+            await attemptErrorRecovery(error: streamingError)
         }
     }
 
@@ -242,10 +247,14 @@ public actor StreamingAsrManager {
         if result.confidence >= config.confirmationThreshold {
             // High confidence: move volatile to confirmed and update volatile
             if !volatileTranscript.isEmpty {
-                confirmedTranscript += volatileTranscript
-                if !confirmedTranscript.hasSuffix(" ") && !result.text.hasPrefix(" ") {
-                    confirmedTranscript += " "
+                var components: [String] = []
+                if !confirmedTranscript.isEmpty {
+                    components.append(confirmedTranscript)
                 }
+                components.append(volatileTranscript)
+
+                // Join with spaces, avoiding double spaces
+                confirmedTranscript = components.joined(separator: " ")
             }
             volatileTranscript = result.text
 
@@ -257,6 +266,66 @@ public actor StreamingAsrManager {
             volatileTranscript = result.text
             logger.debug(
                 "Low confidence (\(result.confidence)): volatile updated to '\(result.text)'")
+        }
+    }
+
+    /// Attempt to recover from processing errors
+    private func attemptErrorRecovery(error: Error) async {
+        logger.warning("Attempting error recovery for: \(error)")
+
+        // Handle specific error types with targeted recovery
+        if let streamingError = error as? StreamingAsrError {
+            switch streamingError {
+            case .modelsNotLoaded:
+                logger.error("Models not loaded - cannot recover automatically")
+
+            case .streamAlreadyExists:
+                logger.error("Stream already exists - cannot recover automatically")
+
+            case .audioBufferProcessingFailed:
+                logger.info("Recovering from audio buffer error - resetting audio converter")
+                await audioConverter.reset()
+
+            case .audioConversionFailed:
+                logger.info("Recovering from audio conversion error - resetting converter")
+                await audioConverter.reset()
+
+            case .modelProcessingFailed:
+                logger.info("Recovering from model processing error - resetting decoder state")
+                await resetDecoderForRecovery()
+
+            case .bufferOverflow:
+                logger.info("Buffer overflow handled automatically")
+
+            case .invalidConfiguration:
+                logger.error("Configuration error cannot be recovered automatically")
+            }
+        } else {
+            // Generic recovery for non-streaming errors
+            await resetDecoderForRecovery()
+        }
+    }
+
+    /// Reset decoder state for error recovery
+    private func resetDecoderForRecovery() async {
+        if let asrManager = asrManager {
+            do {
+                try await asrManager.resetDecoderState(for: audioSource)
+                logger.info("Successfully reset decoder state during error recovery")
+            } catch {
+                logger.error("Failed to reset decoder state during recovery: \(error)")
+
+                // Last resort: try to reinitialize the ASR manager
+                do {
+                    let models = try await AsrModels.downloadAndLoad()
+                    let newAsrManager = AsrManager(config: config.asrConfig)
+                    try await newAsrManager.initialize(models: models)
+                    self.asrManager = newAsrManager
+                    logger.info("Successfully reinitialized ASR manager during error recovery")
+                } catch {
+                    logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
+                }
+            }
         }
     }
 }
@@ -274,46 +343,40 @@ public struct StreamingAsrConfig: Sendable {
     public let enableDebug: Bool
 
     /// Default configuration with balanced settings
+    // Limtiation in the underlying model only supporting 10s. We are working to support other durations.
     public static let `default` = StreamingAsrConfig(
         confirmationThreshold: 0.85,
-        chunkDuration: 10.0,  // Increased from 2.5s to ensure TDT decoder has sufficient context
+        chunkDuration: 10.0,
         enableDebug: false
     )
 
     /// Low latency configuration with faster updates
     public static let lowLatency = StreamingAsrConfig(
         confirmationThreshold: 0.75,
-        chunkDuration: 5.0,  // Increased from 2.0s - minimum viable for TDT
+        chunkDuration: 10.0,
         enableDebug: false
     )
 
     /// High accuracy configuration with conservative confirmation
     public static let highAccuracy = StreamingAsrConfig(
         confirmationThreshold: 0.9,
-        chunkDuration: 10.0,  // Increased from 3.0s for best accuracy
-        enableDebug: false
-    )
-    
-    /// Legacy configuration with pre-TDT chunk durations
-    /// - Warning: These shorter chunks may result in empty or poor quality transcriptions with the TDT decoder
-    public static let legacy = StreamingAsrConfig(
-        confirmationThreshold: 0.85,
-        chunkDuration: 2.5,  // Original duration - may not work well with TDT
+        chunkDuration: 10.0,
         enableDebug: false
     )
 
     public init(
         confirmationThreshold: Float = 0.85,
-        chunkDuration: TimeInterval = 10.0,  // Updated default to 10s for TDT decoder compatibility
+        chunkDuration: TimeInterval = 10.0,
         enableDebug: Bool = false
     ) {
         self.confirmationThreshold = confirmationThreshold
         self.chunkDuration = chunkDuration
         self.enableDebug = enableDebug
     }
-    
+
     /// Custom configuration with specified chunk duration
     /// - Note: For TDT decoder, chunk sizes below 5.0s may result in empty transcriptions
+    // Limtiation in the underlying model only supporting 10s. We are working to support other durations.
     public static func custom(
         chunkDuration: TimeInterval,
         confirmationThreshold: Float = 0.85,

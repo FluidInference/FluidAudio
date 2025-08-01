@@ -39,8 +39,17 @@ actor AudioBuffer {
 
     /// Append audio samples to the buffer
     func append(_ samples: [Float]) throws {
-        guard samples.count <= capacity - count else {
+        // Handle case where samples exceed total capacity
+        if samples.count > capacity {
             throw AudioBufferError.bufferOverflow
+        }
+        
+        // If adding samples would overflow, advance read position to make room
+        let overflow = max(0, (count + samples.count) - capacity)
+        if overflow > 0 {
+            readPosition = (readPosition + overflow) % capacity
+            count -= overflow
+            logger.debug("Buffer overflow handled: discarded \(overflow) old samples")
         }
 
         for sample in samples {

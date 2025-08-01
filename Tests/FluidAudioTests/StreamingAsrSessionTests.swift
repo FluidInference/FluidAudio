@@ -80,8 +80,7 @@ final class StreamingAsrSessionTests: XCTestCase {
         let configs = [
             StreamingAsrConfig.default,
             StreamingAsrConfig.lowLatency,
-            StreamingAsrConfig.highAccuracy,
-            StreamingAsrConfig.legacy
+            StreamingAsrConfig.highAccuracy
         ]
 
         // Verify all configs are valid

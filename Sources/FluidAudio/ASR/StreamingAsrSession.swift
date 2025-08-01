@@ -105,6 +105,11 @@ public actor StreamingAsrSession {
 public enum StreamingAsrError: LocalizedError {
     case modelsNotLoaded
     case streamAlreadyExists(AudioSource)
+    case audioBufferProcessingFailed(Error)
+    case audioConversionFailed(Error) 
+    case modelProcessingFailed(Error)
+    case bufferOverflow
+    case invalidConfiguration(String)
     
     public var errorDescription: String? {
         switch self {
@@ -112,6 +117,16 @@ public enum StreamingAsrError: LocalizedError {
             return "ASR models have not been loaded"
         case .streamAlreadyExists(let source):
             return "A stream already exists for source: \(source)"
+        case .audioBufferProcessingFailed(let error):
+            return "Audio buffer processing failed: \(error.localizedDescription)"
+        case .audioConversionFailed(let error):
+            return "Audio conversion failed: \(error.localizedDescription)"
+        case .modelProcessingFailed(let error):
+            return "Model processing failed: \(error.localizedDescription)"
+        case .bufferOverflow:
+            return "Audio buffer overflow occurred"
+        case .invalidConfiguration(let message):
+            return "Invalid configuration: \(message)"
         }
     }
 }

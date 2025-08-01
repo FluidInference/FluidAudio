@@ -15,7 +15,6 @@ final class StreamingAsrManagerTests: XCTestCase {
     // MARK: - Initialization Tests
 
     func testInitializationWithDefaultConfig() async throws {
-        throw XCTSkip("Skipping test that requires model initialization")
         let manager = StreamingAsrManager()
         let volatileTranscript = await manager.volatileTranscript
         let confirmedTranscript = await manager.confirmedTranscript
@@ -27,10 +26,9 @@ final class StreamingAsrManagerTests: XCTestCase {
     }
 
     func testInitializationWithCustomConfig() async throws {
-        throw XCTSkip("Skipping test that requires model initialization")
         let config = StreamingAsrConfig(
             confirmationThreshold: 0.9,
-            chunkDuration: 5.0,
+            chunkDuration: 10.0,
             enableDebug: true
         )
         let manager = StreamingAsrManager(config: config)
@@ -53,7 +51,7 @@ final class StreamingAsrManagerTests: XCTestCase {
         // Test low latency config
         let lowLatencyConfig = StreamingAsrConfig.lowLatency
         XCTAssertEqual(lowLatencyConfig.confirmationThreshold, 0.75)
-        XCTAssertEqual(lowLatencyConfig.chunkDuration, 5.0)
+        XCTAssertEqual(lowLatencyConfig.chunkDuration, 10.0)
         XCTAssertFalse(lowLatencyConfig.enableDebug)
 
         // Test high accuracy config
@@ -62,11 +60,6 @@ final class StreamingAsrManagerTests: XCTestCase {
         XCTAssertEqual(highAccuracyConfig.chunkDuration, 10.0)
         XCTAssertFalse(highAccuracyConfig.enableDebug)
 
-        // Test legacy config
-        let legacyConfig = StreamingAsrConfig.legacy
-        XCTAssertEqual(legacyConfig.confirmationThreshold, 0.85)
-        XCTAssertEqual(legacyConfig.chunkDuration, 2.5)
-        XCTAssertFalse(legacyConfig.enableDebug)
     }
 
     func testConfigCalculatedProperties() {
@@ -83,6 +76,42 @@ final class StreamingAsrManagerTests: XCTestCase {
     }
 
     // MARK: - Stream Management Tests
+    
+    func testAudioBufferBasicOperations() async throws {
+        let buffer = AudioBuffer(capacity: 1000)
+        
+        // Test initial state
+        let initialChunk = await buffer.getChunk(size: 100)
+        XCTAssertNil(initialChunk, "Buffer should be empty initially")
+        
+        // Test appending samples
+        let samples: [Float] = Array(repeating: 1.0, count: 500)
+        try await buffer.append(samples)
+        
+        // Test getting chunk
+        let chunk = await buffer.getChunk(size: 100)
+        XCTAssertNotNil(chunk, "Should be able to get chunk after appending")
+        XCTAssertEqual(chunk?.count, 100, "Chunk should have correct size")
+        XCTAssertEqual(chunk?.first, 1.0, "Chunk should contain correct values")
+    }
+    
+    func testAudioBufferOverflow() async throws {
+        let buffer = AudioBuffer(capacity: 100)
+        
+        // Fill buffer to capacity
+        let samples1: [Float] = Array(repeating: 1.0, count: 50)
+        try await buffer.append(samples1)
+        
+        // Add more samples that would overflow
+        let samples2: [Float] = Array(repeating: 2.0, count: 80)
+        try await buffer.append(samples2) // Should handle overflow gracefully
+        
+        // Verify buffer still works
+        let chunk = await buffer.getChunk(size: 50)
+        XCTAssertNotNil(chunk, "Buffer should still work after overflow")
+        XCTAssertEqual(chunk?.count, 50, "Chunk should have correct size")
+        XCTAssertEqual(chunk?.first, 2.0, "Should contain newer samples after overflow")
+    }
 
     func testStreamAudioBuffering() async throws {
         throw XCTSkip("Skipping test that requires model initialization")

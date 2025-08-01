@@ -118,6 +118,12 @@ public actor AudioConverter {
         converter = nil
         logger.debug("Audio converter reset")
     }
+    
+    /// Cleanup all resources
+    public func cleanup() {
+        converter = nil
+        logger.debug("Audio converter cleaned up")
+    }
 }
 
 /// Errors that can occur during audio conversion
