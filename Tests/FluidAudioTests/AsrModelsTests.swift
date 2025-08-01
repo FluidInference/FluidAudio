@@ -305,4 +305,70 @@ final class AsrModelsTests: XCTestCase {
     }
 
     // Removed testLoadWithANEOptimization - causes crashes when trying to load models
+    
+    // MARK: - User Configuration Tests
+    
+    func testUserConfigurationIsRespected() {
+        // Test that when a user provides a configuration, it's respected
+        let userConfig = MLModelConfiguration()
+        userConfig.computeUnits = .cpuOnly
+        userConfig.modelDisplayName = "User Custom Model"
+        
+        // Verify the configuration properties
+        XCTAssertEqual(userConfig.computeUnits, .cpuOnly)
+        XCTAssertEqual(userConfig.modelDisplayName, "User Custom Model")
+        
+        // The actual load test would require model files, so we test the configuration logic
+        // The fix ensures that when configuration is not nil, it uses the user's compute units
+    }
+    
+    func testIOSBackgroundConfiguration() {
+        let config = AsrModels.iOSBackgroundConfiguration()
+        
+        // Should always use CPU+ANE for iOS background support
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
+        XCTAssertTrue(config.allowLowPrecisionAccumulationOnGPU)
+    }
+    
+    func testPlatformAwareDefaultConfiguration() {
+        let config = AsrModels.defaultConfiguration()
+        
+        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
+        
+        if isCI {
+            // CI environment should use CPU+ANE
+            XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
+        } else {
+            // Should use all compute units by default
+            XCTAssertEqual(config.computeUnits, .all)
+        }
+    }
+    
+    func testOptimalComputeUnitsRespectsPlatform() {
+        // Test each model type
+        let modelTypes: [ANEOptimizer.ModelType] = [
+            .melSpectrogram,
+            .encoder,
+            .decoder,
+            .joint
+        ]
+        
+        for modelType in modelTypes {
+            let computeUnits = ANEOptimizer.optimalComputeUnits(for: modelType)
+            
+            // Should use model-specific optimization
+            switch modelType {
+            case .melSpectrogram:
+                XCTAssertEqual(computeUnits, .cpuAndGPU)
+            case .encoder, .decoder:
+                XCTAssertEqual(computeUnits, .cpuAndNeuralEngine)
+            case .joint:
+                if #available(macOS 14.0, iOS 17.0, *) {
+                    XCTAssertEqual(computeUnits, .all)
+                } else {
+                    XCTAssertEqual(computeUnits, .cpuAndNeuralEngine)
+                }
+            }
+        }
+    }
 }

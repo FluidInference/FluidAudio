@@ -29,6 +29,7 @@ public struct AsrModels: Sendable {
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
+    
 
     /// Helper to get the repo path from a models directory
     private static func repoPath(from modelsDirectory: URL) -> URL {
@@ -45,10 +46,18 @@ extension AsrModels {
     }
 
     /// Load ASR models from a directory
+    /// 
     /// - Parameters:
     ///   - directory: Directory containing the model files
-    ///   - configuration: MLModel configuration to use (defaults to optimized settings)
+    ///   - configuration: Optional MLModel configuration. When provided, the configuration's
+    ///                   computeUnits will be respected. When nil, platform-optimized defaults
+    ///                   are used (per-model optimization based on model type).
+    /// 
     /// - Returns: Loaded ASR models
+    /// 
+    /// - Note: For iOS apps that need background audio processing, consider using
+    ///         `iOSBackgroundConfiguration()` or a custom configuration with
+    ///         `.cpuAndNeuralEngine` to avoid GPU-related background execution errors.
     public static func load(
         from directory: URL,
         configuration: MLModelConfiguration? = nil
@@ -68,19 +77,29 @@ extension AsrModels {
         var loadedModels: [String: MLModel] = [:]
 
         for (modelName, modelType) in modelConfigs {
-            let optimizedConfig = optimizedConfiguration(for: modelType)
+            let computeUnits: MLComputeUnits
+            
+            if configuration != nil {
+                // User explicitly provided configuration - respect their choice
+                computeUnits = config.computeUnits
+            } else {
+                // No user configuration - use platform-aware optimization
+                let optimizedConfig = optimizedConfiguration(for: modelType)
+                computeUnits = optimizedConfig.computeUnits
+            }
 
-            // Use DownloadUtils with optimized config for each model
+            // Use DownloadUtils with determined compute units
             let models = try await DownloadUtils.loadModels(
                 .parakeet,
                 modelNames: [modelName],
                 directory: directory.deletingLastPathComponent(),
-                computeUnits: optimizedConfig.computeUnits
+                computeUnits: computeUnits
             )
 
             if let model = models[modelName] {
                 loadedModels[modelName] = model
-                logger.info("Loaded \(modelName) with optimized compute units")
+                let computeUnitsDescription = String(describing: computeUnits)
+                logger.info("Loaded \(modelName) with compute units: \(computeUnitsDescription)")
             }
         }
 
@@ -174,6 +193,15 @@ extension AsrModels {
         }
 
         return options
+    }
+    
+    /// Creates a configuration optimized for iOS background execution
+    /// - Returns: Configuration with CPU+ANE compute units to avoid background GPU restrictions
+    public static func iOSBackgroundConfiguration() -> MLModelConfiguration {
+        let config = MLModelConfiguration()
+        config.allowLowPrecisionAccumulationOnGPU = true
+        config.computeUnits = .cpuAndNeuralEngine
+        return config
     }
 
     /// Create performance-optimized configuration for specific use cases
