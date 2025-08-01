@@ -162,6 +162,7 @@ public class DownloadUtils {
             switch file.type {
             case "directory" where file.path.hasSuffix(".mlmodelc"):
                 logger.info("Downloading model: \(file.path)")
+                // We can remove these models once we release the new version for a couple of weeks
                 if file.path == "TokenDurationPrediction.mlmodelc"
                     || file.path == "ParakeetDecoder.mlmodelc"
                 {
@@ -181,7 +182,7 @@ public class DownloadUtils {
                 )
 
             default:
-                break  // Skip other files/directories
+                break
             }
         }
 

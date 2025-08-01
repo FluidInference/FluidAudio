@@ -7,23 +7,22 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/vz7YYZkkJg)
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 
-Fluid Audio is a Swift framework for fully local, real-time audio processing on Apple devices. It provides state-of-the-art speaker diarization, ASR, and voice activity detection through open-source models (MIT/Apache 2.0 licensed) that we've converted to Core ML.
+Fluid Audio is a Swift framework for fully local, low-latency audio processing on Apple devices. It provides state-of-the-art speaker diarization, ASR, and voice activity detection through open-source models (MIT/Apache 2.0 licensed) that we've converted to Core ML.
 
-Our models are optimized for background processing on CPU, avoiding GPU/MPS/Shaders to ensure reliable performance. While we've tested CPU/GPU-based alternatives, they proved too slow or resource-intensive for our real-time requirements. 
+Our models are optimized for background processing on CPU, avoiding GPU/MPS/Shaders to ensure reliable performance. While we've tested CPU/GPU-based alternatives, they proved too slow or resource-intensive for our near real-time requirements.
 
 For custom use cases and feedback, reach out on Discord.
 
 ## Features
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for real-time transcription
-- **NEW: StreamingAsrManager**: High-level streaming API with automatic audio conversion, AsyncStream support, and confidence-based transcription (similar to Apple's Speech API)
-- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping 
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for streaming transcription
+- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
 - **Voice Activity Detection (VAD)**: Production-ready VAD with 98% accuracy using CoreML models and adaptive thresholding
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
 - **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference) - converted and optimized by our team. Permissive licenses.
-- **Real-time Processing**: Designed for real-time workloads but also works for offline processing
-- **Cross-platform**: Full support for macOS 14.0+ and iOS 17.0+ and any Apple Sillicon device 
+- **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
+- **Cross-platform**: Full support for macOS 14.0+ and iOS 17.0+ and any Apple Sillicon device
 - **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 
 ## Installation
@@ -106,7 +105,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 **Technical Achievements:**
 - **Model Conversion**: Solved PyTorch → CoreML limitations with custom fallback algorithm
-- **Performance**: Real-time processing with minimal latency overhead
+- **Performance**: Minimal latency overhead
 - **Integration**: Ready for embedding into diarization pipeline
 
 ## 🗣️ Automatic Speech Recognition (ASR)
@@ -216,10 +215,10 @@ let vadConfig = VADConfig(
 Task {
     let vadManager = VadManager(config: vadConfig)
     try await vadManager.initialize()
-    
+
     let audioSamples: [Float] = // your 16kHz audio data
     let vadResult = try await vadManager.detectVoiceActivity(audioSamples)
-    
+
     print("Voice activity detected: \(vadResult.hasVoice)")
     print("Confidence score: \(vadResult.confidence)")
 }
@@ -244,17 +243,17 @@ let asrConfig = ASRConfig(
 // Transcribe audio
 Task {
     let asrManager = AsrManager(config: asrConfig)
-    
+
     // Load models (automatic download if needed)
     let models = try await AsrModels.downloadAndLoad()
     try await asrManager.initialize(models: models)
-    
+
     let audioSamples: [Float] = // your 16kHz audio data
     let result = try await asrManager.transcribe(audioSamples)
-    
+
     print("Transcription: \(result.text)")
     print("Processing time: \(result.processingTime)s")
-    
+
     // For streaming/chunked transcription
     let chunkResult = try await asrManager.transcribeChunk(
         audioChunk,
@@ -293,7 +292,7 @@ swift run fluidaudio benchmark --auto-download
 # Test with specific parameters
 swift run fluidaudio benchmark --threshold 0.7 --min-duration-on 1.0 --output results.json
 
-# Test a single file for quick parameter tuning  
+# Test a single file for quick parameter tuning
 swift run fluidaudio benchmark --single-file ES2004a --threshold 0.8
 ```
 
@@ -359,7 +358,7 @@ Apache 2.0 - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing. 
+This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing.
 
 Pyannote: https://github.com/pyannote/pyannote-audio
 

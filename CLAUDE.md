@@ -17,6 +17,11 @@ FluidAudio is a speaker diarization system for Apple platforms using Core ML mod
 
 - Avoid using emojis as much as possible
 
+### Avoid redundant comments
+
+- Do not leave comments in places that are redundant or its very obvious
+- If a PR review asks a question, it may be a good indicator that the PR needs to add a comment there
+
 ## Current Performance Status
 
 - **Achieved**: 17.7% DER
