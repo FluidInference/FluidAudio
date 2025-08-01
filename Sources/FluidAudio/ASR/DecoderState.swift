@@ -5,6 +5,10 @@ import Foundation
 struct DecoderState {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
+    /// Stores the last decoded token from the previous audio chunk.
+    /// Used for maintaining linguistic context across chunk boundaries in streaming ASR.
+    /// When processing a new chunk, the decoder starts with this token instead of SOS,
+    /// ensuring proper context continuity for real-time transcription.
     var lastToken: Int?
 
     enum InitError: Error {
