@@ -181,7 +181,7 @@
             case .excellent:
                 return "🎉 Pass"
             case .good:
-                return "✅ Pass"
+                return "Pass"
             case .needsWork:
                 return "⚠️ Needs Work"
             case .critical:

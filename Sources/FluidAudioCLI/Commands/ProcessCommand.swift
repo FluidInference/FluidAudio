@@ -5,7 +5,7 @@ import FluidAudio
 enum ProcessCommand {
     static func run(arguments: [String]) async {
         guard !arguments.isEmpty else {
-            print("❌ No audio file specified")
+            print("No audio file specified")
             printUsage()
             exit(1)
         }
@@ -50,16 +50,16 @@ enum ProcessCommand {
         do {
             let models = try await DiarizerModels.downloadIfNeeded()
             manager.initialize(models: models)
-            print("✅ Models initialized")
+            print("Models initialized")
         } catch {
-            print("❌ Failed to initialize models: \(error)")
+            print("Failed to initialize models: \(error)")
             exit(1)
         }
 
         // Load and process audio file
         do {
             let audioSamples = try await AudioProcessor.loadAudioFile(path: audioFile)
-            print("✅ Loaded audio: \(audioSamples.count) samples")
+            print("Loaded audio: \(audioSamples.count) samples")
 
             let startTime = Date()
             let result = try manager.performCompleteDiarization(
@@ -69,7 +69,7 @@ enum ProcessCommand {
             let duration = Float(audioSamples.count) / 16000.0
             let rtf = Float(processingTime) / duration
 
-            print("✅ Diarization completed in \(String(format: "%.1f", processingTime))s")
+            print("Diarization completed in \(String(format: "%.1f", processingTime))s")
             print("   Real-time factor: \(String(format: "%.2f", rtf))x")
             print("   Found \(result.segments.count) segments")
             print("   Detected \(result.speakerDatabase.count) speakers (total), mapped: TBD")
@@ -94,23 +94,23 @@ enum ProcessCommand {
             }
 
         } catch {
-            print("❌ Failed to process audio file: \(error)")
+            print("Failed to process audio file: \(error)")
             exit(1)
         }
     }
-    
+
     private static func printUsage() {
         print(
             """
-            
+
             Process Command Usage:
                 fluidaudio process <audio_file> [options]
-            
+
             Options:
                 --threshold <float>    Clustering threshold (default: 0.7)
                 --debug               Enable debug mode
                 --output <file>       Save results to file instead of stdout
-            
+
             Example:
                 fluidaudio process audio.wav --threshold 0.5 --output results.json
             """

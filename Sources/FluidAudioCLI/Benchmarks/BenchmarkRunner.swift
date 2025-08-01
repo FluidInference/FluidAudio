@@ -26,7 +26,7 @@
 
                     // Check again after download
                     if !FileManager.default.fileExists(atPath: amiDirectory.path) {
-                        print("❌ Failed to download AMI SDM dataset")
+                        print("Failed to download AMI SDM dataset")
                         return .critical
                     }
                 } else {
@@ -122,7 +122,7 @@
                     let rtf = Float(processingTime) / duration
 
                     print(
-                        "     ✅ DER: \(String(format: "%.1f%%", metrics.der)), JER: \(String(format: "%.1f%%", metrics.jer)), RTF: \(String(format: "%.2f", rtf))x"
+                        "     DER: \(String(format: "%.1f%%", metrics.der)), JER: \(String(format: "%.1f%%", metrics.jer)), RTF: \(String(format: "%.2f", rtf))x"
                     )
 
                     benchmarkResults.append(
@@ -140,12 +140,12 @@
                         ))
 
                 } catch {
-                    print("     ❌ Failed: \(error)")
+                    print("     Failed: \(error)")
                 }
             }
 
             guard processedFiles > 0 else {
-                print("❌ No files were processed successfully")
+                print("No files were processed successfully")
                 return .critical
             }
 
@@ -197,7 +197,7 @@
 
                     // Check again after download
                     if !FileManager.default.fileExists(atPath: amiDirectory.path) {
-                        print("❌ Failed to download AMI IHM dataset")
+                        print("Failed to download AMI IHM dataset")
                         return .critical
                     }
                 } else {
@@ -287,7 +287,7 @@
                     let rtf = Float(processingTime) / duration
 
                     print(
-                        "     ✅ DER: \(String(format: "%.1f", metrics.der))%, JER: \(String(format: "%.1f", metrics.jer))%, RTF: \(String(format: "%.2f", rtf))x"
+                        "     DER: \(String(format: "%.1f", metrics.der))%, JER: \(String(format: "%.1f", metrics.jer))%, RTF: \(String(format: "%.2f", rtf))x"
                     )
 
                     benchmarkResults.append(
@@ -305,12 +305,12 @@
                         ))
 
                 } catch {
-                    print("     ❌ Failed: \(error)")
+                    print("     Failed: \(error)")
                 }
             }
 
             guard processedFiles > 0 else {
-                print("❌ No files were processed successfully")
+                print("No files were processed successfully")
                 return .critical
             }
 

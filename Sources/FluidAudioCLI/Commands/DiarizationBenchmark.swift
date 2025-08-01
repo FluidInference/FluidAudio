@@ -117,9 +117,9 @@ enum DiarizationBenchmark {
         do {
             let models = try await DiarizerModels.downloadIfNeeded()
             manager.initialize(models: models)
-            print("✅ Models initialized successfully")
+            print("Models initialized successfully")
         } catch {
-            print("❌ Failed to initialize models: \(error)")
+            print("Failed to initialize models: \(error)")
             print("💡 Make sure you have network access for model downloads")
             exit(1)
         }
@@ -140,7 +140,7 @@ enum DiarizationBenchmark {
                 singleFile: singleFile, iterations: iterations,
                 customThresholds: (derThreshold, jerThreshold, rtfThreshold))
         default:
-            print("❌ Unsupported dataset: \(dataset)")
+            print("Unsupported dataset: \(dataset)")
             printUsage()
             exit(1)
         }
@@ -152,21 +152,21 @@ enum DiarizationBenchmark {
 
         // Exit with appropriate code based on performance assessment
         if assessment.exitCode != 0 {
-            print("\n❌ Benchmark failed to meet performance standards")
+            print("\nBenchmark failed to meet performance standards")
             print("💡 Exit code: \(assessment.exitCode)")
             exit(assessment.exitCode)
         } else {
-            print("\n✅ Benchmark completed successfully")
+            print("\nBenchmark completed successfully")
         }
     }
-    
+
     private static func printUsage() {
         print(
             """
-            
+
             Diarization Benchmark Command Usage:
                 fluidaudio diarization-benchmark [options]
-            
+
             Options:
                 --dataset <name>           Dataset to benchmark (default: ami-sdm)
                 --threshold <float>        Clustering threshold (default: 0.7)
@@ -182,11 +182,11 @@ enum DiarizationBenchmark {
                 --der-threshold <float>   Custom DER threshold
                 --jer-threshold <float>   Custom JER threshold
                 --rtf-threshold <float>   Custom RTF threshold
-            
+
             Supported datasets:
                 ami-sdm    AMI SDM dataset
                 ami-ihm    AMI IHM dataset
-            
+
             Example:
                 fluidaudio diarization-benchmark --dataset ami-sdm --threshold 0.5 --debug
             """

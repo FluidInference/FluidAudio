@@ -5,6 +5,11 @@ import Foundation
 struct DecoderState {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
+    /// Stores the last decoded token from the previous audio chunk.
+    /// Used for maintaining linguistic context across chunk boundaries in streaming ASR.
+    /// When processing a new chunk, the decoder starts with this token instead of SOS,
+    /// ensuring proper context continuity for real-time transcription.
+    var lastToken: Int?
 
     enum InitError: Error {
         case aneAllocationFailed(String)
@@ -41,6 +46,7 @@ struct DecoderState {
     init(from other: DecoderState) throws {
         hiddenState = try MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
         cellState = try MLMultiArray(shape: other.cellState.shape, dataType: .float32)
+        lastToken = other.lastToken
 
         hiddenState.copyData(from: other.hiddenState)
         cellState.copyData(from: other.cellState)

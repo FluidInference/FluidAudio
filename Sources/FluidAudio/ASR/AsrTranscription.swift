@@ -3,21 +3,23 @@ import Foundation
 import OSLog
 
 extension AsrManager {
-    
+
     /// Transcribe with FP16 optimization for Neural Engine
     public func transcribeWithFP16(_ audioSamples: [Float]) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
-        
+
         let startTime = Date()
-        
+
         if audioSamples.count <= 160_000 {
+            let originalLength = audioSamples.count
             let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
             let (tokenIds, encoderSequenceLength) = try await executeMLInferenceWithFP16(
-                paddedAudio, 
+                paddedAudio,
+                originalLength: originalLength,
                 enableDebug: config.enableDebug
             )
-            
+
             return processTranscriptionResult(
                 tokenIds: tokenIds,
                 encoderSequenceLength: encoderSequenceLength,
@@ -25,7 +27,7 @@ extension AsrManager {
                 processingTime: Date().timeIntervalSince(startTime)
             )
         }
-        
+
         // For longer audio, use chunking with FP16
         return try await ChunkProcessor(
             audioSamples: audioSamples,
@@ -33,50 +35,57 @@ extension AsrManager {
             enableDebug: config.enableDebug
         ).process(using: self, startTime: startTime)
     }
-    
+
     /// Execute ML inference with FP16 optimization
     internal func executeMLInferenceWithFP16(
         _ paddedAudio: [Float],
+        originalLength: Int? = nil,
         enableDebug: Bool = false
     ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
-        
+
         // Prepare input with ANE-aligned arrays and optionally convert to FP16
-        let melspectrogramInput = try await prepareMelSpectrogramInputFP16(paddedAudio)
-        
+        let melspectrogramInput = try await prepareMelSpectrogramInputFP16(
+            paddedAudio, actualLength: originalLength)
+
         // Prefetch for ANE if available
         if #available(macOS 14.0, iOS 17.0, *),
-           let audioArray = melspectrogramInput.featureValue(for: "audio_signal")?.multiArrayValue {
+            let audioArray = melspectrogramInput.featureValue(for: "audio_signal")?.multiArrayValue
+        {
             ANEOptimizer.prefetchToNeuralEngine(audioArray)
         }
-        
-        guard let melspectrogramOutput = try melspectrogramModel?.prediction(
-            from: melspectrogramInput,
-            options: predictionOptions
-        ) else {
+
+        guard
+            let melspectrogramOutput = try melspectrogramModel?.prediction(
+                from: melspectrogramInput,
+                options: predictionOptions
+            )
+        else {
             throw ASRError.processingFailed("Mel-spectrogram model failed")
         }
-        
+
         // Zero-copy encoder input preparation
         let encoderInput = try prepareEncoderInput(melspectrogramOutput)
-        
-        guard let encoderOutput = try encoderModel?.prediction(
-            from: encoderInput,
-            options: predictionOptions
-        ) else {
+
+        guard
+            let encoderOutput = try encoderModel?.prediction(
+                from: encoderInput,
+                options: predictionOptions
+            )
+        else {
             throw ASRError.processingFailed("Encoder model failed")
         }
-        
+
         let rawEncoderOutput = try extractFeatureValue(
             from: encoderOutput, key: "encoder_output", errorMessage: "Invalid encoder output")
         let encoderLength = try extractFeatureValue(
             from: encoderOutput, key: "encoder_output_length",
             errorMessage: "Invalid encoder output length")
-        
+
         // Encoder output is already optimized for ANE by the model
-        
+
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
-        
+
         var tempDecoderState = try DecoderState()
         let tokenIds = try await tdtDecode(
             encoderOutput: encoderHiddenStates,
@@ -84,7 +93,7 @@ extension AsrManager {
             originalAudioSamples: paddedAudio,
             decoderState: &tempDecoderState
         )
-        
+
         return (tokenIds, encoderSequenceLength)
     }
 
@@ -95,9 +104,10 @@ extension AsrManager {
         let startTime = Date()
 
         if audioSamples.count <= 160_000 {
+            let originalLength = audioSamples.count
             let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
             let (tokenIds, encoderSequenceLength) = try await executeMLInference(
-                paddedAudio, enableDebug: config.enableDebug)
+                paddedAudio, originalLength: originalLength, enableDebug: config.enableDebug)
 
             return processTranscriptionResult(
                 tokenIds: tokenIds,
@@ -123,9 +133,11 @@ extension AsrManager {
         let startTime = Date()
 
         if audioSamples.count <= 160_000 {
+            let originalLength = audioSamples.count
             let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
             let (tokenIds, encoderSequenceLength) = try await executeMLInferenceWithState(
                 paddedAudio,
+                originalLength: originalLength,
                 enableDebug: config.enableDebug,
                 decoderState: &decoderState
             )
@@ -148,10 +160,12 @@ extension AsrManager {
 
     internal func executeMLInference(
         _ paddedAudio: [Float],
+        originalLength: Int? = nil,
         enableDebug: Bool = false
     ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
 
-        let melspectrogramInput = try await prepareMelSpectrogramInput(paddedAudio)
+        let melspectrogramInput = try await prepareMelSpectrogramInput(
+            paddedAudio, actualLength: originalLength)
 
         guard
             let melspectrogramOutput = try melspectrogramModel?.prediction(
@@ -195,11 +209,13 @@ extension AsrManager {
 
     internal func executeMLInferenceWithState(
         _ paddedAudio: [Float],
+        originalLength: Int? = nil,
         enableDebug: Bool = false,
         decoderState: inout DecoderState
     ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
 
-        let melspectrogramInput = try await prepareMelSpectrogramInput(paddedAudio)
+        let melspectrogramInput = try await prepareMelSpectrogramInput(
+            paddedAudio, actualLength: originalLength)
 
         guard
             let melspectrogramOutput = try melspectrogramModel?.prediction(

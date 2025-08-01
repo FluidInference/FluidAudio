@@ -8,7 +8,6 @@ public struct AsrModels: Sendable {
     public let encoder: MLModel
     public let decoder: MLModel
     public let joint: MLModel
-    public let tokenDuration: MLModel
     public let configuration: MLModelConfiguration
 
     private static let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "AsrModels")
@@ -18,14 +17,12 @@ public struct AsrModels: Sendable {
         encoder: MLModel,
         decoder: MLModel,
         joint: MLModel,
-        tokenDuration: MLModel,
         configuration: MLModelConfiguration
     ) {
         self.melspectrogram = melspectrogram
         self.encoder = encoder
         self.decoder = decoder
         self.joint = joint
-        self.tokenDuration = tokenDuration
         self.configuration = configuration
     }
 }
@@ -44,7 +41,6 @@ extension AsrModels {
         public static let encoder = "ParakeetEncoder_v2.mlmodelc"
         public static let decoder = "ParakeetDecoder.mlmodelc"
         public static let joint = "RNNTJoint.mlmodelc"
-        public static let tokenDuration = "TokenDurationPrediction.mlmodelc"
         public static let vocabulary = "parakeet_vocab.json"
     }
 
@@ -67,7 +63,6 @@ extension AsrModels {
             (ModelNames.encoder, .encoder),
             (ModelNames.decoder, .decoder),
             (ModelNames.joint, .joint),
-            (ModelNames.tokenDuration, .tokenDuration),
         ]
 
         var loadedModels: [String: MLModel] = [:]
@@ -92,8 +87,7 @@ extension AsrModels {
         guard let melModel = loadedModels[ModelNames.melspectrogram],
             let encoderModel = loadedModels[ModelNames.encoder],
             let decoderModel = loadedModels[ModelNames.decoder],
-            let jointModel = loadedModels[ModelNames.joint],
-            let tokenDurationModel = loadedModels[ModelNames.tokenDuration]
+            let jointModel = loadedModels[ModelNames.joint]
         else {
             throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
         }
@@ -103,7 +97,6 @@ extension AsrModels {
             encoder: encoderModel,
             decoder: decoderModel,
             joint: jointModel,
-            tokenDuration: tokenDurationModel,
             configuration: config
         )
 
@@ -254,7 +247,6 @@ extension AsrModels {
             ModelNames.encoder,
             ModelNames.decoder,
             ModelNames.joint,
-            ModelNames.tokenDuration,
         ]
 
         // Download models using DownloadUtils (this will download if needed)
@@ -284,7 +276,6 @@ extension AsrModels {
             ModelNames.encoder,
             ModelNames.decoder,
             ModelNames.joint,
-            ModelNames.tokenDuration,
         ]
 
         // Check in the DownloadUtils repo structure

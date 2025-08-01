@@ -28,7 +28,8 @@ let package = Package(
         .executableTarget(
             name: "FluidAudioCLI",
             dependencies: ["FluidAudio"],
-            path: "Sources/FluidAudioCLI"
+            path: "Sources/FluidAudioCLI",
+            exclude: ["README.md"]
         ),
         .testTarget(
             name: "FluidAudioTests",
