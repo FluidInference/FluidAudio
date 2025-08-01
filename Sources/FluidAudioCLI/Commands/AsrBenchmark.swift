@@ -125,8 +125,14 @@ public class ASRBenchmark {
                 // Reset decoder state for each new file
                 try await asrManager.resetDecoderState(for: .microphone)
 
-                let result = try await processLibriSpeechFile(
-                    asrManager: asrManager, file: audioFile)
+                let result: ASRBenchmarkResult
+                if config.testStreaming {
+                    result = try await processLibriSpeechFileStreaming(
+                        asrManager: asrManager, file: audioFile)
+                } else {
+                    result = try await processLibriSpeechFile(
+                        asrManager: asrManager, file: audioFile)
+                }
                 results.append(result)
 
             } catch {
@@ -161,6 +167,98 @@ public class ASRBenchmark {
             metrics: metrics,
             processingTime: processingTime,
             audioLength: audioLength
+        )
+    }
+
+    /// Process a single LibriSpeech file with streaming simulation
+    private func processLibriSpeechFileStreaming(asrManager: AsrManager, file: LibriSpeechFile) async throws
+        -> ASRBenchmarkResult
+    {
+        let startTime = Date()
+        let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
+        let audioLength = TimeInterval(audioSamples.count) / 16000.0
+        
+        // Streaming metrics tracking
+        var chunkProcessingTimes: [TimeInterval] = []
+        var firstTokenTime: Date?
+        
+        // Calculate chunk size in samples (minimum 1 second to ensure reasonable context)
+        let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
+        
+        if config.debugMode {
+            logger.info("Starting streaming simulation for \(file.fileName)")
+            logger.info("  Audio length: \(audioLength)s")
+            logger.info("  Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
+            logger.info("  Samples per chunk: \(samplesPerChunk)")
+        }
+        
+        // For streaming, we'll use the full file but measure chunk-by-chunk processing
+        // This simulates how streaming would work with continuous audio
+        var processedSamples = 0
+        var accumulatedText = ""
+        
+        // Process the full audio file but track metrics as if streaming
+        while processedSamples < audioSamples.count {
+            let chunkStartTime = Date()
+            
+            // Calculate how many samples we've "streamed" so far
+            let nextChunkEnd = min(processedSamples + samplesPerChunk, audioSamples.count)
+            let totalSamplesToProcess = nextChunkEnd
+            
+            // Process all audio up to this point (simulating accumulated streaming)
+            let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
+            let result = try await asrManager.transcribeUnified(audioToProcess)
+            
+            // Track first token time
+            if firstTokenTime == nil && !result.text.isEmpty {
+                firstTokenTime = Date()
+            }
+            
+            // Update accumulated text
+            accumulatedText = result.text
+            
+            let chunkProcessingTime = Date().timeIntervalSince(chunkStartTime)
+            chunkProcessingTimes.append(chunkProcessingTime)
+            
+            if config.debugMode {
+                let chunkDuration = Double(nextChunkEnd - processedSamples) / 16000.0
+                logger.info("  Chunk \(chunkProcessingTimes.count): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s")
+            }
+            
+            processedSamples = nextChunkEnd
+        }
+        
+        // Use the final accumulated text
+        let finalText = accumulatedText
+        let metrics = calculateASRMetrics(hypothesis: finalText, reference: file.transcript)
+        
+        let totalProcessingTime = Date().timeIntervalSince(startTime)
+        let firstTokenLatency = firstTokenTime.map { $0.timeIntervalSince(startTime) }
+        
+        // Calculate streaming metrics
+        let avgChunkTime = chunkProcessingTimes.reduce(0, +) / Double(chunkProcessingTimes.count)
+        let maxChunkTime = chunkProcessingTimes.max() ?? 0
+        let minChunkTime = chunkProcessingTimes.min() ?? 0
+        let streamingRTFx = audioLength / totalProcessingTime
+        
+        let streamingMetrics = StreamingMetrics(
+            avgChunkProcessingTime: avgChunkTime,
+            maxChunkProcessingTime: maxChunkTime,
+            minChunkProcessingTime: minChunkTime,
+            totalChunks: chunkProcessingTimes.count,
+            firstTokenLatency: firstTokenLatency,
+            streamingRTFx: streamingRTFx,
+            chunkDuration: config.streamingChunkDuration
+        )
+        
+        return ASRBenchmarkResult(
+            fileName: file.fileName,
+            hypothesis: finalText,
+            reference: file.transcript,
+            metrics: metrics,
+            processingTime: totalProcessingTime,
+            audioLength: audioLength,
+            streamingMetrics: streamingMetrics
         )
     }
 
@@ -419,6 +517,14 @@ extension ASRBenchmark {
         var outputFile = "asr_benchmark_results.json"
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
+        var testStreaming = false
+        var streamingChunkDuration = 0.1  // Default 100ms chunks
+
+        // Check for help flag first
+        if arguments.contains("--help") || arguments.contains("-h") {
+            printUsage()
+            exit(0)
+        }
 
         var i = 0
         while i < arguments.count {
@@ -444,6 +550,18 @@ extension ASRBenchmark {
                 autoDownload = true
             case "--no-auto-download":
                 autoDownload = false
+            case "--test-streaming":
+                testStreaming = true
+            case "--chunk-duration":
+                if i + 1 < arguments.count {
+                    if let duration = Double(arguments[i + 1]), duration > 0 {
+                        streamingChunkDuration = duration
+                    } else {
+                        print("Invalid chunk duration: \(arguments[i + 1])")
+                        exit(1)
+                    }
+                    i += 1
+                }
             default:
                 print("Unknown option: \(arguments[i])")
             }
@@ -455,13 +573,19 @@ extension ASRBenchmark {
         print("   Output file: \(outputFile)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
+        print("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
+        if testStreaming {
+            print("   Chunk duration: \(streamingChunkDuration)s")
+        }
 
         let config = ASRBenchmarkConfig(
             dataset: "librispeech",
             subset: subset,
             maxFiles: maxFiles,
             debugMode: debugMode,
-            longAudioOnly: false
+            longAudioOnly: false,
+            testStreaming: testStreaming,
+            streamingChunkDuration: streamingChunkDuration
         )
 
         let benchmark = ASRBenchmark(config: config)
@@ -581,30 +705,84 @@ extension ASRBenchmark {
             print(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
+            
+            // Print streaming metrics if available
+            if config.testStreaming {
+                print("\n--- Streaming Metrics ---")
+                
+                // Calculate aggregate streaming metrics
+                let streamingResults = results.compactMap { $0.streamingMetrics }
+                if !streamingResults.isEmpty {
+                    let avgChunkTime = streamingResults.map { $0.avgChunkProcessingTime }.reduce(0, +) / Double(streamingResults.count)
+                    let maxChunkTime = streamingResults.map { $0.maxChunkProcessingTime }.max() ?? 0
+                    let totalChunks = streamingResults.map { $0.totalChunks }.reduce(0, +)
+                    let avgFirstTokenLatency = streamingResults.compactMap { $0.firstTokenLatency }.reduce(0, +) / Double(streamingResults.compactMap { $0.firstTokenLatency }.count)
+                    
+                    print("   Chunk duration: \(config.streamingChunkDuration)s")
+                    print("   Total chunks processed: \(totalChunks)")
+                    print("   Avg chunk processing time: \(String(format: "%.3f", avgChunkTime))s")
+                    print("   Max chunk processing time: \(String(format: "%.3f", maxChunkTime))s")
+                    if streamingResults.compactMap({ $0.firstTokenLatency }).count > 0 {
+                        print("   Avg first token latency: \(String(format: "%.3f", avgFirstTokenLatency))s")
+                    }
+                }
+            }
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
+            var configDict: [String: Any] = [
+                "dataset": config.dataset,
+                "subset": config.subset,
+                "maxFiles": config.maxFiles as Any,
+                "debugMode": config.debugMode,
+            ]
+            
+            if config.testStreaming {
+                configDict["testStreaming"] = config.testStreaming
+                configDict["streamingChunkDuration"] = config.streamingChunkDuration
+            }
+            
+            var summaryDict: [String: Any] = [
+                "filesProcessed": results.count,
+                "averageWER": totalWER,
+                "medianWER": medianWER,
+                "averageCER": totalCER,
+                "medianRTFx": medianRTFx,
+                "overallRTFx": overallRTFx,
+                "totalAudioDuration": totalAudioDuration,
+                "totalProcessingTime": totalProcessingTime,
+            ]
+            
+            // Add streaming summary if available
+            if config.testStreaming {
+                let streamingResults = results.compactMap { $0.streamingMetrics }
+                if !streamingResults.isEmpty {
+                    let avgChunkTime = streamingResults.map { $0.avgChunkProcessingTime }.reduce(0, +) / Double(streamingResults.count)
+                    let maxChunkTime = streamingResults.map { $0.maxChunkProcessingTime }.max() ?? 0
+                    let totalChunks = streamingResults.map { $0.totalChunks }.reduce(0, +)
+                    let firstTokenLatencies = streamingResults.compactMap { $0.firstTokenLatency }
+                    
+                    var streamingSummary: [String: Any] = [
+                        "avgChunkProcessingTime": avgChunkTime,
+                        "maxChunkProcessingTime": maxChunkTime,
+                        "totalChunksProcessed": totalChunks,
+                    ]
+                    
+                    if !firstTokenLatencies.isEmpty {
+                        streamingSummary["avgFirstTokenLatency"] = firstTokenLatencies.reduce(0, +) / Double(firstTokenLatencies.count)
+                    }
+                    
+                    summaryDict["streaming"] = streamingSummary
+                }
+            }
+            
             let output =
                 [
-                    "config": [
-                        "dataset": config.dataset,
-                        "subset": config.subset,
-                        "maxFiles": config.maxFiles as Any,
-                        "debugMode": config.debugMode,
-                    ],
-                    "summary": [
-                        "filesProcessed": results.count,
-                        "averageWER": totalWER,
-                        "medianWER": medianWER,
-                        "averageCER": totalCER,
-                        "medianRTFx": medianRTFx,
-                        "overallRTFx": overallRTFx,
-                        "totalAudioDuration": totalAudioDuration,
-                        "totalProcessingTime": totalProcessingTime,
-                    ],
+                    "config": configDict,
+                    "summary": summaryDict,
                     "results": results.map { result in
-                        [
+                        var resultDict: [String: Any] = [
                             "fileName": result.fileName,
                             "hypothesis": result.hypothesis,
                             "reference": result.reference,
@@ -614,6 +792,21 @@ extension ASRBenchmark {
                             "audioLength": result.audioLength,
                             "processingTime": result.processingTime,
                         ]
+                        
+                        // Add streaming metrics if available
+                        if let streamingMetrics = result.streamingMetrics {
+                            resultDict["streamingMetrics"] = [
+                                "avgChunkProcessingTime": streamingMetrics.avgChunkProcessingTime,
+                                "maxChunkProcessingTime": streamingMetrics.maxChunkProcessingTime,
+                                "minChunkProcessingTime": streamingMetrics.minChunkProcessingTime,
+                                "totalChunks": streamingMetrics.totalChunks,
+                                "firstTokenLatency": streamingMetrics.firstTokenLatency as Any,
+                                "streamingRTFx": streamingMetrics.streamingRTFx,
+                                "chunkDuration": streamingMetrics.chunkDuration,
+                            ]
+                        }
+                        
+                        return resultDict
                     },
                 ] as [String: Any]
 
@@ -628,5 +821,60 @@ extension ASRBenchmark {
             print("\nERROR: ASR benchmark failed: \(error)")
             exit(1)
         }
+    }
+
+    private static func printUsage() {
+        print(
+            """
+            ASR Benchmark Command Usage:
+                fluidaudio asr-benchmark [options]
+
+            Options:
+                --subset <name>           LibriSpeech subset to use (default: test-clean)
+                                         Available: test-clean, test-other, dev-clean, dev-other
+                --max-files <number>      Maximum number of files to process (default: all)
+                --output <file>           Output JSON file path (default: asr_benchmark_results.json)
+                --debug                   Enable debug logging
+                --auto-download           Automatically download LibriSpeech dataset (default)
+                --no-auto-download        Disable automatic dataset download
+                --test-streaming          Enable streaming simulation mode
+                --chunk-duration <secs>   Chunk duration for streaming mode (default: 0.1s, min: 1.0s)
+                --help, -h               Show this help message
+
+            Description:
+                The ASR benchmark command evaluates Automatic Speech Recognition performance
+                on the LibriSpeech dataset, calculating WER (Word Error Rate) and CER 
+                (Character Error Rate) metrics, along with processing speed (RTFx).
+
+            Streaming Mode:
+                When --test-streaming is enabled, the benchmark simulates real-time streaming
+                by processing audio in chunks. This measures:
+                - Per-chunk processing latency
+                - First token latency
+                - Streaming real-time factor (RTFx)
+                - Min/max/average chunk processing times
+
+            Examples:
+                # Basic benchmark on test-clean subset
+                fluidaudio asr-benchmark
+
+                # Benchmark with 100 files from test-other subset
+                fluidaudio asr-benchmark --subset test-other --max-files 100
+
+                # Test streaming performance with 0.5s chunks
+                fluidaudio asr-benchmark --test-streaming --chunk-duration 0.5
+
+                # Debug mode with custom output file
+                fluidaudio asr-benchmark --debug --output my_results.json
+
+            Expected Performance:
+                - test-clean: 2-6% WER for good ASR systems
+                - test-other: 5-15% WER for good ASR systems
+                - RTFx: >1x indicates faster than real-time processing
+
+            Note: First run will download LibriSpeech dataset (~1.1GB for test-clean).
+                  ASR models will be downloaded automatically if not present.
+            """
+        )
     }
 }

@@ -28,6 +28,35 @@ public struct ASRMetrics: Sendable {
     }
 }
 
+/// Streaming-specific metrics for ASR benchmarking
+public struct StreamingMetrics: Sendable {
+    public let avgChunkProcessingTime: Double     // Average time to process each chunk
+    public let maxChunkProcessingTime: Double     // Maximum time to process any chunk
+    public let minChunkProcessingTime: Double     // Minimum time to process any chunk
+    public let totalChunks: Int                   // Total number of chunks processed
+    public let firstTokenLatency: Double?         // Time to first token (if measurable)
+    public let streamingRTFx: Double              // Streaming real-time factor
+    public let chunkDuration: Double              // Configured chunk duration in seconds
+    
+    public init(
+        avgChunkProcessingTime: Double,
+        maxChunkProcessingTime: Double,
+        minChunkProcessingTime: Double,
+        totalChunks: Int,
+        firstTokenLatency: Double? = nil,
+        streamingRTFx: Double,
+        chunkDuration: Double
+    ) {
+        self.avgChunkProcessingTime = avgChunkProcessingTime
+        self.maxChunkProcessingTime = maxChunkProcessingTime
+        self.minChunkProcessingTime = minChunkProcessingTime
+        self.totalChunks = totalChunks
+        self.firstTokenLatency = firstTokenLatency
+        self.streamingRTFx = streamingRTFx
+        self.chunkDuration = chunkDuration
+    }
+}
+
 /// Single ASR benchmark result
 public struct ASRBenchmarkResult: Sendable {
     public let fileName: String
@@ -37,8 +66,9 @@ public struct ASRBenchmarkResult: Sendable {
     public let processingTime: TimeInterval
     public let audioLength: TimeInterval
     public let rtfx: Double            // Real-Time Factor (inverse)
+    public let streamingMetrics: StreamingMetrics?  // Optional streaming metrics
 
-    public init(fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval, audioLength: TimeInterval) {
+    public init(fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval, audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil) {
         self.fileName = fileName
         self.hypothesis = hypothesis
         self.reference = reference
@@ -46,6 +76,7 @@ public struct ASRBenchmarkResult: Sendable {
         self.processingTime = processingTime
         self.audioLength = audioLength
         self.rtfx = audioLength / processingTime
+        self.streamingMetrics = streamingMetrics
     }
 }
 
@@ -69,13 +100,17 @@ public struct ASRBenchmarkConfig: Sendable {
     public let maxFiles: Int?
     public let debugMode: Bool
     public let longAudioOnly: Bool
+    public let testStreaming: Bool
+    public let streamingChunkDuration: Double
 
-    public init(dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false, longAudioOnly: Bool = false) {
+    public init(dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false, longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1) {
         self.dataset = dataset
         self.subset = subset
         self.maxFiles = maxFiles
         self.debugMode = debugMode
         self.longAudioOnly = longAudioOnly
+        self.testStreaming = testStreaming
+        self.streamingChunkDuration = streamingChunkDuration
     }
 }
 

@@ -164,7 +164,7 @@ public class DownloadUtils {
                 logger.info("Downloading model: \(file.path)")
                 // We can remove these models once we release the new version for a couple of weeks
                 if file.path == "TokenDurationPrediction.mlmodelc"
-                    || file.path == "ParakeetDecoder.mlmodelc"
+                    || file.path == "ParakeetEncoder.mlmodelc"
                 {
                     logger.info("Skipping \(file.path), not needed anymore")
                     continue

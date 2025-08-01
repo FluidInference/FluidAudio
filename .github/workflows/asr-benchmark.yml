@@ -69,7 +69,7 @@ jobs:
           MAX_FILES="25"
           BENCHMARK_START=$(date +%s)
 
-          # Run in parallel
+          # Run standard benchmarks in parallel
           swift run -c release fluidaudio asr-benchmark \
             --subset test-clean --max-files "$MAX_FILES" \
             --auto-download --output asr_results_clean.json &
@@ -80,7 +80,14 @@ jobs:
             --auto-download --output asr_results_other.json &
           OTHER_PID=$!
 
-          wait $CLEAN_PID && wait $OTHER_PID
+          # Run streaming benchmark (smaller file count for faster CI)
+          swift run -c release fluidaudio asr-benchmark \
+            --subset test-clean --max-files "5" \
+            --test-streaming --chunk-duration 0.5 \
+            --auto-download --output asr_results_streaming.json &
+          STREAMING_PID=$!
+
+          wait $CLEAN_PID && wait $OTHER_PID && wait $STREAMING_PID
 
           # Extract metrics with error handling
           if [ -f asr_results_clean.json ]; then
@@ -109,6 +116,22 @@ jobs:
             [ "$OTHER_RTFx" != "null" ] && [ -n "$OTHER_RTFx" ] && OTHER_RTFx=$(printf "%.2f" "$OTHER_RTFx") || OTHER_RTFx="N/A"
           fi
 
+          if [ -f asr_results_streaming.json ]; then
+            STREAMING_WER=$(jq -r '.summary.averageWER * 100' asr_results_streaming.json 2>/dev/null)
+            STREAMING_RTFx=$(jq -r '.summary.medianRTFx' asr_results_streaming.json 2>/dev/null)
+            STREAMING_AVG_CHUNK=$(jq -r '.summary.streaming.avgChunkProcessingTime' asr_results_streaming.json 2>/dev/null)
+            STREAMING_MAX_CHUNK=$(jq -r '.summary.streaming.maxChunkProcessingTime' asr_results_streaming.json 2>/dev/null)
+            STREAMING_CHUNKS=$(jq -r '.summary.streaming.totalChunksProcessed' asr_results_streaming.json 2>/dev/null)
+            STREAMING_FIRST_TOKEN=$(jq -r '.summary.streaming.avgFirstTokenLatency // "N/A"' asr_results_streaming.json 2>/dev/null)
+
+            # Format values only if they exist and are not null
+            [ "$STREAMING_WER" != "null" ] && [ -n "$STREAMING_WER" ] && STREAMING_WER=$(printf "%.2f" "$STREAMING_WER") || STREAMING_WER="N/A"
+            [ "$STREAMING_RTFx" != "null" ] && [ -n "$STREAMING_RTFx" ] && STREAMING_RTFx=$(printf "%.2f" "$STREAMING_RTFx") || STREAMING_RTFx="N/A"
+            [ "$STREAMING_AVG_CHUNK" != "null" ] && [ -n "$STREAMING_AVG_CHUNK" ] && STREAMING_AVG_CHUNK=$(printf "%.3f" "$STREAMING_AVG_CHUNK") || STREAMING_AVG_CHUNK="N/A"
+            [ "$STREAMING_MAX_CHUNK" != "null" ] && [ -n "$STREAMING_MAX_CHUNK" ] && STREAMING_MAX_CHUNK=$(printf "%.3f" "$STREAMING_MAX_CHUNK") || STREAMING_MAX_CHUNK="N/A"
+            [ "$STREAMING_FIRST_TOKEN" != "null" ] && [ -n "$STREAMING_FIRST_TOKEN" ] && [ "$STREAMING_FIRST_TOKEN" != "N/A" ] && STREAMING_FIRST_TOKEN=$(printf "%.3f" "$STREAMING_FIRST_TOKEN")
+          fi
+
           # Output metrics
           echo "CLEAN_WER_AVG=${CLEAN_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
           echo "CLEAN_WER_MED=${CLEAN_WER_MED:-N/A}" >> $GITHUB_OUTPUT
@@ -116,6 +139,14 @@ jobs:
           echo "OTHER_WER_AVG=${OTHER_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
           echo "OTHER_WER_MED=${OTHER_WER_MED:-N/A}" >> $GITHUB_OUTPUT
           echo "OTHER_RTFx=${OTHER_RTFx:-N/A}" >> $GITHUB_OUTPUT
+          
+          # Streaming metrics
+          echo "STREAMING_WER=${STREAMING_WER:-N/A}" >> $GITHUB_OUTPUT
+          echo "STREAMING_RTFx=${STREAMING_RTFx:-N/A}" >> $GITHUB_OUTPUT
+          echo "STREAMING_AVG_CHUNK=${STREAMING_AVG_CHUNK:-N/A}" >> $GITHUB_OUTPUT
+          echo "STREAMING_MAX_CHUNK=${STREAMING_MAX_CHUNK:-N/A}" >> $GITHUB_OUTPUT
+          echo "STREAMING_CHUNKS=${STREAMING_CHUNKS:-N/A}" >> $GITHUB_OUTPUT
+          echo "STREAMING_FIRST_TOKEN=${STREAMING_FIRST_TOKEN:-N/A}" >> $GITHUB_OUTPUT
 
           EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
           echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
@@ -132,6 +163,18 @@ jobs:
             |---------|---------|---------|------|--------|
             | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
             | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
+
+            ### Streaming Infrastructure Test
+            | Metric | Value | Description |
+            |--------|-------|-------------|
+            | WER | ${{ steps.benchmark.outputs.STREAMING_WER }}% | Word Error Rate in streaming mode |
+            | RTFx | ${{ steps.benchmark.outputs.STREAMING_RTFx }}x | Streaming real-time factor |
+            | Avg Chunk Time | ${{ steps.benchmark.outputs.STREAMING_AVG_CHUNK }}s | Average time to process each chunk |
+            | Max Chunk Time | ${{ steps.benchmark.outputs.STREAMING_MAX_CHUNK }}s | Maximum chunk processing time |
+            | First Token | ${{ steps.benchmark.outputs.STREAMING_FIRST_TOKEN }}s | Latency to first transcription token |
+            | Total Chunks | ${{ steps.benchmark.outputs.STREAMING_CHUNKS }} | Number of chunks processed |
+            
+            <sub>*Streaming test uses 5 files with 0.5s chunks to simulate real-time audio streaming*</sub>
 
             <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 
