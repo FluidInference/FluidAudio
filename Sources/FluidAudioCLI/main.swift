@@ -15,6 +15,8 @@
                 diarization-benchmark   Run diarization benchmark on evaluation datasets
                 vad-benchmark           Run VAD-specific benchmark
                 asr-benchmark           Run ASR benchmark on LibriSpeech
+                transcribe              Transcribe audio file using streaming ASR
+                multi-stream            Transcribe multiple audio files in parallel
                 download                Download evaluation datasets
                 help                    Show this help message
 
@@ -26,6 +28,10 @@
                 fluidaudio diarization-benchmark --dataset ami-sdm
 
                 fluidaudio asr-benchmark --subset test-clean --max-files 100
+
+                fluidaudio transcribe audio.wav --low-latency
+
+                fluidaudio multi-stream audio1.wav audio2.wav
 
                 fluidaudio download --dataset ami-sdm
             """
@@ -56,7 +62,21 @@
                 print("DEBUG: macOS version check passed")
                 await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
             } else {
-                print("❌ ASR benchmark requires macOS 13.0 or later")
+                print("ASR benchmark requires macOS 13.0 or later")
+                exit(1)
+            }
+        case "transcribe":
+            if #available(macOS 13.0, *) {
+                await StreamingTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+            } else {
+                print("Transcribe requires macOS 13.0 or later")
+                exit(1)
+            }
+        case "multi-stream":
+            if #available(macOS 13.0, *) {
+                await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
+            } else {
+                print("Multi-stream requires macOS 13.0 or later")
                 exit(1)
             }
         case "process":
@@ -67,11 +87,11 @@
             printUsage()
             exit(0)
         default:
-            print("❌ Unknown command: \(command)")
+            print("Unknown command: \(command)")
             printUsage()
             exit(1)
         }
-        
+
         semaphore.signal()
     }
 

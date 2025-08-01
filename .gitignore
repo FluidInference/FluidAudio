@@ -10,6 +10,8 @@ xcuserdata/
 ## Obj-C/Swift specific
 *.hmap
 
+*.txt
+
 ## App packaging
 *.ipa
 *.dSYM.zip

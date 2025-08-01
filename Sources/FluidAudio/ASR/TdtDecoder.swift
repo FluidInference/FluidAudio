@@ -8,6 +8,8 @@
 import CoreML
 import Foundation
 import OSLog
+/// Optimized TDT decoder with hybrid CoreML + Metal acceleration
+import Accelerate
 
 public struct TdtConfig: Sendable {
     public let durations: [Int]
@@ -34,11 +36,10 @@ struct TdtHypothesis: Sendable {
     var decState: DecoderState?
     var timestamps: [Int] = []
     var tokenDurations: [Int] = []
+    /// Last non-blank token decoded in this hypothesis.
+    /// Used to initialize the decoder for the next chunk, maintaining context across chunk boundaries.
     var lastToken: Int?
 }
-
-/// Optimized TDT decoder with hybrid CoreML + Metal acceleration
-import Accelerate
 
 @available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoder {
@@ -46,7 +47,7 @@ internal struct TdtDecoder {
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
     private let predictionOptions = AsrModels.optimizedPredictionOptions()
-    
+
     init(config: ASRConfig) {
         self.config = config
     }
@@ -70,15 +71,19 @@ internal struct TdtDecoder {
         decoderState: inout DecoderState
     ) async throws -> [Int] {
 
+        logger.debug("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
+
         guard encoderSequenceLength > 1 else {
             logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
             return []
         }
 
         // Pre-process encoder output for faster access
-        let encoderFrames = try preProcessEncoderOutput(encoderOutput, length: encoderSequenceLength)
+        let encoderFrames = try preProcessEncoderOutput(
+            encoderOutput, length: encoderSequenceLength)
 
         var hypothesis = TdtHypothesis(decState: decoderState)
+        hypothesis.lastToken = decoderState.lastToken  // Preserve last token from previous chunk
         var timeIndices = 0
         var safeTimeIndices = 0
         var timeIndicesCurrentLabels = 0
@@ -138,7 +143,7 @@ internal struct TdtDecoder {
                     decoderOutput: decoderResult.output,
                     model: jointModel
                 )
-                
+
                 let (innerTokenLogits, innerDurationLogits) = try splitLogits(innerLogits)
                 let moreLabel = argmaxSIMD(innerTokenLogits)
                 let moreScore = innerTokenLogits[moreLabel]
@@ -170,7 +175,9 @@ internal struct TdtDecoder {
 
             // Force blank logic
             if let maxSymbols = config.tdtConfig.maxSymbolsPerStep {
-                if label != blankId && lastTimestamp == timeIndices && lastTimestampCount >= maxSymbols {
+                if label != blankId && lastTimestamp == timeIndices
+                    && lastTimestampCount >= maxSymbols
+                {
                     timeIndices += 1
                     safeTimeIndices = min(timeIndices, lastTimestep)
                     activeMask = timeIndices < encoderSequenceLength
@@ -189,11 +196,16 @@ internal struct TdtDecoder {
             decoderState = finalState
         }
 
+        // Save the last token for the next chunk
+        decoderState.lastToken = hypothesis.lastToken
+
         return hypothesis.ySequence
     }
 
     /// Pre-process encoder output into contiguous memory for faster access
-    private func preProcessEncoderOutput(_ encoderOutput: MLMultiArray, length: Int) throws -> EncoderFrameArray {
+    private func preProcessEncoderOutput(_ encoderOutput: MLMultiArray, length: Int) throws
+        -> EncoderFrameArray
+    {
         let shape = encoderOutput.shape
         guard shape.count >= 3 else {
             throw ASRError.processingFailed("Invalid encoder output shape: \(shape)")
@@ -206,17 +218,18 @@ internal struct TdtDecoder {
         // Zero-copy optimization: create views instead of copying data
         if encoderOutput.dataType == .float32 {
             // Store the encoder output reference for zero-copy access
-            let floatPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
-            
+            let floatPtr = encoderOutput.dataPointer.bindMemory(
+                to: Float.self, capacity: encoderOutput.count)
+
             for timeIdx in 0..<length {
                 let startIdx = timeIdx * hiddenSize
-                
+
                 // Create a lightweight wrapper that references the original memory
                 let frameView = UnsafeBufferPointer(
                     start: floatPtr + startIdx,
                     count: hiddenSize
                 )
-                
+
                 // Only copy when absolutely necessary (for now, to maintain compatibility)
                 frames.append(Array(frameView))
             }
@@ -225,7 +238,7 @@ internal struct TdtDecoder {
             for timeIdx in 0..<length {
                 var frame = [Float]()
                 frame.reserveCapacity(hiddenSize)
-                
+
                 for h in 0..<hiddenSize {
                     let index = timeIdx * hiddenSize + h
                     if index < encoderOutput.count {
@@ -234,7 +247,7 @@ internal struct TdtDecoder {
                         throw ASRError.processingFailed("Index out of bounds in encoder output")
                     }
                 }
-                
+
                 frames.append(frame)
             }
         }
@@ -260,7 +273,7 @@ internal struct TdtDecoder {
             "targets": MLFeatureValue(multiArray: targetArray),
             "target_lengths": MLFeatureValue(multiArray: targetLengthArray),
             "h_in": MLFeatureValue(multiArray: state.hiddenState),
-            "c_in": MLFeatureValue(multiArray: state.cellState)
+            "c_in": MLFeatureValue(multiArray: state.cellState),
         ])
 
         let output = try model.prediction(
@@ -280,20 +293,22 @@ internal struct TdtDecoder {
         decoderOutput: MLFeatureProvider,
         model: MLModel
     ) throws -> MLMultiArray {
-        
+
         // Create ANE-aligned encoder array for optimal performance
         let encoderArray = try ANEOptimizer.createANEAlignedArray(
             shape: [1, 1, encoderStep.count as NSNumber],
             dataType: .float32
         )
-        
+
         // Use optimized memory copy
         encoderStep.withUnsafeBufferPointer { buffer in
-            let destPtr = encoderArray.dataPointer.bindMemory(to: Float.self, capacity: encoderStep.count)
+            let destPtr = encoderArray.dataPointer.bindMemory(
+                to: Float.self, capacity: encoderStep.count)
             memcpy(destPtr, buffer.baseAddress!, encoderStep.count * MemoryLayout<Float>.stride)
         }
 
-        let decoderOutputArray = try extractFeatureValue(from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
+        let decoderOutputArray = try extractFeatureValue(
+            from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
 
         // Prefetch arrays for ANE if available
         if #available(macOS 14.0, iOS 17.0, *) {
@@ -303,7 +318,7 @@ internal struct TdtDecoder {
 
         let input = try MLDictionaryFeatureProvider(dictionary: [
             "encoder_outputs": MLFeatureValue(multiArray: encoderArray),
-            "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray)
+            "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray),
         ])
 
         let output = try model.prediction(
@@ -311,10 +326,13 @@ internal struct TdtDecoder {
             options: predictionOptions
         )
 
-        return try extractFeatureValue(from: output, key: "logits", errorMessage: "Joint network output missing logits")
+        return try extractFeatureValue(
+            from: output, key: "logits", errorMessage: "Joint network output missing logits")
     }
     /// Predict token and duration from joint logits
-    internal func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (token: Int, score: Float, duration: Int) {
+    internal func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (
+        token: Int, score: Float, duration: Int
+    ) {
         let (tokenLogits, durationLogits) = try splitLogits(logits)
 
         let bestToken = argmax(tokenLogits)
@@ -359,7 +377,7 @@ internal struct TdtDecoder {
     internal func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
         // Determine the actual number of frames to skip
         let actualSkip: Int
-        
+
         if sequenceLength < 10 && skip > 2 {
             // For very short audio (< 10 frames), limit skip to 2 frames max
             // This ensures we don't miss important tokens in brief utterances
@@ -369,7 +387,7 @@ internal struct TdtDecoder {
             // Even if model predicts more, cap at 4 for stability
             actualSkip = min(skip, 4)
         }
-        
+
         // Move forward by actualSkip frames, but don't exceed sequence bounds
         return min(currentIdx + actualSkip, sequenceLength)
     }
@@ -377,7 +395,9 @@ internal struct TdtDecoder {
     // MARK: - Private Helper Methods
 
     /// Split joint logits into token and duration components with optimized memory access
-    private func splitLogits(_ logits: MLMultiArray) throws -> (tokenLogits: [Float], durationLogits: [Float]) {
+    private func splitLogits(_ logits: MLMultiArray) throws -> (
+        tokenLogits: [Float], durationLogits: [Float]
+    ) {
         let totalElements = logits.count
         let durationElements = config.tdtConfig.durations.count
         let vocabSize = totalElements - durationElements
@@ -388,10 +408,11 @@ internal struct TdtDecoder {
 
         // Create views directly without copying - zero-copy operation
         let logitsPtr = logits.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
-        
+
         // Use ContiguousArray for better cache locality
         let tokenLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr, count: vocabSize))
-        let durationLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
+        let durationLogits = ContiguousArray(
+            UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
 
         return (Array(tokenLogits), Array(durationLogits))
     }
@@ -399,40 +420,46 @@ internal struct TdtDecoder {
     /// Find index of maximum value using SIMD operations
     private func argmaxSIMD(_ values: [Float]) -> Int {
         guard !values.isEmpty else { return 0 }
-        
+
         // Use Accelerate framework for optimized argmax
         var maxValue: Float = 0
         var maxIndex: vDSP_Length = 0
-        
+
         values.withUnsafeBufferPointer { buffer in
             vDSP_maxvi(buffer.baseAddress!, 1, &maxValue, &maxIndex, vDSP_Length(values.count))
         }
-        
+
         return Int(maxIndex)
     }
-    
+
     /// Non-SIMD argmax for compatibility
     private func argmax(_ values: [Float]) -> Int {
         return argmaxSIMD(values)
     }
-    
+
     /// Process duration logits to get duration value
-    private func processDurationLogits(_ durationLogits: [Float]) throws -> (bestDuration: Int, duration: Int) {
+    private func processDurationLogits(_ durationLogits: [Float]) throws -> (
+        bestDuration: Int, duration: Int
+    ) {
         let bestDurationIdx = argmaxSIMD(durationLogits)
         let duration = config.tdtConfig.durations[bestDurationIdx]
         return (bestDurationIdx, duration)
     }
-    internal func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws -> MLMultiArray {
+    internal func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws
+        -> MLMultiArray
+    {
         let shape = encoderOutput.shape
         let batchSize = shape[0].intValue
         let sequenceLength = shape[1].intValue
         let hiddenSize = shape[2].intValue
 
         guard timeIndex < sequenceLength else {
-            throw ASRError.processingFailed("Time index out of bounds: \(timeIndex) >= \(sequenceLength)")
+            throw ASRError.processingFailed(
+                "Time index out of bounds: \(timeIndex) >= \(sequenceLength)")
         }
 
-        let timeStepArray = try MLMultiArray(shape: [batchSize, 1, hiddenSize] as [NSNumber], dataType: .float32)
+        let timeStepArray = try MLMultiArray(
+            shape: [batchSize, 1, hiddenSize] as [NSNumber], dataType: .float32)
 
         for h in 0..<hiddenSize {
             let sourceIndex = timeIndex * hiddenSize + h
@@ -457,7 +484,7 @@ internal struct TdtDecoder {
             "targets": MLFeatureValue(multiArray: targetArray),
             "target_lengths": MLFeatureValue(multiArray: targetLengthArray),
             "h_in": MLFeatureValue(multiArray: hiddenState),
-            "c_in": MLFeatureValue(multiArray: cellState)
+            "c_in": MLFeatureValue(multiArray: cellState),
         ])
     }
 
@@ -466,18 +493,21 @@ internal struct TdtDecoder {
         decoderOutput: MLFeatureProvider,
         timeIndex: Int
     ) throws -> MLFeatureProvider {
-        let decoderOutputArray = try extractFeatureValue(from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
+        let decoderOutputArray = try extractFeatureValue(
+            from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
 
         return try MLDictionaryFeatureProvider(dictionary: [
             "encoder_outputs": MLFeatureValue(multiArray: encoderOutput),
-            "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray)
+            "decoder_outputs": MLFeatureValue(multiArray: decoderOutputArray),
         ])
     }
 
     // MARK: - Error Handling Helper
 
     /// Validates and extracts a required feature value from MLFeatureProvider
-    private func extractFeatureValue(from provider: MLFeatureProvider, key: String, errorMessage: String) throws -> MLMultiArray {
+    private func extractFeatureValue(
+        from provider: MLFeatureProvider, key: String, errorMessage: String
+    ) throws -> MLMultiArray {
         guard let value = provider.featureValue(for: key)?.multiArrayValue else {
             throw ASRError.processingFailed(errorMessage)
         }

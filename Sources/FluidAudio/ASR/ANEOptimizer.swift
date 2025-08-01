@@ -112,9 +112,6 @@ public enum ANEOptimizer {
             } else {
                 return .cpuAndNeuralEngine
             }
-        case .tokenDuration:
-            // Lightweight classification ideal for Neural Engine
-            return .cpuAndNeuralEngine
         }
     }
 
@@ -218,7 +215,6 @@ public enum ANEOptimizer {
         case encoder
         case decoder
         case joint
-        case tokenDuration
     }
 }
 
