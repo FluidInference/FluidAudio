@@ -76,29 +76,18 @@ extension AsrModels {
 
         var loadedModels: [String: MLModel] = [:]
 
-        for (modelName, modelType) in modelConfigs {
-            let computeUnits: MLComputeUnits
-            
-            if configuration != nil {
-                // User explicitly provided configuration - respect their choice
-                computeUnits = config.computeUnits
-            } else {
-                // No user configuration - use platform-aware optimization
-                let optimizedConfig = optimizedConfiguration(for: modelType)
-                computeUnits = optimizedConfig.computeUnits
-            }
-
-            // Use DownloadUtils with determined compute units
+        for (modelName, _) in modelConfigs {
+            // Use DownloadUtils with optimal compute units
             let models = try await DownloadUtils.loadModels(
                 .parakeet,
                 modelNames: [modelName],
                 directory: directory.deletingLastPathComponent(),
-                computeUnits: computeUnits
+                computeUnits: config.computeUnits
             )
 
             if let model = models[modelName] {
                 loadedModels[modelName] = model
-                let computeUnitsDescription = String(describing: computeUnits)
+                let computeUnitsDescription = String(describing: config.computeUnits)
                 logger.info("Loaded \(modelName) with compute units: \(computeUnitsDescription)")
             }
         }
@@ -155,13 +144,8 @@ extension AsrModels {
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        config.computeUnits = isCI ? .cpuAndNeuralEngine : .all
-
-        // Apple Silicon optimizations
-        // Enable GPU optimization through compute units setting
-        // Parameters API not available in current CoreML version
-
+        // Always use CPU+ANE for optimal performance
+        config.computeUnits = .cpuAndNeuralEngine
         return config
     }
 
@@ -217,15 +201,14 @@ extension AsrModels {
 
             switch self {
             case .lowLatency:
-                config.computeUnits = .cpuAndGPU
-            // GPU optimization enabled through compute units
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
             case .balanced:
-                config.computeUnits = .all
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
             case .highAccuracy:
-                config.computeUnits = .all
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
                 config.allowLowPrecisionAccumulationOnGPU = false
             case .streaming:
-                config.computeUnits = .cpuAndNeuralEngine
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
             }
 
             return config

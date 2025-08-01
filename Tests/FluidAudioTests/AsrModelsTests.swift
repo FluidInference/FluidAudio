@@ -23,14 +23,8 @@ final class AsrModelsTests: XCTestCase {
         let config = AsrModels.defaultConfiguration()
 
         XCTAssertTrue(config.allowLowPrecisionAccumulationOnGPU)
-
-        // Check compute units based on environment
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        if isCI {
-            XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
-        } else {
-            XCTAssertEqual(config.computeUnits, .all)
-        }
+        // Should always use CPU+ANE for optimal performance
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
     }
 
     // MARK: - Directory Tests
@@ -282,7 +276,7 @@ final class AsrModelsTests: XCTestCase {
     func testPerformanceProfiles() {
         // Test low latency profile
         let lowLatencyConfig = AsrModels.PerformanceProfile.lowLatency.configuration
-        XCTAssertEqual(lowLatencyConfig.computeUnits, .cpuAndGPU)
+        XCTAssertEqual(lowLatencyConfig.computeUnits, .cpuAndNeuralEngine)
         XCTAssertTrue(lowLatencyConfig.allowLowPrecisionAccumulationOnGPU)
 
         let lowLatencyOptions = AsrModels.PerformanceProfile.lowLatency.predictionOptions
@@ -290,11 +284,11 @@ final class AsrModelsTests: XCTestCase {
 
         // Test balanced profile
         let balancedConfig = AsrModels.PerformanceProfile.balanced.configuration
-        XCTAssertEqual(balancedConfig.computeUnits, .all)
+        XCTAssertEqual(balancedConfig.computeUnits, .cpuAndNeuralEngine)
 
         // Test high accuracy profile
         let accuracyConfig = AsrModels.PerformanceProfile.highAccuracy.configuration
-        XCTAssertEqual(accuracyConfig.computeUnits, .all)
+        XCTAssertEqual(accuracyConfig.computeUnits, .cpuAndNeuralEngine)
         XCTAssertFalse(accuracyConfig.allowLowPrecisionAccumulationOnGPU)
 
         // Test streaming profile
@@ -331,15 +325,8 @@ final class AsrModelsTests: XCTestCase {
     func testPlatformAwareDefaultConfiguration() {
         let config = AsrModels.defaultConfiguration()
         
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        
-        if isCI {
-            // CI environment should use CPU+ANE
-            XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
-        } else {
-            // Should use all compute units by default
-            XCTAssertEqual(config.computeUnits, .all)
-        }
+        // Should always use CPU+ANE for optimal performance
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
     }
     
     func testOptimalComputeUnitsRespectsPlatform() {
