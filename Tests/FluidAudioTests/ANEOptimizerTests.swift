@@ -86,9 +86,10 @@ final class ANEOptimizerTests: XCTestCase {
     // MARK: - Compute Unit Selection Tests
 
     func testOptimalComputeUnits() {
+        // All models use CPU+ANE for optimal performance
         XCTAssertEqual(
             ANEOptimizer.optimalComputeUnits(for: .melSpectrogram),
-            .cpuAndGPU
+            .cpuAndNeuralEngine
         )
 
         XCTAssertEqual(
@@ -101,17 +102,10 @@ final class ANEOptimizerTests: XCTestCase {
             .cpuAndNeuralEngine
         )
 
-        if #available(macOS 14.0, iOS 17.0, *) {
-            XCTAssertEqual(
-                ANEOptimizer.optimalComputeUnits(for: .joint),
-                .all
-            )
-        } else {
-            XCTAssertEqual(
-                ANEOptimizer.optimalComputeUnits(for: .joint),
-                .cpuAndNeuralEngine
-            )
-        }
+        XCTAssertEqual(
+            ANEOptimizer.optimalComputeUnits(for: .joint),
+            .cpuAndNeuralEngine
+        )
     }
 
     // MARK: - Zero-Copy View Tests (Removed - causes crashes with memory operations)

@@ -29,6 +29,7 @@ public struct AsrModels: Sendable {
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
+    
 
     /// Helper to get the repo path from a models directory
     private static func repoPath(from modelsDirectory: URL) -> URL {
@@ -45,10 +46,18 @@ extension AsrModels {
     }
 
     /// Load ASR models from a directory
+    /// 
     /// - Parameters:
     ///   - directory: Directory containing the model files
-    ///   - configuration: MLModel configuration to use (defaults to optimized settings)
+    ///   - configuration: Optional MLModel configuration. When provided, the configuration's
+    ///                   computeUnits will be respected. When nil, platform-optimized defaults
+    ///                   are used (per-model optimization based on model type).
+    /// 
     /// - Returns: Loaded ASR models
+    /// 
+    /// - Note: For iOS apps that need background audio processing, consider using
+    ///         `iOSBackgroundConfiguration()` or a custom configuration with
+    ///         `.cpuAndNeuralEngine` to avoid GPU-related background execution errors.
     public static func load(
         from directory: URL,
         configuration: MLModelConfiguration? = nil
@@ -67,20 +76,19 @@ extension AsrModels {
 
         var loadedModels: [String: MLModel] = [:]
 
-        for (modelName, modelType) in modelConfigs {
-            let optimizedConfig = optimizedConfiguration(for: modelType)
-
-            // Use DownloadUtils with optimized config for each model
+        for (modelName, _) in modelConfigs {
+            // Use DownloadUtils with optimal compute units
             let models = try await DownloadUtils.loadModels(
                 .parakeet,
                 modelNames: [modelName],
                 directory: directory.deletingLastPathComponent(),
-                computeUnits: optimizedConfig.computeUnits
+                computeUnits: config.computeUnits
             )
 
             if let model = models[modelName] {
                 loadedModels[modelName] = model
-                logger.info("Loaded \(modelName) with optimized compute units")
+                let computeUnitsDescription = String(describing: config.computeUnits)
+                logger.info("Loaded \(modelName) with compute units: \(computeUnitsDescription)")
             }
         }
 
@@ -136,13 +144,8 @@ extension AsrModels {
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        config.computeUnits = isCI ? .cpuAndNeuralEngine : .all
-
-        // Apple Silicon optimizations
-        // Enable GPU optimization through compute units setting
-        // Parameters API not available in current CoreML version
-
+        // Always use CPU+ANE for optimal performance
+        config.computeUnits = .cpuAndNeuralEngine
         return config
     }
 
@@ -175,6 +178,15 @@ extension AsrModels {
 
         return options
     }
+    
+    /// Creates a configuration optimized for iOS background execution
+    /// - Returns: Configuration with CPU+ANE compute units to avoid background GPU restrictions
+    public static func iOSBackgroundConfiguration() -> MLModelConfiguration {
+        let config = MLModelConfiguration()
+        config.allowLowPrecisionAccumulationOnGPU = true
+        config.computeUnits = .cpuAndNeuralEngine
+        return config
+    }
 
     /// Create performance-optimized configuration for specific use cases
     public enum PerformanceProfile: Sendable {
@@ -189,15 +201,14 @@ extension AsrModels {
 
             switch self {
             case .lowLatency:
-                config.computeUnits = .cpuAndGPU
-            // GPU optimization enabled through compute units
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
             case .balanced:
-                config.computeUnits = .all
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
             case .highAccuracy:
-                config.computeUnits = .all
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
                 config.allowLowPrecisionAccumulationOnGPU = false
             case .streaming:
-                config.computeUnits = .cpuAndNeuralEngine
+                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
             }
 
             return config

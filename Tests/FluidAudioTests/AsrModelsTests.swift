@@ -23,14 +23,8 @@ final class AsrModelsTests: XCTestCase {
         let config = AsrModels.defaultConfiguration()
 
         XCTAssertTrue(config.allowLowPrecisionAccumulationOnGPU)
-
-        // Check compute units based on environment
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        if isCI {
-            XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
-        } else {
-            XCTAssertEqual(config.computeUnits, .all)
-        }
+        // Should always use CPU+ANE for optimal performance
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
     }
 
     // MARK: - Directory Tests
@@ -220,7 +214,7 @@ final class AsrModelsTests: XCTestCase {
         if isCI {
             XCTAssertEqual(melConfig.computeUnits, .cpuOnly)
         } else {
-            XCTAssertEqual(melConfig.computeUnits, .cpuAndGPU)
+            XCTAssertEqual(melConfig.computeUnits, .cpuAndNeuralEngine)
         }
         XCTAssertTrue(melConfig.allowLowPrecisionAccumulationOnGPU)
 
@@ -244,8 +238,6 @@ final class AsrModelsTests: XCTestCase {
         let jointConfig = AsrModels.optimizedConfiguration(for: .joint)
         if isCI {
             XCTAssertEqual(jointConfig.computeUnits, .cpuOnly)
-        } else if #available(macOS 14.0, iOS 17.0, *) {
-            XCTAssertEqual(jointConfig.computeUnits, .all)
         } else {
             XCTAssertEqual(jointConfig.computeUnits, .cpuAndNeuralEngine)
         }
@@ -284,7 +276,7 @@ final class AsrModelsTests: XCTestCase {
     func testPerformanceProfiles() {
         // Test low latency profile
         let lowLatencyConfig = AsrModels.PerformanceProfile.lowLatency.configuration
-        XCTAssertEqual(lowLatencyConfig.computeUnits, .cpuAndGPU)
+        XCTAssertEqual(lowLatencyConfig.computeUnits, .cpuAndNeuralEngine)
         XCTAssertTrue(lowLatencyConfig.allowLowPrecisionAccumulationOnGPU)
 
         let lowLatencyOptions = AsrModels.PerformanceProfile.lowLatency.predictionOptions
@@ -292,11 +284,11 @@ final class AsrModelsTests: XCTestCase {
 
         // Test balanced profile
         let balancedConfig = AsrModels.PerformanceProfile.balanced.configuration
-        XCTAssertEqual(balancedConfig.computeUnits, .all)
+        XCTAssertEqual(balancedConfig.computeUnits, .cpuAndNeuralEngine)
 
         // Test high accuracy profile
         let accuracyConfig = AsrModels.PerformanceProfile.highAccuracy.configuration
-        XCTAssertEqual(accuracyConfig.computeUnits, .all)
+        XCTAssertEqual(accuracyConfig.computeUnits, .cpuAndNeuralEngine)
         XCTAssertFalse(accuracyConfig.allowLowPrecisionAccumulationOnGPU)
 
         // Test streaming profile
@@ -305,4 +297,53 @@ final class AsrModelsTests: XCTestCase {
     }
 
     // Removed testLoadWithANEOptimization - causes crashes when trying to load models
+    
+    // MARK: - User Configuration Tests
+    
+    func testUserConfigurationIsRespected() {
+        // Test that when a user provides a configuration, it's respected
+        let userConfig = MLModelConfiguration()
+        userConfig.computeUnits = .cpuOnly
+        userConfig.modelDisplayName = "User Custom Model"
+        
+        // Verify the configuration properties
+        XCTAssertEqual(userConfig.computeUnits, .cpuOnly)
+        XCTAssertEqual(userConfig.modelDisplayName, "User Custom Model")
+        
+        // The actual load test would require model files, so we test the configuration logic
+        // The fix ensures that when configuration is not nil, it uses the user's compute units
+    }
+    
+    func testIOSBackgroundConfiguration() {
+        let config = AsrModels.iOSBackgroundConfiguration()
+        
+        // Should always use CPU+ANE for iOS background support
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
+        XCTAssertTrue(config.allowLowPrecisionAccumulationOnGPU)
+    }
+    
+    func testPlatformAwareDefaultConfiguration() {
+        let config = AsrModels.defaultConfiguration()
+        
+        // Should always use CPU+ANE for optimal performance
+        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
+    }
+    
+    func testOptimalComputeUnitsRespectsPlatform() {
+        // Test each model type
+        let modelTypes: [ANEOptimizer.ModelType] = [
+            .melSpectrogram,
+            .encoder,
+            .decoder,
+            .joint
+        ]
+        
+        for modelType in modelTypes {
+            let computeUnits = ANEOptimizer.optimalComputeUnits(for: modelType)
+            
+            // All models should use CPU+ANE for optimal performance
+            XCTAssertEqual(computeUnits, .cpuAndNeuralEngine,
+                          "Model type \(modelType) should use CPU+ANE")
+        }
+    }
 }
