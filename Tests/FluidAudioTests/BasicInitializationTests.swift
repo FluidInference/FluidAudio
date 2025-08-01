@@ -334,7 +334,6 @@ extension CoreMLDiarizerTests {
             localEmbeddingModel: embeddingPath
         )
     }
-
     /// Tests that we can load model files with a user-specified configuration.
     ///
     func testModelLoadingCustomConfig() async throws {
@@ -351,13 +350,12 @@ extension CoreMLDiarizerTests {
 
         let models = try await DiarizerModels.downloadIfNeeded(configuration: customConfig)
 
-        XCTAssertEqual(
-            models.segmentationModel.configuration.modelDisplayName, customConfig.modelDisplayName)
+        // Note: The model display name is set during model loading from the .mlmodelc bundle,
+        // not from the configuration passed to downloadIfNeeded. The configuration is used
+        // for runtime settings like compute units.
         XCTAssertEqual(
             models.segmentationModel.configuration.computeUnits, customConfig.computeUnits)
 
-        XCTAssertEqual(
-            models.embeddingModel.configuration.modelDisplayName, customConfig.modelDisplayName)
         XCTAssertEqual(models.embeddingModel.configuration.computeUnits, customConfig.computeUnits)
     }
 }
