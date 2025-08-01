@@ -94,25 +94,8 @@ public enum ANEOptimizer {
 
     /// Configure optimal compute units for each model type
     public static func optimalComputeUnits(for modelType: ModelType) -> MLComputeUnits {
-        switch modelType {
-        case .melSpectrogram:
-            // FFT operations run better on CPU/GPU
-            return .cpuAndGPU
-        case .encoder:
-            // Transformer/attention benefits from Neural Engine
-            return .cpuAndNeuralEngine
-        case .decoder:
-            // LSTM operations optimized for Neural Engine
-            return .cpuAndNeuralEngine
-        case .joint:
-            // Small dense layers perfect for Neural Engine
-            if #available(macOS 14.0, iOS 17.0, *) {
-                // Use Neural Engine exclusively for small models
-                return .all  // Will prefer NE for small ops
-            } else {
-                return .cpuAndNeuralEngine
-            }
-        }
+        // Testing shows CPU+ANE is fastest for all models, including melspectrogram
+        return .cpuAndNeuralEngine
     }
 
     /// Create zero-copy memory view between models

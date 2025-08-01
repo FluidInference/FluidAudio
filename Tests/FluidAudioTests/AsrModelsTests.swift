@@ -220,7 +220,7 @@ final class AsrModelsTests: XCTestCase {
         if isCI {
             XCTAssertEqual(melConfig.computeUnits, .cpuOnly)
         } else {
-            XCTAssertEqual(melConfig.computeUnits, .cpuAndGPU)
+            XCTAssertEqual(melConfig.computeUnits, .cpuAndNeuralEngine)
         }
         XCTAssertTrue(melConfig.allowLowPrecisionAccumulationOnGPU)
 
@@ -244,8 +244,6 @@ final class AsrModelsTests: XCTestCase {
         let jointConfig = AsrModels.optimizedConfiguration(for: .joint)
         if isCI {
             XCTAssertEqual(jointConfig.computeUnits, .cpuOnly)
-        } else if #available(macOS 14.0, iOS 17.0, *) {
-            XCTAssertEqual(jointConfig.computeUnits, .all)
         } else {
             XCTAssertEqual(jointConfig.computeUnits, .cpuAndNeuralEngine)
         }
@@ -356,19 +354,9 @@ final class AsrModelsTests: XCTestCase {
         for modelType in modelTypes {
             let computeUnits = ANEOptimizer.optimalComputeUnits(for: modelType)
             
-            // Should use model-specific optimization
-            switch modelType {
-            case .melSpectrogram:
-                XCTAssertEqual(computeUnits, .cpuAndGPU)
-            case .encoder, .decoder:
-                XCTAssertEqual(computeUnits, .cpuAndNeuralEngine)
-            case .joint:
-                if #available(macOS 14.0, iOS 17.0, *) {
-                    XCTAssertEqual(computeUnits, .all)
-                } else {
-                    XCTAssertEqual(computeUnits, .cpuAndNeuralEngine)
-                }
-            }
+            // All models should use CPU+ANE for optimal performance
+            XCTAssertEqual(computeUnits, .cpuAndNeuralEngine,
+                          "Model type \(modelType) should use CPU+ANE")
         }
     }
 }
