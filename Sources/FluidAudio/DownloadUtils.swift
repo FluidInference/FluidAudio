@@ -161,11 +161,17 @@ public class DownloadUtils {
         for file in files {
             switch file.type {
             case "directory" where file.path.hasSuffix(".mlmodelc"):
-                logger.info("📥 Downloading model: \(file.path)")
+                logger.info("Downloading model: \(file.path)")
+                if file.path == "TokenDurationPrediction.mlmodelc"
+                    || file.path == "ParakeetDecoder.mlmodelc"
+                {
+                    logger.info("Skipping \(file.path), not needed anymore")
+                    continue
+                }
                 try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
 
             case "file" where isEssentialFile(file.path):
-                logger.info("📥 Downloading \(file.path)")
+                logger.info("Downloading \(file.path)")
                 try await downloadFile(
                     from: repo,
                     path: file.path,

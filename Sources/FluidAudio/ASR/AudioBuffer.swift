@@ -43,7 +43,7 @@ actor AudioBuffer {
         if samples.count > capacity {
             throw AudioBufferError.bufferOverflow
         }
-        
+
         // If adding samples would overflow, make room by discarding old samples
         let overflow = max(0, (count + samples.count) - capacity)
         if overflow > 0 {
@@ -59,7 +59,7 @@ actor AudioBuffer {
             writePosition = (writePosition + 1) % capacity
         }
         count += samples.count
-        
+
         // After overflow, if the new samples should be prioritized, adjust read position
         // to start reading from the beginning of the newly added samples
         if overflow > 0 {
