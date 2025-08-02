@@ -167,13 +167,33 @@ public final class DiarizerManager {
             binarizedSegments: binarizedSegments,
             slidingWindowFeature: slidingFeature,
             embeddingModel: models.embeddingModel,
+            embeddingPreprocessor: models.embeddingPreprocessor,
+            batchFrameExtractor: models.batchFrameExtractor,
             sampleRate: sampleRate
         )
 
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
         let clusteringStartTime = Date()
 
-        let speakerActivities = speakerClustering.calculateSpeakerActivities(binarizedSegments)
+        // Use unified model if available
+        let speakerActivities: [Float]
+        let filteredSegments: [[[Float]]]
+        
+        if let unifiedModel = models.unifiedPostEmbeddingModel {
+            logger.info("🚀 Using unified post-embedding model - GPU acceleration enabled!")
+            let (activities, filtered) = try processWithUnifiedModel(
+                embeddings: embeddings,
+                binarizedSegments: binarizedSegments,
+                speakerDB: &speakerDB,
+                unifiedModel: unifiedModel
+            )
+            speakerActivities = activities
+            filteredSegments = filtered
+        } else {
+            // Fallback to CPU processing
+            speakerActivities = speakerClustering.calculateSpeakerActivities(binarizedSegments)
+            filteredSegments = binarizedSegments
+        }
 
         var speakerLabels: [String] = []
         var activityFilteredCount = 0
@@ -214,6 +234,107 @@ public final class DiarizerManager {
         )
 
         return (segments, timings)
+    }
+    
+    private func processWithUnifiedModel(
+        embeddings: [[Float]],
+        binarizedSegments: [[[Float]]],
+        speakerDB: inout [String: [Float]],
+        unifiedModel: MLModel
+    ) throws -> ([Float], [[[Float]]]) {
+        // Prepare inputs for unified model
+        let numEmbeddings = embeddings.count
+        let embeddingSize = embeddings[0].count
+        
+        // Flatten embeddings to MLMultiArray
+        guard let embeddingsArray = try? MLMultiArray(
+            shape: [numEmbeddings, embeddingSize] as [NSNumber],
+            dataType: .float32
+        ) else {
+            throw DiarizerError.processingFailed("Failed to create embeddings array")
+        }
+        
+        for i in 0..<numEmbeddings {
+            for j in 0..<embeddingSize {
+                embeddingsArray[i * embeddingSize + j] = NSNumber(value: embeddings[i][j])
+            }
+        }
+        
+        // Convert speaker database to MLMultiArray
+        let speakerDBArray: [Float] = speakerDB.values.flatMap { $0 }
+        let numSpeakers = speakerDB.count
+        
+        // Handle empty speaker DB case - use at least 1 row with zeros
+        let dbRows = max(numSpeakers, 1)
+        guard let speakerDBMLArray = try? MLMultiArray(
+            shape: [dbRows, embeddingSize] as [NSNumber],
+            dataType: .float32
+        ) else {
+            throw DiarizerError.processingFailed("Failed to create speaker DB array")
+        }
+        
+        if numSpeakers > 0 {
+            for i in 0..<speakerDBArray.count {
+                speakerDBMLArray[i] = NSNumber(value: speakerDBArray[i])
+            }
+        } else {
+            // Fill with zeros for empty DB
+            for i in 0..<embeddingSize {
+                speakerDBMLArray[i] = NSNumber(value: 0.0)
+            }
+        }
+        
+        // Convert binarized segments
+        let numFrames = binarizedSegments[0].count
+        let numSpeakerSlots = binarizedSegments[0][0].count
+        
+        guard let segmentsArray = try? MLMultiArray(
+            shape: [1, numFrames, numSpeakerSlots] as [NSNumber],
+            dataType: .float32
+        ) else {
+            throw DiarizerError.processingFailed("Failed to create segments array")
+        }
+        
+        for f in 0..<numFrames {
+            for s in 0..<numSpeakerSlots {
+                segmentsArray[f * numSpeakerSlots + s] = NSNumber(value: binarizedSegments[0][f][s])
+            }
+        }
+        
+        // Run unified model
+        let inputs: [String: Any] = [
+            "embeddings": embeddingsArray,
+            "speaker_db": speakerDBMLArray,
+            "binarized_segments": segmentsArray
+        ]
+        
+        guard let output = try? unifiedModel.prediction(from: MLDictionaryFeatureProvider(dictionary: inputs)),
+              let activities = output.featureValue(for: "activities")?.multiArrayValue,
+              let validSpeakers = output.featureValue(for: "valid_speakers")?.multiArrayValue,
+              let filteredSegments = output.featureValue(for: "filtered_segments")?.multiArrayValue
+        else {
+            throw DiarizerError.processingFailed("Unified model prediction failed")
+        }
+        
+        // Convert activities to array
+        var activitiesArray: [Float] = []
+        for i in 0..<numSpeakerSlots {
+            activitiesArray.append(activities[i].floatValue)
+        }
+        
+        // Convert filtered segments back to 3D array
+        var filteredSegmentsArray: [[[Float]]] = [Array(
+            repeating: Array(repeating: 0.0, count: numSpeakerSlots),
+            count: numFrames
+        )]
+        
+        for f in 0..<numFrames {
+            for s in 0..<numSpeakerSlots {
+                filteredSegmentsArray[0][f][s] = filteredSegments[f * numSpeakerSlots + s].floatValue
+            }
+        }
+        
+        return (activitiesArray, filteredSegmentsArray)
     }
 
     private func applyPostProcessingFilters(_ segments: [TimedSpeakerSegment])

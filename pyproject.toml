@@ -1,0 +1,58 @@
+[tool.poetry]
+name = "fluidaudio-model-conversion"
+version = "0.1.0"
+description = "CoreML model conversion and post-processing for FluidAudio speaker diarization"
+authors = ["FluidAudio Team"]
+readme = "README.md"
+python = "^3.10"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+coremltools = "^8.3.0"
+torch = "^2.5.0"
+numpy = "^1.26.4"
+pyannote-audio = "^3.3.2"
+huggingface-hub = "^0.33.1"
+torchaudio = "^2.5.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+black = "^23.0.0"
+isort = "^5.12.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[project]
+name = "fluidaudio-model-conversion"
+version = "0.1.0"
+description = "CoreML model conversion and post-processing for FluidAudio speaker diarization"
+requires-python = ">=3.10"
+dependencies = [
+    "coremltools>=8.3.0",
+    "torch>=2.5.0",
+    "numpy>=1.26.4",
+    "pyannote.audio>=3.3.2",
+    "huggingface_hub>=0.33.1",
+    "torchaudio>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+]
+
+[project.scripts]
+create-postprocessing-models = "create_postprocessing_models_simple:main"
+add-postprocessing = "add_postprocessing_to_models:main"
