@@ -2,48 +2,31 @@ import CoreML
 import Foundation
 
 public struct VadConfig: Sendable {
-    public var threshold: Float = 0.445
-    public var chunkSize: Int = 512
-    public var sampleRate: Int = 16000
+    public var threshold: Float
+    public var chunkSize: Int
+    public var sampleRate: Int
     public var modelCacheDirectory: URL?
-    public var debugMode: Bool = false
-    public var adaptiveThreshold: Bool = true
-    public var minThreshold: Float = 0.1
-    public var maxThreshold: Float = 0.7
-    public var computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+    public var debugMode: Bool
+    public var adaptiveThreshold: Bool
+    public var minThreshold: Float
+    public var maxThreshold: Float
+    public var computeUnits: MLComputeUnits
 
-    public var enableSNRFiltering: Bool = true
-    public var minSNRThreshold: Float = 6.0
-    public var noiseFloorWindow: Int = 100
-    public var spectralRolloffThreshold: Float = 0.85
-    public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)
+    public var enableSNRFiltering: Bool
+    public var minSNRThreshold: Float
+    public var noiseFloorWindow: Int
+    public var spectralRolloffThreshold: Float
+    public var spectralCentroidRange: (min: Float, max: Float)
 
     public static let `default` = VadConfig()
 
-    public static let optimized = VadConfig(
-        threshold: 0.445,
-        chunkSize: 512,
-        sampleRate: 16000,
-        modelCacheDirectory: nil,
-        debugMode: false,
-        adaptiveThreshold: true,
-        minThreshold: 0.1,
-        maxThreshold: 0.7,
-        computeUnits: .cpuAndNeuralEngine,
-        enableSNRFiltering: true,
-        minSNRThreshold: 6.0,
-        noiseFloorWindow: 100,
-        spectralRolloffThreshold: 0.85,
-        spectralCentroidRange: (200.0, 8000.0)
-    )
-
     public init(
-        threshold: Float = 0.3,
+        threshold: Float = 0.445,  // Optimal: 98% accuracy on MUSAN dataset
         chunkSize: Int = 512,
         sampleRate: Int = 16000,
         modelCacheDirectory: URL? = nil,
         debugMode: Bool = false,
-        adaptiveThreshold: Bool = false,
+        adaptiveThreshold: Bool = true,  // Helps with varying audio conditions
         minThreshold: Float = 0.1,
         maxThreshold: Float = 0.7,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,

@@ -173,8 +173,8 @@ Task {
 ```swift
 import FluidAudio
 
-// Use the optimized configuration for best results
-let vadConfig = VadConfig.optimized  // Threshold: 0.445, optimized settings
+// Use the default configuration (already optimized for best results)
+let vadConfig = VadConfig()  // Threshold: 0.445, optimized settings
 
 // Or customize the configuration
 let customVadConfig = VadConfig(

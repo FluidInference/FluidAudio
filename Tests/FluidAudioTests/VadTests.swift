@@ -9,9 +9,8 @@ final class VadTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         
-        // Use optimized config for tests
-        let config = VadConfig.optimized
-        vadManager = VadManager(config: config)
+        // Use default config for tests (which now has optimal settings)
+        vadManager = VadManager()
         
         do {
             try await vadManager.initialize()
@@ -168,12 +167,13 @@ final class VadTests: XCTestCase {
         XCTAssertTrue(defaultConfig.adaptiveThreshold, "Default config should have adaptive threshold on")
     }
     
-    func testOptimizedConfigSettings() async throws {
-        let optimizedConfig = VadConfig.optimized
-        XCTAssertEqual(optimizedConfig.threshold, 0.445)
-        XCTAssertFalse(optimizedConfig.debugMode)
-        XCTAssertTrue(optimizedConfig.adaptiveThreshold)
-        XCTAssertTrue(optimizedConfig.enableSNRFiltering)
-        XCTAssertEqual(optimizedConfig.minSNRThreshold, 6.0)
+    func testDefaultConfigHasOptimalSettings() async throws {
+        // Verify that default config now uses optimal settings
+        let defaultConfig = VadConfig.default
+        XCTAssertEqual(defaultConfig.threshold, 0.445, "Default should use optimal threshold")
+        XCTAssertFalse(defaultConfig.debugMode, "Debug mode should be off by default")
+        XCTAssertTrue(defaultConfig.adaptiveThreshold, "Adaptive threshold should be on by default")
+        XCTAssertTrue(defaultConfig.enableSNRFiltering, "SNR filtering should be on by default")
+        XCTAssertEqual(defaultConfig.minSNRThreshold, 6.0, "Should use optimal SNR threshold")
     }
 }
