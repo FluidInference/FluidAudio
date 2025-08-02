@@ -98,7 +98,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 - **Noise Robustness**: SNR filtering (6.0 dB threshold), spectral analysis, temporal smoothing
 
 **Model Sources & Datasets:**
-- **CoreML Models**: [`FluidInference/coreml_silero_vad`](https://huggingface.co/FluidInference/silero-vad-coreml)
+- **CoreML Models**: [`FluidInference/silero-vad-coreml`](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **Training Data**: MUSAN dataset (curated subsets)
   - [`alexwengg/musan_mini50`](https://huggingface.co/datasets/alexwengg/musan_mini50) (50 test files)
   - [`alexwengg/musan_mini100`](https://huggingface.co/datasets/alexwengg/musan_mini100) (100 test files)

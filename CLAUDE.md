@@ -163,5 +163,5 @@ VADConfig(
 ## Model Sources
 
 - **Diarization**: [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
-- **VAD CoreML**: [alexwengg/coreml_silero_vad](https://huggingface.co/alexwengg/coreml_silero_vad)
+- **VAD CoreML**: [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **Test Data**: [alexwengg/musan_mini*](https://huggingface.co/datasets/alexwengg) variants
