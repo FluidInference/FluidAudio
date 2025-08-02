@@ -2,12 +2,12 @@ import CoreML
 import Foundation
 
 public struct VadConfig: Sendable {
-    public var threshold: Float = 0.3
+    public var threshold: Float = 0.445
     public var chunkSize: Int = 512
     public var sampleRate: Int = 16000
     public var modelCacheDirectory: URL?
-    public var debugMode: Bool = true
-    public var adaptiveThreshold: Bool = false
+    public var debugMode: Bool = false
+    public var adaptiveThreshold: Bool = true
     public var minThreshold: Float = 0.1
     public var maxThreshold: Float = 0.7
     public var computeUnits: MLComputeUnits = .cpuAndNeuralEngine

@@ -198,17 +198,20 @@ Task {
 ```swift
 import FluidAudio
 
-// Initialize VAD with optimal configuration
-let vadConfig = VADConfig(
-    threshold: 0.445,             // Optimized for 98% accuracy
-    chunkSize: 512,              // Audio chunk size for processing
-    sampleRate: 16000,           // 16kHz audio processing
-    adaptiveThreshold: true,     // Enable dynamic thresholding
-    minThreshold: 0.1,           // Minimum threshold value
-    maxThreshold: 0.7,           // Maximum threshold value
-    enableSNRFiltering: true,    // SNR-based noise rejection
+// Use the optimized configuration for best results
+let vadConfig = VadConfig.optimized  // Threshold: 0.445, optimized settings
+
+// Or customize the configuration
+let customVadConfig = VadConfig(
+    threshold: 0.445,            // Recommended threshold (98% accuracy)
+    chunkSize: 512,              // 32ms at 16kHz
+    sampleRate: 16000,
+    adaptiveThreshold: true,     // Adapts to noise levels
+    minThreshold: 0.1,
+    maxThreshold: 0.7,
+    enableSNRFiltering: true,    // Enhanced noise robustness
     minSNRThreshold: 6.0,        // Aggressive noise filtering
-    useGPU: true                 // Metal Performance Shaders
+    computeUnits: .cpuAndNeuralEngine  // Use Neural Engine on Apple Silicon
 )
 
 // Process audio for voice activity detection
@@ -216,11 +219,23 @@ Task {
     let vadManager = VadManager(config: vadConfig)
     try await vadManager.initialize()
 
-    let audioSamples: [Float] = // your 16kHz audio data
-    let vadResult = try await vadManager.detectVoiceActivity(audioSamples)
-
-    print("Voice activity detected: \(vadResult.hasVoice)")
-    print("Confidence score: \(vadResult.confidence)")
+    // Process a single audio chunk (512 samples = 32ms at 16kHz)
+    let audioChunk: [Float] = // your 16kHz audio chunk
+    let vadResult = try await vadManager.processChunk(audioChunk)
+    
+    print("Speech probability: \(vadResult.probability)")
+    print("Voice active: \(vadResult.isVoiceActive)")
+    print("Processing time: \(vadResult.processingTime)s")
+    
+    // Or process an entire audio file
+    let audioData: [Float] = // your complete 16kHz audio data
+    let results = try await vadManager.processAudioFile(audioData)
+    
+    // Find segments with voice activity
+    let voiceSegments = results.enumerated().compactMap { index, result in
+        result.isVoiceActive ? index : nil
+    }
+    print("Voice detected in \(voiceSegments.count) chunks")
 }
 ```
 
@@ -340,9 +355,10 @@ swift run fluidaudio download --dataset librispeech-test-other
 
 **Voice Activity Detection:**
 - **`VadManager`**: Voice activity detection with CoreML models
-- **`VADConfig`**: Configuration for VAD processing with adaptive thresholding
-- **`detectVoiceActivity(_:)`**: Process audio and detect voice activity
-- **`VADAudioProcessor`**: Advanced audio processing with SNR filtering
+- **`VadConfig`**: Configuration for VAD processing with adaptive thresholding
+- **`processChunk(_:)`**: Process a single audio chunk and detect voice activity
+- **`processAudioFile(_:)`**: Process complete audio file in chunks
+- **`VadAudioProcessor`**: Advanced audio processing with SNR filtering
 
 **Automatic Speech Recognition:**
 - **`AsrManager`**: Main ASR class with TDT decoding
