@@ -69,14 +69,13 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 **Coming Soon:**
 - **System Audio Access**: Tap into system audio via CoreAudio for MacOS, don't need to use ScreenCaptureKit or Blackhole
 
-## 🎯 Performance
+## Speaker Diarization
 
 **AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
+
 - **DER: 17.7%** - Competitive with Powerset BCE 2023 (18.5%)
 - **JER: 28.0%** - Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
 - **RTF: 0.02x** - Real-time processing with 50x speedup
-
-- **Efficient Computing**: Runs on Apple Neural Engine with zero performance trade-offs
 
 ```text
   RTF = Processing Time / Audio Duration
@@ -91,15 +90,19 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - Pipeline impact: Minimal - diarization won't be the bottleneck
 ```
 
-## Voice Activity Detection (VAD): (beta)
+## Voice Activity Detection (VAD) (beta)
 
-We still need to properly test this outside of benchmarks
+The APIs here are too complicated for production usage; please use with caution and tune them as needed. To be transparent, VAD is the lowest priority in terms of maintenance for us at this point. If you need support here, please file an issue or contribute back!
+
+Our goal is to offer a similar API to what Apple will introudce in OS26: https://developer.apple.com/documentation/speech/speechdetector
 
 ## Automatic Speech Recognition (ASR)
 
 - **Model**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
 - **Real-time Factor**: Optimized for near-real-time transcription with chunking support
 - **Streaming Support**: Follows the same API as OS 26
+
+`RTFx - ~110x on a M4 Pro`
 
 ## Real-World Usage
 
@@ -112,7 +115,7 @@ Make a PR if you want to add your app!
 
 ## Quick Start
 
-### Real-time ASR with StreamingAsrManager (NEW - Recommended)
+### Streaming ASR (Reccomended)
 
 ```swift
 import AVFoundation
@@ -145,9 +148,45 @@ try audioEngine.start()
 let finalText = try await streamingAsr.finish()
 ```
 
-> **Note**: The default configuration uses 10-second chunks optimized for the TDT decoder. For lower latency, use `.lowLatency` config (5s chunks) or see the [documentation](Documentation/StreamingASR.md) for custom configurations.
+## Manual ASR
 
-### Speaker Diarization
+```swift
+import FluidAudio
+
+// Initialize ASR with configuration
+let asrConfig = ASRConfig(
+    maxSymbolsPerFrame: 3,
+    realtimeMode: true,
+    chunkSizeMs: 1500,          // Process in 1.5 second chunks
+    tdtConfig: TdtConfig(
+        durations: [0, 1, 2, 3, 4],
+        maxSymbolsPerStep: 3
+    )
+)
+
+// Transcribe audio
+Task {
+    let asrManager = AsrManager(config: asrConfig)
+
+    // Load models (automatic download if needed)
+    let models = try await AsrModels.downloadAndLoad()
+    try await asrManager.initialize(models: models)
+
+    let audioSamples: [Float] = // your 16kHz audio data
+    let result = try await asrManager.transcribe(audioSamples)
+
+    print("Transcription: \(result.text)")
+    print("Processing time: \(result.processingTime)s")
+
+    // For streaming/chunked transcription
+    let chunkResult = try await asrManager.transcribeChunk(
+        audioChunk,
+        source: .microphone  // or .system for system audio
+    )
+}
+```
+
+### Manual Speaker Diarization
 
 ```swift
 import FluidAudio
@@ -212,59 +251,6 @@ Task {
     }
     print("Voice detected in \(voiceSegments.count) chunks")
 }
-```
-
-## Automatic Speech Recognition Usage
-
-```swift
-import FluidAudio
-
-// Initialize ASR with configuration
-let asrConfig = ASRConfig(
-    maxSymbolsPerFrame: 3,
-    realtimeMode: true,
-    chunkSizeMs: 1500,          // Process in 1.5 second chunks
-    tdtConfig: TdtConfig(
-        durations: [0, 1, 2, 3, 4],
-        maxSymbolsPerStep: 3
-    )
-)
-
-// Transcribe audio
-Task {
-    let asrManager = AsrManager(config: asrConfig)
-
-    // Load models (automatic download if needed)
-    let models = try await AsrModels.downloadAndLoad()
-    try await asrManager.initialize(models: models)
-
-    let audioSamples: [Float] = // your 16kHz audio data
-    let result = try await asrManager.transcribe(audioSamples)
-
-    print("Transcription: \(result.text)")
-    print("Processing time: \(result.processingTime)s")
-
-    // For streaming/chunked transcription
-    let chunkResult = try await asrManager.transcribeChunk(
-        audioChunk,
-        source: .microphone  // or .system for system audio
-    )
-}
-```
-
-## Configuration
-
-Customize behavior with `DiarizerConfig`:
-
-```swift
-let config = DiarizerConfig(
-    clusteringThreshold: 0.7,      // Speaker similarity (0.0-1.0, higher = stricter)
-    minActivityThreshold: 10.0,    // Minimum activity frames for speaker detection
-    minDurationOn: 1.0,           // Minimum speech duration (seconds)
-    minDurationOff: 0.5,          // Minimum silence between speakers (seconds)
-    numClusters: -1,              // Number of speakers (-1 = auto-detect)
-    debugMode: false
-)
 ```
 
 ## CLI Usage
