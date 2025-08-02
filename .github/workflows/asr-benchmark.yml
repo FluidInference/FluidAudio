@@ -139,7 +139,7 @@ jobs:
           echo "OTHER_WER_AVG=${OTHER_WER_AVG:-N/A}" >> $GITHUB_OUTPUT
           echo "OTHER_WER_MED=${OTHER_WER_MED:-N/A}" >> $GITHUB_OUTPUT
           echo "OTHER_RTFx=${OTHER_RTFx:-N/A}" >> $GITHUB_OUTPUT
-          
+
           # Streaming metrics
           echo "STREAMING_WER=${STREAMING_WER:-N/A}" >> $GITHUB_OUTPUT
           echo "STREAMING_RTFx=${STREAMING_RTFx:-N/A}" >> $GITHUB_OUTPUT
@@ -154,6 +154,7 @@ jobs:
 
       - name: Comment PR
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -173,7 +174,7 @@ jobs:
             | Max Chunk Time | ${{ steps.benchmark.outputs.STREAMING_MAX_CHUNK }}s | Maximum chunk processing time |
             | First Token | ${{ steps.benchmark.outputs.STREAMING_FIRST_TOKEN }}s | Latency to first transcription token |
             | Total Chunks | ${{ steps.benchmark.outputs.STREAMING_CHUNKS }} | Number of chunks processed |
-            
+
             <sub>*Streaming test uses 5 files with 0.5s chunks to simulate real-time audio streaming*</sub>
 
             <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
