@@ -16,14 +16,14 @@ For custom use cases and feedback, reach out on Discord.
 ## Features
 
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for streaming transcription
-- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
-- **Voice Activity Detection (VAD)**: Production-ready VAD with 98% accuracy using CoreML models and adaptive thresholding
+- **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
+- **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
 - **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference) - converted and optimized by our team. Permissive licenses.
 - **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
-- **Cross-platform**: Full support for macOS 14.0+ and iOS 17.0+ and any Apple Sillicon device
-- **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
+- **Cross-platform**: Support for macOS 14.0+ and iOS 17.0+ and Apple Sillicon device
+- **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 
 ## Installation
 
@@ -67,7 +67,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 ## 🚀 Roadmap
 
 **Coming Soon:**
-- **System Audio Access**: Tap into system audio via CoreAudio for MacOS :), don't need to use ScreenCaptureKit or Blackhole
+- **System Audio Access**: Tap into system audio via CoreAudio for MacOS, don't need to use ScreenCaptureKit or Blackhole
 
 ## 🎯 Performance
 
@@ -91,42 +91,17 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - Pipeline impact: Minimal - diarization won't be the bottleneck
 ```
 
-## 🎙️ Voice Activity Detection (VAD)
+## Voice Activity Detection (VAD): (beta)
 
-- **98% Accuracy** on MUSAN dataset at optimal threshold (0.445)
-- **CoreML Pipeline**: STFT → Encoder → RNN → Enhanced Fallback architecture
-- **Noise Robustness**: SNR filtering (6.0 dB threshold), spectral analysis, temporal smoothing
+We still need to properly test this outside of benchmarks
 
-**Model Sources & Datasets:**
-- **CoreML Models**: [`FluidInference/silero-vad-coreml`](https://huggingface.co/FluidInference/silero-vad-coreml)
-- **Training Data**: MUSAN dataset (curated subsets)
-  - [`alexwengg/musan_mini50`](https://huggingface.co/datasets/alexwengg/musan_mini50) (50 test files)
-  - [`alexwengg/musan_mini100`](https://huggingface.co/datasets/alexwengg/musan_mini100) (100 test files)
+## Automatic Speech Recognition (ASR)
 
-**Technical Achievements:**
-- **Model Conversion**: Solved PyTorch → CoreML limitations with custom fallback algorithm
-- **Performance**: Minimal latency overhead
-- **Integration**: Ready for embedding into diarization pipeline
+- **Model**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
+- **Real-time Factor**: Optimized for near-real-time transcription with chunking support
+- **Streaming Support**: Follows the same API as OS 26
 
-## 🗣️ Automatic Speech Recognition (ASR)
-
-- **Model**: Parakeet TDT-0.6b v2 - Token Duration Transducer architecture
-- **Real-time Factor**: Optimized for real-time transcription with chunking support
-- **LibriSpeech Benchmark**: Competitive WER (Word Error Rate) performance
-- **Streaming Support**: Process audio in chunks for live transcription
-
-**Model Sources:**
-- **CoreML Models**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
-- **Architecture**: Token Duration Transducer (TDT) with duration prediction
-- **Vocabulary**: BPE tokenization with 1024 tokens + blank token
-
-**Technical Features:**
-- **Chunked Processing**: Support for real-time audio streaming with configurable chunk sizes
-- **Dual Audio Sources**: Separate decoder states for microphone and system audio
-- **Text Normalization**: Post-processing for improved accuracy
-- **ANE Optimization**: Fully optimized for Apple Neural Engine execution
-
-## 🏢 Real-World Usage
+## Real-World Usage
 
 FluidAudio powers production applications including:
 
@@ -222,15 +197,15 @@ Task {
     // Process a single audio chunk (512 samples = 32ms at 16kHz)
     let audioChunk: [Float] = // your 16kHz audio chunk
     let vadResult = try await vadManager.processChunk(audioChunk)
-    
+
     print("Speech probability: \(vadResult.probability)")
     print("Voice active: \(vadResult.isVoiceActive)")
     print("Processing time: \(vadResult.processingTime)s")
-    
+
     // Or process an entire audio file
     let audioData: [Float] = // your complete 16kHz audio data
     let results = try await vadManager.processAudioFile(audioData)
-    
+
     // Find segments with voice activity
     let voiceSegments = results.enumerated().compactMap { index, result in
         result.isVoiceActive ? index : nil
@@ -348,12 +323,14 @@ swift run fluidaudio download --dataset librispeech-test-other
 ## API Reference
 
 **Diarization:**
+
 - **`DiarizerManager`**: Main diarization class
 - **`performCompleteDiarization(_:sampleRate:)`**: Process audio and return speaker segments
 - **`compareSpeakers(audio1:audio2:)`**: Compare similarity between two audio samples
 - **`validateAudio(_:)`**: Validate audio quality and characteristics
 
 **Voice Activity Detection:**
+
 - **`VadManager`**: Voice activity detection with CoreML models
 - **`VadConfig`**: Configuration for VAD processing with adaptive thresholding
 - **`processChunk(_:)`**: Process a single audio chunk and detect voice activity
@@ -361,6 +338,7 @@ swift run fluidaudio download --dataset librispeech-test-other
 - **`VadAudioProcessor`**: Advanced audio processing with SNR filtering
 
 **Automatic Speech Recognition:**
+
 - **`AsrManager`**: Main ASR class with TDT decoding
 - **`AsrModels`**: Model loading and management
 - **`ASRConfig`**: Configuration for ASR processing
