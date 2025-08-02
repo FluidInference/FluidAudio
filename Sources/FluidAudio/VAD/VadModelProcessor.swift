@@ -206,6 +206,7 @@ internal struct VadModelProcessor {
         let targetArray = try MLMultiArray(shape: [1, 4, 128], dataType: .float32)
 
         // Handle the common case of transposed tensor [1, 128, 4]
+        // TODO:: this should be handled by the model itself, we need to reconvert the model to handle this transpose
         if shape.count == 3 && shape[0] == 1 && shape[1] == 128 && shape[2] == 4 {
             // Optimized transpose from [1, 128, 4] to [1, 4, 128]
             // The encoder output has temporal frames as the last dimension instead of the middle
