@@ -108,35 +108,35 @@ jobs:
                 reportContent += `### Performance Comparison\n\n`;
                 reportContent += `| Dataset | Accuracy | Precision | Recall | F1-Score | RTFx | Files |\n`;
                 reportContent += `|---------|----------|-----------|--------|----------|------|-------|\n`;
-                
+
                 if (musanResults) {
-                  const rtfx = musanResults.rtfx < 1 && musanResults.rtfx > 0 ? 
-                    `${(1.0/musanResults.rtfx).toFixed(1)}x faster` : 
+                  const rtfx = musanResults.rtfx < 1 && musanResults.rtfx > 0 ?
+                    `${(1.0/musanResults.rtfx).toFixed(1)}x faster` :
                     `${musanResults.rtfx?.toFixed(1)}x slower`;
                   reportContent += `| MUSAN | ${musanResults.accuracy?.toFixed(1)}% | ${musanResults.precision?.toFixed(1)}% | ${musanResults.recall?.toFixed(1)}% | ${musanResults.f1_score?.toFixed(1)}% | ${rtfx} | ${musanResults.total_files} |\n`;
                 }
-                
+
                 if (voicesResults) {
-                  const rtfx = voicesResults.rtfx < 1 && voicesResults.rtfx > 0 ? 
-                    `${(1.0/voicesResults.rtfx).toFixed(1)}x faster` : 
+                  const rtfx = voicesResults.rtfx < 1 && voicesResults.rtfx > 0 ?
+                    `${(1.0/voicesResults.rtfx).toFixed(1)}x faster` :
                     `${voicesResults.rtfx?.toFixed(1)}x slower`;
                   reportContent += `| VOiCES | ${voicesResults.accuracy?.toFixed(1)}% | ${voicesResults.precision?.toFixed(1)}% | ${voicesResults.recall?.toFixed(1)}% | ${voicesResults.f1_score?.toFixed(1)}% | ${rtfx} | ${voicesResults.total_files} |\n`;
                 }
-                
+
                 reportContent += `\n### Dataset Details\n\n`;
                 reportContent += `- **MUSAN**: Music, Speech, and Noise dataset - standard VAD evaluation\n`;
                 reportContent += `- **VOiCES**: Voices Obscured in Complex Environmental Settings - tests robustness in real-world conditions\n\n`;
-                
+
                 // Add performance assessment
-                const avgF1 = ((musanResults?.f1_score || 0) + (voicesResults?.f1_score || 0)) / 
+                const avgF1 = ((musanResults?.f1_score || 0) + (voicesResults?.f1_score || 0)) /
                               ((musanResults ? 1 : 0) + (voicesResults ? 1 : 0));
-                
+
                 if (avgF1 >= 70.0) {
-                  reportContent += `✅ **EXCELLENT**: Average F1-Score above 70%\n`;
+                  reportContent += `✅: Average F1-Score above 70%\n`;
                 } else if (avgF1 >= 60.0) {
-                  reportContent += `⚠️ **ACCEPTABLE**: Average F1-Score above 60%\n`;
+                  reportContent += `⚠️: Average F1-Score above 60%\n`;
                 } else {
-                  reportContent += `❌ **NEEDS IMPROVEMENT**: Average F1-Score below 60%\n`;
+                  reportContent += `❌: Average F1-Score below 60%\n`;
                 }
 
               } else {
