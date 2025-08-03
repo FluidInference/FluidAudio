@@ -46,11 +46,18 @@ extension DiarizerModels {
         let directory = directory ?? defaultModelsDirectory()
         let config = configuration ?? defaultConfiguration()
 
-        let modelNames = [
+        // Try to download INT8 model if available, but don't fail if it's not
+        var modelNames = [
             SegmentationModelFileName + ".mlmodelc",
-            "wespeaker_int8.mlmodelc",  // INT8 is now the primary embedding model
-            EmbeddingModelFileName + ".mlmodelc",  // Fallback for compatibility
+            EmbeddingModelFileName + ".mlmodelc",  // Always download regular model as fallback
         ]
+        
+        // Check if INT8 model exists locally first
+        let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
+        if FileManager.default.fileExists(atPath: int8Path.path) {
+            // If INT8 exists locally, include it in the download list to verify it's up to date
+            modelNames.insert("wespeaker_int8.mlmodelc", at: 1)
+        }
 
         let models = try await DownloadUtils.loadModels(
             .diarizer,
