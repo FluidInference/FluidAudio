@@ -104,9 +104,9 @@ Our goal is to offer a similar API to what Apple will introudce in OS26: https:/
 
 `RTFx - ~110x on a M4 Pro`
 
-## Real-World Usage
+## Showcase
 
-FluidAudio powers production applications including:
+FluidAudio powers local AI apps like:
 
 - **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence. Uses FluidAudio Parakeet for iOS transcription and speaker diarization across all platforms.
 - **[Whisper Mate](https://whisper.marksdo.com)**: Transcribes movies and audio to text locally. Records and transcribes in real time from speakers or system apps. Uses FluidAudio for speaker diarization.
