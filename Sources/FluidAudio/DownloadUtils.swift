@@ -212,7 +212,9 @@ public class DownloadUtils {
     }
 
     /// Download a CoreML model directory and all its contents
-    private static func downloadModelDirectory(repo: Repo, dirPath: String, to destination: URL)
+    private static func downloadModelDirectory(
+        repo: Repo, dirPath: String, to destination: URL
+    )
         async throws
     {
         let modelDir = destination.appendingPathComponent(dirPath)

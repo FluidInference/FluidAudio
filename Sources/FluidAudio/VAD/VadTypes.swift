@@ -2,48 +2,31 @@ import CoreML
 import Foundation
 
 public struct VadConfig: Sendable {
-    public var threshold: Float = 0.3
-    public var chunkSize: Int = 512
-    public var sampleRate: Int = 16000
+    public var threshold: Float
+    public var chunkSize: Int
+    public var sampleRate: Int
     public var modelCacheDirectory: URL?
-    public var debugMode: Bool = true
-    public var adaptiveThreshold: Bool = false
-    public var minThreshold: Float = 0.1
-    public var maxThreshold: Float = 0.7
-    public var computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+    public var debugMode: Bool
+    public var adaptiveThreshold: Bool
+    public var minThreshold: Float
+    public var maxThreshold: Float
+    public var computeUnits: MLComputeUnits
 
-    public var enableSNRFiltering: Bool = true
-    public var minSNRThreshold: Float = 6.0
-    public var noiseFloorWindow: Int = 100
-    public var spectralRolloffThreshold: Float = 0.85
-    public var spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)
+    public var enableSNRFiltering: Bool
+    public var minSNRThreshold: Float
+    public var noiseFloorWindow: Int
+    public var spectralRolloffThreshold: Float
+    public var spectralCentroidRange: (min: Float, max: Float)
 
     public static let `default` = VadConfig()
 
-    public static let optimized = VadConfig(
-        threshold: 0.445,
-        chunkSize: 512,
-        sampleRate: 16000,
-        modelCacheDirectory: nil,
-        debugMode: false,
-        adaptiveThreshold: true,
-        minThreshold: 0.1,
-        maxThreshold: 0.7,
-        computeUnits: .cpuAndNeuralEngine,
-        enableSNRFiltering: true,
-        minSNRThreshold: 6.0,
-        noiseFloorWindow: 100,
-        spectralRolloffThreshold: 0.85,
-        spectralCentroidRange: (200.0, 8000.0)
-    )
-
     public init(
-        threshold: Float = 0.3,
+        threshold: Float = 0.445,  // Optimal: 98% accuracy on MUSAN dataset
         chunkSize: Int = 512,
         sampleRate: Int = 16000,
         modelCacheDirectory: URL? = nil,
         debugMode: Bool = false,
-        adaptiveThreshold: Bool = false,
+        adaptiveThreshold: Bool = true,  // Helps with varying audio conditions
         minThreshold: Float = 0.1,
         maxThreshold: Float = 0.7,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
@@ -77,7 +60,10 @@ public struct VadResult: Sendable {
     public let snrValue: Float?
     public let spectralFeatures: SpectralFeatures?
 
-    public init(probability: Float, isVoiceActive: Bool, processingTime: TimeInterval, snrValue: Float? = nil, spectralFeatures: SpectralFeatures? = nil) {
+    public init(
+        probability: Float, isVoiceActive: Bool, processingTime: TimeInterval, snrValue: Float? = nil,
+        spectralFeatures: SpectralFeatures? = nil
+    ) {
         self.probability = probability
         self.isVoiceActive = isVoiceActive
         self.processingTime = processingTime
@@ -94,7 +80,10 @@ public struct SpectralFeatures: Sendable {
     public let zeroCrossingRate: Float
     public let spectralEntropy: Float
 
-    public init(spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float], zeroCrossingRate: Float, spectralEntropy: Float) {
+    public init(
+        spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float],
+        zeroCrossingRate: Float, spectralEntropy: Float
+    ) {
         self.spectralCentroid = spectralCentroid
         self.spectralRolloff = spectralRolloff
         self.spectralFlux = spectralFlux

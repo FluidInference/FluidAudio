@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import FluidAudio
 
 /// CI-specific tests that run reliably in GitHub Actions
@@ -18,8 +19,8 @@ final class CITests: XCTestCase {
         let manager1 = DiarizerManager()
         let manager2 = DiarizerManager(config: .default)
 
-        XCTAssertFalse(manager1.isAvailable) // Not initialized
-        XCTAssertFalse(manager2.isAvailable) // Not initialized
+        XCTAssertFalse(manager1.isAvailable)  // Not initialized
+        XCTAssertFalse(manager2.isAvailable)  // Not initialized
     }
 
     // MARK: - Configuration Tests
@@ -131,16 +132,16 @@ final class CITests: XCTestCase {
     func testSyntheticAudioGeneration() {
         // Test that we can generate test audio for validation
         let sampleRate = 16000
-        let duration = 1.0 // 1 second
-        let frequency: Float = 440.0 // A4 note
+        let duration = 1.0  // 1 second
+        let frequency: Float = 440.0  // A4 note
 
         let samples = (0..<Int(Double(sampleRate) * duration)).map { i in
             sin(2.0 * Float.pi * frequency * Float(i) / Float(sampleRate)) * 0.5
         }
 
         XCTAssertEqual(samples.count, sampleRate)
-        XCTAssertGreaterThan(samples.max() ?? 0, 0.4) // Should have positive peaks
-        XCTAssertLessThan(samples.min() ?? 0, -0.4) // Should have negative peaks
+        XCTAssertGreaterThan(samples.max() ?? 0, 0.4)  // Should have positive peaks
+        XCTAssertLessThan(samples.min() ?? 0, -0.4)  // Should have negative peaks
     }
 
     // MARK: - CoreML Manager Validation (Without Initialization)
@@ -166,8 +167,8 @@ final class CITests: XCTestCase {
 
         // Test embedding validation
         XCTAssertTrue(manager.validateEmbedding([0.5, 0.3, -0.2]))
-        XCTAssertFalse(manager.validateEmbedding([])) // Empty
-        XCTAssertFalse(manager.validateEmbedding([Float.nan])) // NaN
+        XCTAssertFalse(manager.validateEmbedding([]))  // Empty
+        XCTAssertFalse(manager.validateEmbedding([Float.nan]))  // NaN
     }
 
     // MARK: - Model Paths Structure
@@ -187,7 +188,7 @@ final class CITests: XCTestCase {
     func testManagerTypes() {
         // Test that CoreML manager can be created and basic types exist
         let manager = DiarizerManager()
-        XCTAssertFalse(manager.isAvailable) // Not initialized
+        XCTAssertFalse(manager.isAvailable)  // Not initialized
 
         // Test that we can create with custom config
         let config = DiarizerConfig(debugMode: true)
@@ -199,7 +200,7 @@ final class CITests: XCTestCase {
 
     func testAudioProcessingPerformance() {
         // Test that basic audio operations are reasonably fast
-        let largeAudio = Array(repeating: Float(0.5), count: 160000) // 10 seconds at 16kHz
+        let largeAudio = Array(repeating: Float(0.5), count: 160000)  // 10 seconds at 16kHz
 
         measure {
             let manager = DiarizerManager()
@@ -209,7 +210,7 @@ final class CITests: XCTestCase {
 
     func testCosineDistancePerformance() {
         // Test cosine distance calculation performance
-        let embedding1 = Array(repeating: Float(0.5), count: 512) // Typical embedding size
+        let embedding1 = Array(repeating: Float(0.5), count: 512)  // Typical embedding size
         let embedding2 = Array(repeating: Float(0.3), count: 512)
 
         measure {

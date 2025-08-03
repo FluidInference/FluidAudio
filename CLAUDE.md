@@ -34,6 +34,13 @@ FluidAudio is a speaker diarization system for Apple platforms using Core ML mod
 - **DO NOT** implement alternatives without asking
 - Only after your approval: Implementation, then explanation of results
 
+### Code Formatting
+
+- **Swift Format**: This project uses swift-format for consistent code style
+- **Configuration**: See `.swift-format` for style rules
+- **Auto-formatting**: PRs are automatically checked for formatting compliance
+- **Local formatting**: Run `swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/`
+
 ## Current Performance Status
 
 - **Achieved**: 17.7% DER
@@ -98,6 +105,12 @@ swift build -c release
 # Test
 swift test
 swift test --filter CITests
+
+# Format code (requires Swift 6+)
+swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/
+
+# Check formatting without modifying
+swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/
 
 # Package management
 swift package update
@@ -176,5 +189,5 @@ VADConfig(
 ## Model Sources
 
 - **Diarization**: [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
-- **VAD CoreML**: [alexwengg/coreml_silero_vad](https://huggingface.co/alexwengg/coreml_silero_vad)
+- **VAD CoreML**: [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **Test Data**: [alexwengg/musan_mini*](https://huggingface.co/datasets/alexwengg) variants

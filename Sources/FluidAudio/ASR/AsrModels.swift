@@ -9,6 +9,7 @@ public struct AsrModels: Sendable {
     public let decoder: MLModel
     public let joint: MLModel
     public let configuration: MLModelConfiguration
+    public let vocabulary: [Int: String]
 
     private static let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "AsrModels")
 
@@ -17,19 +18,20 @@ public struct AsrModels: Sendable {
         encoder: MLModel,
         decoder: MLModel,
         joint: MLModel,
-        configuration: MLModelConfiguration
+        configuration: MLModelConfiguration,
+        vocabulary: [Int: String]
     ) {
         self.melspectrogram = melspectrogram
         self.encoder = encoder
         self.decoder = decoder
         self.joint = joint
         self.configuration = configuration
+        self.vocabulary = vocabulary
     }
 }
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
-    
 
     /// Helper to get the repo path from a models directory
     private static func repoPath(from modelsDirectory: URL) -> URL {
@@ -46,15 +48,15 @@ extension AsrModels {
     }
 
     /// Load ASR models from a directory
-    /// 
+    ///
     /// - Parameters:
     ///   - directory: Directory containing the model files
     ///   - configuration: Optional MLModel configuration. When provided, the configuration's
     ///                   computeUnits will be respected. When nil, platform-optimized defaults
     ///                   are used (per-model optimization based on model type).
-    /// 
+    ///
     /// - Returns: Loaded ASR models
-    /// 
+    ///
     /// - Note: For iOS apps that need background audio processing, consider using
     ///         `iOSBackgroundConfiguration()` or a custom configuration with
     ///         `.cpuAndNeuralEngine` to avoid GPU-related background execution errors.
@@ -105,11 +107,44 @@ extension AsrModels {
             encoder: encoderModel,
             decoder: decoderModel,
             joint: jointModel,
-            configuration: config
+            configuration: config,
+            vocabulary: try loadVocabulary(from: directory)
         )
 
         logger.info("Successfully loaded all ASR models with optimized compute units")
         return asrModels
+    }
+
+    private static func loadVocabulary(from directory: URL) throws -> [Int: String] {
+        let vocabPath = repoPath(from: directory).appendingPathComponent(ModelNames.vocabulary)
+
+        if !FileManager.default.fileExists(atPath: vocabPath.path) {
+            logger.warning(
+                "Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models."
+            )
+            throw AsrModelsError.modelNotFound(ModelNames.vocabulary, vocabPath)
+        }
+
+        do {
+            let data = try Data(contentsOf: vocabPath)
+            let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
+
+            var vocabulary: [Int: String] = [:]
+
+            for (key, value) in jsonDict {
+                if let tokenId = Int(key) {
+                    vocabulary[tokenId] = value
+                }
+            }
+
+            logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
+            return vocabulary
+        } catch {
+            logger.error(
+                "Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)"
+            )
+            throw AsrModelsError.loadingFailed("Vocabulary parsing failed")
+        }
     }
 
     public static func loadFromCache(
@@ -178,7 +213,7 @@ extension AsrModels {
 
         return options
     }
-    
+
     /// Creates a configuration optimized for iOS background execution
     /// - Returns: Configuration with CPU+ANE compute units to avoid background GPU restrictions
     public static func iOSBackgroundConfiguration() -> MLModelConfiguration {

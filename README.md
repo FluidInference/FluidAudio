@@ -16,14 +16,14 @@ For custom use cases and feedback, reach out on Discord.
 ## Features
 
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for streaming transcription
-- **State-of-the-Art Diarization**: Research-competitive speaker separation with optimal speaker mapping
-- **Voice Activity Detection (VAD)**: Production-ready VAD with 98% accuracy using CoreML models and adaptive thresholding
+- **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
+- **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
 - **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference) - converted and optimized by our team. Permissive licenses.
 - **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
-- **Cross-platform**: Full support for macOS 14.0+ and iOS 17.0+ and any Apple Sillicon device
-- **Apple Neural Engine Optimized**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
+- **Cross-platform**: Support for macOS 14.0+ and iOS 17.0+ and Apple Sillicon device
+- **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 
 ## Installation
 
@@ -67,16 +67,15 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 ## 🚀 Roadmap
 
 **Coming Soon:**
-- **System Audio Access**: Tap into system audio via CoreAudio for MacOS :), don't need to use ScreenCaptureKit or Blackhole
+- **System Audio Access**: Tap into system audio via CoreAudio for MacOS, don't need to use ScreenCaptureKit or Blackhole
 
-## 🎯 Performance
+## Speaker Diarization
 
 **AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
+
 - **DER: 17.7%** - Competitive with Powerset BCE 2023 (18.5%)
 - **JER: 28.0%** - Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
 - **RTF: 0.02x** - Real-time processing with 50x speedup
-
-- **Efficient Computing**: Runs on Apple Neural Engine with zero performance trade-offs
 
 ```text
   RTF = Processing Time / Audio Duration
@@ -91,53 +90,59 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - Pipeline impact: Minimal - diarization won't be the bottleneck
 ```
 
-## 🎙️ Voice Activity Detection (VAD)
+## Voice Activity Detection (VAD) (beta)
 
-- **98% Accuracy** on MUSAN dataset at optimal threshold (0.445)
-- **CoreML Pipeline**: STFT → Encoder → RNN → Enhanced Fallback architecture
-- **Noise Robustness**: SNR filtering (6.0 dB threshold), spectral analysis, temporal smoothing
+The APIs here are too complicated for production usage; please use with caution and tune them as needed. To be transparent, VAD is the lowest priority in terms of maintenance for us at this point. If you need support here, please file an issue or contribute back!
 
-**Model Sources & Datasets:**
-- **CoreML Models**: [`FluidInference/coreml_silero_vad`](https://huggingface.co/FluidInference/silero-vad-coreml)
-- **Training Data**: MUSAN dataset (curated subsets)
-  - [`alexwengg/musan_mini50`](https://huggingface.co/datasets/alexwengg/musan_mini50) (50 test files)
-  - [`alexwengg/musan_mini100`](https://huggingface.co/datasets/alexwengg/musan_mini100) (100 test files)
+Our goal is to offer a similar API to what Apple will introudce in OS26: https://developer.apple.com/documentation/speech/speechdetector
 
-**Technical Achievements:**
-- **Model Conversion**: Solved PyTorch → CoreML limitations with custom fallback algorithm
-- **Performance**: Minimal latency overhead
-- **Integration**: Ready for embedding into diarization pipeline
+## Automatic Speech Recognition (ASR)
 
-## 🗣️ Automatic Speech Recognition (ASR)
+- **Model**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
+- **Real-time Factor**: Optimized for near-real-time transcription with chunking support
+- **Streaming Support**: Follows the same API as OS 26
 
-- **Model**: Parakeet TDT-0.6b v2 - Token Duration Transducer architecture
-- **Real-time Factor**: Optimized for real-time transcription with chunking support
-- **LibriSpeech Benchmark**: Competitive WER (Word Error Rate) performance
-- **Streaming Support**: Process audio in chunks for live transcription
+`RTFx - ~110x on a M4 Pro`
 
-**Model Sources:**
-- **CoreML Models**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
-- **Architecture**: Token Duration Transducer (TDT) with duration prediction
-- **Vocabulary**: BPE tokenization with 1024 tokens + blank token
+## Showcase
 
-**Technical Features:**
-- **Chunked Processing**: Support for real-time audio streaming with configurable chunk sizes
-- **Dual Audio Sources**: Separate decoder states for microphone and system audio
-- **Text Normalization**: Post-processing for improved accuracy
-- **ANE Optimization**: Fully optimized for Apple Neural Engine execution
+FluidAudio powers local AI apps like:
 
-## 🏢 Real-World Usage
-
-FluidAudio powers production applications including:
-
-- **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence
-- **[Whisper Mate](https://whisper.marksdo.com)**: Transcribe movie/audio to text locally. Realtime record & transcribe from speaker or system apps. 🔒 All process in local mac Whisper AI Model.
+- **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence. Uses FluidAudio Parakeet for iOS transcription and speaker diarization across all platforms.
+- **[Whisper Mate](https://whisper.marksdo.com)**: Transcribes movies and audio to text locally. Records and transcribes in real time from speakers or system apps. Uses FluidAudio for speaker diarization.
+- **[Voice Ink](https://tryvoiceink.com/)**: Uses local AI models to instantly transcribe speech with near-perfect accuracy and complete privacy. Utilizes FluidAudio for Parakeet ASR.
 
 Make a PR if you want to add your app!
 
+## Contributing
+
+### Code Style
+
+This project uses `swift-format` to maintain consistent code style. All pull requests are automatically checked for formatting compliance.
+
+**Local Development:**
+```bash
+# Format all code (requires Swift 6+ for contributors only)
+# Users of the library don't need Swift 6
+swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/
+
+# Check formatting without modifying
+swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/
+
+# For Swift <6, install swift-format separately:
+# git clone https://github.com/apple/swift-format
+# cd swift-format && swift build -c release
+# cp .build/release/swift-format /usr/local/bin/
+```
+
+**Automatic Checks:**
+- PRs will fail if code is not properly formatted
+- GitHub Actions runs formatting checks on all Swift file changes
+- See `.swift-format` for style configuration
+
 ## Quick Start
 
-### Real-time ASR with StreamingAsrManager (NEW - Recommended)
+### Streaming ASR (Reccomended)
 
 ```swift
 import AVFoundation
@@ -170,61 +175,7 @@ try audioEngine.start()
 let finalText = try await streamingAsr.finish()
 ```
 
-> **Note**: The default configuration uses 10-second chunks optimized for the TDT decoder. For lower latency, use `.lowLatency` config (5s chunks) or see the [documentation](Documentation/StreamingASR.md) for custom configurations.
-
-### Speaker Diarization
-
-```swift
-import FluidAudio
-
-// Initialize and process audio
-Task {
-    let diarizer = DiarizerManager()
-    diarizer.initialize(models: try await .downloadIfNeeded())
-
-    let audioSamples: [Float] = // your 16kHz audio data
-    let result = try diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
-
-    for segment in result.segments {
-        print("\(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
-    }
-}
-```
-
-## Voice Activity Detection Usage
-
-**VAD Library API**:
-
-```swift
-import FluidAudio
-
-// Initialize VAD with optimal configuration
-let vadConfig = VADConfig(
-    threshold: 0.445,             // Optimized for 98% accuracy
-    chunkSize: 512,              // Audio chunk size for processing
-    sampleRate: 16000,           // 16kHz audio processing
-    adaptiveThreshold: true,     // Enable dynamic thresholding
-    minThreshold: 0.1,           // Minimum threshold value
-    maxThreshold: 0.7,           // Maximum threshold value
-    enableSNRFiltering: true,    // SNR-based noise rejection
-    minSNRThreshold: 6.0,        // Aggressive noise filtering
-    useGPU: true                 // Metal Performance Shaders
-)
-
-// Process audio for voice activity detection
-Task {
-    let vadManager = VadManager(config: vadConfig)
-    try await vadManager.initialize()
-
-    let audioSamples: [Float] = // your 16kHz audio data
-    let vadResult = try await vadManager.detectVoiceActivity(audioSamples)
-
-    print("Voice activity detected: \(vadResult.hasVoice)")
-    print("Confidence score: \(vadResult.confidence)")
-}
-```
-
-## Automatic Speech Recognition Usage
+## Manual ASR
 
 ```swift
 import FluidAudio
@@ -262,19 +213,71 @@ Task {
 }
 ```
 
-## Configuration
-
-Customize behavior with `DiarizerConfig`:
+### Manual Speaker Diarization
 
 ```swift
-let config = DiarizerConfig(
-    clusteringThreshold: 0.7,      // Speaker similarity (0.0-1.0, higher = stricter)
-    minActivityThreshold: 10.0,    // Minimum activity frames for speaker detection
-    minDurationOn: 1.0,           // Minimum speech duration (seconds)
-    minDurationOff: 0.5,          // Minimum silence between speakers (seconds)
-    numClusters: -1,              // Number of speakers (-1 = auto-detect)
-    debugMode: false
+import FluidAudio
+
+// Initialize and process audio
+Task {
+    let diarizer = DiarizerManager()
+    diarizer.initialize(models: try await .downloadIfNeeded())
+
+    let audioSamples: [Float] = // your 16kHz audio data
+    let result = try diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
+
+    for segment in result.segments {
+        print("\(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    }
+}
+```
+
+## Voice Activity Detection Usage
+
+**VAD Library API**:
+
+```swift
+import FluidAudio
+
+// Use the default configuration (already optimized for best results)
+let vadConfig = VadConfig()  // Threshold: 0.445, optimized settings
+
+// Or customize the configuration
+let customVadConfig = VadConfig(
+    threshold: 0.445,            // Recommended threshold (98% accuracy)
+    chunkSize: 512,              // 32ms at 16kHz
+    sampleRate: 16000,
+    adaptiveThreshold: true,     // Adapts to noise levels
+    minThreshold: 0.1,
+    maxThreshold: 0.7,
+    enableSNRFiltering: true,    // Enhanced noise robustness
+    minSNRThreshold: 6.0,        // Aggressive noise filtering
+    computeUnits: .cpuAndNeuralEngine  // Use Neural Engine on Apple Silicon
 )
+
+// Process audio for voice activity detection
+Task {
+    let vadManager = VadManager(config: vadConfig)
+    try await vadManager.initialize()
+
+    // Process a single audio chunk (512 samples = 32ms at 16kHz)
+    let audioChunk: [Float] = // your 16kHz audio chunk
+    let vadResult = try await vadManager.processChunk(audioChunk)
+
+    print("Speech probability: \(vadResult.probability)")
+    print("Voice active: \(vadResult.isVoiceActive)")
+    print("Processing time: \(vadResult.processingTime)s")
+
+    // Or process an entire audio file
+    let audioData: [Float] = // your complete 16kHz audio data
+    let results = try await vadManager.processAudioFile(audioData)
+
+    // Find segments with voice activity
+    let voiceSegments = results.enumerated().compactMap { index, result in
+        result.isVoiceActive ? index : nil
+    }
+    print("Voice detected in \(voiceSegments.count) chunks")
+}
 ```
 
 ## CLI Usage
@@ -333,18 +336,22 @@ swift run fluidaudio download --dataset librispeech-test-other
 ## API Reference
 
 **Diarization:**
+
 - **`DiarizerManager`**: Main diarization class
 - **`performCompleteDiarization(_:sampleRate:)`**: Process audio and return speaker segments
 - **`compareSpeakers(audio1:audio2:)`**: Compare similarity between two audio samples
 - **`validateAudio(_:)`**: Validate audio quality and characteristics
 
 **Voice Activity Detection:**
+
 - **`VadManager`**: Voice activity detection with CoreML models
-- **`VADConfig`**: Configuration for VAD processing with adaptive thresholding
-- **`detectVoiceActivity(_:)`**: Process audio and detect voice activity
-- **`VADAudioProcessor`**: Advanced audio processing with SNR filtering
+- **`VadConfig`**: Configuration for VAD processing with adaptive thresholding
+- **`processChunk(_:)`**: Process a single audio chunk and detect voice activity
+- **`processAudioFile(_:)`**: Process complete audio file in chunks
+- **`VadAudioProcessor`**: Advanced audio processing with SNR filtering
 
 **Automatic Speech Recognition:**
+
 - **`AsrManager`**: Main ASR class with TDT decoding
 - **`AsrModels`**: Model loading and management
 - **`ASRConfig`**: Configuration for ASR processing

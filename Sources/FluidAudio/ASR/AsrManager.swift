@@ -26,10 +26,10 @@ public final class AsrManager {
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
     #if DEBUG
-        // Test-only setter
-        internal func setVocabularyForTesting(_ vocab: [Int: String]) {
-            vocabulary = vocab
-        }
+    // Test-only setter
+    internal func setVocabularyForTesting(_ vocab: [Int: String]) {
+        vocabulary = vocab
+    }
     #endif
 
     private var microphoneDecoderState: DecoderState
@@ -64,9 +64,6 @@ public final class AsrManager {
 
         // Optimization models will be loaded during initialize()
 
-        // Load vocabulary once during initialization
-        self.vocabulary = loadVocabulary()
-
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
@@ -92,6 +89,7 @@ public final class AsrManager {
         self.encoderModel = models.encoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
+        self.vocabulary = models.vocabulary
 
         logger.info("Token duration optimization model loaded successfully")
 
@@ -102,8 +100,7 @@ public final class AsrManager {
     /// - Note: This method is deprecated. Use AsrModels.downloadAndLoad() followed by initialize(models:) instead
     @available(
         *, deprecated,
-        message:
-            "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading"
+        message: "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading"
     )
     public func initialize() async throws {
         logger.info("Initializing AsrManager with automatic model download (deprecated)")
@@ -118,7 +115,9 @@ public final class AsrManager {
         }
     }
 
-    private func createFeatureProvider(features: [(name: String, array: MLMultiArray)]) throws
+    private func createFeatureProvider(
+        features: [(name: String, array: MLMultiArray)]
+    ) throws
         -> MLFeatureProvider
     {
         var featureDict: [String: MLFeatureValue] = [:]
@@ -136,7 +135,9 @@ public final class AsrManager {
         return array
     }
 
-    func prepareMelSpectrogramInput(_ audioSamples: [Float], actualLength: Int? = nil) async throws
+    func prepareMelSpectrogramInput(
+        _ audioSamples: [Float], actualLength: Int? = nil
+    ) async throws
         -> MLFeatureProvider
     {
         let audioLength = audioSamples.count
@@ -163,7 +164,9 @@ public final class AsrManager {
         ])
     }
 
-    func prepareMelSpectrogramInputFP16(_ audioSamples: [Float], actualLength: Int? = nil)
+    func prepareMelSpectrogramInputFP16(
+        _ audioSamples: [Float], actualLength: Int? = nil
+    )
         async throws -> MLFeatureProvider
     {
         let audioLength = audioSamples.count
@@ -194,8 +197,7 @@ public final class AsrManager {
         ])
     }
 
-    func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider
-    {
+    func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
         // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
         if let provider = ZeroCopyFeatureProvider.chain(
             from: melspectrogramOutput,
@@ -266,46 +268,6 @@ public final class AsrManager {
 
         decoderState = freshState
     }
-    private func loadVocabulary() -> [Int: String] {
-        let applicationSupportURL = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        let appDirectory = applicationSupportURL.appendingPathComponent(
-            "FluidAudio", isDirectory: true
-        )
-        .appendingPathComponent("Models", isDirectory: true)
-        .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
-        let vocabPath = appDirectory.appendingPathComponent("parakeet_vocab.json")
-
-        if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            logger.warning(
-                "Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models."
-            )
-            return [:]
-        }
-
-        do {
-            let data = try Data(contentsOf: vocabPath)
-            let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
-
-            var vocabulary: [Int: String] = [:]
-
-            for (key, value) in jsonDict {
-                if let tokenId = Int(key) {
-                    vocabulary[tokenId] = value
-                }
-            }
-
-            logger.info(
-                "Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
-            return vocabulary
-        } catch {
-            logger.error(
-                "Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)"
-            )
-            return [:]
-        }
-    }
 
     private func loadModel(
         path: URL,
@@ -327,8 +289,7 @@ public final class AsrManager {
         decoderPath: URL,
         jointPath: URL,
         configuration: MLModelConfiguration
-    ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel)
-    {
+    ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
         async let melspectrogram = loadModel(
             path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
         async let encoder = loadModel(
@@ -437,7 +398,9 @@ public final class AsrManager {
         logger.info("Decoder state reset for source: \(String(describing: source))")
     }
 
-    internal func transcribeWithState(_ audioSamples: [Float], decoderState: inout DecoderState)
+    internal func transcribeWithState(
+        _ audioSamples: [Float], decoderState: inout DecoderState
+    )
         async throws -> ASRResult
     {
         if config.enableDebug {
@@ -471,15 +434,12 @@ public final class AsrManager {
         return result
     }
 
-    internal func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (
+    internal func convertTokensWithExistingTimings(
+        _ tokenIds: [Int], timings: [TokenTiming]
+    ) -> (
         text: String, timings: [TokenTiming]
     ) {
         guard !tokenIds.isEmpty else { return ("", []) }
-
-        // Fallback: if vocabulary is empty (failed to load during init), try loading it now
-        if vocabulary.isEmpty {
-            vocabulary = loadVocabulary()
-        }
 
         // Debug: print token mappings
         if config.enableDebug {

@@ -2,7 +2,6 @@ import CoreML
 import Foundation
 import OSLog
 
-
 @available(macOS 13.0, iOS 16.0, *)
 public final class DiarizerManager {
 
@@ -10,11 +9,11 @@ public final class DiarizerManager {
     internal let config: DiarizerConfig
     private var models: DiarizerModels?
     private var optimizedWeSpeaker: OptimizedWeSpeaker?
-    
-    internal let segmentationProcessor = SegmentationProcessor()
-    internal let embeddingExtractor = EmbeddingExtractor()
-    internal let speakerClustering: SpeakerClustering
-    internal let audioValidation = AudioValidation()
+
+    private let segmentationProcessor = SegmentationProcessor()
+    private let embeddingExtractor = EmbeddingExtractor()
+    private let speakerClustering: SpeakerClustering
+    private let audioValidation = AudioValidation()
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
@@ -86,7 +85,9 @@ public final class DiarizerManager {
         return speakerClustering.cosineDistance(a, b)
     }
 
-    public func performCompleteDiarization(_ samples: [Float], sampleRate: Int = 16000) throws
+    public func performCompleteDiarization(
+        _ samples: [Float], sampleRate: Int = 16000
+    ) throws
         -> DiarizationResult
     {
         guard let models else {
@@ -276,7 +277,9 @@ public final class DiarizerManager {
         return (segments, timings)
     }
 
-    private func applyPostProcessingFilters(_ segments: [TimedSpeakerSegment])
+    private func applyPostProcessingFilters(
+        _ segments: [TimedSpeakerSegment]
+    )
         -> [TimedSpeakerSegment]
     {
         return segments.filter { segment in

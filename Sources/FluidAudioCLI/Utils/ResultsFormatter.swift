@@ -118,27 +118,34 @@ struct ResultsFormatter {
             // DER threshold check
             if let derThreshold = customThresholds.der {
                 let derStatus = avgDER < derThreshold ? "✅" : "❌"
-                print("DER (Diarization Error Rate)    \(String(format: "%.1f", avgDER))%    < \(String(format: "%.1f", derThreshold))%    \(derStatus)")
+                print(
+                    "DER (Diarization Error Rate)    \(String(format: "%.1f", avgDER))%    < \(String(format: "%.1f", derThreshold))%    \(derStatus)"
+                )
             }
 
             // JER threshold check
             if let jerThreshold = customThresholds.jer {
                 let jerStatus = avgJER < jerThreshold ? "✅" : "❌"
-                print("JER (Jaccard Error Rate)    \(String(format: "%.1f", avgJER))%    < \(String(format: "%.1f", jerThreshold))%    \(jerStatus)")
+                print(
+                    "JER (Jaccard Error Rate)    \(String(format: "%.1f", avgJER))%    < \(String(format: "%.1f", jerThreshold))%    \(jerStatus)"
+                )
             }
 
-            // RTFx threshold check (RTFx > threshold is good, as higher RTFx means faster processing)
+            // RTF threshold check
             if let rtfThreshold = customThresholds.rtf {
-                let rtfxThreshold = rtfThreshold > 0 ? 1.0 / rtfThreshold : 0.0
-                let rtfxStatus = avgRtfx > rtfxThreshold ? "✅" : "❌"
-                print("RTFx (Speed Factor)    \(String(format: "%.2f", avgRtfx))x    > \(String(format: "%.2f", rtfxThreshold))x    \(rtfxStatus)")
+                let rtfStatus = avgRtf < rtfThreshold ? "✅" : "❌"
+                print(
+                    "RTF (Real-Time Factor)    \(String(format: "%.2f", avgRtf))x    < \(String(format: "%.2f", rtfThreshold))x    \(rtfStatus)"
+                )
             }
 
             // Speaker count (always shown if we have thresholds)
             let avgSpeakersFloat = Float(avgSpeakers)
             let groundTruthSpeakers = results.first?.groundTruthSpeakerCount ?? 0
             let speakerStatus = abs(avgSpeakersFloat - Float(groundTruthSpeakers)) < 1.0 ? "✅" : "❌"
-            print("Speakers Detected    \(String(format: "%.0f", avgSpeakersFloat))    \(groundTruthSpeakers)    \(speakerStatus)")
+            print(
+                "Speakers Detected    \(String(format: "%.0f", avgSpeakersFloat))    \(groundTruthSpeakers)    \(speakerStatus)"
+            )
         }
 
         // Print detailed timing breakdown
@@ -177,7 +184,8 @@ struct ResultsFormatter {
 
         // Performance assessment (still pass RTF to assess function, but we display RTFx)
         let avgRTF = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
-        let assessment = PerformanceAssessment.assess(der: avgDER, jer: avgJER, rtf: avgRTF, customThresholds: customThresholds)
+        let assessment = PerformanceAssessment.assess(
+            der: avgDER, jer: avgJER, rtf: avgRTF, customThresholds: customThresholds)
         print("\n\(assessment.description)")
 
         return assessment

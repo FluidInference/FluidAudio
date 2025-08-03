@@ -169,9 +169,8 @@ public enum ANEOptimizer {
             dataType: .float16
         )
 
-        // Convert using Accelerate
+        // Convert using Accelerate with platform-specific handling
         let sourcePtr = input.dataPointer.bindMemory(to: Float.self, capacity: input.count)
-        let destPtr = float16Array.dataPointer.bindMemory(to: Float16.self, capacity: input.count)
 
         var sourceBuffer = vImage_Buffer(
             data: sourcePtr,
@@ -180,11 +179,14 @@ public enum ANEOptimizer {
             rowBytes: input.count * MemoryLayout<Float>.stride
         )
 
+        // Use UInt16 as storage type for cross-platform compatibility
+        let destPtr = float16Array.dataPointer.bindMemory(to: UInt16.self, capacity: input.count)
+
         var destBuffer = vImage_Buffer(
             data: destPtr,
             height: 1,
             width: vImagePixelCount(input.count),
-            rowBytes: input.count * MemoryLayout<Float16>.stride
+            rowBytes: input.count * MemoryLayout<UInt16>.stride
         )
 
         vImageConvert_PlanarFtoPlanar16F(&sourceBuffer, &destBuffer, 0)
