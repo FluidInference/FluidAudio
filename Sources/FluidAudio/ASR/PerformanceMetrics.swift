@@ -7,10 +7,10 @@ public struct ASRPerformanceMetrics: Sendable {
     public let encoderTime: TimeInterval
     public let decoderTime: TimeInterval
     public let totalProcessingTime: TimeInterval
-    public let rtfx: Float // Real-time factor
+    public let rtfx: Float  // Real-time factor
     public let peakMemoryMB: Float
     public let gpuUtilization: Float?
-    
+
     public var summary: String {
         """
         Performance Metrics:
@@ -28,12 +28,12 @@ public struct ASRPerformanceMetrics: Sendable {
 /// Performance monitor for tracking ASR metrics
 @available(macOS 13.0, iOS 16.0, *)
 public actor PerformanceMonitor {
-    
+
     public init() {}
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "Performance")
     private var metrics: [ASRPerformanceMetrics] = []
     private let signpostLogger = OSSignposter(subsystem: "com.fluidinfluence.asr", category: "Performance")
-    
+
     /// Track performance for a processing session
     public func trackSession<T>(
         operation: String,
@@ -42,24 +42,24 @@ public actor PerformanceMonitor {
     ) async throws -> (result: T, metrics: ASRPerformanceMetrics) {
         let sessionID = signpostLogger.makeSignpostID()
         let state = signpostLogger.beginInterval("ASR.Operation", id: sessionID)
-        
+
         let startTime = Date()
         let startMemory = getCurrentMemoryUsage()
-        
+
         // Track individual components
         let melTime: TimeInterval = 0
         let encoderTime: TimeInterval = 0
         let decoderTime: TimeInterval = 0
-        
+
         // Execute the operation
         let result = try await block()
-        
+
         let totalTime = Date().timeIntervalSince(startTime)
         let peakMemory = max(startMemory, getCurrentMemoryUsage())
         let rtfx = audioLengthSeconds / Float(totalTime)
-        
+
         signpostLogger.endInterval("ASR.Operation", state)
-        
+
         let metrics = ASRPerformanceMetrics(
             melSpectrogramTime: melTime,
             encoderTime: encoderTime,
@@ -67,15 +67,15 @@ public actor PerformanceMonitor {
             totalProcessingTime: totalTime,
             rtfx: rtfx,
             peakMemoryMB: peakMemory,
-            gpuUtilization: nil // Would require Metal performance counters
+            gpuUtilization: nil  // Would require Metal performance counters
         )
-        
+
         self.metrics.append(metrics)
         logger.info("\(operation) completed: \(metrics.summary)")
-        
+
         return (result, metrics)
     }
-    
+
     /// Track a specific component's execution time
     public func trackComponent<T>(
         _ component: String,
@@ -83,24 +83,24 @@ public actor PerformanceMonitor {
     ) async throws -> (result: T, time: TimeInterval) {
         let componentID = signpostLogger.makeSignpostID()
         let state = signpostLogger.beginInterval("ASR.Component", id: componentID)
-        
+
         let startTime = Date()
         let result = try await block()
         let time = Date().timeIntervalSince(startTime)
-        
+
         signpostLogger.endInterval("ASR.Component", state)
-        
+
         return (result, time)
     }
-    
+
     /// Get aggregated metrics
     public func getAggregatedMetrics() -> AggregatedMetrics? {
         guard !metrics.isEmpty else { return nil }
-        
+
         let avgRTFx = metrics.map { $0.rtfx }.reduce(0, +) / Float(metrics.count)
         let avgProcessingTime = metrics.map { $0.totalProcessingTime }.reduce(0, +) / Double(metrics.count)
         let maxMemory = metrics.map { $0.peakMemoryMB }.max() ?? 0
-        
+
         return AggregatedMetrics(
             averageRTFx: avgRTFx,
             averageProcessingTime: avgProcessingTime,
@@ -108,30 +108,31 @@ public actor PerformanceMonitor {
             sampleCount: metrics.count
         )
     }
-    
+
     /// Clear all stored metrics
     public func reset() {
         metrics.removeAll()
     }
-    
+
     /// Get current memory usage in MB
     private func getCurrentMemoryUsage() -> Float {
         var info = mach_task_basic_info()
         var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
-        
+
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                task_info(mach_task_self_,
-                         task_flavor_t(MACH_TASK_BASIC_INFO),
-                         $0,
-                         &count)
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    $0,
+                    &count)
             }
         }
-        
+
         if result == KERN_SUCCESS {
             return Float(info.resident_size) / 1024.0 / 1024.0
         }
-        
+
         return 0
     }
 }
@@ -142,7 +143,7 @@ public struct AggregatedMetrics: Sendable {
     public let averageProcessingTime: TimeInterval
     public let maxMemoryMB: Float
     public let sampleCount: Int
-    
+
     public var summary: String {
         """
         Aggregated Metrics (\(sampleCount) samples):
@@ -162,7 +163,7 @@ extension AsrManager {
         monitor: PerformanceMonitor? = nil
     ) async throws -> (result: ASRResult, metrics: ASRPerformanceMetrics?) {
         let audioLengthSeconds = Float(audioSamples.count) / Float(config.sampleRate)
-        
+
         if let monitor = monitor {
             return try await monitor.trackSession(
                 operation: "Transcription",

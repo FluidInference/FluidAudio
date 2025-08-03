@@ -8,7 +8,7 @@ struct TextNormalizer {
     private static let additionalDiacritics: [Character: String] = [
         "œ": "oe", "Œ": "OE", "ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE",
         "ß": "ss", "ẞ": "SS", "đ": "d", "Đ": "D", "ð": "d", "Ð": "D",
-        "þ": "th", "Þ": "th", "ł": "l", "Ł": "L"
+        "þ": "th", "Þ": "th", "ł": "l", "Ł": "L",
     ]
 
     /// Normalize text using HuggingFace ASR leaderboard standards
@@ -92,7 +92,7 @@ struct TextNormalizer {
             "she'll": "she will",
             "he'll": "he will",
             "she'd": "she would",
-            "he'd": "he would"
+            "he'd": "he would",
         ]
 
         for (contraction, expansion) in contractions {
@@ -111,7 +111,7 @@ struct TextNormalizer {
             "vs": "versus",
             "inc": "incorporated",
             "ltd": "limited",
-            "co": "company"
+            "co": "company",
         ]
 
         for (abbrev, expansion) in abbreviations {
@@ -134,7 +134,7 @@ struct TextNormalizer {
             "million": "1000000", "billion": "1000000000",
             "first": "1st", "second": "2nd", "third": "3rd", "fourth": "4th",
             "fifth": "5th", "sixth": "6th", "seventh": "7th", "eighth": "8th",
-            "ninth": "9th", "tenth": "10th"
+            "ninth": "9th", "tenth": "10th",
         ]
 
         for (word, digit) in numberWords {

@@ -1,7 +1,7 @@
+import Accelerate
 import CoreML
 import Foundation
 import OSLog
-import Accelerate
 
 @available(macOS 13.0, iOS 16.0, *)
 public actor VadManager {
@@ -65,7 +65,7 @@ public actor VadManager {
         let modelNames = [
             "silero_stft.mlmodelc",
             "silero_encoder.mlmodelc",
-            "silero_rnn_decoder.mlmodelc"
+            "silero_rnn_decoder.mlmodelc",
         ]
 
         let models = try await DownloadUtils.loadModels(
@@ -76,8 +76,9 @@ public actor VadManager {
         )
 
         guard let stftModel = models["silero_stft.mlmodelc"],
-              let encoderModel = models["silero_encoder.mlmodelc"],
-              let rnnModel = models["silero_rnn_decoder.mlmodelc"] else {
+            let encoderModel = models["silero_encoder.mlmodelc"],
+            let rnnModel = models["silero_rnn_decoder.mlmodelc"]
+        else {
             logger.error("Failed to load all required VAD models")
             throw VadError.modelLoadingFailed
         }
@@ -147,7 +148,8 @@ public actor VadManager {
 
         if config.debugMode {
             let snrString = snrValue.map { String(format: "%.1f", $0) } ?? "N/A"
-            let debugMessage = "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)),  smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", config.threshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
+            let debugMessage =
+                "VAD processing (CoreML): raw=\(String(format: "%.3f", rawProbability)),  smoothed=\(String(format: "%.3f", smoothedProbability)), threshold=\(String(format: "%.3f", config.threshold)), snr=\(snrString)dB, active=\(isVoiceActive), time=\(String(format: "%.3f", processingTime))s"
             logger.debug("\(debugMessage)")
         }
 
@@ -166,20 +168,23 @@ public actor VadManager {
             if processedChunk.count < config.chunkSize {
                 let paddingSize = config.chunkSize - processedChunk.count
                 if config.debugMode {
-                    logger.debug("Padding audio chunk with \(paddingSize) zeros (original: \(processedChunk.count) samples)")
+                    logger.debug(
+                        "Padding audio chunk with \(paddingSize) zeros (original: \(processedChunk.count) samples)")
                 }
                 processedChunk.append(contentsOf: Array(repeating: 0.0, count: paddingSize))
             } else {
                 if config.debugMode {
-                    logger.debug("Truncating audio chunk from \(processedChunk.count) to \(self.config.chunkSize) samples")
+                    logger.debug(
+                        "Truncating audio chunk from \(processedChunk.count) to \(self.config.chunkSize) samples")
                 }
                 processedChunk = Array(processedChunk.prefix(config.chunkSize))
             }
         }
 
         guard let stftModel = self.stftModel,
-              let encoderModel = self.encoderModel,
-              let rnnModel = self.rnnModel else {
+            let encoderModel = self.encoderModel,
+            let rnnModel = self.rnnModel
+        else {
             throw VadError.notInitialized
         }
 

@@ -9,15 +9,18 @@ import Foundation
 
 /// ASR evaluation metrics
 public struct ASRMetrics: Sendable {
-    public let wer: Double           // Word Error Rate
-    public let cer: Double           // Character Error Rate
+    public let wer: Double  // Word Error Rate
+    public let cer: Double  // Character Error Rate
     public let insertions: Int
     public let deletions: Int
     public let substitutions: Int
     public let totalWords: Int
     public let totalCharacters: Int
 
-    public init(wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int, totalCharacters: Int) {
+    public init(
+        wer: Double, cer: Double, insertions: Int, deletions: Int, substitutions: Int, totalWords: Int,
+        totalCharacters: Int
+    ) {
         self.wer = wer
         self.cer = cer
         self.insertions = insertions
@@ -30,14 +33,14 @@ public struct ASRMetrics: Sendable {
 
 /// Streaming-specific metrics for ASR benchmarking
 public struct StreamingMetrics: Sendable {
-    public let avgChunkProcessingTime: Double     // Average time to process each chunk
-    public let maxChunkProcessingTime: Double     // Maximum time to process any chunk
-    public let minChunkProcessingTime: Double     // Minimum time to process any chunk
-    public let totalChunks: Int                   // Total number of chunks processed
-    public let firstTokenLatency: Double?         // Time to first token (if measurable)
-    public let streamingRTFx: Double              // Streaming real-time factor
-    public let chunkDuration: Double              // Configured chunk duration in seconds
-    
+    public let avgChunkProcessingTime: Double  // Average time to process each chunk
+    public let maxChunkProcessingTime: Double  // Maximum time to process any chunk
+    public let minChunkProcessingTime: Double  // Minimum time to process any chunk
+    public let totalChunks: Int  // Total number of chunks processed
+    public let firstTokenLatency: Double?  // Time to first token (if measurable)
+    public let streamingRTFx: Double  // Streaming real-time factor
+    public let chunkDuration: Double  // Configured chunk duration in seconds
+
     public init(
         avgChunkProcessingTime: Double,
         maxChunkProcessingTime: Double,
@@ -65,10 +68,13 @@ public struct ASRBenchmarkResult: Sendable {
     public let metrics: ASRMetrics
     public let processingTime: TimeInterval
     public let audioLength: TimeInterval
-    public let rtfx: Double            // Real-Time Factor (inverse)
+    public let rtfx: Double  // Real-Time Factor (inverse)
     public let streamingMetrics: StreamingMetrics?  // Optional streaming metrics
 
-    public init(fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval, audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil) {
+    public init(
+        fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval,
+        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil
+    ) {
         self.fileName = fileName
         self.hypothesis = hypothesis
         self.reference = reference
@@ -103,7 +109,10 @@ public struct ASRBenchmarkConfig: Sendable {
     public let testStreaming: Bool
     public let streamingChunkDuration: Double
 
-    public init(dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false, longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1) {
+    public init(
+        dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false,
+        longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1
+    ) {
         self.dataset = dataset
         self.subset = subset
         self.maxFiles = maxFiles

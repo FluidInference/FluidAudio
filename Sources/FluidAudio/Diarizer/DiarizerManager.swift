@@ -2,14 +2,13 @@ import CoreML
 import Foundation
 import OSLog
 
-
 @available(macOS 13.0, iOS 16.0, *)
 public final class DiarizerManager {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
     private let config: DiarizerConfig
     private var models: DiarizerModels?
-    
+
     private let segmentationProcessor = SegmentationProcessor()
     private let embeddingExtractor = EmbeddingExtractor()
     private let speakerClustering: SpeakerClustering
@@ -69,7 +68,9 @@ public final class DiarizerManager {
         return speakerClustering.cosineDistance(a, b)
     }
 
-    public func performCompleteDiarization(_ samples: [Float], sampleRate: Int = 16000) throws
+    public func performCompleteDiarization(
+        _ samples: [Float], sampleRate: Int = 16000
+    ) throws
         -> DiarizationResult
     {
         guard let models else {
@@ -216,7 +217,9 @@ public final class DiarizerManager {
         return (segments, timings)
     }
 
-    private func applyPostProcessingFilters(_ segments: [TimedSpeakerSegment])
+    private func applyPostProcessingFilters(
+        _ segments: [TimedSpeakerSegment]
+    )
         -> [TimedSpeakerSegment]
     {
         return segments.filter { segment in

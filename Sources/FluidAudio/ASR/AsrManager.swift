@@ -26,10 +26,10 @@ public final class AsrManager {
     /// Cached vocabulary loaded once during initialization
     internal var vocabulary: [Int: String] = [:]
     #if DEBUG
-        // Test-only setter
-        internal func setVocabularyForTesting(_ vocab: [Int: String]) {
-            vocabulary = vocab
-        }
+    // Test-only setter
+    internal func setVocabularyForTesting(_ vocab: [Int: String]) {
+        vocabulary = vocab
+    }
     #endif
 
     private var microphoneDecoderState: DecoderState
@@ -102,8 +102,7 @@ public final class AsrManager {
     /// - Note: This method is deprecated. Use AsrModels.downloadAndLoad() followed by initialize(models:) instead
     @available(
         *, deprecated,
-        message:
-            "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading"
+        message: "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading"
     )
     public func initialize() async throws {
         logger.info("Initializing AsrManager with automatic model download (deprecated)")
@@ -118,7 +117,9 @@ public final class AsrManager {
         }
     }
 
-    private func createFeatureProvider(features: [(name: String, array: MLMultiArray)]) throws
+    private func createFeatureProvider(
+        features: [(name: String, array: MLMultiArray)]
+    ) throws
         -> MLFeatureProvider
     {
         var featureDict: [String: MLFeatureValue] = [:]
@@ -136,7 +137,9 @@ public final class AsrManager {
         return array
     }
 
-    func prepareMelSpectrogramInput(_ audioSamples: [Float], actualLength: Int? = nil) async throws
+    func prepareMelSpectrogramInput(
+        _ audioSamples: [Float], actualLength: Int? = nil
+    ) async throws
         -> MLFeatureProvider
     {
         let audioLength = audioSamples.count
@@ -163,7 +166,9 @@ public final class AsrManager {
         ])
     }
 
-    func prepareMelSpectrogramInputFP16(_ audioSamples: [Float], actualLength: Int? = nil)
+    func prepareMelSpectrogramInputFP16(
+        _ audioSamples: [Float], actualLength: Int? = nil
+    )
         async throws -> MLFeatureProvider
     {
         let audioLength = audioSamples.count
@@ -194,8 +199,7 @@ public final class AsrManager {
         ])
     }
 
-    func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider
-    {
+    func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
         // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
         if let provider = ZeroCopyFeatureProvider.chain(
             from: melspectrogramOutput,
@@ -327,8 +331,7 @@ public final class AsrManager {
         decoderPath: URL,
         jointPath: URL,
         configuration: MLModelConfiguration
-    ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel)
-    {
+    ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
         async let melspectrogram = loadModel(
             path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
         async let encoder = loadModel(
@@ -437,7 +440,9 @@ public final class AsrManager {
         logger.info("Decoder state reset for source: \(String(describing: source))")
     }
 
-    internal func transcribeWithState(_ audioSamples: [Float], decoderState: inout DecoderState)
+    internal func transcribeWithState(
+        _ audioSamples: [Float], decoderState: inout DecoderState
+    )
         async throws -> ASRResult
     {
         if config.enableDebug {
@@ -471,7 +476,9 @@ public final class AsrManager {
         return result
     }
 
-    internal func convertTokensWithExistingTimings(_ tokenIds: [Int], timings: [TokenTiming]) -> (
+    internal func convertTokensWithExistingTimings(
+        _ tokenIds: [Int], timings: [TokenTiming]
+    ) -> (
         text: String, timings: [TokenTiming]
     ) {
         guard !tokenIds.isEmpty else { return ("", []) }

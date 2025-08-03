@@ -171,7 +171,7 @@ public enum ANEOptimizer {
 
         // Convert using Accelerate with platform-specific handling
         let sourcePtr = input.dataPointer.bindMemory(to: Float.self, capacity: input.count)
-        
+
         var sourceBuffer = vImage_Buffer(
             data: sourcePtr,
             height: 1,
@@ -181,7 +181,7 @@ public enum ANEOptimizer {
 
         // Use UInt16 as storage type for cross-platform compatibility
         let destPtr = float16Array.dataPointer.bindMemory(to: UInt16.self, capacity: input.count)
-        
+
         var destBuffer = vImage_Buffer(
             data: destPtr,
             height: 1,

@@ -297,53 +297,54 @@ final class AsrModelsTests: XCTestCase {
     }
 
     // Removed testLoadWithANEOptimization - causes crashes when trying to load models
-    
+
     // MARK: - User Configuration Tests
-    
+
     func testUserConfigurationIsRespected() {
         // Test that when a user provides a configuration, it's respected
         let userConfig = MLModelConfiguration()
         userConfig.computeUnits = .cpuOnly
         userConfig.modelDisplayName = "User Custom Model"
-        
+
         // Verify the configuration properties
         XCTAssertEqual(userConfig.computeUnits, .cpuOnly)
         XCTAssertEqual(userConfig.modelDisplayName, "User Custom Model")
-        
+
         // The actual load test would require model files, so we test the configuration logic
         // The fix ensures that when configuration is not nil, it uses the user's compute units
     }
-    
+
     func testIOSBackgroundConfiguration() {
         let config = AsrModels.iOSBackgroundConfiguration()
-        
+
         // Should always use CPU+ANE for iOS background support
         XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
         XCTAssertTrue(config.allowLowPrecisionAccumulationOnGPU)
     }
-    
+
     func testPlatformAwareDefaultConfiguration() {
         let config = AsrModels.defaultConfiguration()
-        
+
         // Should always use CPU+ANE for optimal performance
         XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
     }
-    
+
     func testOptimalComputeUnitsRespectsPlatform() {
         // Test each model type
         let modelTypes: [ANEOptimizer.ModelType] = [
             .melSpectrogram,
             .encoder,
             .decoder,
-            .joint
+            .joint,
         ]
-        
+
         for modelType in modelTypes {
             let computeUnits = ANEOptimizer.optimalComputeUnits(for: modelType)
-            
+
             // All models should use CPU+ANE for optimal performance
-            XCTAssertEqual(computeUnits, .cpuAndNeuralEngine,
-                          "Model type \(modelType) should use CPU+ANE")
+            XCTAssertEqual(
+                computeUnits, .cpuAndNeuralEngine,
+                "Model type \(modelType) should use CPU+ANE")
         }
     }
 }

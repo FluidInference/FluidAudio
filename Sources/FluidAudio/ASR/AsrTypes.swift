@@ -62,7 +62,7 @@ public struct ASRResult: Sendable {
         self.tokenTimings = tokenTimings
         self.performanceMetrics = performanceMetrics
     }
-    
+
     /// Real-time factor (RTFx) - how many times faster than real-time
     public var rtfx: Float {
         Float(duration) / Float(processingTime)

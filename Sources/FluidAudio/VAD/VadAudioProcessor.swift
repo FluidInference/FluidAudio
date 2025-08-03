@@ -1,8 +1,7 @@
-import Foundation
 import Accelerate
-import OSLog
 import CoreML
-
+import Foundation
+import OSLog
 
 /// Comprehensive audio processing for VAD including energy detection, spectral analysis, SNR filtering, and temporal smoothing
 internal class VadAudioProcessor {
@@ -71,7 +70,7 @@ internal class VadAudioProcessor {
         // Apply weighted moving average (more weight to recent values)
         guard !probabilityWindow.isEmpty else { return probability }
 
-        let weights: [Float] = [0.1, 0.15, 0.2, 0.25, 0.3] // Most recent gets highest weight
+        let weights: [Float] = [0.1, 0.15, 0.2, 0.25, 0.3]  // Most recent gets highest weight
         var weightedSum: Float = 0.0
         var totalWeight: Float = 0.0
 
@@ -148,8 +147,9 @@ internal class VadAudioProcessor {
         // Spectral feature-based filtering - more aggressive
         if let features = spectralFeatures {
             // Check if spectral centroid is in expected speech range
-            let centroidInRange = features.spectralCentroid >= config.spectralCentroidRange.min &&
-                                 features.spectralCentroid <= config.spectralCentroidRange.max
+            let centroidInRange =
+                features.spectralCentroid >= config.spectralCentroidRange.min
+                && features.spectralCentroid <= config.spectralCentroidRange.max
 
             if !centroidInRange {
                 filteredProbability *= 0.5  // Reduce probability by 50%
@@ -194,7 +194,7 @@ internal class VadAudioProcessor {
             spectralCentroid: spectralCentroid,
             spectralRolloff: spectralRolloff,
             spectralFlux: 0.0,  // Unused - set to default
-            mfccFeatures: [],   // Unused - set to default
+            mfccFeatures: [],  // Unused - set to default
             zeroCrossingRate: zeroCrossingRate,
             spectralEntropy: spectralEntropy
         )
@@ -309,7 +309,7 @@ internal class VadAudioProcessor {
 
         var crossings = 0
         for i in 1..<values.count {
-            if (values[i] >= 0) != (values[i-1] >= 0) {
+            if (values[i] >= 0) != (values[i - 1] >= 0) {
                 crossings += 1
             }
         }
@@ -353,26 +353,26 @@ internal class VadAudioProcessor {
 
         // Noise detection features
         let isHighFrequencyNoise = zeroCrossingRate > 0.3  // Too many zero crossings = noise
-        let isVeryHighEnergy = logEnergy > -0.5           // Extremely high energy = often noise
-        let isTooManyPeaks = peakCount > 200              // Too many peaks = noise
+        let isVeryHighEnergy = logEnergy > -0.5  // Extremely high energy = often noise
+        let isTooManyPeaks = peakCount > 200  // Too many peaks = noise
 
         // Balanced feature weighting for better speech/noise discrimination
-        let energyScore = max(0.0, tanh(logEnergy + 5.0) * 0.3)   // Moderate energy threshold
-        let varianceScore = tanh(std * 2.0) * 0.15                // Moderate variance importance
-        let speechScore = speechIndicator * 0.4                   // Strong weight for speech patterns
-        let crossingScore = tanh(zeroCrossingRate * 4.0) * 0.15   // Moderate crossing rate
+        let energyScore = max(0.0, tanh(logEnergy + 5.0) * 0.3)  // Moderate energy threshold
+        let varianceScore = tanh(std * 2.0) * 0.15  // Moderate variance importance
+        let speechScore = speechIndicator * 0.4  // Strong weight for speech patterns
+        let crossingScore = tanh(zeroCrossingRate * 4.0) * 0.15  // Moderate crossing rate
 
         // Refined noise detection with moderate penalties
         var penalties: Float = 0.0
-        if isHighFrequencyNoise { penalties -= 0.2 }         // Moderate penalty for high-frequency noise
-        if isVeryHighEnergy { penalties -= 0.15 }            // Moderate penalty for very high energy
-        if isTooManyPeaks { penalties -= 0.15 }              // Moderate penalty for too many peaks
-        if speechIndicator < 0.3 { penalties -= 0.2 }       // Moderate penalty for non-speech patterns
+        if isHighFrequencyNoise { penalties -= 0.2 }  // Moderate penalty for high-frequency noise
+        if isVeryHighEnergy { penalties -= 0.15 }  // Moderate penalty for very high energy
+        if isTooManyPeaks { penalties -= 0.15 }  // Moderate penalty for too many peaks
+        if speechIndicator < 0.3 { penalties -= 0.2 }  // Moderate penalty for non-speech patterns
 
         // Moderate additional noise pattern detection
-        if std < 0.005 { penalties -= 0.15 }                 // Very little variation = likely noise
-        if logEnergy > 3.0 { penalties -= 0.1 }              // Very high energy = potentially noise
-        if zeroCrossingRate > 0.5 { penalties -= 0.2 }      // Excessive zero crossings = noise
+        if std < 0.005 { penalties -= 0.15 }  // Very little variation = likely noise
+        if logEnergy > 3.0 { penalties -= 0.1 }  // Very high energy = potentially noise
+        if zeroCrossingRate > 0.5 { penalties -= 0.2 }  // Excessive zero crossings = noise
 
         let baseScore = energyScore + varianceScore + speechScore + crossingScore
         let combinedScore = max(0.0, baseScore + penalties)  // Ensure non-negative
@@ -389,7 +389,7 @@ internal class VadAudioProcessor {
 
         var peaks = 0
         for i in 1..<(values.count - 1) {
-            if values[i] > values[i-1] && values[i] > values[i+1] && abs(values[i]) > 0.1 {
+            if values[i] > values[i - 1] && values[i] > values[i + 1] && abs(values[i]) > 0.1 {
                 peaks += 1
             }
         }
@@ -405,7 +405,7 @@ internal class VadAudioProcessor {
         // Speech typically has moderate dynamic range (not too flat, not too extreme)
         let topQuartile = Array(sortedValues.prefix(max(1, sortedValues.count / 4)))
         let bottomQuartile = Array(sortedValues.suffix(max(1, sortedValues.count / 4)))
-        let middleHalf = Array(sortedValues[sortedValues.count/4..<3*sortedValues.count/4])
+        let middleHalf = Array(sortedValues[sortedValues.count / 4..<3 * sortedValues.count / 4])
 
         let topMean = topQuartile.reduce(0, +) / Float(topQuartile.count)
         let bottomMean = bottomQuartile.reduce(0, +) / Float(bottomQuartile.count)
@@ -416,7 +416,7 @@ internal class VadAudioProcessor {
         let middleRatio = middleMean / max(topMean, 1e-10)
 
         // Speech-like patterns: moderate dynamic range + good middle energy
-        let rangeScore = 1.0 / (1.0 + exp(-2.0 * (log(max(dynamicRange, 1.0)) - 3.0))) // Peak around 20:1 ratio
+        let rangeScore = 1.0 / (1.0 + exp(-2.0 * (log(max(dynamicRange, 1.0)) - 3.0)))  // Peak around 20:1 ratio
         let middleScore = middleRatio  // Higher middle energy is speech-like
 
         // Simple consistency check - speech has variance

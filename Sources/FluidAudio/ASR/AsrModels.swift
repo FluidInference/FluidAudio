@@ -29,7 +29,6 @@ public struct AsrModels: Sendable {
 
 @available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
-    
 
     /// Helper to get the repo path from a models directory
     private static func repoPath(from modelsDirectory: URL) -> URL {
@@ -46,15 +45,15 @@ extension AsrModels {
     }
 
     /// Load ASR models from a directory
-    /// 
+    ///
     /// - Parameters:
     ///   - directory: Directory containing the model files
     ///   - configuration: Optional MLModel configuration. When provided, the configuration's
     ///                   computeUnits will be respected. When nil, platform-optimized defaults
     ///                   are used (per-model optimization based on model type).
-    /// 
+    ///
     /// - Returns: Loaded ASR models
-    /// 
+    ///
     /// - Note: For iOS apps that need background audio processing, consider using
     ///         `iOSBackgroundConfiguration()` or a custom configuration with
     ///         `.cpuAndNeuralEngine` to avoid GPU-related background execution errors.
@@ -178,7 +177,7 @@ extension AsrModels {
 
         return options
     }
-    
+
     /// Creates a configuration optimized for iOS background execution
     /// - Returns: Configuration with CPU+ANE compute units to avoid background GPU restrictions
     public static func iOSBackgroundConfiguration() -> MLModelConfiguration {

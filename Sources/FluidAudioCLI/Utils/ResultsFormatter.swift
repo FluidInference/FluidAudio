@@ -4,7 +4,7 @@ import Foundation
 
 /// Results formatting and output handling
 struct ResultsFormatter {
-    
+
     static func printResults(_ result: ProcessingResult) async {
         print("\n📊 Diarization Results:")
         print("   Audio File: \(result.audioFile)")
@@ -50,7 +50,7 @@ struct ResultsFormatter {
     }
 
     static func printBenchmarkResults(
-        _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String, 
+        _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String,
         customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
     ) -> PerformanceAssessment {
         print("\n🏆 \(dataset) Benchmark Results")
@@ -111,30 +111,38 @@ struct ResultsFormatter {
             print("\n📊 Accuracy Metrics")
             let metricsHeader = "Metric    Value    Threshold    Status"
             print(metricsHeader)
-            
+
             // DER threshold check
             if let derThreshold = customThresholds.der {
                 let derStatus = avgDER < derThreshold ? "✅" : "❌"
-                print("DER (Diarization Error Rate)    \(String(format: "%.1f", avgDER))%    < \(String(format: "%.1f", derThreshold))%    \(derStatus)")
+                print(
+                    "DER (Diarization Error Rate)    \(String(format: "%.1f", avgDER))%    < \(String(format: "%.1f", derThreshold))%    \(derStatus)"
+                )
             }
-            
+
             // JER threshold check
             if let jerThreshold = customThresholds.jer {
                 let jerStatus = avgJER < jerThreshold ? "✅" : "❌"
-                print("JER (Jaccard Error Rate)    \(String(format: "%.1f", avgJER))%    < \(String(format: "%.1f", jerThreshold))%    \(jerStatus)")
+                print(
+                    "JER (Jaccard Error Rate)    \(String(format: "%.1f", avgJER))%    < \(String(format: "%.1f", jerThreshold))%    \(jerStatus)"
+                )
             }
-            
+
             // RTF threshold check
             if let rtfThreshold = customThresholds.rtf {
                 let rtfStatus = avgRtf < rtfThreshold ? "✅" : "❌"
-                print("RTF (Real-Time Factor)    \(String(format: "%.2f", avgRtf))x    < \(String(format: "%.2f", rtfThreshold))x    \(rtfStatus)")
+                print(
+                    "RTF (Real-Time Factor)    \(String(format: "%.2f", avgRtf))x    < \(String(format: "%.2f", rtfThreshold))x    \(rtfStatus)"
+                )
             }
-            
+
             // Speaker count (always shown if we have thresholds)
             let avgSpeakersFloat = Float(avgSpeakers)
             let groundTruthSpeakers = results.first?.groundTruthSpeakerCount ?? 0
             let speakerStatus = abs(avgSpeakersFloat - Float(groundTruthSpeakers)) < 1.0 ? "✅" : "❌"
-            print("Speakers Detected    \(String(format: "%.0f", avgSpeakersFloat))    \(groundTruthSpeakers)    \(speakerStatus)")
+            print(
+                "Speakers Detected    \(String(format: "%.0f", avgSpeakersFloat))    \(groundTruthSpeakers)    \(speakerStatus)"
+            )
         }
 
         // Print detailed timing breakdown
@@ -173,9 +181,10 @@ struct ResultsFormatter {
 
         // Performance assessment
         let avgRTF = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
-        let assessment = PerformanceAssessment.assess(der: avgDER, jer: avgJER, rtf: avgRTF, customThresholds: customThresholds)
+        let assessment = PerformanceAssessment.assess(
+            der: avgDER, jer: avgJER, rtf: avgRTF, customThresholds: customThresholds)
         print("\n\(assessment.description)")
-        
+
         return assessment
     }
 

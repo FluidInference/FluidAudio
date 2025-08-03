@@ -5,11 +5,11 @@
 //  Copyright © 2025 Brandon Weng. All rights reserved.
 //
 
+/// Optimized TDT decoder with hybrid CoreML + Metal acceleration
+import Accelerate
 import CoreML
 import Foundation
 import OSLog
-/// Optimized TDT decoder with hybrid CoreML + Metal acceleration
-import Accelerate
 
 public struct TdtConfig: Sendable {
     public let durations: [Int]
@@ -203,7 +203,9 @@ internal struct TdtDecoder {
     }
 
     /// Pre-process encoder output into contiguous memory for faster access
-    private func preProcessEncoderOutput(_ encoderOutput: MLMultiArray, length: Int) throws
+    private func preProcessEncoderOutput(
+        _ encoderOutput: MLMultiArray, length: Int
+    ) throws
         -> EncoderFrameArray
     {
         let shape = encoderOutput.shape
@@ -330,7 +332,9 @@ internal struct TdtDecoder {
             from: output, key: "logits", errorMessage: "Joint network output missing logits")
     }
     /// Predict token and duration from joint logits
-    internal func predictTokenAndDuration(_ logits: MLMultiArray) throws -> (
+    internal func predictTokenAndDuration(
+        _ logits: MLMultiArray
+    ) throws -> (
         token: Int, score: Float, duration: Int
     ) {
         let (tokenLogits, durationLogits) = try splitLogits(logits)
@@ -395,7 +399,9 @@ internal struct TdtDecoder {
     // MARK: - Private Helper Methods
 
     /// Split joint logits into token and duration components with optimized memory access
-    private func splitLogits(_ logits: MLMultiArray) throws -> (
+    private func splitLogits(
+        _ logits: MLMultiArray
+    ) throws -> (
         tokenLogits: [Float], durationLogits: [Float]
     ) {
         let totalElements = logits.count
@@ -438,14 +444,18 @@ internal struct TdtDecoder {
     }
 
     /// Process duration logits to get duration value
-    private func processDurationLogits(_ durationLogits: [Float]) throws -> (
+    private func processDurationLogits(
+        _ durationLogits: [Float]
+    ) throws -> (
         bestDuration: Int, duration: Int
     ) {
         let bestDurationIdx = argmaxSIMD(durationLogits)
         let duration = config.tdtConfig.durations[bestDurationIdx]
         return (bestDurationIdx, duration)
     }
-    internal func extractEncoderTimeStep(_ encoderOutput: MLMultiArray, timeIndex: Int) throws
+    internal func extractEncoderTimeStep(
+        _ encoderOutput: MLMultiArray, timeIndex: Int
+    ) throws
         -> MLMultiArray
     {
         let shape = encoderOutput.shape
