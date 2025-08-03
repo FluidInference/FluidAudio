@@ -233,7 +233,8 @@ extension CoreMLDiarizerTests {
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName)
 
         let segmentationPath = repoPath.appendingPathComponent("pyannote_segmentation.mlmodelc")
-        let embeddingPath = repoPath.appendingPathComponent("wespeaker.mlmodelc")
+        let embeddingPath = repoPath.appendingPathComponent("wespeaker_int8.mlmodelc")
+        let fallbackEmbeddingPath = repoPath.appendingPathComponent("wespeaker.mlmodelc")
 
         var isDirectory: ObjCBool = false
         XCTAssertTrue(
@@ -247,14 +248,17 @@ extension CoreMLDiarizerTests {
                 isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
-        XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: embeddingPath.path, isDirectory: &isDirectory))
+        // Check for INT8 model first, fallback to regular model
+        let embeddingExists = FileManager.default.fileExists(atPath: embeddingPath.path, isDirectory: &isDirectory)
+        let fallbackExists = FileManager.default.fileExists(atPath: fallbackEmbeddingPath.path, isDirectory: &isDirectory)
+        
+        XCTAssertTrue(embeddingExists || fallbackExists, "Either INT8 or regular embedding model should exist")
         XCTAssertTrue(isDirectory.boolValue)
-
+        
+        let actualEmbeddingPath = embeddingExists ? embeddingPath : fallbackEmbeddingPath
         XCTAssertTrue(
             FileManager.default.fileExists(
-                atPath: embeddingPath.appendingPathComponent("coremldata.bin").path,
+                atPath: actualEmbeddingPath.appendingPathComponent("coremldata.bin").path,
                 isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
@@ -267,7 +271,7 @@ extension CoreMLDiarizerTests {
 
         let _ = try await DiarizerModels.load(
             localSegmentationModel: segmentationPath,
-            localEmbeddingModel: embeddingPath
+            localEmbeddingModel: actualEmbeddingPath
         )
     }
 
@@ -296,7 +300,8 @@ extension CoreMLDiarizerTests {
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
 
         let segmentationPath = modelsDir.appendingPathComponent("pyannote_segmentation.mlmodelc")
-        let embeddingPath = modelsDir.appendingPathComponent("wespeaker.mlmodelc")
+        let embeddingPath = modelsDir.appendingPathComponent("wespeaker_int8.mlmodelc")
+        let fallbackEmbeddingPath = modelsDir.appendingPathComponent("wespeaker.mlmodelc")
 
         // Check that the model files are actually there.
         var isDirectory: ObjCBool = false
@@ -311,14 +316,17 @@ extension CoreMLDiarizerTests {
                 isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
-        XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: embeddingPath.path, isDirectory: &isDirectory))
+        // Check for INT8 model first, fallback to regular model
+        let embeddingExists = FileManager.default.fileExists(atPath: embeddingPath.path, isDirectory: &isDirectory)
+        let fallbackExists = FileManager.default.fileExists(atPath: fallbackEmbeddingPath.path, isDirectory: &isDirectory)
+        
+        XCTAssertTrue(embeddingExists || fallbackExists, "Either INT8 or regular embedding model should exist")
         XCTAssertTrue(isDirectory.boolValue)
-
+        
+        let actualEmbeddingPath = embeddingExists ? embeddingPath : fallbackEmbeddingPath
         XCTAssertTrue(
             FileManager.default.fileExists(
-                atPath: embeddingPath.appendingPathComponent("coremldata.bin").path,
+                atPath: actualEmbeddingPath.appendingPathComponent("coremldata.bin").path,
                 isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
@@ -331,7 +339,7 @@ extension CoreMLDiarizerTests {
 
         let _ = try await DiarizerModels.load(
             localSegmentationModel: segmentationPath,
-            localEmbeddingModel: embeddingPath
+            localEmbeddingModel: actualEmbeddingPath
         )
     }
     /// Tests that we can load model files with a user-specified configuration.

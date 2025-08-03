@@ -49,6 +49,7 @@ extension DiarizerModels {
         let modelNames = [
             SegmentationModelFileName + ".mlmodelc",
             "wespeaker_int8.mlmodelc",  // INT8 is now the primary embedding model
+            EmbeddingModelFileName + ".mlmodelc",  // Fallback for compatibility
         ]
 
         let models = try await DownloadUtils.loadModels(
@@ -71,16 +72,10 @@ extension DiarizerModels {
         var embeddingModelType = "Standard Float32"
 
         // Always try INT8 model first (it's now the default)
-        let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
-        if FileManager.default.fileExists(atPath: int8Path.path) {
-            do {
-                logger.info("🚀 Loading INT8 quantized embedding model (default)")
-                embeddingModel = try MLModel(contentsOf: int8Path, configuration: config)
-                embeddingModelType = "🔥 INT8 Quantized (100x+ RTF)"
-                logger.info("✅ Loaded INT8 embedding model - optimal performance enabled!")
-            } catch {
-                logger.warning("Failed to load INT8 model: \(error.localizedDescription)")
-            }
+        if let int8Model = models["wespeaker_int8.mlmodelc"] {
+            embeddingModel = int8Model
+            embeddingModelType = "🔥 INT8 Quantized (100x+ RTF)"
+            logger.info("✅ Loaded INT8 embedding model - optimal performance enabled!")
         }
 
         // Check for optimized model without SliceByIndex
