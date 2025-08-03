@@ -6,14 +6,15 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public final class DiarizerManager {
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
-    private let config: DiarizerConfig
+    internal let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
+    internal let config: DiarizerConfig
     private var models: DiarizerModels?
+    private var optimizedWeSpeaker: OptimizedWeSpeaker?
     
-    private let segmentationProcessor = SegmentationProcessor()
-    private let embeddingExtractor = EmbeddingExtractor()
-    private let speakerClustering: SpeakerClustering
-    private let audioValidation = AudioValidation()
+    internal let segmentationProcessor = SegmentationProcessor()
+    internal let embeddingExtractor = EmbeddingExtractor()
+    internal let speakerClustering: SpeakerClustering
+    internal let audioValidation = AudioValidation()
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
@@ -31,6 +32,25 @@ public final class DiarizerManager {
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
         self.models = consume models
+        
+        // Initialize OptimizedWeSpeaker if INT8 model is available
+        let useINT8 = ProcessInfo.processInfo.environment["USE_INT8_MODELS"] != nil
+        if useINT8 {
+            // Look for INT8 model in cache directory
+            let cacheDir = DiarizerModels.defaultModelsDirectory()
+            let int8ModelPath = cacheDir.appendingPathComponent("wespeaker_int8.mlmodelc")
+            
+            if FileManager.default.fileExists(atPath: int8ModelPath.path) {
+                do {
+                    optimizedWeSpeaker = try OptimizedWeSpeaker(wespeakerPath: int8ModelPath)
+                    logger.info("✅ OptimizedWeSpeaker initialized with INT8 model from cache")
+                } catch {
+                    logger.error("Failed to initialize OptimizedWeSpeaker: \(error)")
+                }
+            } else {
+                logger.warning("INT8 model not found in cache for OptimizedWeSpeaker")
+            }
+        }
     }
 
     @available(*, deprecated, message: "Use initialize(models:) instead")
@@ -86,7 +106,13 @@ public final class DiarizerManager {
         var allSegments: [TimedSpeakerSegment] = []
         var speakerDB: [String: [Float]] = [:]
 
+        let totalChunks = (samples.count + chunkSize - 1) / chunkSize
+        var chunkIndex = 0
+        
         for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
+            chunkIndex += 1
+            logger.info("🔄 Processing chunk \(chunkIndex) at offset \(chunkStart)")
+            
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
             let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
@@ -121,15 +147,15 @@ public final class DiarizerManager {
             postProcessingSeconds: postProcessingTime
         )
 
-        logger.info(
-            "Complete diarization finished in \(String(format: "%.2f", totalProcessingTime))s (segmentation: \(String(format: "%.2f", segmentationTime))s, embedding: \(String(format: "%.2f", embeddingTime))s, clustering: \(String(format: "%.2f", clusteringTime))s, post-processing: \(String(format: "%.2f", postProcessingTime))s)"
-        )
+        // logger.info(
+        //     "Complete diarization finished in \(String(format: "%.2f", totalProcessingTime))s (segmentation: \(String(format: "%.2f", segmentationTime))s, embedding: \(String(format: "%.2f", embeddingTime))s, clustering: \(String(format: "%.2f", clusteringTime))s, post-processing: \(String(format: "%.2f", postProcessingTime))s)"
+        // )
 
         return DiarizationResult(
             segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
     }
 
-    private struct ChunkTimings {
+    internal struct ChunkTimings {
         let segmentationTime: TimeInterval
         let embeddingTime: TimeInterval
         let clusteringTime: TimeInterval
@@ -144,6 +170,7 @@ public final class DiarizerManager {
     ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
 
+        // Prepare chunk (same for both paths)
         let chunkSize = sampleRate * 10
         var paddedChunk = chunk
         if chunk.count < chunkSize {
@@ -152,25 +179,60 @@ public final class DiarizerManager {
             paddedChunk = padded[...]
         }
 
+        // Run segmentation once (used by both paths)
         let binarizedSegments = try segmentationProcessor.getSegments(
             audioChunk: paddedChunk,
             segmentationModel: models.segmentationModel
         )
+        
+        let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
+        
+        // Unified and merged models removed - caused performance/stability issues
+        
+        // Otherwise use traditional separate model processing
         let slidingFeature = segmentationProcessor.createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
 
-        let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
         let embeddingStartTime = Date()
 
-        let embeddings = try embeddingExtractor.getEmbedding(
-            audioChunk: paddedChunk,
-            binarizedSegments: binarizedSegments,
-            slidingWindowFeature: slidingFeature,
-            embeddingModel: models.embeddingModel,
-            embeddingPreprocessor: models.embeddingPreprocessor,
-            batchFrameExtractor: models.batchFrameExtractor,
-            sampleRate: sampleRate
-        )
+        let embeddings: [[Float]]
+        
+        // Use OptimizedWeSpeaker if available (for INT8 models)
+        if let optimizedWeSpeaker = self.optimizedWeSpeaker {
+            logger.info("🚀 Using OptimizedWeSpeaker for embedding extraction")
+            
+            // Extract masks from sliding window feature
+            var masks: [[Float]] = []
+            let numSpeakers = slidingFeature.data[0][0].count
+            let numFrames = slidingFeature.data[0].count
+            
+            for s in 0..<numSpeakers {
+                var speakerMask: [Float] = []
+                for f in 0..<numFrames {
+                    // Apply clean frame logic
+                    let speakerSum = slidingFeature.data[0][f].reduce(0, +)
+                    let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0
+                    speakerMask.append(slidingFeature.data[0][f][s] * isClean)
+                }
+                masks.append(speakerMask)
+            }
+            
+            embeddings = try optimizedWeSpeaker.getEmbeddings(
+                audio: Array(paddedChunk),
+                masks: masks
+            )
+        } else {
+            // Use regular embedding extraction
+            embeddings = try embeddingExtractor.getEmbedding(
+                audioChunk: paddedChunk,
+                binarizedSegments: binarizedSegments,
+                slidingWindowFeature: slidingFeature,
+                embeddingModel: models.embeddingModel,
+                embeddingPreprocessor: models.embeddingPreprocessor,
+                batchFrameExtractor: models.batchFrameExtractor,
+                sampleRate: sampleRate
+            )
+        }
 
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
         let clusteringStartTime = Date()
@@ -179,8 +241,7 @@ public final class DiarizerManager {
         let speakerActivities: [Float]
         let filteredSegments: [[[Float]]]
         
-        if let unifiedModel = models.unifiedPostEmbeddingModel {
-            logger.info("🚀 Using unified post-embedding model - GPU acceleration enabled!")
+        if false, let unifiedModel = models.unifiedPostEmbeddingModel {
             let (activities, filtered) = try processWithUnifiedModel(
                 embeddings: embeddings,
                 binarizedSegments: binarizedSegments,

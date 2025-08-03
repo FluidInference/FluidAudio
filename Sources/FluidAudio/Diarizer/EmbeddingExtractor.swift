@@ -5,7 +5,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 internal struct EmbeddingExtractor {
     
-    private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Embedding")
+    internal let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Embedding")
     
     func getEmbedding(
         audioChunk: ArraySlice<Float>,
@@ -23,14 +23,15 @@ internal struct EmbeddingExtractor {
         
         logger.info("=== Embedding Extraction Debug ===")
         logger.info("Chunk size: \(chunkSize), Frames: \(numFrames), Speakers: \(numSpeakers)")
-        logger.info("batchFrameExtractor: \(batchFrameExtractor != nil ? "✅ Available (No SliceByIndex!)" : "nil")")
+        logger.info("batchFrameExtractor: \(batchFrameExtractor != nil ? "✅ Available (No SliceByIndex!)" : "❌ NOT FOUND")")
         logger.info("embeddingPreprocessor: \(embeddingPreprocessor != nil ? "Available" : "nil")")
         
         // First priority: Use batch frame extractor if available (eliminates 1001 SliceByIndex)
-        if let batchExtractor = batchFrameExtractor {
+        if false, let batchExtractor = batchFrameExtractor {
             logger.info("🚀 Using batch frame extractor - NO SliceByIndex operations!")
-            return try getEmbeddingWithBatchExtractor(
+            return try getEmbeddingWithBatchFrames(
                 audioChunk: audioChunk,
+                binarizedSegments: binarizedSegments,
                 slidingWindowFeature: slidingWindowFeature,
                 embeddingModel: embeddingModel,
                 batchExtractor: batchExtractor,
@@ -39,7 +40,7 @@ internal struct EmbeddingExtractor {
         }
         
         // Second priority: Use preprocessor path if available
-        if let preprocessor = embeddingPreprocessor {
+        if false, let preprocessor = embeddingPreprocessor {
             logger.info("🚀 Using embedding with GPU-accelerated preprocessor")
             return try getEmbeddingOptimized(
                 audioChunk: audioChunk,

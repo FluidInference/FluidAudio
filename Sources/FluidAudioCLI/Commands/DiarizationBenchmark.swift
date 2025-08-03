@@ -103,6 +103,8 @@ enum DiarizationBenchmark {
         if iterations > 1 {
             print("   Iterations: \(iterations) (consistency testing)")
         }
+        
+        print("🔍 Creating DiarizerConfig and DiarizerManager...")
 
         let config = DiarizerConfig(
             clusteringThreshold: threshold,
@@ -113,17 +115,24 @@ enum DiarizationBenchmark {
         )
 
         let manager = DiarizerManager(config: config)
+        print("✓ DiarizerManager created")
 
         do {
+            print("🔄 Downloading models if needed...")
             let models = try await DiarizerModels.downloadIfNeeded()
+            print("✓ Models downloaded/verified")
+            
+            print("🔄 Initializing manager with models...")
             manager.initialize(models: models)
-            print("Models initialized successfully")
+            print("✓ Models initialized successfully")
         } catch {
             print("Failed to initialize models: \(error)")
             print("💡 Make sure you have network access for model downloads")
             exit(1)
         }
 
+        print("🔄 Starting benchmark run...")
+        
         // Run benchmark based on dataset
         let assessment: PerformanceAssessment
         switch dataset.lowercased() {
