@@ -2,7 +2,7 @@
   "hooks": {
     "Stop": [
       {
-        "matcher": "",
+        "matcher": "\\.swift$",
         "hooks": [
           {
             "type": "command",
