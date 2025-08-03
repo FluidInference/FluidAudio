@@ -22,6 +22,13 @@ FluidAudio is a speaker diarization system for Apple platforms using Core ML mod
 - Do not leave comments in places that are redundant or its very obvious
 - If a PR review asks a question, it may be a good indicator that the PR needs to add a comment there
 
+### Code Formatting
+
+- **Swift Format**: This project uses swift-format for consistent code style
+- **Configuration**: See `.swift-format` for style rules
+- **Auto-formatting**: PRs are automatically checked for formatting compliance
+- **Local formatting**: Run `swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/`
+
 ## Current Performance Status
 
 - **Achieved**: 17.7% DER
@@ -86,6 +93,12 @@ swift build -c release
 # Test
 swift test
 swift test --filter CITests
+
+# Format code (requires Swift 6+)
+swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/
+
+# Check formatting without modifying
+swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/
 
 # Package management
 swift package update
