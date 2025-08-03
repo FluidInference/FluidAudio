@@ -1,6 +1,7 @@
 import Foundation
-@testable import FluidAudio
 import XCTest
+
+@testable import FluidAudio
 
 @available(macOS 13.0, iOS 16.0, *)
 final class StreamingAsrSessionTests: XCTestCase {
@@ -44,7 +45,7 @@ final class StreamingAsrSessionTests: XCTestCase {
         let session = StreamingAsrSession()
         // Should not throw when cleaning up empty session
         await session.cleanup()
-        
+
         let streams = await session.activeStreams
         XCTAssertTrue(streams.isEmpty)
     }
@@ -80,7 +81,7 @@ final class StreamingAsrSessionTests: XCTestCase {
         let configs = [
             StreamingAsrConfig.default,
             StreamingAsrConfig.lowLatency,
-            StreamingAsrConfig.highAccuracy
+            StreamingAsrConfig.highAccuracy,
         ]
 
         // Verify all configs are valid
@@ -96,7 +97,7 @@ final class StreamingAsrSessionTests: XCTestCase {
     func testAudioSourceValues() {
         // Ensure audio sources are properly defined
         let sources: [AudioSource] = [.microphone, .system]
-        
+
         for source in sources {
             // Test that sources can be used as dictionary keys
             var dict: [AudioSource: String] = [:]
@@ -109,7 +110,7 @@ final class StreamingAsrSessionTests: XCTestCase {
 
     func testConcurrentStreamOperations() async throws {
         let session = StreamingAsrSession()
-        
+
         // Test concurrent reads
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<10 {
@@ -119,7 +120,7 @@ final class StreamingAsrSessionTests: XCTestCase {
                 }
             }
         }
-        
+
         // Session should still be in valid state
         let streams = await session.activeStreams
         XCTAssertNotNil(streams)
@@ -129,14 +130,14 @@ final class StreamingAsrSessionTests: XCTestCase {
 
     func testSessionMemoryCleanup() async throws {
         var session: StreamingAsrSession? = StreamingAsrSession()
-        
+
         // Cleanup and release
         await session?.cleanup()
-        
+
         // Weak reference for testing
         weak var weakSession = session
         session = nil
-        
+
         // Session should be deallocated
         XCTAssertNil(weakSession)
     }
@@ -145,19 +146,19 @@ final class StreamingAsrSessionTests: XCTestCase {
 
     func testSessionReadyForIntegration() async throws {
         let session = StreamingAsrSession()
-        
+
         // Verify session provides expected interface
         XCTAssertNotNil(session)
-        
+
         // Verify we can query streams
         let streams = await session.activeStreams
         XCTAssertNotNil(streams)
-        
+
         // Verify we can attempt to get streams
         let micStream = await session.getStream(for: .microphone)
-        XCTAssertNil(micStream) // Should be nil before creation
-        
+        XCTAssertNil(micStream)  // Should be nil before creation
+
         let systemStream = await session.getStream(for: .system)
-        XCTAssertNil(systemStream) // Should be nil before creation
+        XCTAssertNil(systemStream)  // Should be nil before creation
     }
 }

@@ -4,7 +4,7 @@ import Foundation
 
 /// Metrics calculation for diarization evaluation
 struct MetricsCalculator {
-    
+
     static func calculateDiarizationMetrics(
         predicted: [TimedSpeakerSegment], groundTruth: [TimedSpeakerSegment], totalDuration: Float
     ) -> DiarizationMetrics {
@@ -217,8 +217,7 @@ struct MetricsCalculator {
         var totalOverlap = 0
 
         for (predIndex, gtIndex) in assignments.assignments.enumerated() {
-            if gtIndex != -1 && predIndex < predSpeakerArray.count && gtIndex < gtSpeakerArray.count
-            {
+            if gtIndex != -1 && predIndex < predSpeakerArray.count && gtIndex < gtSpeakerArray.count {
                 let predSpeaker = predSpeakerArray[predIndex]
                 let gtSpeaker = gtSpeakerArray[gtIndex]
                 let overlap = overlapMatrix[predSpeaker]![gtSpeaker]!

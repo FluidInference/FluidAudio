@@ -4,7 +4,7 @@ import Foundation
 
 /// Audio loading and processing utilities
 struct AudioProcessor {
-    
+
     static func loadAudioFile(path: String) async throws -> [Float] {
         let url = URL(fileURLWithPath: path)
         let audioFile = try AVAudioFile(forReading: url)

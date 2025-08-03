@@ -49,7 +49,9 @@ internal struct VadModelProcessor {
         return stftOutput
     }
 
-    func processEncoder(_ concatenatedFeatures: MLMultiArray, encoderModel: MLModel) throws
+    func processEncoder(
+        _ concatenatedFeatures: MLMultiArray, encoderModel: MLModel
+    ) throws
         -> MLMultiArray
     {
         if config.debugMode {
