@@ -31,12 +31,12 @@ public final class DiarizerManager {
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
         self.models = consume models
-        
+
         // Initialize OptimizedWeSpeaker if INT8 model is available (now default)
         // Look for INT8 model in cache directory
         let cacheDir = DiarizerModels.defaultModelsDirectory()
         let int8ModelPath = cacheDir.appendingPathComponent("wespeaker_int8.mlmodelc")
-        
+
         if FileManager.default.fileExists(atPath: int8ModelPath.path) {
             do {
                 optimizedWeSpeaker = try OptimizedWeSpeaker(wespeakerPath: int8ModelPath)
@@ -106,11 +106,11 @@ public final class DiarizerManager {
 
         let totalChunks = (samples.count + chunkSize - 1) / chunkSize
         var chunkIndex = 0
-        
+
         for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
             chunkIndex += 1
             logger.info("🔄 Processing chunk \(chunkIndex) at offset \(chunkStart)")
-            
+
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
             let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
@@ -182,11 +182,11 @@ public final class DiarizerManager {
             audioChunk: paddedChunk,
             segmentationModel: models.segmentationModel
         )
-        
+
         let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
-        
+
         // Unified and merged models removed - caused performance/stability issues
-        
+
         // Otherwise use traditional separate model processing
         let slidingFeature = segmentationProcessor.createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
@@ -194,16 +194,16 @@ public final class DiarizerManager {
         let embeddingStartTime = Date()
 
         let embeddings: [[Float]]
-        
+
         // Use OptimizedWeSpeaker if available (for INT8 models)
         if let optimizedWeSpeaker = self.optimizedWeSpeaker {
             logger.info("🚀 Using OptimizedWeSpeaker for embedding extraction")
-            
+
             // Extract masks from sliding window feature
             var masks: [[Float]] = []
             let numSpeakers = slidingFeature.data[0][0].count
             let numFrames = slidingFeature.data[0].count
-            
+
             for s in 0..<numSpeakers {
                 var speakerMask: [Float] = []
                 for f in 0..<numFrames {
@@ -214,7 +214,7 @@ public final class DiarizerManager {
                 }
                 masks.append(speakerMask)
             }
-            
+
             embeddings = try optimizedWeSpeaker.getEmbeddings(
                 audio: Array(paddedChunk),
                 masks: masks

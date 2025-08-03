@@ -1,10 +1,10 @@
 import Foundation
 
 public enum EmbeddingMode: String, Sendable, CaseIterable {
-    case full = "full"              // Full embedding extraction (10.5s)
-    case fast = "fast"              // Fast mode with optimizations
-    case skip = "skip"              // Skip embedding extraction entirely
-    case cached = "cached"          // Use cached embeddings if available
+    case full = "full"  // Full embedding extraction (10.5s)
+    case fast = "fast"  // Fast mode with optimizations
+    case skip = "skip"  // Skip embedding extraction entirely
+    case cached = "cached"  // Use cached embeddings if available
 }
 
 public struct DiarizerConfig: Sendable {

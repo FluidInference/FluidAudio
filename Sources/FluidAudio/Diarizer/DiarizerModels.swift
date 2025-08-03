@@ -61,7 +61,7 @@ extension DiarizerModels {
         guard let segmentationModel = models[SegmentationModelFileName + ".mlmodelc"] else {
             throw DiarizerError.modelDownloadFailed
         }
-        
+
         // Priority order for embedding models:
         // 1. INT8 quantized model (DEFAULT - best performance/accuracy tradeoff)
         // 2. Optimized model without SliceByIndex operations
@@ -69,7 +69,7 @@ extension DiarizerModels {
         // 4. Regular wespeaker model (fallback)
         var embeddingModel: MLModel?
         var embeddingModelType = "Standard Float32"
-        
+
         // Always try INT8 model first (it's now the default)
         let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
         if FileManager.default.fileExists(atPath: int8Path.path) {
@@ -82,13 +82,16 @@ extension DiarizerModels {
                 logger.warning("Failed to load INT8 model: \(error.localizedDescription)")
             }
         }
-        
+
         // Check for optimized model without SliceByIndex
         let optimizedNoSlicePath = directory.appendingPathComponent("wespeaker_optimized_no_slice.mlpackage")
         let float16Path = directory.appendingPathComponent("wespeaker_float16.mlpackage")
         var isDirectory: ObjCBool = false
-        
-        if embeddingModel == nil && FileManager.default.fileExists(atPath: optimizedNoSlicePath.path, isDirectory: &isDirectory) && isDirectory.boolValue {
+
+        if embeddingModel == nil
+            && FileManager.default.fileExists(atPath: optimizedNoSlicePath.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+        {
             do {
                 logger.info("🚀 Found optimized embedding model WITHOUT SliceByIndex operations!")
                 // Check if we need to compile it first
@@ -106,9 +109,10 @@ extension DiarizerModels {
                 logger.warning("Failed to load optimized no-slice model: \(error.localizedDescription)")
             }
         }
-        
+
         // Try Float16 if optimized not available
-        if embeddingModel == nil && FileManager.default.fileExists(atPath: float16Path.path, isDirectory: &isDirectory) {
+        if embeddingModel == nil && FileManager.default.fileExists(atPath: float16Path.path, isDirectory: &isDirectory)
+        {
             do {
                 logger.info("🚀 Found Float16 optimized embedding model")
                 // Check if we need to compile it first
@@ -126,7 +130,7 @@ extension DiarizerModels {
                 logger.warning("Failed to load Float16 model: \(error.localizedDescription)")
             }
         }
-        
+
         // Fallback to regular model if optimized versions not available
         if embeddingModel == nil {
             guard let regularModel = models[EmbeddingModelFileName + ".mlmodelc"] else {
@@ -136,14 +140,13 @@ extension DiarizerModels {
             embeddingModelType = "📦 Standard Float32"
         }
 
-
         let endTime = Date()
         let totalDuration = endTime.timeIntervalSince(startTime)
         // For now, we don't have separate download vs compilation times, so we'll estimate
         // In reality, if models are cached, download time is 0
         let downloadDuration: TimeInterval = 0  // Models are typically cached
         let compilationDuration = totalDuration  // Most time is spent on compilation
-        
+
         // Debug print to verify models are loaded
         print("🔍 Model Loading Status:")
         print("   Embedding Model: \(embeddingModelType)")
