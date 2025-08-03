@@ -1,0 +1,56 @@
+name: Swift Format
+
+on:
+  pull_request:
+    paths:
+      - '**.swift'
+      - '.swift-format'
+      - '.github/workflows/swift-format.yml'
+
+jobs:
+  swift-format:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0'
+          
+      - name: Run swift-format lint
+        run: |
+          swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/
+          
+      - name: Check formatting
+        run: |
+          # Create a copy to check if formatting would change files
+          cp -r Sources Sources.bak
+          cp -r Tests Tests.bak
+          cp -r Examples Examples.bak || true
+          
+          # Format in place
+          swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/ || true
+          
+          # Check if any files changed
+          if ! diff -r Sources Sources.bak > /dev/null 2>&1; then
+            echo "❌ Swift formatting issues found in Sources/"
+            diff -r Sources Sources.bak || true
+            exit 1
+          fi
+          
+          if ! diff -r Tests Tests.bak > /dev/null 2>&1; then
+            echo "❌ Swift formatting issues found in Tests/"
+            diff -r Tests Tests.bak || true
+            exit 1
+          fi
+          
+          if [ -d "Examples" ] && ! diff -r Examples Examples.bak > /dev/null 2>&1; then
+            echo "❌ Swift formatting issues found in Examples/"
+            diff -r Examples Examples.bak || true
+            exit 1
+          fi
+          
+          echo "✅ All files are properly formatted"

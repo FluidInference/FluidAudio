@@ -60,7 +60,10 @@ public struct VadResult: Sendable {
     public let snrValue: Float?
     public let spectralFeatures: SpectralFeatures?
 
-    public init(probability: Float, isVoiceActive: Bool, processingTime: TimeInterval, snrValue: Float? = nil, spectralFeatures: SpectralFeatures? = nil) {
+    public init(
+        probability: Float, isVoiceActive: Bool, processingTime: TimeInterval, snrValue: Float? = nil,
+        spectralFeatures: SpectralFeatures? = nil
+    ) {
         self.probability = probability
         self.isVoiceActive = isVoiceActive
         self.processingTime = processingTime
@@ -77,7 +80,10 @@ public struct SpectralFeatures: Sendable {
     public let zeroCrossingRate: Float
     public let spectralEntropy: Float
 
-    public init(spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float], zeroCrossingRate: Float, spectralEntropy: Float) {
+    public init(
+        spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float],
+        zeroCrossingRate: Float, spectralEntropy: Float
+    ) {
         self.spectralCentroid = spectralCentroid
         self.spectralRolloff = spectralRolloff
         self.spectralFlux = spectralFlux

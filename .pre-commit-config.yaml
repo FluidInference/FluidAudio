@@ -1,0 +1,25 @@
+repos:
+  - repo: local
+    hooks:
+      - id: swift-format
+        name: swift-format
+        entry: swift-format
+        language: system
+        files: '\.swift$'
+        args: ['--in-place', '--configuration', '.swift-format']
+        require_serial: true
+        
+      - id: swift-format-lint
+        name: swift-format lint
+        entry: swift-format lint
+        language: system
+        files: '\.swift$'
+        args: ['--configuration', '.swift-format']
+        require_serial: true
+
+      - id: swift-build
+        name: swift build check
+        entry: swift build
+        language: system
+        files: '\.swift$'
+        pass_filenames: false

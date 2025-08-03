@@ -1,3 +1,4 @@
+import Accelerate
 import CoreML
 import Foundation
 
@@ -19,11 +20,11 @@ struct DecoderState {
         // Use ANE-aligned arrays for optimal performance
         do {
             hiddenState = try ANEOptimizer.createANEAlignedArray(
-                shape: [2, 1, 640], 
+                shape: [2, 1, 640],
                 dataType: .float32
             )
             cellState = try ANEOptimizer.createANEAlignedArray(
-                shape: [2, 1, 640], 
+                shape: [2, 1, 640],
                 dataType: .float32
             )
         } catch {
@@ -32,7 +33,7 @@ struct DecoderState {
             hiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
             cellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
         }
-        
+
         // Initialize to zeros using Accelerate
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
@@ -51,20 +52,18 @@ struct DecoderState {
         hiddenState.copyData(from: other.hiddenState)
         cellState.copyData(from: other.cellState)
     }
-    
+
     /// Fallback initializer that never fails (for use in critical paths)
     init(fallback: Bool) {
         // Standard MLMultiArray allocation without ANE optimization
         hiddenState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
         cellState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        
+
         // Initialize to zeros
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
     }
 }
-
-import Accelerate
 
 extension MLMultiArray {
     func resetData(to value: NSNumber) {
@@ -75,7 +74,7 @@ extension MLMultiArray {
             }
             return
         }
-        
+
         // Use vDSP for optimized memory fill
         var floatValue = value.floatValue
         self.dataPointer.withMemoryRebound(to: Float.self, capacity: count) { ptr in
@@ -91,7 +90,7 @@ extension MLMultiArray {
             }
             return
         }
-        
+
         // Use optimized memory copy
         let destPtr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
         let srcPtr = source.dataPointer.bindMemory(to: Float.self, capacity: count)
