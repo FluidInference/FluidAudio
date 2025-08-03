@@ -12,29 +12,14 @@ public struct DiarizerModels: Sendable {
 
     public let segmentationModel: CoreMLDiarizer.SegmentationModel
     public let embeddingModel: CoreMLDiarizer.EmbeddingModel
-    public let embeddingPreprocessor: MLModel?
-    public let batchFrameExtractor: MLModel?
-    public let unifiedPostEmbeddingModel: MLModel?
-    public let mergedEmbeddingUnifiedModel: MLModel?
-    public let unifiedFbankModel: MLModel?
     public let downloadDuration: TimeInterval
     public let compilationDuration: TimeInterval
 
     init(segmentation: MLModel, embedding: MLModel, 
-         embeddingPreprocessor: MLModel? = nil,
-         batchFrameExtractor: MLModel? = nil,
-         unifiedPostEmbeddingModel: MLModel? = nil,
-         mergedEmbeddingUnifiedModel: MLModel? = nil,
-         unifiedFbankModel: MLModel? = nil,
          downloadDuration: TimeInterval = 0, 
          compilationDuration: TimeInterval = 0) {
         self.segmentationModel = segmentation
         self.embeddingModel = embedding
-        self.embeddingPreprocessor = embeddingPreprocessor
-        self.batchFrameExtractor = batchFrameExtractor
-        self.unifiedPostEmbeddingModel = unifiedPostEmbeddingModel
-        self.mergedEmbeddingUnifiedModel = mergedEmbeddingUnifiedModel
-        self.unifiedFbankModel = unifiedFbankModel
         self.downloadDuration = downloadDuration
         self.compilationDuration = compilationDuration
     }
@@ -77,38 +62,26 @@ extension DiarizerModels {
         }
         
         // Priority order for embedding models:
-        // 1. INT8 quantized model (if USE_INT8_MODELS environment variable is set)
+        // 1. INT8 quantized model (if USE_INT8_MODELS is set)
         // 2. Optimized model without SliceByIndex operations
         // 3. Float16 optimized version
         // 4. Regular wespeaker model
         var embeddingModel: MLModel?
         var embeddingModelType = "Standard Float32"
         
-        // Check for INT8 model if requested
+        // Check for INT8 model first
         let useINT8 = ProcessInfo.processInfo.environment["USE_INT8_MODELS"] != nil
         if useINT8 {
-            print("⚡ INT8 MODELS ENABLED! Optimized for speed with maintained accuracy...")
-            print("✅ Expected: DER ~17.8%, RTF 80x+")
-            logger.info("⚡ INT8 models enabled - optimized for speed")
-            
-            // Check cache directory for INT8 model
-            let int8ModelPath = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
-            
-            if FileManager.default.fileExists(atPath: int8ModelPath.path) {
+            let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
+            if FileManager.default.fileExists(atPath: int8Path.path) {
                 do {
-                    print("🚀 Found INT8 model at: \(int8ModelPath.lastPathComponent)")
-                    logger.info("🚀 Loading INT8 quantized wespeaker from cache")
-                    embeddingModel = try MLModel(contentsOf: int8ModelPath, configuration: config)
-                    embeddingModelType = "⚡ INT8 Quantized (8-bit palettized)"
-                    print("✅ Successfully loaded INT8 quantized embedding model!")
-                    logger.info("✅ Loaded INT8 quantized embedding model")
+                    logger.info("🚀 Found INT8 quantized embedding model!")
+                    embeddingModel = try MLModel(contentsOf: int8Path, configuration: config)
+                    embeddingModelType = "🔥 INT8 Quantized (Maximum Performance!)"
+                    logger.info("✅ Loaded INT8 embedding model - 60x+ RTF enabled!")
                 } catch {
-                    print("❌ Failed to load INT8 model: \(error)")
-                    logger.error("Failed to load INT8 model: \(error.localizedDescription)")
+                    logger.warning("Failed to load INT8 model: \(error.localizedDescription)")
                 }
-            } else {
-                print("❌ INT8 model not found at: \(int8ModelPath.path)")
-                logger.warning("INT8 model not found in cache, falling back to standard model")
             }
         }
         
@@ -117,7 +90,7 @@ extension DiarizerModels {
         let float16Path = directory.appendingPathComponent("wespeaker_float16.mlpackage")
         var isDirectory: ObjCBool = false
         
-        if FileManager.default.fileExists(atPath: optimizedNoSlicePath.path, isDirectory: &isDirectory) && isDirectory.boolValue {
+        if embeddingModel == nil && FileManager.default.fileExists(atPath: optimizedNoSlicePath.path, isDirectory: &isDirectory) && isDirectory.boolValue {
             do {
                 logger.info("🚀 Found optimized embedding model WITHOUT SliceByIndex operations!")
                 // Check if we need to compile it first
@@ -165,99 +138,6 @@ extension DiarizerModels {
             embeddingModelType = "📦 Standard Float32"
         }
 
-        // Look for optional optimization models
-        // print("🔍 Looking for models in directory: \(directory.path)")
-        
-        // List contents of directory for debugging
-        // if let contents = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
-        //     print("   Directory contents: \(contents.filter { $0.contains(".ml") })")
-        // }
-        
-        let embeddingPreprocessorPath = directory.appendingPathComponent("embedding_preprocessor.mlpackage")
-        
-        var embeddingPreprocessor: MLModel?
-        
-        // Try to load embedding preprocessor
-        logger.info("🔍 Looking for embedding preprocessor at: \(embeddingPreprocessorPath.path)")
-        if FileManager.default.fileExists(atPath: embeddingPreprocessorPath.path, isDirectory: &isDirectory) {
-            do {
-                // Check if we need to compile the model first
-                let compiledPath = embeddingPreprocessorPath.deletingPathExtension().appendingPathExtension("mlmodelc")
-                if !FileManager.default.fileExists(atPath: compiledPath.path) {
-                    // print("   Compiling embedding preprocessor...")
-                    let compiledURL = try await MLModel.compileModel(at: embeddingPreprocessorPath)
-                    // print("   ✅ Compiled to: \(compiledURL.lastPathComponent)")
-                    embeddingPreprocessor = try MLModel(contentsOf: compiledURL, configuration: config)
-                } else {
-                    embeddingPreprocessor = try MLModel(contentsOf: compiledPath, configuration: config)
-                }
-                logger.info("✅ Successfully loaded embedding preprocessor model - GPU acceleration enabled!")
-                // print("   ✅ Embedding preprocessor loaded successfully!")
-            } catch {
-                logger.warning("Failed to load embedding preprocessor: \(error.localizedDescription)")
-                // print("   ❌ Failed to load embedding preprocessor: \(error)")
-            }
-        } else {
-            logger.info("❌ Embedding preprocessor not found at: \(embeddingPreprocessorPath.path)")
-        }
-        
-        logger.info("📂 Model directory: \(directory.path)")
-        
-        // Load batch frame extractor model
-        var batchFrameExtractor: MLModel?
-        
-        let batchExtractorPath = directory.appendingPathComponent("batch_frame_extractor.mlpackage")
-        logger.info("🔍 Looking for batch frame extractor at: \(batchExtractorPath.path)")
-        if FileManager.default.fileExists(atPath: batchExtractorPath.path, isDirectory: &isDirectory) {
-            do {
-                logger.info("🚀 Found batch frame extractor - eliminates 1001 SliceByIndex operations!")
-                let compiledPath = batchExtractorPath.deletingPathExtension().appendingPathExtension("mlmodelc")
-                if !FileManager.default.fileExists(atPath: compiledPath.path) {
-                    // print("   Compiling batch frame extractor...")
-                    let compiledURL = try await MLModel.compileModel(at: batchExtractorPath)
-                    // print("   ✅ Compiled to: \(compiledURL.lastPathComponent)")
-                    batchFrameExtractor = try MLModel(contentsOf: compiledURL, configuration: config)
-                } else {
-                    batchFrameExtractor = try MLModel(contentsOf: compiledPath, configuration: config)
-                }
-                logger.info("✅ Batch frame extractor loaded - 3-5x speedup enabled!")
-                // print("   ✅ Batch frame extractor loaded successfully!")
-            } catch {
-                logger.warning("Failed to load batch frame extractor: \(error.localizedDescription)")
-                // print("   ❌ Failed to load batch frame extractor: \(error)")
-            }
-        }
-        
-        // Load unified post-embedding model
-        var unifiedPostEmbeddingModel: MLModel?
-        
-        let unifiedModelPath = directory.appendingPathComponent("unified_post_embedding.mlpackage")
-        isDirectory = false
-        if FileManager.default.fileExists(atPath: unifiedModelPath.path, isDirectory: &isDirectory) {
-            do {
-                // Check if we need to compile the model first
-                let compiledPath = unifiedModelPath.deletingPathExtension().appendingPathExtension("mlmodelc")
-                if !FileManager.default.fileExists(atPath: compiledPath.path) {
-                    // print("   Compiling unified post-embedding model...")
-                    let compiledURL = try await MLModel.compileModel(at: unifiedModelPath)
-                    // print("   ✅ Compiled to: \(compiledURL.lastPathComponent)")
-                    unifiedPostEmbeddingModel = try MLModel(contentsOf: compiledURL, configuration: config)
-                } else {
-                    unifiedPostEmbeddingModel = try MLModel(contentsOf: compiledPath, configuration: config)
-                }
-                logger.info("✅ Successfully loaded unified post-embedding model - GPU acceleration enabled!")
-                // print("   ✅ Unified post-embedding model loaded successfully!")
-            } catch {
-                logger.warning("Failed to load unified post-embedding model: \(error.localizedDescription)")
-                // print("   ❌ Failed to load unified post-embedding model: \(error)")
-            }
-        } else {
-            logger.info("🔍 Looking for unified post-embedding model at: \(unifiedModelPath.path)")
-        }
-        
-        // Merged and unified models removed - caused compilation/runtime issues
-        let mergedEmbeddingUnifiedModel: MLModel? = nil
-        let unifiedFbankModel: MLModel? = nil
 
         let endTime = Date()
         let totalDuration = endTime.timeIntervalSince(startTime)
@@ -267,22 +147,12 @@ extension DiarizerModels {
         let compilationDuration = totalDuration // Most time is spent on compilation
         
         // Debug print to verify models are loaded
-        // print("🔍 Model Loading Status:")
-        // print("   Embedding Model: \(embeddingModelType)")
-        // print("   Batch Frame Extractor: \(batchFrameExtractor != nil ? "✅ Loaded (No SliceByIndex!)" : "❌ Not Found")")
-        // print("   Embedding Preprocessor: \(embeddingPreprocessor != nil ? "✅ Loaded" : "❌ Not Found")")
-        // print("   Unified Post-Embedding: \(unifiedPostEmbeddingModel != nil ? "✅ Loaded" : "❌ Not Found")")
-        // print("   Merged Embedding+Unified: \(mergedEmbeddingUnifiedModel != nil ? "✅ Loaded" : "❌ Not Found")")
-        // print("   Unified Fbank Model: \(unifiedFbankModel != nil ? "🎯 Loaded (TRUE single model!)" : "❌ Not Found")")
+        print("🔍 Model Loading Status:")
+        print("   Embedding Model: \(embeddingModelType)")
         
         return DiarizerModels(
             segmentation: segmentationModel, 
             embedding: embeddingModel!, // Force unwrap safe - we ensure it's set above
-            embeddingPreprocessor: embeddingPreprocessor,
-            batchFrameExtractor: batchFrameExtractor,
-            unifiedPostEmbeddingModel: unifiedPostEmbeddingModel,
-            mergedEmbeddingUnifiedModel: mergedEmbeddingUnifiedModel,
-            unifiedFbankModel: unifiedFbankModel,
             downloadDuration: downloadDuration, 
             compilationDuration: compilationDuration
         )
@@ -351,8 +221,6 @@ extension DiarizerModels {
         return DiarizerModels(
             segmentation: segmentationModel, 
             embedding: embeddingModel,
-            embeddingPreprocessor: nil,
-            unifiedPostEmbeddingModel: nil,
             downloadDuration: 0, 
             compilationDuration: loadDuration
         )

@@ -12,8 +12,6 @@ internal struct EmbeddingExtractor {
         binarizedSegments: [[[Float]]],
         slidingWindowFeature: SlidingWindowFeature,
         embeddingModel: MLModel,
-        embeddingPreprocessor: MLModel? = nil,
-        batchFrameExtractor: MLModel? = nil,
         sampleRate: Int = 16000
     ) throws -> [[Float]] {
         let chunkSize = 10 * sampleRate
@@ -23,33 +21,6 @@ internal struct EmbeddingExtractor {
         
         logger.info("=== Embedding Extraction Debug ===")
         logger.info("Chunk size: \(chunkSize), Frames: \(numFrames), Speakers: \(numSpeakers)")
-        logger.info("batchFrameExtractor: \(batchFrameExtractor != nil ? "✅ Available (No SliceByIndex!)" : "❌ NOT FOUND")")
-        logger.info("embeddingPreprocessor: \(embeddingPreprocessor != nil ? "Available" : "nil")")
-        
-        // First priority: Use batch frame extractor if available (eliminates 1001 SliceByIndex)
-        if false, let batchExtractor = batchFrameExtractor {
-            logger.info("🚀 Using batch frame extractor - NO SliceByIndex operations!")
-            return try getEmbeddingWithBatchFrames(
-                audioChunk: audioChunk,
-                binarizedSegments: binarizedSegments,
-                slidingWindowFeature: slidingWindowFeature,
-                embeddingModel: embeddingModel,
-                batchExtractor: batchExtractor,
-                sampleRate: sampleRate
-            )
-        }
-        
-        // Second priority: Use preprocessor path if available
-        if false, let preprocessor = embeddingPreprocessor {
-            logger.info("🚀 Using embedding with GPU-accelerated preprocessor")
-            return try getEmbeddingOptimized(
-                audioChunk: audioChunk,
-                slidingWindowFeature: slidingWindowFeature,
-                embeddingModel: embeddingModel,
-                preprocessor: preprocessor,
-                sampleRate: sampleRate
-            )
-        }
         
         var cleanFrames = Array(
             repeating: Array(repeating: 0.0 as Float, count: 1), count: numFrames)
