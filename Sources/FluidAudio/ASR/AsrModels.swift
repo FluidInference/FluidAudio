@@ -147,7 +147,6 @@ extension AsrModels {
         }
     }
 
-
     public static func loadFromCache(
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {

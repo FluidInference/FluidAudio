@@ -269,7 +269,6 @@ public final class AsrManager {
         decoderState = freshState
     }
 
-
     private func loadModel(
         path: URL,
         name: String,
