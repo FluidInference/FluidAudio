@@ -67,7 +67,7 @@ enum ProcessCommand {
             let processingTime = Date().timeIntervalSince(startTime)
 
             let duration = Float(audioSamples.count) / 16000.0
-            let rtf = Float(processingTime) / duration
+            let rtf = duration / Float(processingTime)
 
             print("Diarization completed in \(String(format: "%.1f", processingTime))s")
             print("   Real-time factor: \(String(format: "%.2f", rtf))x")

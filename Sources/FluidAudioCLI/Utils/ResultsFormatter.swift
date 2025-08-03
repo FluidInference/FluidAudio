@@ -10,7 +10,7 @@ struct ResultsFormatter {
         print("   Audio File: \(result.audioFile)")
         print("   Duration: \(String(format: "%.1f", result.durationSeconds))s")
         print("   Processing Time: \(String(format: "%.1f", result.processingTimeSeconds))s")
-        let rtfx = result.realTimeFactor > 0 ? 1.0 / result.realTimeFactor : 0.0
+        let rtfx = result.realTimeFactor
         print("   Speed Factor (RTFx): \(String(format: "%.2f", rtfx))x")
         print("   Detected Speakers: \(result.speakerCount)")
         print("\n🎤 Speaker Segments:")
@@ -71,7 +71,7 @@ struct ResultsFormatter {
                 toLength: 6, withPad: " ", startingAt: 0)
             let jerStr = String(format: "%.1f%%", result.jer).padding(
                 toLength: 6, withPad: " ", startingAt: 0)
-            let rtfx = result.realTimeFactor > 0 ? 1.0 / result.realTimeFactor : 0.0
+            let rtfx = result.realTimeFactor
             let rtfxStr = String(format: "%.2fx", rtfx).padding(
                 toLength: 6, withPad: " ", startingAt: 0)
             let durationStr = formatTime(result.durationSeconds).padding(
@@ -93,14 +93,15 @@ struct ResultsFormatter {
         let avgJerStr = String(format: "%.1f%%", avgJER).padding(
             toLength: 6, withPad: " ", startingAt: 0)
         let avgRtf = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
-        let avgRtfx = avgRtf > 0 ? 1.0 / avgRtf : 0.0
+        let avgRtfx = avgRtf
         let avgRtfxStr = String(format: "%.2fx", avgRtfx).padding(
             toLength: 6, withPad: " ", startingAt: 0)
         let totalDuration = results.reduce(0.0) { $0 + $1.durationSeconds }
         let avgDurationStr = formatTime(totalDuration).padding(
             toLength: 8, withPad: " ", startingAt: 0)
-        let avgSpeakers = results.reduce(0) { $0 + $1.speakerCount } / results.count
-        let avgSpeakerStr = String(format: "%.1f", Float(avgSpeakers)).padding(
+        let totalSpeakers = results.reduce(0) { $0 + $1.speakerCount }
+        let avgSpeakers = Float(totalSpeakers) / Float(results.count)
+        let avgSpeakerStr = String(format: "%.1f", avgSpeakers).padding(
             toLength: 8, withPad: " ", startingAt: 0)
 
         print(
@@ -140,11 +141,10 @@ struct ResultsFormatter {
             }
 
             // Speaker count (always shown if we have thresholds)
-            let avgSpeakersFloat = Float(avgSpeakers)
             let groundTruthSpeakers = results.first?.groundTruthSpeakerCount ?? 0
-            let speakerStatus = abs(avgSpeakersFloat - Float(groundTruthSpeakers)) < 1.0 ? "✅" : "❌"
+            let speakerStatus = abs(avgSpeakers - Float(groundTruthSpeakers)) < 1.0 ? "✅" : "❌"
             print(
-                "Speakers Detected    \(String(format: "%.0f", avgSpeakersFloat))    \(groundTruthSpeakers)    \(speakerStatus)"
+                "Speakers Detected    \(String(format: "%.0f", avgSpeakers))    \(groundTruthSpeakers)    \(speakerStatus)"
             )
         }
 

@@ -119,10 +119,10 @@ struct BenchmarkRunner {
                 totalJER += metrics.jer
                 processedFiles += 1
 
-                let rtf = Float(processingTime) / duration
+                let rtf = duration / Float(processingTime)
 
                 print(
-                    "     DER: \(String(format: "%.1f%%", metrics.der)), JER: \(String(format: "%.1f%%", metrics.jer)), RTF: \(String(format: "%.2f", rtf))x"
+                    "     DER: \(String(format: "%.1f%%", metrics.der)), JER: \(String(format: "%.1f%%", metrics.jer)), RTFx: \(String(format: "%.1f", rtf))x"
                 )
 
                 benchmarkResults.append(
@@ -284,7 +284,7 @@ struct BenchmarkRunner {
                 totalJER += metrics.jer
                 processedFiles += 1
 
-                let rtf = Float(processingTime) / duration
+                let rtf = duration / Float(processingTime)
 
                 print(
                     "     DER: \(String(format: "%.1f", metrics.der))%, JER: \(String(format: "%.1f", metrics.jer))%, RTF: \(String(format: "%.2f", rtf))x"

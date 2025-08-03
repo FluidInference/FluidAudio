@@ -49,15 +49,9 @@ extension DiarizerModels {
         // Try to download INT8 model if available, but don't fail if it's not
         var modelNames = [
             SegmentationModelFileName + ".mlmodelc",
-            EmbeddingModelFileName + ".mlmodelc",  // Always download regular model as fallback
+            "wespeaker_int8.mlmodelc",  // Always download INT8 model (primary)
+            EmbeddingModelFileName + ".mlmodelc",  // Regular model as fallback
         ]
-
-        // Check if INT8 model exists locally first
-        let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
-        if FileManager.default.fileExists(atPath: int8Path.path) {
-            // If INT8 exists locally, include it in the download list to verify it's up to date
-            modelNames.insert("wespeaker_int8.mlmodelc", at: 1)
-        }
 
         let models = try await DownloadUtils.loadModels(
             .diarizer,
@@ -140,6 +134,8 @@ extension DiarizerModels {
             }
             embeddingModel = regularModel
             embeddingModelType = "📦 Standard Float32"
+            logger.warning("⚠️ INT8 model not available - using standard Float32 model (60x RTF)")
+            logger.info("💡 For optimal performance (80-85x RTF), ensure wespeaker_int8.mlmodelc is available")
         }
 
         let endTime = Date()

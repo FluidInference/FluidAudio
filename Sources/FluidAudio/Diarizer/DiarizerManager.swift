@@ -11,9 +11,11 @@ public final class DiarizerManager {
     private var optimizedWeSpeaker: OptimizedWeSpeaker?
 
     private let segmentationProcessor = SegmentationProcessor()
+    private let optimizedSegmentationProcessor = OptimizedSegmentationProcessor()
     private let embeddingExtractor = EmbeddingExtractor()
     private let speakerClustering: SpeakerClustering
     private let audioValidation = AudioValidation()
+    private let memoryOptimizer = ANEMemoryOptimizer.shared
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
@@ -177,11 +179,26 @@ public final class DiarizerManager {
             paddedChunk = padded[...]
         }
 
-        // Run segmentation once (used by both paths)
-        let binarizedSegments = try segmentationProcessor.getSegments(
-            audioChunk: paddedChunk,
-            segmentationModel: models.segmentationModel
-        )
+        // Use optimized segmentation with zero-copy
+        let useOptimized = true  // Can be made configurable
+        let binarizedSegments: [[[Float]]]
+        let segmentationOutput: MLFeatureProvider?
+
+        if useOptimized {
+            let (segments, output) = try optimizedSegmentationProcessor.getSegments(
+                audioChunk: paddedChunk,
+                segmentationModel: models.segmentationModel
+            )
+            binarizedSegments = segments
+            segmentationOutput = output
+        } else {
+            // Fallback to regular processor
+            binarizedSegments = try segmentationProcessor.getSegments(
+                audioChunk: paddedChunk,
+                segmentationModel: models.segmentationModel
+            )
+            segmentationOutput = nil
+        }
 
         let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
 
