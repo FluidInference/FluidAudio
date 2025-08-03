@@ -51,7 +51,7 @@ extension DiarizerModels {
             SegmentationModelFileName + ".mlmodelc",
             EmbeddingModelFileName + ".mlmodelc",  // Always download regular model as fallback
         ]
-        
+
         // Check if INT8 model exists locally first
         let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
         if FileManager.default.fileExists(atPath: int8Path.path) {
