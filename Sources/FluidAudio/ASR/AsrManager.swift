@@ -64,9 +64,6 @@ public final class AsrManager {
 
         // Optimization models will be loaded during initialize()
 
-        // Load vocabulary once during initialization
-        self.vocabulary = loadVocabulary()
-
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
@@ -92,6 +89,7 @@ public final class AsrManager {
         self.encoderModel = models.encoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
+        self.vocabulary = models.vocabulary
 
         logger.info("Token duration optimization model loaded successfully")
 
@@ -270,46 +268,6 @@ public final class AsrManager {
 
         decoderState = freshState
     }
-    private func loadVocabulary() -> [Int: String] {
-        let applicationSupportURL = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        let appDirectory = applicationSupportURL.appendingPathComponent(
-            "FluidAudio", isDirectory: true
-        )
-        .appendingPathComponent("Models", isDirectory: true)
-        .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
-        let vocabPath = appDirectory.appendingPathComponent("parakeet_vocab.json")
-
-        if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            logger.warning(
-                "Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models."
-            )
-            return [:]
-        }
-
-        do {
-            let data = try Data(contentsOf: vocabPath)
-            let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
-
-            var vocabulary: [Int: String] = [:]
-
-            for (key, value) in jsonDict {
-                if let tokenId = Int(key) {
-                    vocabulary[tokenId] = value
-                }
-            }
-
-            logger.info(
-                "Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
-            return vocabulary
-        } catch {
-            logger.error(
-                "Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)"
-            )
-            return [:]
-        }
-    }
 
     private func loadModel(
         path: URL,
@@ -482,11 +440,6 @@ public final class AsrManager {
         text: String, timings: [TokenTiming]
     ) {
         guard !tokenIds.isEmpty else { return ("", []) }
-
-        // Fallback: if vocabulary is empty (failed to load during init), try loading it now
-        if vocabulary.isEmpty {
-            vocabulary = loadVocabulary()
-        }
 
         // Debug: print token mappings
         if config.enableDebug {
