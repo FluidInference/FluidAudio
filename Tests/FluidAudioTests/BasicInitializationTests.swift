@@ -250,11 +250,12 @@ extension CoreMLDiarizerTests {
 
         // Check for INT8 model first, fallback to regular model
         let embeddingExists = FileManager.default.fileExists(atPath: embeddingPath.path, isDirectory: &isDirectory)
-        let fallbackExists = FileManager.default.fileExists(atPath: fallbackEmbeddingPath.path, isDirectory: &isDirectory)
-        
+        let fallbackExists = FileManager.default.fileExists(
+            atPath: fallbackEmbeddingPath.path, isDirectory: &isDirectory)
+
         XCTAssertTrue(embeddingExists || fallbackExists, "Either INT8 or regular embedding model should exist")
         XCTAssertTrue(isDirectory.boolValue)
-        
+
         let actualEmbeddingPath = embeddingExists ? embeddingPath : fallbackEmbeddingPath
         XCTAssertTrue(
             FileManager.default.fileExists(
@@ -318,11 +319,12 @@ extension CoreMLDiarizerTests {
 
         // Check for INT8 model first, fallback to regular model
         let embeddingExists = FileManager.default.fileExists(atPath: embeddingPath.path, isDirectory: &isDirectory)
-        let fallbackExists = FileManager.default.fileExists(atPath: fallbackEmbeddingPath.path, isDirectory: &isDirectory)
-        
+        let fallbackExists = FileManager.default.fileExists(
+            atPath: fallbackEmbeddingPath.path, isDirectory: &isDirectory)
+
         XCTAssertTrue(embeddingExists || fallbackExists, "Either INT8 or regular embedding model should exist")
         XCTAssertTrue(isDirectory.boolValue)
-        
+
         let actualEmbeddingPath = embeddingExists ? embeddingPath : fallbackEmbeddingPath
         XCTAssertTrue(
             FileManager.default.fileExists(
