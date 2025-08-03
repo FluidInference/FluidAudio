@@ -33,23 +33,20 @@ public final class DiarizerManager {
         logger.info("Initializing diarization system")
         self.models = consume models
         
-        // Initialize OptimizedWeSpeaker if INT8 model is available
-        let useINT8 = ProcessInfo.processInfo.environment["USE_INT8_MODELS"] != nil
-        if useINT8 {
-            // Look for INT8 model in cache directory
-            let cacheDir = DiarizerModels.defaultModelsDirectory()
-            let int8ModelPath = cacheDir.appendingPathComponent("wespeaker_int8.mlmodelc")
-            
-            if FileManager.default.fileExists(atPath: int8ModelPath.path) {
-                do {
-                    optimizedWeSpeaker = try OptimizedWeSpeaker(wespeakerPath: int8ModelPath)
-                    logger.info("✅ OptimizedWeSpeaker initialized with INT8 model from cache")
-                } catch {
-                    logger.error("Failed to initialize OptimizedWeSpeaker: \(error)")
-                }
-            } else {
-                logger.warning("INT8 model not found in cache for OptimizedWeSpeaker")
+        // Initialize OptimizedWeSpeaker if INT8 model is available (now default)
+        // Look for INT8 model in cache directory
+        let cacheDir = DiarizerModels.defaultModelsDirectory()
+        let int8ModelPath = cacheDir.appendingPathComponent("wespeaker_int8.mlmodelc")
+        
+        if FileManager.default.fileExists(atPath: int8ModelPath.path) {
+            do {
+                optimizedWeSpeaker = try OptimizedWeSpeaker(wespeakerPath: int8ModelPath)
+                logger.info("✅ OptimizedWeSpeaker initialized with INT8 model")
+            } catch {
+                logger.error("Failed to initialize OptimizedWeSpeaker: \(error)")
             }
+        } else {
+            logger.info("INT8 model not found in cache - using standard embedding extraction")
         }
     }
 

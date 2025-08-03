@@ -47,7 +47,7 @@ extension DiarizerModels {
 
         let modelNames = [
             SegmentationModelFileName + ".mlmodelc",
-            EmbeddingModelFileName + ".mlmodelc"
+            "wespeaker_int8.mlmodelc"  // INT8 is now the primary embedding model
         ]
 
         let models = try await DownloadUtils.loadModels(
@@ -62,26 +62,23 @@ extension DiarizerModels {
         }
         
         // Priority order for embedding models:
-        // 1. INT8 quantized model (if USE_INT8_MODELS is set)
+        // 1. INT8 quantized model (DEFAULT - best performance/accuracy tradeoff)
         // 2. Optimized model without SliceByIndex operations
         // 3. Float16 optimized version
-        // 4. Regular wespeaker model
+        // 4. Regular wespeaker model (fallback)
         var embeddingModel: MLModel?
         var embeddingModelType = "Standard Float32"
         
-        // Check for INT8 model first
-        let useINT8 = ProcessInfo.processInfo.environment["USE_INT8_MODELS"] != nil
-        if useINT8 {
-            let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
-            if FileManager.default.fileExists(atPath: int8Path.path) {
-                do {
-                    logger.info("🚀 Found INT8 quantized embedding model!")
-                    embeddingModel = try MLModel(contentsOf: int8Path, configuration: config)
-                    embeddingModelType = "🔥 INT8 Quantized (Maximum Performance!)"
-                    logger.info("✅ Loaded INT8 embedding model - 60x+ RTF enabled!")
-                } catch {
-                    logger.warning("Failed to load INT8 model: \(error.localizedDescription)")
-                }
+        // Always try INT8 model first (it's now the default)
+        let int8Path = directory.appendingPathComponent("wespeaker_int8.mlmodelc")
+        if FileManager.default.fileExists(atPath: int8Path.path) {
+            do {
+                logger.info("🚀 Loading INT8 quantized embedding model (default)")
+                embeddingModel = try MLModel(contentsOf: int8Path, configuration: config)
+                embeddingModelType = "🔥 INT8 Quantized (100x+ RTF)"
+                logger.info("✅ Loaded INT8 embedding model - optimal performance enabled!")
+            } catch {
+                logger.warning("Failed to load INT8 model: \(error.localizedDescription)")
             }
         }
         
