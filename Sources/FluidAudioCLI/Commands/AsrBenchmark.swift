@@ -408,56 +408,26 @@ public class ASRBenchmark {
 
         print("Extracting archive...")
 
-        // Create a temporary extraction directory to avoid path conflicts
-        let tempExtractDir = extractTo.appendingPathComponent("temp_extract_\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempExtractDir, withIntermediateDirectories: true)
-        
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-        process.arguments = ["-xzf", tempFile.path, "-C", tempExtractDir.path]
-        
-        // Capture stderr for debugging
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
+        process.arguments = ["-xzf", tempFile.path, "-C", extractTo.path]
 
         try process.run()
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            // Read error output for debugging
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let errorString = String(data: errorData, encoding: .utf8) ?? "Unknown error"
-            
-            // Clean up temp directory
-            try? FileManager.default.removeItem(at: tempExtractDir)
-            
-            throw ASRError.processingFailed("Failed to extract tar.gz file: \(errorString)")
+            throw ASRError.processingFailed("Failed to extract tar.gz file")
         }
 
-        // Move extracted files from temp directory to final location
-        let extractedPath = tempExtractDir.appendingPathComponent(expectedSubpath)
+        let extractedPath = extractTo.appendingPathComponent(expectedSubpath)
         if FileManager.default.fileExists(atPath: extractedPath.path) {
             let targetPath = extractTo.appendingPathComponent(
                 expectedSubpath.components(separatedBy: "/").last!)
-            
-            // Remove existing target if it exists
             try? FileManager.default.removeItem(at: targetPath)
-            
-            // Move from temp extraction to final location
             try FileManager.default.moveItem(at: extractedPath, to: targetPath)
-            
-            // Clean up the LibriSpeech parent directory if it exists
-            let librispeechDir = tempExtractDir.appendingPathComponent("LibriSpeech")
-            if FileManager.default.fileExists(atPath: librispeechDir.path) {
-                try? FileManager.default.removeItem(at: librispeechDir)
-            }
+
+            try? FileManager.default.removeItem(at: extractTo.appendingPathComponent("LibriSpeech"))
         }
-        
-        // Clean up temp extraction directory
-        try? FileManager.default.removeItem(at: tempExtractDir)
-        
-        // Clean up the downloaded temp file
-        try? FileManager.default.removeItem(at: tempFile)
 
         print("Dataset extracted successfully")
     }
@@ -891,7 +861,7 @@ extension ASRBenchmark {
 
             Description:
                 The ASR benchmark command evaluates Automatic Speech Recognition performance
-                on the LibriSpeech dataset, calculating WER (Word Error Rate) and CER 
+                on the LibriSpeech dataset, calculating WER (Word Error Rate) and CER
                 (Character Error Rate) metrics, along with processing speed (RTFx).
 
             Streaming Mode:
