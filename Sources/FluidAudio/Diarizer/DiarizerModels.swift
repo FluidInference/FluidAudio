@@ -15,7 +15,10 @@ public struct DiarizerModels: Sendable {
     public let downloadDuration: TimeInterval
     public let compilationDuration: TimeInterval
 
-    init(segmentation: MLModel, embedding: MLModel, downloadDuration: TimeInterval = 0, compilationDuration: TimeInterval = 0) {
+    init(
+        segmentation: MLModel, embedding: MLModel, downloadDuration: TimeInterval = 0,
+        compilationDuration: TimeInterval = 0
+    ) {
         self.segmentationModel = segmentation
         self.embeddingModel = embedding
         self.downloadDuration = downloadDuration
@@ -45,7 +48,7 @@ extension DiarizerModels {
 
         let modelNames = [
             SegmentationModelFileName + ".mlmodelc",
-            EmbeddingModelFileName + ".mlmodelc"
+            EmbeddingModelFileName + ".mlmodelc",
         ]
 
         let models = try await DownloadUtils.loadModels(
@@ -56,7 +59,8 @@ extension DiarizerModels {
         )
 
         guard let segmentationModel = models[SegmentationModelFileName + ".mlmodelc"],
-              let embeddingModel = models[EmbeddingModelFileName + ".mlmodelc"] else {
+            let embeddingModel = models[EmbeddingModelFileName + ".mlmodelc"]
+        else {
             throw DiarizerError.modelDownloadFailed
         }
 
@@ -64,10 +68,12 @@ extension DiarizerModels {
         let totalDuration = endTime.timeIntervalSince(startTime)
         // For now, we don't have separate download vs compilation times, so we'll estimate
         // In reality, if models are cached, download time is 0
-        let downloadDuration: TimeInterval = 0 // Models are typically cached
-        let compilationDuration = totalDuration // Most time is spent on compilation
-        
-        return DiarizerModels(segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: downloadDuration, compilationDuration: compilationDuration)
+        let downloadDuration: TimeInterval = 0  // Models are typically cached
+        let compilationDuration = totalDuration  // Most time is spent on compilation
+
+        return DiarizerModels(
+            segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: downloadDuration,
+            compilationDuration: compilationDuration)
     }
 
     public static func load(
@@ -87,7 +93,8 @@ extension DiarizerModels {
 
     static func defaultModelsDirectory() -> URL {
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return applicationSupport
+        return
+            applicationSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
@@ -129,6 +136,8 @@ extension DiarizerModels {
 
         let endTime = Date()
         let loadDuration = endTime.timeIntervalSince(startTime)
-        return DiarizerModels(segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: 0, compilationDuration: loadDuration)
+        return DiarizerModels(
+            segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: 0,
+            compilationDuration: loadDuration)
     }
 }
