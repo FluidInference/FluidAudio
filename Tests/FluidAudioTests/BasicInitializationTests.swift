@@ -267,7 +267,7 @@ extension CoreMLDiarizerTests {
 
         let _ = try await DiarizerModels.load(
             localSegmentationModel: segmentationPath,
-            localEmbeddingModel: actualEmbeddingPath
+            localEmbeddingModel: embeddingPath
         )
     }
 
@@ -331,7 +331,7 @@ extension CoreMLDiarizerTests {
 
         let _ = try await DiarizerModels.load(
             localSegmentationModel: segmentationPath,
-            localEmbeddingModel: actualEmbeddingPath
+            localEmbeddingModel: embeddingPath
         )
     }
     /// Tests that we can load model files with a user-specified configuration.
