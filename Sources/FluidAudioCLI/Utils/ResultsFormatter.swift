@@ -132,11 +132,11 @@ struct ResultsFormatter {
                 )
             }
 
-            // RTF threshold check
+            // RTFx threshold check
             if let rtfThreshold = customThresholds.rtf {
                 let rtfStatus = avgRtf < rtfThreshold ? "✅" : "❌"
                 print(
-                    "RTF (Real-Time Factor)    \(String(format: "%.2f", avgRtf))x    < \(String(format: "%.2f", rtfThreshold))x    \(rtfStatus)"
+                    "RTFx (Real-Time Factor)   \(String(format: "%.2f", avgRtf))x    < \(String(format: "%.2f", rtfThreshold))x    \(rtfStatus)"
                 )
             }
 

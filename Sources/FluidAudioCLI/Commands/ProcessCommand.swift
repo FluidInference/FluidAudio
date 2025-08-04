@@ -67,10 +67,10 @@ enum ProcessCommand {
             let processingTime = Date().timeIntervalSince(startTime)
 
             let duration = Float(audioSamples.count) / 16000.0
-            let rtf = duration / Float(processingTime)
+            let rtfx = duration / Float(processingTime)
 
             print("Diarization completed in \(String(format: "%.1f", processingTime))s")
-            print("   Real-time factor: \(String(format: "%.2f", rtf))x")
+            print("   Real-time factor (RTFx): \(String(format: "%.2f", rtfx))x")
             print("   Found \(result.segments.count) segments")
             print("   Detected \(result.speakerDatabase.count) speakers (total), mapped: TBD")
 
@@ -79,7 +79,7 @@ enum ProcessCommand {
                 audioFile: audioFile,
                 durationSeconds: duration,
                 processingTimeSeconds: processingTime,
-                realTimeFactor: rtf,
+                realTimeFactor: rtfx,
                 segments: result.segments,
                 speakerCount: result.speakerDatabase.count,
                 config: config

@@ -26,6 +26,25 @@ public struct DiarizerModels: Sendable {
     }
 }
 
+// MARK: - Model Variants
+
+@available(macOS 13.0, iOS 16.0, *)
+internal enum EmbeddingModelVariant: CaseIterable {
+    case wespeakerV2
+
+    var fileName: String {
+        return "wespeaker_v2.mlmodelc"
+    }
+
+    var displayName: String {
+        return "WeSpeaker V2"
+    }
+
+    var isPackage: Bool {
+        fileName.hasSuffix(".mlpackage")
+    }
+}
+
 // -----------------------------
 // MARK: - Download from Hugging Face.
 // -----------------------------
@@ -34,6 +53,47 @@ extension DiarizerModels {
 
     private static let SegmentationModelFileName = "pyannote_segmentation"
     private static let EmbeddingModelFileName = "wespeaker"
+
+    // MARK: - Private Model Loading Helpers
+
+    @available(macOS 13.0, iOS 16.0, *)
+    private static func loadEmbeddingModel(
+        variant: EmbeddingModelVariant,
+        directory: URL,
+        downloadedModels: [String: MLModel],
+        configuration: MLModelConfiguration,
+        logger: Logger
+    ) async throws -> MLModel? {
+        // wespeaker_v2 model is already compiled, just return it
+        return downloadedModels[variant.fileName]
+    }
+
+    @available(macOS 13.0, iOS 16.0, *)
+    private static func selectEmbeddingModel(
+        from downloadedModels: [String: MLModel],
+        directory: URL,
+        configuration: MLModelConfiguration,
+        logger: Logger
+    ) async throws -> (model: MLModel, variant: EmbeddingModelVariant) {
+        // Try each variant in priority order
+        for variant in EmbeddingModelVariant.allCases {
+            if let model = try await loadEmbeddingModel(
+                variant: variant,
+                directory: directory,
+                downloadedModels: downloadedModels,
+                configuration: configuration,
+                logger: logger
+            ) {
+                logger.info("Loaded \(variant.displayName)")
+
+                logger.info("Using WeSpeaker V2 model")
+
+                return (model, variant)
+            }
+        }
+
+        throw DiarizerError.modelCompilationFailed
+    }
 
     public static func download(
         to directory: URL? = nil,
@@ -46,11 +106,10 @@ extension DiarizerModels {
         let directory = directory ?? defaultModelsDirectory()
         let config = configuration ?? defaultConfiguration()
 
-        // Try to download INT8 model if available, but don't fail if it's not
-        var modelNames = [
+        // Download required models
+        let modelNames = [
             SegmentationModelFileName + ".mlmodelc",
-            "wespeaker_int8.mlmodelc",  // Always download INT8 model (primary)
-            EmbeddingModelFileName + ".mlmodelc",  // Regular model as fallback
+            EmbeddingModelVariant.wespeakerV2.fileName,  // wespeaker_v2.mlmodelc
         ]
 
         let models = try await DownloadUtils.loadModels(
@@ -60,97 +119,31 @@ extension DiarizerModels {
             computeUnits: config.computeUnits
         )
 
+        // Load segmentation model
         guard let segmentationModel = models[SegmentationModelFileName + ".mlmodelc"] else {
             throw DiarizerError.modelDownloadFailed
         }
 
-        // Priority order for embedding models:
-        // 1. INT8 quantized model (DEFAULT - best performance/accuracy tradeoff)
-        // 2. Optimized model without SliceByIndex operations
-        // 3. Float16 optimized version
-        // 4. Regular wespeaker model (fallback)
-        var embeddingModel: MLModel?
-        var embeddingModelType = "Standard Float32"
-
-        // Always try INT8 model first (it's now the default)
-        if let int8Model = models["wespeaker_int8.mlmodelc"] {
-            embeddingModel = int8Model
-            embeddingModelType = "🔥 INT8 Quantized (100x+ RTF)"
-            logger.info("✅ Loaded INT8 embedding model - optimal performance enabled!")
-        }
-
-        // Check for optimized model without SliceByIndex
-        let optimizedNoSlicePath = directory.appendingPathComponent("wespeaker_optimized_no_slice.mlpackage")
-        let float16Path = directory.appendingPathComponent("wespeaker_float16.mlpackage")
-        var isDirectory: ObjCBool = false
-
-        if embeddingModel == nil
-            && FileManager.default.fileExists(atPath: optimizedNoSlicePath.path, isDirectory: &isDirectory)
-            && isDirectory.boolValue
-        {
-            do {
-                logger.info("🚀 Found optimized embedding model WITHOUT SliceByIndex operations!")
-                // Check if we need to compile it first
-                let compiledPath = optimizedNoSlicePath.deletingPathExtension().appendingPathExtension("mlmodelc")
-                if !FileManager.default.fileExists(atPath: compiledPath.path) {
-                    logger.info("   Compiling optimized model...")
-                    let compiledURL = try await MLModel.compileModel(at: optimizedNoSlicePath)
-                    embeddingModel = try MLModel(contentsOf: compiledURL, configuration: config)
-                } else {
-                    embeddingModel = try MLModel(contentsOf: compiledPath, configuration: config)
-                }
-                embeddingModelType = "✅ Optimized (No SliceByIndex!)"
-                logger.info("✅ Loaded optimized embedding model - NO SliceByIndex operations!")
-            } catch {
-                logger.warning("Failed to load optimized no-slice model: \(error.localizedDescription)")
-            }
-        }
-
-        // Try Float16 if optimized not available
-        if embeddingModel == nil && FileManager.default.fileExists(atPath: float16Path.path, isDirectory: &isDirectory)
-        {
-            do {
-                logger.info("🚀 Found Float16 optimized embedding model")
-                // Check if we need to compile it first
-                let compiledPath = float16Path.deletingPathExtension().appendingPathExtension("mlmodelc")
-                if !FileManager.default.fileExists(atPath: compiledPath.path) {
-                    logger.info("   Compiling Float16 model...")
-                    let compiledURL = try await MLModel.compileModel(at: float16Path)
-                    embeddingModel = try MLModel(contentsOf: compiledURL, configuration: config)
-                } else {
-                    embeddingModel = try MLModel(contentsOf: compiledPath, configuration: config)
-                }
-                embeddingModelType = "✅ Float16 Optimized"
-                logger.info("✅ Loaded Float16 optimized embedding model")
-            } catch {
-                logger.warning("Failed to load Float16 model: \(error.localizedDescription)")
-            }
-        }
-
-        // Fallback to regular model if optimized versions not available
-        if embeddingModel == nil {
-            guard let regularModel = models[EmbeddingModelFileName + ".mlmodelc"] else {
-                throw DiarizerError.modelDownloadFailed
-            }
-            embeddingModel = regularModel
-            embeddingModelType = "📦 Standard Float32"
-            logger.warning("⚠️ INT8 model not available - using standard Float32 model (60x RTF)")
-            logger.info("💡 For optimal performance (80-85x RTF), ensure wespeaker_int8.mlmodelc is available")
-        }
+        // Select best available embedding model
+        let (embeddingModel, embeddingVariant) = try await selectEmbeddingModel(
+            from: models,
+            directory: directory,
+            configuration: config,
+            logger: logger
+        )
 
         let endTime = Date()
         let totalDuration = endTime.timeIntervalSince(startTime)
-        // For now, we don't have separate download vs compilation times, so we'll estimate
-        // In reality, if models are cached, download time is 0
         let downloadDuration: TimeInterval = 0  // Models are typically cached
-        let compilationDuration = totalDuration  // Most time is spent on compilation
+        let compilationDuration = totalDuration
 
-        // Debug print to verify models are loaded
-        print("🔍 Model Loading Status:")
-        print("   Embedding Model: \(embeddingModelType)")
+        // Log model loading status
+        logger.info("Model Loading Status - Embedding Model: \(embeddingVariant.displayName)")
 
         return DiarizerModels(
-            segmentation: segmentationModel, embedding: embeddingModel!, downloadDuration: downloadDuration,
+            segmentation: segmentationModel,
+            embedding: embeddingModel,
+            downloadDuration: downloadDuration,
             compilationDuration: compilationDuration)
     }
 

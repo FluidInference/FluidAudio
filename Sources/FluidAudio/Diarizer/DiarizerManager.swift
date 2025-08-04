@@ -8,12 +8,10 @@ public final class DiarizerManager {
     internal let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
     internal let config: DiarizerConfig
     private var models: DiarizerModels?
-    private var optimizedWeSpeaker: OptimizedWeSpeaker?
 
     private let segmentationProcessor = SegmentationProcessor()
-    private let optimizedSegmentationProcessor = OptimizedSegmentationProcessor()
-    private let embeddingExtractor = EmbeddingExtractor()
     private let speakerClustering: SpeakerClustering
+    private var embeddingExtractor: EmbeddingExtractor?
     private let audioValidation = AudioValidation()
     private let memoryOptimizer = ANEMemoryOptimizer.shared
 
@@ -34,20 +32,14 @@ public final class DiarizerManager {
         logger.info("Initializing diarization system")
         self.models = consume models
 
-        // Initialize OptimizedWeSpeaker if INT8 model is available (now default)
-        // Look for INT8 model in cache directory
+        // Initialize EmbeddingExtractor with wespeaker_v2 model
         let cacheDir = DiarizerModels.defaultModelsDirectory()
-        let int8ModelPath = cacheDir.appendingPathComponent("wespeaker_int8.mlmodelc")
-
-        if FileManager.default.fileExists(atPath: int8ModelPath.path) {
-            do {
-                optimizedWeSpeaker = try OptimizedWeSpeaker(wespeakerPath: int8ModelPath)
-                logger.info("✅ OptimizedWeSpeaker initialized with INT8 model")
-            } catch {
-                logger.error("Failed to initialize OptimizedWeSpeaker: \(error)")
-            }
-        } else {
-            logger.info("INT8 model not found in cache - using standard embedding extraction")
+        let wespeakerPath = cacheDir.appendingPathComponent("wespeaker_v2.mlmodelc")
+        do {
+            self.embeddingExtractor = try EmbeddingExtractor(wespeakerPath: wespeakerPath)
+            logger.info("EmbeddingExtractor initialized with WeSpeaker V2 model")
+        } catch {
+            logger.error("Failed to initialize EmbeddingExtractor: \(error)")
         }
     }
 
@@ -96,7 +88,6 @@ public final class DiarizerManager {
             throw DiarizerError.notInitialized
         }
 
-        let processingStartTime = Date()
         var segmentationTime: TimeInterval = 0
         var embeddingTime: TimeInterval = 0
         var clusteringTime: TimeInterval = 0
@@ -105,13 +96,11 @@ public final class DiarizerManager {
         let chunkSize = sampleRate * 10
         var allSegments: [TimedSpeakerSegment] = []
         var speakerDB: [String: [Float]] = [:]
-
-        let totalChunks = (samples.count + chunkSize - 1) / chunkSize
         var chunkIndex = 0
 
         for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
             chunkIndex += 1
-            logger.info("🔄 Processing chunk \(chunkIndex) at offset \(chunkStart)")
+            logger.info("Processing chunk \(chunkIndex) at offset \(chunkStart)")
 
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
             let chunk = samples[chunkStart..<chunkEnd]
@@ -135,8 +124,6 @@ public final class DiarizerManager {
         let filteredSegments = applyPostProcessingFilters(allSegments)
         postProcessingTime = Date().timeIntervalSince(postProcessingStartTime)
 
-        let totalProcessingTime = Date().timeIntervalSince(processingStartTime)
-
         let timings = PipelineTimings(
             modelDownloadSeconds: models.downloadDuration,
             modelCompilationSeconds: models.compilationDuration,
@@ -146,10 +133,6 @@ public final class DiarizerManager {
             speakerClusteringSeconds: clusteringTime,
             postProcessingSeconds: postProcessingTime
         )
-
-        // logger.info(
-        //     "Complete diarization finished in \(String(format: "%.2f", totalProcessingTime))s (segmentation: \(String(format: "%.2f", segmentationTime))s, embedding: \(String(format: "%.2f", embeddingTime))s, clustering: \(String(format: "%.2f", clusteringTime))s, post-processing: \(String(format: "%.2f", postProcessingTime))s)"
-        // )
 
         return DiarizationResult(
             segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
@@ -180,25 +163,10 @@ public final class DiarizerManager {
         }
 
         // Use optimized segmentation with zero-copy
-        let useOptimized = true  // Can be made configurable
-        let binarizedSegments: [[[Float]]]
-        let segmentationOutput: MLFeatureProvider?
-
-        if useOptimized {
-            let (segments, output) = try optimizedSegmentationProcessor.getSegments(
-                audioChunk: paddedChunk,
-                segmentationModel: models.segmentationModel
-            )
-            binarizedSegments = segments
-            segmentationOutput = output
-        } else {
-            // Fallback to regular processor
-            binarizedSegments = try segmentationProcessor.getSegments(
-                audioChunk: paddedChunk,
-                segmentationModel: models.segmentationModel
-            )
-            segmentationOutput = nil
-        }
+        let (binarizedSegments, _) = try segmentationProcessor.getSegments(
+            audioChunk: paddedChunk,
+            segmentationModel: models.segmentationModel
+        )
 
         let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
 
@@ -210,42 +178,33 @@ public final class DiarizerManager {
 
         let embeddingStartTime = Date()
 
-        let embeddings: [[Float]]
-
-        // Use OptimizedWeSpeaker if available (for INT8 models)
-        if let optimizedWeSpeaker = self.optimizedWeSpeaker {
-            logger.info("🚀 Using OptimizedWeSpeaker for embedding extraction")
-
-            // Extract masks from sliding window feature
-            var masks: [[Float]] = []
-            let numSpeakers = slidingFeature.data[0][0].count
-            let numFrames = slidingFeature.data[0].count
-
-            for s in 0..<numSpeakers {
-                var speakerMask: [Float] = []
-                for f in 0..<numFrames {
-                    // Apply clean frame logic
-                    let speakerSum = slidingFeature.data[0][f].reduce(0, +)
-                    let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0
-                    speakerMask.append(slidingFeature.data[0][f][s] * isClean)
-                }
-                masks.append(speakerMask)
-            }
-
-            embeddings = try optimizedWeSpeaker.getEmbeddings(
-                audio: Array(paddedChunk),
-                masks: masks
-            )
-        } else {
-            // Use regular embedding extraction
-            embeddings = try embeddingExtractor.getEmbedding(
-                audioChunk: paddedChunk,
-                binarizedSegments: binarizedSegments,
-                slidingWindowFeature: slidingFeature,
-                embeddingModel: models.embeddingModel,
-                sampleRate: sampleRate
-            )
+        // Use EmbeddingExtractor for embedding extraction
+        guard let embeddingExtractor = self.embeddingExtractor else {
+            throw DiarizerError.notInitialized
         }
+
+        logger.info("Using EmbeddingExtractor for embedding extraction")
+
+        // Extract masks from sliding window feature
+        var masks: [[Float]] = []
+        let numSpeakers = slidingFeature.data[0][0].count
+        let numFrames = slidingFeature.data[0].count
+
+        for s in 0..<numSpeakers {
+            var speakerMask: [Float] = []
+            for f in 0..<numFrames {
+                // Apply clean frame logic
+                let speakerSum = slidingFeature.data[0][f].reduce(0, +)
+                let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0
+                speakerMask.append(slidingFeature.data[0][f][s] * isClean)
+            }
+            masks.append(speakerMask)
+        }
+
+        let embeddings = try embeddingExtractor.getEmbeddings(
+            audio: Array(paddedChunk),
+            masks: masks
+        )
 
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
         let clusteringStartTime = Date()

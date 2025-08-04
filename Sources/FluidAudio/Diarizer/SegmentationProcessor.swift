@@ -1,55 +1,177 @@
+import Accelerate
 import CoreML
 import Foundation
 import OSLog
 
+/// Segmentation processor with ANE-aligned memory and zero-copy operations
 @available(macOS 13.0, iOS 16.0, *)
 public struct SegmentationProcessor {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Segmentation")
+    private let memoryOptimizer = ANEMemoryOptimizer.shared
 
     public init() {}
 
     func getSegments(
-        audioChunk: ArraySlice<Float>, segmentationModel: MLModel, chunkSize: Int = 160_000
-    ) throws -> [[[Float]]] {
+        audioChunk: ArraySlice<Float>,
+        segmentationModel: MLModel,
+        chunkSize: Int = 160_000
+    ) throws -> (segments: [[[Float]]], featureProvider: MLFeatureProvider) {
 
-        let audioArray = try MLMultiArray(
+        // Create ANE-aligned audio array
+        let audioArray = try memoryOptimizer.createAlignedArray(
             shape: [1, 1, NSNumber(value: chunkSize)],
             dataType: .float32
         )
-        var offset = 0
-        for sample in audioChunk.prefix(chunkSize) {
-            audioArray[offset] = NSNumber(value: sample)
-            offset &+= 1
+
+        // Use optimized memory copy
+        let ptr = audioArray.dataPointer.assumingMemoryBound(to: Float.self)
+        let copyCount = min(audioChunk.count, chunkSize)
+
+        audioChunk.prefix(chunkSize).withUnsafeBufferPointer { buffer in
+            // Use vDSP for optimized copy
+            vDSP_mmov(
+                buffer.baseAddress!,
+                ptr,
+                vDSP_Length(copyCount),
+                vDSP_Length(1),
+                vDSP_Length(1),
+                vDSP_Length(copyCount)
+            )
         }
 
-        let input = try MLDictionaryFeatureProvider(dictionary: ["audio": audioArray])
+        // Zero-fill remaining if needed
+        if copyCount < chunkSize {
+            var zero: Float = 0
+            vDSP_vfill(&zero, ptr.advanced(by: copyCount), 1, vDSP_Length(chunkSize - copyCount))
+        }
 
-        let output = try segmentationModel.prediction(from: input)
+        // Create zero-copy feature provider
+        let featureProvider = ZeroCopyDiarizerFeatureProvider(features: [
+            "audio": MLFeatureValue(multiArray: audioArray)
+        ])
+
+        // Configure optimal prediction options
+        let options = MLPredictionOptions()
+
+        // Prefetch to Neural Engine if available
+        if #available(macOS 14.0, iOS 17.0, *) {
+            audioArray.prefetchToNeuralEngine()
+        }
+
+        let output = try segmentationModel.prediction(from: featureProvider, options: options)
 
         guard let segmentOutput = output.featureValue(for: "segments")?.multiArrayValue else {
             throw DiarizerError.processingFailed("Missing segments output from segmentation model")
         }
 
+        // Process segments with optimized memory access
+        let segments = processSegmentsOptimized(segmentOutput)
+
+        return (segments, output)
+    }
+
+    private func processSegmentsOptimized(_ segmentOutput: MLMultiArray) -> [[[Float]]] {
         let frames = segmentOutput.shape[1].intValue
         let combinations = segmentOutput.shape[2].intValue
 
+        // Pre-allocate result array
         var segments = Array(
             repeating: Array(
-                repeating: Array(repeating: 0.0 as Float, count: combinations), count: frames),
+                repeating: Array(repeating: 0.0 as Float, count: combinations),
+                count: frames),
             count: 1)
 
+        // Use direct memory access for better performance
+        let ptr = segmentOutput.dataPointer.assumingMemoryBound(to: Float.self)
+
+        // Copy data in a cache-friendly manner
         for f in 0..<frames {
-            for c in 0..<combinations {
-                let index = f * combinations + c
-                segments[0][f][c] = segmentOutput[index].floatValue
+            segments[0][f].withUnsafeMutableBufferPointer { buffer in
+                // Copy entire frame at once
+                memcpy(
+                    buffer.baseAddress!,
+                    ptr.advanced(by: f * combinations),
+                    combinations * MemoryLayout<Float>.size
+                )
             }
         }
 
-        return powersetConversion(segments)
+        return powersetConversionOptimized(segments)
     }
 
-    private func powersetConversion(_ segments: [[[Float]]]) -> [[[Float]]] {
+    private func powersetConversionOptimized(_ segments: [[[Float]]]) -> [[[Float]]] {
+        let powerset: [[Int]] = [
+            [],
+            [0],
+            [1],
+            [2],
+            [0, 1],
+            [0, 2],
+            [1, 2],
+        ]
+
+        let batchSize = segments.count
+        let numFrames = segments[0].count
+        let numSpeakers = 3
+
+        // Use ANE-aligned array for result
+        let binarizedArray = try? memoryOptimizer.createAlignedArray(
+            shape: [batchSize, numFrames, numSpeakers] as [NSNumber],
+            dataType: .float32
+        )
+
+        guard let binarizedArray = binarizedArray else {
+            // Fallback to regular array
+            return powersetConversionFallback(segments)
+        }
+
+        // Direct memory access
+        let ptr = binarizedArray.dataPointer.assumingMemoryBound(to: Float.self)
+
+        // Process all frames
+        for b in 0..<batchSize {
+            for f in 0..<numFrames {
+                let frame = segments[b][f]
+
+                // Find max using vDSP
+                var maxValue: Float = 0
+                var maxIndex: vDSP_Length = 0
+                frame.withUnsafeBufferPointer { buffer in
+                    vDSP_maxvi(buffer.baseAddress!, 1, &maxValue, &maxIndex, vDSP_Length(frame.count))
+                }
+
+                // Set speakers based on powerset
+                let baseIdx = (b * numFrames + f) * numSpeakers
+                for speaker in powerset[Int(maxIndex)] {
+                    ptr[baseIdx + speaker] = 1.0
+                }
+            }
+        }
+
+        // Convert back to nested array format
+        var result = Array(
+            repeating: Array(
+                repeating: Array(repeating: 0.0 as Float, count: numSpeakers),
+                count: numFrames
+            ),
+            count: batchSize
+        )
+
+        for b in 0..<batchSize {
+            for f in 0..<numFrames {
+                for s in 0..<numSpeakers {
+                    let idx = (b * numFrames + f) * numSpeakers + s
+                    result[b][f][s] = ptr[idx]
+                }
+            }
+        }
+
+        return result
+    }
+
+    private func powersetConversionFallback(_ segments: [[[Float]]]) -> [[[Float]]] {
+        // Original implementation as fallback
         let powerset: [[Int]] = [
             [],
             [0],
@@ -102,43 +224,5 @@ public struct SegmentationProcessor {
             data: binarizedSegments,
             slidingWindow: slidingWindow
         )
-    }
-
-    func getAnnotation(
-        annotation: inout [Segment: Int],
-        binarizedSegments: [[[Float]]],
-        slidingWindow: SlidingWindow
-    ) {
-        let segmentation = binarizedSegments[0]
-        let numFrames = segmentation.count
-
-        var frameSpeakers: [Int] = []
-        for frame in segmentation {
-            if let maxIdx = frame.indices.max(by: { frame[$0] < frame[$1] }) {
-                frameSpeakers.append(maxIdx)
-            } else {
-                frameSpeakers.append(0)
-            }
-        }
-
-        var currentSpeaker = frameSpeakers[0]
-        var startFrame = 0
-
-        for i in 1..<numFrames {
-            if frameSpeakers[i] != currentSpeaker {
-                let startTime = slidingWindow.time(forFrame: startFrame)
-                let endTime = slidingWindow.time(forFrame: i)
-
-                let segment = Segment(start: startTime, end: endTime)
-                annotation[segment] = currentSpeaker
-                currentSpeaker = frameSpeakers[i]
-                startFrame = i
-            }
-        }
-
-        let finalStart = slidingWindow.time(forFrame: startFrame)
-        let finalEnd = slidingWindow.segment(forFrame: numFrames - 1).end
-        let finalSegment = Segment(start: finalStart, end: finalEnd)
-        annotation[finalSegment] = currentSpeaker
     }
 }
