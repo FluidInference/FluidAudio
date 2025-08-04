@@ -16,19 +16,24 @@ public class EmbeddingExtractor {
     // Reusable feature providers
     private var featureProviders: [ZeroCopyDiarizerFeatureProvider] = []
 
-    public init(wespeakerPath: URL) throws {
-        self.wespeakerModel = try MLModel(contentsOf: wespeakerPath)
+    public init(embeddingModel: MLModel) {
+        self.wespeakerModel = embeddingModel
 
         // Pre-allocate ANE-aligned buffers
-        self.waveformBuffer = try memoryOptimizer.createAlignedArray(
-            shape: [3, 160000] as [NSNumber],
-            dataType: .float32
-        )
+        do {
+            self.waveformBuffer = try memoryOptimizer.createAlignedArray(
+                shape: [3, 160000] as [NSNumber],
+                dataType: .float32
+            )
 
-        self.maskBuffer = try memoryOptimizer.createAlignedArray(
-            shape: [3, 1000] as [NSNumber],  // Typical mask size
-            dataType: .float32
-        )
+            self.maskBuffer = try memoryOptimizer.createAlignedArray(
+                shape: [3, 1000] as [NSNumber],  // Typical mask size
+                dataType: .float32
+            )
+        } catch {
+            logger.error("Failed to allocate ANE-aligned buffers: \(error)")
+            // Buffers will remain nil, will be allocated on-demand in getEmbeddings
+        }
 
         logger.info("EmbeddingExtractor initialized with ANE-aligned buffers")
     }

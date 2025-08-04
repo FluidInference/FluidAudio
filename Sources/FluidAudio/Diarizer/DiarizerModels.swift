@@ -26,25 +26,6 @@ public struct DiarizerModels: Sendable {
     }
 }
 
-// MARK: - Model Variants
-
-@available(macOS 13.0, iOS 16.0, *)
-internal enum EmbeddingModelVariant: CaseIterable {
-    case wespeakerV2
-
-    var fileName: String {
-        return "wespeaker_v2.mlmodelc"
-    }
-
-    var displayName: String {
-        return "WeSpeaker V2"
-    }
-
-    var isPackage: Bool {
-        fileName.hasSuffix(".mlpackage")
-    }
-}
-
 // -----------------------------
 // MARK: - Download from Hugging Face.
 // -----------------------------
@@ -52,48 +33,9 @@ internal enum EmbeddingModelVariant: CaseIterable {
 extension DiarizerModels {
 
     private static let SegmentationModelFileName = "pyannote_segmentation"
-    private static let EmbeddingModelFileName = "wespeaker"
+    private static let EmbeddingModelFileName = "wespeaker_v2"
 
     // MARK: - Private Model Loading Helpers
-
-    @available(macOS 13.0, iOS 16.0, *)
-    private static func loadEmbeddingModel(
-        variant: EmbeddingModelVariant,
-        directory: URL,
-        downloadedModels: [String: MLModel],
-        configuration: MLModelConfiguration,
-        logger: Logger
-    ) async throws -> MLModel? {
-        // wespeaker_v2 model is already compiled, just return it
-        return downloadedModels[variant.fileName]
-    }
-
-    @available(macOS 13.0, iOS 16.0, *)
-    private static func selectEmbeddingModel(
-        from downloadedModels: [String: MLModel],
-        directory: URL,
-        configuration: MLModelConfiguration,
-        logger: Logger
-    ) async throws -> (model: MLModel, variant: EmbeddingModelVariant) {
-        // Try each variant in priority order
-        for variant in EmbeddingModelVariant.allCases {
-            if let model = try await loadEmbeddingModel(
-                variant: variant,
-                directory: directory,
-                downloadedModels: downloadedModels,
-                configuration: configuration,
-                logger: logger
-            ) {
-                logger.info("Loaded \(variant.displayName)")
-
-                logger.info("Using WeSpeaker V2 model")
-
-                return (model, variant)
-            }
-        }
-
-        throw DiarizerError.modelCompilationFailed
-    }
 
     public static func download(
         to directory: URL? = nil,
@@ -109,7 +51,7 @@ extension DiarizerModels {
         // Download required models
         let modelNames = [
             SegmentationModelFileName + ".mlmodelc",
-            EmbeddingModelVariant.wespeakerV2.fileName,  // wespeaker_v2.mlmodelc
+            EmbeddingModelFileName + ".mlmodelc",  // wespeaker_v2.mlmodelc
         ]
 
         let models = try await DownloadUtils.loadModels(
@@ -124,13 +66,10 @@ extension DiarizerModels {
             throw DiarizerError.modelDownloadFailed
         }
 
-        // Select best available embedding model
-        let (embeddingModel, embeddingVariant) = try await selectEmbeddingModel(
-            from: models,
-            directory: directory,
-            configuration: config,
-            logger: logger
-        )
+        // Load embedding model
+        guard let embeddingModel = models[EmbeddingModelFileName + ".mlmodelc"] else {
+            throw DiarizerError.modelDownloadFailed
+        }
 
         let endTime = Date()
         let totalDuration = endTime.timeIntervalSince(startTime)
@@ -138,7 +77,7 @@ extension DiarizerModels {
         let compilationDuration = totalDuration
 
         // Log model loading status
-        logger.info("Model Loading Status - Embedding Model: \(embeddingVariant.displayName)")
+        logger.info("Model Loading Status - Embedding Model: WeSpeaker V2")
 
         return DiarizerModels(
             segmentation: segmentationModel,

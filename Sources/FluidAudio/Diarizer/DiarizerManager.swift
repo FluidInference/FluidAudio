@@ -30,17 +30,13 @@ public final class DiarizerManager {
 
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
-        self.models = consume models
 
-        // Initialize EmbeddingExtractor with wespeaker_v2 model
-        let cacheDir = DiarizerModels.defaultModelsDirectory()
-        let wespeakerPath = cacheDir.appendingPathComponent("wespeaker_v2.mlmodelc")
-        do {
-            self.embeddingExtractor = try EmbeddingExtractor(wespeakerPath: wespeakerPath)
-            logger.info("EmbeddingExtractor initialized with WeSpeaker V2 model")
-        } catch {
-            logger.error("Failed to initialize EmbeddingExtractor: \(error)")
-        }
+        // Initialize EmbeddingExtractor with the embedding model from DiarizerModels
+        self.embeddingExtractor = EmbeddingExtractor(embeddingModel: models.embeddingModel)
+        logger.info("EmbeddingExtractor initialized with embedding model")
+
+        // Store models after extracting embedding model
+        self.models = consume models
     }
 
     @available(*, deprecated, message: "Use initialize(models:) instead")
@@ -100,7 +96,6 @@ public final class DiarizerManager {
 
         for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
             chunkIndex += 1
-            logger.info("Processing chunk \(chunkIndex) at offset \(chunkStart)")
 
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
             let chunk = samples[chunkStart..<chunkEnd]
