@@ -15,13 +15,13 @@ FluidAudio is a speaker diarization system for Apple platforms using Core ML mod
 
 ### ⚠️ NEVER CREATE DUMMY MODELS OR SYNTHETIC DATA
 
-- **DO NOT** create dummy models for testing or development
+- **DO NOT** create dummy, mock, or fake models for testing or development
 - **DO NOT** generate synthetic audio data for testing
 - **DO NOT** use random/fake models as placeholders
 - **DO NOT** create "demonstration" or "simulated" models that don't contain real weights
-- Always use the actual pyannote/wespeaker models
+- Always use the actual models required by the code
 - If model authentication is required, inform the user rather than creating dummy versions
-- Dummy models produce meaningless results and waste development time
+- Mock models produce meaningless results and waste development time
 - Placeholder models with random weights will destroy performance (e.g., 17.8% → 77.1% DER)
 
 ### ⚠️ MODEL OPERATIONS - CONSULT BEFORE IMPLEMENTING

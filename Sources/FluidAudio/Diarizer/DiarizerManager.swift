@@ -203,7 +203,8 @@ public final class DiarizerManager {
 
         let embeddings = try embeddingExtractor.getEmbeddings(
             audio: Array(paddedChunk),
-            masks: masks
+            masks: masks,
+            minActivityThreshold: config.minActivityThreshold
         )
 
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)

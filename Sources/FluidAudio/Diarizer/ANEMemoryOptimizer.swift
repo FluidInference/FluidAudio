@@ -6,11 +6,9 @@ import Metal
 /// ANE-optimized memory management for speaker diarization pipeline
 @available(macOS 13.0, iOS 16.0, *)
 public class ANEMemoryOptimizer {
-    /// ANE requires 64-byte alignment for optimal DMA transfers
-    public static let aneAlignment = 64
-
-    /// ANE tile size for matrix operations
-    public static let aneTileSize = 16
+    // Use shared ANE constants
+    public static let aneAlignment = ANEMemoryUtils.aneAlignment
+    public static let aneTileSize = ANEMemoryUtils.aneTileSize
 
     /// Shared instance for resource management
     public static let shared = ANEMemoryOptimizer()
@@ -25,53 +23,17 @@ public class ANEMemoryOptimizer {
         shape: [NSNumber],
         dataType: MLMultiArrayDataType
     ) throws -> MLMultiArray {
-        // Calculate total elements
-        let totalElements = shape.map { $0.intValue }.reduce(1, *)
-
-        // Calculate element size
-        let elementSize: Int
-        switch dataType {
-        case .float16:
-            elementSize = 2
-        case .float32:
-            elementSize = 4
-        case .float64:
-            elementSize = 8
-        case .int32:
-            elementSize = 4
-        case .double:
-            elementSize = 8
-        @unknown default:
-            elementSize = 4
-        }
-
-        // Align the allocation size to ANE requirements
-        let bytesNeeded = totalElements * elementSize
-        let alignedBytes = ((bytesNeeded + Self.aneAlignment - 1) / Self.aneAlignment) * Self.aneAlignment
-
-        // Allocate page-aligned memory for ANE DMA
-        var alignedPointer: UnsafeMutableRawPointer?
-        let result = posix_memalign(&alignedPointer, Self.aneAlignment, alignedBytes)
-
-        guard result == 0, let pointer = alignedPointer else {
+        do {
+            return try ANEMemoryUtils.createAlignedArray(
+                shape: shape,
+                dataType: dataType,
+                zeroClear: true
+            )
+        } catch ANEMemoryUtils.ANEMemoryError.allocationFailed {
+            throw DiarizerError.memoryAllocationFailed
+        } catch {
             throw DiarizerError.memoryAllocationFailed
         }
-
-        // Zero-initialize the memory
-        memset(pointer, 0, alignedBytes)
-
-        // Create MLMultiArray with aligned memory
-        let array = try MLMultiArray(
-            dataPointer: pointer,
-            shape: shape,
-            dataType: dataType,
-            strides: calculateOptimalStrides(for: shape, dataType: dataType),
-            deallocator: { bytes in
-                bytes.deallocate()
-            }
-        )
-
-        return array
     }
 
     /// Calculate optimal strides for ANE tile processing
@@ -79,25 +41,7 @@ public class ANEMemoryOptimizer {
         for shape: [NSNumber],
         dataType: MLMultiArrayDataType
     ) -> [NSNumber] {
-        var strides: [Int] = []
-        var currentStride = 1
-
-        // Calculate strides from last dimension to first
-        for i in (0..<shape.count).reversed() {
-            strides.insert(currentStride, at: 0)
-            let dimSize = shape[i].intValue
-
-            // Align dimension stride to ANE tile boundaries when beneficial
-            if i == shape.count - 1 && dimSize % Self.aneTileSize != 0 {
-                // Pad the innermost dimension to tile boundary
-                let paddedSize = ((dimSize + Self.aneTileSize - 1) / Self.aneTileSize) * Self.aneTileSize
-                currentStride *= paddedSize
-            } else {
-                currentStride *= dimSize
-            }
-        }
-
-        return strides.map { NSNumber(value: $0) }
+        return ANEMemoryUtils.calculateOptimalStrides(for: shape)
     }
 
     /// Get or create a reusable buffer from pool

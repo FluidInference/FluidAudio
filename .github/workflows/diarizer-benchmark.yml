@@ -122,7 +122,7 @@ jobs:
             comment += '|--------|-------|--------|---------|-------------|\n';
             comment += `| **DER** | **${der.toFixed(1)}%** | <30% | ${der < 30 ? '✅' : '⚠️'} | Diarization Error Rate (lower is better) |\n`;
             comment += `| **JER** | **${jer.toFixed(1)}%** | <25% | ${jer < 25 ? '✅' : '⚠️'} | Jaccard Error Rate |\n`;
-            comment += `| **RTFx** | **${rtf.toFixed(2)}x** | <1.0x | ${rtf < 1.0 ? '✅' : '⚠️'} | Real-Time Factor (lower is faster) |\n\n`;
+            comment += `| **RTFx** | **${rtf.toFixed(2)}x** | >1.0x | ${rtf > 1.0 ? '✅' : '⚠️'} | Real-Time Factor (higher is faster) |\n\n`;
 
             comment += '### Diarization Pipeline Timing Breakdown\n';
             comment += '_Time spent in each stage of speaker diarization_\n\n';

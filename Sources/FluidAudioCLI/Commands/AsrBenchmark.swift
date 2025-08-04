@@ -412,11 +412,17 @@ public class ASRBenchmark {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
         process.arguments = ["-xzf", tempFile.path, "-C", extractTo.path]
 
+        // Capture stderr for better error reporting
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+
         try process.run()
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            throw ASRError.processingFailed("Failed to extract tar.gz file")
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+            throw ASRError.processingFailed("Failed to extract tar.gz file: \(errorMessage)")
         }
 
         let extractedPath = extractTo.appendingPathComponent(expectedSubpath)

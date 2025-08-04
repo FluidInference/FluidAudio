@@ -88,11 +88,14 @@ public struct SegmentationProcessor {
         // Copy data in a cache-friendly manner
         for f in 0..<frames {
             segments[0][f].withUnsafeMutableBufferPointer { buffer in
-                // Copy entire frame at once
-                memcpy(
-                    buffer.baseAddress!,
+                // Use vDSP_mmov for consistency with other vDSP operations
+                vDSP_mmov(
                     ptr.advanced(by: f * combinations),
-                    combinations * MemoryLayout<Float>.size
+                    buffer.baseAddress!,
+                    vDSP_Length(combinations),
+                    1,
+                    vDSP_Length(combinations),
+                    1
                 )
             }
         }

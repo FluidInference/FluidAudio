@@ -36,7 +36,8 @@ public class EmbeddingExtractor {
     /// Process with ANE-optimized zero-copy operations
     public func getEmbeddings(
         audio: [Float],
-        masks: [[Float]]
+        masks: [[Float]],
+        minActivityThreshold: Float = 10.0
     ) throws -> [[Float]] {
         // We need to return embeddings for ALL speakers, not just active ones
         // to maintain compatibility with the rest of the pipeline
@@ -55,7 +56,7 @@ public class EmbeddingExtractor {
             // Check if speaker is active
             let speakerActivity = masks[speakerIdx].reduce(0, +)
 
-            if speakerActivity < 10.0 {
+            if speakerActivity < minActivityThreshold {
                 // For inactive speakers, return zero embedding
                 embeddings.append([Float](repeating: 0.0, count: 256))
                 continue
