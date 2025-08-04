@@ -111,6 +111,7 @@ FluidAudio powers local AI apps like:
 - **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence. Uses FluidAudio Parakeet for iOS transcription and speaker diarization across all platforms.
 - **[Whisper Mate](https://whisper.marksdo.com)**: Transcribes movies and audio to text locally. Records and transcribes in real time from speakers or system apps. Uses FluidAudio for speaker diarization.
 - **[Voice Ink](https://tryvoiceink.com/)**: Uses local AI models to instantly transcribe speech with near-perfect accuracy and complete privacy. Utilizes FluidAudio for Parakeet ASR.
+- **[Spokenly](https://spokenly.app/)**: Mac dictation app that provides fast, accurate voice-to-text conversion anywhere on your system with Parakeet ASR powered by FluidAudio. Supports real-time dictation, file transcription, and speaker diarization.
 
 Make a PR if you want to add your app!
 
