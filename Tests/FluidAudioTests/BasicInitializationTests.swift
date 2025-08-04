@@ -232,6 +232,13 @@ extension CoreMLDiarizerTests {
         let repoPath = downloadDir.deletingLastPathComponent()
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName)
 
+        // Clean up any unwanted models that might have been downloaded
+        let unwantedModels = ["wespeaker.mlmodelc", "wespeaker_int8.mlmodelc"]
+        for modelName in unwantedModels {
+            let modelPath = repoPath.appendingPathComponent(modelName)
+            try? FileManager.default.removeItem(at: modelPath)
+        }
+
         let segmentationPath = repoPath.appendingPathComponent("pyannote_segmentation.mlmodelc")
         let embeddingPath = repoPath.appendingPathComponent("wespeaker_v2.mlmodelc")
 
@@ -294,6 +301,13 @@ extension CoreMLDiarizerTests {
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
+
+        // Clean up any unwanted models that might have been downloaded
+        let unwantedModels = ["wespeaker.mlmodelc", "wespeaker_int8.mlmodelc"]
+        for modelName in unwantedModels {
+            let modelPath = modelsDir.appendingPathComponent(modelName)
+            try? FileManager.default.removeItem(at: modelPath)
+        }
 
         let segmentationPath = modelsDir.appendingPathComponent("pyannote_segmentation.mlmodelc")
         let embeddingPath = modelsDir.appendingPathComponent("wespeaker_v2.mlmodelc")
