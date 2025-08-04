@@ -178,7 +178,7 @@ public final class DiarizerManager {
             throw DiarizerError.notInitialized
         }
 
-        logger.info("Using EmbeddingExtractor for embedding extraction")
+        logger.debug("Using EmbeddingExtractor for embedding extraction")
 
         // Extract masks from sliding window feature
         var masks: [[Float]] = []

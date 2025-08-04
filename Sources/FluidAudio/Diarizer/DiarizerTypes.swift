@@ -1,12 +1,5 @@
 import Foundation
 
-public enum EmbeddingMode: String, Sendable, CaseIterable {
-    case full = "full"  // Full embedding extraction (10.5s)
-    case fast = "fast"  // Fast mode with optimizations
-    case skip = "skip"  // Skip embedding extraction entirely
-    case cached = "cached"  // Use cached embeddings if available
-}
-
 public struct DiarizerConfig: Sendable {
     public var clusteringThreshold: Float = 0.7
     public var minDurationOn: Float = 1.0
@@ -14,7 +7,6 @@ public struct DiarizerConfig: Sendable {
     public var numClusters: Int = -1
     public var minActivityThreshold: Float = 10.0
     public var debugMode: Bool = false
-    public var embeddingMode: EmbeddingMode = .full
 
     public static let `default` = DiarizerConfig()
 
@@ -24,8 +16,7 @@ public struct DiarizerConfig: Sendable {
         minDurationOff: Float = 0.5,
         numClusters: Int = -1,
         minActivityThreshold: Float = 10.0,
-        debugMode: Bool = false,
-        embeddingMode: EmbeddingMode = .full
+        debugMode: Bool = false
     ) {
         self.clusteringThreshold = clusteringThreshold
         self.minDurationOn = minDurationOn
@@ -33,7 +24,6 @@ public struct DiarizerConfig: Sendable {
         self.numClusters = numClusters
         self.minActivityThreshold = minActivityThreshold
         self.debugMode = debugMode
-        self.embeddingMode = embeddingMode
     }
 }
 

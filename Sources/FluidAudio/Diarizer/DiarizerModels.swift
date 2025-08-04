@@ -49,10 +49,9 @@ extension DiarizerModels {
         let config = configuration ?? defaultConfiguration()
 
         // Download required models
-        let modelNames = [
-            SegmentationModelFileName + ".mlmodelc",
-            EmbeddingModelFileName + ".mlmodelc",  // wespeaker_v2.mlmodelc
-        ]
+        let segmentationModelName = SegmentationModelFileName + ".mlmodelc"
+        let embeddingModelName = EmbeddingModelFileName + ".mlmodelc"
+        let modelNames = [segmentationModelName, embeddingModelName]
 
         let models = try await DownloadUtils.loadModels(
             .diarizer,
@@ -62,12 +61,12 @@ extension DiarizerModels {
         )
 
         // Load segmentation model
-        guard let segmentationModel = models[SegmentationModelFileName + ".mlmodelc"] else {
+        guard let segmentationModel = models[segmentationModelName] else {
             throw DiarizerError.modelDownloadFailed
         }
 
         // Load embedding model
-        guard let embeddingModel = models[EmbeddingModelFileName + ".mlmodelc"] else {
+        guard let embeddingModel = models[embeddingModelName] else {
             throw DiarizerError.modelDownloadFailed
         }
 
@@ -75,9 +74,6 @@ extension DiarizerModels {
         let totalDuration = endTime.timeIntervalSince(startTime)
         let downloadDuration: TimeInterval = 0  // Models are typically cached
         let compilationDuration = totalDuration
-
-        // Log model loading status
-        logger.info("Model Loading Status - Embedding Model: WeSpeaker V2")
 
         return DiarizerModels(
             segmentation: segmentationModel,
