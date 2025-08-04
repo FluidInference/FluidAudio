@@ -28,16 +28,14 @@ public enum ANEMemoryUtils {
     ) throws -> MLMultiArray {
         // Calculate total elements
         let totalElements = shape.map { $0.intValue }.reduce(1, *)
-        guard totalElements > 0 else {
-            throw ANEMemoryError.invalidShape
-        }
 
         // Calculate element size
         let elementSize = getElementSize(for: dataType)
 
         // Align the allocation size to ANE requirements
         let bytesNeeded = totalElements * elementSize
-        let alignedBytes = ((bytesNeeded + aneAlignment - 1) / aneAlignment) * aneAlignment
+        // Ensure at least one alignment unit is allocated even for empty arrays
+        let alignedBytes = max(aneAlignment, ((bytesNeeded + aneAlignment - 1) / aneAlignment) * aneAlignment)
 
         // Allocate page-aligned memory for ANE DMA
         var alignedPointer: UnsafeMutableRawPointer?
