@@ -92,11 +92,8 @@ public final class DiarizerManager {
         let chunkSize = sampleRate * 10
         var allSegments: [TimedSpeakerSegment] = []
         var speakerDB: [String: [Float]] = [:]
-        var chunkIndex = 0
 
         for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
-            chunkIndex += 1
-
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
             let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
@@ -163,13 +160,13 @@ public final class DiarizerManager {
             segmentationModel: models.segmentationModel
         )
 
-        let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
-
         // Unified and merged models removed - caused performance/stability issues
 
         // Otherwise use traditional separate model processing
         let slidingFeature = segmentationProcessor.createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
+
+        let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
 
         let embeddingStartTime = Date()
 
