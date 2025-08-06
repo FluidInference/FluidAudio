@@ -119,10 +119,10 @@ struct BenchmarkRunner {
                 totalJER += metrics.jer
                 processedFiles += 1
 
-                let rtf = Float(processingTime) / duration
+                let rtfx = duration / Float(processingTime)
 
                 print(
-                    "     DER: \(String(format: "%.1f%%", metrics.der)), JER: \(String(format: "%.1f%%", metrics.jer)), RTF: \(String(format: "%.2f", rtf))x"
+                    "     DER: \(String(format: "%.1f%%", metrics.der)), JER: \(String(format: "%.1f%%", metrics.jer)), RTFx: \(String(format: "%.1f", rtfx))x"
                 )
 
                 benchmarkResults.append(
@@ -130,7 +130,7 @@ struct BenchmarkRunner {
                         meetingId: meetingId,
                         durationSeconds: duration,
                         processingTimeSeconds: processingTime,
-                        realTimeFactor: rtf,
+                        realTimeFactor: rtfx,
                         der: metrics.der,
                         jer: metrics.jer,
                         segments: result.segments,
@@ -284,10 +284,10 @@ struct BenchmarkRunner {
                 totalJER += metrics.jer
                 processedFiles += 1
 
-                let rtf = Float(processingTime) / duration
+                let rtfx = duration / Float(processingTime)
 
                 print(
-                    "     DER: \(String(format: "%.1f", metrics.der))%, JER: \(String(format: "%.1f", metrics.jer))%, RTF: \(String(format: "%.2f", rtf))x"
+                    "     DER: \(String(format: "%.1f", metrics.der))%, JER: \(String(format: "%.1f", metrics.jer))%, RTFx: \(String(format: "%.2f", rtfx))x"
                 )
 
                 benchmarkResults.append(
@@ -295,7 +295,7 @@ struct BenchmarkRunner {
                         meetingId: meetingId,
                         durationSeconds: duration,
                         processingTimeSeconds: processingTime,
-                        realTimeFactor: rtf,
+                        realTimeFactor: rtfx,
                         der: metrics.der,
                         jer: metrics.jer,
                         segments: result.segments,

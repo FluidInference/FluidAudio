@@ -75,7 +75,7 @@ internal struct SpeakerClustering {
         guard a.count == b.count, !a.isEmpty else {
             if config.debugMode {
                 logger.debug(
-                    "🔍 CLUSTERING DEBUG: Invalid embeddings for distance calculation - a.count: \(a.count), b.count: \(b.count)"
+                    "CLUSTERING DEBUG: Invalid embeddings for distance calculation - a.count: \(a.count), b.count: \(b.count)"
                 )
             }
             return Float.infinity
@@ -96,7 +96,7 @@ internal struct SpeakerClustering {
 
         guard magnitudeA > 0 && magnitudeB > 0 else {
             logger.warning(
-                "🔍 CLUSTERING DEBUG: Zero magnitude embedding detected - magnitudeA: \(magnitudeA), magnitudeB: \(magnitudeB)"
+                "CLUSTERING DEBUG: Zero magnitude embedding detected - magnitudeA: \(magnitudeA), magnitudeB: \(magnitudeB)"
             )
             return Float.infinity
         }
@@ -106,7 +106,7 @@ internal struct SpeakerClustering {
 
         if config.debugMode {
             logger.debug(
-                "🔍 CLUSTERING DEBUG: cosineDistance - similarity: \(String(format: "%.4f", similarity)), distance: \(String(format: "%.4f", distance)), magA: \(String(format: "%.4f", magnitudeA)), magB: \(String(format: "%.4f", magnitudeB))"
+                "CLUSTERING DEBUG: cosineDistance - similarity: \(String(format: "%.4f", similarity)), distance: \(String(format: "%.4f", distance)), magA: \(String(format: "%.4f", magnitudeA)), magB: \(String(format: "%.4f", magnitudeB))"
             )
         }
 
