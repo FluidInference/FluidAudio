@@ -5,14 +5,15 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public final class DiarizerManager {
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
-    private let config: DiarizerConfig
+    internal let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
+    internal let config: DiarizerConfig
     private var models: DiarizerModels?
 
     private let segmentationProcessor = SegmentationProcessor()
-    private let embeddingExtractor = EmbeddingExtractor()
     private let speakerClustering: SpeakerClustering
+    private var embeddingExtractor: EmbeddingExtractor?
     private let audioValidation = AudioValidation()
+    private let memoryOptimizer = ANEMemoryOptimizer.shared
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
@@ -29,6 +30,12 @@ public final class DiarizerManager {
 
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
+
+        // Initialize EmbeddingExtractor with the embedding model from DiarizerModels
+        self.embeddingExtractor = EmbeddingExtractor(embeddingModel: models.embeddingModel)
+        logger.info("EmbeddingExtractor initialized with embedding model")
+
+        // Store models after extracting embedding model
         self.models = consume models
     }
 
@@ -77,7 +84,6 @@ public final class DiarizerManager {
             throw DiarizerError.notInitialized
         }
 
-        let processingStartTime = Date()
         var segmentationTime: TimeInterval = 0
         var embeddingTime: TimeInterval = 0
         var clusteringTime: TimeInterval = 0
@@ -110,8 +116,6 @@ public final class DiarizerManager {
         let filteredSegments = applyPostProcessingFilters(allSegments)
         postProcessingTime = Date().timeIntervalSince(postProcessingStartTime)
 
-        let totalProcessingTime = Date().timeIntervalSince(processingStartTime)
-
         let timings = PipelineTimings(
             modelDownloadSeconds: models.downloadDuration,
             modelCompilationSeconds: models.compilationDuration,
@@ -122,15 +126,11 @@ public final class DiarizerManager {
             postProcessingSeconds: postProcessingTime
         )
 
-        logger.info(
-            "Complete diarization finished in \(String(format: "%.2f", totalProcessingTime))s (segmentation: \(String(format: "%.2f", segmentationTime))s, embedding: \(String(format: "%.2f", embeddingTime))s, clustering: \(String(format: "%.2f", clusteringTime))s, post-processing: \(String(format: "%.2f", postProcessingTime))s)"
-        )
-
         return DiarizationResult(
             segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
     }
 
-    private struct ChunkTimings {
+    internal struct ChunkTimings {
         let segmentationTime: TimeInterval
         let embeddingTime: TimeInterval
         let clusteringTime: TimeInterval
@@ -145,6 +145,7 @@ public final class DiarizerManager {
     ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
 
+        // Prepare chunk (same for both paths)
         let chunkSize = sampleRate * 10
         var paddedChunk = chunk
         if chunk.count < chunkSize {
@@ -153,27 +154,55 @@ public final class DiarizerManager {
             paddedChunk = padded[...]
         }
 
-        let binarizedSegments = try segmentationProcessor.getSegments(
+        // Use optimized segmentation with zero-copy
+        let (binarizedSegments, _) = try segmentationProcessor.getSegments(
             audioChunk: paddedChunk,
             segmentationModel: models.segmentationModel
         )
+
+        // Unified and merged models removed - caused performance/stability issues
+
+        // Otherwise use traditional separate model processing
         let slidingFeature = segmentationProcessor.createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
 
         let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
+
         let embeddingStartTime = Date()
 
-        let embeddings = try embeddingExtractor.getEmbedding(
-            audioChunk: paddedChunk,
-            binarizedSegments: binarizedSegments,
-            slidingWindowFeature: slidingFeature,
-            embeddingModel: models.embeddingModel,
-            sampleRate: sampleRate
+        // Use EmbeddingExtractor for embedding extraction
+        guard let embeddingExtractor = self.embeddingExtractor else {
+            throw DiarizerError.notInitialized
+        }
+
+        logger.debug("Using EmbeddingExtractor for embedding extraction")
+
+        // Extract masks from sliding window feature
+        var masks: [[Float]] = []
+        let numSpeakers = slidingFeature.data[0][0].count
+        let numFrames = slidingFeature.data[0].count
+
+        for s in 0..<numSpeakers {
+            var speakerMask: [Float] = []
+            for f in 0..<numFrames {
+                // Apply clean frame logic
+                let speakerSum = slidingFeature.data[0][f].reduce(0, +)
+                let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0
+                speakerMask.append(slidingFeature.data[0][f][s] * isClean)
+            }
+            masks.append(speakerMask)
+        }
+
+        let embeddings = try embeddingExtractor.getEmbeddings(
+            audio: Array(paddedChunk),
+            masks: masks,
+            minActivityThreshold: config.minActivityThreshold
         )
 
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
         let clusteringStartTime = Date()
 
+        // Calculate speaker activities
         let speakerActivities = speakerClustering.calculateSpeakerActivities(binarizedSegments)
 
         var speakerLabels: [String] = []

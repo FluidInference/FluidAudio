@@ -33,7 +33,9 @@ public struct DiarizerModels: Sendable {
 extension DiarizerModels {
 
     private static let SegmentationModelFileName = "pyannote_segmentation"
-    private static let EmbeddingModelFileName = "wespeaker"
+    private static let EmbeddingModelFileName = "wespeaker_v2"
+
+    // MARK: - Private Model Loading Helpers
 
     public static func download(
         to directory: URL? = nil,
@@ -46,10 +48,10 @@ extension DiarizerModels {
         let directory = directory ?? defaultModelsDirectory()
         let config = configuration ?? defaultConfiguration()
 
-        let modelNames = [
-            SegmentationModelFileName + ".mlmodelc",
-            EmbeddingModelFileName + ".mlmodelc",
-        ]
+        // Download required models
+        let segmentationModelName = SegmentationModelFileName + ".mlmodelc"
+        let embeddingModelName = EmbeddingModelFileName + ".mlmodelc"
+        let modelNames = [segmentationModelName, embeddingModelName]
 
         let models = try await DownloadUtils.loadModels(
             .diarizer,
@@ -58,21 +60,25 @@ extension DiarizerModels {
             computeUnits: config.computeUnits
         )
 
-        guard let segmentationModel = models[SegmentationModelFileName + ".mlmodelc"],
-            let embeddingModel = models[EmbeddingModelFileName + ".mlmodelc"]
-        else {
+        // Load segmentation model
+        guard let segmentationModel = models[segmentationModelName] else {
+            throw DiarizerError.modelDownloadFailed
+        }
+
+        // Load embedding model
+        guard let embeddingModel = models[embeddingModelName] else {
             throw DiarizerError.modelDownloadFailed
         }
 
         let endTime = Date()
         let totalDuration = endTime.timeIntervalSince(startTime)
-        // For now, we don't have separate download vs compilation times, so we'll estimate
-        // In reality, if models are cached, download time is 0
         let downloadDuration: TimeInterval = 0  // Models are typically cached
-        let compilationDuration = totalDuration  // Most time is spent on compilation
+        let compilationDuration = totalDuration
 
         return DiarizerModels(
-            segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: downloadDuration,
+            segmentation: segmentationModel,
+            embedding: embeddingModel,
+            downloadDuration: downloadDuration,
             compilationDuration: compilationDuration)
     }
 
@@ -102,6 +108,7 @@ extension DiarizerModels {
 
     static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
+        // Enable Float16 optimization for ~2x speedup
         config.allowLowPrecisionAccumulationOnGPU = true
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
         config.computeUnits = isCI ? .cpuAndNeuralEngine : .all

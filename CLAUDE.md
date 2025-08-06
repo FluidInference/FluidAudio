@@ -13,14 +13,26 @@ FluidAudio is a speaker diarization system for Apple platforms using Core ML mod
 - Use actors, `@MainActor`, or proper locking mechanisms instead
 - If you encounter Sendable conformance issues, fix them properly rather than bypassing with `@unchecked`
 
-### DO NOT USE EMOJIs
+### ⚠️ NEVER CREATE DUMMY MODELS OR SYNTHETIC DATA
 
-- Avoid using emojis as much as possible
+- **DO NOT** create dummy, mock, or fake models for testing or development
+- **DO NOT** generate synthetic audio data for testing
+- **DO NOT** use random/fake models as placeholders
+- **DO NOT** create "demonstration" or "simulated" models that don't contain real weights
+- Always use the actual models required by the code
+- If model authentication is required, inform the user rather than creating dummy versions
+- Mock models produce meaningless results and waste development time
+- Placeholder models with random weights will destroy performance (e.g., 17.8% → 77.1% DER)
 
-### Avoid redundant comments
+### ⚠️ MODEL OPERATIONS - CONSULT BEFORE IMPLEMENTING
 
-- Do not leave comments in places that are redundant or its very obvious
-- If a PR review asks a question, it may be a good indicator that the PR needs to add a comment there
+- When asked to merge, convert, or modify models:
+  - If it seems impossible or I have significant objections, CONSULT YOU FIRST
+  - Explain the concerns and let you decide whether to proceed
+  - If you say proceed, then DO IT IMMEDIATELY without further objections
+- **DO NOT** create demonstration or placeholder models without permission
+- **DO NOT** implement alternatives without asking
+- Only after your approval: Implementation, then explanation of results
 
 ### Code Formatting
 
@@ -165,6 +177,8 @@ VADConfig(
 3. **Error Handling**: Implement graceful degradation
 4. **Performance**: Keep RTF < 1.0x for real-time capability
 5. **Thread Safety**: Never use `@unchecked Sendable` - implement proper synchronization
+6. **Follow Instructions**: When the user asks to implement something specific, DO IT FIRST before explaining why it might not be optimal. Implementation first, explanation second.
+7. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested. Keep the codebase clean by only supporting current versions.
 
 ## Next Steps
 

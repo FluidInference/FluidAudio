@@ -232,8 +232,15 @@ extension CoreMLDiarizerTests {
         let repoPath = downloadDir.deletingLastPathComponent()
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName)
 
+        // Clean up any unwanted models that might have been downloaded
+        let unwantedModels = ["wespeaker.mlmodelc", "wespeaker_int8.mlmodelc"]
+        for modelName in unwantedModels {
+            let modelPath = repoPath.appendingPathComponent(modelName)
+            try? FileManager.default.removeItem(at: modelPath)
+        }
+
         let segmentationPath = repoPath.appendingPathComponent("pyannote_segmentation.mlmodelc")
-        let embeddingPath = repoPath.appendingPathComponent("wespeaker.mlmodelc")
+        let embeddingPath = repoPath.appendingPathComponent("wespeaker_v2.mlmodelc")
 
         var isDirectory: ObjCBool = false
         XCTAssertTrue(
@@ -247,9 +254,9 @@ extension CoreMLDiarizerTests {
                 isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
+        // Check for embedding model
         XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: embeddingPath.path, isDirectory: &isDirectory))
+            FileManager.default.fileExists(atPath: embeddingPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
 
         XCTAssertTrue(
@@ -295,8 +302,15 @@ extension CoreMLDiarizerTests {
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
 
+        // Clean up any unwanted models that might have been downloaded
+        let unwantedModels = ["wespeaker.mlmodelc", "wespeaker_int8.mlmodelc"]
+        for modelName in unwantedModels {
+            let modelPath = modelsDir.appendingPathComponent(modelName)
+            try? FileManager.default.removeItem(at: modelPath)
+        }
+
         let segmentationPath = modelsDir.appendingPathComponent("pyannote_segmentation.mlmodelc")
-        let embeddingPath = modelsDir.appendingPathComponent("wespeaker.mlmodelc")
+        let embeddingPath = modelsDir.appendingPathComponent("wespeaker_v2.mlmodelc")
 
         // Check that the model files are actually there.
         var isDirectory: ObjCBool = false
@@ -311,9 +325,9 @@ extension CoreMLDiarizerTests {
                 isDirectory: &isDirectory))
         XCTAssertFalse(isDirectory.boolValue)
 
+        // Check for embedding model
         XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: embeddingPath.path, isDirectory: &isDirectory))
+            FileManager.default.fileExists(atPath: embeddingPath.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
 
         XCTAssertTrue(
