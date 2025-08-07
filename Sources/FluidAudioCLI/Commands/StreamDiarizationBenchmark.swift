@@ -195,8 +195,8 @@ enum StreamDiarizationBenchmark {
 
         // Download dataset if needed
         if autoDownload {
-            print("📥 Checking dataset availability...")
-            await DatasetDownloader.downloadAMIIfNeeded()
+            print("📥 Downloading AMI annotations if needed...")
+            await DatasetDownloader.downloadAMIAnnotations(force: false)
         }
 
         // Get list of files to process
@@ -335,8 +335,8 @@ enum StreamDiarizationBenchmark {
             diarizerManager.initialize(models: models)
 
             // Configure streaming manager
-            diarizerManager.streamingSpeakerManager.assignmentThreshold = assignmentThreshold
-            diarizerManager.streamingSpeakerManager.updateThreshold = updateThreshold
+            diarizerManager.speakerManager.speakerThreshold = assignmentThreshold
+            diarizerManager.speakerManager.embeddingThreshold = updateThreshold
 
             // Process in chunks
             let samplesPerChunk = Int(chunkSeconds * 16000)
@@ -398,7 +398,7 @@ enum StreamDiarizationBenchmark {
                         String(
                             format: "    [Chunk %3d] %.1f%% | RTFx: %.1fx | Speakers: %d | Latency: %.3fs",
                             chunkIndex, progress, rtfx,
-                            diarizerManager.streamingSpeakerManager.speakerCount,
+                            diarizerManager.speakerManager.speakerCount,
                             chunkLatency))
                 }
 
@@ -456,7 +456,7 @@ enum StreamDiarizationBenchmark {
                 rtfx: Float(finalRTFx),
                 processingTime: totalElapsed,
                 chunksProcessed: chunkIndex,
-                detectedSpeakers: diarizerManager.streamingSpeakerManager.speakerCount,
+                detectedSpeakers: diarizerManager.speakerManager.speakerCount,
                 groundTruthSpeakers: AMIParser.getGroundTruthSpeakerCount(for: meetingName),
                 speakerFragmentation: fragmentation,
                 speakerConsistency: consistency,

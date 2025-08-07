@@ -179,33 +179,6 @@ struct DatasetDownloader {
     }
 
     /// Download AMI annotations to working directory for benchmarking
-    /// Check if AMI dataset exists and download if needed
-    static func downloadAMIIfNeeded() async {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        let baseDir = homeDir.appendingPathComponent("FluidAudioDatasets")
-        let amiDir = baseDir.appendingPathComponent("ami_official")
-        let sdmDir = amiDir.appendingPathComponent("sdm")
-
-        // Check if we have at least one AMI file
-        let testFile = sdmDir.appendingPathComponent("ES2004a.Mix-Headset.wav")
-
-        if !FileManager.default.fileExists(atPath: testFile.path) {
-            print("📥 AMI dataset not found, downloading...")
-            await downloadAMIDataset(variant: .sdm, force: false, singleFile: nil)
-        } else {
-            print("✅ AMI dataset found")
-        }
-
-        // Also ensure annotations are downloaded
-        let annotationsDir = baseDir.appendingPathComponent("ami_public_1.6.2")
-        let segmentsDir = annotationsDir.appendingPathComponent("segments")
-
-        if !FileManager.default.fileExists(atPath: segmentsDir.path) {
-            print("📥 AMI annotations not found, downloading...")
-            await downloadAMIAnnotations(force: false)
-        }
-    }
-
     static func downloadAMIAnnotations(force: Bool = false) async {
         let workingDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let annotationsDir = workingDir.appendingPathComponent("Datasets/ami_public_1.6.2")

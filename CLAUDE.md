@@ -170,17 +170,12 @@ VADConfig(
 - **Speaker tracking**: Effective across chunks
 - **DER calculation**: Fixed with optimal speaker mapping (Hungarian algorithm)
 
-## Streaming Diarization (Work in Progress)
-
-### Goal
-Develop a custom streaming speaker diarization manager that maintains consistent speaker IDs across chunks WITHOUT using the Hungarian algorithm for retroactive remapping (which is "cheating" in real-time scenarios).
-
 ## Development Guidelines
 
 1. **Testing**: Always run benchmarks on multiple files for validation
 2. **Logging**: Use comprehensive logging for debugging
 3. **Error Handling**: Implement graceful degradation
-4. **Performance**: Keep RTFx > 1.0x for real-time capability
+4. **Performance**: Keep RTF < 1.0x for real-time capability
 5. **Thread Safety**: Never use `@unchecked Sendable` - implement proper synchronization
 6. **Follow Instructions**: When the user asks to implement something specific, DO IT FIRST before explaining why it might not be optimal. Implementation first, explanation second.
 7. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested. Keep the codebase clean by only supporting current versions.
