@@ -20,19 +20,16 @@ public final class DiarizerManager {
     private let audioValidation = AudioValidation()
     private let memoryOptimizer = ANEMemoryOptimizer.shared
 
-    // Streaming speaker manager for consistent speaker tracking
-    public let streamingSpeakerManager: StreamingSpeakerManager
+    // Speaker manager for consistent speaker tracking
+    public let speakerManager: SpeakerManager
 
     public init(config: DiarizerConfig = .default) {
         self.config = config
         self.speakerClustering = SpeakerClustering(config: config)
-        // Use more lenient threshold for streaming to reduce over-segmentation
-        // Regular diarization uses 0.7 and gets 8 speakers but maps to 4
-        // For streaming, we need to be even more lenient to avoid creating duplicates
-        self.streamingSpeakerManager = StreamingSpeakerManager(
-            assignmentThreshold: config.clusteringThreshold * 1.2,  // 0.84 for default 0.7
-            updateThreshold: config.clusteringThreshold * 0.8,  // 0.56 for updates
-            minDurationForNewSpeaker: config.minDurationOn * 1.5  // 1.5s minimum
+        self.speakerManager = SpeakerManager(
+            speakerThreshold: config.clusteringThreshold * 1.2,
+            embeddingThreshold: config.clusteringThreshold * 0.8,
+            minDuration: config.minDurationOn * 1.5
         )
     }
 
@@ -91,26 +88,9 @@ public final class DiarizerManager {
         return speakerClustering.cosineDistance(a, b)
     }
 
-    // TODO: Implement speaker database initialization
-    // This will be added once StreamingSpeakerManager supports it
-    /*
-    /// Initialize the streaming speaker manager with known speakers
-    /// - Parameters:
-    ///   - speakers: Dictionary of speaker ID to embedding (256-dimensional)
-    ///   - allowNewSpeakers: Whether to allow detection of new speakers
-    ///   - maxNewSpeakers: Maximum number of new speakers to allow
-    public func initializeKnownSpeakers(
-        _ speakers: [String: [Float]],
-        allowNewSpeakers: Bool = true,
-        maxNewSpeakers: Int? = nil
-    ) {
-        streamingSpeakerManager.initializeWithSpeakers(
-            speakers,
-            allowNewSpeakers: allowNewSpeakers,
-            maxNewSpeakers: maxNewSpeakers
-        )
+    public func initializeKnownSpeakers(_ speakers: [String: [Float]]) {
+        speakerManager.initializeKnownSpeakers(speakers)
     }
-    */
 
     public func performCompleteDiarization(
         _ samples: [Float], sampleRate: Int = 16000
@@ -252,11 +232,10 @@ public final class DiarizerManager {
                 let embedding = embeddings[speakerIndex]
                 if validateEmbedding(embedding) {
                     clusteringProcessedCount += 1
-                    // Use streaming speaker manager for consistent tracking
-                    let duration = Float(activity) / 50.0  // Convert activity frames to seconds
-                    if let speakerId = streamingSpeakerManager.assignSpeaker(
-                        embedding: embedding,
-                        duration: duration,
+                    let duration = Float(activity) / 50.0
+                    if let speakerId = speakerManager.assignSpeaker(
+                        embedding,
+                        speechDuration: duration,
                         confidence: 1.0
                     ) {
                         speakerLabels.append(speakerId)
