@@ -13,6 +13,7 @@ func printUsage() {
         Commands:
             process                 Process a single audio file for diarization
             diarization-benchmark   Run diarization benchmark on evaluation datasets
+            stream-diarization-benchmark  Run streaming diarization benchmark (no Hungarian)
             vad-benchmark           Run VAD-specific benchmark
             asr-benchmark           Run ASR benchmark on LibriSpeech
             transcribe              Transcribe audio file using streaming ASR
@@ -77,6 +78,13 @@ Task {
             await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
         } else {
             print("Multi-stream requires macOS 13.0 or later")
+            exit(1)
+        }
+    case "stream-diarization-benchmark":
+        if #available(macOS 13.0, *) {
+            await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        } else {
+            print("Stream diarization benchmark requires macOS 13.0 or later")
             exit(1)
         }
     case "process":
