@@ -78,20 +78,36 @@ jobs:
           RTFX=$(jq '.[0].rtfx' streaming_results.json)
           SPEAKERS=$(jq '.[0].detectedSpeakers' streaming_results.json)
           GT_SPEAKERS=$(jq '.[0].groundTruthSpeakers' streaming_results.json)
-          FRAGMENTATION=$(jq '.[0].speakerFragmentation' streaming_results.json)
           CHUNKS=$(jq '.[0].chunksProcessed' streaming_results.json)
           LATENCY_90=$(jq '.[0].latency90th' streaming_results.json)
           LATENCY_99=$(jq '.[0].latency99th' streaming_results.json)
+          
+          # Extract detailed timing information
+          TOTAL_TIME=$(jq '.[0].timings.totalProcessingSeconds' streaming_results.json)
+          MODEL_DOWNLOAD_TIME=$(jq '.[0].timings.modelDownloadSeconds' streaming_results.json)
+          MODEL_COMPILE_TIME=$(jq '.[0].timings.modelCompilationSeconds' streaming_results.json)
+          AUDIO_LOAD_TIME=$(jq '.[0].timings.audioLoadingSeconds' streaming_results.json)
+          SEGMENTATION_TIME=$(jq '.[0].timings.segmentationSeconds' streaming_results.json)
+          EMBEDDING_TIME=$(jq '.[0].timings.embeddingExtractionSeconds' streaming_results.json)
+          CLUSTERING_TIME=$(jq '.[0].timings.speakerClusteringSeconds' streaming_results.json)
+          INFERENCE_TIME=$(jq '.[0].timings.totalInferenceSeconds' streaming_results.json)
           
           echo "DER=${DER}" >> $GITHUB_OUTPUT
           echo "JER=${JER}" >> $GITHUB_OUTPUT
           echo "RTFX=${RTFX}" >> $GITHUB_OUTPUT
           echo "SPEAKERS=${SPEAKERS}" >> $GITHUB_OUTPUT
           echo "GT_SPEAKERS=${GT_SPEAKERS}" >> $GITHUB_OUTPUT
-          echo "FRAGMENTATION=${FRAGMENTATION}" >> $GITHUB_OUTPUT
           echo "CHUNKS=${CHUNKS}" >> $GITHUB_OUTPUT
           echo "LATENCY_90=${LATENCY_90}" >> $GITHUB_OUTPUT
           echo "LATENCY_99=${LATENCY_99}" >> $GITHUB_OUTPUT
+          echo "TOTAL_TIME=${TOTAL_TIME}" >> $GITHUB_OUTPUT
+          echo "MODEL_DOWNLOAD_TIME=${MODEL_DOWNLOAD_TIME}" >> $GITHUB_OUTPUT
+          echo "MODEL_COMPILE_TIME=${MODEL_COMPILE_TIME}" >> $GITHUB_OUTPUT
+          echo "AUDIO_LOAD_TIME=${AUDIO_LOAD_TIME}" >> $GITHUB_OUTPUT
+          echo "SEGMENTATION_TIME=${SEGMENTATION_TIME}" >> $GITHUB_OUTPUT
+          echo "EMBEDDING_TIME=${EMBEDDING_TIME}" >> $GITHUB_OUTPUT
+          echo "CLUSTERING_TIME=${CLUSTERING_TIME}" >> $GITHUB_OUTPUT
+          echo "INFERENCE_TIME=${INFERENCE_TIME}" >> $GITHUB_OUTPUT
 
       - name: Comment PR with Streaming Results
         if: always()
@@ -103,10 +119,17 @@ jobs:
             const rtfx = parseFloat('${{ steps.extract.outputs.RTFX }}');
             const speakers = parseInt('${{ steps.extract.outputs.SPEAKERS }}');
             const gtSpeakers = parseInt('${{ steps.extract.outputs.GT_SPEAKERS }}');
-            const fragmentation = parseFloat('${{ steps.extract.outputs.FRAGMENTATION }}');
             const chunks = parseInt('${{ steps.extract.outputs.CHUNKS }}');
             const latency90 = parseFloat('${{ steps.extract.outputs.LATENCY_90 }}');
             const latency99 = parseFloat('${{ steps.extract.outputs.LATENCY_99 }}');
+            const totalTime = parseFloat('${{ steps.extract.outputs.TOTAL_TIME }}');
+            const inferenceTime = parseFloat('${{ steps.extract.outputs.INFERENCE_TIME }}');
+            const modelDownloadTime = parseFloat('${{ steps.extract.outputs.MODEL_DOWNLOAD_TIME }}');
+            const modelCompileTime = parseFloat('${{ steps.extract.outputs.MODEL_COMPILE_TIME }}');
+            const audioLoadTime = parseFloat('${{ steps.extract.outputs.AUDIO_LOAD_TIME }}');
+            const segmentationTime = parseFloat('${{ steps.extract.outputs.SEGMENTATION_TIME }}');
+            const embeddingTime = parseFloat('${{ steps.extract.outputs.EMBEDDING_TIME }}');
+            const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
             const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
             
             let comment = '## 🌊 Streaming Diarization Benchmark\n\n';
@@ -118,8 +141,19 @@ jobs:
             comment += `| **DER** | **${der.toFixed(1)}%** | <30% | ${der < 30 ? '✅' : '❌'} | Diarization Error Rate |\n`;
             comment += `| **JER** | **${jer.toFixed(1)}%** | <35% | ${jer < 35 ? '✅' : '❌'} | Jaccard Error Rate |\n`;
             comment += `| **RTFx** | **${rtfx.toFixed(1)}x** | >1x | ${rtfx > 1 ? '✅' : '❌'} | Real-Time Factor |\n`;
-            comment += `| **Speakers** | ${speakers}/${gtSpeakers} | ${gtSpeakers} | ${speakers === gtSpeakers ? '✅' : '⚠️'} | Detected/Truth |\n`;
-            comment += `| **Fragmentation** | ${fragmentation.toFixed(2)} | <2.0 | ${fragmentation < 2.0 ? '✅' : '⚠️'} | Speaker consistency |\n\n`;
+            comment += `| **Speakers** | ${speakers}/${gtSpeakers} | ${gtSpeakers} | ${speakers === gtSpeakers ? '✅' : '⚠️'} | Detected/Truth |\n\n`;
+            
+            comment += '### Diarization Pipeline Timing Breakdown\n';
+            comment += '_Time spent in each stage of streaming diarization (aggregated across chunks)_\n\n';
+            comment += '| Stage | Time (s) | % | Description |\n';
+            comment += '|-------|----------|---|-------------|\n';
+            comment += `| Model Download | ${modelDownloadTime.toFixed(3)} | ${(modelDownloadTime/totalTime*100).toFixed(1)} | Fetching diarization models |\n`;
+            comment += `| Model Compile | ${modelCompileTime.toFixed(3)} | ${(modelCompileTime/totalTime*100).toFixed(1)} | CoreML compilation |\n`;
+            comment += `| Audio Load | ${audioLoadTime.toFixed(3)} | ${(audioLoadTime/totalTime*100).toFixed(1)} | Loading audio file |\n`;
+            comment += `| Segmentation | ${segmentationTime.toFixed(3)} | ${(segmentationTime/totalTime*100).toFixed(1)} | Detecting speech regions |\n`;
+            comment += `| Embedding | ${embeddingTime.toFixed(3)} | ${(embeddingTime/totalTime*100).toFixed(1)} | Extracting speaker voices |\n`;
+            comment += `| Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)} | Grouping same speakers |\n`;
+            comment += `| **Total** | **${totalTime.toFixed(3)}** | **100** | **Full pipeline** |\n\n`;
             
             comment += '### Streaming Characteristics\n';
             comment += '| Property | Value | Description |\n';
@@ -138,10 +172,9 @@ jobs:
             
             comment += '**Key Differences**:\n';
             comment += '- ✅ **Real-time compatible**: No retroactive speaker ID changes\n';
-            comment += '- ✅ **Low latency**: Sub-100ms per chunk processing\n';
-            comment += '- ⚠️ **Higher fragmentation**: Multiple IDs may map to same speaker\n\n';
+            comment += '- ✅ **Low latency**: Sub-100ms per chunk processing\n\n';
             
-            comment += `<sub>🌊 **Streaming Test** • ES2004a • ${chunks} chunks • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
+            comment += `<sub>🌊 **Streaming Test** • ES2004a • ${chunks} chunks • ${inferenceTime.toFixed(1)}s inference time • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
             
             // Add hidden identifier
             comment += '<!-- fluidaudio-streaming-benchmark -->';

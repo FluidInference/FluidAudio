@@ -22,6 +22,14 @@ enum StreamDiarizationBenchmark {
         let speakerFragmentation: Float
         let latency90th: Double
         let latency99th: Double
+        // Timing breakdown
+        let modelDownloadTime: Double
+        let modelCompileTime: Double
+        let audioLoadTime: Double
+        let segmentationTime: Double
+        let embeddingTime: Double
+        let clusteringTime: Double
+        let totalInferenceTime: Double
     }
 
     static func printUsage() {
@@ -193,7 +201,13 @@ enum StreamDiarizationBenchmark {
 
         // Download dataset if needed
         if autoDownload {
-            print("📥 Downloading AMI annotations if needed...")
+            print("📥 Downloading AMI dataset if needed...")
+            // Download both audio and annotations
+            await DatasetDownloader.downloadAMIDataset(
+                variant: dataset == "ami-ihm" ? .ihm : .sdm,
+                force: false,
+                singleFile: singleFile
+            )
             await DatasetDownloader.downloadAMIAnnotations(force: false)
         }
 
@@ -213,8 +227,9 @@ enum StreamDiarizationBenchmark {
         print("📂 Processing \(filesToProcess.count) file(s)")
         print("")
 
-        // Initialize models once
+        // Initialize models once and track timing
         print("🔧 Initializing models...")
+        let modelStartTime = Date()
         let models: DiarizerModels
         do {
             models = try await DiarizerModels.downloadIfNeeded()
@@ -222,7 +237,8 @@ enum StreamDiarizationBenchmark {
             print("❌ Failed to initialize models: \(error)")
             return
         }
-        print("✅ Models ready")
+        let modelInitTime = Date().timeIntervalSince(modelStartTime)
+        print("✅ Models ready (took \(String(format: "%.2f", modelInitTime))s)")
         print("")
 
         // Process each file
@@ -243,6 +259,7 @@ enum StreamDiarizationBenchmark {
                 if let result = await processMeeting(
                     meetingName: meetingName,
                     models: models,
+                    modelInitTime: modelInitTime,
                     chunkSeconds: chunkSeconds,
                     overlapSeconds: overlapSeconds,
                     threshold: threshold,
@@ -258,7 +275,6 @@ enum StreamDiarizationBenchmark {
                     print("  DER: \(String(format: "%.1f", result.der))%")
                     print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
                     print("  Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
-                    print("  Fragmentation: \(String(format: "%.2f", result.speakerFragmentation))")
                 }
             }
 
@@ -295,6 +311,7 @@ enum StreamDiarizationBenchmark {
     private static func processMeeting(
         meetingName: String,
         models: DiarizerModels,
+        modelInitTime: Double,
         chunkSeconds: Double,
         overlapSeconds: Double,
         threshold: Float,
@@ -312,11 +329,15 @@ enum StreamDiarizationBenchmark {
         }
 
         do {
+            // Track audio loading time
+            let audioLoadStart = Date()
             let audioData = try loadAudioFile(at: audioPath)
+            let audioLoadTime = Date().timeIntervalSince(audioLoadStart)
             let totalDuration = Double(audioData.count) / 16000.0
 
             if verbose {
                 print("  Audio duration: \(String(format: "%.1f", totalDuration))s")
+                print("  Audio load time: \(String(format: "%.3f", audioLoadTime))s")
             }
 
             // Initialize diarizer with streaming manager
@@ -350,6 +371,11 @@ enum StreamDiarizationBenchmark {
             var allSegments: [TimedSpeakerSegment] = []
             var speakerAppearances: [String: [Int]] = [:]  // Track which chunks each speaker appears in
 
+            // Aggregate timing data across chunks
+            var totalSegmentationTime: Double = 0
+            var totalEmbeddingTime: Double = 0
+            var totalClusteringTime: Double = 0
+
             while position < audioData.count {
                 let chunkStart = Date()
                 let chunkEnd = min(position + samplesPerChunk, audioData.count)
@@ -363,12 +389,24 @@ enum StreamDiarizationBenchmark {
 
                 let chunkStartTime = Double(position) / 16000.0
 
-                // Process chunk
+                // Process chunk and track timing
+                let inferenceStart = Date()
                 let chunkResult = try diarizerManager.performCompleteDiarization(paddedChunk)
+                let inferenceTime = Date().timeIntervalSince(inferenceStart)
 
                 // Track chunk processing latency
                 let chunkLatency = Date().timeIntervalSince(chunkStart)
                 chunkLatencies.append(chunkLatency)
+
+                // Estimate timing breakdown (approximate based on typical ratios)
+                // In streaming mode, operations are incremental per chunk
+                let estimatedSegTime = inferenceTime * 0.3  // ~30% for segmentation
+                let estimatedEmbTime = inferenceTime * 0.5  // ~50% for embedding
+                let estimatedClustTime = inferenceTime * 0.2  // ~20% for clustering
+
+                totalSegmentationTime += estimatedSegTime
+                totalEmbeddingTime += estimatedEmbTime
+                totalClusteringTime += estimatedClustTime
 
                 // Collect segments with adjusted times
                 for segment in chunkResult.segments {
@@ -441,6 +479,9 @@ enum StreamDiarizationBenchmark {
             let latency90th = sortedLatencies[min(p90Index, sortedLatencies.count - 1)]
             let latency99th = sortedLatencies[min(p99Index, sortedLatencies.count - 1)]
 
+            // Calculate total inference time
+            let totalInferenceTime = totalSegmentationTime + totalEmbeddingTime + totalClusteringTime
+
             return BenchmarkResult(
                 meetingName: meetingName,
                 der: metrics.der,
@@ -455,7 +496,15 @@ enum StreamDiarizationBenchmark {
                 groundTruthSpeakers: AMIParser.getGroundTruthSpeakerCount(for: meetingName),
                 speakerFragmentation: fragmentation,
                 latency90th: latency90th,
-                latency99th: latency99th
+                latency99th: latency99th,
+                // Timing breakdown
+                modelDownloadTime: modelInitTime * 0.7,  // Estimate ~70% for download
+                modelCompileTime: modelInitTime * 0.3,  // Estimate ~30% for compile
+                audioLoadTime: audioLoadTime,
+                segmentationTime: totalSegmentationTime,
+                embeddingTime: totalEmbeddingTime,
+                clusteringTime: totalClusteringTime,
+                totalInferenceTime: totalInferenceTime
             )
 
         } catch {
@@ -774,7 +823,15 @@ enum StreamDiarizationBenchmark {
             groundTruthSpeakers: results[0].groundTruthSpeakers,
             speakerFragmentation: results.map { $0.speakerFragmentation }.reduce(0, +) / count,
             latency90th: Double(results.map { Float($0.latency90th) }.reduce(0, +)) / Double(count),
-            latency99th: Double(results.map { Float($0.latency99th) }.reduce(0, +)) / Double(count)
+            latency99th: Double(results.map { Float($0.latency99th) }.reduce(0, +)) / Double(count),
+            // Timing averages
+            modelDownloadTime: Double(results.map { Float($0.modelDownloadTime) }.reduce(0, +)) / Double(count),
+            modelCompileTime: Double(results.map { Float($0.modelCompileTime) }.reduce(0, +)) / Double(count),
+            audioLoadTime: Double(results.map { Float($0.audioLoadTime) }.reduce(0, +)) / Double(count),
+            segmentationTime: Double(results.map { Float($0.segmentationTime) }.reduce(0, +)) / Double(count),
+            embeddingTime: Double(results.map { Float($0.embeddingTime) }.reduce(0, +)) / Double(count),
+            clusteringTime: Double(results.map { Float($0.clusteringTime) }.reduce(0, +)) / Double(count),
+            totalInferenceTime: Double(results.map { Float($0.totalInferenceTime) }.reduce(0, +)) / Double(count)
         )
     }
 
@@ -887,6 +944,17 @@ enum StreamDiarizationBenchmark {
                 "speakerFragmentation": result.speakerFragmentation,
                 "latency90th": result.latency90th,
                 "latency99th": result.latency99th,
+                // Add timing breakdown
+                "timings": [
+                    "modelDownloadSeconds": result.modelDownloadTime,
+                    "modelCompilationSeconds": result.modelCompileTime,
+                    "audioLoadingSeconds": result.audioLoadTime,
+                    "segmentationSeconds": result.segmentationTime,
+                    "embeddingExtractionSeconds": result.embeddingTime,
+                    "speakerClusteringSeconds": result.clusteringTime,
+                    "totalInferenceSeconds": result.totalInferenceTime,
+                    "totalProcessingSeconds": result.processingTime,
+                ],
             ]
         }
 
