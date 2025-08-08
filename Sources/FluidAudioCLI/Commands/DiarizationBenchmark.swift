@@ -106,9 +106,9 @@ enum DiarizationBenchmark {
 
         let config = DiarizerConfig(
             clusteringThreshold: threshold,
-            minDurationOn: minDurationOn,
-            minDurationOff: minDurationOff,
-            minActivityThreshold: minActivityThreshold,
+            minSpeechDuration: minDurationOn,
+            minSilenceGap: minDurationOff,
+            minActiveFramesCount: minActivityThreshold,
             debugMode: debugMode
         )
 

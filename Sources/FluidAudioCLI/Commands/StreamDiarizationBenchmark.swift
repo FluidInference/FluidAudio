@@ -322,9 +322,9 @@ enum StreamDiarizationBenchmark {
             // Initialize diarizer with streaming manager
             let config = DiarizerConfig(
                 clusteringThreshold: threshold,
-                minDurationOn: 1.0,
-                minDurationOff: 0.5,
-                minActivityThreshold: 10.0,
+                minSpeechDuration: 1.0,
+                minSilenceGap: 0.5,
+                minActiveFramesCount: 10.0,
                 debugMode: debugMode
             )
 
