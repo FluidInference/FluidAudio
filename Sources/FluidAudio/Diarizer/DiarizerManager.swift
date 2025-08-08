@@ -15,7 +15,6 @@ public final class DiarizerManager {
     }
 
     public let segmentationProcessor = SegmentationProcessor()
-    private let speakerClustering: SpeakerClustering
     public var embeddingExtractor: EmbeddingExtractor?
     private let audioValidation = AudioValidation()
     private let memoryOptimizer = ANEMemoryOptimizer.shared
@@ -23,13 +22,18 @@ public final class DiarizerManager {
     // Speaker manager for consistent speaker tracking
     public let speakerManager: SpeakerManager
 
-    public init(config: DiarizerConfig = .default) {
+    // Chunking parameters owned by DiarizerManager
+    public var chunkDuration: Float = 10.0  // seconds
+    public var chunkOverlap: Float = 0.0  // seconds
+
+    public init(config: DiarizerConfig = .default, chunkDuration: Float = 10.0, chunkOverlap: Float = 0.0) {
         self.config = config
-        self.speakerClustering = SpeakerClustering(config: config)
+        self.chunkDuration = chunkDuration
+        self.chunkOverlap = chunkOverlap
         self.speakerManager = SpeakerManager(
             speakerThreshold: config.clusteringThreshold * 1.2,
             embeddingThreshold: config.clusteringThreshold * 0.8,
-            minDuration: config.minDurationOn * 1.5
+            minDuration: config.minDurationOn
         )
     }
 
@@ -72,7 +76,7 @@ public final class DiarizerManager {
             throw DiarizerError.embeddingExtractionFailed
         }
 
-        let distance = speakerClustering.cosineDistance(segment1.embedding, segment2.embedding)
+        let distance = speakerManager.cosineDistance(segment1.embedding, segment2.embedding)
         return max(0, (1.0 - distance) * 100)
     }
 
@@ -85,7 +89,7 @@ public final class DiarizerManager {
     }
 
     public func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
-        return speakerClustering.cosineDistance(a, b)
+        return speakerManager.cosineDistance(a, b)
     }
 
     public func initializeKnownSpeakers(_ speakers: [String: [Float]]) {
@@ -106,11 +110,16 @@ public final class DiarizerManager {
         var clusteringTime: TimeInterval = 0
         var postProcessingTime: TimeInterval = 0
 
-        let chunkSize = sampleRate * 10
+        // Use DiarizerManager's chunk parameters
+        let chunkDuration = Int(self.chunkDuration)
+        let overlapDuration = Int(self.chunkOverlap)
+        let chunkSize = sampleRate * chunkDuration
+        let stepSize = chunkSize - (sampleRate * overlapDuration)  // Step size with overlap
+
         var allSegments: [TimedSpeakerSegment] = []
         var speakerDB: [String: [Float]] = [:]
 
-        for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
+        for chunkStart in stride(from: 0, to: samples.count, by: stepSize) {
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
             let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
@@ -161,6 +170,9 @@ public final class DiarizerManager {
         sampleRate: Int = 16000
     ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
+
+        // Calculate actual chunk duration before padding
+        let actualChunkDuration = Float(chunk.count) / Float(sampleRate)
 
         // Prepare chunk (same for both paths)
         let chunkSize = sampleRate * 10
@@ -220,7 +232,7 @@ public final class DiarizerManager {
         let clusteringStartTime = Date()
 
         // Calculate speaker activities
-        let speakerActivities = speakerClustering.calculateSpeakerActivities(binarizedSegments)
+        let speakerActivities = calculateSpeakerActivities(binarizedSegments)
 
         var speakerLabels: [String] = []
         var activityFilteredCount = 0
@@ -232,11 +244,23 @@ public final class DiarizerManager {
                 let embedding = embeddings[speakerIndex]
                 if validateEmbedding(embedding) {
                     clusteringProcessedCount += 1
-                    let duration = Float(activity) / 50.0
+                    // Calculate exact duration based on sliding window step
+                    // Each frame represents slidingWindow.step seconds (0.016875s from pyannote model)
+                    let duration = Float(activity) * Float(slidingFeature.slidingWindow.step)
+
+                    // Check for overlap in this speaker's frames
+                    let hasOverlap = detectOverlap(
+                        speakerIndex: speakerIndex,
+                        binarizedSegments: binarizedSegments
+                    )
+
+                    // Calculate embedding quality
+                    let quality = calculateEmbeddingQuality(embedding) * (activity / Float(numFrames))
+
                     if let speakerId = speakerManager.assignSpeaker(
                         embedding,
                         speechDuration: duration,
-                        confidence: 1.0
+                        confidence: quality
                     ) {
                         speakerLabels.append(speakerId)
                         // Also update the legacy speaker database for compatibility
@@ -256,7 +280,7 @@ public final class DiarizerManager {
 
         let clusteringTime = Date().timeIntervalSince(clusteringStartTime)
 
-        let segments = speakerClustering.createTimedSegments(
+        let segments = createTimedSegments(
             binarizedSegments: binarizedSegments,
             slidingWindow: slidingFeature.slidingWindow,
             embeddings: embeddings,
@@ -280,6 +304,177 @@ public final class DiarizerManager {
     {
         return segments.filter { segment in
             segment.durationSeconds >= self.config.minDurationOn
+        }
+    }
+
+    // MARK: - Functions moved from SpeakerClustering
+
+    private func calculateSpeakerActivities(_ binarizedSegments: [[[Float]]]) -> [Float] {
+        let numSpeakers = binarizedSegments[0][0].count
+        let numFrames = binarizedSegments[0].count
+        var activities: [Float] = Array(repeating: 0.0, count: numSpeakers)
+
+        for speakerIndex in 0..<numSpeakers {
+            for frameIndex in 0..<numFrames {
+                activities[speakerIndex] += binarizedSegments[0][frameIndex][speakerIndex]
+            }
+        }
+
+        return activities
+    }
+
+    private func createTimedSegments(
+        binarizedSegments: [[[Float]]],
+        slidingWindow: SlidingWindow,
+        embeddings: [[Float]],
+        speakerLabels: [String],
+        speakerActivities: [Float]
+    ) -> [TimedSpeakerSegment] {
+        let segmentation = binarizedSegments[0]
+        let numFrames = segmentation.count
+        var segments: [TimedSpeakerSegment] = []
+
+        var frameSpeakers: [Int] = []
+        for frame in segmentation {
+            if let maxIdx = frame.indices.max(by: { frame[$0] < frame[$1] }) {
+                frameSpeakers.append(maxIdx)
+            } else {
+                frameSpeakers.append(0)
+            }
+        }
+
+        var currentSpeaker = frameSpeakers[0]
+        var startFrame = 0
+
+        for i in 1..<numFrames {
+            if frameSpeakers[i] != currentSpeaker {
+                if let segment = createSegmentIfValid(
+                    speakerIndex: currentSpeaker,
+                    startFrame: startFrame,
+                    endFrame: i,
+                    slidingWindow: slidingWindow,
+                    embeddings: embeddings,
+                    speakerLabels: speakerLabels,
+                    speakerActivities: speakerActivities
+                ) {
+                    segments.append(segment)
+                }
+                currentSpeaker = frameSpeakers[i]
+                startFrame = i
+            }
+        }
+
+        if let segment = createSegmentIfValid(
+            speakerIndex: currentSpeaker,
+            startFrame: startFrame,
+            endFrame: numFrames,
+            slidingWindow: slidingWindow,
+            embeddings: embeddings,
+            speakerLabels: speakerLabels,
+            speakerActivities: speakerActivities
+        ) {
+            segments.append(segment)
+        }
+
+        return segments
+    }
+
+    private func createSegmentIfValid(
+        speakerIndex: Int,
+        startFrame: Int,
+        endFrame: Int,
+        slidingWindow: SlidingWindow,
+        embeddings: [[Float]],
+        speakerLabels: [String],
+        speakerActivities: [Float]
+    ) -> TimedSpeakerSegment? {
+        guard speakerIndex < speakerLabels.count,
+            !speakerLabels[speakerIndex].isEmpty,
+            speakerIndex < embeddings.count
+        else {
+            return nil
+        }
+
+        let startTime = slidingWindow.time(forFrame: startFrame)
+        let endTime = slidingWindow.time(forFrame: endFrame)
+        let duration = endTime - startTime
+
+        if Float(duration) < config.minDurationOn {
+            return nil
+        }
+
+        let embedding = embeddings[speakerIndex]
+        let activity = speakerActivities[speakerIndex]
+        let quality = calculateEmbeddingQuality(embedding) * (activity / Float(endFrame - startFrame))
+
+        return TimedSpeakerSegment(
+            speakerId: speakerLabels[speakerIndex],
+            embedding: embedding,
+            startTimeSeconds: Float(startTime),
+            endTimeSeconds: Float(endTime),
+            qualityScore: quality
+        )
+    }
+
+    private func calculateEmbeddingQuality(_ embedding: [Float]) -> Float {
+        let magnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
+        return min(1.0, magnitude / 10.0)
+    }
+
+    private func detectOverlap(speakerIndex: Int, binarizedSegments: [[[Float]]]) -> Bool {
+        let numFrames = binarizedSegments[0].count
+        var overlapCount = 0
+        var totalActive = 0
+
+        for frameIndex in 0..<numFrames {
+            // Check if this speaker is active in this frame
+            if binarizedSegments[0][frameIndex][speakerIndex] > 0.5 {
+                totalActive += 1
+
+                // Count how many speakers are active in this frame
+                let activeSpeakers = binarizedSegments[0][frameIndex].filter { $0 > 0.5 }.count
+                if activeSpeakers > 1 {
+                    overlapCount += 1
+                }
+            }
+        }
+
+        // Consider it overlapping if more than 20% of active frames have multiple speakers
+        return totalActive > 0 && Float(overlapCount) / Float(totalActive) > 0.2
+    }
+
+    /// Post-process to merge similar speakers (for IS meetings)
+    public func mergeSimilarSpeakers(threshold: Float = 0.3) {
+        let speakers = speakerManager.speakerIds
+        var mergedPairs: Set<String> = []
+
+        for i in 0..<speakers.count {
+            for j in (i + 1)..<speakers.count {
+                let speakerId1 = speakers[i]
+                let speakerId2 = speakers[j]
+
+                // Skip if already merged
+                if mergedPairs.contains(speakerId1) || mergedPairs.contains(speakerId2) {
+                    continue
+                }
+
+                if let info1 = speakerManager.getSpeakerInfo(for: speakerId1),
+                    let info2 = speakerManager.getSpeakerInfo(for: speakerId2)
+                {
+
+                    let distance = cosineDistance(info1.embedding, info2.embedding)
+
+                    if distance < threshold {
+                        // Merge speaker2 into speaker1
+                        logger.info(
+                            "Merging similar speakers: \(speakerId2) into \(speakerId1) (distance: \(distance))")
+
+                        // Transfer all segments from speaker2 to speaker1
+                        // This would need to be implemented in your segment management
+                        mergedPairs.insert(speakerId2)
+                    }
+                }
+            }
         }
     }
 }

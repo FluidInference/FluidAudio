@@ -37,90 +37,61 @@ public struct Speaker: Identifiable, Codable {
     }
 }
 
-/// All speaker-related operations in one place
+// MARK: - SpeakerManager Extensions
+
 @available(macOS 13.0, iOS 16.0, *)
-public class SpeakerOperations {
+extension SpeakerManager {
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "SpeakerOps")
-    private let diarizerManager: DiarizerManager
+    private static let opsLogger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "SpeakerOps")
 
-    private var speakers: [String: Speaker] = [:]
-    private let queue = DispatchQueue(label: "speaker.ops", attributes: .concurrent)
-
-    public init(diarizerManager: DiarizerManager) {
-        self.diarizerManager = diarizerManager
-    }
-
-    public func addSpeaker(name: String, embedding: [Float]) -> String {
-        let speaker = Speaker(name: name, embedding: embedding)
-
-        queue.sync(flags: .barrier) {
-            speakers[speaker.id] = speaker
+    /// Export current speakers as Speaker objects
+    public func exportAsSpeakers() -> [Speaker] {
+        var speakers: [Speaker] = []
+        for speakerId in speakerIds {
+            if let info = getSpeakerInfo(for: speakerId) {
+                var speaker = Speaker(
+                    id: speakerId,
+                    name: speakerId,
+                    embedding: info.embedding
+                )
+                speaker.totalDuration = Double(info.totalDuration)
+                speaker.lastSeen = info.lastSeen
+                speakers.append(speaker)
+            }
         }
-
-        logger.info("Added speaker: \(name)")
-        return speaker.id
+        return speakers
     }
 
-    public func renameSpeaker(id: String, newName: String) {
-        queue.sync(flags: .barrier) {
-            speakers[id]?.name = newName
+    /// Import speakers from Speaker objects
+    public func importFromSpeakers(_ speakers: [Speaker]) {
+        var profiles: [String: [Float]] = [:]
+        for speaker in speakers {
+            profiles[speaker.id] = speaker.embedding
         }
-        logger.info("Renamed speaker \(id) to \(newName)")
+        initializeKnownSpeakers(profiles)
+        Self.opsLogger.info("Imported \(speakers.count) speakers")
     }
 
-    public func deleteSpeaker(id: String) {
-        queue.sync(flags: .barrier) {
-            speakers.removeValue(forKey: id)
-        }
-        logger.info("Deleted speaker \(id)")
-    }
-
-    public func getAllSpeakers() -> [Speaker] {
-        queue.sync {
-            Array(speakers.values)
-        }
-    }
-
-    public func clearAll() {
-        queue.sync(flags: .barrier) {
-            speakers.removeAll()
-        }
-        logger.info("Cleared all speakers")
-    }
-
+    /// Verify if two embeddings are from the same speaker
     public func verifySameSpeaker(
-        audio1: [Float],
-        audio2: [Float],
+        embedding1: [Float],
+        embedding2: [Float],
         threshold: Float = 0.7
-    ) async throws -> (isSame: Bool, confidence: Float) {
-
-        let result1 = try diarizerManager.performCompleteDiarization(audio1)
-        let result2 = try diarizerManager.performCompleteDiarization(audio2)
-
-        guard let embedding1 = result1.segments.first?.embedding,
-            let embedding2 = result2.segments.first?.embedding
-        else {
-            throw DiarizerError.embeddingExtractionFailed
-        }
-
-        let distance = diarizerManager.cosineDistance(embedding1, embedding2)
+    ) -> (isSame: Bool, confidence: Float) {
+        let distance = cosineDistance(embedding1, embedding2)
         let isSame = distance < threshold
-        let confidence = isSame ? (1.0 - distance) : distance
-
+        let confidence = 1.0 - distance
         return (isSame, confidence)
     }
 
+    /// Find speakers in segments that match the target embedding
     public func findSpeaker(
         targetEmbedding: [Float],
-        in audio: [Float],
+        in segments: [TimedSpeakerSegment],
         threshold: Float = 0.65
-    ) async throws -> [Speaker] {
-
-        let result = try diarizerManager.performCompleteDiarization(audio)
-
+    ) -> [Speaker] {
         var speakerGroups: [String: [TimedSpeakerSegment]] = [:]
-        for segment in result.segments {
+        for segment in segments {
             speakerGroups[segment.speakerId, default: []].append(segment)
         }
 
@@ -129,7 +100,7 @@ public class SpeakerOperations {
         for (speakerId, segments) in speakerGroups {
             guard let firstEmbedding = segments.first?.embedding else { continue }
 
-            let distance = diarizerManager.cosineDistance(targetEmbedding, firstEmbedding)
+            let distance = cosineDistance(targetEmbedding, firstEmbedding)
 
             if distance < threshold {
                 for segment in segments {
@@ -148,87 +119,43 @@ public class SpeakerOperations {
         return matches
     }
 
-    public func assignStreamingSpeaker(
-        embedding: [Float],
-        duration: Float,
-        threshold: Float = 0.7
-    ) -> String {
-
-        return queue.sync(flags: .barrier) {
-            var minDistance: Float = Float.infinity
-            var closestId: String?
-
-            for (id, speaker) in speakers {
-                let distance = diarizerManager.cosineDistance(embedding, speaker.embedding)
-                if distance < minDistance {
-                    minDistance = distance
-                    closestId = id
-                }
-            }
-
-            if let id = closestId, minDistance < threshold {
-                speakers[id]?.totalDuration += Double(duration)
-                speakers[id]?.lastSeen = Date()
-                return id
-            } else {
-                let speaker = Speaker(embedding: embedding)
-                speakers[speaker.id] = speaker
-                return speaker.id
-            }
-        }
-    }
-
+    /// Export speakers to JSON data
     public func exportToJSON() throws -> Data {
-        let speakerList = getAllSpeakers()
-        return try JSONEncoder().encode(speakerList)
+        let speakers = exportAsSpeakers()
+        return try JSONEncoder().encode(speakers)
     }
 
+    /// Import speakers from JSON data
     public func importFromJSON(_ data: Data) throws {
         let imported = try JSONDecoder().decode([Speaker].self, from: data)
-
-        queue.sync(flags: .barrier) {
-            for speaker in imported {
-                speakers[speaker.id] = speaker
-            }
-        }
-
-        logger.info("Imported \(imported.count) speakers")
+        importFromSpeakers(imported)
     }
 
+    /// Find similar speakers to a target embedding
     public func findSimilarSpeakers(
         to embedding: [Float],
         limit: Int = 5
     ) -> [(speaker: Speaker, distance: Float)] {
+        var results: [(Speaker, Float)] = []
 
-        return queue.sync {
-            var results: [(Speaker, Float)] = []
-
-            for speaker in speakers.values {
-                let distance = diarizerManager.cosineDistance(embedding, speaker.embedding)
+        for speakerId in speakerIds {
+            if let info = getSpeakerInfo(for: speakerId) {
+                let distance = cosineDistance(embedding, info.embedding)
+                var speaker = Speaker(
+                    id: speakerId,
+                    name: speakerId,
+                    embedding: info.embedding
+                )
+                speaker.totalDuration = Double(info.totalDuration)
+                speaker.lastSeen = info.lastSeen
                 results.append((speaker, distance))
             }
-
-            return
-                results
-                .sorted { $0.1 < $1.1 }
-                .prefix(limit)
-                .map { ($0.0, $0.1) }
-        }
-    }
-
-    public func mergeSpeakers(sourceId: String, targetId: String) {
-        queue.sync(flags: .barrier) {
-            guard let source = speakers[sourceId],
-                var target = speakers[targetId]
-            else { return }
-
-            target.totalDuration += source.totalDuration
-
-            speakers[targetId] = target
-
-            speakers.removeValue(forKey: sourceId)
         }
 
-        logger.info("Merged \(sourceId) into \(targetId)")
+        return
+            results
+            .sorted { $0.1 < $1.1 }
+            .prefix(limit)
+            .map { ($0.0, $0.1) }
     }
 }
