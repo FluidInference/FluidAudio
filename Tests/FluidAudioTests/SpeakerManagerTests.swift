@@ -302,7 +302,7 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager(
             speakerThreshold: 0.5,
             embeddingThreshold: 0.3,
-            minDuration: 2.0
+            minSpeechDuration: 2.0
         )
 
         let embedding = createDistinctEmbedding(pattern: 1)
