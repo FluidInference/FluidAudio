@@ -217,11 +217,13 @@ public struct SegmentationProcessor {
     func createSlidingWindowFeature(
         binarizedSegments: [[[Float]]], chunkOffset: Double = 0.0
     ) -> SlidingWindowFeature {
+        // These values come from the pyannote/speaker-diarization-3.1 model configuration
         let slidingWindow = SlidingWindow(
             start: chunkOffset,
-            duration: 0.0619375,
-            step: 0.016875
+            duration: 0.0619375,  // 991 samples at 16kHz (model's sliding window duration)
+            step: 0.016875  // 270 samples at 16kHz (model's sliding window step)
         )
+        // Model output frame rate: 1 / 0.016875 = ~59.26 fps (not 50 fps)
 
         return SlidingWindowFeature(
             data: binarizedSegments,

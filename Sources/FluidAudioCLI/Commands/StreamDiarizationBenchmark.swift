@@ -331,7 +331,11 @@ enum StreamDiarizationBenchmark {
                 debugMode: debugMode
             )
 
-            let diarizerManager = DiarizerManager(config: config)
+            let diarizerManager = DiarizerManager(
+                config: config,
+                chunkDuration: Float(chunkSeconds),
+                chunkOverlap: Float(overlapSeconds)
+            )
             diarizerManager.initialize(models: models)
 
             // Configure streaming manager
@@ -845,6 +849,34 @@ enum StreamDiarizationBenchmark {
     private static func printFinalSummary(results: [BenchmarkResult]) {
         guard !results.isEmpty else { return }
 
+        // Visualization temporarily disabled - BenchmarkVisualizer to be implemented
+        // // Generate ASCII chart visualization
+        // let vizResults = results.map { result in
+        //     BenchmarkVisualizer.BenchmarkResult(
+        //         dataset: result.meetingName,
+        //         der: Double(result.der),
+        //         rtfx: Double(result.rtfx),
+        //         missedSpeech: Double(result.missRate),
+        //         falseAlarm: Double(result.falseAlarmRate),
+        //         speakerError: Double(result.speakerErrorRate),
+        //         detectedSpeakers: result.detectedSpeakers,
+        //         truthSpeakers: result.groundTruthSpeakers
+        //     )
+        // }
+
+        // let chart = BenchmarkVisualizer.generateASCIIChart(results: vizResults)
+        // print(chart)
+
+        // // Save charts to files
+        // BenchmarkVisualizer.saveChartToFile(chart, filename: "benchmark_chart.txt")
+
+        // // Generate and save HTML chart
+        // let htmlChart = BenchmarkVisualizer.generateHTMLChart(results: vizResults)
+        // let htmlPath = "benchmark_chart.html"
+        // try? htmlChart.write(toFile: htmlPath, atomically: true, encoding: .utf8)
+        // print("📊 Interactive HTML chart saved to: \(htmlPath)")
+
+        // Continue with original summary
         print("\n" + String(repeating: "=", count: 60))
         print("📊 FINAL BENCHMARK SUMMARY")
         print(String(repeating: "=", count: 60))

@@ -147,7 +147,7 @@ public class SpeakerManager {
         logger.debug("Updated embedding for \(speakerId), update count: \(speakerInfo.updateCount)")
     }
 
-    private func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
+    internal func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else {
             return Float.infinity
         }
@@ -179,6 +179,13 @@ public class SpeakerManager {
 
     public var speakerIds: [String] {
         queue.sync { Array(speakerDatabase.keys).sorted() }
+    }
+
+    /// Get detailed speaker information
+    public func getAllSpeakerInfo() -> [String: SpeakerInfo] {
+        queue.sync {
+            return speakerDatabase
+        }
     }
 
     public func getSpeakerInfo(for speakerId: String) -> SpeakerInfo? {
