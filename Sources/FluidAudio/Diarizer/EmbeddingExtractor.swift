@@ -153,7 +153,7 @@ public class EmbeddingExtractor {
             // Extract directly from the view
             var embedding = [Float](repeating: 0, count: embeddingDim)
             let ptr = embeddingView.dataPointer.assumingMemoryBound(to: Float.self)
-            _ = embedding.withUnsafeMutableBufferPointer { buffer in
+            embedding.withUnsafeMutableBufferPointer { buffer in
                 // Use optimized memory copy
                 memcpy(buffer.baseAddress!, ptr, embeddingDim * MemoryLayout<Float>.size)
             }

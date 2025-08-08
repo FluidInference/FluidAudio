@@ -2,8 +2,8 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Independent streaming diarization benchmark for evaluating real-time performance
-/// This benchmark does NOT use Hungarian algorithm for speaker remapping
+/// Streaming diarization benchmark for evaluating real-time performance
+/// Uses first-occurrence speaker mapping for true streaming evaluation
 @available(macOS 13.0, *)
 enum StreamDiarizationBenchmark {
 
@@ -40,7 +40,7 @@ enum StreamDiarizationBenchmark {
             Evaluates streaming speaker diarization WITHOUT retroactive speaker remapping.
             This measures true real-time performance as seen in production systems.
 
-            Usage: fluidaudio stream-diarization-benchmark [options]
+            Usage: fluidaudio diarization-benchmark [options]
 
             Options:
                 --dataset <name>         Dataset to benchmark (default: ami-sdm)
@@ -70,15 +70,15 @@ enum StreamDiarizationBenchmark {
 
             Examples:
                 # Benchmark single file with real-time settings
-                fluidaudio stream-diarization-benchmark --single-file ES2004a \\
+                fluidaudio diarization-benchmark --single-file ES2004a \\
                     --chunk-seconds 3 --overlap-seconds 2
 
                 # Full AMI benchmark with balanced settings
-                fluidaudio stream-diarization-benchmark --dataset ami-sdm \\
+                fluidaudio diarization-benchmark --dataset ami-sdm \\
                     --chunk-seconds 10 --overlap-seconds 5 --csv results.csv
 
                 # Quick test on 5 files
-                fluidaudio stream-diarization-benchmark --max-files 5 --verbose
+                fluidaudio diarization-benchmark --max-files 5 --verbose
             """)
     }
 
@@ -275,6 +275,39 @@ enum StreamDiarizationBenchmark {
                     print("  DER: \(String(format: "%.1f", result.der))%")
                     print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
                     print("  Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
+
+                    // Print timing breakdown
+                    print("\n⏱️ Diarization Pipeline Timing Breakdown:")
+                    print("  Time spent in each stage of streaming diarization:\n")
+                    print("  Stage               Time (s)    %     Description")
+                    print("  " + String(repeating: "-", count: 60))
+                    let totalTime = result.processingTime
+                    print(
+                        String(
+                            format: "  Model Download      %.3f      %.1f   Fetching diarization models",
+                            result.modelDownloadTime, result.modelDownloadTime / totalTime * 100))
+                    print(
+                        String(
+                            format: "  Model Compile       %.3f      %.1f   CoreML compilation",
+                            result.modelCompileTime, result.modelCompileTime / totalTime * 100))
+                    print(
+                        String(
+                            format: "  Audio Load          %.3f      %.1f   Loading audio file",
+                            result.audioLoadTime, result.audioLoadTime / totalTime * 100))
+                    print(
+                        String(
+                            format: "  Segmentation        %.3f      %.1f   Detecting speech regions",
+                            result.segmentationTime, result.segmentationTime / totalTime * 100))
+                    print(
+                        String(
+                            format: "  Embedding           %.3f      %.1f   Extracting speaker voices",
+                            result.embeddingTime, result.embeddingTime / totalTime * 100))
+                    print(
+                        String(
+                            format: "  Clustering          %.3f      %.1f   Grouping same speakers",
+                            result.clusteringTime, result.clusteringTime / totalTime * 100))
+                    print("  " + String(repeating: "-", count: 60))
+                    print(String(format: "  Total               %.3f    100.0   Full pipeline", totalTime))
                 }
             }
 
@@ -459,7 +492,7 @@ enum StreamDiarizationBenchmark {
                 return nil
             }
 
-            // Calculate metrics WITHOUT Hungarian mapping for true streaming evaluation
+            // Calculate metrics with first-occurrence mapping for true streaming evaluation
             let metrics = calculateStreamingMetrics(
                 predicted: allSegments,
                 groundTruth: groundTruth,
@@ -513,7 +546,7 @@ enum StreamDiarizationBenchmark {
         }
     }
 
-    /// Calculate DER metrics WITHOUT Hungarian mapping - for true streaming evaluation
+    /// Calculate DER metrics with first-occurrence mapping for streaming evaluation
     private static func calculateStreamingMetrics(
         predicted: [TimedSpeakerSegment],
         groundTruth: [TimedSpeakerSegment],
@@ -610,7 +643,7 @@ enum StreamDiarizationBenchmark {
             }
         }
 
-        // Calculate JER (Jaccard Error Rate) without Hungarian mapping
+        // Calculate JER (Jaccard Error Rate) with streaming mapping
         var segmentIntersection = 0
         var segmentUnion = 0
 
@@ -848,69 +881,51 @@ enum StreamDiarizationBenchmark {
     private static func printFinalSummary(results: [BenchmarkResult]) {
         guard !results.isEmpty else { return }
 
-        // Visualization temporarily disabled - BenchmarkVisualizer to be implemented
-        // // Generate ASCII chart visualization
-        // let vizResults = results.map { result in
-        //     BenchmarkVisualizer.BenchmarkResult(
-        //         dataset: result.meetingName,
-        //         der: Double(result.der),
-        //         rtfx: Double(result.rtfx),
-        //         missedSpeech: Double(result.missRate),
-        //         falseAlarm: Double(result.falseAlarmRate),
-        //         speakerError: Double(result.speakerErrorRate),
-        //         detectedSpeakers: result.detectedSpeakers,
-        //         truthSpeakers: result.groundTruthSpeakers
-        //     )
-        // }
-
-        // let chart = BenchmarkVisualizer.generateASCIIChart(results: vizResults)
-        // print(chart)
-
-        // // Save charts to files
-        // BenchmarkVisualizer.saveChartToFile(chart, filename: "benchmark_chart.txt")
-
-        // // Generate and save HTML chart
-        // let htmlChart = BenchmarkVisualizer.generateHTMLChart(results: vizResults)
-        // let htmlPath = "benchmark_chart.html"
-        // try? htmlChart.write(toFile: htmlPath, atomically: true, encoding: .utf8)
-        // print("📊 Interactive HTML chart saved to: \(htmlPath)")
-
-        // Continue with original summary
-        print("\n" + String(repeating: "=", count: 60))
+        print("\n" + String(repeating: "=", count: 80))
         print("📊 FINAL BENCHMARK SUMMARY")
-        print(String(repeating: "=", count: 60))
+        print(String(repeating: "=", count: 80))
 
-        // Calculate aggregates
+        // Print detailed results table sorted by DER
+        print("\n📋 Results Sorted by DER (Best → Worst):")
+        print(String(repeating: "-", count: 80))
+        // Simple header without String(format:)
+        print("Meeting        DER %    Miss %     FA %     SE %   Speakers     RTFx")
+        print(String(repeating: "-", count: 80))
+
+        for result in results.sorted(by: { $0.der < $1.der }) {
+            let speakerInfo = "\(result.detectedSpeakers)/\(result.groundTruthSpeakers)"
+            // Format meeting name to fixed width
+            let meetingCol = result.meetingName.padding(toLength: 12, withPad: " ", startingAt: 0)
+            let speakerCol = speakerInfo.padding(toLength: 10, withPad: " ", startingAt: 0)
+            print(
+                String(
+                    format: "%@ %8.1f %8.1f %8.1f %8.1f %@ %8.1f",
+                    meetingCol,
+                    result.der,
+                    result.missRate,
+                    result.falseAlarmRate,
+                    result.speakerErrorRate,
+                    speakerCol,
+                    result.rtfx))
+        }
+        print(String(repeating: "-", count: 80))
+
+        // Calculate aggregates and add summary row
         let avgDER = results.map { $0.der }.reduce(0, +) / Float(results.count)
+        let avgMiss = results.map { $0.missRate }.reduce(0, +) / Float(results.count)
+        let avgFA = results.map { $0.falseAlarmRate }.reduce(0, +) / Float(results.count)
+        let avgSE = results.map { $0.speakerErrorRate }.reduce(0, +) / Float(results.count)
         let avgRTFx = results.map { $0.rtfx }.reduce(0, +) / Float(results.count)
         let avgFragmentation = results.map { $0.speakerFragmentation }.reduce(0, +) / Float(results.count)
         let avgLatency90 = results.map { $0.latency90th }.reduce(0, +) / Double(results.count)
         let avgLatency99 = results.map { $0.latency99th }.reduce(0, +) / Double(results.count)
 
-        print("\n🎯 Performance Metrics:")
-        print("  Average DER: \(String(format: "%.1f", avgDER))%")
+        // Print average row
         print(
-            "    Missed speech: \(String(format: "%.1f", results.map { $0.missRate }.reduce(0, +) / Float(results.count)))%"
-        )
-        print(
-            "    False alarm: \(String(format: "%.1f", results.map { $0.falseAlarmRate }.reduce(0, +) / Float(results.count)))%"
-        )
-        print(
-            "    Speaker error: \(String(format: "%.1f", results.map { $0.speakerErrorRate }.reduce(0, +) / Float(results.count)))%"
-        )
-
-        print("\n⚡ Speed Metrics:")
-        print("  Average RTFx: \(String(format: "%.1f", avgRTFx))x")
-        print("  90th percentile latency: \(String(format: "%.3f", avgLatency90))s")
-        print("  99th percentile latency: \(String(format: "%.3f", avgLatency99))s")
-
-        print("\n🔍 Quality Metrics:")
-        print("  Speaker fragmentation: \(String(format: "%.2f", avgFragmentation)) (1.0 = ideal)")
-
-        // Show best and worst performers
-        let sortedByDER = results.sorted { $0.der < $1.der }
-        print("\n📈 Best DER: \(sortedByDER[0].meetingName) = \(String(format: "%.1f", sortedByDER[0].der))%")
-        print("📉 Worst DER: \(sortedByDER.last!.meetingName) = \(String(format: "%.1f", sortedByDER.last!.der))%")
+            String(
+                format: "AVERAGE      %8.1f %8.1f %8.1f %8.1f         - %8.1f",
+                avgDER, avgMiss, avgFA, avgSE, avgRTFx))
+        print(String(repeating: "=", count: 80))
 
         // Check against targets
         print("\n✅ Target Check:")
