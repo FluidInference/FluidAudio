@@ -33,7 +33,7 @@ public final class DiarizerManager {
         self.speakerManager = SpeakerManager(
             speakerThreshold: config.clusteringThreshold * 1.2,
             embeddingThreshold: config.clusteringThreshold * 0.8,
-            minDuration: config.minDurationOn
+            minDuration: config.minSpeechDuration
         )
     }
 
@@ -172,7 +172,7 @@ public final class DiarizerManager {
         let segmentationStartTime = Date()
 
         // Calculate actual chunk duration before padding
-        let actualChunkDuration = Float(chunk.count) / Float(sampleRate)
+        _ = Float(chunk.count) / Float(sampleRate)
 
         // Prepare chunk (same for both paths)
         let chunkSize = sampleRate * 10
@@ -225,7 +225,7 @@ public final class DiarizerManager {
         let embeddings = try embeddingExtractor.getEmbeddings(
             audio: Array(paddedChunk),
             masks: masks,
-            minActivityThreshold: config.minActivityThreshold
+            minActivityThreshold: config.minActiveFramesCount
         )
 
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
@@ -240,7 +240,7 @@ public final class DiarizerManager {
         var clusteringProcessedCount = 0
 
         for (speakerIndex, activity) in speakerActivities.enumerated() {
-            if activity > self.config.minActivityThreshold {
+            if activity > self.config.minActiveFramesCount {
                 let embedding = embeddings[speakerIndex]
                 if validateEmbedding(embedding) {
                     clusteringProcessedCount += 1
@@ -249,7 +249,7 @@ public final class DiarizerManager {
                     let duration = Float(activity) * Float(slidingFeature.slidingWindow.step)
 
                     // Check for overlap in this speaker's frames
-                    let hasOverlap = detectOverlap(
+                    _ = detectOverlap(
                         speakerIndex: speakerIndex,
                         binarizedSegments: binarizedSegments
                     )
@@ -303,7 +303,7 @@ public final class DiarizerManager {
         -> [TimedSpeakerSegment]
     {
         return segments.filter { segment in
-            segment.durationSeconds >= self.config.minDurationOn
+            segment.durationSeconds >= self.config.minSpeechDuration
         }
     }
 
@@ -399,7 +399,7 @@ public final class DiarizerManager {
         let endTime = slidingWindow.time(forFrame: endFrame)
         let duration = endTime - startTime
 
-        if Float(duration) < config.minDurationOn {
+        if Float(duration) < config.minSpeechDuration {
             return nil
         }
 

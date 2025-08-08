@@ -1,28 +1,39 @@
 import Foundation
 
 public struct DiarizerConfig: Sendable {
+    /// Threshold for clustering speaker embeddings (0.5-0.9). Lower = more speakers.
     public var clusteringThreshold: Float = 0.7
-    public var minDurationOn: Float = 1.0
-    public var minDurationOff: Float = 0.5
+
+    /// Minimum speech segment duration in seconds. Shorter segments are discarded.
+    public var minSpeechDuration: Float = 1.0
+
+    /// Minimum silence gap (seconds) before splitting same speaker's segments.
+    public var minSilenceGap: Float = 0.5
+
+    /// Expected number of speakers (-1 for automatic).
     public var numClusters: Int = -1
-    public var minActivityThreshold: Float = 10.0
+
+    /// Minimum active frames for valid speech detection.
+    public var minActiveFramesCount: Float = 10.0
+
+    /// Enable debug logging.
     public var debugMode: Bool = false
 
     public static let `default` = DiarizerConfig()
 
     public init(
         clusteringThreshold: Float = 0.7,
-        minDurationOn: Float = 1.0,
-        minDurationOff: Float = 0.5,
+        minSpeechDuration: Float = 1.0,
+        minSilenceGap: Float = 0.5,
         numClusters: Int = -1,
-        minActivityThreshold: Float = 10.0,
+        minActiveFramesCount: Float = 10.0,
         debugMode: Bool = false
     ) {
         self.clusteringThreshold = clusteringThreshold
-        self.minDurationOn = minDurationOn
-        self.minDurationOff = minDurationOff
+        self.minSpeechDuration = minSpeechDuration
+        self.minSilenceGap = minSilenceGap
         self.numClusters = numClusters
-        self.minActivityThreshold = minActivityThreshold
+        self.minActiveFramesCount = minActiveFramesCount
         self.debugMode = debugMode
     }
 }
