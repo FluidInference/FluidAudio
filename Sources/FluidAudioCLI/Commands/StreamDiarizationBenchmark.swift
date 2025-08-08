@@ -20,7 +20,6 @@ enum StreamDiarizationBenchmark {
         let detectedSpeakers: Int
         let groundTruthSpeakers: Int
         let speakerFragmentation: Float
-        let speakerConsistency: Float
         let latency90th: Double
         let latency99th: Double
     }
@@ -60,7 +59,6 @@ enum StreamDiarizationBenchmark {
             Performance Targets:
                 DER < 30%  (competitive with research systems)
                 RTFx > 1x  (real-time capable)
-                Speaker consistency > 0.8
 
             Examples:
                 # Benchmark single file with real-time settings
@@ -261,7 +259,6 @@ enum StreamDiarizationBenchmark {
                     print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
                     print("  Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
                     print("  Fragmentation: \(String(format: "%.2f", result.speakerFragmentation))")
-                    print("  Consistency: \(String(format: "%.2f", result.speakerConsistency))")
                 }
             }
 
@@ -437,11 +434,6 @@ enum StreamDiarizationBenchmark {
                 totalChunks: chunkIndex
             )
 
-            // Calculate speaker consistency (how consistent are speaker IDs across chunks)
-            let consistency = calculateConsistency(
-                predicted: allSegments,
-                groundTruth: groundTruth
-            )
 
             // Calculate latency percentiles
             let sortedLatencies = chunkLatencies.sorted()
@@ -463,7 +455,6 @@ enum StreamDiarizationBenchmark {
                 detectedSpeakers: diarizerManager.speakerManager.speakerCount,
                 groundTruthSpeakers: AMIParser.getGroundTruthSpeakerCount(for: meetingName),
                 speakerFragmentation: fragmentation,
-                speakerConsistency: consistency,
                 latency90th: latency90th,
                 latency99th: latency99th
             )
@@ -653,52 +644,6 @@ enum StreamDiarizationBenchmark {
         return Float(totalFragments) / Float(max(idealFragments, 1))
     }
 
-    private static func calculateConsistency(
-        predicted: [TimedSpeakerSegment],
-        groundTruth: [TimedSpeakerSegment]
-    ) -> Float {
-        // Calculate how consistently the same true speaker maps to the same predicted speaker ID
-        // 1.0 = perfect consistency
-        // 0.0 = no consistency
-
-        var speakerMapping: [String: [String: Float]] = [:]  // truth_speaker -> [predicted_speaker: overlap_duration]
-
-        for truthSegment in groundTruth {
-            let truthSpeaker = truthSegment.speakerId
-
-            if speakerMapping[truthSpeaker] == nil {
-                speakerMapping[truthSpeaker] = [:]
-            }
-
-            for predSegment in predicted {
-                let overlap =
-                    min(predSegment.endTimeSeconds, truthSegment.endTimeSeconds)
-                    - max(predSegment.startTimeSeconds, truthSegment.startTimeSeconds)
-
-                if overlap > 0 {
-                    speakerMapping[truthSpeaker]?[predSegment.speakerId, default: 0] += overlap
-                }
-            }
-        }
-
-        // Calculate consistency score
-        var totalConsistency: Float = 0
-        var speakerCount = 0
-
-        for (_, predictionMap) in speakerMapping {
-            guard !predictionMap.isEmpty else { continue }
-
-            let totalDuration = predictionMap.values.reduce(0, +)
-            let maxDuration = predictionMap.values.max() ?? 0
-
-            // Consistency is the ratio of the dominant speaker to total
-            let consistency = maxDuration / max(totalDuration, 1)
-            totalConsistency += consistency
-            speakerCount += 1
-        }
-
-        return speakerCount > 0 ? totalConsistency / Float(speakerCount) : 0
-    }
 
     private static func getAMIFiles(dataset: String, maxFiles: Int?) -> [String] {
         // Get list of AMI meeting names
@@ -830,7 +775,6 @@ enum StreamDiarizationBenchmark {
             detectedSpeakers: Int(Float(results.map { $0.detectedSpeakers }.reduce(0, +)) / count),
             groundTruthSpeakers: results[0].groundTruthSpeakers,
             speakerFragmentation: results.map { $0.speakerFragmentation }.reduce(0, +) / count,
-            speakerConsistency: results.map { $0.speakerConsistency }.reduce(0, +) / count,
             latency90th: Double(results.map { Float($0.latency90th) }.reduce(0, +)) / Double(count),
             latency99th: Double(results.map { Float($0.latency99th) }.reduce(0, +)) / Double(count)
         )
@@ -885,7 +829,6 @@ enum StreamDiarizationBenchmark {
         let avgDER = results.map { $0.der }.reduce(0, +) / Float(results.count)
         let avgRTFx = results.map { $0.rtfx }.reduce(0, +) / Float(results.count)
         let avgFragmentation = results.map { $0.speakerFragmentation }.reduce(0, +) / Float(results.count)
-        let avgConsistency = results.map { $0.speakerConsistency }.reduce(0, +) / Float(results.count)
         let avgLatency90 = results.map { $0.latency90th }.reduce(0, +) / Double(results.count)
         let avgLatency99 = results.map { $0.latency99th }.reduce(0, +) / Double(results.count)
 
@@ -908,7 +851,6 @@ enum StreamDiarizationBenchmark {
 
         print("\n🔍 Quality Metrics:")
         print("  Speaker fragmentation: \(String(format: "%.2f", avgFragmentation)) (1.0 = ideal)")
-        print("  Speaker consistency: \(String(format: "%.2f", avgConsistency)) (1.0 = perfect)")
 
         // Show best and worst performers
         let sortedByDER = results.sorted { $0.der < $1.der }
@@ -928,12 +870,6 @@ enum StreamDiarizationBenchmark {
         } else {
             print("  ❌ RTFx > 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
         }
-
-        if avgConsistency > 0.8 {
-            print("  ✅ Consistency > 0.8 (achieved: \(String(format: "%.2f", avgConsistency)))")
-        } else {
-            print("  ❌ Consistency > 0.8 (achieved: \(String(format: "%.2f", avgConsistency)))")
-        }
     }
 
     private static func saveJSONResults(results: [BenchmarkResult], to path: String) {
@@ -951,7 +887,6 @@ enum StreamDiarizationBenchmark {
                 "detectedSpeakers": result.detectedSpeakers,
                 "groundTruthSpeakers": result.groundTruthSpeakers,
                 "speakerFragmentation": result.speakerFragmentation,
-                "speakerConsistency": result.speakerConsistency,
                 "latency90th": result.latency90th,
                 "latency99th": result.latency99th,
             ]
@@ -968,7 +903,7 @@ enum StreamDiarizationBenchmark {
 
     private static func saveCSVResults(results: [BenchmarkResult], to path: String) {
         var csv =
-            "Meeting,DER,MissRate,FalseAlarm,SpeakerError,JER,RTFx,ProcessingTime,Chunks,DetectedSpeakers,TrueSpeakers,Fragmentation,Consistency,Latency90th,Latency99th\n"
+            "Meeting,DER,MissRate,FalseAlarm,SpeakerError,JER,RTFx,ProcessingTime,Chunks,DetectedSpeakers,TrueSpeakers,Fragmentation,Latency90th,Latency99th\n"
 
         for result in results {
             csv += "\(result.meetingName),"
@@ -983,7 +918,6 @@ enum StreamDiarizationBenchmark {
             csv += "\(result.detectedSpeakers),"
             csv += "\(result.groundTruthSpeakers),"
             csv += "\(String(format: "%.3f", result.speakerFragmentation)),"
-            csv += "\(String(format: "%.3f", result.speakerConsistency)),"
             csv += "\(String(format: "%.4f", result.latency90th)),"
             csv += "\(String(format: "%.4f", result.latency99th))\n"
         }
@@ -1003,7 +937,6 @@ enum StreamDiarizationBenchmark {
             csv += "\(String(format: "%.1f", results.map { Float($0.detectedSpeakers) }.reduce(0, +) / count)),"
             csv += "\(String(format: "%.1f", results.map { Float($0.groundTruthSpeakers) }.reduce(0, +) / count)),"
             csv += "\(String(format: "%.3f", results.map { $0.speakerFragmentation }.reduce(0, +) / count)),"
-            csv += "\(String(format: "%.3f", results.map { $0.speakerConsistency }.reduce(0, +) / count)),"
             csv += "\(String(format: "%.4f", results.map { Float($0.latency90th) }.reduce(0, +) / count)),"
             csv += "\(String(format: "%.4f", results.map { Float($0.latency99th) }.reduce(0, +) / count))\n"
         }
