@@ -12,8 +12,7 @@ func printUsage() {
 
         Commands:
             process                 Process a single audio file for diarization
-            diarization-benchmark   Run diarization benchmark on evaluation datasets
-            stream-diarization-benchmark  Run streaming diarization benchmark (no Hungarian)
+            diarization-benchmark  Run streaming diarization benchmark
             vad-benchmark           Run VAD-specific benchmark
             asr-benchmark           Run ASR benchmark on LibriSpeech
             transcribe              Transcribe audio file using streaming ASR
@@ -26,7 +25,7 @@ func printUsage() {
         Examples:
             fluidaudio process audio.wav --output results.json
 
-            fluidaudio diarization-benchmark --dataset ami-sdm
+            fluidaudio diarization-benchmark --single-file ES2004a
 
             fluidaudio asr-benchmark --subset test-clean --max-files 100
 
@@ -53,8 +52,6 @@ let semaphore = DispatchSemaphore(value: 0)
 // Use Task to handle async commands
 Task {
     switch command {
-    case "diarization-benchmark":
-        await DiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
     case "vad-benchmark":
         await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
     case "asr-benchmark":
@@ -80,7 +77,7 @@ Task {
             print("Multi-stream requires macOS 13.0 or later")
             exit(1)
         }
-    case "stream-diarization-benchmark":
+    case "diarization-benchmark":
         if #available(macOS 13.0, *) {
             await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         } else {

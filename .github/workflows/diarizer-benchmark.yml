@@ -1,4 +1,4 @@
-name: Diarizer Performance Benchmark
+name: Streaming Diarization Benchmark
 on:
   pull_request:
     branches: [main]
@@ -9,8 +9,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  benchmark:
-    name: Single File Performance Benchmark
+  streaming-benchmark:
+    name: Streaming Algorithm Performance
     runs-on: macos-latest
     permissions:
       contents: read
@@ -28,64 +28,78 @@ jobs:
       - name: Build package
         run: swift build
 
-      - name: Run Single File Benchmark
+      - name: Run Streaming Diarization Benchmark
         id: benchmark
         run: |
-          echo "🚀 Running single file benchmark..."
-
+          echo "🌊 Running streaming diarization benchmark..."
+          
           # Record start time
           BENCHMARK_START=$(date +%s)
-
-          swift run fluidaudio diarization-benchmark --auto-download --single-file ES2004a --output benchmark_results.json
-
+          
+          # Run streaming benchmark
+          swift run fluidaudio diarization-benchmark \
+            --single-file ES2004a \
+            --threshold 0.7 \
+            --chunk-seconds 10 \
+            --overlap-seconds 0 \
+            --output streaming_results.json \
+            --auto-download
+          
           # Check if results file was generated
-          if [ -f benchmark_results.json ]; then
+          if [ -f streaming_results.json ]; then
             echo "SUCCESS=true" >> $GITHUB_OUTPUT
           else
-            echo "❌ Benchmark failed - no results file generated"
+            echo "❌ Streaming benchmark failed - no results file generated"
             echo "SUCCESS=false" >> $GITHUB_OUTPUT
           fi
-
+          
           # Calculate execution time
           BENCHMARK_END=$(date +%s)
           EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
           EXECUTION_MINS=$((EXECUTION_TIME / 60))
           EXECUTION_SECS=$((EXECUTION_TIME % 60))
-
+          
           echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
         timeout-minutes: 25
 
-      - name: Show benchmark_results.json
+      - name: Show streaming_results.json
         if: always()
         run: |
-          echo "--- benchmark_results.json ---"
-          cat benchmark_results.json || echo "benchmark_results.json not found"
+          echo "--- streaming_results.json ---"
+          cat streaming_results.json || echo "streaming_results.json not found"
           echo "-----------------------------"
 
-      - name: Extract benchmark metrics with jq
+      - name: Extract streaming metrics
         id: extract
         run: |
-          DER=$(jq '.averageDER' benchmark_results.json)
-          JER=$(jq '.averageJER' benchmark_results.json)
-          RTF=$(jq '.results[0].realTimeFactor' benchmark_results.json)
-          DURATION=$(jq '.results[0].durationSeconds' benchmark_results.json)
-          SPEAKER_COUNT=$(jq '.results[0].speakerCount' benchmark_results.json)
-
+          # Extract metrics from JSON output
+          DER=$(jq '.[0].der' streaming_results.json)
+          JER=$(jq '.[0].jer' streaming_results.json)
+          RTFX=$(jq '.[0].rtfx' streaming_results.json)
+          SPEAKERS=$(jq '.[0].detectedSpeakers' streaming_results.json)
+          GT_SPEAKERS=$(jq '.[0].groundTruthSpeakers' streaming_results.json)
+          CHUNKS=$(jq '.[0].chunksProcessed' streaming_results.json)
+          LATENCY_90=$(jq '.[0].latency90th' streaming_results.json)
+          LATENCY_99=$(jq '.[0].latency99th' streaming_results.json)
+          
           # Extract detailed timing information
-          TOTAL_TIME=$(jq '.results[0].timings.totalProcessingSeconds' benchmark_results.json)
-          MODEL_DOWNLOAD_TIME=$(jq '.results[0].timings.modelDownloadSeconds' benchmark_results.json)
-          MODEL_COMPILE_TIME=$(jq '.results[0].timings.modelCompilationSeconds' benchmark_results.json)
-          AUDIO_LOAD_TIME=$(jq '.results[0].timings.audioLoadingSeconds' benchmark_results.json)
-          SEGMENTATION_TIME=$(jq '.results[0].timings.segmentationSeconds' benchmark_results.json)
-          EMBEDDING_TIME=$(jq '.results[0].timings.embeddingExtractionSeconds' benchmark_results.json)
-          CLUSTERING_TIME=$(jq '.results[0].timings.speakerClusteringSeconds' benchmark_results.json)
-          INFERENCE_TIME=$(jq '.results[0].timings.totalInferenceSeconds' benchmark_results.json)
-
+          TOTAL_TIME=$(jq '.[0].timings.totalProcessingSeconds' streaming_results.json)
+          MODEL_DOWNLOAD_TIME=$(jq '.[0].timings.modelDownloadSeconds' streaming_results.json)
+          MODEL_COMPILE_TIME=$(jq '.[0].timings.modelCompilationSeconds' streaming_results.json)
+          AUDIO_LOAD_TIME=$(jq '.[0].timings.audioLoadingSeconds' streaming_results.json)
+          SEGMENTATION_TIME=$(jq '.[0].timings.segmentationSeconds' streaming_results.json)
+          EMBEDDING_TIME=$(jq '.[0].timings.embeddingExtractionSeconds' streaming_results.json)
+          CLUSTERING_TIME=$(jq '.[0].timings.speakerClusteringSeconds' streaming_results.json)
+          INFERENCE_TIME=$(jq '.[0].timings.totalInferenceSeconds' streaming_results.json)
+          
           echo "DER=${DER}" >> $GITHUB_OUTPUT
           echo "JER=${JER}" >> $GITHUB_OUTPUT
-          echo "RTF=${RTF}" >> $GITHUB_OUTPUT
-          echo "DURATION=${DURATION}" >> $GITHUB_OUTPUT
-          echo "SPEAKER_COUNT=${SPEAKER_COUNT}" >> $GITHUB_OUTPUT
+          echo "RTFX=${RTFX}" >> $GITHUB_OUTPUT
+          echo "SPEAKERS=${SPEAKERS}" >> $GITHUB_OUTPUT
+          echo "GT_SPEAKERS=${GT_SPEAKERS}" >> $GITHUB_OUTPUT
+          echo "CHUNKS=${CHUNKS}" >> $GITHUB_OUTPUT
+          echo "LATENCY_90=${LATENCY_90}" >> $GITHUB_OUTPUT
+          echo "LATENCY_99=${LATENCY_99}" >> $GITHUB_OUTPUT
           echo "TOTAL_TIME=${TOTAL_TIME}" >> $GITHUB_OUTPUT
           echo "MODEL_DOWNLOAD_TIME=${MODEL_DOWNLOAD_TIME}" >> $GITHUB_OUTPUT
           echo "MODEL_COMPILE_TIME=${MODEL_COMPILE_TIME}" >> $GITHUB_OUTPUT
@@ -95,16 +109,19 @@ jobs:
           echo "CLUSTERING_TIME=${CLUSTERING_TIME}" >> $GITHUB_OUTPUT
           echo "INFERENCE_TIME=${INFERENCE_TIME}" >> $GITHUB_OUTPUT
 
-      - name: Comment PR with Benchmark Results
+      - name: Comment PR with Streaming Results
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const der = parseFloat('${{ steps.extract.outputs.DER }}');
             const jer = parseFloat('${{ steps.extract.outputs.JER }}');
-            const rtf = parseFloat('${{ steps.extract.outputs.RTF }}');
-            const duration = parseFloat('${{ steps.extract.outputs.DURATION }}').toFixed(1);
-            const speakerCount = '${{ steps.extract.outputs.SPEAKER_COUNT }}';
+            const rtfx = parseFloat('${{ steps.extract.outputs.RTFX }}');
+            const speakers = parseInt('${{ steps.extract.outputs.SPEAKERS }}');
+            const gtSpeakers = parseInt('${{ steps.extract.outputs.GT_SPEAKERS }}');
+            const chunks = parseInt('${{ steps.extract.outputs.CHUNKS }}');
+            const latency90 = parseFloat('${{ steps.extract.outputs.LATENCY_90 }}');
+            const latency99 = parseFloat('${{ steps.extract.outputs.LATENCY_99 }}');
             const totalTime = parseFloat('${{ steps.extract.outputs.TOTAL_TIME }}');
             const inferenceTime = parseFloat('${{ steps.extract.outputs.INFERENCE_TIME }}');
             const modelDownloadTime = parseFloat('${{ steps.extract.outputs.MODEL_DOWNLOAD_TIME }}');
@@ -114,18 +131,20 @@ jobs:
             const embeddingTime = parseFloat('${{ steps.extract.outputs.EMBEDDING_TIME }}');
             const clusteringTime = parseFloat('${{ steps.extract.outputs.CLUSTERING_TIME }}');
             const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
-
-            let comment = '## Speaker Diarization Benchmark Results\n\n';
-            comment += '### Speaker Diarization Performance\n';
-            comment += '_Evaluating "who spoke when" detection accuracy_\n\n';
+            
+            let comment = '## 🎯 Speaker Diarization Benchmark\n\n';
+            comment += '### Performance Metrics\n';
+            comment += '_Real-time speaker diarization on AMI Corpus_\n\n';
+            
             comment += '| Metric | Value | Target | Status | Description |\n';
             comment += '|--------|-------|--------|---------|-------------|\n';
-            comment += `| **DER** | **${der.toFixed(1)}%** | <30% | ${der < 30 ? '✅' : '⚠️'} | Diarization Error Rate (lower is better) |\n`;
-            comment += `| **JER** | **${jer.toFixed(1)}%** | <25% | ${jer < 25 ? '✅' : '⚠️'} | Jaccard Error Rate |\n`;
-            comment += `| **RTFx** | **${rtf.toFixed(2)}x** | >1.0x | ${rtf > 1.0 ? '✅' : '⚠️'} | Real-Time Factor (higher is faster) |\n\n`;
-
+            comment += `| **DER** | **${der.toFixed(1)}%** | <30% | ${der < 30 ? '✅' : '❌'} | Diarization Error Rate |\n`;
+            comment += `| **JER** | **${jer.toFixed(1)}%** | <35% | ${jer < 35 ? '✅' : '❌'} | Jaccard Error Rate |\n`;
+            comment += `| **RTFx** | **${rtfx.toFixed(1)}x** | >1x | ${rtfx > 1 ? '✅' : '❌'} | Real-Time Factor |\n`;
+            comment += `| **Speakers** | ${speakers}/${gtSpeakers} | ${gtSpeakers} | ${speakers === gtSpeakers ? '✅' : '⚠️'} | Detected/Truth |\n\n`;
+            
             comment += '### Diarization Pipeline Timing Breakdown\n';
-            comment += '_Time spent in each stage of speaker diarization_\n\n';
+            comment += '_Time spent in each stage of streaming diarization (aggregated across chunks)_\n\n';
             comment += '| Stage | Time (s) | % | Description |\n';
             comment += '|-------|----------|---|-------------|\n';
             comment += `| Model Download | ${modelDownloadTime.toFixed(3)} | ${(modelDownloadTime/totalTime*100).toFixed(1)} | Fetching diarization models |\n`;
@@ -135,63 +154,54 @@ jobs:
             comment += `| Embedding | ${embeddingTime.toFixed(3)} | ${(embeddingTime/totalTime*100).toFixed(1)} | Extracting speaker voices |\n`;
             comment += `| Clustering | ${clusteringTime.toFixed(3)} | ${(clusteringTime/totalTime*100).toFixed(1)} | Grouping same speakers |\n`;
             comment += `| **Total** | **${totalTime.toFixed(3)}** | **100** | **Full pipeline** |\n\n`;
-
-            comment += '### Speaker Diarization Research Comparison\n';
-            comment += '_Research baselines typically achieve 18-30% DER on standard datasets_\n\n';
+            
+            comment += '### Performance Comparison\n';
             comment += '| Method | DER | Notes |\n';
             comment += '|--------|-----|-------|\n';
-            comment += '| **FluidAudio** | **' + der.toFixed(1) + '%** | **On-device CoreML** |\n';
+            comment += `| **FluidAudio** | **${der.toFixed(1)}%** | **On-device CoreML** |\n`;
             comment += '| Research baseline | 18-30% | Standard dataset performance |\n\n';
-
+            
             comment += '**Note**: RTFx shown above is from GitHub Actions runner. On Apple Silicon with ANE:\n';
             comment += '- **M2 MacBook Air (2022)**: Runs at **150 RTFx** real-time\n';
             comment += '- Performance scales with Apple Neural Engine capabilities\n\n';
-
-            comment += `<sub>🎯 **Speaker Diarization Test** • AMI Corpus ES2004a • ${duration}s meeting audio • ${inferenceTime.toFixed(1)}s diarization time • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
-
-            // Add hidden identifier for reliable comment detection
-            comment += '<!-- fluidaudio-benchmark-single-file -->';
-
+            
+            comment += `<sub>🎯 **Speaker Diarization Test** • AMI Corpus ES2004a • ${inferenceTime.toFixed(1)}s diarization time • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
+            
+            // Add hidden identifier
+            comment += '<!-- fluidaudio-streaming-benchmark -->';
+            
             try {
-              // First, try to find existing benchmark comment
+              // Find existing streaming benchmark comment
               const comments = await github.rest.issues.listComments({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
               });
-
-              // Look for existing benchmark comment (identified by the hidden tag)
+              
               const existingComment = comments.data.find(comment => {
-                const isBot = comment.user.type === 'Bot' ||
+                const isBot = comment.user.type === 'Bot' || 
                              comment.user.login === 'github-actions[bot]' ||
                              comment.user.login.includes('[bot]');
-
-                const hasIdentifier = comment.body.includes('<!-- fluidaudio-benchmark-single-file -->');
-                const hasHeader = comment.body.includes('## 🎯 Single File Benchmark Results');
-
-                return isBot && (hasIdentifier || hasHeader);
+                return isBot && comment.body.includes('<!-- fluidaudio-streaming-benchmark -->');
               });
-
+              
               if (existingComment) {
-                // Update existing comment
                 await github.rest.issues.updateComment({
                   comment_id: existingComment.id,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   body: comment
                 });
-                console.log('✅ Successfully updated existing benchmark comment');
+                console.log('✅ Updated existing streaming benchmark comment');
               } else {
-                // Create new comment if none exists
                 await github.rest.issues.createComment({
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   body: comment
                 });
-                console.log('✅ Successfully posted new benchmark results comment');
+                console.log('✅ Posted new streaming benchmark results');
               }
             } catch (error) {
               console.error('❌ Failed to update/post comment:', error.message);
-              // Don't fail the workflow just because commenting failed
             }
