@@ -434,7 +434,6 @@ enum StreamDiarizationBenchmark {
                 totalChunks: chunkIndex
             )
 
-
             // Calculate latency percentiles
             let sortedLatencies = chunkLatencies.sorted()
             let p90Index = Int(Double(sortedLatencies.count) * 0.9)
@@ -643,7 +642,6 @@ enum StreamDiarizationBenchmark {
         let idealFragments = speakerAppearances.count
         return Float(totalFragments) / Float(max(idealFragments, 1))
     }
-
 
     private static func getAMIFiles(dataset: String, maxFiles: Int?) -> [String] {
         // Get list of AMI meeting names
