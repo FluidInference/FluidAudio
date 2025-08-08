@@ -15,7 +15,7 @@ public class SpeakerManager {
     // Configuration
     public var speakerThreshold: Float
     public var embeddingThreshold: Float
-    private let minDuration: Float
+    private let minSpeechDuration: Float
 
     public struct SpeakerInfo {
         let id: String
@@ -36,11 +36,11 @@ public class SpeakerManager {
     public init(
         speakerThreshold: Float = 0.65,
         embeddingThreshold: Float = 0.45,
-        minDuration: Float = 1.0
+        minSpeechDuration: Float = 1.0
     ) {
         self.speakerThreshold = speakerThreshold
         self.embeddingThreshold = embeddingThreshold
-        self.minDuration = minDuration
+        self.minSpeechDuration = minSpeechDuration
     }
 
     public func initializeKnownSpeakers(_ speakerIdToEmbedding: [String: [Float]]) {
@@ -97,7 +97,7 @@ public class SpeakerManager {
                 logger.debug("Matched to speaker \(speakerId) with distance \(minDistance)")
 
                 if minDistance < embeddingThreshold
-                    && speechDuration >= minDuration
+                    && speechDuration >= minSpeechDuration
                 {
                     updateSpeakerEmbedding(
                         speakerId: speakerId, newEmbedding: embedding, duration: speechDuration)
@@ -108,7 +108,7 @@ public class SpeakerManager {
                 speakerDatabase[speakerId]?.totalDuration += speechDuration
 
                 return speakerId
-            } else if speechDuration >= minDuration {
+            } else if speechDuration >= minSpeechDuration {
                 let newSpeakerId = "Speaker_\(nextSpeakerId)"
                 nextSpeakerId += 1
 

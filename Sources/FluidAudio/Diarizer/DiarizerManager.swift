@@ -33,7 +33,7 @@ public final class DiarizerManager {
         self.speakerManager = SpeakerManager(
             speakerThreshold: config.clusteringThreshold * 1.2,
             embeddingThreshold: config.clusteringThreshold * 0.8,
-            minDuration: config.minSpeechDuration
+            minSpeechDuration: config.minSpeechDuration
         )
     }
 

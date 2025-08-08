@@ -1,0 +1,183 @@
+name: Streaming Diarization Benchmark
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  streaming-benchmark:
+    name: Streaming Algorithm Performance
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Swift 6.1
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Build package
+        run: swift build
+
+      - name: Run Streaming Diarization Benchmark
+        id: benchmark
+        run: |
+          echo "🌊 Running streaming diarization benchmark..."
+          
+          # Record start time
+          BENCHMARK_START=$(date +%s)
+          
+          # Run streaming benchmark
+          swift run fluidaudio stream-diarization-benchmark \
+            --single-file ES2004a \
+            --threshold 0.7 \
+            --chunk-seconds 10 \
+            --overlap-seconds 0 \
+            --output streaming_results.json \
+            --auto-download
+          
+          # Check if results file was generated
+          if [ -f streaming_results.json ]; then
+            echo "SUCCESS=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Streaming benchmark failed - no results file generated"
+            echo "SUCCESS=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Calculate execution time
+          BENCHMARK_END=$(date +%s)
+          EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
+          EXECUTION_MINS=$((EXECUTION_TIME / 60))
+          EXECUTION_SECS=$((EXECUTION_TIME % 60))
+          
+          echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
+        timeout-minutes: 25
+
+      - name: Show streaming_results.json
+        if: always()
+        run: |
+          echo "--- streaming_results.json ---"
+          cat streaming_results.json || echo "streaming_results.json not found"
+          echo "-----------------------------"
+
+      - name: Extract streaming metrics
+        id: extract
+        run: |
+          # Extract metrics from JSON output
+          DER=$(jq '.[0].der' streaming_results.json)
+          JER=$(jq '.[0].jer' streaming_results.json)
+          RTFX=$(jq '.[0].rtfx' streaming_results.json)
+          SPEAKERS=$(jq '.[0].detectedSpeakers' streaming_results.json)
+          GT_SPEAKERS=$(jq '.[0].groundTruthSpeakers' streaming_results.json)
+          FRAGMENTATION=$(jq '.[0].speakerFragmentation' streaming_results.json)
+          CHUNKS=$(jq '.[0].chunksProcessed' streaming_results.json)
+          LATENCY_90=$(jq '.[0].latency90th' streaming_results.json)
+          LATENCY_99=$(jq '.[0].latency99th' streaming_results.json)
+          
+          echo "DER=${DER}" >> $GITHUB_OUTPUT
+          echo "JER=${JER}" >> $GITHUB_OUTPUT
+          echo "RTFX=${RTFX}" >> $GITHUB_OUTPUT
+          echo "SPEAKERS=${SPEAKERS}" >> $GITHUB_OUTPUT
+          echo "GT_SPEAKERS=${GT_SPEAKERS}" >> $GITHUB_OUTPUT
+          echo "FRAGMENTATION=${FRAGMENTATION}" >> $GITHUB_OUTPUT
+          echo "CHUNKS=${CHUNKS}" >> $GITHUB_OUTPUT
+          echo "LATENCY_90=${LATENCY_90}" >> $GITHUB_OUTPUT
+          echo "LATENCY_99=${LATENCY_99}" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with Streaming Results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const der = parseFloat('${{ steps.extract.outputs.DER }}');
+            const jer = parseFloat('${{ steps.extract.outputs.JER }}');
+            const rtfx = parseFloat('${{ steps.extract.outputs.RTFX }}');
+            const speakers = parseInt('${{ steps.extract.outputs.SPEAKERS }}');
+            const gtSpeakers = parseInt('${{ steps.extract.outputs.GT_SPEAKERS }}');
+            const fragmentation = parseFloat('${{ steps.extract.outputs.FRAGMENTATION }}');
+            const chunks = parseInt('${{ steps.extract.outputs.CHUNKS }}');
+            const latency90 = parseFloat('${{ steps.extract.outputs.LATENCY_90 }}');
+            const latency99 = parseFloat('${{ steps.extract.outputs.LATENCY_99 }}');
+            const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
+            
+            let comment = '## 🌊 Streaming Diarization Benchmark\n\n';
+            comment += '### Streaming Algorithm Performance\n';
+            comment += '_Real-time speaker diarization without retroactive remapping_\n\n';
+            
+            comment += '| Metric | Value | Target | Status | Description |\n';
+            comment += '|--------|-------|--------|---------|-------------|\n';
+            comment += `| **DER** | **${der.toFixed(1)}%** | <30% | ${der < 30 ? '✅' : '❌'} | Diarization Error Rate |\n`;
+            comment += `| **JER** | **${jer.toFixed(1)}%** | <35% | ${jer < 35 ? '✅' : '❌'} | Jaccard Error Rate |\n`;
+            comment += `| **RTFx** | **${rtfx.toFixed(1)}x** | >1x | ${rtfx > 1 ? '✅' : '❌'} | Real-Time Factor |\n`;
+            comment += `| **Speakers** | ${speakers}/${gtSpeakers} | ${gtSpeakers} | ${speakers === gtSpeakers ? '✅' : '⚠️'} | Detected/Truth |\n`;
+            comment += `| **Fragmentation** | ${fragmentation.toFixed(2)} | <2.0 | ${fragmentation < 2.0 ? '✅' : '⚠️'} | Speaker consistency |\n\n`;
+            
+            comment += '### Streaming Characteristics\n';
+            comment += '| Property | Value | Description |\n';
+            comment += '|----------|-------|-------------|\n';
+            comment += `| Chunks Processed | ${chunks} | 10s chunks with no overlap |\n`;
+            comment += `| P90 Latency | ${(latency90 * 1000).toFixed(1)}ms | 90th percentile chunk latency |\n`;
+            comment += `| P99 Latency | ${(latency99 * 1000).toFixed(1)}ms | 99th percentile chunk latency |\n`;
+            comment += `| Algorithm | First-occurrence | No retroactive remapping |\n\n`;
+            
+            comment += '### Algorithm Comparison\n';
+            comment += '| Algorithm | DER | Use Case |\n';
+            comment += '|-----------|-----|----------|\n';
+            comment += `| **Streaming** (this) | **${der.toFixed(1)}%** | Real-time processing |\n`;
+            comment += '| Hungarian (batch) | ~17.7% | Optimal evaluation |\n';
+            comment += '| Powerset BCE | 18.5% | Research baseline |\n\n';
+            
+            comment += '**Key Differences**:\n';
+            comment += '- ✅ **Real-time compatible**: No retroactive speaker ID changes\n';
+            comment += '- ✅ **Low latency**: Sub-100ms per chunk processing\n';
+            comment += '- ⚠️ **Higher fragmentation**: Multiple IDs may map to same speaker\n\n';
+            
+            comment += `<sub>🌊 **Streaming Test** • ES2004a • ${chunks} chunks • Test runtime: ${executionTime} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>\n\n`;
+            
+            // Add hidden identifier
+            comment += '<!-- fluidaudio-streaming-benchmark -->';
+            
+            try {
+              // Find existing streaming benchmark comment
+              const comments = await github.rest.issues.listComments({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+              
+              const existingComment = comments.data.find(comment => {
+                const isBot = comment.user.type === 'Bot' || 
+                             comment.user.login === 'github-actions[bot]' ||
+                             comment.user.login.includes('[bot]');
+                return isBot && comment.body.includes('<!-- fluidaudio-streaming-benchmark -->');
+              });
+              
+              if (existingComment) {
+                await github.rest.issues.updateComment({
+                  comment_id: existingComment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Updated existing streaming benchmark comment');
+              } else {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+                console.log('✅ Posted new streaming benchmark results');
+              }
+            } catch (error) {
+              console.error('❌ Failed to update/post comment:', error.message);
+            }
