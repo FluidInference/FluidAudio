@@ -18,8 +18,8 @@ final class BasicInitializationTests: XCTestCase {
         // Test CoreML with custom configuration
         let config = DiarizerConfig(
             clusteringThreshold: 0.8,
-            minDurationOn: 2.0,
-            minDurationOff: 1.0,
+            minSpeechDuration: 2.0,
+            minSilenceGap: 1.0,
             numClusters: 3,
             debugMode: true
         )
@@ -31,8 +31,8 @@ final class BasicInitializationTests: XCTestCase {
         // Test default configuration
         let defaultConfig = DiarizerConfig.default
         XCTAssertEqual(defaultConfig.clusteringThreshold, 0.7, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOn, 1.0, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSpeechDuration, 1.0, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSilenceGap, 0.5, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.numClusters, -1)
         XCTAssertFalse(defaultConfig.debugMode)
     }
@@ -383,8 +383,8 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
         // Test that CoreML diarizer can be created with custom config
         let config = DiarizerConfig(
             clusteringThreshold: 0.7,
-            minDurationOn: 1.0,
-            minDurationOff: 0.5,
+            minSpeechDuration: 1.0,
+            minSilenceGap: 0.5,
             numClusters: -1,
             debugMode: true
         )
