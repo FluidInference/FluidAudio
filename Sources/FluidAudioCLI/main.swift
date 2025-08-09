@@ -12,7 +12,7 @@ func printUsage() {
 
         Commands:
             process                 Process a single audio file for diarization
-            diarization-benchmark  Run streaming diarization benchmark
+            diarization-benchmark   Run streaming diarization benchmark
             vad-benchmark           Run VAD-specific benchmark
             asr-benchmark           Run ASR benchmark on LibriSpeech
             transcribe              Transcribe audio file using streaming ASR
