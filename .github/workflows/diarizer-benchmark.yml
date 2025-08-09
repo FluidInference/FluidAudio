@@ -65,21 +65,22 @@ jobs:
       - name: Extract benchmark metrics with jq
         id: extract
         run: |
-          DER=$(jq '.averageDER' benchmark_results.json)
-          JER=$(jq '.averageJER' benchmark_results.json)
-          RTF=$(jq '.results[0].realTimeFactor' benchmark_results.json)
-          DURATION=$(jq '.results[0].durationSeconds' benchmark_results.json)
-          SPEAKER_COUNT=$(jq '.results[0].speakerCount' benchmark_results.json)
+          # The output is now an array, so we need to access the first element
+          DER=$(jq '.[0].der' benchmark_results.json)
+          JER=$(jq '.[0].jer' benchmark_results.json)
+          RTF=$(jq '.[0].rtfx' benchmark_results.json)
+          DURATION="1049"  # ES2004a duration in seconds
+          SPEAKER_COUNT=$(jq '.[0].detectedSpeakers' benchmark_results.json)
 
           # Extract detailed timing information
-          TOTAL_TIME=$(jq '.results[0].timings.totalProcessingSeconds' benchmark_results.json)
-          MODEL_DOWNLOAD_TIME=$(jq '.results[0].timings.modelDownloadSeconds' benchmark_results.json)
-          MODEL_COMPILE_TIME=$(jq '.results[0].timings.modelCompilationSeconds' benchmark_results.json)
-          AUDIO_LOAD_TIME=$(jq '.results[0].timings.audioLoadingSeconds' benchmark_results.json)
-          SEGMENTATION_TIME=$(jq '.results[0].timings.segmentationSeconds' benchmark_results.json)
-          EMBEDDING_TIME=$(jq '.results[0].timings.embeddingExtractionSeconds' benchmark_results.json)
-          CLUSTERING_TIME=$(jq '.results[0].timings.speakerClusteringSeconds' benchmark_results.json)
-          INFERENCE_TIME=$(jq '.results[0].timings.totalInferenceSeconds' benchmark_results.json)
+          TOTAL_TIME=$(jq '.[0].timings.totalProcessingSeconds' benchmark_results.json)
+          MODEL_DOWNLOAD_TIME=$(jq '.[0].timings.modelDownloadSeconds' benchmark_results.json)
+          MODEL_COMPILE_TIME=$(jq '.[0].timings.modelCompilationSeconds' benchmark_results.json)
+          AUDIO_LOAD_TIME=$(jq '.[0].timings.audioLoadingSeconds' benchmark_results.json)
+          SEGMENTATION_TIME=$(jq '.[0].timings.segmentationSeconds' benchmark_results.json)
+          EMBEDDING_TIME=$(jq '.[0].timings.embeddingExtractionSeconds' benchmark_results.json)
+          CLUSTERING_TIME=$(jq '.[0].timings.speakerClusteringSeconds' benchmark_results.json)
+          INFERENCE_TIME=$(jq '.[0].timings.totalInferenceSeconds' benchmark_results.json)
 
           echo "DER=${DER}" >> $GITHUB_OUTPUT
           echo "JER=${JER}" >> $GITHUB_OUTPUT

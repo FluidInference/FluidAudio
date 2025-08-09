@@ -88,10 +88,10 @@ extension DiarizerConfig: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(clusteringThreshold, forKey: .clusteringThreshold)
-        try container.encode(minDurationOn, forKey: .minDurationOn)
-        try container.encode(minDurationOff, forKey: .minDurationOff)
+        try container.encode(minSpeechDuration, forKey: .minDurationOn)
+        try container.encode(minSilenceGap, forKey: .minDurationOff)
         try container.encode(numClusters, forKey: .numClusters)
-        try container.encode(minActivityThreshold, forKey: .minActivityThreshold)
+        try container.encode(minActiveFramesCount, forKey: .minActivityThreshold)
         try container.encode(debugMode, forKey: .debugMode)
     }
 
@@ -107,10 +107,10 @@ extension DiarizerConfig: Codable {
 
         self.init(
             clusteringThreshold: clusteringThreshold,
-            minDurationOn: minDurationOn,
-            minDurationOff: minDurationOff,
+            minSpeechDuration: minDurationOn,
+            minSilenceGap: minDurationOff,
             numClusters: numClusters,
-            minActivityThreshold: minActivityThreshold,
+            minActiveFramesCount: minActivityThreshold,
             debugMode: debugMode
         )
     }

@@ -29,28 +29,28 @@ final class CITests: XCTestCase {
         let defaultConfig = DiarizerConfig.default
 
         XCTAssertEqual(defaultConfig.clusteringThreshold, 0.7, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOn, 1.0, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSpeechDuration, 1.0, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSilenceGap, 0.5, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.numClusters, -1)
-        XCTAssertEqual(defaultConfig.minActivityThreshold, 10.0, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minActiveFramesCount, 10.0, accuracy: 0.01)
         XCTAssertFalse(defaultConfig.debugMode)
     }
 
     func testDiarizerConfigCustom() {
         let customConfig = DiarizerConfig(
             clusteringThreshold: 0.8,
-            minDurationOn: 2.0,
-            minDurationOff: 1.0,
+            minSpeechDuration: 2.0,
+            minSilenceGap: 1.0,
             numClusters: 3,
-            minActivityThreshold: 15.0,
+            minActiveFramesCount: 15.0,
             debugMode: true
         )
 
         XCTAssertEqual(customConfig.clusteringThreshold, 0.8, accuracy: 0.01)
-        XCTAssertEqual(customConfig.minDurationOn, 2.0, accuracy: 0.01)
-        XCTAssertEqual(customConfig.minDurationOff, 1.0, accuracy: 0.01)
+        XCTAssertEqual(customConfig.minSpeechDuration, 2.0, accuracy: 0.01)
+        XCTAssertEqual(customConfig.minSilenceGap, 1.0, accuracy: 0.01)
         XCTAssertEqual(customConfig.numClusters, 3)
-        XCTAssertEqual(customConfig.minActivityThreshold, 15.0, accuracy: 0.01)
+        XCTAssertEqual(customConfig.minActiveFramesCount, 15.0, accuracy: 0.01)
         XCTAssertTrue(customConfig.debugMode)
     }
 
