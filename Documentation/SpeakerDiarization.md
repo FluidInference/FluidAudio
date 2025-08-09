@@ -80,20 +80,130 @@ Process audio in chunks for real-time applications:
 
 ```swift
 // Configure for streaming
-let diarizer = DiarizerManager(
-    config: config,
-    chunkDuration: 10.0,    // Process in 10-second chunks
-    chunkOverlap: 0.0        // No overlap for lowest latency
-)
+let diarizer = DiarizerManager(config: config)
 diarizer.initialize(models: models)
 
-// Process stream
-for audioChunk in audioStream {
-    let result = try diarizer.performCompleteDiarization(audioChunk)
+// Choose chunk size based on your requirements
+let chunkDuration = 5.0  // Can be 3.0 for low latency or 10.0 for best accuracy
+let chunkSize = Int(16000 * chunkDuration)  // Convert to samples
+var audioBuffer: [Float] = []
+var streamPosition = 0.0
+
+// Process incoming audio stream
+for audioSamples in audioStream {
+    audioBuffer.append(contentsOf: audioSamples)
     
-    // Real-time results
-    for segment in result.segments {
-        handleSpeakerSegment(segment)
+    // Process when we have accumulated enough audio
+    while audioBuffer.count >= chunkSize {
+        let chunk = Array(audioBuffer.prefix(chunkSize))
+        audioBuffer.removeFirst(chunkSize)
+        
+        // This works with any chunk size, but accuracy varies
+        let result = try diarizer.performCompleteDiarization(chunk)
+        
+        // Adjust timestamps manually
+        for segment in result.segments {
+            let adjustedSegment = TimedSpeakerSegment(
+                speakerId: segment.speakerId,
+                startTimeSeconds: streamPosition + segment.startTimeSeconds,
+                endTimeSeconds: streamPosition + segment.endTimeSeconds
+            )
+            handleSpeakerSegment(adjustedSegment)
+        }
+        
+        streamPosition += chunkDuration
+    }
+}
+```
+
+### Chunk Size Considerations
+
+The `performCompleteDiarization` function accepts audio of any length, but accuracy varies:
+
+- **< 3 seconds**: May fail or produce unreliable results
+- **3-5 seconds**: Minimum viable chunk, reduced accuracy
+- **10 seconds**: Optimal balance of accuracy and latency (recommended)
+- **> 10 seconds**: Good accuracy but higher latency
+- **Maximum**: Limited only by memory
+
+You can adjust chunk size based on your needs:
+- **Low latency**: Use 3-5 second chunks (accept lower accuracy)
+- **High accuracy**: Use 10+ second chunks (accept higher latency)
+
+The diarizer doesn't automatically chunk audio - you need to:
+1. Accumulate incoming audio samples to your desired chunk size
+2. Process chunks with `performCompleteDiarization`
+3. Maintain speaker IDs across chunks using `SpeakerManager`
+
+### Real-time Audio Capture Example
+
+```swift
+import AVFoundation
+
+class RealTimeDiarizer {
+    private let audioEngine = AVAudioEngine()
+    private let diarizer: DiarizerManager
+    private var audioBuffer: [Float] = []
+    private let chunkDuration = 10.0  // seconds
+    private let sampleRate: Double = 16000
+    private var chunkSamples: Int { Int(sampleRate * chunkDuration) }
+    private var streamPosition: Double = 0
+    
+    init() async throws {
+        let models = try await DiarizerModels.downloadIfNeeded()
+        let config = DiarizerConfig(clusteringThreshold: 0.7)
+        
+        diarizer = DiarizerManager(config: config)
+        diarizer.initialize(models: models)
+    }
+    
+    func startCapture() throws {
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        
+        // Install tap to capture audio
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            guard let self = self else { return }
+            
+            // Convert to 16kHz mono Float array
+            let samples = self.convertBuffer(buffer, targetSampleRate: 16000)
+            self.processAudioSamples(samples)
+        }
+        
+        audioEngine.prepare()
+        try audioEngine.start()
+    }
+    
+    private func processAudioSamples(_ samples: [Float]) {
+        audioBuffer.append(contentsOf: samples)
+        
+        // Process complete chunks
+        while audioBuffer.count >= chunkSamples {
+            let chunk = Array(audioBuffer.prefix(chunkSamples))
+            audioBuffer.removeFirst(chunkSamples)
+            
+            Task {
+                do {
+                    let result = try diarizer.performCompleteDiarization(chunk)
+                    await handleResults(result, at: streamPosition)
+                    streamPosition += chunkDuration
+                } catch {
+                    print("Diarization error: \(error)")
+                }
+            }
+        }
+    }
+    
+    @MainActor
+    private func handleResults(_ result: DiarizationResult, at position: Double) {
+        for segment in result.segments {
+            print("Speaker \(segment.speakerId): \(position + segment.startTimeSeconds)s")
+        }
+    }
+    
+    private func convertBuffer(_ buffer: AVAudioPCMBuffer, targetSampleRate: Double) -> [Float] {
+        // Audio conversion implementation here
+        // Returns 16kHz mono Float array
     }
 }
 ```
@@ -265,13 +375,13 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a
 | `getSpeakerInfo(for:)` | Get speaker details |
 | `reset()` | Clear all speakers |
 
-### DiarizerResult
+### DiarizationResult
 
 | Property | Type | Description |
 |----------|------|-------------|
 | `segments` | `[TimedSpeakerSegment]` | Speaker segments with timing |
-| `speakerCount` | `Int` | Number of unique speakers |
-| `totalDuration` | `Float` | Total audio duration |
+| `speakerDatabase` | `[String: [Float]]` | Speaker embeddings database |
+| `timings` | `PipelineTimings` | Detailed processing timings |
 
 ## Requirements
 
