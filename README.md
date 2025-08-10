@@ -371,3 +371,5 @@ This project builds upon the excellent work of the [sherpa-onnx](https://github.
 Pyannote: https://github.com/pyannote/pyannote-audio
 
 Wewpeaker: https://github.com/wenet-e2e/wespeaker
+
+Parakeet-mlx: https://github.com/senstella/parakeet-mlx
