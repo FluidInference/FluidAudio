@@ -273,6 +273,7 @@ enum StreamDiarizationBenchmark {
                     // Print summary for this iteration
                     print("\n📊 Results for \(meetingName) (iteration \(iteration)):")
                     print("  DER: \(String(format: "%.1f", result.der))%")
+                    print("  JER: \(String(format: "%.1f", result.jer))%")
                     print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
                     print("  Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
 
@@ -644,8 +645,9 @@ enum StreamDiarizationBenchmark {
         }
 
         // Calculate JER (Jaccard Error Rate) with streaming mapping
-        var segmentIntersection = 0
-        var segmentUnion = 0
+        // JER uses Jaccard similarity: intersection over union of speaker sets
+        var totalJaccardScore: Float = 0
+        var activeFrames = 0
 
         for frame in 0..<totalFrames {
             let frameTime = Float(frame) * frameSize
@@ -666,16 +668,75 @@ enum StreamDiarizationBenchmark {
                 }
             }
 
+            // Only calculate Jaccard for frames where at least one system detects speech
             if !gtSpeakers.isEmpty || !predSpeakers.isEmpty {
-                segmentUnion += 1
-                if gtSpeakers == predSpeakers && !gtSpeakers.isEmpty {
-                    segmentIntersection += 1
-                }
+                activeFrames += 1
+
+                // Calculate Jaccard index for this frame
+                let intersection = gtSpeakers.intersection(predSpeakers)
+                let union = gtSpeakers.union(predSpeakers)
+
+                let frameJaccard = union.isEmpty ? 0 : Float(intersection.count) / Float(union.count)
+                totalJaccardScore += frameJaccard
             }
         }
 
-        let jaccardIndex = segmentUnion > 0 ? Float(segmentIntersection) / Float(segmentUnion) : 0
-        let jer = (1.0 - jaccardIndex) * 100.0
+        let averageJaccard = activeFrames > 0 ? totalJaccardScore / Float(activeFrames) : 0
+        let jer = (1.0 - averageJaccard) * 100.0
+
+        // Debug JER calculation
+        if true {  // Enable debug output
+            print(
+                "🔍 JER Debug: Active frames: \(activeFrames)/\(totalFrames), Avg Jaccard: \(String(format: "%.3f", averageJaccard))"
+            )
+
+            // Count frame types for analysis
+            var perfectFrames = 0
+            var partialFrames = 0
+            var missedFrames = 0
+            var falseAlarmFrames = 0
+
+            for frame in 0..<totalFrames {
+                let frameTime = Float(frame) * frameSize
+                var gtSpeakers = Set<String>()
+                for segment in groundTruth {
+                    if frameTime >= segment.startTimeSeconds && frameTime < segment.endTimeSeconds {
+                        gtSpeakers.insert(segment.speakerId)
+                    }
+                }
+                var predSpeakers = Set<String>()
+                for segment in predicted {
+                    if frameTime >= segment.startTimeSeconds && frameTime < segment.endTimeSeconds {
+                        if let mapped = firstOccurrenceMap[segment.speakerId] {
+                            predSpeakers.insert(mapped)
+                        }
+                    }
+                }
+
+                if gtSpeakers == predSpeakers && !gtSpeakers.isEmpty {
+                    perfectFrames += 1
+                } else if !gtSpeakers.isEmpty && predSpeakers.isEmpty {
+                    missedFrames += 1
+                } else if gtSpeakers.isEmpty && !predSpeakers.isEmpty {
+                    falseAlarmFrames += 1
+                } else if !gtSpeakers.intersection(predSpeakers).isEmpty {
+                    partialFrames += 1
+                }
+            }
+
+            print(
+                "   Perfect match frames: \(perfectFrames) (\(String(format: "%.1f", Float(perfectFrames)/Float(totalFrames)*100))%)"
+            )
+            print(
+                "   Partial match frames: \(partialFrames) (\(String(format: "%.1f", Float(partialFrames)/Float(totalFrames)*100))%)"
+            )
+            print(
+                "   Missed speech frames: \(missedFrames) (\(String(format: "%.1f", Float(missedFrames)/Float(totalFrames)*100))%)"
+            )
+            print(
+                "   False alarm frames: \(falseAlarmFrames) (\(String(format: "%.1f", Float(falseAlarmFrames)/Float(totalFrames)*100))%)"
+            )
+        }
 
         // Calculate rates
         let missRate = (Float(missedFrames) / Float(totalFrames)) * 100.0
@@ -887,10 +948,10 @@ enum StreamDiarizationBenchmark {
 
         // Print detailed results table sorted by DER
         print("\n📋 Results Sorted by DER (Best → Worst):")
-        print(String(repeating: "-", count: 80))
+        print(String(repeating: "-", count: 90))
         // Simple header without String(format:)
-        print("Meeting        DER %    Miss %     FA %     SE %   Speakers     RTFx")
-        print(String(repeating: "-", count: 80))
+        print("Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx")
+        print(String(repeating: "-", count: 90))
 
         for result in results.sorted(by: { $0.der < $1.der }) {
             let speakerInfo = "\(result.detectedSpeakers)/\(result.groundTruthSpeakers)"
@@ -899,19 +960,21 @@ enum StreamDiarizationBenchmark {
             let speakerCol = speakerInfo.padding(toLength: 10, withPad: " ", startingAt: 0)
             print(
                 String(
-                    format: "%@ %8.1f %8.1f %8.1f %8.1f %@ %8.1f",
+                    format: "%@ %8.1f %8.1f %8.1f %8.1f %8.1f %@ %8.1f",
                     meetingCol,
                     result.der,
+                    result.jer,
                     result.missRate,
                     result.falseAlarmRate,
                     result.speakerErrorRate,
                     speakerCol,
                     result.rtfx))
         }
-        print(String(repeating: "-", count: 80))
+        print(String(repeating: "-", count: 90))
 
         // Calculate aggregates and add summary row
         let avgDER = results.map { $0.der }.reduce(0, +) / Float(results.count)
+        let avgJER = results.map { $0.jer }.reduce(0, +) / Float(results.count)
         let avgMiss = results.map { $0.missRate }.reduce(0, +) / Float(results.count)
         let avgFA = results.map { $0.falseAlarmRate }.reduce(0, +) / Float(results.count)
         let avgSE = results.map { $0.speakerErrorRate }.reduce(0, +) / Float(results.count)
@@ -923,9 +986,9 @@ enum StreamDiarizationBenchmark {
         // Print average row
         print(
             String(
-                format: "AVERAGE      %8.1f %8.1f %8.1f %8.1f         - %8.1f",
-                avgDER, avgMiss, avgFA, avgSE, avgRTFx))
-        print(String(repeating: "=", count: 80))
+                format: "AVERAGE      %8.1f %8.1f %8.1f %8.1f %8.1f         - %8.1f",
+                avgDER, avgJER, avgMiss, avgFA, avgSE, avgRTFx))
+        print(String(repeating: "=", count: 90))
 
         // Check against targets
         print("\n✅ Target Check:")

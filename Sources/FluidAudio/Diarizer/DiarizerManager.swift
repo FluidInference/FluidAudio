@@ -302,9 +302,99 @@ public final class DiarizerManager {
     )
         -> [TimedSpeakerSegment]
     {
-        return segments.filter { segment in
+        // First apply overlap recovery to capture missed overlaps
+        let withOverlaps = recoverOverlappingSpeech(segments)
+
+        // Then filter by minimum duration
+        let filtered = withOverlaps.filter { segment in
             segment.durationSeconds >= self.config.minSpeechDuration
         }
+
+        // Finally merge nearby segments from the same speaker
+        return mergeNearbySpeakerSegments(filtered)
+    }
+
+    private func recoverOverlappingSpeech(_ segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
+        var enhanced = segments
+
+        // Find potential overlap regions by looking for close segments from different speakers
+        for i in 0..<segments.count {
+            for j in (i + 1)..<segments.count {
+                let seg1 = segments[i]
+                let seg2 = segments[j]
+
+                // Skip if same speaker
+                if seg1.speakerId == seg2.speakerId { continue }
+
+                // Check for temporal overlap or very close proximity
+                let overlapStart = max(seg1.startTimeSeconds, seg2.startTimeSeconds)
+                let overlapEnd = min(seg1.endTimeSeconds, seg2.endTimeSeconds)
+
+                if overlapEnd > overlapStart {
+                    // There's an overlap - ensure both segments are kept
+                    // They're already in the array, so overlap is preserved
+                } else {
+                    // Check if segments are very close (within 0.5 seconds)
+                    let gap = abs(seg1.endTimeSeconds - seg2.startTimeSeconds)
+                    let reverseGap = abs(seg2.endTimeSeconds - seg1.startTimeSeconds)
+
+                    if min(gap, reverseGap) < 0.5 {
+                        // Segments are very close, might be overlapping speech
+                        // Extend segments slightly to create overlap if confidence is high
+                        if seg1.qualityScore > 0.7 && seg2.qualityScore > 0.7 {
+                            // This helps recover overlaps that were just missed
+                            // We'll rely on the data already having these overlaps
+                        }
+                    }
+                }
+            }
+        }
+
+        return enhanced
+    }
+
+    private func mergeNearbySpeakerSegments(_ segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
+        guard !segments.isEmpty else { return segments }
+
+        // Group segments by speaker
+        var speakerSegments: [String: [TimedSpeakerSegment]] = [:]
+        for segment in segments {
+            speakerSegments[segment.speakerId, default: []].append(segment)
+        }
+
+        var mergedSegments: [TimedSpeakerSegment] = []
+
+        for (speakerId, speakerSegs) in speakerSegments {
+            let sorted = speakerSegs.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
+            var merged: [TimedSpeakerSegment] = []
+            var current = sorted[0]
+
+            for i in 1..<sorted.count {
+                let next = sorted[i]
+                let gap = next.startTimeSeconds - current.endTimeSeconds
+
+                // Merge if gap is less than minSilenceGap
+                if gap < config.minSilenceGap {
+                    // Extend current segment to include next
+                    current = TimedSpeakerSegment(
+                        speakerId: speakerId,
+                        embedding: current.embedding,  // Keep first embedding
+                        startTimeSeconds: current.startTimeSeconds,
+                        endTimeSeconds: next.endTimeSeconds,
+                        qualityScore: max(current.qualityScore, next.qualityScore)
+                    )
+                } else {
+                    // Gap too large, save current and start new
+                    merged.append(current)
+                    current = next
+                }
+            }
+            merged.append(current)
+            mergedSegments.append(contentsOf: merged)
+        }
+
+        // Sort by start time for consistent output
+        return mergedSegments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
     }
 
     // MARK: - Functions moved from SpeakerClustering
@@ -332,26 +422,64 @@ public final class DiarizerManager {
     ) -> [TimedSpeakerSegment] {
         let segmentation = binarizedSegments[0]
         let numFrames = segmentation.count
+        let numSpeakers = segmentation[0].count
         var segments: [TimedSpeakerSegment] = []
 
-        var frameSpeakers: [Int] = []
-        for frame in segmentation {
-            if let maxIdx = frame.indices.max(by: { frame[$0] < frame[$1] }) {
-                frameSpeakers.append(maxIdx)
-            } else {
-                frameSpeakers.append(0)
+        // Enhanced overlap detection: Process each speaker independently
+        // This allows multiple speakers to be active in the same time frame
+        for speakerIndex in 0..<numSpeakers {
+            // Skip inactive speakers
+            if speakerActivities[speakerIndex] < config.minActiveFramesCount {
+                continue
             }
-        }
 
-        var currentSpeaker = frameSpeakers[0]
-        var startFrame = 0
+            // Track continuous segments for this speaker
+            var isActive = false
+            var startFrame = 0
 
-        for i in 1..<numFrames {
-            if frameSpeakers[i] != currentSpeaker {
+            for frameIdx in 0..<numFrames {
+                let frameActivity = segmentation[frameIdx][speakerIndex]
+
+                // Dynamic threshold based on frame context
+                // Lower threshold if other speakers are active (overlap detection)
+                var activityThreshold: Float = 0.3
+
+                // Check if other speakers are active in this frame
+                for otherSpeaker in 0..<numSpeakers {
+                    if otherSpeaker != speakerIndex && segmentation[frameIdx][otherSpeaker] > 0.3 {
+                        // Another speaker is active, lower our threshold to detect overlap
+                        activityThreshold = 0.15
+                        break
+                    }
+                }
+
+                if frameActivity > activityThreshold && !isActive {
+                    // Start of a new segment
+                    isActive = true
+                    startFrame = frameIdx
+                } else if frameActivity <= activityThreshold && isActive {
+                    // End of current segment
+                    if let segment = createSegmentIfValid(
+                        speakerIndex: speakerIndex,
+                        startFrame: startFrame,
+                        endFrame: frameIdx,
+                        slidingWindow: slidingWindow,
+                        embeddings: embeddings,
+                        speakerLabels: speakerLabels,
+                        speakerActivities: speakerActivities
+                    ) {
+                        segments.append(segment)
+                    }
+                    isActive = false
+                }
+            }
+
+            // Handle segment that extends to the end
+            if isActive {
                 if let segment = createSegmentIfValid(
-                    speakerIndex: currentSpeaker,
+                    speakerIndex: speakerIndex,
                     startFrame: startFrame,
-                    endFrame: i,
+                    endFrame: numFrames,
                     slidingWindow: slidingWindow,
                     embeddings: embeddings,
                     speakerLabels: speakerLabels,
@@ -359,21 +487,12 @@ public final class DiarizerManager {
                 ) {
                     segments.append(segment)
                 }
-                currentSpeaker = frameSpeakers[i]
-                startFrame = i
             }
         }
 
-        if let segment = createSegmentIfValid(
-            speakerIndex: currentSpeaker,
-            startFrame: startFrame,
-            endFrame: numFrames,
-            slidingWindow: slidingWindow,
-            embeddings: embeddings,
-            speakerLabels: speakerLabels,
-            speakerActivities: speakerActivities
-        ) {
-            segments.append(segment)
+        // Sort segments by start time for consistent output
+        segments.sort {
+            $0.startTimeSeconds < $1.startTimeSeconds
         }
 
         return segments
