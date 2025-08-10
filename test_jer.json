@@ -1,0 +1,28 @@
+[
+  {
+    "speakerFragmentation" : 11,
+    "meeting" : "ES2004a",
+    "falseAlarmRate" : 1.6448278427124023,
+    "rtfx" : 143.257080078125,
+    "latency99th" : 0.12555801868438721,
+    "latency90th" : 0.096493959426879883,
+    "timings" : {
+      "segmentationSeconds" : 2.19510817527771,
+      "speakerClusteringSeconds" : 1.4634054899215698,
+      "embeddingExtractionSeconds" : 3.6585135459899902,
+      "modelCompilationSeconds" : 0.046188283711671829,
+      "audioLoadingSeconds" : 0.016490936279296875,
+      "totalInferenceSeconds" : 7.3170270919799805,
+      "totalProcessingSeconds" : 7.3249759674072266,
+      "modelDownloadSeconds" : 0.10777266323566437
+    },
+    "der" : 17.733835220336914,
+    "speakerErrorRate" : 5.7702388763427734,
+    "processingTime" : 7.3249759674072266,
+    "missRate" : 10.318768501281738,
+    "detectedSpeakers" : 4,
+    "jer" : 27.226459503173828,
+    "groundTruthSpeakers" : 4,
+    "chunksProcessed" : 105
+  }
+]
