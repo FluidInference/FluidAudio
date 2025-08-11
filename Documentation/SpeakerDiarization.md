@@ -2,14 +2,6 @@
 
 Real-time speaker diarization for iOS and macOS, answering "who spoke when" in audio streams.
 
-## Overview
-
-The FluidAudio Diarizer provides production-ready speaker diarization with:
-- **17.7% DER** on AMI corpus (competitive with state-of-the-art)
-- **150+ RTFx** real-time performance on Apple Silicon
-- **On-device processing** using Core ML
-- **Streaming support** for real-time applications
-
 ## Quick Start
 
 ```swift
@@ -18,17 +10,10 @@ import FluidAudio
 // 1. Download models (one-time setup)
 let models = try await DiarizerModels.downloadIfNeeded()
 
-// 2. Configure and initialize
-let config = DiarizerConfig(
-    clusteringThreshold: 0.7,  // Optimal for best accuracy
-    minSpeechDuration: 1.0,     // Minimum speech segment
-    minSilenceGap: 0.5          // Minimum gap between speakers
-)
-
-let diarizer = DiarizerManager(config: config)
+// 2. Initialize with default config
+let diarizer = DiarizerManager()
 diarizer.initialize(models: models)
 
-// 3. Process audio
 let audioSamples: [Float] = loadAudioFile() // 16kHz mono
 let result = try diarizer.performCompleteDiarization(audioSamples)
 
@@ -38,40 +23,16 @@ for segment in result.segments {
 }
 ```
 
-## Core Components
+### Custom Configuration (Optional)
 
-### DiarizerManager
-Main entry point for diarization pipeline:
-```swift
-let diarizer = DiarizerManager(config: config)
-diarizer.initialize(models: models)
-let result = try diarizer.performCompleteDiarization(audio)
-```
-
-### SpeakerManager
-Tracks speaker identities across audio chunks:
-```swift
-let speakerManager = diarizer.speakerManager
-
-// Get speaker information
-print("Active speakers: \(speakerManager.speakerCount)")
-for speakerId in speakerManager.speakerIds {
-    if let info = speakerManager.getSpeakerInfo(for: speakerId) {
-        print("\(speakerId): \(info.totalDuration)s total")
-    }
-}
-```
-
-### DiarizerConfig
-Configuration parameters:
+For fine-tuning, you can customize the configuration:
 ```swift
 let config = DiarizerConfig(
-    clusteringThreshold: 0.7,      // Speaker separation threshold (0.0-1.0)
-    minSpeechDuration: 1.0,         // Minimum speech duration in seconds
-    minSilenceGap: 0.5,             // Minimum silence between speakers
-    minActiveFramesCount: 10.0,     // Minimum active frames for valid segment
-    debugMode: false                // Enable debug logging
+    clusteringThreshold: 0.7,  // Speaker separation sensitivity (0.5-0.9)
+    minSpeechDuration: 1.0,     // Minimum speech segment (seconds)
+    minSilenceGap: 0.5          // Minimum gap between speakers (seconds)
 )
+let diarizer = DiarizerManager(config: config)
 ```
 
 ## Streaming/Real-time Processing
@@ -80,27 +41,25 @@ Process audio in chunks for real-time applications:
 
 ```swift
 // Configure for streaming
-let diarizer = DiarizerManager(config: config)
+let diarizer = DiarizerManager()  // Default config works well
 diarizer.initialize(models: models)
 
-// Choose chunk size based on your requirements
 let chunkDuration = 5.0  // Can be 3.0 for low latency or 10.0 for best accuracy
 let chunkSize = Int(16000 * chunkDuration)  // Convert to samples
 var audioBuffer: [Float] = []
 var streamPosition = 0.0
 
-// Process incoming audio stream
 for audioSamples in audioStream {
     audioBuffer.append(contentsOf: audioSamples)
-    
+
     // Process when we have accumulated enough audio
     while audioBuffer.count >= chunkSize {
         let chunk = Array(audioBuffer.prefix(chunkSize))
         audioBuffer.removeFirst(chunkSize)
-        
+
         // This works with any chunk size, but accuracy varies
         let result = try diarizer.performCompleteDiarization(chunk)
-        
+
         // Adjust timestamps manually
         for segment in result.segments {
             let adjustedSegment = TimedSpeakerSegment(
@@ -110,7 +69,7 @@ for audioSamples in audioStream {
             )
             handleSpeakerSegment(adjustedSegment)
         }
-        
+
         streamPosition += chunkDuration
     }
 }
@@ -148,40 +107,38 @@ class RealTimeDiarizer {
     private let sampleRate: Double = 16000
     private var chunkSamples: Int { Int(sampleRate * chunkDuration) }
     private var streamPosition: Double = 0
-    
+
     init() async throws {
         let models = try await DiarizerModels.downloadIfNeeded()
-        let config = DiarizerConfig(clusteringThreshold: 0.7)
-        
-        diarizer = DiarizerManager(config: config)
+        diarizer = DiarizerManager()  // Default config
         diarizer.initialize(models: models)
     }
-    
+
     func startCapture() throws {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-        
+
         // Install tap to capture audio
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
-            
+
             // Convert to 16kHz mono Float array
             let samples = self.convertBuffer(buffer, targetSampleRate: 16000)
             self.processAudioSamples(samples)
         }
-        
+
         audioEngine.prepare()
         try audioEngine.start()
     }
-    
+
     private func processAudioSamples(_ samples: [Float]) {
         audioBuffer.append(contentsOf: samples)
-        
+
         // Process complete chunks
         while audioBuffer.count >= chunkSamples {
             let chunk = Array(audioBuffer.prefix(chunkSamples))
             audioBuffer.removeFirst(chunkSamples)
-            
+
             Task {
                 do {
                     let result = try diarizer.performCompleteDiarization(chunk)
@@ -193,19 +150,55 @@ class RealTimeDiarizer {
             }
         }
     }
-    
+
     @MainActor
     private func handleResults(_ result: DiarizationResult, at position: Double) {
         for segment in result.segments {
             print("Speaker \(segment.speakerId): \(position + segment.startTimeSeconds)s")
         }
     }
-    
+
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, targetSampleRate: Double) -> [Float] {
         // Audio conversion implementation here
         // Returns 16kHz mono Float array
     }
 }
+```
+
+## Core Components
+
+### DiarizerManager
+Main entry point for diarization pipeline:
+```swift
+let diarizer = DiarizerManager()  // Default config (recommended)
+diarizer.initialize(models: models)
+let result = try diarizer.performCompleteDiarization(audio)
+```
+
+### SpeakerManager
+Tracks speaker identities across audio chunks:
+```swift
+let speakerManager = diarizer.speakerManager
+
+// Get speaker information
+print("Active speakers: \(speakerManager.speakerCount)")
+for speakerId in speakerManager.speakerIds {
+    if let info = speakerManager.getSpeakerInfo(for: speakerId) {
+        print("\(speakerId): \(info.totalDuration)s total")
+    }
+}
+```
+
+### DiarizerConfig
+Configuration parameters:
+```swift
+let config = DiarizerConfig(
+    clusteringThreshold: 0.7,      // Speaker separation threshold (0.0-1.0)
+    minSpeechDuration: 1.0,         // Minimum speech duration in seconds
+    minSilenceGap: 0.5,             // Minimum silence between speakers
+    minActiveFramesCount: 10.0,     // Minimum active frames for valid segment
+    debugMode: false                // Enable debug logging
+)
 ```
 
 ## Known Speaker Recognition
@@ -236,11 +229,11 @@ import FluidAudio
 
 struct DiarizationView: View {
     @StateObject private var processor = DiarizationProcessor()
-    
+
     var body: some View {
         VStack {
             Text("Speakers: \(processor.speakerCount)")
-            
+
             List(processor.activeSpeakers) { speaker in
                 HStack {
                     Circle()
@@ -251,7 +244,7 @@ struct DiarizationView: View {
                     Text("\(speaker.duration, specifier: "%.1f")s")
                 }
             }
-            
+
             Button(processor.isProcessing ? "Stop" : "Start") {
                 processor.toggleProcessing()
             }
@@ -264,9 +257,9 @@ class DiarizationProcessor: ObservableObject {
     @Published var speakerCount = 0
     @Published var activeSpeakers: [SpeakerDisplay] = []
     @Published var isProcessing = false
-    
+
     private var diarizer: DiarizerManager?
-    
+
     func toggleProcessing() {
         if isProcessing {
             stopProcessing()
@@ -274,34 +267,32 @@ class DiarizationProcessor: ObservableObject {
             startProcessing()
         }
     }
-    
+
     private func startProcessing() {
         Task {
             let models = try await DiarizerModels.downloadIfNeeded()
-            let config = DiarizerConfig(clusteringThreshold: 0.7)
-            
-            diarizer = DiarizerManager(config: config)
+            diarizer = DiarizerManager()  // Default config
             diarizer?.initialize(models: models)
             isProcessing = true
-            
+
             // Start audio capture and process chunks
             AudioCapture.start { [weak self] chunk in
                 self?.processChunk(chunk)
             }
         }
     }
-    
+
     private func processChunk(_ audio: [Float]) {
         Task { @MainActor in
             guard let diarizer = diarizer else { return }
-            
+
             let result = try diarizer.performCompleteDiarization(audio)
             speakerCount = diarizer.speakerManager.speakerCount
-            
+
             // Update UI with current speakers
             activeSpeakers = diarizer.speakerManager.speakerIds.compactMap { id in
-                guard let info = diarizer.speakerManager.getSpeakerInfo(for: id) else { 
-                    return nil 
+                guard let info = diarizer.speakerManager.getSpeakerInfo(for: id) else {
+                    return nil
                 }
                 return SpeakerDisplay(
                     id: id,
@@ -317,9 +308,7 @@ class DiarizationProcessor: ObservableObject {
 
 ## Performance Optimization
 
-### Optimal Parameters
 ```swift
-// Best accuracy (17.7% DER)
 let config = DiarizerConfig(
     clusteringThreshold: 0.7,
     minSpeechDuration: 1.0,
@@ -353,7 +342,7 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a
 
 # Results:
 # DER: 17.7% (Miss: 10.3%, FA: 1.6%, Speaker Error: 5.8%)
-# RTFx: 141.2x (real-time factor)
+# RTFx: 141.2x (real-time factor) M1 2022
 ```
 
 ## API Reference
@@ -380,8 +369,8 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a
 | Property | Type | Description |
 |----------|------|-------------|
 | `segments` | `[TimedSpeakerSegment]` | Speaker segments with timing |
-| `speakerDatabase` | `[String: [Float]]` | Speaker embeddings database |
-| `timings` | `PipelineTimings` | Detailed processing timings |
+| `speakerDatabase` | `[String: [Float]]?` | Speaker embeddings (debug mode) |
+| `timings` | `PipelineTimings?` | Processing timings (debug mode) |
 
 ## Requirements
 

@@ -39,9 +39,8 @@ dependencies: [
 
 ## Documentation
 
-- **[Speaker Diarization Guide](Documentation/SpeakerDiarization.md)** - Complete guide for speaker diarization
-- **[Streaming ASR Guide](Documentation/StreamingASR.md)** - Real-time ASR implementation details
-- **DeepWiki**: [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio)
+- **DeepWiki**: [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio) - Primary documentation
+- **Local Docs**: [Documentation/](Documentation/) - Additional guides and API references
 
 ## MCP
 

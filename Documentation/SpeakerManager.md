@@ -1,185 +1,147 @@
-# SpeakerManager API Guide
+# SpeakerManager API
 
-The `SpeakerManager` class provides advanced speaker tracking and management capabilities for FluidAudio. It maintains speaker consistency across audio chunks and sessions.
+Tracks and manages speaker identities across audio chunks.
 
-## Core Concepts
+## Configuration
 
-### Speaker Tracking
-The SpeakerManager maintains an in-memory database of speakers, tracking:
-- **Speaker embeddings**: 256-dimensional voice fingerprints
-- **Speaker IDs**: Consistent identifiers (e.g., "Speaker_1", "Speaker_2")
-- **Speaker metadata**: Duration spoken, last seen time, update count
-
-### Embedding Similarity
-Speakers are identified by comparing embeddings using cosine distance:
-- Distance < 0.7: Same speaker (high confidence)
-- Distance 0.7-0.9: Possibly same speaker
-- Distance > 0.9: Different speakers
-
-## Basic Usage
-
-### Initialize Manager
 ```swift
 let speakerManager = SpeakerManager(
-    speakerThreshold: 0.65,      // Max distance for speaker match
-    embeddingThreshold: 0.45,     // Distance for embedding updates
-    minSpeechDuration: 1.0        // Min seconds to create new speaker
+    speakerThreshold: 0.65,      // Max cosine distance for match
+    embeddingThreshold: 0.45,     // Threshold for embedding updates
+    minSpeechDuration: 1.0        // Min seconds to create speaker
 )
 ```
 
-### Assign Speakers
+## Core Methods
+
+### assignSpeaker
 ```swift
-// Process new audio segment
 let speakerId = speakerManager.assignSpeaker(
-    embedding,                    // 256-dim embedding from model
-    speechDuration: 2.5,          // Segment duration in seconds
-    confidence: 0.95              // Optional confidence score
+    embedding,                    // 256-dim array
+    speechDuration: 2.5,          // seconds
+    confidence: 0.95              // optional
 )
-// Returns: "Speaker_1" or nil if too short
+// Returns: "Speaker_1" or nil
 ```
 
-## Advanced Features
-
-### Known Speaker Enrollment
-Pre-load known speakers for meetings or sessions:
+### initializeKnownSpeakers
 ```swift
-let knownSpeakers = [
-    "Alice": aliceEmbedding,
-    "Bob": bobEmbedding
-]
+let knownSpeakers = ["Alice": embedding1, "Bob": embedding2]
 speakerManager.initializeKnownSpeakers(knownSpeakers)
 ```
 
-### Speaker Verification
-Check if two audio samples are from the same person:
+## Speaker Operations (SpeakerOperations.swift)
+
+### verifySameSpeaker
 ```swift
 let (isSame, confidence) = speakerManager.verifySameSpeaker(
     embedding1: sample1,
     embedding2: sample2,
     threshold: 0.7
 )
-// Returns: (isSame: true, confidence: 0.85)
 ```
 
-### Speaker Search
-Find a specific speaker in recorded segments:
+### findSpeaker
 ```swift
 let matches = speakerManager.findSpeaker(
     targetEmbedding: targetVoice,
     in: segments,
     threshold: 0.65
 )
-// Returns array of Speaker objects with timestamps
 ```
 
-### Similar Speaker Discovery
-Find the most similar speakers to a target:
+### findSimilarSpeakers
 ```swift
 let similar = speakerManager.findSimilarSpeakers(
     to: unknownEmbedding,
     limit: 5
 )
-// Returns: [(speaker, distance)] sorted by similarity
+// Returns: [(speaker, distance)]
 ```
 
-## Session Management
+## Persistence
 
-### Export/Import Speakers
-Save and restore speaker profiles between sessions:
+### JSON Export/Import
 ```swift
-// Export to JSON
 let jsonData = try speakerManager.exportToJSON()
-try jsonData.write(to: profilesURL)
 
-// Import from JSON
-let savedData = try Data(contentsOf: profilesURL)
-try speakerManager.importFromJSON(savedData)
+try speakerManager.importFromJSON(jsonData)
 ```
 
-### Export as Speaker Objects
-Get structured speaker data:
+### Speaker Objects
 ```swift
 let speakers = speakerManager.exportAsSpeakers()
-for speaker in speakers {
-    print("\(speaker.id): \(speaker.totalDuration)s")
-}
+
+speakerManager.importFromSpeakers(speakers)
 ```
 
-### Prune Inactive Speakers
-Clean up long-running sessions:
+## Memory Management
+
 ```swift
-// Remove speakers not seen in last 5 minutes
+// Remove inactive speakers since seconds
 speakerManager.pruneInactiveSpeakers(olderThan: 300)
+
+// Clear database
+speakerManager.reset()
 ```
 
-## Model Inference Methods
+## Integration with DiarizerManager
 
-FluidAudio uses two main CoreML models for diarization:
-
-### Segmentation Model
 ```swift
-// SegmentationProcessor.getSegments()
-// Detects speech activity and separates overlapping speakers
-// Input: 10-second audio chunk (16kHz)
-// Output: Speaker activity masks
+let diarizer = DiarizerManager()
+diarizer.initialize(models: models)
+
+let speakerManager = diarizer.speakerManager
+
+let result = try diarizer.performCompleteDiarization(audio)
+
+let info = speakerManager.getAllSpeakerInfo()
 ```
 
-### Embedding Model
-```swift
-// EmbeddingExtractor.getEmbeddings()
-// Converts audio+masks into speaker embeddings
-// Input: Audio + speaker masks
-// Output: 256-dimensional embeddings
-```
+## Model Pipeline
 
-## Integration Example
+1. **Segmentation** (`SegmentationProcessor.getSegments()`)
+   - Input: 10s audio (16kHz)
+   - Output: 3 speaker activity masks
 
-Complete diarization with speaker tracking:
-```swift
-// 1. Initialize
-let config = DiarizerConfig(clusteringThreshold: 0.7)
-let manager = DiarizerManager(config: config)
+2. **Embedding** (`EmbeddingExtractor.getEmbeddings()`)
+   - Input: Audio + masks
+   - Output: 3x256-dim embeddings
 
-// 2. Load known speakers (optional)
-manager.speakerManager.initializeKnownSpeakers(knownProfiles)
-
-// 3. Process audio
-let result = try manager.performCompleteDiarization(audioSamples)
-
-// 4. Access speaker info
-let speakerInfo = manager.speakerManager.getAllSpeakerInfo()
-for (id, info) in speakerInfo {
-    print("\(id): \(info.totalDuration)s, updates: \(info.updateCount)")
-}
-
-// 5. Export for next session
-let profiles = manager.speakerManager.exportAsSpeakers()
-```
-
-## Performance Tips
-
-1. **Thresholds**: Lower thresholds = more speakers detected
-2. **Min Duration**: Set to 1.0s to avoid noise being labeled as speakers
-3. **Embedding Updates**: Only update embeddings for high-confidence matches
-4. **Memory**: Prune inactive speakers in long sessions
-5. **Known Speakers**: Pre-load for better accuracy in meetings
+3. **Speaker Assignment** (`SpeakerManager.assignSpeaker()`)
+   - Input: Embeddings
+   - Output: Speaker IDs
 
 ## API Reference
 
-### SpeakerManager Methods
-- `assignSpeaker(_:speechDuration:confidence:)` - Assign or create speaker
-- `initializeKnownSpeakers(_:)` - Load known speaker profiles
-- `verifySameSpeaker(embedding1:embedding2:threshold:)` - Compare speakers
-- `findSpeaker(targetEmbedding:in:threshold:)` - Search for speaker
-- `findSimilarSpeakers(to:limit:)` - Find similar speakers
-- `exportToJSON()` / `importFromJSON(_:)` - Persistence
-- `exportAsSpeakers()` / `importFromSpeakers(_:)` - Structured data
-- `pruneInactiveSpeakers(olderThan:)` - Memory management
-- `reset()` - Clear all speakers
+### Methods
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `assignSpeaker(_:speechDuration:confidence:)` | `String?` | Assign/create speaker |
+| `initializeKnownSpeakers(_:)` | `Void` | Load profiles |
+| `getSpeakerInfo(for:)` | `SpeakerInfo?` | Get speaker data |
+| `getAllSpeakerInfo()` | `[String: SpeakerInfo]` | All speakers |
+| `verifySameSpeaker(embedding1:embedding2:threshold:)` | `(Bool, Float)` | Compare embeddings |
+| `findSpeaker(targetEmbedding:in:threshold:)` | `[Speaker]` | Search segments |
+| `findSimilarSpeakers(to:limit:)` | `[(Speaker, Float)]` | Ranked matches |
+| `exportToJSON()` | `Data` | JSON export |
+| `importFromJSON(_:)` | `Void` | JSON import |
+| `exportAsSpeakers()` | `[Speaker]` | Speaker objects |
+| `importFromSpeakers(_:)` | `Void` | Load speakers |
+| `pruneInactiveSpeakers(olderThan:)` | `Void` | Remove old |
+| `reset()` | `Void` | Clear all |
 
-### SpeakerInfo Properties
-- `id: String` - Unique speaker identifier
-- `embedding: [Float]` - 256-dim voice fingerprint
-- `totalDuration: Float` - Total seconds spoken
-- `lastSeen: Date` - Last activity timestamp
-- `updateCount: Int` - Number of embedding updates
+### SpeakerInfo
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `String` | Speaker ID |
+| `embedding` | `[Float]` | 256-dim vector |
+| `totalDuration` | `Float` | Total seconds |
+| `lastSeen` | `Date` | Last update |
+| `updateCount` | `Int` | Updates made |
+
+### Thresholds
+- `< 0.5`: Same speaker (high confidence)
+- `0.5-0.7`: Same speaker (medium confidence)
+- `0.7-0.9`: Different speakers (medium confidence)
+- `> 0.9`: Different speakers (high confidence)

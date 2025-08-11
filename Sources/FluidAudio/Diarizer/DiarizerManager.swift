@@ -25,7 +25,11 @@ public final class DiarizerManager {
     public init(config: DiarizerConfig = .default) {
         self.config = config
         self.speakerManager = SpeakerManager(
+            // Speaker assignment threshold: 1.2x clustering threshold
+            // More conservative (higher threshold) to avoid merging different speakers
             speakerThreshold: config.clusteringThreshold * 1.2,
+            // Embedding update threshold: 0.8x clustering threshold
+            // More aggressive (lower threshold) to update embeddings with high-confidence matches
             embeddingThreshold: config.clusteringThreshold * 0.8,
             minSpeechDuration: config.minSpeechDuration
         )
@@ -42,11 +46,9 @@ public final class DiarizerManager {
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
 
-        // Initialize EmbeddingExtractor with the embedding model from DiarizerModels
         self.embeddingExtractor = EmbeddingExtractor(embeddingModel: models.embeddingModel)
         logger.info("EmbeddingExtractor initialized with embedding model")
 
-        // Store models after extracting embedding model
         self.models = consume models
     }
 
@@ -73,12 +75,12 @@ public final class DiarizerManager {
     ///
     /// Example:
     /// ```swift
-    /// let similarity = try await diarizer.compareSpeakers(audio1: sample1, audio2: sample2)
+    /// let similarity = try await diarizer.compareSpeakerSimilarity(audio1: sample1, audio2: sample2)
     /// if similarity > 80 {
     ///     print("Likely the same speaker")
     /// }
     /// ```
-    public func compareSpeakers(audio1: [Float], audio2: [Float]) async throws -> Float {
+    public func compareSpeakerSimilarity(audio1: [Float], audio2: [Float]) async throws -> Float {
         async let result1 = performCompleteDiarization(audio1)
         async let result2 = performCompleteDiarization(audio2)
 
@@ -139,11 +141,10 @@ public final class DiarizerManager {
         var clusteringTime: TimeInterval = 0
         var postProcessingTime: TimeInterval = 0
 
-        // Use DiarizerManager's chunk parameters with proper rounding
         let chunkDuration = Int(config.chunkDuration.rounded())
         let overlapDuration = Int(config.chunkOverlap.rounded())
         let chunkSize = sampleRate * chunkDuration
-        let stepSize = chunkSize - (sampleRate * overlapDuration)  // Step size with overlap
+        let stepSize = chunkSize - (sampleRate * overlapDuration)
 
         var allSegments: [TimedSpeakerSegment] = []
         var speakerDB: [String: [Float]] = [:]
@@ -171,7 +172,6 @@ public final class DiarizerManager {
         let filteredSegments = applyPostProcessingFilters(allSegments)
         postProcessingTime = Date().timeIntervalSince(postProcessingStartTime)
 
-        // Only populate debug info if debugMode is enabled
         if config.debugMode {
             let timings = PipelineTimings(
                 modelDownloadSeconds: models.downloadDuration,
@@ -185,7 +185,6 @@ public final class DiarizerManager {
             return DiarizationResult(
                 segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
         } else {
-            // Return minimal result for production use
             return DiarizationResult(segments: filteredSegments)
         }
     }
@@ -219,7 +218,6 @@ public final class DiarizerManager {
     ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
 
-        // Prepare chunk (same for both paths)
         let chunkSize = sampleRate * 10
         var paddedChunk = chunk
         if chunk.count < chunkSize {
@@ -228,15 +226,11 @@ public final class DiarizerManager {
             paddedChunk = padded[...]
         }
 
-        // Use optimized segmentation with zero-copy
         let (binarizedSegments, _) = try segmentationProcessor.getSegments(
             audioChunk: paddedChunk,
             segmentationModel: models.segmentationModel
         )
 
-        // Unified and merged models removed - caused performance/stability issues
-
-        // Otherwise use traditional separate model processing
         let slidingFeature = segmentationProcessor.createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
 
@@ -244,14 +238,12 @@ public final class DiarizerManager {
 
         let embeddingStartTime = Date()
 
-        // Use EmbeddingExtractor for embedding extraction
         guard let embeddingExtractor = self.embeddingExtractor else {
             throw DiarizerError.notInitialized
         }
 
         logger.debug("Using EmbeddingExtractor for embedding extraction")
 
-        // Extract masks from sliding window feature
         var masks: [[Float]] = []
         let numSpeakers = slidingFeature.data[0][0].count
         let numFrames = slidingFeature.data[0].count
@@ -259,9 +251,8 @@ public final class DiarizerManager {
         for s in 0..<numSpeakers {
             var speakerMask: [Float] = []
             for f in 0..<numFrames {
-                // Apply clean frame logic
                 let speakerSum = slidingFeature.data[0][f].reduce(0, +)
-                let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0
+                let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0  // Clean frame: only 1 speaker
                 speakerMask.append(slidingFeature.data[0][f][s] * isClean)
             }
             masks.append(speakerMask)
@@ -276,7 +267,6 @@ public final class DiarizerManager {
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
         let clusteringStartTime = Date()
 
-        // Calculate speaker activities
         let speakerActivities = calculateSpeakerActivities(binarizedSegments)
 
         var speakerIds: [String] = []
@@ -289,11 +279,9 @@ public final class DiarizerManager {
                 let embedding = embeddings[speakerIndex]
                 if validateEmbedding(embedding) {
                     clusteringProcessedCount += 1
-                    // Calculate exact duration based on sliding window step
-                    // Each frame represents slidingWindow.step seconds (0.016875s from pyannote model)
+                    // Each frame = 0.016875s (pyannote model step size)
                     let duration = Float(activity) * Float(slidingFeature.slidingWindow.step)
 
-                    // Calculate embedding quality
                     let quality = calculateEmbeddingQuality(embedding) * (activity / Float(numFrames))
 
                     if let speakerId = speakerManager.assignSpeaker(
@@ -302,8 +290,7 @@ public final class DiarizerManager {
                         confidence: quality
                     ) {
                         speakerIds.append(speakerId)
-                        // Also update the legacy speaker database for compatibility
-                        speakerDB[speakerId] = embedding
+                        speakerDB[speakerId] = embedding  // Legacy compatibility
                     } else {
                         speakerIds.append("")
                     }
@@ -341,20 +328,16 @@ public final class DiarizerManager {
     )
         -> [TimedSpeakerSegment]
     {
-        // Filter by minimum duration
         let filtered = segments.filter { segment in
             segment.durationSeconds >= self.config.minSpeechDuration
         }
 
-        // Finally merge nearby segments from the same speaker
         return mergeNearbySpeakerSegments(filtered)
     }
 
-    /// Merge close segments from same speaker.
     private func mergeNearbySpeakerSegments(_ segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
         guard !segments.isEmpty else { return segments }
 
-        // Group segments by speaker
         var speakerSegments: [String: [TimedSpeakerSegment]] = [:]
         for segment in segments {
             speakerSegments[segment.speakerId, default: []].append(segment)
@@ -371,18 +354,15 @@ public final class DiarizerManager {
                 let next = sorted[i]
                 let gap = next.startTimeSeconds - current.endTimeSeconds
 
-                // Merge if gap is less than minSilenceGap
                 if gap < config.minSilenceGap {
-                    // Extend current segment to include next
                     current = TimedSpeakerSegment(
                         speakerId: speakerId,
-                        embedding: current.embedding,  // Keep first embedding
+                        embedding: current.embedding,
                         startTimeSeconds: current.startTimeSeconds,
                         endTimeSeconds: next.endTimeSeconds,
                         qualityScore: max(current.qualityScore, next.qualityScore)
                     )
                 } else {
-                    // Gap too large, save current and start new
                     merged.append(current)
                     current = next
                 }
@@ -391,11 +371,8 @@ public final class DiarizerManager {
             mergedSegments.append(contentsOf: merged)
         }
 
-        // Sort by start time for consistent output
         return mergedSegments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
     }
-
-    // MARK: - Functions moved from SpeakerClustering
 
     /// Count activity frames per speaker.
     private func calculateSpeakerActivities(_ binarizedSegments: [[[Float]]]) -> [Float] {
@@ -425,40 +402,32 @@ public final class DiarizerManager {
         let numSpeakers = segmentation[0].count
         var segments: [TimedSpeakerSegment] = []
 
-        // Enhanced overlap detection: Process each speaker independently
-        // This allows multiple speakers to be active in the same time frame
+        // Process each speaker independently for overlap detection
         for speakerIndex in 0..<numSpeakers {
-            // Skip inactive speakers
             if speakerActivities[speakerIndex] < config.minActiveFramesCount {
                 continue
             }
 
-            // Track continuous segments for this speaker
             var isActive = false
             var startFrame = 0
 
             for frameIdx in 0..<numFrames {
                 let frameActivity = segmentation[frameIdx][speakerIndex]
 
-                // Dynamic threshold based on frame context
-                // Lower threshold if other speakers are active (overlap detection)
+                // Dynamic threshold: lower when other speakers active
                 var activityThreshold: Float = 0.3
 
-                // Check if other speakers are active in this frame
                 for otherSpeaker in 0..<numSpeakers {
                     if otherSpeaker != speakerIndex && segmentation[frameIdx][otherSpeaker] > 0.3 {
-                        // Another speaker is active, lower our threshold to detect overlap
-                        activityThreshold = 0.15
+                        activityThreshold = 0.15  // Detect overlap
                         break
                     }
                 }
 
                 if frameActivity > activityThreshold && !isActive {
-                    // Start of a new segment
                     isActive = true
                     startFrame = frameIdx
                 } else if frameActivity <= activityThreshold && isActive {
-                    // End of current segment
                     if let segment = createSegmentIfValid(
                         speakerIndex: speakerIndex,
                         startFrame: startFrame,
@@ -474,7 +443,6 @@ public final class DiarizerManager {
                 }
             }
 
-            // Handle segment that extends to the end
             if isActive {
                 if let segment = createSegmentIfValid(
                     speakerIndex: speakerIndex,
@@ -490,7 +458,6 @@ public final class DiarizerManager {
             }
         }
 
-        // Sort segments by start time for consistent output
         segments.sort {
             $0.startTimeSeconds < $1.startTimeSeconds
         }

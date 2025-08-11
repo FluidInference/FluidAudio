@@ -190,7 +190,7 @@ final class CoreMLDiarizerTests: XCTestCase {
         let manager = DiarizerManager(config: config)
 
         do {
-            let similarity = try await manager.compareSpeakers(audio1: audio1, audio2: audio2)
+            let similarity = try await manager.compareSpeakerSimilarity(audio1: audio1, audio2: audio2)
             XCTAssertGreaterThanOrEqual(similarity, 0, "Similarity should be >= 0")
             XCTAssertLessThanOrEqual(similarity, 100, "Similarity should be <= 100")
         } catch DiarizerError.notInitialized {

@@ -243,10 +243,12 @@ final class SpeakerManagerTests: XCTestCase {
         manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 10.0)
         manager.assignSpeaker(createDistinctEmbedding(pattern: 2), speechDuration: 20.0)
 
-        let stats = manager.getStatistics()
+        // getStatistics method was removed - test speaker count instead
+        XCTAssertEqual(manager.speakerCount, 2)
 
-        XCTAssertTrue(stats.contains("Speakers: 2"))
-        XCTAssertTrue(stats.contains("Total Duration:"))
+        // Verify speakers were added with correct info
+        let allInfo = manager.getAllSpeakerInfo()
+        XCTAssertEqual(allInfo.count, 2)
     }
 
     // MARK: - Thread Safety
