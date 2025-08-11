@@ -119,21 +119,21 @@ final class CoreMLDiarizerTests: XCTestCase {
         // Test identical embeddings
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [1.0, 0.0, 0.0]
-        let distance1 = manager.cosineDistance(embedding1, embedding2)
+        let distance1 = manager.speakerManager.cosineDistance(embedding1, embedding2)
         XCTAssertEqual(
             distance1, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
 
         // Test orthogonal embeddings
         let embedding3: [Float] = [1.0, 0.0, 0.0]
         let embedding4: [Float] = [0.0, 1.0, 0.0]
-        let distance2 = manager.cosineDistance(embedding3, embedding4)
+        let distance2 = manager.speakerManager.cosineDistance(embedding3, embedding4)
         XCTAssertEqual(
             distance2, 1.0, accuracy: 0.001, "Orthogonal embeddings should have distance 1")
 
         // Test opposite embeddings
         let embedding5: [Float] = [1.0, 0.0, 0.0]
         let embedding6: [Float] = [-1.0, 0.0, 0.0]
-        let distance3 = manager.cosineDistance(embedding5, embedding6)
+        let distance3 = manager.speakerManager.cosineDistance(embedding5, embedding6)
         XCTAssertEqual(
             distance3, 2.0, accuracy: 0.001, "Opposite embeddings should have distance 2")
     }
@@ -407,7 +407,7 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
         // Test cosine distance calculation
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [1.0, 0.0, 0.0]
-        let distance = diarizer.cosineDistance(embedding1, embedding2)
+        let distance = diarizer.speakerManager.cosineDistance(embedding1, embedding2)
         XCTAssertEqual(
             distance, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
     }

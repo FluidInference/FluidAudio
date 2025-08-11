@@ -136,6 +136,33 @@ final class SpeakerManagerTests: XCTestCase {
         }
     }
 
+    func testPublicSpeakerInfoMembers() {
+        // This test verifies that all SpeakerInfo members are public as requested in PR #63
+        let manager = SpeakerManager()
+        let embedding = createDistinctEmbedding(pattern: 1)
+
+        let speakerId = manager.assignSpeaker(embedding, speechDuration: 5.0)
+        XCTAssertNotNil(speakerId)
+
+        if let id = speakerId, let info = manager.getSpeakerInfo(for: id) {
+            // Test that all public properties are accessible
+            let publicId = info.id
+            let publicEmbedding = info.embedding
+            let publicDuration = info.totalDuration
+            let publicLastSeen = info.lastSeen
+            let publicUpdateCount = info.updateCount
+
+            // Verify the values
+            XCTAssertEqual(publicId, id)
+            XCTAssertEqual(publicEmbedding, embedding)
+            XCTAssertEqual(publicDuration, 5.0)
+            XCTAssertNotNil(publicLastSeen)
+            XCTAssertEqual(publicUpdateCount, 1)
+
+            print("✅ All SpeakerInfo members are publicly accessible")
+        }
+    }
+
     func testGetAllSpeakerInfo() {
         let manager = SpeakerManager()
 

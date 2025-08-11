@@ -18,13 +18,13 @@ public class SpeakerManager {
     private let minSpeechDuration: Float
 
     public struct SpeakerInfo {
-        let id: String
-        var embedding: [Float]
-        var totalDuration: Float
-        var lastSeen: Date
-        var updateCount: Int
+        public let id: String
+        public var embedding: [Float]
+        public var totalDuration: Float
+        public var lastSeen: Date
+        public var updateCount: Int
 
-        init(id: String, embedding: [Float], duration: Float) {
+        public init(id: String, embedding: [Float], duration: Float) {
             self.id = id
             self.embedding = embedding
             self.totalDuration = duration

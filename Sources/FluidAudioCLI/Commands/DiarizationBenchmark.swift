@@ -380,14 +380,12 @@ enum StreamDiarizationBenchmark {
                 minSpeechDuration: 1.0,
                 minSilenceGap: 0.5,
                 minActiveFramesCount: 10.0,
-                debugMode: debugMode
-            )
-
-            let diarizerManager = DiarizerManager(
-                config: config,
+                debugMode: debugMode,
                 chunkDuration: Float(chunkSeconds),
                 chunkOverlap: Float(overlapSeconds)
             )
+
+            let diarizerManager = DiarizerManager(config: config)
             diarizerManager.initialize(models: models)
 
             // Configure streaming manager

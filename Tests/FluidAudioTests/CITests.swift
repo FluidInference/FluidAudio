@@ -162,7 +162,7 @@ final class CITests: XCTestCase {
         // Test cosine distance calculation
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [0.0, 1.0, 0.0]
-        let distance = manager.cosineDistance(embedding1, embedding2)
+        let distance = manager.speakerManager.cosineDistance(embedding1, embedding2)
         XCTAssertEqual(distance, 1.0, accuracy: 0.001)
 
         // Test embedding validation
@@ -215,7 +215,7 @@ final class CITests: XCTestCase {
 
         measure {
             let manager = DiarizerManager()
-            let _ = manager.cosineDistance(embedding1, embedding2)
+            let _ = manager.speakerManager.cosineDistance(embedding1, embedding2)
         }
     }
 }

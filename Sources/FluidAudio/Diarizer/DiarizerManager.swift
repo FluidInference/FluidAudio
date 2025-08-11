@@ -22,14 +22,8 @@ public final class DiarizerManager {
     // Speaker manager for consistent speaker tracking
     public let speakerManager: SpeakerManager
 
-    // Chunking parameters owned by DiarizerManager
-    public var chunkDuration: Float = 10.0  // seconds
-    public var chunkOverlap: Float = 0.0  // seconds
-
-    public init(config: DiarizerConfig = .default, chunkDuration: Float = 10.0, chunkOverlap: Float = 0.0) {
+    public init(config: DiarizerConfig = .default) {
         self.config = config
-        self.chunkDuration = chunkDuration
-        self.chunkOverlap = chunkOverlap
         self.speakerManager = SpeakerManager(
             speakerThreshold: config.clusteringThreshold * 1.2,
             embeddingThreshold: config.clusteringThreshold * 0.8,
@@ -88,10 +82,6 @@ public final class DiarizerManager {
         return audioValidation.validateAudio(samples)
     }
 
-    public func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
-        return speakerManager.cosineDistance(a, b)
-    }
-
     public func initializeKnownSpeakers(_ speakers: [String: [Float]]) {
         speakerManager.initializeKnownSpeakers(speakers)
     }
@@ -110,9 +100,9 @@ public final class DiarizerManager {
         var clusteringTime: TimeInterval = 0
         var postProcessingTime: TimeInterval = 0
 
-        // Use DiarizerManager's chunk parameters
-        let chunkDuration = Int(self.chunkDuration)
-        let overlapDuration = Int(self.chunkOverlap)
+        // Use DiarizerManager's chunk parameters with proper rounding
+        let chunkDuration = Int(config.chunkDuration.rounded())
+        let overlapDuration = Int(config.chunkOverlap.rounded())
         let chunkSize = sampleRate * chunkDuration
         let stepSize = chunkSize - (sampleRate * overlapDuration)  // Step size with overlap
 
@@ -170,9 +160,6 @@ public final class DiarizerManager {
         sampleRate: Int = 16000
     ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
-
-        // Calculate actual chunk duration before padding
-        _ = Float(chunk.count) / Float(sampleRate)
 
         // Prepare chunk (same for both paths)
         let chunkSize = sampleRate * 10
@@ -581,7 +568,7 @@ public final class DiarizerManager {
                     let info2 = speakerManager.getSpeakerInfo(for: speakerId2)
                 {
 
-                    let distance = cosineDistance(info1.embedding, info2.embedding)
+                    let distance = speakerManager.cosineDistance(info1.embedding, info2.embedding)
 
                     if distance < threshold {
                         // Merge speaker2 into speaker1

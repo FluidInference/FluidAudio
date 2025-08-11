@@ -218,13 +218,7 @@ import FluidAudio
 // Initialize and process audio
 Task {
     let models = try await DiarizerModels.downloadIfNeeded()
-    let config = DiarizerConfig(
-        clusteringThreshold: 0.7,  // Optimal for 17.7% DER
-        minSpeechDuration: 1.0,     // Min speech segment
-        minSilenceGap: 0.5          // Min gap between speakers
-    )
-    
-    let diarizer = DiarizerManager(config: config)
+    let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
     diarizer.initialize(models: models)
 
     let audioSamples: [Float] = // your 16kHz audio data

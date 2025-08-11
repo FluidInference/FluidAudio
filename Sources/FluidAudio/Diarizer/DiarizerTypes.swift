@@ -19,6 +19,12 @@ public struct DiarizerConfig: Sendable {
     /// Enable debug logging.
     public var debugMode: Bool = false
 
+    /// Duration of audio chunks for processing (seconds).
+    public var chunkDuration: Float = 10.0
+
+    /// Overlap between chunks (seconds).
+    public var chunkOverlap: Float = 0.0
+
     public static let `default` = DiarizerConfig()
 
     public init(
@@ -27,7 +33,9 @@ public struct DiarizerConfig: Sendable {
         minSilenceGap: Float = 0.5,
         numClusters: Int = -1,
         minActiveFramesCount: Float = 10.0,
-        debugMode: Bool = false
+        debugMode: Bool = false,
+        chunkDuration: Float = 10.0,
+        chunkOverlap: Float = 0.0
     ) {
         self.clusteringThreshold = clusteringThreshold
         self.minSpeechDuration = minSpeechDuration
@@ -35,6 +43,8 @@ public struct DiarizerConfig: Sendable {
         self.numClusters = numClusters
         self.minActiveFramesCount = minActiveFramesCount
         self.debugMode = debugMode
+        self.chunkDuration = chunkDuration
+        self.chunkOverlap = chunkOverlap
     }
 }
 
