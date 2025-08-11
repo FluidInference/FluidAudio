@@ -116,12 +116,17 @@ public struct PipelineTimings: Sendable, Codable {
 
 public struct DiarizationResult: Sendable {
     public let segments: [TimedSpeakerSegment]
-    public let speakerDatabase: [String: [Float]]
-    public let timings: PipelineTimings
+
+    /// Speaker database with embeddings (only populated when debugMode is enabled)
+    public let speakerDatabase: [String: [Float]]?
+
+    /// Performance timings (only populated when debugMode is enabled)
+    public let timings: PipelineTimings?
 
     public init(
-        segments: [TimedSpeakerSegment], speakerDatabase: [String: [Float]],
-        timings: PipelineTimings = PipelineTimings()
+        segments: [TimedSpeakerSegment],
+        speakerDatabase: [String: [Float]]? = nil,
+        timings: PipelineTimings? = nil
     ) {
         self.segments = segments
         self.speakerDatabase = speakerDatabase

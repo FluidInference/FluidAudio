@@ -38,7 +38,16 @@ public class EmbeddingExtractor {
         logger.info("EmbeddingExtractor initialized with ANE-aligned buffers")
     }
 
-    /// Process with ANE-optimized zero-copy operations
+    /// Extract speaker embeddings using the CoreML embedding model.
+    ///
+    /// This is the main model inference method that runs the WeSpeaker embedding model
+    /// to convert audio+masks into 256-dimensional speaker embeddings.
+    ///
+    /// - Parameters:
+    ///   - audio: Raw audio samples (16kHz)
+    ///   - masks: Speaker activity masks from segmentation
+    ///   - minActivityThreshold: Minimum frames for valid speaker
+    /// - Returns: Array of 256-dim embeddings for each speaker
     public func getEmbeddings(
         audio: [Float],
         masks: [[Float]],

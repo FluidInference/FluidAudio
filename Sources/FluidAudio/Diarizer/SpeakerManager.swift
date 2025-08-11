@@ -181,7 +181,7 @@ public class SpeakerManager {
         queue.sync { Array(speakerDatabase.keys).sorted() }
     }
 
-    /// Get detailed speaker information
+    /// Get all speaker info (for testing/debugging).
     public func getAllSpeakerInfo() -> [String: SpeakerInfo] {
         queue.sync {
             return speakerDatabase
@@ -200,6 +200,7 @@ public class SpeakerManager {
         }
     }
 
+    /// Remove inactive speakers (for long-running sessions).
     public func pruneInactiveSpeakers(olderThan timeInterval: TimeInterval = 300) {
         queue.sync(flags: .barrier) {
             let cutoffDate = Date().addingTimeInterval(-timeInterval)
@@ -209,20 +210,6 @@ public class SpeakerManager {
                 speakerDatabase.removeValue(forKey: speakerId)
                 logger.info("Pruned inactive speaker \(speakerId)")
             }
-        }
-    }
-
-    public func getStatistics() -> String {
-        queue.sync {
-            let totalSpeakers = speakerDatabase.count
-            let totalDuration = speakerDatabase.values.reduce(0) { $0 + $1.totalDuration }
-            let avgUpdates = speakerDatabase.values.reduce(0) { $0 + $1.updateCount } / max(1, totalSpeakers)
-
-            return """
-                Speakers: \(totalSpeakers)
-                Total Duration: \(String(format: "%.1f", totalDuration))s
-                Avg Updates: \(avgUpdates)
-                """
         }
     }
 }

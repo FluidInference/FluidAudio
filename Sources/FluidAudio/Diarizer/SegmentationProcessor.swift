@@ -12,6 +12,16 @@ public struct SegmentationProcessor {
 
     public init() {}
 
+    /// Detect speaker segments using the CoreML segmentation model.
+    ///
+    /// This is the main model inference method that runs the pyannote segmentation model
+    /// to detect speech activity and separate overlapping speakers.
+    ///
+    /// - Parameters:
+    ///   - audioChunk: 10-second audio chunk (16kHz)
+    ///   - segmentationModel: Pre-loaded CoreML segmentation model
+    ///   - chunkSize: Expected audio size (default 160k samples = 10s)
+    /// - Returns: Tuple of (binarized segments, raw feature provider)
     func getSegments(
         audioChunk: ArraySlice<Float>,
         segmentationModel: MLModel,
