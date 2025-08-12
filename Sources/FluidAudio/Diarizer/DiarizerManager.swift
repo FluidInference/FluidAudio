@@ -31,7 +31,8 @@ public final class DiarizerManager {
             // Embedding update threshold: 0.8x clustering threshold
             // More aggressive (lower threshold) to update embeddings with high-confidence matches
             embeddingThreshold: config.clusteringThreshold * 0.8,
-            minSpeechDuration: config.minSpeechDuration
+            minSpeechDuration: config.minSpeechDuration,
+            minEmbeddingUpdateDuration: config.minEmbeddingUpdateDuration
         )
     }
 
@@ -52,46 +53,9 @@ public final class DiarizerManager {
         self.models = consume models
     }
 
-    @available(*, deprecated, message: "Use initialize(models:) instead")
-    public func initialize() async throws {
-        self.initialize(models: try await .downloadIfNeeded())
-    }
-
     public func cleanup() {
         models = nil
         logger.info("Diarization resources cleaned up")
-    }
-
-    /// Compare two audio samples to determine if they're from the same speaker.
-    ///
-    /// Performs diarization on both audio samples and compares the dominant speaker
-    /// from each to calculate similarity.
-    ///
-    /// - Parameters:
-    ///   - audio1: First audio sample (16kHz mono)
-    ///   - audio2: Second audio sample (16kHz mono)
-    /// - Returns: Similarity score (0-100, higher = more similar)
-    /// - Throws: DiarizerError if processing fails
-    ///
-    /// Example:
-    /// ```swift
-    /// let similarity = try await diarizer.compareSpeakerSimilarity(audio1: sample1, audio2: sample2)
-    /// if similarity > 80 {
-    ///     print("Likely the same speaker")
-    /// }
-    /// ```
-    public func compareSpeakerSimilarity(audio1: [Float], audio2: [Float]) async throws -> Float {
-        async let result1 = performCompleteDiarization(audio1)
-        async let result2 = performCompleteDiarization(audio2)
-
-        guard let segment1 = try await result1.segments.max(by: { $0.qualityScore < $1.qualityScore }),
-            let segment2 = try await result2.segments.max(by: { $0.qualityScore < $1.qualityScore })
-        else {
-            throw DiarizerError.embeddingExtractionFailed
-        }
-
-        let distance = speakerManager.cosineDistance(segment1.embedding, segment2.embedding)
-        return max(0, (1.0 - distance) * 100)
     }
 
     /// Validate embedding format.
@@ -104,8 +68,11 @@ public final class DiarizerManager {
         return audioValidation.validateAudio(samples)
     }
 
-    /// Initialize with known speaker profiles.
-    public func initializeKnownSpeakers(_ speakers: [String: [Float]]) {
+    /// Initialize with known speaker profiles from Slipbox persistence.
+    /// Accepts Speaker structs and adds them to the in-memory database.
+    ///
+    /// - Parameter speakers: Array of Speaker structs with embeddings and metadata
+    public func initializeKnownSpeakers(_ speakers: [Speaker]) {
         speakerManager.initializeKnownSpeakers(speakers)
     }
 
@@ -147,7 +114,6 @@ public final class DiarizerManager {
         let stepSize = chunkSize - (sampleRate * overlapDuration)
 
         var allSegments: [TimedSpeakerSegment] = []
-        var speakerDB: [String: [Float]] = [:]
 
         for chunkStart in stride(from: 0, to: samples.count, by: stepSize) {
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
@@ -157,7 +123,6 @@ public final class DiarizerManager {
             let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
                 chunk,
                 chunkOffset: chunkOffset,
-                speakerDB: &speakerDB,
                 models: models,
                 sampleRate: sampleRate
             )
@@ -169,7 +134,7 @@ public final class DiarizerManager {
         }
 
         let postProcessingStartTime = Date()
-        let filteredSegments = applyPostProcessingFilters(allSegments)
+        let filteredSegments = allSegments  // No post-processing
         postProcessingTime = Date().timeIntervalSince(postProcessingStartTime)
 
         if config.debugMode {
@@ -182,6 +147,12 @@ public final class DiarizerManager {
                 speakerClusteringSeconds: clusteringTime,
                 postProcessingSeconds: postProcessingTime
             )
+
+            // Build speakerDatabase from speakerManager for debug output
+            let speakerDB = speakerManager.getAllSpeakerInfo().reduce(into: [String: [Float]]()) { result, item in
+                result[item.key] = item.value.mainEmbedding
+            }
+
             return DiarizationResult(
                 segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
         } else {
@@ -205,14 +176,12 @@ public final class DiarizerManager {
     /// - Parameters:
     ///   - chunk: Audio chunk to process
     ///   - chunkOffset: Time offset of this chunk in the full audio
-    ///   - speakerDB: Mutable speaker database (deprecated, use speakerManager instead)
     ///   - models: Diarization models for processing
     ///   - sampleRate: Audio sample rate
     /// - Returns: Tuple of (segments with speaker IDs, timing metrics)
     private func processChunkWithSpeakerTracking(
         _ chunk: ArraySlice<Float>,
         chunkOffset: Double,
-        speakerDB: inout [String: [Float]],
         models: DiarizerModels,
         sampleRate: Int = 16000
     ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
@@ -284,13 +253,12 @@ public final class DiarizerManager {
 
                     let quality = calculateEmbeddingQuality(embedding) * (activity / Float(numFrames))
 
-                    if let speakerId = speakerManager.assignSpeaker(
+                    if let speaker = speakerManager.assignSpeaker(
                         embedding,
                         speechDuration: duration,
                         confidence: quality
                     ) {
-                        speakerIds.append(speakerId)
-                        speakerDB[speakerId] = embedding  // Legacy compatibility
+                        speakerIds.append(speaker.id)
                     } else {
                         speakerIds.append("")
                     }
@@ -321,57 +289,6 @@ public final class DiarizerManager {
         )
 
         return (segments, timings)
-    }
-
-    private func applyPostProcessingFilters(
-        _ segments: [TimedSpeakerSegment]
-    )
-        -> [TimedSpeakerSegment]
-    {
-        let filtered = segments.filter { segment in
-            segment.durationSeconds >= self.config.minSpeechDuration
-        }
-
-        return mergeNearbySpeakerSegments(filtered)
-    }
-
-    private func mergeNearbySpeakerSegments(_ segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
-        guard !segments.isEmpty else { return segments }
-
-        var speakerSegments: [String: [TimedSpeakerSegment]] = [:]
-        for segment in segments {
-            speakerSegments[segment.speakerId, default: []].append(segment)
-        }
-
-        var mergedSegments: [TimedSpeakerSegment] = []
-
-        for (speakerId, speakerSegs) in speakerSegments {
-            let sorted = speakerSegs.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
-            var merged: [TimedSpeakerSegment] = []
-            var current = sorted[0]
-
-            for i in 1..<sorted.count {
-                let next = sorted[i]
-                let gap = next.startTimeSeconds - current.endTimeSeconds
-
-                if gap < config.minSilenceGap {
-                    current = TimedSpeakerSegment(
-                        speakerId: speakerId,
-                        embedding: current.embedding,
-                        startTimeSeconds: current.startTimeSeconds,
-                        endTimeSeconds: next.endTimeSeconds,
-                        qualityScore: max(current.qualityScore, next.qualityScore)
-                    )
-                } else {
-                    merged.append(current)
-                    current = next
-                }
-            }
-            merged.append(current)
-            mergedSegments.append(contentsOf: merged)
-        }
-
-        return mergedSegments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
     }
 
     /// Count activity frames per speaker.
@@ -496,7 +413,7 @@ public final class DiarizerManager {
 
         return TimedSpeakerSegment(
             speakerId: speakerIds[speakerIndex],
-            embedding: embedding,
+            mainEmbedding: embedding,
             startTimeSeconds: Float(startTime),
             endTimeSeconds: Float(endTime),
             qualityScore: quality
@@ -508,38 +425,4 @@ public final class DiarizerManager {
         return min(1.0, magnitude / 10.0)
     }
 
-    /// Merge similar speakers (for IS meetings).
-    public func mergeSimilarSpeakers(threshold: Float = 0.3) {
-        let speakers = speakerManager.speakerIds
-        var mergedPairs: Set<String> = []
-
-        for i in 0..<speakers.count {
-            for j in (i + 1)..<speakers.count {
-                let speakerId1 = speakers[i]
-                let speakerId2 = speakers[j]
-
-                // Skip if already merged
-                if mergedPairs.contains(speakerId1) || mergedPairs.contains(speakerId2) {
-                    continue
-                }
-
-                if let info1 = speakerManager.getSpeakerInfo(for: speakerId1),
-                    let info2 = speakerManager.getSpeakerInfo(for: speakerId2)
-                {
-
-                    let distance = speakerManager.cosineDistance(info1.embedding, info2.embedding)
-
-                    if distance < threshold {
-                        // Merge speaker2 into speaker1
-                        logger.info(
-                            "Merging similar speakers: \(speakerId2) into \(speakerId1) (distance: \(distance))")
-
-                        // Transfer all segments from speaker2 to speaker1
-                        // This would need to be implemented in your segment management
-                        mergedPairs.insert(speakerId2)
-                    }
-                }
-            }
-        }
-    }
 }

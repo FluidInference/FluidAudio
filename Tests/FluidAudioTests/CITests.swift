@@ -60,7 +60,7 @@ final class CITests: XCTestCase {
         let embedding: [Float] = [0.1, 0.2, -0.3, 0.4, -0.5]
         let segment = TimedSpeakerSegment(
             speakerId: "Speaker 1",
-            embedding: embedding,
+            mainEmbedding: embedding,
             startTimeSeconds: 10.5,
             endTimeSeconds: 25.3,
             qualityScore: 0.95
@@ -71,23 +71,10 @@ final class CITests: XCTestCase {
         XCTAssertEqual(segment.endTimeSeconds, 25.3, accuracy: 0.01)
         XCTAssertEqual(segment.qualityScore, 0.95, accuracy: 0.01)
         XCTAssertEqual(segment.durationSeconds, 14.8, accuracy: 0.01)
-        XCTAssertEqual(segment.embedding.count, 5)
+        XCTAssertEqual(segment.mainEmbedding.count, 5)
     }
 
-    func testSpeakerEmbeddingCreation() {
-        let embedding: [Float] = [0.1, 0.2, -0.3, 0.4, -0.5]
-        let speakerEmbedding = SpeakerEmbedding(
-            embedding: embedding,
-            qualityScore: 0.85,
-            durationSeconds: 5.0
-        )
-
-        XCTAssertEqual(speakerEmbedding.embedding.count, 5)
-        XCTAssertEqual(speakerEmbedding.embedding[0], 0.1, accuracy: 0.001)
-        XCTAssertEqual(speakerEmbedding.embedding[4], -0.5, accuracy: 0.001)
-        XCTAssertEqual(speakerEmbedding.qualityScore, 0.85, accuracy: 0.01)
-        XCTAssertEqual(speakerEmbedding.durationSeconds, 5.0, accuracy: 0.01)
-    }
+    // Removed testSpeakerEmbeddingCreation - SpeakerEmbedding struct was redundant and removed
 
     func testAudioValidationResult() {
         let validResult = AudioValidationResult(

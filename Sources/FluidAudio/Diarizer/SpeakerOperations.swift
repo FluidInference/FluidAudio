@@ -1,222 +1,273 @@
-import CoreML
 import Foundation
 import OSLog
 
-/// Single speaker representation that can be either a profile or a segment
-@available(macOS 13.0, iOS 16.0, *)
-public struct Speaker: Identifiable, Codable {
-    public let id: String
-    public var name: String
-    public var embedding: [Float]
-
-    public var startTime: Double?
-    public var endTime: Double?
-    public var confidence: Float = 1.0
-    public var totalDuration: Double = 0
-    public var lastSeen: Date = Date()
-
-    public var duration: Double? {
-        guard let start = startTime, let end = endTime else { return nil }
-        return end - start
-    }
-
-    public init(
-        id: String? = nil,
-        name: String? = nil,
-        embedding: [Float],
-        startTime: Double? = nil,
-        endTime: Double? = nil,
-        confidence: Float = 1.0
-    ) {
-        self.id = id ?? "Speaker_\(UUID().uuidString.prefix(8))"
-        self.name = name ?? self.id
-        self.embedding = embedding
-        self.startTime = startTime
-        self.endTime = endTime
-        self.confidence = confidence
-    }
-}
-
-// MARK: - SpeakerManager Extensions
-
+/// These functions provide additional capabilities beyond core diarization
 @available(macOS 13.0, iOS 16.0, *)
 extension SpeakerManager {
 
-    private static let opsLogger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "SpeakerOps")
-
-    /// Export current speakers as Speaker objects for persistence or external processing.
-    ///
-    /// Use cases:
-    /// - Saving speaker profiles to disk for later sessions
-    /// - Transferring speaker data between different components
-    /// - Creating speaker databases for known participants
-    ///
-    /// Example:
-    /// ```swift
-    /// let speakers = speakerManager.exportAsSpeakers()
-    /// let jsonData = try JSONEncoder().encode(speakers)
-    /// try jsonData.write(to: profilesURL)
-    /// ```
-    public func exportAsSpeakers() -> [Speaker] {
-        var speakers: [Speaker] = []
-        for speakerId in speakerIds {
-            if let info = getSpeakerInfo(for: speakerId) {
-                var speaker = Speaker(
-                    id: speakerId,
-                    name: speakerId,
-                    embedding: info.embedding
-                )
-                speaker.totalDuration = Double(info.totalDuration)
-                speaker.lastSeen = info.lastSeen
-                speakers.append(speaker)
-            }
-        }
-        return speakers
-    }
-
-    /// Import speakers from Speaker objects to restore previous sessions.
-    ///
-    /// Use cases:
-    /// - Loading known speaker profiles at startup
-    /// - Transferring speakers between different DiarizerManager instances
-    /// - Implementing speaker enrollment systems
-    ///
-    /// Example:
-    /// ```swift
-    /// let jsonData = try Data(contentsOf: profilesURL)
-    /// let speakers = try JSONDecoder().decode([Speaker].self, from: jsonData)
-    /// speakerManager.importFromSpeakers(speakers)
-    /// ```
-    public func importFromSpeakers(_ speakers: [Speaker]) {
-        var profiles: [String: [Float]] = [:]
-        for speaker in speakers {
-            profiles[speaker.id] = speaker.embedding
-        }
-        initializeKnownSpeakers(profiles)
-        Self.opsLogger.info("Imported \(speakers.count) speakers")
-    }
-
-    /// Verify if two embeddings are from the same speaker.
-    ///
-    /// Use cases:
-    /// - Speaker verification for security applications
-    /// - Confirming speaker identity in multi-session recordings
-    /// - Quality assurance for speaker segmentation
-    ///
-    /// - Returns: Tuple with (isSame: whether speakers match, confidence: 0.0-1.0)
-    public func verifySameSpeaker(
-        embedding1: [Float],
-        embedding2: [Float],
-        threshold: Float = 0.7
-    ) -> (isSame: Bool, confidence: Float) {
-        let distance = cosineDistance(embedding1, embedding2)
-        let isSame = distance < threshold
-        let confidence = 1.0 - distance
-        return (isSame, confidence)
-    }
-
-    /// Find speakers in segments that match the target embedding.
-    ///
-    /// Use cases:
-    /// - Searching for a specific speaker in a recording
-    /// - Identifying when a known speaker spoke
-    /// - Cross-session speaker tracking
+    /// Add a historical embedding to a speaker and update the main embedding.
     ///
     /// - Parameters:
-    ///   - targetEmbedding: The speaker embedding to search for
-    ///   - segments: Array of segments to search through
-    ///   - threshold: Similarity threshold (0.0-1.0, lower = more similar)
-    public func findSpeaker(
-        targetEmbedding: [Float],
-        in segments: [TimedSpeakerSegment],
-        threshold: Float = 0.65
-    ) -> [Speaker] {
-        var speakerGroups: [String: [TimedSpeakerSegment]] = [:]
-        for segment in segments {
-            speakerGroups[segment.speakerId, default: []].append(segment)
+    ///   - embedding: The historical embedding to add
+    ///   - speakerId: The speaker ID to add the embedding to
+    /// - Returns: Updated Speaker if successful, nil if speaker not found
+    @discardableResult
+    public func addHistoricalEmbedding(
+        _ embedding: HistoricalEmbedding,
+        to speakerId: String
+    ) -> Speaker? {
+        return queue.sync(flags: .barrier) {
+            guard var speaker = speakerDatabase[speakerId] else {
+                logger.warning("Speaker \(speakerId) not found")
+                return nil
+            }
+
+            // Validate embedding quality
+            let embeddingMagnitude = sqrt(embedding.embedding.map { $0 * $0 }.reduce(0, +))
+            guard embeddingMagnitude > 0.1 else {
+                logger.debug("Skipping low-quality embedding for speaker \(speakerId)")
+                return nil
+            }
+
+            // FIFO management - max 50 embeddings
+            if speaker.historicalEmbeddings.count >= 50 {
+                speaker.historicalEmbeddings.removeFirst()
+            }
+
+            speaker.historicalEmbeddings.append(embedding)
+
+            // Always update main embedding using exponential moving average
+            let alpha: Float = 0.9
+            for i in 0..<speaker.mainEmbedding.count {
+                speaker.mainEmbedding[i] = alpha * speaker.mainEmbedding[i] + (1 - alpha) * embedding.embedding[i]
+            }
+            speaker.updateCount += 1
+            speaker.updatedAt = Date()
+
+            speakerDatabase[speakerId] = speaker
+
+            logger.debug(
+                "Added historical embedding to speaker \(speakerId), total: \(speaker.historicalEmbeddings.count)")
+
+            // Return the updated Speaker object
+            return Speaker(
+                id: speaker.id,
+                name: "Speaker \(speaker.id)",
+                mainEmbedding: speaker.mainEmbedding,
+                duration: speaker.duration,
+                createdAt: speaker.createdAt,
+                updatedAt: speaker.updatedAt
+            )
+        }
+    }
+
+    /// Remove a historical embedding from a speaker and recalculate the main embedding.
+    ///
+    /// Useful for speaker reassignment scenarios where a segment needs to be moved to a different speaker.
+    ///
+    /// - Parameters:
+    ///   - segmentId: The segment ID of the historical embedding to remove
+    ///   - speakerId: The speaker ID to remove the embedding from
+    /// - Returns: The removed historical embedding if found, nil otherwise
+    @discardableResult
+    public func removeHistoricalEmbedding(
+        segmentId: UUID,
+        from speakerId: String
+    ) -> HistoricalEmbedding? {
+        return queue.sync(flags: .barrier) {
+            guard var speaker = speakerDatabase[speakerId] else {
+                logger.warning("Speaker \(speakerId) not found")
+                return nil
+            }
+
+            let beforeCount = speaker.historicalEmbeddings.count
+
+            if let index = speaker.historicalEmbeddings.firstIndex(where: { $0.segmentId == segmentId }) {
+                let removed = speaker.historicalEmbeddings.remove(at: index)
+                speakerDatabase[speakerId] = speaker
+
+                logger.info(
+                    "✅ Speaker \(speakerId): removed historical embedding (before: \(beforeCount), after: \(speaker.historicalEmbeddings.count))"
+                )
+
+                recalculateMainEmbedding(for: speakerId)
+
+                return removed
+            }
+
+            logger.info("❌ Speaker \(speakerId): historical embedding not found for segment \(segmentId)")
+            return nil
+        }
+    }
+
+    /// Reassign a historical embedding from one speaker to another.
+    ///
+    /// This moves a segment's embedding from one speaker to another, updating both speakers'
+    /// main embeddings. Useful for correcting misclassified segments.
+    ///
+    /// - Parameters:
+    ///   - segmentId: The segment ID to reassign
+    ///   - fromSpeakerId: The current speaker ID
+    ///   - toSpeakerId: The target speaker ID
+    /// - Returns: True if successful, false if segment not found or speakers don't exist
+    @discardableResult
+    public func reassignSegment(
+        segmentId: UUID,
+        from fromSpeakerId: String,
+        to toSpeakerId: String
+    ) -> Bool {
+        // Remove from original speaker
+        guard let embedding = removeHistoricalEmbedding(segmentId: segmentId, from: fromSpeakerId) else {
+            logger.warning("Failed to remove segment \(segmentId) from speaker \(fromSpeakerId)")
+            return false
         }
 
-        var matches: [Speaker] = []
+        // Add to new speaker
+        let updatedSpeaker = addHistoricalEmbedding(embedding, to: toSpeakerId)
 
-        for (speakerId, segments) in speakerGroups {
-            guard let firstEmbedding = segments.first?.embedding else { continue }
+        if updatedSpeaker != nil {
+            logger.info("✅ Reassigned segment \(segmentId) from \(fromSpeakerId) to \(toSpeakerId)")
+        } else {
+            logger.error("Failed to add segment \(segmentId) to speaker \(toSpeakerId)")
+            // Try to restore to original speaker
+            _ = addHistoricalEmbedding(embedding, to: fromSpeakerId)
+        }
 
-            let distance = cosineDistance(targetEmbedding, firstEmbedding)
+        return updatedSpeaker != nil
+    }
 
-            if distance < threshold {
-                for segment in segments {
-                    matches.append(
-                        Speaker(
-                            id: speakerId,
-                            embedding: firstEmbedding,
-                            startTime: Double(segment.startTimeSeconds),
-                            endTime: Double(segment.endTimeSeconds),
-                            confidence: 1.0 - distance
-                        ))
+    // MARK: - Speaker Recalculation
+
+    /// Recalculate the main embedding from historical embeddings.
+    ///
+    /// This method averages all historical embeddings to create a new main embedding.
+    /// Useful for recovering from corrupted main embeddings or updating after significant changes.
+    ///
+    /// - Parameter speakerId: The speaker ID to recalculate
+    /// - Returns: Updated Speaker if successful, nil if speaker not found or no historical embeddings
+    @discardableResult
+    public func recalculateMainEmbedding(for speakerId: String) -> Speaker? {
+        return queue.sync(flags: .barrier) {
+            guard var speaker = speakerDatabase[speakerId] else {
+                logger.warning("Speaker \(speakerId) not found")
+                return nil
+            }
+
+            let embeddings = speaker.historicalEmbeddings
+
+            guard !embeddings.isEmpty else {
+                logger.error("No historical embeddings for speaker \(speakerId)")
+                return nil
+            }
+
+            guard let firstEmbedding = embeddings.first, !firstEmbedding.embedding.isEmpty else {
+                logger.error("First historical embedding is empty for speaker \(speakerId)")
+                return nil
+            }
+
+            let beforeFirst10 = Array(speaker.mainEmbedding.prefix(10))
+            logger.info("Recalculating main embedding for \(speakerId), before: \(beforeFirst10)")
+
+            let embeddingSize = firstEmbedding.embedding.count
+
+            // Calculate average of all historical embeddings
+            var averageEmbedding = [Float](repeating: 0.0, count: embeddingSize)
+
+            var validEmbeddingCount = 0
+            for historical in embeddings {
+                if historical.embedding.count != embeddingSize {
+                    logger.warning(
+                        "Skipping historical embedding with wrong size: \(historical.embedding.count) != \(embeddingSize)"
+                    )
+                    continue
                 }
+
+                // Add to average
+                for i in 0..<embeddingSize {
+                    averageEmbedding[i] += historical.embedding[i]
+                }
+                validEmbeddingCount += 1
             }
-        }
 
-        return matches
-    }
-
-    /// Export speakers to JSON data for persistence.
-    ///
-    /// Use cases:
-    /// - Saving speaker profiles to disk
-    /// - Sending speaker data over network
-    /// - Creating backups of speaker databases
-    public func exportToJSON() throws -> Data {
-        let speakers = exportAsSpeakers()
-        return try JSONEncoder().encode(speakers)
-    }
-
-    /// Import speakers from JSON data.
-    ///
-    /// Use cases:
-    /// - Restoring speaker profiles from disk
-    /// - Receiving speaker data from network
-    /// - Loading pre-trained speaker profiles
-    public func importFromJSON(_ data: Data) throws {
-        let imported = try JSONDecoder().decode([Speaker].self, from: data)
-        importFromSpeakers(imported)
-    }
-
-    /// Find similar speakers to a target embedding, ranked by similarity.
-    ///
-    /// Use cases:
-    /// - Speaker identification from a database
-    /// - Finding the most likely speaker match
-    /// - Speaker clustering analysis
-    ///
-    /// - Parameters:
-    ///   - embedding: The target speaker embedding
-    ///   - limit: Maximum number of results to return
-    /// - Returns: Array of (speaker, distance) tuples sorted by similarity
-    public func findSimilarSpeakers(
-        to embedding: [Float],
-        limit: Int = 5
-    ) -> [(speaker: Speaker, distance: Float)] {
-        var results: [(Speaker, Float)] = []
-
-        for speakerId in speakerIds {
-            if let info = getSpeakerInfo(for: speakerId) {
-                let distance = cosineDistance(embedding, info.embedding)
-                var speaker = Speaker(
-                    id: speakerId,
-                    name: speakerId,
-                    embedding: info.embedding
-                )
-                speaker.totalDuration = Double(info.totalDuration)
-                speaker.lastSeen = info.lastSeen
-                results.append((speaker, distance))
+            guard validEmbeddingCount > 0 else {
+                logger.error("No valid historical embeddings found for speaker \(speakerId)")
+                return nil
             }
-        }
 
-        return
-            results
-            .sorted { $0.1 < $1.1 }
-            .prefix(limit)
-            .map { ($0.0, $0.1) }
+            // Divide by count to get average
+            let count = Float(validEmbeddingCount)
+            for i in 0..<embeddingSize {
+                averageEmbedding[i] /= count
+            }
+
+            if averageEmbedding.isEmpty {
+                logger.error("Resulting average embedding is empty for speaker \(speakerId)")
+                return nil
+            }
+
+            speaker.mainEmbedding = averageEmbedding
+            speaker.updatedAt = Date()
+            speakerDatabase[speakerId] = speaker
+
+            let afterFirst10 = Array(speaker.mainEmbedding.prefix(10))
+            logger.info("Recalculated main embedding for \(speakerId), after: \(afterFirst10)")
+            logger.info("Used \(validEmbeddingCount) historical embeddings for recalculation")
+
+            // Return the updated Speaker object
+            return Speaker(
+                id: speaker.id,
+                name: "Speaker \(speaker.id)",
+                mainEmbedding: speaker.mainEmbedding,
+                duration: speaker.duration,
+                createdAt: speaker.createdAt,
+                updatedAt: speaker.updatedAt
+            )
+        }
+    }
+
+    // MARK: - Speaker Query Operations
+
+    /// Get the names/IDs of all current speakers.
+    ///
+    /// Returns a list of speaker identifiers from the in-memory database.
+    /// Useful for getting a quick overview of detected speakers.
+    ///
+    /// - Returns: Array of speaker IDs/names currently in the database
+    public func getCurrentSpeakerNames() -> [String] {
+        return queue.sync {
+            return Array(speakerDatabase.keys).sorted()
+        }
+    }
+
+    /// Get global speaker statistics from the in-memory database.
+    ///
+    /// Returns comprehensive statistics about all speakers including count,
+    /// total duration, and quality metrics.
+    ///
+    /// - Returns: Tuple containing (totalSpeakers, totalDuration, averageConfidence, speakersWithHistory)
+    public func getGlobalSpeakerStats() -> (
+        totalSpeakers: Int,
+        totalDuration: Float,
+        averageConfidence: Float,
+        speakersWithHistory: Int
+    ) {
+        return queue.sync { () -> (Int, Float, Float, Int) in
+            let speakers = Array(speakerDatabase.values)
+
+            guard !speakers.isEmpty else {
+                return (0, 0, 0, 0)
+            }
+
+            let totalDuration = speakers.reduce(0) { $0 + $1.duration }
+            let totalUpdates = speakers.reduce(0) { $0 + $1.updateCount }
+            let averageConfidence = Float(totalUpdates) / Float(speakers.count) / 10.0  // Normalize
+            let speakersWithHistory = speakers.filter { !$0.historicalEmbeddings.isEmpty }.count
+
+            logger.info(
+                "Global stats - Speakers: \(speakers.count), Duration: \(String(format: "%.1f", totalDuration))s, Avg confidence: \(String(format: "%.2f", averageConfidence)), With history: \(speakersWithHistory)"
+            )
+
+            return (speakers.count, totalDuration, min(1.0, averageConfidence), speakersWithHistory)
+        }
     }
 }

@@ -178,28 +178,29 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertFalse(manager.isAvailable, "Manager should not be available after cleanup")
     }
 
-    func testSpeakerComparison() async {
-        let audio1 = Array(0..<16000).map { i in
-            sin(Float(i) * 0.01) * 0.5
-        }
-        let audio2 = Array(0..<16000).map { i in
-            sin(Float(i) * 0.02) * 0.5
-        }
-
-        let config = DiarizerConfig()
-        let manager = DiarizerManager(config: config)
-
-        do {
-            let similarity = try await manager.compareSpeakerSimilarity(audio1: audio1, audio2: audio2)
-            XCTAssertGreaterThanOrEqual(similarity, 0, "Similarity should be >= 0")
-            XCTAssertLessThanOrEqual(similarity, 100, "Similarity should be <= 100")
-        } catch DiarizerError.notInitialized {
-            // Expected error in test environment
-            print("Speaker comparison failed due to not being initialized (expected)")
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
+    // Removed deprecated test for compareSpeakerSimilarity method
+    // func testSpeakerComparison() async {
+    //     let audio1 = Array(0..<16000).map { i in
+    //         sin(Float(i) * 0.01) * 0.5
+    //     }
+    //     let audio2 = Array(0..<16000).map { i in
+    //         sin(Float(i) * 0.02) * 0.5
+    //     }
+    //
+    //     let config = DiarizerConfig()
+    //     let manager = DiarizerManager(config: config)
+    //
+    //     do {
+    //         let similarity = try await manager.compareSpeakerSimilarity(audio1: audio1, audio2: audio2)
+    //         XCTAssertGreaterThanOrEqual(similarity, 0, "Similarity should be >= 0")
+    //         XCTAssertLessThanOrEqual(similarity, 100, "Similarity should be <= 100")
+    //     } catch DiarizerError.notInitialized {
+    //         // Expected error in test environment
+    //         print("Speaker comparison failed due to not being initialized (expected)")
+    //     } catch {
+    //         XCTFail("Unexpected error: \(error)")
+    //     }
+    // }
 }
 
 // MARK: - Model Loading Tests

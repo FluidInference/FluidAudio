@@ -96,25 +96,6 @@ public final class AsrManager {
         logger.info("AsrManager initialized successfully with provided models")
     }
 
-    /// Initialize ASR Manager by downloading and loading models from default location
-    /// - Note: This method is deprecated. Use AsrModels.downloadAndLoad() followed by initialize(models:) instead
-    @available(
-        *, deprecated,
-        message: "Use AsrModels.downloadAndLoad() followed by initialize(models:) for more control over model loading"
-    )
-    public func initialize() async throws {
-        logger.info("Initializing AsrManager with automatic model download (deprecated)")
-
-        do {
-            // Download and load models using the new AsrModels API
-            let models = try await AsrModels.downloadAndLoad()
-            try await initialize(models: models)
-        } catch {
-            logger.error("Failed to initialize AsrManager: \(error.localizedDescription)")
-            throw ASRError.modelLoadFailed
-        }
-    }
-
     private func createFeatureProvider(
         features: [(name: String, array: MLMultiArray)]
     ) throws

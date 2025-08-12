@@ -28,11 +28,11 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager()
         let embedding = createDistinctEmbedding(pattern: 1)
 
-        let speakerId = manager.assignSpeaker(embedding, speechDuration: 2.0)
+        let speaker = manager.assignSpeaker(embedding, speechDuration: 2.0)
 
-        XCTAssertNotNil(speakerId)
+        XCTAssertNotNil(speaker)
         XCTAssertEqual(manager.speakerCount, 1)
-        XCTAssertTrue(speakerId?.hasPrefix("Speaker_") ?? false)
+        XCTAssertTrue(speaker?.id.hasPrefix("Speaker_") ?? false)
     }
 
     func testAssignExistingSpeaker() {
@@ -40,14 +40,14 @@ final class SpeakerManagerTests: XCTestCase {
 
         // Add first speaker
         let embedding1 = createDistinctEmbedding(pattern: 1)
-        let speakerId1 = manager.assignSpeaker(embedding1, speechDuration: 2.0)
+        let speaker1 = manager.assignSpeaker(embedding1, speechDuration: 2.0)
 
         // Add nearly identical embedding - should match existing speaker
         var embedding2 = embedding1
         embedding2[0] += 0.001  // Tiny variation
-        let speakerId2 = manager.assignSpeaker(embedding2, speechDuration: 2.0)
+        let speaker2 = manager.assignSpeaker(embedding2, speechDuration: 2.0)
 
-        XCTAssertEqual(speakerId1, speakerId2)
+        XCTAssertEqual(speaker1?.id, speaker2?.id)
         XCTAssertEqual(manager.speakerCount, 1)  // Should still be 1 speaker
     }
 
@@ -58,12 +58,12 @@ final class SpeakerManagerTests: XCTestCase {
         let embedding1 = createDistinctEmbedding(pattern: 1)
         let embedding2 = createDistinctEmbedding(pattern: 2)
 
-        let speakerId1 = manager.assignSpeaker(embedding1, speechDuration: 2.0)
-        let speakerId2 = manager.assignSpeaker(embedding2, speechDuration: 2.0)
+        let speaker1 = manager.assignSpeaker(embedding1, speechDuration: 2.0)
+        let speaker2 = manager.assignSpeaker(embedding2, speechDuration: 2.0)
 
-        XCTAssertNotNil(speakerId1)
-        XCTAssertNotNil(speakerId2)
-        XCTAssertNotEqual(speakerId1, speakerId2)
+        XCTAssertNotNil(speaker1)
+        XCTAssertNotNil(speaker2)
+        XCTAssertNotEqual(speaker1?.id, speaker2?.id)
         XCTAssertEqual(manager.speakerCount, 2)
     }
 
@@ -73,8 +73,22 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager()
 
         let knownSpeakers = [
-            "Alice": createDistinctEmbedding(pattern: 10),
-            "Bob": createDistinctEmbedding(pattern: 20),
+            Speaker(
+                id: "Alice",
+                name: "Alice",
+                mainEmbedding: createDistinctEmbedding(pattern: 10),
+                duration: 0,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            Speaker(
+                id: "Bob",
+                name: "Bob",
+                mainEmbedding: createDistinctEmbedding(pattern: 20),
+                duration: 0,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
         ]
 
         manager.initializeKnownSpeakers(knownSpeakers)
@@ -88,13 +102,21 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager(speakerThreshold: 0.3)
 
         let aliceEmbedding = createDistinctEmbedding(pattern: 10)
-        manager.initializeKnownSpeakers(["Alice": aliceEmbedding])
+        let aliceSpeaker = Speaker(
+            id: "Alice",
+            name: "Alice",
+            mainEmbedding: aliceEmbedding,
+            duration: 0,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        manager.initializeKnownSpeakers([aliceSpeaker])
 
         // Test with exact same embedding
         let testEmbedding = aliceEmbedding
 
-        let assignedId = manager.assignSpeaker(testEmbedding, speechDuration: 2.0)
-        XCTAssertEqual(assignedId, "Alice")
+        let assignedSpeaker = manager.assignSpeaker(testEmbedding, speechDuration: 2.0)
+        XCTAssertEqual(assignedSpeaker?.id, "Alice")
     }
 
     func testInvalidEmbeddingSize() {
@@ -102,9 +124,9 @@ final class SpeakerManagerTests: XCTestCase {
 
         // Test with wrong size
         let invalidEmbedding = [Float](repeating: 0.5, count: 128)
-        let speakerId = manager.assignSpeaker(invalidEmbedding, speechDuration: 2.0)
+        let speaker = manager.assignSpeaker(invalidEmbedding, speechDuration: 2.0)
 
-        XCTAssertNil(speakerId)
+        XCTAssertNil(speaker)
         XCTAssertEqual(manager.speakerCount, 0)
     }
 
@@ -112,9 +134,9 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager()
 
         let emptyEmbedding = [Float]()
-        let speakerId = manager.assignSpeaker(emptyEmbedding, speechDuration: 2.0)
+        let speaker = manager.assignSpeaker(emptyEmbedding, speechDuration: 2.0)
 
-        XCTAssertNil(speakerId)
+        XCTAssertNil(speaker)
         XCTAssertEqual(manager.speakerCount, 0)
     }
 
@@ -124,15 +146,15 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager()
         let embedding = createDistinctEmbedding(pattern: 1)
 
-        let speakerId = manager.assignSpeaker(embedding, speechDuration: 3.5)
-        XCTAssertNotNil(speakerId)
+        let speaker = manager.assignSpeaker(embedding, speechDuration: 3.5)
+        XCTAssertNotNil(speaker)
 
-        if let id = speakerId {
+        if let id = speaker?.id {
             let info = manager.getSpeakerInfo(for: id)
             XCTAssertNotNil(info)
             XCTAssertEqual(info?.id, id)
-            XCTAssertEqual(info?.embedding, embedding)
-            XCTAssertEqual(info?.totalDuration, 3.5)
+            XCTAssertEqual(info?.mainEmbedding, embedding)
+            XCTAssertEqual(info?.duration, 3.5)
         }
     }
 
@@ -141,22 +163,22 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager()
         let embedding = createDistinctEmbedding(pattern: 1)
 
-        let speakerId = manager.assignSpeaker(embedding, speechDuration: 5.0)
-        XCTAssertNotNil(speakerId)
+        let speaker = manager.assignSpeaker(embedding, speechDuration: 5.0)
+        XCTAssertNotNil(speaker)
 
-        if let id = speakerId, let info = manager.getSpeakerInfo(for: id) {
+        if let id = speaker?.id, let info = manager.getSpeakerInfo(for: id) {
             // Test that all public properties are accessible
             let publicId = info.id
-            let publicEmbedding = info.embedding
-            let publicDuration = info.totalDuration
-            let publicLastSeen = info.lastSeen
+            let publicEmbedding = info.mainEmbedding
+            let publicDuration = info.duration
+            let publicUpdatedAt = info.updatedAt
             let publicUpdateCount = info.updateCount
 
             // Verify the values
             XCTAssertEqual(publicId, id)
             XCTAssertEqual(publicEmbedding, embedding)
             XCTAssertEqual(publicDuration, 5.0)
-            XCTAssertNotNil(publicLastSeen)
+            XCTAssertNotNil(publicUpdatedAt)
             XCTAssertEqual(publicUpdateCount, 1)
 
             print("✅ All SpeakerInfo members are publicly accessible")
@@ -170,14 +192,18 @@ final class SpeakerManagerTests: XCTestCase {
         let embedding1 = createDistinctEmbedding(pattern: 1)
         let embedding2 = createDistinctEmbedding(pattern: 2)
 
-        let id1 = manager.assignSpeaker(embedding1, speechDuration: 2.0)
-        let id2 = manager.assignSpeaker(embedding2, speechDuration: 3.0)
+        let speaker1 = manager.assignSpeaker(embedding1, speechDuration: 2.0)
+        let speaker2 = manager.assignSpeaker(embedding2, speechDuration: 3.0)
 
         let allInfo = manager.getAllSpeakerInfo()
 
         XCTAssertEqual(allInfo.count, 2)
-        XCTAssertNotNil(id1.flatMap { allInfo[$0] })
-        XCTAssertNotNil(id2.flatMap { allInfo[$0] })
+        if let id1 = speaker1?.id {
+            XCTAssertNotNil(allInfo[id1])
+        }
+        if let id2 = speaker2?.id {
+            XCTAssertNotNil(allInfo[id2])
+        }
     }
 
     // MARK: - Clear Operations
@@ -186,8 +212,8 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager()
 
         // Add speakers
-        manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 2.0)
-        manager.assignSpeaker(createDistinctEmbedding(pattern: 2), speechDuration: 2.0)
+        _ = manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 2.0)
+        _ = manager.assignSpeaker(createDistinctEmbedding(pattern: 2), speechDuration: 2.0)
 
         XCTAssertEqual(manager.speakerCount, 2)
 
@@ -240,8 +266,8 @@ final class SpeakerManagerTests: XCTestCase {
         let manager = SpeakerManager()
 
         // Add speakers with different durations
-        manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 10.0)
-        manager.assignSpeaker(createDistinctEmbedding(pattern: 2), speechDuration: 20.0)
+        _ = manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 10.0)
+        _ = manager.assignSpeaker(createDistinctEmbedding(pattern: 2), speechDuration: 20.0)
 
         // getStatistics method was removed - test speaker count instead
         XCTAssertEqual(manager.speakerCount, 2)
@@ -313,17 +339,17 @@ final class SpeakerManagerTests: XCTestCase {
     func testSpeakerThresholdBoundaries() {
         // Test with very low threshold (everything matches)
         let manager1 = SpeakerManager(speakerThreshold: 0.01)
-        manager1.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 2.0)
+        _ = manager1.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 2.0)
         var similarEmbedding = createDistinctEmbedding(pattern: 1)
         similarEmbedding[0] += 0.001  // Tiny variation
-        manager1.assignSpeaker(similarEmbedding, speechDuration: 2.0)
+        _ = manager1.assignSpeaker(similarEmbedding, speechDuration: 2.0)
         XCTAssertEqual(manager1.speakerCount, 1)  // Should match to same speaker
 
         // Test with high threshold (only exact matches)
         let manager2 = SpeakerManager(speakerThreshold: 0.001)  // Very small threshold
         let emb1 = createDistinctEmbedding(pattern: 1)
-        manager2.assignSpeaker(emb1, speechDuration: 2.0)
-        manager2.assignSpeaker(emb1, speechDuration: 2.0)  // Exact same embedding
+        _ = manager2.assignSpeaker(emb1, speechDuration: 2.0)
+        _ = manager2.assignSpeaker(emb1, speechDuration: 2.0)  // Exact same embedding
         XCTAssertEqual(manager2.speakerCount, 1)  // Should match to same speaker
     }
 
@@ -337,17 +363,17 @@ final class SpeakerManagerTests: XCTestCase {
         let embedding = createDistinctEmbedding(pattern: 1)
 
         // Test with duration below threshold - should not create new speaker
-        let id1 = manager.assignSpeaker(embedding, speechDuration: 0.5)
-        XCTAssertNil(id1)  // Should return nil for short duration
+        let speaker1 = manager.assignSpeaker(embedding, speechDuration: 0.5)
+        XCTAssertNil(speaker1)  // Should return nil for short duration
         XCTAssertEqual(manager.speakerCount, 0)  // No speaker created
 
         // Test with duration above threshold - should create speaker
-        let id2 = manager.assignSpeaker(embedding, speechDuration: 3.0)
-        XCTAssertNotNil(id2)
+        let speaker2 = manager.assignSpeaker(embedding, speechDuration: 3.0)
+        XCTAssertNotNil(speaker2)
         XCTAssertEqual(manager.speakerCount, 1)  // One speaker created
 
         // Test again with short duration on existing speaker
-        let id3 = manager.assignSpeaker(embedding, speechDuration: 0.5)
-        XCTAssertEqual(id3, id2)  // Should match existing speaker even with short duration
+        let speaker3 = manager.assignSpeaker(embedding, speechDuration: 0.5)
+        XCTAssertEqual(speaker3?.id, speaker2?.id)  // Should match existing speaker even with short duration
     }
 }
