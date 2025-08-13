@@ -11,7 +11,7 @@ Fluid Audio is a Swift framework for fully local, low-latency audio processing o
 
 Our models are optimized for background processing on CPU, avoiding GPU/MPS/Shaders to ensure reliable performance. While we've tested CPU/GPU-based alternatives, they proved too slow or resource-intensive for our near real-time requirements.
 
-For custom use cases and feedback, reach out on Discord.
+For custom use cases, feedback, more model support, and other platform requests, join our Discord. We’re also working on porting video, language, and TTS models to run on device, and will share updates there.
 
 ## Features
 
@@ -62,12 +62,6 @@ For claude code:
 ```bash
 claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 ```
-
-
-## 🚀 Roadmap
-
-**Coming Soon:**
-- **System Audio Access**: Tap into system audio via CoreAudio for MacOS, don't need to use ScreenCaptureKit or Blackhole
 
 ## Speaker Diarization
 
