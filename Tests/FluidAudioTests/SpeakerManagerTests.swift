@@ -150,7 +150,7 @@ final class SpeakerManagerTests: XCTestCase {
         XCTAssertNotNil(speaker)
 
         if let id = speaker?.id {
-            let info = manager.getSpeakerInfo(for: id)
+            let info = manager.getSpeaker(for: id)
             XCTAssertNotNil(info)
             XCTAssertEqual(info?.id, id)
             XCTAssertEqual(info?.currentEmbedding, embedding)
@@ -166,7 +166,7 @@ final class SpeakerManagerTests: XCTestCase {
         let speaker = manager.assignSpeaker(embedding, speechDuration: 5.0)
         XCTAssertNotNil(speaker)
 
-        if let id = speaker?.id, let info = manager.getSpeakerInfo(for: id) {
+        if let id = speaker?.id, let info = manager.getSpeaker(for: id) {
             // Test that all public properties are accessible
             let publicId = info.id
             let publicEmbedding = info.currentEmbedding
@@ -195,7 +195,7 @@ final class SpeakerManagerTests: XCTestCase {
         let speaker1 = manager.assignSpeaker(embedding1, speechDuration: 2.0)
         let speaker2 = manager.assignSpeaker(embedding2, speechDuration: 3.0)
 
-        let allInfo = manager.getAllSpeakerInfo()
+        let allInfo = manager.getAllSpeakers()
 
         XCTAssertEqual(allInfo.count, 2)
         if let id1 = speaker1?.id {
@@ -273,7 +273,7 @@ final class SpeakerManagerTests: XCTestCase {
         XCTAssertEqual(manager.speakerCount, 2)
 
         // Verify speakers were added with correct info
-        let allInfo = manager.getAllSpeakerInfo()
+        let allInfo = manager.getAllSpeakers()
         XCTAssertEqual(allInfo.count, 2)
     }
 
@@ -349,7 +349,7 @@ final class SpeakerManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.speakerCount, 1)
 
-        let info = manager.getSpeakerInfo(for: "TestSpeaker1")
+        let info = manager.getSpeaker(for: "TestSpeaker1")
         XCTAssertNotNil(info)
         XCTAssertEqual(info?.id, "TestSpeaker1")
         XCTAssertEqual(info?.currentEmbedding, embedding)
@@ -369,7 +369,7 @@ final class SpeakerManagerTests: XCTestCase {
             duration: 5.0
         )
 
-        let originalInfo = manager.getSpeakerInfo(for: "TestSpeaker1")
+        let originalInfo = manager.getSpeaker(for: "TestSpeaker1")
         let originalCreatedAt = originalInfo?.createdAt
 
         // Wait a bit to ensure different timestamp
@@ -385,7 +385,7 @@ final class SpeakerManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.speakerCount, 1)  // Should still be 1 speaker
 
-        let updatedInfo = manager.getSpeakerInfo(for: "TestSpeaker1")
+        let updatedInfo = manager.getSpeaker(for: "TestSpeaker1")
         XCTAssertNotNil(updatedInfo)
         XCTAssertEqual(updatedInfo?.id, "TestSpeaker1")
         XCTAssertEqual(updatedInfo?.currentEmbedding, embedding2)
@@ -410,13 +410,13 @@ final class SpeakerManagerTests: XCTestCase {
 
         // Add some raw embeddings
         let rawEmbedding = RawEmbedding(embedding: embedding)
-        speaker.addHistoricalEmbedding(rawEmbedding)
+        speaker.addRawEmbedding(rawEmbedding)
 
         manager.upsertSpeaker(speaker)
 
         XCTAssertEqual(manager.speakerCount, 1)
 
-        let info = manager.getSpeakerInfo(for: "Alice")
+        let info = manager.getSpeaker(for: "Alice")
         XCTAssertNotNil(info)
         XCTAssertEqual(info?.id, "Alice")
         XCTAssertEqual(info?.currentEmbedding, embedding)

@@ -10,8 +10,8 @@ public class SpeakerManager {
     // Constants
     public static let EMBEDDING_SIZE = 256  // Standard embedding dimension for speaker models
 
-    // Speaker database: ID -> representative embedding
-    internal var speakerDatabase: [String: SpeakerInfo] = [:]
+    // Speaker database: ID -> Speaker
+    internal var speakerDatabase: [String: Speaker] = [:]
     private var nextSpeakerId = 1
     internal let queue = DispatchQueue(label: "speaker.manager.queue", attributes: .concurrent)
 
@@ -22,29 +22,6 @@ public class SpeakerManager {
     public var embeddingThreshold: Float  // Max distance for updating embeddings (default: 0.45)
     public var minSpeechDuration: Float  // Min duration to create speaker (default: 1.0)
     public var minEmbeddingUpdateDuration: Float  // Min duration to update embeddings (default: 2.0)
-
-    public struct SpeakerInfo {
-        public let id: String
-        public var currentEmbedding: [Float]
-        public var duration: Float
-        public var createdAt: Date
-        public var updatedAt: Date
-        public var updateCount: Int
-        public var rawEmbeddings: [RawEmbedding]
-
-        public init(
-            id: String, currentEmbedding: [Float], duration: Float, createdAt: Date? = nil, updatedAt: Date? = nil
-        ) {
-            let now = Date()
-            self.id = id
-            self.currentEmbedding = currentEmbedding
-            self.duration = duration
-            self.createdAt = createdAt ?? now
-            self.updatedAt = updatedAt ?? now
-            self.updateCount = 1
-            self.rawEmbeddings = []
-        }
-    }
 
     public init(
         speakerThreshold: Float = 0.65,
@@ -69,18 +46,7 @@ public class SpeakerManager {
                     continue
                 }
 
-                var speakerInfo = SpeakerInfo(
-                    id: speaker.id,
-                    currentEmbedding: speaker.currentEmbedding,
-                    duration: speaker.duration,
-                    createdAt: speaker.createdAt,
-                    updatedAt: speaker.updatedAt
-                )
-
-                speakerInfo.rawEmbeddings = speaker.rawEmbeddings
-                speakerInfo.updateCount = speaker.updateCount
-
-                speakerDatabase[speaker.id] = speakerInfo
+                speakerDatabase[speaker.id] = speaker
 
                 if speaker.id.hasPrefix("Speaker_"),
                     let numericPart = speaker.id.split(separator: "_").last,
@@ -90,7 +56,7 @@ public class SpeakerManager {
                 }
 
                 logger.info(
-                    "Initialized known speaker: \(speaker.id) with \(speaker.rawEmbeddings.count) historical embeddings"
+                    "Initialized known speaker: \(speaker.id) with \(speaker.rawEmbeddings.count) raw embeddings"
                 )
             }
 
@@ -124,15 +90,8 @@ public class SpeakerManager {
                     distance: distance
                 )
 
-                if let speakerInfo = speakerDatabase[speakerId] {
-                    return Speaker(
-                        id: speakerInfo.id,
-                        name: "Speaker \(speakerInfo.id)",
-                        currentEmbedding: speakerInfo.currentEmbedding,
-                        duration: speakerInfo.duration,
-                        createdAt: speakerInfo.createdAt,
-                        updatedAt: speakerInfo.updatedAt
-                    )
+                if let speaker = speakerDatabase[speakerId] {
+                    return speaker
                 }
                 return nil
             }
@@ -145,16 +104,9 @@ public class SpeakerManager {
                     distanceToClosest: distance
                 )
 
-                // Return the full Speaker object
-                if let speakerInfo = speakerDatabase[newSpeakerId] {
-                    return Speaker(
-                        id: speakerInfo.id,
-                        name: "Speaker \(speakerInfo.id)",
-                        currentEmbedding: speakerInfo.currentEmbedding,
-                        duration: speakerInfo.duration,
-                        createdAt: speakerInfo.createdAt,
-                        updatedAt: speakerInfo.updatedAt
-                    )
+                // Return the Speaker object
+                if let speaker = speakerDatabase[newSpeakerId] {
+                    return speaker
                 }
                 return nil
             }
@@ -169,8 +121,8 @@ public class SpeakerManager {
         var minDistance: Float = Float.infinity
         var closestSpeakerId: String?
 
-        for (speakerId, speakerInfo) in speakerDatabase {
-            let distance = cosineDistance(embedding, speakerInfo.currentEmbedding)
+        for (speakerId, speaker) in speakerDatabase {
+            let distance = cosineDistance(embedding, speaker.currentEmbedding)
             if distance < minDistance {
                 minDistance = distance
                 closestSpeakerId = speakerId
@@ -186,7 +138,7 @@ public class SpeakerManager {
         duration: Float,
         distance: Float
     ) {
-        guard var speakerInfo = speakerDatabase[speakerId] else {
+        guard let speaker = speakerDatabase[speakerId] else {
             logger.error("Speaker \(speakerId) not found in database")
             return
         }
@@ -195,31 +147,25 @@ public class SpeakerManager {
         if distance < embeddingThreshold && duration >= minEmbeddingUpdateDuration {
             let embeddingMagnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
             if embeddingMagnitude > 0.1 {
-                // Add to historical embeddings (with FIFO management - max 50)
-                let historical = RawEmbedding(segmentId: UUID(), embedding: embedding)
-                if speakerInfo.rawEmbeddings.count >= 50 {
-                    speakerInfo.rawEmbeddings.removeFirst()
-                }
-                speakerInfo.rawEmbeddings.append(historical)
+                // Use Speaker's built-in method to update embedding
+                speaker.updateMainEmbedding(
+                    duration: duration,
+                    embedding: embedding,
+                    segmentId: UUID(),
+                    alpha: 0.9
+                )
 
-                // Update main embedding using exponential moving average
-                let alpha: Float = 0.9
-                for i in 0..<speakerInfo.currentEmbedding.count {
-                    speakerInfo.currentEmbedding[i] =
-                        alpha * speakerInfo.currentEmbedding[i] + (1 - alpha) * embedding[i]
-                }
-
-                speakerInfo.updateCount += 1
                 logger.debug(
-                    "Updated embedding for \(speakerId), update count: \(speakerInfo.updateCount), historical count: \(speakerInfo.rawEmbeddings.count)"
+                    "Updated embedding for \(speakerId), update count: \(speaker.updateCount), raw count: \(speaker.rawEmbeddings.count)"
                 )
             }
+        } else {
+            // Just update duration if not updating embedding
+            speaker.duration += duration
+            speaker.updatedAt = Date()
         }
 
-        // Always update speaker stats regardless of embedding update
-        speakerInfo.updatedAt = Date()
-        speakerInfo.duration += duration
-        speakerDatabase[speakerId] = speakerInfo
+        speakerDatabase[speakerId] = speaker
     }
 
     private func createNewSpeaker(
@@ -231,15 +177,19 @@ public class SpeakerManager {
         nextSpeakerId += 1
         highestSpeakerId = max(highestSpeakerId, nextSpeakerId - 1)
 
-        // Create speaker with initial historical embedding
-        let initialHistorical = RawEmbedding(segmentId: UUID(), embedding: embedding)
-        var newSpeakerInfo = SpeakerInfo(
+        // Create new Speaker object
+        let newSpeaker = Speaker(
             id: newSpeakerId,
+            name: newSpeakerId,  // Default name is the ID, can be updated later
             currentEmbedding: embedding,
             duration: duration
         )
-        newSpeakerInfo.rawEmbeddings = [initialHistorical]
-        speakerDatabase[newSpeakerId] = newSpeakerInfo
+
+        // Add initial raw embedding
+        let initialRaw = RawEmbedding(segmentId: UUID(), embedding: embedding, timestamp: Date())
+        newSpeaker.addRawEmbedding(initialRaw)
+
+        speakerDatabase[newSpeakerId] = newSpeaker
 
         logger.info("Created new speaker \(newSpeakerId) (distance to closest: \(distanceToClosest))")
         return newSpeakerId
@@ -279,19 +229,17 @@ public class SpeakerManager {
         queue.sync { Array(speakerDatabase.keys).sorted() }
     }
 
-    /// Get all speaker info (for testing/debugging).
-    public func getAllSpeakerInfo() -> [String: SpeakerInfo] {
+    /// Get all speakers (for testing/debugging).
+    public func getAllSpeakers() -> [String: Speaker] {
         queue.sync {
             return speakerDatabase
         }
     }
 
-    public func getSpeakerInfo(for speakerId: String) -> SpeakerInfo? {
+    public func getSpeaker(for speakerId: String) -> Speaker? {
         queue.sync { speakerDatabase[speakerId] }
     }
 
-    /// Upsert a speaker from a Speaker object
-    ///
     /// - Parameter speaker: The Speaker object to upsert
     public func upsertSpeaker(_ speaker: Speaker) {
         upsertSpeaker(
@@ -311,7 +259,7 @@ public class SpeakerManager {
     ///   - id: The speaker ID
     ///   - currentEmbedding: The current embedding for the speaker
     ///   - duration: The total duration of speech
-    ///   - rawEmbeddings: Historical embeddings for the speaker
+    ///   - rawEmbeddings: Raw embeddings for the speaker
     ///   - updateCount: Number of updates to this speaker
     ///   - createdAt: Creation timestamp
     ///   - updatedAt: Last update timestamp
@@ -327,32 +275,32 @@ public class SpeakerManager {
         queue.sync(flags: .barrier) {
             let now = Date()
 
-            if var existingSpeaker = speakerDatabase[id] {
+            if let existingSpeaker = speakerDatabase[id] {
                 // Update existing speaker
                 existingSpeaker.currentEmbedding = currentEmbedding
                 existingSpeaker.duration = duration
                 existingSpeaker.rawEmbeddings = rawEmbeddings
                 existingSpeaker.updateCount = updateCount
                 existingSpeaker.updatedAt = updatedAt ?? now
-                // Keep original createdAt
+                // Keep original createdAt and name
 
                 speakerDatabase[id] = existingSpeaker
                 logger.info("Updated existing speaker: \(id)")
             } else {
                 // Insert new speaker
-                let newSpeaker = SpeakerInfo(
+                let newSpeaker = Speaker(
                     id: id,
+                    name: id,  // Default name is the ID
                     currentEmbedding: currentEmbedding,
                     duration: duration,
                     createdAt: createdAt ?? now,
                     updatedAt: updatedAt ?? now
                 )
 
-                var mutableSpeaker = newSpeaker
-                mutableSpeaker.rawEmbeddings = rawEmbeddings
-                mutableSpeaker.updateCount = updateCount
+                newSpeaker.rawEmbeddings = rawEmbeddings
+                newSpeaker.updateCount = updateCount
 
-                speakerDatabase[id] = mutableSpeaker
+                speakerDatabase[id] = newSpeaker
 
                 // Update tracking for numeric IDs
                 if id.hasPrefix("Speaker_"),

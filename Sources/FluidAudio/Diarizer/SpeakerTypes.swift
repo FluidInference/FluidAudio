@@ -38,8 +38,6 @@ public final class Speaker: Identifiable, Codable, Sendable {
         return SendableSpeaker(from: self)
     }
 
-    // MARK: - Embedding Management Methods
-
     /// Update main embedding with new segment data using exponential moving average
     public func updateMainEmbedding(
         duration: Float,
@@ -54,13 +52,13 @@ public final class Speaker: Identifiable, Codable, Sendable {
         let embeddingMagnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
         guard embeddingMagnitude > 0.1 else { return }
 
-        // Add to historical embeddings
-        let historicalEmbedding = RawEmbedding(
+        // Add to raw embeddings
+        let rawEmbedding = RawEmbedding(
             segmentId: segmentId,
             embedding: embedding,
             timestamp: Date()
         )
-        addHistoricalEmbedding(historicalEmbedding)
+        addRawEmbedding(rawEmbedding)
 
         // Update main embedding using exponential moving average
         if currentEmbedding.count == embedding.count {
@@ -75,13 +73,13 @@ public final class Speaker: Identifiable, Codable, Sendable {
         self.updateCount += 1
     }
 
-    /// Add a historical embedding with FIFO queue management
-    public func addHistoricalEmbedding(_ embedding: RawEmbedding) {
+    /// Add a raw embedding with FIFO queue management
+    public func addRawEmbedding(_ embedding: RawEmbedding) {
         // Validate embedding quality
         let embeddingMagnitude = sqrt(embedding.embedding.map { $0 * $0 }.reduce(0, +))
         guard embeddingMagnitude > 0.1 else { return }
 
-        // Maintain max of 50 historical embeddings (FIFO)
+        // Maintain max of 50 raw embeddings (FIFO)
         if rawEmbeddings.count >= 50 {
             rawEmbeddings.removeFirst()
         }
@@ -90,9 +88,9 @@ public final class Speaker: Identifiable, Codable, Sendable {
         recalculateMainEmbedding()
     }
 
-    /// Remove a historical embedding by segment ID
+    /// Remove a raw embedding by segment ID
     @discardableResult
-    public func removeHistoricalEmbedding(segmentId: UUID) -> RawEmbedding? {
+    public func removeRawEmbedding(segmentId: UUID) -> RawEmbedding? {
         guard let index = rawEmbeddings.firstIndex(where: { $0.segmentId == segmentId }) else {
             return nil
         }
@@ -102,7 +100,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
         return removed
     }
 
-    /// Recalculate main embedding as average of all historical embeddings
+    /// Recalculate main embedding as average of all raw embeddings
     public func recalculateMainEmbedding() {
         guard !rawEmbeddings.isEmpty,
             let firstEmbedding = rawEmbeddings.first,
@@ -112,12 +110,12 @@ public final class Speaker: Identifiable, Codable, Sendable {
         let embeddingSize = firstEmbedding.embedding.count
         var averageEmbedding = [Float](repeating: 0.0, count: embeddingSize)
 
-        // Calculate average of all historical embeddings
+        // Calculate average of all raw embeddings
         var validCount = 0
-        for historical in rawEmbeddings {
-            if historical.embedding.count == embeddingSize {
+        for raw in rawEmbeddings {
+            if raw.embedding.count == embeddingSize {
                 for i in 0..<embeddingSize {
-                    averageEmbedding[i] += historical.embedding[i]
+                    averageEmbedding[i] += raw.embedding[i]
                 }
                 validCount += 1
             }
@@ -137,7 +135,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
 
     /// Merge another speaker into this one
     public func mergeWith(_ other: Speaker, keepName: String? = nil) {
-        // Merge historical embeddings
+        // Merge raw embeddings
         var allEmbeddings = rawEmbeddings + other.rawEmbeddings
 
         // Keep only the most recent 50 embeddings
@@ -210,7 +208,7 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
-    
+
     // Convenience init from FluidAudio's Speaker type
     public init(from speaker: Speaker) {
         self.id = Int(speaker.id.split(separator: "_").last.flatMap { Int($0) } ?? 0)

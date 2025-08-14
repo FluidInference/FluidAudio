@@ -149,7 +149,7 @@ public final class DiarizerManager {
             )
 
             // Build speakerDatabase from speakerManager for debug output
-            let speakerDB = speakerManager.getAllSpeakerInfo().reduce(into: [String: [Float]]()) { result, item in
+            let speakerDB = speakerManager.getAllSpeakers().reduce(into: [String: [Float]]()) { result, item in
                 result[item.key] = item.value.currentEmbedding
             }
 
