@@ -149,7 +149,7 @@ public struct DiarizationResult: Sendable {
 public struct TimedSpeakerSegment: Sendable, Identifiable {
     public let id = UUID()
     public let speakerId: String
-    public let mainEmbedding: [Float]
+    public let embedding: [Float]
     public let startTimeSeconds: Float
     public let endTimeSeconds: Float
     public let qualityScore: Float
@@ -159,11 +159,11 @@ public struct TimedSpeakerSegment: Sendable, Identifiable {
     }
 
     public init(
-        speakerId: String, mainEmbedding: [Float], startTimeSeconds: Float, endTimeSeconds: Float,
+        speakerId: String, embedding: [Float], startTimeSeconds: Float, endTimeSeconds: Float,
         qualityScore: Float
     ) {
         self.speakerId = speakerId
-        self.mainEmbedding = mainEmbedding
+        self.embedding = embedding
         self.startTimeSeconds = startTimeSeconds
         self.endTimeSeconds = endTimeSeconds
         self.qualityScore = qualityScore

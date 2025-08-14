@@ -150,7 +150,7 @@ public final class DiarizerManager {
 
             // Build speakerDatabase from speakerManager for debug output
             let speakerDB = speakerManager.getAllSpeakerInfo().reduce(into: [String: [Float]]()) { result, item in
-                result[item.key] = item.value.mainEmbedding
+                result[item.key] = item.value.currentEmbedding
             }
 
             return DiarizationResult(
@@ -413,7 +413,7 @@ public final class DiarizerManager {
 
         return TimedSpeakerSegment(
             speakerId: speakerIds[speakerIndex],
-            mainEmbedding: embedding,
+            embedding: embedding,
             startTimeSeconds: Float(startTime),
             endTimeSeconds: Float(endTime),
             qualityScore: quality

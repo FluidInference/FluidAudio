@@ -170,7 +170,7 @@ public enum SpeakerUtilities {
         var closestSpeaker: Speaker?
 
         for candidate in candidates {
-            let distance = cosineDistance(embedding, candidate.mainEmbedding)
+            let distance = cosineDistance(embedding, candidate.currentEmbedding)
             if distance < minDistance {
                 minDistance = distance
                 closestSpeaker = candidate
@@ -264,7 +264,7 @@ public enum SpeakerUtilities {
             return Speaker(
                 id: params.id,
                 name: params.name,
-                mainEmbedding: params.embedding,
+                currentEmbedding: params.embedding,
                 duration: params.duration,
                 createdAt: params.createdAt,
                 updatedAt: params.updatedAt
@@ -301,7 +301,151 @@ public enum SpeakerUtilities {
 
         return updated
     }
+    
 
+    // MARK: - Historical Embedding Management
+    
+    /// Adds a historical embedding with validation and FIFO management
+    /// Returns the updated array and whether recalculation is needed
+    public static func addHistoricalEmbedding(
+        to historicalEmbeddings: [RawEmbedding],
+        segmentId: UUID,
+        embedding: [Float],
+        timestamp: Date = Date(),
+        maxCapacity: Int = 50
+    ) -> (updated: [RawEmbedding], shouldRecalculate: Bool)? {
+        // Validate the embedding
+        guard validateEmbedding(embedding) else {
+            logger.warning("Invalid embedding for segment \(segmentId)")
+            return nil
+        }
+        
+        // Create the new historical embedding
+        let newEmbedding = RawEmbedding(
+            segmentId: segmentId,
+            embedding: embedding,
+            timestamp: timestamp
+        )
+        
+        // FIFO queue management - inline for simplicity
+        var updated = historicalEmbeddings
+        if updated.count >= maxCapacity {
+            updated.removeFirst()
+        }
+        updated.append(newEmbedding)
+        
+        // Should recalculate if we have enough data
+        let shouldRecalculate = updated.count >= 3  // Need at least 3 for meaningful average
+        
+        return (updated, shouldRecalculate)
+    }
+    
+    /// Removes a historical embedding by segment ID
+    /// Returns the updated array and the removed embedding if found
+    public static func removeHistoricalEmbedding(
+        from historicalEmbeddings: [RawEmbedding],
+        segmentId: UUID
+    ) -> (updated: [RawEmbedding], removed: RawEmbedding?, shouldRecalculate: Bool) {
+        var updated = historicalEmbeddings
+        
+        if let index = updated.firstIndex(where: { $0.segmentId == segmentId }) {
+            let removed = updated.remove(at: index)
+            let shouldRecalculate = !updated.isEmpty
+            return (updated, removed, shouldRecalculate)
+        }
+        
+        return (historicalEmbeddings, nil, false)
+    }
+    
+    // MARK: - Complete Speaker Update Operations
+    
+    /// Complete speaker update operation including historical tracking
+    public struct SpeakerUpdateResult {
+        public let updatedMainEmbedding: [Float]?
+        public let updatedHistoricalEmbeddings: [RawEmbedding]
+        public let updatedDuration: Float
+        public let shouldRecalculate: Bool
+    }
+    
+    /// Updates a speaker with new segment data - handles both main and historical embeddings
+    public static func updateSpeakerWithSegment(
+        currentMainEmbedding: [Float],
+        currentHistoricalEmbeddings: [RawEmbedding],
+        currentDuration: Float,
+        segmentDuration: Float,
+        segmentEmbedding: [Float],
+        segmentId: UUID,
+        alpha: Float = 0.9,
+        minSegmentDuration: Float = 2.0
+    ) -> SpeakerUpdateResult? {
+        // Validate segment duration
+        guard segmentDuration >= minSegmentDuration else {
+            return nil
+        }
+        
+        // Validate embedding
+        guard validateEmbedding(segmentEmbedding) else {
+            return nil
+        }
+        
+        // Add to historical embeddings
+        guard let (updatedHistorical, shouldRecalc) = addHistoricalEmbedding(
+            to: currentHistoricalEmbeddings,
+            segmentId: segmentId,
+            embedding: segmentEmbedding,
+            timestamp: Date()
+        ) else {
+            return nil
+        }
+        
+        // Update main embedding using exponential moving average
+        let updatedMain = updateEmbedding(
+            current: currentMainEmbedding,
+            new: segmentEmbedding,
+            alpha: alpha
+        )
+        
+        // Calculate new duration
+        let newDuration = currentDuration + segmentDuration
+        
+        return SpeakerUpdateResult(
+            updatedMainEmbedding: updatedMain,
+            updatedHistoricalEmbeddings: updatedHistorical,
+            updatedDuration: newDuration,
+            shouldRecalculate: shouldRecalc
+        )
+    }
+    
+    /// Merge two speakers' data
+    public static func mergeSpeakers(
+        speaker1Historical: [RawEmbedding],
+        speaker1Duration: Float,
+        speaker2Historical: [RawEmbedding],
+        speaker2Duration: Float,
+        maxCapacity: Int = 50
+    ) -> (mergedHistorical: [RawEmbedding], mergedDuration: Float, newMainEmbedding: [Float]?) {
+        // Merge historical embeddings
+        var allEmbeddings = speaker1Historical + speaker2Historical
+        
+        // Keep only the most recent embeddings if over capacity
+        if allEmbeddings.count > maxCapacity {
+            allEmbeddings = Array(
+                allEmbeddings
+                    .sorted { $0.timestamp > $1.timestamp }
+                    .prefix(maxCapacity)
+            )
+        }
+        
+        // Calculate new main embedding from merged history
+        let embeddingArrays = allEmbeddings.map { $0.embedding }
+        let newMainEmbedding = averageEmbeddings(embeddingArrays)
+        
+        // Merge durations
+        let mergedDuration = speaker1Duration + speaker2Duration
+        
+        return (allEmbeddings, mergedDuration, newMainEmbedding)
+    }
+    
     /// Calculate average of multiple embeddings
     public static func averageEmbeddings(_ embeddings: [[Float]]) -> [Float]? {
         guard !embeddings.isEmpty,
@@ -362,16 +506,16 @@ extension SpeakerManager {
             }
 
             // Find and remove the embedding from source speaker
-            guard let index = fromSpeakerInfo.historicalEmbeddings.firstIndex(where: { $0.segmentId == segmentId })
+            guard let index = fromSpeakerInfo.rawEmbeddings.firstIndex(where: { $0.segmentId == segmentId })
             else {
                 logger.warning("Segment \(segmentId) not found in speaker \(fromSpeakerId)")
                 return false
             }
 
-            let embedding = fromSpeakerInfo.historicalEmbeddings.remove(at: index)
+            let embedding = fromSpeakerInfo.rawEmbeddings.remove(at: index)
 
             // Add to destination speaker
-            toSpeakerInfo.historicalEmbeddings.append(embedding)
+            toSpeakerInfo.rawEmbeddings.append(embedding)
 
             // Update both speakers in database
             speakerDatabase[fromSpeakerId] = fromSpeakerInfo
@@ -422,7 +566,7 @@ extension SpeakerManager {
             let totalDuration = speakers.reduce(0) { $0 + $1.duration }
             let totalUpdates = speakers.reduce(0) { $0 + $1.updateCount }
             let averageConfidence = Float(totalUpdates) / Float(speakers.count) / 10.0  // Normalize
-            let speakersWithHistory = speakers.filter { !$0.historicalEmbeddings.isEmpty }.count
+            let speakersWithHistory = speakers.filter { !$0.rawEmbeddings.isEmpty }.count
 
             logger.info(
                 "Global stats - Speakers: \(speakers.count), Duration: \(String(format: "%.1f", totalDuration))s, Avg confidence: \(String(format: "%.2f", averageConfidence)), With history: \(speakersWithHistory)"

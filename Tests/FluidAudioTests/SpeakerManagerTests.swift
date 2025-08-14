@@ -76,7 +76,7 @@ final class SpeakerManagerTests: XCTestCase {
             Speaker(
                 id: "Alice",
                 name: "Alice",
-                mainEmbedding: createDistinctEmbedding(pattern: 10),
+                currentEmbedding: createDistinctEmbedding(pattern: 10),
                 duration: 0,
                 createdAt: Date(),
                 updatedAt: Date()
@@ -84,7 +84,7 @@ final class SpeakerManagerTests: XCTestCase {
             Speaker(
                 id: "Bob",
                 name: "Bob",
-                mainEmbedding: createDistinctEmbedding(pattern: 20),
+                currentEmbedding: createDistinctEmbedding(pattern: 20),
                 duration: 0,
                 createdAt: Date(),
                 updatedAt: Date()
@@ -105,7 +105,7 @@ final class SpeakerManagerTests: XCTestCase {
         let aliceSpeaker = Speaker(
             id: "Alice",
             name: "Alice",
-            mainEmbedding: aliceEmbedding,
+            currentEmbedding: aliceEmbedding,
             duration: 0,
             createdAt: Date(),
             updatedAt: Date()
@@ -153,7 +153,7 @@ final class SpeakerManagerTests: XCTestCase {
             let info = manager.getSpeakerInfo(for: id)
             XCTAssertNotNil(info)
             XCTAssertEqual(info?.id, id)
-            XCTAssertEqual(info?.mainEmbedding, embedding)
+            XCTAssertEqual(info?.currentEmbedding, embedding)
             XCTAssertEqual(info?.duration, 3.5)
         }
     }
@@ -169,7 +169,7 @@ final class SpeakerManagerTests: XCTestCase {
         if let id = speaker?.id, let info = manager.getSpeakerInfo(for: id) {
             // Test that all public properties are accessible
             let publicId = info.id
-            let publicEmbedding = info.mainEmbedding
+            let publicEmbedding = info.currentEmbedding
             let publicDuration = info.duration
             let publicUpdatedAt = info.updatedAt
             let publicUpdateCount = info.updateCount
@@ -332,6 +332,96 @@ final class SpeakerManagerTests: XCTestCase {
         }
 
         wait(for: [expectation], timeout: 5.0)
+    }
+
+    // MARK: - Upsert Tests
+
+    func testUpsertNewSpeaker() {
+        let manager = SpeakerManager()
+        let embedding = createDistinctEmbedding(pattern: 1)
+
+        // Upsert a new speaker
+        manager.upsertSpeaker(
+            id: "TestSpeaker1",
+            currentEmbedding: embedding,
+            duration: 5.0
+        )
+
+        XCTAssertEqual(manager.speakerCount, 1)
+
+        let info = manager.getSpeakerInfo(for: "TestSpeaker1")
+        XCTAssertNotNil(info)
+        XCTAssertEqual(info?.id, "TestSpeaker1")
+        XCTAssertEqual(info?.currentEmbedding, embedding)
+        XCTAssertEqual(info?.duration, 5.0)
+        XCTAssertEqual(info?.updateCount, 1)
+    }
+
+    func testUpsertExistingSpeaker() {
+        let manager = SpeakerManager()
+        let embedding1 = createDistinctEmbedding(pattern: 1)
+        let embedding2 = createDistinctEmbedding(pattern: 2)
+
+        // Insert initial speaker
+        manager.upsertSpeaker(
+            id: "TestSpeaker1",
+            currentEmbedding: embedding1,
+            duration: 5.0
+        )
+
+        let originalInfo = manager.getSpeakerInfo(for: "TestSpeaker1")
+        let originalCreatedAt = originalInfo?.createdAt
+
+        // Wait a bit to ensure different timestamp
+        Thread.sleep(forTimeInterval: 0.01)
+
+        // Update the same speaker
+        manager.upsertSpeaker(
+            id: "TestSpeaker1",
+            currentEmbedding: embedding2,
+            duration: 10.0,
+            updateCount: 5
+        )
+
+        XCTAssertEqual(manager.speakerCount, 1)  // Should still be 1 speaker
+
+        let updatedInfo = manager.getSpeakerInfo(for: "TestSpeaker1")
+        XCTAssertNotNil(updatedInfo)
+        XCTAssertEqual(updatedInfo?.id, "TestSpeaker1")
+        XCTAssertEqual(updatedInfo?.currentEmbedding, embedding2)
+        XCTAssertEqual(updatedInfo?.duration, 10.0)
+        XCTAssertEqual(updatedInfo?.updateCount, 5)
+        // CreatedAt should remain the same
+        XCTAssertEqual(updatedInfo?.createdAt, originalCreatedAt)
+        // UpdatedAt should be different
+        XCTAssertNotEqual(updatedInfo?.updatedAt, originalCreatedAt)
+    }
+
+    func testUpsertWithSpeakerObject() {
+        let manager = SpeakerManager()
+        let embedding = createDistinctEmbedding(pattern: 1)
+
+        let speaker = Speaker(
+            id: "Alice",
+            name: "Alice",
+            currentEmbedding: embedding,
+            duration: 7.5
+        )
+
+        // Add some raw embeddings
+        let rawEmbedding = RawEmbedding(embedding: embedding)
+        speaker.addHistoricalEmbedding(rawEmbedding)
+
+        manager.upsertSpeaker(speaker)
+
+        XCTAssertEqual(manager.speakerCount, 1)
+
+        let info = manager.getSpeakerInfo(for: "Alice")
+        XCTAssertNotNil(info)
+        XCTAssertEqual(info?.id, "Alice")
+        XCTAssertEqual(info?.currentEmbedding, embedding)
+        XCTAssertEqual(info?.duration, 7.5)
+        XCTAssertEqual(info?.rawEmbeddings.count, 1)
     }
 
     // MARK: - Edge Cases

@@ -129,7 +129,7 @@ extension TimedSpeakerSegment: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(speakerId, forKey: .speakerId)
-        try container.encode(mainEmbedding, forKey: .embedding)
+        try container.encode(embedding, forKey: .embedding)
         try container.encode(startTimeSeconds, forKey: .startTimeSeconds)
         try container.encode(endTimeSeconds, forKey: .endTimeSeconds)
         try container.encode(qualityScore, forKey: .qualityScore)
@@ -145,7 +145,7 @@ extension TimedSpeakerSegment: Codable {
 
         self.init(
             speakerId: speakerId,
-            mainEmbedding: embedding,
+            embedding: embedding,
             startTimeSeconds: startTimeSeconds,
             endTimeSeconds: endTimeSeconds,
             qualityScore: qualityScore

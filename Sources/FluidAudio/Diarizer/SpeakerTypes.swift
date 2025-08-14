@@ -7,17 +7,17 @@ import Foundation
 public final class Speaker: Identifiable, Codable, Sendable {
     public let id: String  // Note: Slipbox uses Int, conversion needed at integration
     public var name: String
-    public var mainEmbedding: [Float]
+    public var currentEmbedding: [Float]
     public var duration: Float = 0  // Renamed from totalDuration to match Slipbox
     public var createdAt: Date  // Added to match Slipbox
     public var updatedAt: Date  // Added to match Slipbox
     public var updateCount: Int = 1
-    public var historicalEmbeddings: [HistoricalEmbedding] = []
+    public var rawEmbeddings: [RawEmbedding] = []
 
     public init(
         id: String? = nil,
         name: String? = nil,
-        mainEmbedding: [Float],
+        currentEmbedding: [Float],
         duration: Float = 0,
         createdAt: Date? = nil,
         updatedAt: Date? = nil
@@ -25,12 +25,12 @@ public final class Speaker: Identifiable, Codable, Sendable {
         let now = Date()
         self.id = id ?? "Speaker_\(UUID().uuidString.prefix(8))"
         self.name = name ?? self.id
-        self.mainEmbedding = mainEmbedding
+        self.currentEmbedding = currentEmbedding
         self.duration = duration
         self.createdAt = createdAt ?? now
         self.updatedAt = updatedAt ?? now
         self.updateCount = 1
-        self.historicalEmbeddings = []
+        self.rawEmbeddings = []
     }
 
     /// Convert to SendableSpeaker format for cross-boundary usage.
@@ -55,7 +55,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
         guard embeddingMagnitude > 0.1 else { return }
 
         // Add to historical embeddings
-        let historicalEmbedding = HistoricalEmbedding(
+        let historicalEmbedding = RawEmbedding(
             segmentId: segmentId,
             embedding: embedding,
             timestamp: Date()
@@ -63,9 +63,9 @@ public final class Speaker: Identifiable, Codable, Sendable {
         addHistoricalEmbedding(historicalEmbedding)
 
         // Update main embedding using exponential moving average
-        if mainEmbedding.count == embedding.count {
-            for i in 0..<mainEmbedding.count {
-                mainEmbedding[i] = alpha * mainEmbedding[i] + (1 - alpha) * embedding[i]
+        if currentEmbedding.count == embedding.count {
+            for i in 0..<currentEmbedding.count {
+                currentEmbedding[i] = alpha * currentEmbedding[i] + (1 - alpha) * embedding[i]
             }
         }
 
@@ -76,36 +76,36 @@ public final class Speaker: Identifiable, Codable, Sendable {
     }
 
     /// Add a historical embedding with FIFO queue management
-    public func addHistoricalEmbedding(_ embedding: HistoricalEmbedding) {
+    public func addHistoricalEmbedding(_ embedding: RawEmbedding) {
         // Validate embedding quality
         let embeddingMagnitude = sqrt(embedding.embedding.map { $0 * $0 }.reduce(0, +))
         guard embeddingMagnitude > 0.1 else { return }
 
         // Maintain max of 50 historical embeddings (FIFO)
-        if historicalEmbeddings.count >= 50 {
-            historicalEmbeddings.removeFirst()
+        if rawEmbeddings.count >= 50 {
+            rawEmbeddings.removeFirst()
         }
 
-        historicalEmbeddings.append(embedding)
+        rawEmbeddings.append(embedding)
         recalculateMainEmbedding()
     }
 
     /// Remove a historical embedding by segment ID
     @discardableResult
-    public func removeHistoricalEmbedding(segmentId: UUID) -> HistoricalEmbedding? {
-        guard let index = historicalEmbeddings.firstIndex(where: { $0.segmentId == segmentId }) else {
+    public func removeHistoricalEmbedding(segmentId: UUID) -> RawEmbedding? {
+        guard let index = rawEmbeddings.firstIndex(where: { $0.segmentId == segmentId }) else {
             return nil
         }
 
-        let removed = historicalEmbeddings.remove(at: index)
+        let removed = rawEmbeddings.remove(at: index)
         recalculateMainEmbedding()
         return removed
     }
 
     /// Recalculate main embedding as average of all historical embeddings
     public func recalculateMainEmbedding() {
-        guard !historicalEmbeddings.isEmpty,
-            let firstEmbedding = historicalEmbeddings.first,
+        guard !rawEmbeddings.isEmpty,
+            let firstEmbedding = rawEmbeddings.first,
             !firstEmbedding.embedding.isEmpty
         else { return }
 
@@ -114,7 +114,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
 
         // Calculate average of all historical embeddings
         var validCount = 0
-        for historical in historicalEmbeddings {
+        for historical in rawEmbeddings {
             if historical.embedding.count == embeddingSize {
                 for i in 0..<embeddingSize {
                     averageEmbedding[i] += historical.embedding[i]
@@ -130,7 +130,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
                 averageEmbedding[i] /= count
             }
 
-            self.mainEmbedding = averageEmbedding
+            self.currentEmbedding = averageEmbedding
             self.updatedAt = Date()
         }
     }
@@ -138,7 +138,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
     /// Merge another speaker into this one
     public func mergeWith(_ other: Speaker, keepName: String? = nil) {
         // Merge historical embeddings
-        var allEmbeddings = historicalEmbeddings + other.historicalEmbeddings
+        var allEmbeddings = rawEmbeddings + other.rawEmbeddings
 
         // Keep only the most recent 50 embeddings
         if allEmbeddings.count > 50 {
@@ -149,7 +149,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
             )
         }
 
-        historicalEmbeddings = allEmbeddings
+        rawEmbeddings = allEmbeddings
 
         // Update duration
         duration += other.duration
@@ -168,9 +168,9 @@ public final class Speaker: Identifiable, Codable, Sendable {
 
 }
 
-/// Historical embedding tracking for speaker evolution over time
+/// Raw embedding tracking for speaker evolution over time
 @available(macOS 13.0, iOS 16.0, *)
-public struct HistoricalEmbedding: Codable, Sendable {
+public struct RawEmbedding: Codable, Sendable {
     public let segmentId: UUID
     public let embedding: [Float]
     public let timestamp: Date
@@ -185,49 +185,40 @@ public struct HistoricalEmbedding: Codable, Sendable {
 /// Sendable speaker data for cross-async boundary usage
 @available(macOS 13.0, iOS 16.0, *)
 public struct SendableSpeaker: Sendable, Identifiable, Hashable {
-    public let id: String
+    public let id: Int
     public let name: String
     public let duration: Float
     public let mainEmbedding: [Float]
     public let createdAt: Date
     public let updatedAt: Date
 
-    /// Label for display - matches Slipbox format
+    /// Label for display
     public var label: String {
         if name.isEmpty {
-            // Extract numeric part for Slipbox-like formatting
-            if let lastPart = id.split(separator: "_").last {
-                return "Speaker #\(lastPart)"
-            }
             return "Speaker #\(id)"
         } else {
             return name
         }
     }
 
-    public init(from speaker: Speaker) {
-        self.id = speaker.id
-        self.name = speaker.name
-        self.duration = speaker.duration  // Now matches field name
-        self.mainEmbedding = speaker.mainEmbedding
-        self.createdAt = speaker.createdAt
-        self.updatedAt = speaker.updatedAt
-    }
-
-    public init(
-        id: String,
-        name: String,
-        duration: Float,
-        mainEmbedding: [Float],
-        createdAt: Date = Date(),
-        updatedAt: Date = Date()
-    ) {
+    // Primary init for Slipbox compatibility
+    public init(id: Int, name: String, duration: Float, mainEmbedding: [Float], createdAt: Date, updatedAt: Date) {
         self.id = id
         self.name = name
         self.duration = duration
         self.mainEmbedding = mainEmbedding
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+    
+    // Convenience init from FluidAudio's Speaker type
+    public init(from speaker: Speaker) {
+        self.id = Int(speaker.id.split(separator: "_").last.flatMap { Int($0) } ?? 0)
+        self.name = speaker.name
+        self.duration = speaker.duration
+        self.mainEmbedding = speaker.currentEmbedding
+        self.createdAt = speaker.createdAt
+        self.updatedAt = speaker.updatedAt
     }
 
     public func hash(into hasher: inout Hasher) {
