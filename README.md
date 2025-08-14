@@ -229,6 +229,8 @@ Task {
 }
 ```
 
+**Speaker Enrollment (NEW)**: The `Speaker` class now includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), you can update the speaker's name from the default "Speaker_1" to their actual name, enabling personalized speaker identification throughout the session.
+
 ## Voice Activity Detection Usage
 
 **VAD Library API**:
