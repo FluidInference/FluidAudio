@@ -183,8 +183,8 @@ let speakerManager = diarizer.speakerManager
 // Get speaker information
 print("Active speakers: \(speakerManager.speakerCount)")
 for speakerId in speakerManager.speakerIds {
-    if let info = speakerManager.getSpeakerInfo(for: speakerId) {
-        print("\(speakerId): \(info.totalDuration)s total")
+    if let speaker = speakerManager.getSpeaker(for: speakerId) {
+        print("\(speaker.name): \(speaker.duration)s total")
     }
 }
 ```
@@ -211,11 +211,9 @@ let aliceAudio = loadAudioFile("alice_sample.wav")
 let aliceEmbedding = try diarizer.extractEmbedding(aliceAudio)
 
 // Initialize with known speakers
-let knownSpeakers = [
-    "Alice": aliceEmbedding,
-    "Bob": bobEmbedding
-]
-speakerManager.initializeKnownSpeakers(knownSpeakers)
+let alice = Speaker(id: "Alice", name: "Alice", currentEmbedding: aliceEmbedding)
+let bob = Speaker(id: "Bob", name: "Bob", currentEmbedding: bobEmbedding)
+speakerManager.initializeKnownSpeakers([alice, bob])
 
 // Process - will use "Alice" instead of "Speaker_1" when matched
 let result = try diarizer.performCompleteDiarization(audioSamples)
@@ -291,13 +289,13 @@ class DiarizationProcessor: ObservableObject {
 
             // Update UI with current speakers
             activeSpeakers = diarizer.speakerManager.speakerIds.compactMap { id in
-                guard let info = diarizer.speakerManager.getSpeakerInfo(for: id) else {
+                guard let speaker = diarizer.speakerManager.getSpeaker(for: id) else {
                     return nil
                 }
                 return SpeakerDisplay(
                     id: id,
-                    name: info.id,
-                    duration: info.totalDuration,
+                    name: speaker.name,
+                    duration: speaker.duration,
                     isSpeaking: result.segments.contains { $0.speakerId == id }
                 )
             }
@@ -361,7 +359,7 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a
 |--------|-------------|
 | `assignSpeaker(_:speechDuration:)` | Assign embedding to speaker |
 | `initializeKnownSpeakers(_:)` | Load known speaker profiles |
-| `getSpeakerInfo(for:)` | Get speaker details |
+| `getSpeaker(for:)` | Get speaker details |
 | `reset()` | Clear all speakers |
 
 ### DiarizationResult
