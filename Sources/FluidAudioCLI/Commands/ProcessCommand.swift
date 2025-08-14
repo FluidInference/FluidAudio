@@ -72,7 +72,7 @@ enum ProcessCommand {
             print("Diarization completed in \(String(format: "%.1f", processingTime))s")
             print("   Real-time factor (RTFx): \(String(format: "%.2f", rtfx))x")
             print("   Found \(result.segments.count) segments")
-            print("   Detected \(result.speakerDatabase.count) speakers (total), mapped: TBD")
+            print("   Detected \(result.speakerDatabase?.count ?? 0) speakers (total), mapped: TBD")
 
             // Create output
             let output = ProcessingResult(
@@ -81,7 +81,7 @@ enum ProcessCommand {
                 processingTimeSeconds: processingTime,
                 realTimeFactor: rtfx,
                 segments: result.segments,
-                speakerCount: result.speakerDatabase.count,
+                speakerCount: result.speakerDatabase?.count ?? 0,
                 config: config
             )
 

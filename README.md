@@ -39,7 +39,8 @@ dependencies: [
 
 ## Documentation
 
-See the public DeepWiki docs: [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio)
+- **DeepWiki**: [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio) - Primary documentation
+- **Local Docs**: [Documentation/](Documentation/) - Additional guides and API references
 
 ## MCP
 
@@ -208,24 +209,27 @@ Task {
 }
 ```
 
-### Manual Speaker Diarization
+### Speaker Diarization
 
 ```swift
 import FluidAudio
 
 // Initialize and process audio
 Task {
-    let diarizer = DiarizerManager()
-    diarizer.initialize(models: try await .downloadIfNeeded())
+    let models = try await DiarizerModels.downloadIfNeeded()
+    let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
+    diarizer.initialize(models: models)
 
     let audioSamples: [Float] = // your 16kHz audio data
-    let result = try diarizer.performCompleteDiarization(audioSamples, sampleRate: 16000)
+    let result = try diarizer.performCompleteDiarization(audioSamples)
 
     for segment in result.segments {
-        print("\(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
     }
 }
 ```
+
+**Speaker Enrollment (NEW)**: The `Speaker` class now includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), you can update the speaker's name from the default "Speaker_1" to their actual name, enabling personalized speaker identification throughout the session.
 
 ## Voice Activity Detection Usage
 
@@ -285,13 +289,13 @@ FluidAudio includes a powerful command-line interface for benchmarking and audio
 
 ```bash
 # Run AMI benchmark with automatic dataset download
-swift run fluidaudio benchmark --auto-download
+swift run fluidaudio diarization-benchmark --auto-download
 
 # Test with specific parameters
-swift run fluidaudio benchmark --threshold 0.7 --min-duration-on 1.0 --output results.json
+swift run fluidaudio diarization-benchmark --threshold 0.7 --output results.json
 
 # Test a single file for quick parameter tuning
-swift run fluidaudio benchmark --single-file ES2004a --threshold 0.8
+swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.8
 ```
 
 ### ASR Benchmark

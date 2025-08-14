@@ -39,15 +39,12 @@ enum StreamingTranscribeCommand {
         }
 
         let audioFile = arguments[0]
-        var compareWithLegacy = false
         var configType = "default"
 
         // Parse options
         var i = 1
         while i < arguments.count {
             switch arguments[i] {
-            case "--compare":
-                compareWithLegacy = true
             case "--config":
                 if i + 1 < arguments.count {
                     configType = arguments[i + 1]
@@ -73,11 +70,6 @@ enum StreamingTranscribeCommand {
             audioFile: audioFile,
             configType: configType
         )
-
-        // Compare with legacy API if requested
-        if compareWithLegacy {
-            await compareLegacyVsStreaming(audioFile: audioFile)
-        }
     }
 
     /// Test audio conversion capabilities
@@ -251,78 +243,6 @@ enum StreamingTranscribeCommand {
         }
     }
 
-    /// Compare legacy AsrManager vs StreamingAsrManager
-    private static func compareLegacyVsStreaming(audioFile: String) async {
-        print("\n\n🔄 Comparing Legacy vs Streaming APIs")
-        print("====================================\n")
-
-        do {
-            // Load audio as 16kHz mono for legacy API
-            let audioSamples = try await AudioProcessor.loadAudioFile(path: audioFile)
-            print(
-                "Loaded \(audioSamples.count) samples (\(Float(audioSamples.count)/16000.0)s)")
-
-            // Test 1: Legacy AsrManager
-            print("\n1️⃣ Legacy AsrManager")
-            print("-------------------")
-            let models = try await AsrModels.downloadAndLoad()
-            let asrManager = AsrManager()
-            try await asrManager.initialize(models: models)
-
-            let legacyStart = Date()
-            let legacyResult = try await asrManager.transcribe(audioSamples)
-            let legacyTime = Date().timeIntervalSince(legacyStart)
-
-            print("Result: '\(legacyResult.text)'")
-            print("Time: \(String(format: "%.3f", legacyTime))s")
-
-            // Test 2: StreamingAsrManager with same audio
-            print("\n2️⃣ StreamingAsrManager")
-            print("---------------------")
-
-            // Load original format for streaming
-            let audioFileURL = URL(fileURLWithPath: audioFile)
-            let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
-            let format = audioFileHandle.processingFormat
-            let frameCount = AVAudioFrameCount(audioFileHandle.length)
-
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
-            else {
-                print("Failed to create buffer")
-                return
-            }
-
-            try audioFileHandle.read(into: buffer)
-
-            let streamingAsr = StreamingAsrManager()
-            try await streamingAsr.start()
-
-            let streamingStart = Date()
-
-            // Stream entire buffer at once for fair comparison
-            await streamingAsr.streamAudio(buffer)
-            let streamingResult = try await streamingAsr.finish()
-            let streamingTime = Date().timeIntervalSince(streamingStart)
-
-            print("Result: '\(streamingResult)'")
-            print("Time: \(String(format: "%.3f", streamingTime))s")
-
-            // Compare results
-            print("\n📊 Comparison Summary")
-            print("-------------------")
-            print("Legacy result:    '\(legacyResult.text)'")
-            print("Streaming result: '\(streamingResult)'")
-            print("\nMatch: \(legacyResult.text == streamingResult ? "YES" : "NO")")
-            print("\nPerformance:")
-            print("  Legacy time:    \(String(format: "%.3f", legacyTime))s")
-            print("  Streaming time: \(String(format: "%.3f", streamingTime))s")
-            print("  Difference:     \(String(format: "%.3f", streamingTime - legacyTime))s")
-
-        } catch {
-            print("Comparison failed: \(error)")
-        }
-    }
-
     private static func printUsage() {
         print(
             """
@@ -332,13 +252,11 @@ enum StreamingTranscribeCommand {
 
             Options:
                 --config <type>    Configuration type: default, low-latency, high-accuracy
-                --compare          Compare with direct AsrManager API
                 --help, -h         Show this help message
 
             Examples:
                 fluidaudio transcribe audio.wav
                 fluidaudio transcribe audio.wav --config low-latency
-                fluidaudio transcribe audio.wav --compare
 
             This command uses StreamingAsrManager which provides:
             - Automatic audio format conversion to 16kHz mono
