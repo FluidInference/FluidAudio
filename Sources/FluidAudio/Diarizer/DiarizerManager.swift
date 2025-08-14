@@ -9,15 +9,31 @@ public final class DiarizerManager {
     internal let config: DiarizerConfig
     private var models: DiarizerModels?
 
-    private let segmentationProcessor = SegmentationProcessor()
-    private let speakerClustering: SpeakerClustering
-    private var embeddingExtractor: EmbeddingExtractor?
+    /// Public getter for segmentation model (for streaming)
+    public var segmentationModel: MLModel? {
+        return models?.segmentationModel
+    }
+
+    public let segmentationProcessor = SegmentationProcessor()
+    public var embeddingExtractor: EmbeddingExtractor?
     private let audioValidation = AudioValidation()
     private let memoryOptimizer = ANEMemoryOptimizer.shared
 
+    // Speaker manager for consistent speaker tracking
+    public let speakerManager: SpeakerManager
+
     public init(config: DiarizerConfig = .default) {
         self.config = config
-        self.speakerClustering = SpeakerClustering(config: config)
+        self.speakerManager = SpeakerManager(
+            // Speaker assignment threshold: 0.9x clustering threshold
+            // Slightly more aggressive to reduce over-segmentation
+            speakerThreshold: config.clusteringThreshold * 1.2,
+            // Embedding update threshold: 0.8x clustering threshold
+            // More aggressive (lower threshold) to update embeddings with high-confidence matches
+            embeddingThreshold: config.clusteringThreshold * 0.8,
+            minSpeechDuration: config.minSpeechDuration,
+            minEmbeddingUpdateDuration: config.minEmbeddingUpdateDuration
+        )
     }
 
     public var isAvailable: Bool {
@@ -31,17 +47,10 @@ public final class DiarizerManager {
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
 
-        // Initialize EmbeddingExtractor with the embedding model from DiarizerModels
         self.embeddingExtractor = EmbeddingExtractor(embeddingModel: models.embeddingModel)
         logger.info("EmbeddingExtractor initialized with embedding model")
 
-        // Store models after extracting embedding model
         self.models = consume models
-    }
-
-    @available(*, deprecated, message: "Use initialize(models:) instead")
-    public func initialize() async throws {
-        self.initialize(models: try await .downloadIfNeeded())
     }
 
     public func cleanup() {
@@ -49,32 +58,41 @@ public final class DiarizerManager {
         logger.info("Diarization resources cleaned up")
     }
 
-    public func compareSpeakers(audio1: [Float], audio2: [Float]) async throws -> Float {
-        async let result1 = performCompleteDiarization(audio1)
-        async let result2 = performCompleteDiarization(audio2)
-
-        guard let segment1 = try await result1.segments.max(by: { $0.qualityScore < $1.qualityScore }),
-            let segment2 = try await result2.segments.max(by: { $0.qualityScore < $1.qualityScore })
-        else {
-            throw DiarizerError.embeddingExtractionFailed
-        }
-
-        let distance = speakerClustering.cosineDistance(segment1.embedding, segment2.embedding)
-        return max(0, (1.0 - distance) * 100)
-    }
-
+    /// Validate embedding format.
     public func validateEmbedding(_ embedding: [Float]) -> Bool {
         return audioValidation.validateEmbedding(embedding)
     }
 
+    /// Validate audio quality.
     public func validateAudio(_ samples: [Float]) -> AudioValidationResult {
         return audioValidation.validateAudio(samples)
     }
 
-    public func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
-        return speakerClustering.cosineDistance(a, b)
+    /// Accepts Speaker structs and adds them to the in-memory database.
+    ///
+    /// - Parameter speakers: Array of Speaker structs with embeddings and metadata
+    public func initializeKnownSpeakers(_ speakers: [Speaker]) {
+        speakerManager.initializeKnownSpeakers(speakers)
     }
 
+    /// Perform complete speaker diarization on audio samples.
+    ///
+    /// Processes the entire audio to identify "who spoke when" by:
+    /// - Detecting speech segments
+    /// - Extracting speaker embeddings
+    /// - Clustering speakers
+    /// - Tracking consistent speaker IDs
+    ///
+    /// - Parameters:
+    ///   - samples: Audio samples (should be 16kHz mono)
+    ///   - sampleRate: Sample rate (default: 16000)
+    /// - Returns: `DiarizationResult` containing:
+    ///   - `segments`: Array of speaker segments with speaker IDs, timestamps, and embeddings
+    ///   - `speakerDatabase`: Dictionary mapping speaker IDs to embeddings (only when debugMode enabled)
+    ///   - `timings`: Performance metrics (only when debugMode enabled)
+    /// - Throws: DiarizerError if not initialized or processing fails
+    ///
+    /// ```
     public func performCompleteDiarization(
         _ samples: [Float], sampleRate: Int = 16000
     ) throws
@@ -89,11 +107,14 @@ public final class DiarizerManager {
         var clusteringTime: TimeInterval = 0
         var postProcessingTime: TimeInterval = 0
 
-        let chunkSize = sampleRate * 10
-        var allSegments: [TimedSpeakerSegment] = []
-        var speakerDB: [String: [Float]] = [:]
+        let chunkDuration = Int(config.chunkDuration.rounded())
+        let overlapDuration = Int(config.chunkOverlap.rounded())
+        let chunkSize = sampleRate * chunkDuration
+        let stepSize = chunkSize - (sampleRate * overlapDuration)
 
-        for chunkStart in stride(from: 0, to: samples.count, by: chunkSize) {
+        var allSegments: [TimedSpeakerSegment] = []
+
+        for chunkStart in stride(from: 0, to: samples.count, by: stepSize) {
             let chunkEnd = min(chunkStart + chunkSize, samples.count)
             let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStart) / Double(sampleRate)
@@ -101,7 +122,6 @@ public final class DiarizerManager {
             let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
                 chunk,
                 chunkOffset: chunkOffset,
-                speakerDB: &speakerDB,
                 models: models,
                 sampleRate: sampleRate
             )
@@ -113,21 +133,30 @@ public final class DiarizerManager {
         }
 
         let postProcessingStartTime = Date()
-        let filteredSegments = applyPostProcessingFilters(allSegments)
+        let filteredSegments = allSegments  // No post-processing
         postProcessingTime = Date().timeIntervalSince(postProcessingStartTime)
 
-        let timings = PipelineTimings(
-            modelDownloadSeconds: models.downloadDuration,
-            modelCompilationSeconds: models.compilationDuration,
-            audioLoadingSeconds: 0,
-            segmentationSeconds: segmentationTime,
-            embeddingExtractionSeconds: embeddingTime,
-            speakerClusteringSeconds: clusteringTime,
-            postProcessingSeconds: postProcessingTime
-        )
+        if config.debugMode {
+            let timings = PipelineTimings(
+                modelDownloadSeconds: models.downloadDuration,
+                modelCompilationSeconds: models.compilationDuration,
+                audioLoadingSeconds: 0,
+                segmentationSeconds: segmentationTime,
+                embeddingExtractionSeconds: embeddingTime,
+                speakerClusteringSeconds: clusteringTime,
+                postProcessingSeconds: postProcessingTime
+            )
 
-        return DiarizationResult(
-            segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
+            // Build speakerDatabase from speakerManager for debug output
+            let speakerDB = speakerManager.getAllSpeakers().reduce(into: [String: [Float]]()) { result, item in
+                result[item.key] = item.value.currentEmbedding
+            }
+
+            return DiarizationResult(
+                segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
+        } else {
+            return DiarizationResult(segments: filteredSegments)
+        }
     }
 
     internal struct ChunkTimings {
@@ -136,16 +165,27 @@ public final class DiarizerManager {
         let clusteringTime: TimeInterval
     }
 
+    /// Process a single audio chunk with consistent speaker tracking.
+    ///
+    /// This function maintains speaker consistency across chunks by:
+    /// - Using SpeakerManager to track and assign consistent speaker IDs
+    /// - Updating speaker embeddings as more data becomes available
+    /// - Handling both known and new speakers
+    ///
+    /// - Parameters:
+    ///   - chunk: Audio chunk to process
+    ///   - chunkOffset: Time offset of this chunk in the full audio
+    ///   - models: Diarization models for processing
+    ///   - sampleRate: Audio sample rate
+    /// - Returns: Tuple of (segments with speaker IDs, timing metrics)
     private func processChunkWithSpeakerTracking(
         _ chunk: ArraySlice<Float>,
         chunkOffset: Double,
-        speakerDB: inout [String: [Float]],
         models: DiarizerModels,
         sampleRate: Int = 16000
     ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
         let segmentationStartTime = Date()
 
-        // Prepare chunk (same for both paths)
         let chunkSize = sampleRate * 10
         var paddedChunk = chunk
         if chunk.count < chunkSize {
@@ -154,15 +194,11 @@ public final class DiarizerManager {
             paddedChunk = padded[...]
         }
 
-        // Use optimized segmentation with zero-copy
         let (binarizedSegments, _) = try segmentationProcessor.getSegments(
             audioChunk: paddedChunk,
             segmentationModel: models.segmentationModel
         )
 
-        // Unified and merged models removed - caused performance/stability issues
-
-        // Otherwise use traditional separate model processing
         let slidingFeature = segmentationProcessor.createSlidingWindowFeature(
             binarizedSegments: binarizedSegments, chunkOffset: chunkOffset)
 
@@ -170,14 +206,12 @@ public final class DiarizerManager {
 
         let embeddingStartTime = Date()
 
-        // Use EmbeddingExtractor for embedding extraction
         guard let embeddingExtractor = self.embeddingExtractor else {
             throw DiarizerError.notInitialized
         }
 
         logger.debug("Using EmbeddingExtractor for embedding extraction")
 
-        // Extract masks from sliding window feature
         var masks: [[Float]] = []
         let numSpeakers = slidingFeature.data[0][0].count
         let numFrames = slidingFeature.data[0].count
@@ -185,9 +219,8 @@ public final class DiarizerManager {
         for s in 0..<numSpeakers {
             var speakerMask: [Float] = []
             for f in 0..<numFrames {
-                // Apply clean frame logic
                 let speakerSum = slidingFeature.data[0][f].reduce(0, +)
-                let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0
+                let isClean: Float = speakerSum < 2.0 ? 1.0 : 0.0  // Clean frame: only 1 speaker
                 speakerMask.append(slidingFeature.data[0][f][s] * isClean)
             }
             masks.append(speakerMask)
@@ -196,44 +229,55 @@ public final class DiarizerManager {
         let embeddings = try embeddingExtractor.getEmbeddings(
             audio: Array(paddedChunk),
             masks: masks,
-            minActivityThreshold: config.minActivityThreshold
+            minActivityThreshold: config.minActiveFramesCount
         )
 
         let embeddingTime = Date().timeIntervalSince(embeddingStartTime)
         let clusteringStartTime = Date()
 
-        // Calculate speaker activities
-        let speakerActivities = speakerClustering.calculateSpeakerActivities(binarizedSegments)
+        let speakerActivities = calculateSpeakerActivities(binarizedSegments)
 
-        var speakerLabels: [String] = []
+        var speakerIds: [String] = []
         var activityFilteredCount = 0
         var embeddingInvalidCount = 0
         var clusteringProcessedCount = 0
 
         for (speakerIndex, activity) in speakerActivities.enumerated() {
-            if activity > self.config.minActivityThreshold {
+            if activity > self.config.minActiveFramesCount {
                 let embedding = embeddings[speakerIndex]
                 if validateEmbedding(embedding) {
                     clusteringProcessedCount += 1
-                    let speakerId = speakerClustering.assignSpeaker(embedding: embedding, speakerDB: &speakerDB)
-                    speakerLabels.append(speakerId)
+                    // Each frame = 0.016875s (pyannote model step size)
+                    let duration = Float(activity) * Float(slidingFeature.slidingWindow.step)
+
+                    let quality = calculateEmbeddingQuality(embedding) * (activity / Float(numFrames))
+
+                    if let speaker = speakerManager.assignSpeaker(
+                        embedding,
+                        speechDuration: duration,
+                        confidence: quality
+                    ) {
+                        speakerIds.append(speaker.id)
+                    } else {
+                        speakerIds.append("")
+                    }
                 } else {
                     embeddingInvalidCount += 1
-                    speakerLabels.append("")
+                    speakerIds.append("")
                 }
             } else {
                 activityFilteredCount += 1
-                speakerLabels.append("")
+                speakerIds.append("")
             }
         }
 
         let clusteringTime = Date().timeIntervalSince(clusteringStartTime)
 
-        let segments = speakerClustering.createTimedSegments(
+        let segments = createTimedSegments(
             binarizedSegments: binarizedSegments,
             slidingWindow: slidingFeature.slidingWindow,
             embeddings: embeddings,
-            speakerLabels: speakerLabels,
+            speakerIds: speakerIds,
             speakerActivities: speakerActivities
         )
 
@@ -246,13 +290,138 @@ public final class DiarizerManager {
         return (segments, timings)
     }
 
-    private func applyPostProcessingFilters(
-        _ segments: [TimedSpeakerSegment]
-    )
-        -> [TimedSpeakerSegment]
-    {
-        return segments.filter { segment in
-            segment.durationSeconds >= self.config.minDurationOn
+    /// Count activity frames per speaker.
+    private func calculateSpeakerActivities(_ binarizedSegments: [[[Float]]]) -> [Float] {
+        let numSpeakers = binarizedSegments[0][0].count
+        let numFrames = binarizedSegments[0].count
+        var activities: [Float] = Array(repeating: 0.0, count: numSpeakers)
+
+        for speakerIndex in 0..<numSpeakers {
+            for frameIndex in 0..<numFrames {
+                activities[speakerIndex] += binarizedSegments[0][frameIndex][speakerIndex]
+            }
         }
+
+        return activities
     }
+
+    /// Convert frames to timed segments.
+    private func createTimedSegments(
+        binarizedSegments: [[[Float]]],
+        slidingWindow: SlidingWindow,
+        embeddings: [[Float]],
+        speakerIds: [String],
+        speakerActivities: [Float]
+    ) -> [TimedSpeakerSegment] {
+        let segmentation = binarizedSegments[0]
+        let numFrames = segmentation.count
+        let numSpeakers = segmentation[0].count
+        var segments: [TimedSpeakerSegment] = []
+
+        // Process each speaker independently for overlap detection
+        for speakerIndex in 0..<numSpeakers {
+            if speakerActivities[speakerIndex] < config.minActiveFramesCount {
+                continue
+            }
+
+            var isActive = false
+            var startFrame = 0
+
+            for frameIdx in 0..<numFrames {
+                let frameActivity = segmentation[frameIdx][speakerIndex]
+
+                // Dynamic threshold: lower when other speakers active
+                var activityThreshold: Float = 0.3
+
+                for otherSpeaker in 0..<numSpeakers {
+                    if otherSpeaker != speakerIndex && segmentation[frameIdx][otherSpeaker] > 0.3 {
+                        activityThreshold = 0.15  // Detect overlap
+                        break
+                    }
+                }
+
+                if frameActivity > activityThreshold && !isActive {
+                    isActive = true
+                    startFrame = frameIdx
+                } else if frameActivity <= activityThreshold && isActive {
+                    if let segment = createSegmentIfValid(
+                        speakerIndex: speakerIndex,
+                        startFrame: startFrame,
+                        endFrame: frameIdx,
+                        slidingWindow: slidingWindow,
+                        embeddings: embeddings,
+                        speakerIds: speakerIds,
+                        speakerActivities: speakerActivities
+                    ) {
+                        segments.append(segment)
+                    }
+                    isActive = false
+                }
+            }
+
+            if isActive {
+                if let segment = createSegmentIfValid(
+                    speakerIndex: speakerIndex,
+                    startFrame: startFrame,
+                    endFrame: numFrames,
+                    slidingWindow: slidingWindow,
+                    embeddings: embeddings,
+                    speakerIds: speakerIds,
+                    speakerActivities: speakerActivities
+                ) {
+                    segments.append(segment)
+                }
+            }
+        }
+
+        segments.sort {
+            $0.startTimeSeconds < $1.startTimeSeconds
+        }
+
+        return segments
+    }
+
+    /// Create segment if duration is valid.
+    private func createSegmentIfValid(
+        speakerIndex: Int,
+        startFrame: Int,
+        endFrame: Int,
+        slidingWindow: SlidingWindow,
+        embeddings: [[Float]],
+        speakerIds: [String],
+        speakerActivities: [Float]
+    ) -> TimedSpeakerSegment? {
+        guard speakerIndex < speakerIds.count,
+            !speakerIds[speakerIndex].isEmpty,
+            speakerIndex < embeddings.count
+        else {
+            return nil
+        }
+
+        let startTime = slidingWindow.time(forFrame: startFrame)
+        let endTime = slidingWindow.time(forFrame: endFrame)
+        let duration = endTime - startTime
+
+        if Float(duration) < config.minSpeechDuration {
+            return nil
+        }
+
+        let embedding = embeddings[speakerIndex]
+        let activity = speakerActivities[speakerIndex]
+        let quality = calculateEmbeddingQuality(embedding) * (activity / Float(endFrame - startFrame))
+
+        return TimedSpeakerSegment(
+            speakerId: speakerIds[speakerIndex],
+            embedding: embedding,
+            startTimeSeconds: Float(startTime),
+            endTimeSeconds: Float(endTime),
+            qualityScore: quality
+        )
+    }
+
+    private func calculateEmbeddingQuality(_ embedding: [Float]) -> Float {
+        let magnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
+        return min(1.0, magnitude / 10.0)
+    }
+
 }

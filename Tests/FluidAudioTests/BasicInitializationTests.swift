@@ -18,8 +18,8 @@ final class BasicInitializationTests: XCTestCase {
         // Test CoreML with custom configuration
         let config = DiarizerConfig(
             clusteringThreshold: 0.8,
-            minDurationOn: 2.0,
-            minDurationOff: 1.0,
+            minSpeechDuration: 2.0,
+            minSilenceGap: 1.0,
             numClusters: 3,
             debugMode: true
         )
@@ -31,8 +31,8 @@ final class BasicInitializationTests: XCTestCase {
         // Test default configuration
         let defaultConfig = DiarizerConfig.default
         XCTAssertEqual(defaultConfig.clusteringThreshold, 0.7, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOn, 1.0, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSpeechDuration, 1.0, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSilenceGap, 0.5, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.numClusters, -1)
         XCTAssertFalse(defaultConfig.debugMode)
     }
@@ -119,21 +119,21 @@ final class CoreMLDiarizerTests: XCTestCase {
         // Test identical embeddings
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [1.0, 0.0, 0.0]
-        let distance1 = manager.cosineDistance(embedding1, embedding2)
+        let distance1 = manager.speakerManager.cosineDistance(embedding1, embedding2)
         XCTAssertEqual(
             distance1, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
 
         // Test orthogonal embeddings
         let embedding3: [Float] = [1.0, 0.0, 0.0]
         let embedding4: [Float] = [0.0, 1.0, 0.0]
-        let distance2 = manager.cosineDistance(embedding3, embedding4)
+        let distance2 = manager.speakerManager.cosineDistance(embedding3, embedding4)
         XCTAssertEqual(
             distance2, 1.0, accuracy: 0.001, "Orthogonal embeddings should have distance 1")
 
         // Test opposite embeddings
         let embedding5: [Float] = [1.0, 0.0, 0.0]
         let embedding6: [Float] = [-1.0, 0.0, 0.0]
-        let distance3 = manager.cosineDistance(embedding5, embedding6)
+        let distance3 = manager.speakerManager.cosineDistance(embedding5, embedding6)
         XCTAssertEqual(
             distance3, 2.0, accuracy: 0.001, "Opposite embeddings should have distance 2")
     }
@@ -178,28 +178,29 @@ final class CoreMLDiarizerTests: XCTestCase {
         XCTAssertFalse(manager.isAvailable, "Manager should not be available after cleanup")
     }
 
-    func testSpeakerComparison() async {
-        let audio1 = Array(0..<16000).map { i in
-            sin(Float(i) * 0.01) * 0.5
-        }
-        let audio2 = Array(0..<16000).map { i in
-            sin(Float(i) * 0.02) * 0.5
-        }
-
-        let config = DiarizerConfig()
-        let manager = DiarizerManager(config: config)
-
-        do {
-            let similarity = try await manager.compareSpeakers(audio1: audio1, audio2: audio2)
-            XCTAssertGreaterThanOrEqual(similarity, 0, "Similarity should be >= 0")
-            XCTAssertLessThanOrEqual(similarity, 100, "Similarity should be <= 100")
-        } catch DiarizerError.notInitialized {
-            // Expected error in test environment
-            print("Speaker comparison failed due to not being initialized (expected)")
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
+    // Removed deprecated test for compareSpeakerSimilarity method
+    // func testSpeakerComparison() async {
+    //     let audio1 = Array(0..<16000).map { i in
+    //         sin(Float(i) * 0.01) * 0.5
+    //     }
+    //     let audio2 = Array(0..<16000).map { i in
+    //         sin(Float(i) * 0.02) * 0.5
+    //     }
+    //
+    //     let config = DiarizerConfig()
+    //     let manager = DiarizerManager(config: config)
+    //
+    //     do {
+    //         let similarity = try await manager.compareSpeakerSimilarity(audio1: audio1, audio2: audio2)
+    //         XCTAssertGreaterThanOrEqual(similarity, 0, "Similarity should be >= 0")
+    //         XCTAssertLessThanOrEqual(similarity, 100, "Similarity should be <= 100")
+    //     } catch DiarizerError.notInitialized {
+    //         // Expected error in test environment
+    //         print("Speaker comparison failed due to not being initialized (expected)")
+    //     } catch {
+    //         XCTFail("Unexpected error: \(error)")
+    //     }
+    // }
 }
 
 // MARK: - Model Loading Tests
@@ -383,8 +384,8 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
         // Test that CoreML diarizer can be created with custom config
         let config = DiarizerConfig(
             clusteringThreshold: 0.7,
-            minDurationOn: 1.0,
-            minDurationOff: 0.5,
+            minSpeechDuration: 1.0,
+            minSilenceGap: 0.5,
             numClusters: -1,
             debugMode: true
         )
@@ -407,7 +408,7 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
         // Test cosine distance calculation
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [1.0, 0.0, 0.0]
-        let distance = diarizer.cosineDistance(embedding1, embedding2)
+        let distance = diarizer.speakerManager.cosineDistance(embedding1, embedding2)
         XCTAssertEqual(
             distance, 0.0, accuracy: 0.001, "Identical embeddings should have 0 distance")
     }

@@ -1,29 +1,59 @@
 import Foundation
 
+// MARK: - Diarization Pipeline Types
+// This file contains types used in the diarization processing pipeline
+// For speaker profile types, see SpeakerTypes.swift
+
 public struct DiarizerConfig: Sendable {
+    /// Threshold for clustering speaker embeddings (0.5-0.9). Lower = more speakers.
     public var clusteringThreshold: Float = 0.7
-    public var minDurationOn: Float = 1.0
-    public var minDurationOff: Float = 0.5
+
+    /// Minimum speech segment duration in seconds. Shorter segments are discarded.
+    public var minSpeechDuration: Float = 1.0
+
+    /// Minimum segment duration for updating speaker embeddings (seconds).
+    public var minEmbeddingUpdateDuration: Float = 2.0
+
+    /// Minimum silence gap (seconds) before splitting same speaker's segments.
+    public var minSilenceGap: Float = 0.5
+
+    /// Expected number of speakers (-1 for automatic).
     public var numClusters: Int = -1
-    public var minActivityThreshold: Float = 10.0
+
+    /// Minimum active frames for valid speech detection.
+    public var minActiveFramesCount: Float = 10.0
+
+    /// Enable debug logging.
     public var debugMode: Bool = false
+
+    /// Duration of audio chunks for processing (seconds).
+    public var chunkDuration: Float = 10.0
+
+    /// Overlap between chunks (seconds).
+    public var chunkOverlap: Float = 0.0
 
     public static let `default` = DiarizerConfig()
 
     public init(
         clusteringThreshold: Float = 0.7,
-        minDurationOn: Float = 1.0,
-        minDurationOff: Float = 0.5,
+        minSpeechDuration: Float = 1.0,
+        minEmbeddingUpdateDuration: Float = 2.0,
+        minSilenceGap: Float = 0.5,
         numClusters: Int = -1,
-        minActivityThreshold: Float = 10.0,
-        debugMode: Bool = false
+        minActiveFramesCount: Float = 10.0,
+        debugMode: Bool = false,
+        chunkDuration: Float = 10.0,
+        chunkOverlap: Float = 0.0
     ) {
         self.clusteringThreshold = clusteringThreshold
-        self.minDurationOn = minDurationOn
-        self.minDurationOff = minDurationOff
+        self.minSpeechDuration = minSpeechDuration
+        self.minEmbeddingUpdateDuration = minEmbeddingUpdateDuration
+        self.minSilenceGap = minSilenceGap
         self.numClusters = numClusters
-        self.minActivityThreshold = minActivityThreshold
+        self.minActiveFramesCount = minActiveFramesCount
         self.debugMode = debugMode
+        self.chunkDuration = chunkDuration
+        self.chunkOverlap = chunkOverlap
     }
 }
 
@@ -95,12 +125,17 @@ public struct PipelineTimings: Sendable, Codable {
 
 public struct DiarizationResult: Sendable {
     public let segments: [TimedSpeakerSegment]
-    public let speakerDatabase: [String: [Float]]
-    public let timings: PipelineTimings
+
+    /// Speaker database with embeddings (only populated when debugMode is enabled)
+    public let speakerDatabase: [String: [Float]]?
+
+    /// Performance timings (only populated when debugMode is enabled)
+    public let timings: PipelineTimings?
 
     public init(
-        segments: [TimedSpeakerSegment], speakerDatabase: [String: [Float]],
-        timings: PipelineTimings = PipelineTimings()
+        segments: [TimedSpeakerSegment],
+        speakerDatabase: [String: [Float]]? = nil,
+        timings: PipelineTimings? = nil
     ) {
         self.segments = segments
         self.speakerDatabase = speakerDatabase
@@ -108,6 +143,9 @@ public struct DiarizationResult: Sendable {
     }
 }
 
+/// Represents a segment of speech from a specific speaker with timing information
+/// This is used for diarization results - "who spoke when"
+/// For speaker profiles, see Speaker struct in SpeakerTypes.swift
 public struct TimedSpeakerSegment: Sendable, Identifiable {
     public let id = UUID()
     public let speakerId: String
@@ -129,18 +167,6 @@ public struct TimedSpeakerSegment: Sendable, Identifiable {
         self.startTimeSeconds = startTimeSeconds
         self.endTimeSeconds = endTimeSeconds
         self.qualityScore = qualityScore
-    }
-}
-
-public struct SpeakerEmbedding: Sendable {
-    public let embedding: [Float]
-    public let qualityScore: Float
-    public let durationSeconds: Float
-
-    public init(embedding: [Float], qualityScore: Float, durationSeconds: Float) {
-        self.embedding = embedding
-        self.qualityScore = qualityScore
-        self.durationSeconds = durationSeconds
     }
 }
 

@@ -29,28 +29,28 @@ final class CITests: XCTestCase {
         let defaultConfig = DiarizerConfig.default
 
         XCTAssertEqual(defaultConfig.clusteringThreshold, 0.7, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOn, 1.0, accuracy: 0.01)
-        XCTAssertEqual(defaultConfig.minDurationOff, 0.5, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSpeechDuration, 1.0, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minSilenceGap, 0.5, accuracy: 0.01)
         XCTAssertEqual(defaultConfig.numClusters, -1)
-        XCTAssertEqual(defaultConfig.minActivityThreshold, 10.0, accuracy: 0.01)
+        XCTAssertEqual(defaultConfig.minActiveFramesCount, 10.0, accuracy: 0.01)
         XCTAssertFalse(defaultConfig.debugMode)
     }
 
     func testDiarizerConfigCustom() {
         let customConfig = DiarizerConfig(
             clusteringThreshold: 0.8,
-            minDurationOn: 2.0,
-            minDurationOff: 1.0,
+            minSpeechDuration: 2.0,
+            minSilenceGap: 1.0,
             numClusters: 3,
-            minActivityThreshold: 15.0,
+            minActiveFramesCount: 15.0,
             debugMode: true
         )
 
         XCTAssertEqual(customConfig.clusteringThreshold, 0.8, accuracy: 0.01)
-        XCTAssertEqual(customConfig.minDurationOn, 2.0, accuracy: 0.01)
-        XCTAssertEqual(customConfig.minDurationOff, 1.0, accuracy: 0.01)
+        XCTAssertEqual(customConfig.minSpeechDuration, 2.0, accuracy: 0.01)
+        XCTAssertEqual(customConfig.minSilenceGap, 1.0, accuracy: 0.01)
         XCTAssertEqual(customConfig.numClusters, 3)
-        XCTAssertEqual(customConfig.minActivityThreshold, 15.0, accuracy: 0.01)
+        XCTAssertEqual(customConfig.minActiveFramesCount, 15.0, accuracy: 0.01)
         XCTAssertTrue(customConfig.debugMode)
     }
 
@@ -74,20 +74,7 @@ final class CITests: XCTestCase {
         XCTAssertEqual(segment.embedding.count, 5)
     }
 
-    func testSpeakerEmbeddingCreation() {
-        let embedding: [Float] = [0.1, 0.2, -0.3, 0.4, -0.5]
-        let speakerEmbedding = SpeakerEmbedding(
-            embedding: embedding,
-            qualityScore: 0.85,
-            durationSeconds: 5.0
-        )
-
-        XCTAssertEqual(speakerEmbedding.embedding.count, 5)
-        XCTAssertEqual(speakerEmbedding.embedding[0], 0.1, accuracy: 0.001)
-        XCTAssertEqual(speakerEmbedding.embedding[4], -0.5, accuracy: 0.001)
-        XCTAssertEqual(speakerEmbedding.qualityScore, 0.85, accuracy: 0.01)
-        XCTAssertEqual(speakerEmbedding.durationSeconds, 5.0, accuracy: 0.01)
-    }
+    // Removed testSpeakerEmbeddingCreation - SpeakerEmbedding struct was redundant and removed
 
     func testAudioValidationResult() {
         let validResult = AudioValidationResult(
@@ -162,7 +149,7 @@ final class CITests: XCTestCase {
         // Test cosine distance calculation
         let embedding1: [Float] = [1.0, 0.0, 0.0]
         let embedding2: [Float] = [0.0, 1.0, 0.0]
-        let distance = manager.cosineDistance(embedding1, embedding2)
+        let distance = manager.speakerManager.cosineDistance(embedding1, embedding2)
         XCTAssertEqual(distance, 1.0, accuracy: 0.001)
 
         // Test embedding validation
@@ -215,7 +202,7 @@ final class CITests: XCTestCase {
 
         measure {
             let manager = DiarizerManager()
-            let _ = manager.cosineDistance(embedding1, embedding2)
+            let _ = manager.speakerManager.cosineDistance(embedding1, embedding2)
         }
     }
 }
