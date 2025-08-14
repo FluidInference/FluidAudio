@@ -8,7 +8,7 @@ public class SpeakerManager {
     internal let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "SpeakerManager")
 
     // Constants
-    public static let EMBEDDING_SIZE = 256  // Standard embedding dimension for speaker models
+    public static let embeddingSize = 256  // Standard embedding dimension for speaker models
 
     // Speaker database: ID -> Speaker
     internal var speakerDatabase: [String: Speaker] = [:]
@@ -40,7 +40,7 @@ public class SpeakerManager {
             var maxNumericId = 0
 
             for speaker in speakers {
-                guard speaker.currentEmbedding.count == Self.EMBEDDING_SIZE else {
+                guard speaker.currentEmbedding.count == Self.embeddingSize else {
                     logger.warning(
                         "Skipping speaker \(speaker.id) - invalid embedding size: \(speaker.currentEmbedding.count)")
                     continue
@@ -48,10 +48,8 @@ public class SpeakerManager {
 
                 speakerDatabase[speaker.id] = speaker
 
-                if speaker.id.hasPrefix("Speaker_"),
-                    let numericPart = speaker.id.split(separator: "_").last,
-                    let numericId = Int(numericPart)
-                {
+                // Try to extract numeric ID if it's a pure number
+                if let numericId = Int(speaker.id) {
                     maxNumericId = max(maxNumericId, numericId)
                 }
 
@@ -64,7 +62,7 @@ public class SpeakerManager {
             self.nextSpeakerId = maxNumericId + 1
 
             logger.info(
-                "Initialized with \(self.speakerDatabase.count) known speakers, next ID will be: Speaker_\(self.nextSpeakerId)"
+                "Initialized with \(self.speakerDatabase.count) known speakers, next ID will be: \(self.nextSpeakerId)"
             )
         }
     }
@@ -74,7 +72,7 @@ public class SpeakerManager {
         speechDuration: Float,
         confidence: Float = 1.0
     ) -> Speaker? {
-        guard !embedding.isEmpty && embedding.count == Self.EMBEDDING_SIZE else {
+        guard !embedding.isEmpty && embedding.count == Self.embeddingSize else {
             logger.error("Invalid embedding size: \(embedding.count)")
             return nil
         }
@@ -143,11 +141,10 @@ public class SpeakerManager {
             return
         }
 
-        // Update embedding if quality is good and duration meets threshold
-        if distance < embeddingThreshold && duration >= minEmbeddingUpdateDuration {
+        // Update embedding if quality is good
+        if distance < embeddingThreshold {
             let embeddingMagnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
             if embeddingMagnitude > 0.1 {
-                // Use Speaker's built-in method to update embedding
                 speaker.updateMainEmbedding(
                     duration: duration,
                     embedding: embedding,
@@ -173,14 +170,14 @@ public class SpeakerManager {
         duration: Float,
         distanceToClosest: Float
     ) -> String {
-        let newSpeakerId = "Speaker_\(nextSpeakerId)"
+        let newSpeakerId = String(nextSpeakerId)
         nextSpeakerId += 1
         highestSpeakerId = max(highestSpeakerId, nextSpeakerId - 1)
 
         // Create new Speaker object
         let newSpeaker = Speaker(
             id: newSpeakerId,
-            name: newSpeakerId,  // Default name is the ID, can be updated later
+            name: "Speaker \(newSpeakerId)",  // Default name with number
             currentEmbedding: embedding,
             duration: duration
         )
@@ -195,30 +192,10 @@ public class SpeakerManager {
         return newSpeakerId
     }
 
+    /// Internal cosine distance calculation that delegates to SpeakerUtilities
+    /// Kept for backward compatibility with tests
     internal func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
-        guard a.count == b.count, !a.isEmpty else {
-            return Float.infinity
-        }
-
-        var dotProduct: Float = 0
-        var magnitudeA: Float = 0
-        var magnitudeB: Float = 0
-
-        for i in 0..<a.count {
-            dotProduct += a[i] * b[i]
-            magnitudeA += a[i] * a[i]
-            magnitudeB += b[i] * b[i]
-        }
-
-        magnitudeA = sqrt(magnitudeA)
-        magnitudeB = sqrt(magnitudeB)
-
-        guard magnitudeA > 0, magnitudeB > 0 else {
-            return Float.infinity
-        }
-
-        let similarity = dotProduct / (magnitudeA * magnitudeB)
-        return 1.0 - similarity
+        return SpeakerUtilities.cosineDistance(a, b)
     }
 
     public var speakerCount: Int {
@@ -303,10 +280,7 @@ public class SpeakerManager {
                 speakerDatabase[id] = newSpeaker
 
                 // Update tracking for numeric IDs
-                if id.hasPrefix("Speaker_"),
-                    let numericPart = id.split(separator: "_").last,
-                    let numericId = Int(numericPart)
-                {
+                if let numericId = Int(id) {
                     highestSpeakerId = max(highestSpeakerId, numericId)
                     nextSpeakerId = max(nextSpeakerId, numericId + 1)
                 }

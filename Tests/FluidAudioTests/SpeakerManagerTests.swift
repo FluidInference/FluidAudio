@@ -32,7 +32,8 @@ final class SpeakerManagerTests: XCTestCase {
 
         XCTAssertNotNil(speaker)
         XCTAssertEqual(manager.speakerCount, 1)
-        XCTAssertTrue(speaker?.id.hasPrefix("Speaker_") ?? false)
+        // ID should be numeric (starting from 1)
+        XCTAssertEqual(speaker?.id, "1")
     }
 
     func testAssignExistingSpeaker() {
@@ -422,6 +423,91 @@ final class SpeakerManagerTests: XCTestCase {
         XCTAssertEqual(info?.currentEmbedding, embedding)
         XCTAssertEqual(info?.duration, 7.5)
         XCTAssertEqual(info?.rawEmbeddings.count, 1)
+    }
+
+    // MARK: - Embedding Update Tests
+
+    func testEmbeddingUpdateWithinAssignSpeaker() {
+        let manager = SpeakerManager(
+            speakerThreshold: 0.3,
+            embeddingThreshold: 0.2,
+            minEmbeddingUpdateDuration: 2.0
+        )
+
+        // Create initial speaker
+        let emb1 = createDistinctEmbedding(pattern: 1)
+        let speaker1 = manager.assignSpeaker(emb1, speechDuration: 3.0)
+        XCTAssertNotNil(speaker1)
+
+        // Get initial state
+        let initialInfo = manager.getSpeaker(for: speaker1!.id)
+        let initialUpdateCount = initialInfo?.updateCount ?? 0
+
+        // Assign similar embedding with sufficient duration - should update
+        var emb2 = emb1
+        emb2[0] += 0.01  // Very similar
+        let speaker2 = manager.assignSpeaker(emb2, speechDuration: 3.0)
+
+        XCTAssertEqual(speaker2?.id, speaker1?.id)  // Same speaker
+
+        // Check that embedding was updated
+        let updatedInfo = manager.getSpeaker(for: speaker1!.id)
+        XCTAssertGreaterThan(updatedInfo?.updateCount ?? 0, initialUpdateCount)
+        XCTAssertNotEqual(updatedInfo?.currentEmbedding, emb1)  // Embedding changed
+    }
+
+    func testNoEmbeddingUpdateForShortDuration() {
+        let manager = SpeakerManager(
+            speakerThreshold: 0.3,
+            embeddingThreshold: 0.2,
+            minEmbeddingUpdateDuration: 2.0
+        )
+
+        // Create initial speaker
+        let emb1 = createDistinctEmbedding(pattern: 1)
+        let speaker1 = manager.assignSpeaker(emb1, speechDuration: 3.0)
+        XCTAssertNotNil(speaker1)
+
+        // Get initial state
+        let initialInfo = manager.getSpeaker(for: speaker1!.id)
+        let initialUpdateCount = initialInfo?.updateCount ?? 0
+
+        // Assign similar embedding with short duration - WILL update embedding now (duration check removed)
+        var emb2 = emb1
+        emb2[0] += 0.01
+        let speaker2 = manager.assignSpeaker(emb2, speechDuration: 0.5)
+
+        XCTAssertEqual(speaker2?.id, speaker1?.id)  // Same speaker
+
+        // Check that embedding WAS updated (since duration check was removed)
+        let updatedInfo = manager.getSpeaker(for: speaker1!.id)
+        XCTAssertGreaterThan(updatedInfo?.updateCount ?? 0, initialUpdateCount)  // Updated
+        XCTAssertNotEqual(updatedInfo?.currentEmbedding, emb1)  // Embedding changed
+        XCTAssertGreaterThan(updatedInfo?.duration ?? 0, 3.0)  // Duration still increased
+    }
+
+    func testRawEmbeddingFIFOInManager() {
+        let manager = SpeakerManager(
+            speakerThreshold: 0.3,
+            embeddingThreshold: 0.2,
+            minEmbeddingUpdateDuration: 2.0
+        )
+
+        // Create initial speaker
+        let emb1 = createDistinctEmbedding(pattern: 1)
+        let speaker = manager.assignSpeaker(emb1, speechDuration: 3.0)
+        XCTAssertNotNil(speaker)
+
+        // Add many embeddings to trigger FIFO (max 50)
+        for i in 0..<60 {
+            var emb = emb1
+            emb[0] += Float(i) * 0.001  // Slight variations
+            _ = manager.assignSpeaker(emb, speechDuration: 2.5)
+        }
+
+        // Check that raw embeddings are limited to 50
+        let info = manager.getSpeaker(for: speaker!.id)
+        XCTAssertLessThanOrEqual(info?.rawEmbeddings.count ?? 0, 50)
     }
 
     // MARK: - Edge Cases

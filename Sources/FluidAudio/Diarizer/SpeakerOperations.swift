@@ -333,7 +333,6 @@ public enum SpeakerUtilities {
         }
         updated.append(newEmbedding)
 
-        // Should recalculate if we have enough data
         let shouldRecalculate = updated.count >= 3  // Need at least 3 for meaningful average
 
         return (updated, shouldRecalculate)

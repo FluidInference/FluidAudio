@@ -25,8 +25,8 @@ public final class DiarizerManager {
     public init(config: DiarizerConfig = .default) {
         self.config = config
         self.speakerManager = SpeakerManager(
-            // Speaker assignment threshold: 1.2x clustering threshold
-            // More conservative (higher threshold) to avoid merging different speakers
+            // Speaker assignment threshold: 0.9x clustering threshold
+            // Slightly more aggressive to reduce over-segmentation
             speakerThreshold: config.clusteringThreshold * 1.2,
             // Embedding update threshold: 0.8x clustering threshold
             // More aggressive (lower threshold) to update embeddings with high-confidence matches
@@ -68,7 +68,6 @@ public final class DiarizerManager {
         return audioValidation.validateAudio(samples)
     }
 
-    /// Initialize with known speaker profiles from Slipbox persistence.
     /// Accepts Speaker structs and adds them to the in-memory database.
     ///
     /// - Parameter speakers: Array of Speaker structs with embeddings and metadata

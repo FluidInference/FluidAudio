@@ -2,15 +2,14 @@ import Foundation
 
 /// Speaker profile representation for tracking speakers across audio
 /// This represents a speaker's identity, not a specific segment
-/// Aligned with Slipbox Speaker schema for compatibility
 @available(macOS 13.0, iOS 16.0, *)
-public final class Speaker: Identifiable, Codable, Sendable {
-    public let id: String  // Note: Slipbox uses Int, conversion needed at integration
+public final class Speaker: Identifiable, Codable, Sendable, Equatable, Hashable {
+    public let id: String
     public var name: String
     public var currentEmbedding: [Float]
-    public var duration: Float = 0  // Renamed from totalDuration to match Slipbox
-    public var createdAt: Date  // Added to match Slipbox
-    public var updatedAt: Date  // Added to match Slipbox
+    public var duration: Float = 0
+    public var createdAt: Date
+    public var updatedAt: Date
     public var updateCount: Int = 1
     public var rawEmbeddings: [RawEmbedding] = []
 
@@ -23,7 +22,7 @@ public final class Speaker: Identifiable, Codable, Sendable {
         updatedAt: Date? = nil
     ) {
         let now = Date()
-        self.id = id ?? "Speaker_\(UUID().uuidString.prefix(8))"
+        self.id = id ?? UUID().uuidString
         self.name = name ?? self.id
         self.currentEmbedding = currentEmbedding
         self.duration = duration
@@ -45,8 +44,6 @@ public final class Speaker: Identifiable, Codable, Sendable {
         segmentId: UUID,
         alpha: Float = 0.9
     ) {
-        // Only process embeddings from segments that are at least 2 seconds long
-        guard duration >= 2.0 else { return }
 
         // Validate embedding quality
         let embeddingMagnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
@@ -164,6 +161,13 @@ public final class Speaker: Identifiable, Codable, Sendable {
         updateCount += other.updateCount
     }
 
+    public static func == (lhs: Speaker, rhs: Speaker) -> Bool {
+        return lhs.id == rhs.id
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
 }
 
 /// Raw embedding tracking for speaker evolution over time
@@ -199,7 +203,6 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
         }
     }
 
-    // Primary init for Slipbox compatibility
     public init(id: Int, name: String, duration: Float, mainEmbedding: [Float], createdAt: Date, updatedAt: Date) {
         self.id = id
         self.name = name
@@ -211,7 +214,13 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
 
     // Convenience init from FluidAudio's Speaker type
     public init(from speaker: Speaker) {
-        self.id = Int(speaker.id.split(separator: "_").last.flatMap { Int($0) } ?? 0)
+        // Try to parse as integer first, otherwise use hash of UUID
+        if let numericId = Int(speaker.id) {
+            self.id = numericId
+        } else {
+            // For UUID strings, use a stable hash
+            self.id = abs(speaker.id.hashValue)
+        }
         self.name = speaker.name
         self.duration = speaker.duration
         self.mainEmbedding = speaker.currentEmbedding
