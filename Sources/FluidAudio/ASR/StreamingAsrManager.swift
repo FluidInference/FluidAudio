@@ -342,10 +342,24 @@ public struct StreamingAsrConfig: Sendable {
     /// Enable debug logging
     public let enableDebug: Bool
 
-    /// Default configuration - optimized for Melspectrogram_v2
+    /// Default configuration with balanced settings
     public static let `default` = StreamingAsrConfig(
         confirmationThreshold: 0.85,
-        chunkDuration: 1.0,  // 1 second chunks - balance of latency and context
+        chunkDuration: 10.0,  // 10 second chunks - model limitation
+        enableDebug: false
+    )
+
+    /// Low latency configuration with faster updates
+    public static let lowLatency = StreamingAsrConfig(
+        confirmationThreshold: 0.75,
+        chunkDuration: 10.0,  // 10 second chunks - model limitation
+        enableDebug: false
+    )
+
+    /// High accuracy configuration with conservative confirmation
+    public static let highAccuracy = StreamingAsrConfig(
+        confirmationThreshold: 0.9,
+        chunkDuration: 10.0,  // 10 second chunks - model limitation
         enableDebug: false
     )
 
@@ -360,8 +374,8 @@ public struct StreamingAsrConfig: Sendable {
     }
 
     /// Custom configuration with specified chunk duration
-    /// - Note: With Melspectrogram_v2, chunks as short as 0.01s (160 samples) are supported
-    /// - Default uses 1.0s for optimal balance of latency and ASR accuracy
+    /// - Note: The underlying model currently works best with 10s chunks
+    /// - Shorter chunk support is still being validated
     public static func custom(
         chunkDuration: TimeInterval,
         confirmationThreshold: Float = 0.85,
