@@ -365,7 +365,7 @@ public struct StreamingAsrConfig: Sendable {
 
     public init(
         confirmationThreshold: Float = 0.85,
-        chunkDuration: TimeInterval = 1.0,
+        chunkDuration: TimeInterval = 10.0,
         enableDebug: Bool = false
     ) {
         self.confirmationThreshold = confirmationThreshold
