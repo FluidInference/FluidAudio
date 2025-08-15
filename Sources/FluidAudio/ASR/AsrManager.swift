@@ -145,38 +145,6 @@ public final class AsrManager {
         ])
     }
 
-    func prepareMelSpectrogramInputFP16(
-        _ audioSamples: [Float], actualLength: Int? = nil
-    )
-        async throws -> MLFeatureProvider
-    {
-        let audioLength = audioSamples.count
-        let actualAudioLength = actualLength ?? audioLength  // Use provided actual length or default to sample count
-
-        // Create FP32 array first
-        let audioArrayFP32 = try await sharedMLArrayCache.getArray(
-            shape: [1, audioLength] as [NSNumber],
-            dataType: .float32
-        )
-
-        // Copy audio data
-        audioSamples.withUnsafeBufferPointer { buffer in
-            let destPtr = audioArrayFP32.dataPointer.bindMemory(
-                to: Float.self, capacity: audioLength)
-            memcpy(destPtr, buffer.baseAddress!, audioLength * MemoryLayout<Float>.stride)
-        }
-
-        // Convert to FP16 for Neural Engine
-        let audioArrayFP16 = try ANEOptimizer.convertToFloat16(audioArrayFP32)
-
-        // Pass the actual audio length, not the padded length
-        let lengthArray = try createScalarArray(value: actualAudioLength)
-
-        return try createFeatureProvider(features: [
-            ("audio_signal", audioArrayFP16),
-            ("audio_length", lengthArray),
-        ])
-    }
 
     func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
         // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
@@ -379,41 +347,6 @@ public final class AsrManager {
         logger.info("Decoder state reset for source: \(String(describing: source))")
     }
 
-    internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout DecoderState
-    )
-        async throws -> ASRResult
-    {
-        if config.enableDebug {
-            logger.debug("transcribeWithState: processing \(audioSamples.count) samples")
-            // Log decoder state values before processing
-            let hiddenBefore = (
-                decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
-            )
-            let cellBefore = (
-                decoderState.cellState[0].intValue, decoderState.cellState[1].intValue
-            )
-            logger.debug(
-                "Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]"
-            )
-        }
-
-        let result = try await transcribeUnifiedWithState(audioSamples, decoderState: &decoderState)
-
-        if config.enableDebug {
-            // Log decoder state values after processing
-            let hiddenAfter = (
-                decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
-            )
-            let cellAfter = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
-            logger.debug(
-                "Decoder state after: hidden[\(hiddenAfter.0),\(hiddenAfter.1)], cell[\(cellAfter.0),\(cellAfter.1)]"
-            )
-            logger.debug("Transcription result: '\(result.text)'")
-        }
-
-        return result
-    }
 
     internal func convertTokensWithExistingTimings(
         _ tokenIds: [Int], timings: [TokenTiming]
