@@ -31,7 +31,7 @@ public enum ANEMemoryUtils {
 
         // Calculate optimal strides for ANE
         let strides = calculateOptimalStrides(for: shape)
-        
+
         // Calculate actual elements needed based on strides (accounts for padding)
         // The total elements needed is the stride of the first dimension times the first dimension size
         let totalElementsNeeded: Int
