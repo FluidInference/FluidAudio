@@ -215,7 +215,7 @@ public class ASRBenchmark {
 
             // Process all audio up to this point (simulating accumulated streaming)
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
-            let result = try await asrManager.transcribeUnified(audioToProcess)
+            let result = try await asrManager.transcribe(audioToProcess, source: .microphone)
 
             // Track first token time
             if firstTokenTime == nil && !result.text.isEmpty {
@@ -279,7 +279,7 @@ public class ASRBenchmark {
         -> ASRResult
     {
         // Use optimized transcription with Neural Engine optimizations
-        let result = try await asrManager.transcribeWithFP16(audioSamples)
+        let result = try await asrManager.transcribe(audioSamples)
 
         if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
             print("⚠️ CI: Transcription returned empty text")
