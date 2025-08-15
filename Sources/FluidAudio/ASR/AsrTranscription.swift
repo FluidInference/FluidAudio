@@ -63,7 +63,7 @@ extension AsrManager {
             chunkSize: 160_000,
             enableDebug: config.enableDebug
         ).process(using: self, startTime: startTime)
-        
+
         // Note: ChunkProcessor uses its own decoder state, so we don't update the passed-in state
         return result
     }

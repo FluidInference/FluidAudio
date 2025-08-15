@@ -145,7 +145,6 @@ public final class AsrManager {
         ])
     }
 
-
     func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
         // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
         if let provider = ZeroCopyFeatureProvider.chain(
@@ -346,7 +345,6 @@ public final class AsrManager {
         }
         logger.info("Decoder state reset for source: \(String(describing: source))")
     }
-
 
     internal func convertTokensWithExistingTimings(
         _ tokenIds: [Int], timings: [TokenTiming]
