@@ -31,8 +31,8 @@ jobs:
           path: |
             .build
             ~/Library/Application Support/FluidAudio/Models/Parakeet
-            ~/Documents/Datasets/librispeech
-          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v4
+            ~/Library/Application Support/FluidAudio/Datasets/LibriSpeech
+          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v5
 
       - name: Build
         run: swift build -c release
