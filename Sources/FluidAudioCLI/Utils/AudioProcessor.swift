@@ -7,6 +7,18 @@ struct AudioProcessor {
 
     static func loadAudioFile(path: String) async throws -> [Float] {
         let url = URL(fileURLWithPath: path)
+        
+        // Try to load the file directly first
+        do {
+            return try await loadAudioFileDirectly(url: url)
+        } catch {
+            // If direct loading fails (e.g., FLAC in CI), try converting with ffmpeg
+            print("Direct audio loading failed, attempting ffmpeg conversion: \(error.localizedDescription)")
+            return try await loadAudioFileWithFFmpeg(path: path)
+        }
+    }
+    
+    private static func loadAudioFileDirectly(url: URL) async throws -> [Float] {
         let audioFile = try AVAudioFile(forReading: url)
 
         let format = audioFile.processingFormat
@@ -79,6 +91,57 @@ struct AudioProcessor {
         }
 
         return resampled
+    }
+    
+    /// Load audio file using ffmpeg conversion as fallback for unsupported formats
+    private static func loadAudioFileWithFFmpeg(path: String) async throws -> [Float] {
+        let fileManager = FileManager.default
+        let tempDir = fileManager.temporaryDirectory
+        let tempWavPath = tempDir.appendingPathComponent("\(UUID().uuidString).wav")
+        
+        defer {
+            // Clean up temp file
+            try? fileManager.removeItem(at: tempWavPath)
+        }
+        
+        // Convert to WAV using ffmpeg
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [
+            "ffmpeg",
+            "-i", path,                    // Input file
+            "-ar", "16000",                 // Sample rate
+            "-ac", "1",                     // Mono
+            "-f", "wav",                    // WAV format
+            "-y",                           // Overwrite output
+            tempWavPath.path,              // Output path
+            "-loglevel", "error"           // Only show errors
+        ]
+        
+        let pipe = Pipe()
+        process.standardError = pipe
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            if process.terminationStatus != 0 {
+                let errorData = pipe.fileHandleForReading.readDataToEndOfFile()
+                let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                throw NSError(
+                    domain: "AudioError", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "ffmpeg conversion failed: \(errorMessage)"])
+            }
+            
+            // Now load the converted WAV file
+            return try await loadAudioFileDirectly(url: tempWavPath)
+            
+        } catch {
+            // If ffmpeg is not available or fails, throw a more informative error
+            throw NSError(
+                domain: "AudioError", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to load audio file. FLAC files require ffmpeg for conversion in CI environment. Error: \(error.localizedDescription)"])
+        }
     }
 }
 
