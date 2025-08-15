@@ -20,14 +20,19 @@ jobs:
         with:
           swift-version: "6.1"
 
+      - name: Install ffmpeg
+        run: |
+          brew install ffmpeg || echo "ffmpeg may already be installed"
+          ffmpeg -version || echo "ffmpeg not available"
+
       - name: Cache Dependencies
         uses: actions/cache@v4
         with:
           path: |
             .build
             ~/Library/Application Support/FluidAudio/Models/Parakeet
-            ~/Documents/Datasets/librispeech
-          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v4
+            ~/Library/Application Support/FluidAudio/Datasets/LibriSpeech
+          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v5
 
       - name: Build
         run: swift build -c release
@@ -69,25 +74,44 @@ jobs:
           MAX_FILES="25"
           BENCHMARK_START=$(date +%s)
 
-          # Run standard benchmarks in parallel
-          swift run -c release fluidaudio asr-benchmark \
-            --subset test-clean --max-files "$MAX_FILES" \
-            --auto-download --output asr_results_clean.json &
-          CLEAN_PID=$!
+          # Set error handling
+          set -o pipefail
 
-          swift run -c release fluidaudio asr-benchmark \
-            --subset test-other --max-files "$MAX_FILES" \
-            --auto-download --output asr_results_other.json &
-          OTHER_PID=$!
+          # Function to run benchmark with error capture
+          run_benchmark() {
+            local SUBSET=$1
+            local MAX=$2
+            local OUTPUT=$3
+            local EXTRA_ARGS="${4:-}"
+            
+            echo "========================================="
+            echo "Running ASR benchmark: $SUBSET (max $MAX files)"
+            echo "Output: $OUTPUT"
+            echo "Extra args: $EXTRA_ARGS"
+            echo "========================================="
+            
+            if swift run -c release fluidaudio asr-benchmark \
+              --subset "$SUBSET" --max-files "$MAX" \
+              --auto-download --output "$OUTPUT" $EXTRA_ARGS 2>&1 | tee benchmark_log.txt; then
+              echo "✅ Benchmark $SUBSET completed successfully"
+              return 0
+            else
+              echo "❌ Benchmark $SUBSET FAILED with exit code $?"
+              echo "Last 50 lines of output:"
+              tail -50 benchmark_log.txt
+              # Continue with other benchmarks even if one fails
+              return 1
+            fi
+          }
+
+          # Run benchmarks with error capture
+          run_benchmark "test-clean" "$MAX_FILES" "asr_results_clean.json" || CLEAN_FAILED=1
+
+          run_benchmark "test-other" "$MAX_FILES" "asr_results_other.json" || OTHER_FAILED=1
 
           # Run streaming benchmark (smaller file count for faster CI)
-          swift run -c release fluidaudio asr-benchmark \
-            --subset test-clean --max-files "5" \
-            --test-streaming --chunk-duration 0.5 \
-            --auto-download --output asr_results_streaming.json &
-          STREAMING_PID=$!
+          run_benchmark "test-clean" "5" "asr_results_streaming.json" "--test-streaming --chunk-duration 0.5" || STREAMING_FAILED=1 
 
-          wait $CLEAN_PID && wait $OTHER_PID && wait $STREAMING_PID
 
           # Extract metrics with error handling
           if [ -f asr_results_clean.json ]; then
@@ -152,18 +176,37 @@ jobs:
           echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
           echo "FILES_COUNT=$MAX_FILES" >> $GITHUB_OUTPUT
 
+          # Report failures summary
+          if [ ! -z "$CLEAN_FAILED" ] || [ ! -z "$OTHER_FAILED" ] || [ ! -z "$STREAMING_FAILED" ]; then
+            echo "BENCHMARK_STATUS=PARTIAL_FAILURE" >> $GITHUB_OUTPUT
+            echo "⚠️ Some benchmarks failed:"
+            [ ! -z "$CLEAN_FAILED" ] && echo "  - test-clean benchmark failed"
+            [ ! -z "$OTHER_FAILED" ] && echo "  - test-other benchmark failed"
+            [ ! -z "$STREAMING_FAILED" ] && echo "  - streaming benchmark failed"
+            # Don't exit with error to allow PR comment to be posted
+          else
+            echo "BENCHMARK_STATUS=SUCCESS" >> $GITHUB_OUTPUT
+            echo "✅ All benchmarks completed successfully"
+          fi
+
       - name: Comment PR
         if: github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `## ASR Benchmark Results
+            const benchmarkStatus = '${{ steps.benchmark.outputs.BENCHMARK_STATUS }}';
+            const statusEmoji = benchmarkStatus === 'SUCCESS' ? '✅' : '⚠️';
+            const statusText = benchmarkStatus === 'SUCCESS' ? 'All benchmarks passed' : 'Some benchmarks failed (see logs)';
+            
+            const body = `## ASR Benchmark Results ${statusEmoji}
+
+            **Status:** ${statusText}
 
             | Dataset | WER Avg | WER Med | RTFx | Status |
             |---------|---------|---------|------|--------|
-            | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '⚠️'} |
-            | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '⚠️'} |
+            | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '${{ steps.benchmark.outputs.CLEAN_WER_AVG }}' === 'N/A' ? '❌' : '⚠️'} |
+            | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '${{ steps.benchmark.outputs.OTHER_WER_AVG }}' === 'N/A' ? '❌' : '⚠️'} |
 
             ### Streaming Infrastructure Test
             | Metric | Value | Description |

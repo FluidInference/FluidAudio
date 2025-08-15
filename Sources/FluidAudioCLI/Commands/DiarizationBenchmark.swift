@@ -977,9 +977,6 @@ enum StreamDiarizationBenchmark {
         let avgFA = results.map { $0.falseAlarmRate }.reduce(0, +) / Float(results.count)
         let avgSE = results.map { $0.speakerErrorRate }.reduce(0, +) / Float(results.count)
         let avgRTFx = results.map { $0.rtfx }.reduce(0, +) / Float(results.count)
-        let avgFragmentation = results.map { $0.speakerFragmentation }.reduce(0, +) / Float(results.count)
-        let avgLatency90 = results.map { $0.latency90th }.reduce(0, +) / Double(results.count)
-        let avgLatency99 = results.map { $0.latency99th }.reduce(0, +) / Double(results.count)
 
         // Print average row
         print(
