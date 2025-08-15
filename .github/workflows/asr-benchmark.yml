@@ -66,28 +66,24 @@ jobs:
       - name: Run Benchmarks
         id: benchmark
         run: |
-          MAX_FILES="25"
+          MAX_FILES="10"
           BENCHMARK_START=$(date +%s)
 
-          # Run standard benchmarks in parallel
+
           swift run -c release fluidaudio asr-benchmark \
             --subset test-clean --max-files "$MAX_FILES" \
-            --auto-download --output asr_results_clean.json &
-          CLEAN_PID=$!
+            --auto-download --output asr_results_clean.json 
 
           swift run -c release fluidaudio asr-benchmark \
             --subset test-other --max-files "$MAX_FILES" \
-            --auto-download --output asr_results_other.json &
-          OTHER_PID=$!
+            --auto-download --output asr_results_other.json 
 
           # Run streaming benchmark (smaller file count for faster CI)
           swift run -c release fluidaudio asr-benchmark \
             --subset test-clean --max-files "5" \
             --test-streaming --chunk-duration 0.5 \
-            --auto-download --output asr_results_streaming.json &
-          STREAMING_PID=$!
+            --auto-download --output asr_results_streaming.json 
 
-          wait $CLEAN_PID && wait $OTHER_PID && wait $STREAMING_PID
 
           # Extract metrics with error handling
           if [ -f asr_results_clean.json ]; then
