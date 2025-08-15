@@ -26,14 +26,33 @@ public enum ANEMemoryUtils {
         dataType: MLMultiArrayDataType,
         zeroClear: Bool = true
     ) throws -> MLMultiArray {
-        // Calculate total elements
-        let totalElements = shape.map { $0.intValue }.reduce(1, *)
-
         // Calculate element size
         let elementSize = getElementSize(for: dataType)
 
+        // Calculate total elements from shape
+        let totalElements = shape.map { $0.intValue }.reduce(1, *)
+
+        // For very large arrays, use standard strides to avoid excessive memory overhead
+        // ANE optimization is beneficial for smaller tensors but counterproductive for large test arrays
+        let strides: [NSNumber]
+        if totalElements > 100_000 {
+            // Use standard row-major strides for large arrays
+            var standardStrides: [Int] = []
+            var currentStride = 1
+            for i in (0..<shape.count).reversed() {
+                standardStrides.insert(currentStride, at: 0)
+                currentStride *= shape[i].intValue
+            }
+            strides = standardStrides.map { NSNumber(value: $0) }
+        } else {
+            // Use ANE-optimized strides for smaller arrays
+            strides = calculateOptimalStrides(for: shape)
+        }
+
+        let actualElements = totalElements
+
         // Align the allocation size to ANE requirements
-        let bytesNeeded = totalElements * elementSize
+        let bytesNeeded = actualElements * elementSize
         // Ensure at least one alignment unit is allocated even for empty arrays
         let alignedBytes = max(aneAlignment, ((bytesNeeded + aneAlignment - 1) / aneAlignment) * aneAlignment)
 
@@ -55,7 +74,7 @@ public enum ANEMemoryUtils {
             dataPointer: pointer,
             shape: shape,
             dataType: dataType,
-            strides: calculateOptimalStrides(for: shape),
+            strides: strides,
             deallocator: { bytes in
                 bytes.deallocate()
             }
