@@ -191,8 +191,8 @@ final class AsrManagerTests: XCTestCase {
         lengthArray[0] = NSNumber(value: 100)
 
         let melOutput = try MLDictionaryFeatureProvider(dictionary: [
-            "melspectogram": MLFeatureValue(multiArray: melArray),
-            "melspectogram_length": MLFeatureValue(multiArray: lengthArray),
+            "melspectrogram": MLFeatureValue(multiArray: melArray),
+            "melspectrogram_length": MLFeatureValue(multiArray: lengthArray),
         ])
 
         let encoderInput = try manager.prepareEncoderInput(melOutput)
@@ -292,8 +292,8 @@ final class AsrManagerTests: XCTestCase {
         }
 
         let melOutput = try MLDictionaryFeatureProvider(dictionary: [
-            "melspectogram": MLFeatureValue(multiArray: melArray),
-            "melspectogram_length": MLFeatureValue(multiArray: lengthArray),
+            "melspectrogram": MLFeatureValue(multiArray: melArray),
+            "melspectrogram_length": MLFeatureValue(multiArray: lengthArray),
         ])
 
         let encoderInput = try manager.prepareEncoderInput(melOutput)

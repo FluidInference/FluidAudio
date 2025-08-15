@@ -343,24 +343,23 @@ public struct StreamingAsrConfig: Sendable {
     public let enableDebug: Bool
 
     /// Default configuration with balanced settings
-    // Limtiation in the underlying model only supporting 10s. We are working to support other durations.
     public static let `default` = StreamingAsrConfig(
         confirmationThreshold: 0.85,
-        chunkDuration: 10.0,
+        chunkDuration: 10.0,  // 10 second chunks for now
         enableDebug: false
     )
 
     /// Low latency configuration with faster updates
     public static let lowLatency = StreamingAsrConfig(
         confirmationThreshold: 0.75,
-        chunkDuration: 10.0,
+        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
         enableDebug: false
     )
 
     /// High accuracy configuration with conservative confirmation
     public static let highAccuracy = StreamingAsrConfig(
         confirmationThreshold: 0.9,
-        chunkDuration: 10.0,
+        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
         enableDebug: false
     )
 
@@ -375,8 +374,8 @@ public struct StreamingAsrConfig: Sendable {
     }
 
     /// Custom configuration with specified chunk duration
-    /// - Note: For TDT decoder, chunk sizes below 5.0s may result in empty transcriptions
-    // Limtiation in the underlying model only supporting 10s. We are working to support other durations.
+    /// - Note: The underlying model currently works best with 10s chunks
+    /// - Shorter chunk support is still being validated
     public static func custom(
         chunkDuration: TimeInterval,
         confirmationThreshold: Float = 0.85,

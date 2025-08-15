@@ -40,7 +40,7 @@ extension AsrModels {
     }
 
     public enum ModelNames {
-        public static let melspectrogram = "Melspectogram.mlmodelc"
+        public static let melspectrogram = "Melspectrogram_v2.mlmodelc"
         public static let encoder = "ParakeetEncoder_v2.mlmodelc"
         public static let decoder = "ParakeetDecoder.mlmodelc"
         public static let joint = "RNNTJoint.mlmodelc"
