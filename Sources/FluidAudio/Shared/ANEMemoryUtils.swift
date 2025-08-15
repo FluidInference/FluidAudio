@@ -26,14 +26,23 @@ public enum ANEMemoryUtils {
         dataType: MLMultiArrayDataType,
         zeroClear: Bool = true
     ) throws -> MLMultiArray {
-        // Calculate total elements
-        let totalElements = shape.map { $0.intValue }.reduce(1, *)
-
         // Calculate element size
         let elementSize = getElementSize(for: dataType)
 
+        // Calculate optimal strides for ANE
+        let strides = calculateOptimalStrides(for: shape)
+
+        // Calculate actual elements needed based on strides (accounts for padding)
+        // The total elements needed is the stride of the first dimension times the first dimension size
+        let totalElementsNeeded: Int
+        if !shape.isEmpty {
+            totalElementsNeeded = strides[0].intValue * shape[0].intValue
+        } else {
+            totalElementsNeeded = 0
+        }
+
         // Align the allocation size to ANE requirements
-        let bytesNeeded = totalElements * elementSize
+        let bytesNeeded = totalElementsNeeded * elementSize
         // Ensure at least one alignment unit is allocated even for empty arrays
         let alignedBytes = max(aneAlignment, ((bytesNeeded + aneAlignment - 1) / aneAlignment) * aneAlignment)
 
@@ -55,7 +64,7 @@ public enum ANEMemoryUtils {
             dataPointer: pointer,
             shape: shape,
             dataType: dataType,
-            strides: calculateOptimalStrides(for: shape),
+            strides: strides,
             deallocator: { bytes in
                 bytes.deallocate()
             }
