@@ -71,7 +71,7 @@ jobs:
       - name: Run Benchmarks
         id: benchmark
         run: |
-          MAX_FILES="10"
+          MAX_FILES="25
           BENCHMARK_START=$(date +%s)
 
           # Set error handling
