@@ -182,11 +182,11 @@ public final class AsrManager {
         // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
         if let provider = ZeroCopyFeatureProvider.chain(
             from: melspectrogramOutput,
-            outputName: "melspectogram",
+            outputName: "melspectrogram",
             to: "audio_signal"
         ) {
             // Also need to chain the length
-            if let melLength = melspectrogramOutput.featureValue(for: "melspectogram_length") {
+            if let melLength = melspectrogramOutput.featureValue(for: "melspectrogram_length") {
                 let features = [
                     "audio_signal": provider.featureValue(for: "audio_signal")!,
                     "length": melLength,
@@ -197,10 +197,10 @@ public final class AsrManager {
 
         // Fallback to copying if zero-copy fails
         let melspectrogram = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectogram",
+            from: melspectrogramOutput, key: "melspectrogram",
             errorMessage: "Invalid mel-spectrogram output")
         let melspectrogramLength = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectogram_length",
+            from: melspectrogramOutput, key: "melspectrogram_length",
             errorMessage: "Invalid mel-spectrogram length output")
 
         return try createFeatureProvider(features: [
