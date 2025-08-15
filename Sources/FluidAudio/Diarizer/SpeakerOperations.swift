@@ -498,8 +498,8 @@ extension SpeakerManager {
     ) -> Bool {
         return queue.sync(flags: .barrier) {
             // Get speaker info from database
-            guard var fromSpeakerInfo = speakerDatabase[fromSpeakerId],
-                var toSpeakerInfo = speakerDatabase[toSpeakerId]
+            guard let fromSpeakerInfo = speakerDatabase[fromSpeakerId],
+                let toSpeakerInfo = speakerDatabase[toSpeakerId]
             else {
                 logger.warning("One or both speakers not found: from=\(fromSpeakerId), to=\(toSpeakerId)")
                 return false
