@@ -345,21 +345,21 @@ public struct StreamingAsrConfig: Sendable {
     /// Default configuration with balanced settings
     public static let `default` = StreamingAsrConfig(
         confirmationThreshold: 0.85,
-        chunkDuration: 10.0,  // 10 second chunks - model limitation
+        chunkDuration: 10.0,  // 10 second chunks for now
         enableDebug: false
     )
 
     /// Low latency configuration with faster updates
     public static let lowLatency = StreamingAsrConfig(
         confirmationThreshold: 0.75,
-        chunkDuration: 10.0,  // 10 second chunks - model limitation
+        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
         enableDebug: false
     )
 
     /// High accuracy configuration with conservative confirmation
     public static let highAccuracy = StreamingAsrConfig(
         confirmationThreshold: 0.9,
-        chunkDuration: 10.0,  // 10 second chunks - model limitation
+        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
         enableDebug: false
     )
 
