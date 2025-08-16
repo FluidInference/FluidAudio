@@ -11,10 +11,7 @@ public enum CoreMLDiarizer {
 public struct DiarizerModels: Sendable {
 
     /// Required model names for Diarizer
-    public static let requiredModelNames: Set<String> = [
-        "pyannote_segmentation.mlmodelc",
-        "wespeaker_v2.mlmodelc",
-    ]
+    public static let requiredModelNames = ModelNames.Diarizer.requiredModels
 
     public let segmentationModel: CoreMLDiarizer.SegmentationModel
     public let embeddingModel: CoreMLDiarizer.EmbeddingModel
@@ -38,8 +35,8 @@ public struct DiarizerModels: Sendable {
 
 extension DiarizerModels {
 
-    private static let SegmentationModelFileName = "pyannote_segmentation"
-    private static let EmbeddingModelFileName = "wespeaker_v2"
+    private static let SegmentationModelFileName = ModelNames.Diarizer.segmentation
+    private static let EmbeddingModelFileName = ModelNames.Diarizer.embedding
 
     // MARK: - Private Model Loading Helpers
 
@@ -55,8 +52,8 @@ extension DiarizerModels {
         let config = configuration ?? defaultConfiguration()
 
         // Download required models
-        let segmentationModelName = SegmentationModelFileName + ".mlmodelc"
-        let embeddingModelName = EmbeddingModelFileName + ".mlmodelc"
+        let segmentationModelName = ModelNames.Diarizer.segmentationFile
+        let embeddingModelName = ModelNames.Diarizer.embeddingFile
 
         let models = try await DownloadUtils.loadModels(
             .diarizer,
