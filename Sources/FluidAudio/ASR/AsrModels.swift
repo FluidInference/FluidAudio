@@ -4,6 +4,15 @@ import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
 public struct AsrModels: Sendable {
+
+    /// Required model names for ASR
+    public static let requiredModelNames: Set<String> = [
+        "Melspectrogram_v2.mlmodelc",
+        "ParakeetEncoder_v2.mlmodelc",
+        "ParakeetDecoder.mlmodelc",
+        "RNNTJoint.mlmodelc",
+    ]
+
     public let melspectrogram: MLModel
     public let encoder: MLModel
     public let decoder: MLModel

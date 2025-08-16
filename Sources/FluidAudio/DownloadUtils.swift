@@ -30,6 +30,7 @@ public class DownloadUtils {
         var folderName: String {
             rawValue.split(separator: "/").last?.description ?? rawValue
         }
+
     }
 
     public static func loadModels(
@@ -147,6 +148,19 @@ public class DownloadUtils {
         return models
     }
 
+    /// Get required model names from the appropriate manager
+    @available(macOS 13.0, iOS 16.0, *)
+    private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+        switch repo {
+        case .vad:
+            return VadManager.requiredModelNames
+        case .parakeet:
+            return AsrModels.requiredModelNames
+        case .diarizer:
+            return DiarizerModels.requiredModelNames
+        }
+    }
+
     /// Download a HuggingFace repository
     private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
         logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
@@ -155,7 +169,7 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
-        // Get the required model names for this repo
+        // Get the required model names for this repo from the appropriate manager
         let requiredModels = getRequiredModelNames(for: repo)
 
         // Download all repository contents
@@ -188,27 +202,6 @@ public class DownloadUtils {
         }
 
         logger.info("Downloaded all required models for \(repo.folderName)")
-    }
-
-    /// Get the required model names for a specific repository
-    private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
-        switch repo {
-        case .vad:
-            return ["silero_vad.mlmodelc"]
-        case .parakeet:
-            // Include both versions for different iOS/macOS versions
-            return [
-                "Melspectrogram_v2.mlmodelc",
-                "ParakeetEncoder_v2.mlmodelc",
-                "ParakeetDecoder.mlmodelc",
-                "RNNTJoint.mlmodelc",
-            ]
-        case .diarizer:
-            return [
-                "pyannote_segmentation.mlmodelc",
-                "wespeaker_v2.mlmodelc",
-            ]
-        }
     }
 
     /// Check if a file is essential for model operation

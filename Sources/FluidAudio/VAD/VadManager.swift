@@ -6,6 +6,13 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public actor VadManager {
 
+    /// Required model names for VAD
+    public static let requiredModelNames: Set<String> = [
+        "silero_stft.mlmodelc",
+        "silero_encoder.mlmodelc",
+        "silero_rnn_decoder.mlmodelc",
+    ]
+
     private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "VAD")
     private let config: VadConfig
 
@@ -62,15 +69,9 @@ public actor VadManager {
     private func loadCoreMLModelsWithRecovery(from directory: URL? = nil) async throws {
         let baseDirectory = directory ?? getDefaultBaseDirectory()
 
-        let modelNames = [
-            "silero_stft.mlmodelc",
-            "silero_encoder.mlmodelc",
-            "silero_rnn_decoder.mlmodelc",
-        ]
-
         let models = try await DownloadUtils.loadModels(
             .vad,
-            modelNames: modelNames,
+            modelNames: Array(Self.requiredModelNames),
             directory: baseDirectory,
             computeUnits: config.computeUnits
         )
