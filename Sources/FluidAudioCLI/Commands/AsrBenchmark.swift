@@ -172,7 +172,8 @@ public class ASRBenchmark {
             reference: file.transcript,
             metrics: metrics,
             processingTime: processingTime,
-            audioLength: audioLength
+            audioLength: audioLength,
+            confidence: asrResult.confidence
         )
     }
 
@@ -204,6 +205,7 @@ public class ASRBenchmark {
         // This simulates how streaming would work with continuous audio
         var processedSamples = 0
         var accumulatedText = ""
+        var finalConfidence: Float = 0.0
 
         // Process the full audio file but track metrics as if streaming
         while processedSamples < audioSamples.count {
@@ -222,8 +224,9 @@ public class ASRBenchmark {
                 firstTokenTime = Date()
             }
 
-            // Update accumulated text
+            // Update accumulated text and confidence
             accumulatedText = result.text
+            finalConfidence = result.confidence
 
             let chunkProcessingTime = Date().timeIntervalSince(chunkStartTime)
             chunkProcessingTimes.append(chunkProcessingTime)
@@ -268,6 +271,7 @@ public class ASRBenchmark {
             metrics: metrics,
             processingTime: totalProcessingTime,
             audioLength: audioLength,
+            confidence: finalConfidence,
             streamingMetrics: streamingMetrics
         )
     }
@@ -717,9 +721,12 @@ extension ASRBenchmark {
             print("   Files processed: \(results.count)")
             let overallRTFx = totalAudioDuration / totalProcessingTime
 
+            let averageConfidence = results.map { $0.confidence }.reduce(0, +) / Float(results.count)
+
             print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
             print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
             print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            print("   Average Confidence: \(String(format: "%.1f", averageConfidence * 100))%")
             print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
             print(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
@@ -770,6 +777,7 @@ extension ASRBenchmark {
                 "averageWER": totalWER,
                 "medianWER": medianWER,
                 "averageCER": totalCER,
+                "averageConfidence": averageConfidence,
                 "medianRTFx": medianRTFx,
                 "overallRTFx": overallRTFx,
                 "totalAudioDuration": totalAudioDuration,
@@ -815,6 +823,7 @@ extension ASRBenchmark {
                             "rtfx": result.rtfx,
                             "audioLength": result.audioLength,
                             "processingTime": result.processingTime,
+                            "confidence": result.confidence,
                         ]
 
                         // Add streaming metrics if available

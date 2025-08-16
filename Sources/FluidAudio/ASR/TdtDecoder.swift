@@ -36,6 +36,7 @@ struct TdtHypothesis: Sendable {
     var decState: DecoderState?
     var timestamps: [Int] = []
     var tokenDurations: [Int] = []
+    var tokenConfidences: [Float] = []
     /// Last non-blank token decoded in this hypothesis.
     /// Used to initialize the decoder for the next chunk, maintaining context across chunk boundaries.
     var lastToken: Int?
@@ -169,6 +170,12 @@ internal struct TdtDecoder {
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
+                hypothesis.tokenDurations.append(actualDuration)
+
+                // Calculate confidence using softmax over all token logits
+                let confidence = softmaxConfidence(tokenLogits, selectedIndex: label)
+                hypothesis.tokenConfidences.append(confidence)
+
                 hypothesis.decState = decoderResult.newState
                 hypothesis.lastToken = label
             }
@@ -200,6 +207,199 @@ internal struct TdtDecoder {
         decoderState.lastToken = hypothesis.lastToken
 
         return hypothesis.ySequence
+    }
+
+    /// Decode with timing and confidence information
+    func decodeWithTimings(
+        encoderOutput: MLMultiArray,
+        encoderSequenceLength: Int,
+        decoderModel: MLModel,
+        jointModel: MLModel,
+        decoderState: inout DecoderState,
+        sampleRate: Int = 16000
+    ) async throws -> (tokens: [Int], tokenTimings: [TokenTiming]) {
+
+        logger.debug("TDT decode with timings: encoderSequenceLength=\(encoderSequenceLength)")
+
+        guard encoderSequenceLength > 1 else {
+            logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
+            return ([], [])
+        }
+
+        // Pre-process encoder output for faster access
+        let encoderFrames = try preProcessEncoderOutput(
+            encoderOutput, length: encoderSequenceLength)
+
+        var hypothesis = TdtHypothesis(decState: decoderState)
+        hypothesis.lastToken = decoderState.lastToken  // Preserve last token from previous chunk
+        var timeIndices = 0
+        var safeTimeIndices = 0
+        var timeIndicesCurrentLabels = 0
+        var activeMask = true
+        let lastTimestep = encoderSequenceLength - 1
+
+        var lastTimestamp = -1
+        var lastTimestampCount = 0
+
+        // Frame duration in seconds (assuming 10ms frames typical for ASR)
+        let frameDuration = 0.01  // 10ms per frame
+
+        // Main decoding loop with optimizations
+        while activeMask {
+            var label = hypothesis.lastToken ?? sosId
+
+            // Use cached decoder inputs
+            let decoderResult = try runDecoderOptimized(
+                token: label,
+                state: hypothesis.decState ?? decoderState,
+                model: decoderModel
+            )
+
+            // Fast encoder frame access
+            let encoderStep = encoderFrames[safeTimeIndices]
+
+            // Batch process joint network if possible
+            let logits = try runJointOptimized(
+                encoderStep: encoderStep,
+                decoderOutput: decoderResult.output,
+                model: jointModel
+            )
+
+            // Optimized token/duration prediction
+            let (tokenLogits, durationLogits) = try splitLogits(logits)
+            label = argmaxSIMD(tokenLogits)
+            var score = tokenLogits[label]
+            let duration = config.tdtConfig.durations[argmaxSIMD(durationLogits)]
+
+            var blankMask = label == blankId
+            var actualDuration = duration
+
+            if blankMask && duration == 0 {
+                actualDuration = 1
+            }
+
+            timeIndicesCurrentLabels = timeIndices
+            timeIndices += actualDuration
+            safeTimeIndices = min(timeIndices, lastTimestep)
+            activeMask = timeIndices < encoderSequenceLength
+            var advanceMask = activeMask && blankMask
+
+            // Optimized inner loop
+            while advanceMask {
+                timeIndicesCurrentLabels = timeIndices
+
+                let innerEncoderStep = encoderFrames[safeTimeIndices]
+                let innerLogits = try runJointOptimized(
+                    encoderStep: innerEncoderStep,
+                    decoderOutput: decoderResult.output,
+                    model: jointModel
+                )
+
+                let (innerTokenLogits, innerDurationLogits) = try splitLogits(innerLogits)
+                let moreLabel = argmaxSIMD(innerTokenLogits)
+                let moreScore = innerTokenLogits[moreLabel]
+                let moreDuration = config.tdtConfig.durations[argmaxSIMD(innerDurationLogits)]
+
+                label = moreLabel
+                score = moreScore
+                actualDuration = moreDuration
+
+                blankMask = label == blankId
+                if blankMask && actualDuration == 0 {
+                    actualDuration = 1
+                }
+
+                timeIndices += actualDuration
+                safeTimeIndices = min(timeIndices, lastTimestep)
+                activeMask = timeIndices < encoderSequenceLength
+                advanceMask = activeMask && blankMask
+            }
+
+            // Update hypothesis
+            if label != blankId {
+                hypothesis.ySequence.append(label)
+                hypothesis.score += score
+                hypothesis.timestamps.append(timeIndicesCurrentLabels)
+                hypothesis.tokenDurations.append(actualDuration)
+
+                // Calculate confidence using softmax over all token logits
+                let confidence = softmaxConfidence(tokenLogits, selectedIndex: label)
+                hypothesis.tokenConfidences.append(confidence)
+
+                hypothesis.decState = decoderResult.newState
+                hypothesis.lastToken = label
+            }
+
+            // Force blank logic
+            if let maxSymbols = config.tdtConfig.maxSymbolsPerStep {
+                if label != blankId && lastTimestamp == timeIndices
+                    && lastTimestampCount >= maxSymbols
+                {
+                    timeIndices += 1
+                    safeTimeIndices = min(timeIndices, lastTimestep)
+                    activeMask = timeIndices < encoderSequenceLength
+                }
+            }
+
+            if lastTimestamp == timeIndices {
+                lastTimestampCount += 1
+            } else {
+                lastTimestamp = timeIndices
+                lastTimestampCount = 1
+            }
+        }
+
+        if let finalState = hypothesis.decState {
+            decoderState = finalState
+        }
+
+        // Save the last token for the next chunk
+        decoderState.lastToken = hypothesis.lastToken
+
+        // Create TokenTiming objects with proper timing calculations
+        var tokenTimings: [TokenTiming] = []
+
+        for i in 0..<hypothesis.ySequence.count {
+            let tokenId = hypothesis.ySequence[i]
+            let startFrame = hypothesis.timestamps[i]
+            let duration = hypothesis.tokenDurations[i]
+            let confidence = hypothesis.tokenConfidences[i]
+
+            // Convert frame indices to time
+            let startTime = Double(startFrame) * frameDuration
+            let endTime = Double(startFrame + duration) * frameDuration
+
+            // Token string will be resolved later via vocabulary lookup in AsrManager
+            let tokenString = "token_\(tokenId)"
+
+            let timing = TokenTiming(
+                token: tokenString,
+                tokenId: tokenId,
+                startTime: startTime,
+                endTime: endTime,
+                confidence: confidence
+            )
+
+            tokenTimings.append(timing)
+        }
+
+        return (hypothesis.ySequence, tokenTimings)
+    }
+
+    /// Calculate confidence using softmax probability
+    private func softmaxConfidence(_ logits: [Float], selectedIndex: Int) -> Float {
+        guard selectedIndex < logits.count else { return 0.0 }
+
+        // Find max for numerical stability
+        let maxLogit = logits.max() ?? 0.0
+
+        // Calculate exp(logit - max) for numerical stability
+        let expValues = logits.map { exp($0 - maxLogit) }
+        let sumExp = expValues.reduce(0, +)
+
+        // Return softmax probability for the selected token
+        guard sumExp > 0 else { return 0.0 }
+        return expValues[selectedIndex] / sumExp
     }
 
     /// Pre-process encoder output into contiguous memory for faster access

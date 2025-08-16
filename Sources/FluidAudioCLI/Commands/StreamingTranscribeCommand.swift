@@ -154,20 +154,39 @@ enum StreamingTranscribeCommand {
             let tracker = TranscriptionTracker()
             let startTime = Date()
 
+            // Create streaming display
+            let display = StreamingDisplay()
+            await display.start(confidenceThreshold: config.confirmationThreshold)
+
             // Listen for updates
             let updateTask = Task {
                 for await update in await streamingAsr.transcriptionUpdates {
+                    // Update display with new transcription data
                     if update.isConfirmed {
-                        print(
-                            "✓ Confirmed: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
-                        )
                         await tracker.addConfirmedUpdate(update.text)
-                    } else {
-                        print(
-                            "~ Volatile: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
+                        await display.update(
+                            confirmed: await streamingAsr.confirmedTranscript,
+                            volatile: await streamingAsr.volatileTranscript,
+                            confidence: update.confidence,
+                            isNewChunk: true
                         )
+                    } else {
                         await tracker.addVolatileUpdate(update.text)
+                        await display.update(
+                            confirmed: await streamingAsr.confirmedTranscript,
+                            volatile: await streamingAsr.volatileTranscript,
+                            confidence: update.confidence,
+                            isNewChunk: false
+                        )
                     }
+
+                    // Update statistics
+                    let processingTime = Date().timeIntervalSince(startTime)
+                    let audioDuration = Double(audioFileHandle.length) / format.sampleRate
+                    await display.updateStatistics(
+                        processingTime: processingTime,
+                        audioLength: audioDuration
+                    )
                 }
             }
 
@@ -176,7 +195,7 @@ enum StreamingTranscribeCommand {
             let samplesPerChunk = Int(chunkDuration * format.sampleRate)
             var position = 0
 
-            print("Streaming audio...")
+            // Streaming audio (display handles the UI)
             while position < Int(buffer.frameLength) {
                 let remainingSamples = Int(buffer.frameLength) - position
                 let chunkSize = min(samplesPerChunk, remainingSamples)
@@ -211,32 +230,96 @@ enum StreamingTranscribeCommand {
                 position += chunkSize
             }
 
-            print("\nFinalizing transcription...")
+            // Finalize
             let finalText = try await streamingAsr.finish()
 
-            // Cancel update task
+            // Cancel update task but keep display active for final view
             updateTask.cancel()
 
-            // Print results
-            print("\n" + String(repeating: "=", count: 50))
-            print("📝 TRANSCRIPTION RESULTS")
-            print(String(repeating: "=", count: 50))
-            print("\nFinal transcription:")
-            print(finalText)
-            print("\nStatistics:")
-            print("  Total volatile updates: \(await tracker.getVolatileCount())")
-            print("  Total confirmed updates: \(await tracker.getConfirmedCount())")
-            print("  Final confirmed text: \(await streamingAsr.confirmedTranscript)")
-            print("  Final volatile text: \(await streamingAsr.volatileTranscript)")
+            // Update display one last time with final state
+            await display.update(
+                confirmed: await streamingAsr.confirmedTranscript,
+                volatile: await streamingAsr.volatileTranscript,
+                confidence: 1.0,  // Show as fully confident for final
+                isNewChunk: false
+            )
 
             let processingTime = Date().timeIntervalSince(startTime)
             let audioDuration = Double(audioFileHandle.length) / format.sampleRate
+            await display.updateStatistics(
+                processingTime: processingTime,
+                audioLength: audioDuration
+            )
+
+            // Show completion message in display
+            await display.showCompletion()
+
+            // Wait for user input before showing final results
+            print(
+                "\n"
+                    + TerminalUI.colored(
+                        "✅ Transcription Complete! Press Enter to view full results...",
+                        color: TerminalUI.Color.brightGreen))
+            _ = readLine()
+
+            // Now stop display and show full results
+            await display.stop()
+
+            // Clear screen for final results
+            TerminalUI.clearScreen()
+
+            // Print final results with scrollable output
+            print(String(repeating: "═", count: 80))
+            print("📝 FINAL TRANSCRIPTION RESULTS")
+            print(String(repeating: "═", count: 80))
+
+            print("\n" + TerminalUI.colored("Complete Transcription:", color: TerminalUI.Color.bold))
+            print(String(repeating: "─", count: 80))
+
+            // Word wrap the final text for better readability
+            let wrappedLines = TerminalUI.wordWrap(text: finalText, width: 78)
+            for line in wrappedLines {
+                print(TerminalUI.colored(line, color: TerminalUI.Color.brightWhite))
+            }
+
+            print("\n" + String(repeating: "─", count: 80))
+            print("\n" + TerminalUI.colored("Statistics:", color: TerminalUI.Color.bold))
+            print("  Total volatile updates: \(await tracker.getVolatileCount())")
+            print("  Total confirmed updates: \(await tracker.getConfirmedCount())")
+
+            let confirmedText = await streamingAsr.confirmedTranscript
+            let volatileText = await streamingAsr.volatileTranscript
+            let wordCount = finalText.split(separator: " ").count
+
+            print("  " + TerminalUI.colored("Total words: \(wordCount)", color: TerminalUI.Color.cyan))
+            if !confirmedText.isEmpty {
+                print(
+                    "  "
+                        + TerminalUI.colored(
+                            "Final confirmed: \(confirmedText.split(separator: " ").count) words",
+                            color: TerminalUI.Color.green))
+            }
+            if !volatileText.isEmpty {
+                print(
+                    "  "
+                        + TerminalUI.colored(
+                            "Final volatile: \(volatileText.split(separator: " ").count) words",
+                            color: TerminalUI.Color.yellow))
+            }
+
             let rtfx = audioDuration / processingTime
 
-            print("\nPerformance:")
+            print("\n" + TerminalUI.colored("Performance:", color: TerminalUI.Color.bold))
             print("  Audio duration: \(String(format: "%.2f", audioDuration))s")
             print("  Processing time: \(String(format: "%.2f", processingTime))s")
-            print("  RTFx: \(String(format: "%.2f", rtfx))x")
+            print(
+                "  "
+                    + TerminalUI.colored(
+                        "RTFx: \(String(format: "%.2fx", rtfx))",
+                        color: rtfx > 10 ? TerminalUI.Color.green : TerminalUI.Color.yellow))
+
+            print("\n" + TerminalUI.colored("Press Enter to exit...", color: TerminalUI.Color.dim))
+            _ = readLine()
 
         } catch {
             print("Streaming transcription failed: \(error)")

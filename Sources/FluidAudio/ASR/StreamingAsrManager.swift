@@ -88,7 +88,7 @@ public actor StreamingAsrManager {
 
             logger.info("Recognition task started, waiting for audio...")
 
-            for await pcmBuffer in await self.inputSequence {
+            for await pcmBuffer in self.inputSequence {
                 do {
                     // Convert to 16kHz mono
                     let samples = try await audioConverter.convertToAsrFormat(pcmBuffer)
@@ -331,9 +331,17 @@ public actor StreamingAsrManager {
 }
 
 /// Configuration for StreamingAsrManager
+///
+/// Confidence ranges for ASR with softmax probabilities:
+/// - 0.6+ : Very high confidence (rare)
+/// - 0.5-0.6: High confidence (good for confirmation)
+/// - 0.4-0.5: Normal confidence (typical for continuous speech)
+/// - 0.3-0.4: Lower confidence (still usually correct)
+/// - <0.3: Low confidence (may have errors)
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAsrConfig: Sendable {
     /// Confidence threshold for confirming transcriptions (0.0 - 1.0)
+    /// Typical values: 0.4-0.6 for softmax-based confidence
     public let confirmationThreshold: Float
 
     /// Duration of each audio chunk in seconds
@@ -344,27 +352,27 @@ public struct StreamingAsrConfig: Sendable {
 
     /// Default configuration with balanced settings
     public static let `default` = StreamingAsrConfig(
-        confirmationThreshold: 0.85,
+        confirmationThreshold: 0.50,  // 50% confidence is typical for good transcription
         chunkDuration: 10.0,  // 10 second chunks for now
         enableDebug: false
     )
 
     /// Low latency configuration with faster updates
     public static let lowLatency = StreamingAsrConfig(
-        confirmationThreshold: 0.75,
+        confirmationThreshold: 0.40,  // Accept more uncertain predictions for speed
         chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
         enableDebug: false
     )
 
     /// High accuracy configuration with conservative confirmation
     public static let highAccuracy = StreamingAsrConfig(
-        confirmationThreshold: 0.9,
+        confirmationThreshold: 0.90,  // Extremely high threshold for testing
         chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
         enableDebug: false
     )
 
     public init(
-        confirmationThreshold: Float = 0.85,
+        confirmationThreshold: Float = 0.90,
         chunkDuration: TimeInterval = 10.0,
         enableDebug: Bool = false
     ) {

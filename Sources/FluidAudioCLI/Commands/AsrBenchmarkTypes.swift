@@ -8,7 +8,7 @@
 import Foundation
 
 /// ASR evaluation metrics
-public struct ASRMetrics: Sendable {
+public struct ASRMetrics: Sendable, Codable {
     public let wer: Double  // Word Error Rate
     public let cer: Double  // Character Error Rate
     public let insertions: Int
@@ -32,7 +32,7 @@ public struct ASRMetrics: Sendable {
 }
 
 /// Streaming-specific metrics for ASR benchmarking
-public struct StreamingMetrics: Sendable {
+public struct StreamingMetrics: Sendable, Codable {
     public let avgChunkProcessingTime: Double  // Average time to process each chunk
     public let maxChunkProcessingTime: Double  // Maximum time to process any chunk
     public let minChunkProcessingTime: Double  // Minimum time to process any chunk
@@ -61,7 +61,7 @@ public struct StreamingMetrics: Sendable {
 }
 
 /// Single ASR benchmark result
-public struct ASRBenchmarkResult: Sendable {
+public struct ASRBenchmarkResult: Sendable, Codable {
     public let fileName: String
     public let hypothesis: String
     public let reference: String
@@ -69,11 +69,12 @@ public struct ASRBenchmarkResult: Sendable {
     public let processingTime: TimeInterval
     public let audioLength: TimeInterval
     public let rtfx: Double  // Real-Time Factor (inverse)
+    public let confidence: Float  // Overall confidence score
     public let streamingMetrics: StreamingMetrics?  // Optional streaming metrics
 
     public init(
         fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval,
-        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil
+        audioLength: TimeInterval, confidence: Float, streamingMetrics: StreamingMetrics? = nil
     ) {
         self.fileName = fileName
         self.hypothesis = hypothesis
@@ -82,6 +83,7 @@ public struct ASRBenchmarkResult: Sendable {
         self.processingTime = processingTime
         self.audioLength = audioLength
         self.rtfx = audioLength / processingTime
+        self.confidence = confidence
         self.streamingMetrics = streamingMetrics
     }
 }

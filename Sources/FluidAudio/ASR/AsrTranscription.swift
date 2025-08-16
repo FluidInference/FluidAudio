@@ -29,7 +29,7 @@ extension AsrManager {
         if audioSamples.count <= 160_000 {
             let originalLength = audioSamples.count
             let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
-            let (tokenIds, encoderSequenceLength) = try await executeMLInference(
+            let (tokenIds, encoderSequenceLength, extractedTimings) = try await executeMLInference(
                 paddedAudio,
                 originalLength: originalLength,
                 enableDebug: config.enableDebug,
@@ -40,7 +40,8 @@ extension AsrManager {
                 tokenIds: tokenIds,
                 encoderSequenceLength: encoderSequenceLength,
                 audioSamples: audioSamples,
-                processingTime: Date().timeIntervalSince(startTime)
+                processingTime: Date().timeIntervalSince(startTime),
+                tokenTimings: extractedTimings
             )
 
             if config.enableDebug {
@@ -73,7 +74,7 @@ extension AsrManager {
         originalLength: Int? = nil,
         enableDebug: Bool = false,
         decoderState: inout DecoderState
-    ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
+    ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int, tokenTimings: [TokenTiming]) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
             paddedAudio, actualLength: originalLength)
@@ -107,14 +108,14 @@ extension AsrManager {
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
-        let tokenIds = try await tdtDecode(
+        let (tokenIds, tokenTimings) = try await tdtDecodeWithTimings(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
             originalAudioSamples: paddedAudio,
             decoderState: &decoderState
         )
 
-        return (tokenIds, encoderSequenceLength)
+        return (tokenIds, encoderSequenceLength, tokenTimings)
     }
 
     internal func processTranscriptionResult(
@@ -134,9 +135,19 @@ extension AsrManager {
             )
         }
 
+        // Calculate overall confidence from token timings
+        let overallConfidence: Float
+        if !tokenTimings.isEmpty {
+            let totalConfidence = tokenTimings.reduce(0.0) { $0 + $1.confidence }
+            overallConfidence = totalConfidence / Float(tokenTimings.count)
+        } else {
+            // Fallback for when timings aren't available
+            overallConfidence = text.isEmpty ? 0.0 : 0.8
+        }
+
         return ASRResult(
             text: text,
-            confidence: 1.0,
+            confidence: overallConfidence,
             duration: duration,
             processingTime: processingTime,
             tokenTimings: finalTimings
@@ -170,9 +181,11 @@ private struct ChunkProcessor {
             chunkIndex += 1
         }
 
+        let finalText = allTexts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+
         return ASRResult(
-            text: allTexts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines),
-            confidence: 1.0,
+            text: finalText,
+            confidence: finalText.isEmpty ? 0.0 : 0.8,  // Use fallback confidence for chunks
             duration: audioLength,
             processingTime: Date().timeIntervalSince(startTime),
             tokenTimings: nil
@@ -187,7 +200,7 @@ private struct ChunkProcessor {
         let chunkSamples = Array(audioSamples[position..<endPosition])
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: chunkSize)
 
-        let (tokenIds, _) = try await manager.executeMLInference(
+        let (tokenIds, _, _) = try await manager.executeMLInference(
             paddedChunk, originalLength: chunkSamples.count, enableDebug: false, decoderState: &decoderState)
         let (text, _) = manager.convertTokensWithExistingTimings(tokenIds, timings: [])
 
