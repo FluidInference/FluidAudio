@@ -6,6 +6,9 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public actor VadManager {
 
+    /// Required model names for VAD
+    public static let requiredModelNames = ModelNames.VAD.requiredModels
+
     private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "VAD")
     private let config: VadConfig
 
@@ -62,22 +65,16 @@ public actor VadManager {
     private func loadCoreMLModelsWithRecovery(from directory: URL? = nil) async throws {
         let baseDirectory = directory ?? getDefaultBaseDirectory()
 
-        let modelNames = [
-            "silero_stft.mlmodelc",
-            "silero_encoder.mlmodelc",
-            "silero_rnn_decoder.mlmodelc",
-        ]
-
         let models = try await DownloadUtils.loadModels(
             .vad,
-            modelNames: modelNames,
+            modelNames: Array(Self.requiredModelNames),
             directory: baseDirectory,
             computeUnits: config.computeUnits
         )
 
-        guard let stftModel = models["silero_stft.mlmodelc"],
-            let encoderModel = models["silero_encoder.mlmodelc"],
-            let rnnModel = models["silero_rnn_decoder.mlmodelc"]
+        guard let stftModel = models[ModelNames.VAD.stftFile],
+            let encoderModel = models[ModelNames.VAD.encoderFile],
+            let rnnModel = models[ModelNames.VAD.rnnDecoderFile]
         else {
             logger.error("Failed to load all required VAD models")
             throw VadError.modelLoadingFailed

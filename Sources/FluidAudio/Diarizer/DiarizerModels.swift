@@ -10,6 +10,9 @@ public enum CoreMLDiarizer {
 @available(macOS 13.0, iOS 16.0, *)
 public struct DiarizerModels: Sendable {
 
+    /// Required model names for Diarizer
+    public static let requiredModelNames = ModelNames.Diarizer.requiredModels
+
     public let segmentationModel: CoreMLDiarizer.SegmentationModel
     public let embeddingModel: CoreMLDiarizer.EmbeddingModel
     public let downloadDuration: TimeInterval
@@ -32,8 +35,8 @@ public struct DiarizerModels: Sendable {
 
 extension DiarizerModels {
 
-    private static let SegmentationModelFileName = "pyannote_segmentation"
-    private static let EmbeddingModelFileName = "wespeaker_v2"
+    private static let SegmentationModelFileName = ModelNames.Diarizer.segmentation
+    private static let EmbeddingModelFileName = ModelNames.Diarizer.embedding
 
     // MARK: - Private Model Loading Helpers
 
@@ -49,13 +52,12 @@ extension DiarizerModels {
         let config = configuration ?? defaultConfiguration()
 
         // Download required models
-        let segmentationModelName = SegmentationModelFileName + ".mlmodelc"
-        let embeddingModelName = EmbeddingModelFileName + ".mlmodelc"
-        let modelNames = [segmentationModelName, embeddingModelName]
+        let segmentationModelName = ModelNames.Diarizer.segmentationFile
+        let embeddingModelName = ModelNames.Diarizer.embeddingFile
 
         let models = try await DownloadUtils.loadModels(
             .diarizer,
-            modelNames: modelNames,
+            modelNames: Array(requiredModelNames),
             directory: directory.deletingLastPathComponent(),
             computeUnits: config.computeUnits
         )
