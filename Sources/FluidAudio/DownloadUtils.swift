@@ -155,21 +155,22 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
+        // Get the required model names for this repo
+        let requiredModels = getRequiredModelNames(for: repo)
+
         // Download all repository contents
         let files = try await listRepoFiles(repo)
 
         for file in files {
             switch file.type {
             case "directory" where file.path.hasSuffix(".mlmodelc"):
-                logger.info("Downloading model: \(file.path)")
-                // We can remove these models once we release the new version for a couple of weeks
-                if file.path == "TokenDurationPrediction.mlmodelc"
-                    || file.path == "ParakeetEncoder.mlmodelc"
-                {
-                    logger.info("Skipping \(file.path), not needed anymore")
-                    continue
+                // Only download if this model is in our required list
+                if requiredModels.contains(file.path) {
+                    logger.info("Downloading required model: \(file.path)")
+                    try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
+                } else {
+                    logger.info("Skipping unrequired model: \(file.path)")
                 }
-                try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
 
             case "file" where isEssentialFile(file.path):
                 logger.info("Downloading \(file.path)")
@@ -186,7 +187,28 @@ public class DownloadUtils {
             }
         }
 
-        logger.info("Downloaded all models for \(repo.folderName)")
+        logger.info("Downloaded all required models for \(repo.folderName)")
+    }
+
+    /// Get the required model names for a specific repository
+    private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+        switch repo {
+        case .vad:
+            return ["silero_vad.mlmodelc"]
+        case .parakeet:
+            // Include both versions for different iOS/macOS versions
+            return [
+                "Melspectrogram_v2.mlmodelc",
+                "ParakeetEncoder_v2.mlmodelc",
+                "ParakeetDecoder.mlmodelc",
+                "RNNTJoint.mlmodelc",
+            ]
+        case .diarizer:
+            return [
+                "pyannote_segmentation.mlmodelc",
+                "wespeaker_v2.mlmodelc",
+            ]
+        }
     }
 
     /// Check if a file is essential for model operation
