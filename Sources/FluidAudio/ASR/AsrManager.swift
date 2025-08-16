@@ -320,6 +320,26 @@ public final class AsrManager {
         )
     }
 
+    internal func tdtDecodeWithTimings(
+        encoderOutput: MLMultiArray,
+        encoderSequenceLength: Int,
+        originalAudioSamples: [Float],
+        decoderState: inout DecoderState
+    ) async throws -> (tokens: [Int], tokenTimings: [TokenTiming]) {
+        // Note: Decoder state initialization is now handled by the caller
+        // Use resetDecoderState() to explicitly reset when needed
+
+        let decoder = TdtDecoder(config: config)
+        return try await decoder.decodeWithTimings(
+            encoderOutput: encoderOutput,
+            encoderSequenceLength: encoderSequenceLength,
+            decoderModel: decoderModel!,
+            jointModel: jointModel!,
+            decoderState: &decoderState,
+            sampleRate: config.sampleRate
+        )
+    }
+
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
         return try await transcribe(audioSamples, source: .microphone)
     }
@@ -382,19 +402,20 @@ public final class AsrManager {
         let text = concatenated.replacingOccurrences(of: "▁", with: " ")
             .trimmingCharacters(in: .whitespaces)
 
-        // 4. For now, return original timings as-is
-        // Note: Proper timing alignment would require tracking character positions
-        // through the concatenation and replacement process
-        let adjustedTimings = tokenInfos.compactMap { info in
-            info.timing.map { timing in
-                TokenTiming(
-                    token: info.token.replacingOccurrences(of: "▁", with: ""),
-                    tokenId: info.tokenId,
-                    startTime: timing.startTime,
-                    endTime: timing.endTime,
-                    confidence: timing.confidence
-                )
-            }
+        // 4. Resolve token strings from vocabulary and create proper timings
+        let adjustedTimings: [TokenTiming] = tokenInfos.compactMap { info in
+            guard let timing = info.timing else { return nil }
+
+            // Use vocabulary lookup for the actual token string
+            let actualToken = vocabulary[info.tokenId] ?? "token_\(info.tokenId)"
+
+            return TokenTiming(
+                token: actualToken.replacingOccurrences(of: "▁", with: ""),
+                tokenId: info.tokenId,
+                startTime: timing.startTime,
+                endTime: timing.endTime,
+                confidence: timing.confidence
+            )
         }
 
         return (text, adjustedTimings)
