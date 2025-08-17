@@ -6,65 +6,68 @@ import OSLog
 public class DownloadUtils {
 
     private static let logger = Logger(subsystem: "com.fluidaudio", category: "DownloadUtils")
-    
+
     public static let sharedSession: URLSession = {
         let configuration = URLSessionConfiguration.default
-        
+
         // Configure proxy settings if environment variables are set
         if let proxyConfig = configureProxySettings() {
             configuration.connectionProxyDictionary = proxyConfig
         }
-        
+
         return URLSession(configuration: configuration)
     }()
-    
+
     private static func configureProxySettings() -> [String: Any]? {
         var proxyConfig: [String: Any] = [:]
         var hasProxyConfig = false
-        
+
         // Configure HTTPS proxy
         if let httpsProxy = ProcessInfo.processInfo.environment["https_proxy"],
-           let proxySettings = parseProxyURL(httpsProxy, type: "HTTPS") {
+            let proxySettings = parseProxyURL(httpsProxy, type: "HTTPS")
+        {
             proxyConfig.merge(proxySettings) { _, new in new }
             hasProxyConfig = true
         }
-        
+
         // Configure HTTP proxy
         if let httpProxy = ProcessInfo.processInfo.environment["http_proxy"],
-           let proxySettings = parseProxyURL(httpProxy, type: "HTTP") {
+            let proxySettings = parseProxyURL(httpProxy, type: "HTTP")
+        {
             proxyConfig.merge(proxySettings) { _, new in new }
             hasProxyConfig = true
         }
-        
+
         return hasProxyConfig ? proxyConfig : nil
     }
-    
+
     private static func parseProxyURL(_ proxyURLString: String, type: String) -> [String: Any]? {
         guard let proxyURL = URL(string: proxyURLString),
-              let host = proxyURL.host,
-              let port = proxyURL.port else {
+            let host = proxyURL.host,
+            let port = proxyURL.port
+        else {
             logger.warning("Invalid \(type) proxy URL: \(proxyURLString)")
             return nil
         }
-        
+
         let config: [String: Any]
         switch type {
         case "HTTPS":
             config = [
                 kCFNetworkProxiesHTTPSEnable as String: true,
                 kCFNetworkProxiesHTTPSProxy as String: host,
-                kCFNetworkProxiesHTTPSPort as String: port
+                kCFNetworkProxiesHTTPSPort as String: port,
             ]
         case "HTTP":
             config = [
                 kCFNetworkProxiesHTTPEnable as String: true,
                 kCFNetworkProxiesHTTPProxy as String: host,
-                kCFNetworkProxiesHTTPPort as String: port
+                kCFNetworkProxiesHTTPPort as String: port,
             ]
         default:
             return nil
         }
-        
+
         logger.info("Configured \(type) proxy: \(host):\(port)")
         return config
     }
