@@ -172,18 +172,6 @@ do {
 }
 ```
 
-## Performance Considerations
-
-- **Chunk Duration**: The TDT (Token Duration Transducer) decoder requires longer chunks for optimal performance:
-  - Minimum viable: 5.0s (may still produce some empty results)
-  - Recommended: 10.0s (optimal balance of latency and accuracy)
-  - Note: This is a significant increase from typical streaming ASR systems due to TDT's architecture
-- **Confirmation Threshold**: Higher thresholds (0.85-0.90) reduce false confirmations
-- **Buffer Size**: Internal buffer holds up to 10 seconds of audio
-- **Model Download**: First use downloads ~40MB of models (cached afterward)
-
-> **Migration Note**: Chunk durations have increased significantly from earlier versions to support the TDT decoder. If you need lower latency, consider using custom configuration, but be aware that chunks shorter than 5.0s may result in empty or poor transcriptions.
-
 ## Comparison with RealtimeAsrManager
 
 | Feature | StreamingAsrManager | RealtimeAsrManager |
