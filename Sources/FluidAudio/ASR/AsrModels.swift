@@ -4,6 +4,10 @@ import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
 public struct AsrModels: Sendable {
+
+    /// Required model names for ASR
+    public static let requiredModelNames = ModelNames.ASR.requiredModels
+
     public let melspectrogram: MLModel
     public let encoder: MLModel
     public let decoder: MLModel
@@ -39,6 +43,7 @@ extension AsrModels {
             .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
     }
 
+    // Model names for v3
     public enum ModelNames {
         public static let melspectrogram = "Melspectogram.mlpackage"
         public static let encoder = "ParakeetEncoder.mlpackage"
@@ -46,6 +51,9 @@ extension AsrModels {
         public static let joint = "RNNTJoint.mlpackage"  // Original working version
         public static let vocabulary = "parakeet_v3_vocab.json"
     }
+    
+    // Use centralized model names (alias for compatibility with main)
+    private typealias Names = ModelNames
 
     /// Load ASR models from a directory
     ///
@@ -70,10 +78,10 @@ extension AsrModels {
 
         // Load each model with its optimal compute unit configuration
         let modelConfigs: [(name: String, modelType: ANEOptimizer.ModelType)] = [
-            (ModelNames.melspectrogram, .melSpectrogram),
-            (ModelNames.encoder, .encoder),
-            (ModelNames.decoder, .decoder),
-            (ModelNames.joint, .joint),
+            (Names.melspectrogram, .melSpectrogram),
+            (Names.encoder, .encoder),
+            (Names.decoder, .decoder),
+            (Names.joint, .joint),
         ]
 
         var loadedModels: [String: MLModel] = [:]
@@ -94,10 +102,10 @@ extension AsrModels {
             }
         }
 
-        guard let melModel = loadedModels[ModelNames.melspectrogram],
-            let encoderModel = loadedModels[ModelNames.encoder],
-            let decoderModel = loadedModels[ModelNames.decoder],
-            let jointModel = loadedModels[ModelNames.joint]
+        guard let melModel = loadedModels[Names.melspectrogram],
+            let encoderModel = loadedModels[Names.encoder],
+            let decoderModel = loadedModels[Names.decoder],
+            let jointModel = loadedModels[Names.joint]
         else {
             throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
         }
@@ -116,7 +124,7 @@ extension AsrModels {
     }
 
     private static func loadVocabulary(from directory: URL) async throws -> [Int: String] {
-        let vocabPath = repoPath(from: directory).appendingPathComponent(ModelNames.vocabulary)
+        let vocabPath = repoPath(from: directory).appendingPathComponent(Names.vocabulary)
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
             // For v3, vocabulary file might not be included, try to download from v2 repo
@@ -136,7 +144,7 @@ extension AsrModels {
                 logger.warning(
                     "Failed to download vocabulary file: \(error.localizedDescription). Please ensure parakeet_v3_vocab.json is downloaded with the models."
                 )
-                throw AsrModelsError.modelNotFound(ModelNames.vocabulary, vocabPath)
+                throw AsrModelsError.modelNotFound(Names.vocabulary, vocabPath)
             }
         }
 
@@ -304,10 +312,10 @@ extension AsrModels {
         // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v3-coreml/
         // by DownloadUtils.loadModels, so we don't need to download separately
         let modelNames = [
-            ModelNames.melspectrogram,
-            ModelNames.encoder,
-            ModelNames.decoder,
-            ModelNames.joint,
+            Names.melspectrogramFile,
+            Names.encoderFile,
+            Names.decoderFile,
+            Names.jointFile,
         ]
 
         // Download models using DownloadUtils (this will download if needed)
@@ -333,10 +341,10 @@ extension AsrModels {
     public static func modelsExist(at directory: URL) -> Bool {
         let fileManager = FileManager.default
         let modelFiles = [
-            ModelNames.melspectrogram,
-            ModelNames.encoder,
-            ModelNames.decoder,
-            ModelNames.joint,
+            Names.melspectrogramFile,
+            Names.encoderFile,
+            Names.decoderFile,
+            Names.jointFile,
         ]
 
         // Check in the DownloadUtils repo structure
@@ -348,7 +356,7 @@ extension AsrModels {
         }
 
         // Also check for vocabulary file
-        let vocabPath = repoPath.appendingPathComponent(ModelNames.vocabulary)
+        let vocabPath = repoPath.appendingPathComponent(Names.vocabulary)
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
 
         return modelsPresent && vocabPresent

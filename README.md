@@ -284,6 +284,7 @@ Task {
 FluidAudio includes a powerful command-line interface for benchmarking and audio processing:
 
 **Note**: The CLI is available on macOS only. For iOS applications, use the FluidAudio library programmatically as shown in the usage examples above.
+**Note**: FluidAudio automatically downloads required models during audio processing. If you encounter network restrictions when accessing Hugging Face, you can configure an HTTPS proxy by setting the environment variable. For example: `export https_proxy=http://127.0.0.1:7890`
 
 ### Diarization Benchmark
 

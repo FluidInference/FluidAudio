@@ -30,9 +30,9 @@ jobs:
         with:
           path: |
             .build
-            ~/Library/Application Support/FluidAudio/Models/Parakeet
+            ~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml
             ~/Library/Application Support/FluidAudio/Datasets/LibriSpeech
-          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v5
+          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v6
 
       - name: Build
         run: swift build -c release

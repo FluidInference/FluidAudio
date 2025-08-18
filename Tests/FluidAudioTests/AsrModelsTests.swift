@@ -10,10 +10,11 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Model Names Tests
 
     func testModelNames() {
-        XCTAssertEqual(AsrModels.ModelNames.melspectrogram, "Melspectrogram_v2.mlmodelc")
-        XCTAssertEqual(AsrModels.ModelNames.encoder, "ParakeetEncoder_v2.mlmodelc")
-        XCTAssertEqual(AsrModels.ModelNames.decoder, "ParakeetDecoder.mlmodelc")
-        XCTAssertEqual(AsrModels.ModelNames.joint, "RNNTJoint_fixed.mlmodelc")
+        // v3 models use .mlpackage format
+        XCTAssertEqual(AsrModels.ModelNames.melspectrogram, "Melspectogram.mlpackage")
+        XCTAssertEqual(AsrModels.ModelNames.encoder, "ParakeetEncoder.mlpackage")
+        XCTAssertEqual(AsrModels.ModelNames.decoder, "ParakeetDecoder.mlpackage")
+        XCTAssertEqual(AsrModels.ModelNames.joint, "RNNTJoint.mlpackage")
         XCTAssertEqual(AsrModels.ModelNames.vocabulary, "parakeet_v3_vocab.json")
     }
 
@@ -65,11 +66,11 @@ final class AsrModelsTests: XCTestCase {
         // Test 2: The method should check for model files in the expected structure
         // We're testing the logic, not the actual file system operations
         let modelNames = [
-            AsrModels.ModelNames.melspectrogram,
-            AsrModels.ModelNames.encoder,
-            AsrModels.ModelNames.decoder,
-            AsrModels.ModelNames.joint,
-            AsrModels.ModelNames.vocabulary,
+            ModelNames.ASR.melspectrogramFile,
+            ModelNames.ASR.encoderFile,
+            ModelNames.ASR.decoderFile,
+            ModelNames.ASR.jointFile,
+            ModelNames.ASR.vocabulary,
         ]
 
         // Verify all expected model names are defined
@@ -111,10 +112,10 @@ final class AsrModelsTests: XCTestCase {
 
         // Test that AsrModels struct can be created with proper types
         let modelNames = [
-            AsrModels.ModelNames.melspectrogram,
-            AsrModels.ModelNames.encoder,
-            AsrModels.ModelNames.decoder,
-            AsrModels.ModelNames.joint,
+            ModelNames.ASR.melspectrogramFile,
+            ModelNames.ASR.encoderFile,
+            ModelNames.ASR.decoderFile,
+            ModelNames.ASR.jointFile,
         ]
 
         XCTAssertEqual(modelNames.count, 4)

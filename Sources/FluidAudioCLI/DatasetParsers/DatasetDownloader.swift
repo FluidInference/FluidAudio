@@ -1,6 +1,7 @@
 #if os(macOS)
 import AVFoundation
 import Foundation
+import FluidAudio
 
 /// Dataset downloading functionality for AMI and VAD datasets
 struct DatasetDownloader {
@@ -130,7 +131,7 @@ struct DatasetDownloader {
 
             do {
                 print("     📥 Downloading from: \(urlString)")
-                let (data, response) = try await URLSession.shared.data(from: url)
+                let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
@@ -252,7 +253,7 @@ struct DatasetDownloader {
         }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
 
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 200 {
@@ -531,7 +532,7 @@ struct DatasetDownloader {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid API URL"])
         }
 
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, _) = try await DownloadUtils.sharedSession.data(from: url)
 
         // Parse the JSON response to extract file names
         if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
@@ -579,7 +580,7 @@ struct DatasetDownloader {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
         }
 
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, _) = try await DownloadUtils.sharedSession.data(from: url)
         try data.write(to: destination)
 
         // Verify it's valid audio
@@ -643,7 +644,7 @@ struct DatasetDownloader {
 
         do {
             // Download the tar.gz file
-            let (downloadURL, response) = try await URLSession.shared.download(
+            let (downloadURL, response) = try await DownloadUtils.sharedSession.download(
                 from: URL(string: musanURL)!)
 
             // Check response

@@ -7,6 +7,71 @@ public class DownloadUtils {
 
     private static let logger = Logger(subsystem: "com.fluidaudio", category: "DownloadUtils")
 
+    public static let sharedSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+
+        // Configure proxy settings if environment variables are set
+        if let proxyConfig = configureProxySettings() {
+            configuration.connectionProxyDictionary = proxyConfig
+        }
+
+        return URLSession(configuration: configuration)
+    }()
+
+    private static func configureProxySettings() -> [String: Any]? {
+        var proxyConfig: [String: Any] = [:]
+        var hasProxyConfig = false
+
+        // Configure HTTPS proxy
+        if let httpsProxy = ProcessInfo.processInfo.environment["https_proxy"],
+            let proxySettings = parseProxyURL(httpsProxy, type: "HTTPS")
+        {
+            proxyConfig.merge(proxySettings) { _, new in new }
+            hasProxyConfig = true
+        }
+
+        // Configure HTTP proxy
+        if let httpProxy = ProcessInfo.processInfo.environment["http_proxy"],
+            let proxySettings = parseProxyURL(httpProxy, type: "HTTP")
+        {
+            proxyConfig.merge(proxySettings) { _, new in new }
+            hasProxyConfig = true
+        }
+
+        return hasProxyConfig ? proxyConfig : nil
+    }
+
+    private static func parseProxyURL(_ proxyURLString: String, type: String) -> [String: Any]? {
+        guard let proxyURL = URL(string: proxyURLString),
+            let host = proxyURL.host,
+            let port = proxyURL.port
+        else {
+            logger.warning("Invalid \(type) proxy URL: \(proxyURLString)")
+            return nil
+        }
+
+        let config: [String: Any]
+        switch type {
+        case "HTTPS":
+            config = [
+                kCFNetworkProxiesHTTPSEnable as String: true,
+                kCFNetworkProxiesHTTPSProxy as String: host,
+                kCFNetworkProxiesHTTPSPort as String: port,
+            ]
+        case "HTTP":
+            config = [
+                kCFNetworkProxiesHTTPEnable as String: true,
+                kCFNetworkProxiesHTTPProxy as String: host,
+                kCFNetworkProxiesHTTPPort as String: port,
+            ]
+        default:
+            return nil
+        }
+
+        logger.info("Configured \(type) proxy: \(host):\(port)")
+        return config
+    }
+
     /// Download progress callback
     public typealias ProgressHandler = (Double) -> Void
 
@@ -30,6 +95,7 @@ public class DownloadUtils {
         var folderName: String {
             rawValue.split(separator: "/").last?.description ?? rawValue
         }
+
     }
 
     public static func loadModels(
@@ -191,6 +257,19 @@ public class DownloadUtils {
         return models
     }
 
+    /// Get required model names from the appropriate manager
+    @available(macOS 13.0, iOS 16.0, *)
+    private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+        switch repo {
+        case .vad:
+            return VadManager.requiredModelNames
+        case .parakeet:
+            return AsrModels.requiredModelNames
+        case .diarizer:
+            return DiarizerModels.requiredModelNames
+        }
+    }
+
     /// Download a HuggingFace repository
     private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
         logger.info("📥 Downloading \(repo.folderName) from HuggingFace...")
@@ -199,21 +278,22 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
+        // Get the required model names for this repo from the appropriate manager
+        let requiredModels = getRequiredModelNames(for: repo)
+
         // Download all repository contents
         let files = try await listRepoFiles(repo)
 
         for file in files {
             switch file.type {
             case "directory" where file.path.hasSuffix(".mlmodelc") || file.path.hasSuffix(".mlpackage"):
-                logger.info("Downloading model: \(file.path)")
-                // We can remove these models once we release the new version for a couple of weeks
-                if file.path == "TokenDurationPrediction.mlmodelc"
-                    || file.path == "ParakeetEncoder.mlmodelc"
-                {
-                    logger.info("Skipping \(file.path), not needed anymore")
-                    continue
+                // Only download if this model is in our required list
+                if requiredModels.contains(file.path) {
+                    logger.info("Downloading required model: \(file.path)")
+                    try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
+                } else {
+                    logger.info("Skipping unrequired model: \(file.path)")
                 }
-                try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
 
             case "file" where isEssentialFile(file.path):
                 logger.info("Downloading \(file.path)")
@@ -230,7 +310,7 @@ public class DownloadUtils {
             }
         }
 
-        logger.info("Downloaded all models for \(repo.folderName)")
+        logger.info("Downloaded all required models for \(repo.folderName)")
     }
 
     /// Check if a file is essential for model operation
@@ -246,7 +326,7 @@ public class DownloadUtils {
         var request = URLRequest(url: apiURL)
         request.timeoutInterval = 30
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await sharedSession.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw URLError(.badServerResponse)
@@ -407,10 +487,8 @@ public class DownloadUtils {
         request.timeoutInterval = config.timeout
 
         // Use URLSession download task with progress
-        let session = URLSession.shared
-
         // Always use URLSession.download for reliability (proven to work in PR #32)
-        let (tempFile, response) = try await session.download(for: request)
+        let (tempFile, response) = try await sharedSession.download(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
             httpResponse.statusCode == 200

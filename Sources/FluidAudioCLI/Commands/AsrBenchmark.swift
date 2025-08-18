@@ -409,7 +409,7 @@ public class ASRBenchmark {
         let downloadURL = URL(string: url)!
 
         print("Downloading \(url)...")
-        let (tempFile, _) = try await URLSession.shared.download(from: downloadURL)
+        let (tempFile, _) = try await DownloadUtils.sharedSession.download(from: downloadURL)
 
         try FileManager.default.createDirectory(at: extractTo, withIntermediateDirectories: true)
 

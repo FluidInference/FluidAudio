@@ -35,8 +35,8 @@ jobs:
       - name: Cache VAD models
         uses: actions/cache@v4
         with:
-          path: ~/Library/Application Support/FluidAudio/vad
-          key: ${{ runner.os }}-vad-models-v5
+          path: ~/Library/Application Support/FluidAudio/Models/silero-vad-coreml
+          key: ${{ runner.os }}-vad-models-v6
 
       - name: Cache VOiCES dataset
         uses: actions/cache@v4
