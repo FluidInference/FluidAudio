@@ -55,16 +55,12 @@ internal struct TdtDecoder {
     // Special token Indexes for v3 models
     // The joint network outputs 8193 vocab tokens (0-8192) + 5 duration tokens
     // Token 8192 is the blank token (vocabulary size boundary)
-    // But the decoder embedding only accepts tokens 0-8192, so we need to handle this carefully
+    // The decoder DOES accept tokens 0-8192 (including blank), contrary to previous assumption
     private let blankId = 8192  // v3 models use 8192 as blank token
 
-    // sosId (Start-of-Sequence)
-    // Python uses token 2 (<pad>) and it works, so let's match that
-    // Token 2 = <pad> (what Python uses successfully)
-    // Token 64 = <|en|> for English (didn't help)
-    // Token 4 = <|startoftranscript|> (alternative)
-    private let sosId = 2  // Use pad token like Python does
-    private let startTranscriptId = 4  // Alternative: generic start token
+    // Start-of-Sequence: Python starts with blank token for RNNT
+    // This is crucial for proper RNNT decoding - the decoder needs to see the blank token
+    private let sosId = 8192  // Start with blank token like Python does
 
     /// Execute optimized TDT decoding
     func decode(
@@ -101,9 +97,9 @@ internal struct TdtDecoder {
         while activeMask {
             var label = hypothesis.lastToken ?? sosId
 
-            // SAFETY: Never feed token >= 8192 to decoder to avoid embedding issues
-            // Map blank token (8192) to pad token (2) for decoder input
-            let decoderInputToken = (label >= 8192) ? 2 : label  // Use pad token if out of bounds
+            // Feed the actual token to decoder - including blank (8192)
+            // The decoder can and must handle the blank token for proper RNNT decoding
+            let decoderInputToken = label  // Use actual token, no mapping!
 
             // Use cached decoder inputs
             let decoderResult = try runDecoderOptimized(
@@ -198,7 +194,10 @@ internal struct TdtDecoder {
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.decState = decoderResult.newState
-                hypothesis.lastToken = label
+                hypothesis.lastToken = label  // Store non-blank token for next decoder call
+            } else {
+                // Even for blank tokens, we need to update the decoder state
+                hypothesis.decState = decoderResult.newState
             }
 
             // Force blank logic

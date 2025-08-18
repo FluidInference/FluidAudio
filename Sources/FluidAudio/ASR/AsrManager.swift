@@ -37,7 +37,7 @@ public final class AsrManager {
 
     // Special token IDs for v3 models (must match TdtDecoder.swift)
     let blankId = 8192  // v3 models use 8192 as blank token
-    let sosId = 2  // v3 models use <pad> token as SOS
+    let sosId = 8192  // Start with blank token for RNNT (same as blankId)
 
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {

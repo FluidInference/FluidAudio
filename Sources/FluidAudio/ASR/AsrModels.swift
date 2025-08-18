@@ -43,7 +43,7 @@ extension AsrModels {
         public static let melspectrogram = "Melspectogram.mlpackage"
         public static let encoder = "ParakeetEncoder.mlpackage"
         public static let decoder = "ParakeetDecoder.mlpackage"
-        public static let joint = "RNNTJoint_truly_fixed.mlpackage"  // Truly fixed with correct duration logits
+        public static let joint = "RNNTJoint.mlpackage"  // Original working version
         public static let vocabulary = "parakeet_v3_vocab.json"
     }
 
