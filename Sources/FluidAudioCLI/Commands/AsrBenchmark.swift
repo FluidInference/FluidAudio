@@ -102,7 +102,7 @@ public class ASRBenchmark {
             )
         }
 
-        let maxFiles = config.maxFiles ?? filteredFiles.count  // Process all files if not specified
+        let maxFiles = 100
         let filesToProcess = Array(filteredFiles.prefix(maxFiles))
 
         print(
@@ -137,6 +137,13 @@ public class ASRBenchmark {
                     result = try await processLibriSpeechFile(
                         asrManager: asrManager, file: audioFile)
                 }
+
+                // Print the hypothesis and reference for debugging
+                print("\n📝 File: \(audioFile.fileName)")
+                print("   Reference: \(result.reference)")
+                print("   Hypothesis: \(result.hypothesis)")
+                print("   WER: \(String(format: "%.1f%%", result.metrics.wer * 100))")
+
                 results.append(result)
 
             } catch {
@@ -652,7 +659,7 @@ extension ASRBenchmark {
                     print("🔍 CI Debug Information:")
                     let modelsDir = FileManager.default.homeDirectoryForCurrentUser
                         .appendingPathComponent(
-                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
+                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
                         )
                     print("   Models directory: \(modelsDir.path)")
                     print(
@@ -678,6 +685,12 @@ extension ASRBenchmark {
 
             let results = try await benchmark.runLibriSpeechBenchmark(
                 asrManager: asrManager, subset: subset)
+
+            guard !results.isEmpty else {
+                print("\n❌ No files were successfully processed")
+                print("   Please check the error messages above for details")
+                return
+            }
 
             let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
             let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)

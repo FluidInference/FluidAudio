@@ -52,15 +52,19 @@ internal struct TdtDecoder {
         self.config = config
     }
 
-    // Special token Indexes matching Parakeet TDT model's vocabulary (1024 word tokens)
-    // OUTPUT from joint network during decoding
-    // 0-1023 represents characters, numbers, punctuations
-    // 1024 represents, BLANK or nonexistent
-    private let blankId = 1024
+    // Special token Indexes for v3 models
+    // The joint network outputs 8193 vocab tokens (0-8192) + 5 duration tokens
+    // Token 8192 is the blank token (vocabulary size boundary)
+    // But the decoder embedding only accepts tokens 0-8192, so we need to handle this carefully
+    private let blankId = 8192  // v3 models use 8192 as blank token
 
     // sosId (Start-of-Sequence)
-    // sosId is INPUT when there's no real previous token
-    private let sosId = 1024
+    // Python uses token 2 (<pad>) and it works, so let's match that
+    // Token 2 = <pad> (what Python uses successfully)
+    // Token 64 = <|en|> for English (didn't help)
+    // Token 4 = <|startoftranscript|> (alternative)
+    private let sosId = 2  // Use pad token like Python does
+    private let startTranscriptId = 4  // Alternative: generic start token
 
     /// Execute optimized TDT decoding
     func decode(
@@ -97,9 +101,13 @@ internal struct TdtDecoder {
         while activeMask {
             var label = hypothesis.lastToken ?? sosId
 
+            // SAFETY: Never feed token >= 8192 to decoder to avoid embedding issues
+            // Map blank token (8192) to pad token (2) for decoder input
+            let decoderInputToken = (label >= 8192) ? 2 : label  // Use pad token if out of bounds
+
             // Use cached decoder inputs
             let decoderResult = try runDecoderOptimized(
-                token: label,
+                token: decoderInputToken,
                 state: hypothesis.decState ?? decoderState,
                 model: decoderModel
             )
@@ -114,9 +122,27 @@ internal struct TdtDecoder {
                 model: jointModel
             )
 
-            // Optimized token/duration prediction
+            // Use raw logits directly, like Python does
             let (tokenLogits, durationLogits) = try splitLogits(logits)
+
+            // Simple argmax on raw logits
             label = argmaxSIMD(tokenLogits)
+
+            // Debug: Log decoded tokens
+            if config.enableDebug {
+                if label >= 8192 {
+                    print("DEBUG: Got blank token \(label)")
+                } else if hypothesis.ySequence.count < 10 {
+                    // Log first 10 tokens for debugging
+                    let topScores = tokenLogits.enumerated()
+                        .sorted { $0.element > $1.element }
+                        .prefix(3)
+                        .map { "(\($0.offset): \(String(format: "%.2f", $0.element)))" }
+                        .joined(separator: ", ")
+                    print("DEBUG: Token \(hypothesis.ySequence.count): selected \(label), top scores: \(topScores)")
+                }
+            }
+
             var score = tokenLogits[label]
             let duration = config.tdtConfig.durations[argmaxSIMD(durationLogits)]
 
@@ -144,7 +170,9 @@ internal struct TdtDecoder {
                     model: jointModel
                 )
 
+                // Use raw logits like Python does
                 let (innerTokenLogits, innerDurationLogits) = try splitLogits(innerLogits)
+
                 let moreLabel = argmaxSIMD(innerTokenLogits)
                 let moreScore = innerTokenLogits[moreLabel]
                 let moreDuration = config.tdtConfig.durations[argmaxSIMD(innerDurationLogits)]
@@ -212,7 +240,23 @@ internal struct TdtDecoder {
         guard shape.count >= 3 else {
             throw ASRError.processingFailed("Invalid encoder output shape: \(shape)")
         }
+
+        // Shape is [batch, time, hidden] = [1, 126, 1024]
+        let batchSize = shape[0].intValue
+        let sequenceLength = shape[1].intValue
         let hiddenSize = shape[2].intValue
+
+        guard batchSize == 1 else {
+            throw ASRError.processingFailed("Expected batch size 1, got \(batchSize)")
+        }
+
+        guard hiddenSize == 1024 else {
+            throw ASRError.processingFailed("Expected hidden size 1024, got \(hiddenSize)")
+        }
+
+        guard length <= sequenceLength else {
+            throw ASRError.processingFailed("Requested length \(length) exceeds sequence length \(sequenceLength)")
+        }
 
         var frames = EncoderFrameArray()
         frames.reserveCapacity(length)
@@ -223,6 +267,8 @@ internal struct TdtDecoder {
             let floatPtr = encoderOutput.dataPointer.bindMemory(
                 to: Float.self, capacity: encoderOutput.count)
 
+            // The data is laid out as [batch, time, hidden]
+            // So for batch 0, time t, the data starts at: t * hiddenSize
             for timeIdx in 0..<length {
                 let startIdx = timeIdx * hiddenSize
 
@@ -242,6 +288,7 @@ internal struct TdtDecoder {
                 frame.reserveCapacity(hiddenSize)
 
                 for h in 0..<hiddenSize {
+                    // For [batch, time, hidden] layout with batch=0
                     let index = timeIdx * hiddenSize + h
                     if index < encoderOutput.count {
                         frame.append(encoderOutput[index].floatValue)
@@ -297,16 +344,21 @@ internal struct TdtDecoder {
     ) throws -> MLMultiArray {
 
         // Create ANE-aligned encoder array for optimal performance
+        // The encoder step is a single frame of size 1024 (hidden dimension)
         let encoderArray = try ANEOptimizer.createANEAlignedArray(
-            shape: [1, 1, encoderStep.count as NSNumber],
+            shape: [1, 1, 1024],
             dataType: .float32
         )
 
         // Use optimized memory copy
+        // Ensure we copy exactly 1024 values (the encoder hidden dimension)
+        guard encoderStep.count == 1024 else {
+            throw ASRError.processingFailed("Invalid encoder frame size: \(encoderStep.count), expected 1024")
+        }
         encoderStep.withUnsafeBufferPointer { buffer in
             let destPtr = encoderArray.dataPointer.bindMemory(
-                to: Float.self, capacity: encoderStep.count)
-            memcpy(destPtr, buffer.baseAddress!, encoderStep.count * MemoryLayout<Float>.stride)
+                to: Float.self, capacity: 1024)
+            memcpy(destPtr, buffer.baseAddress!, 1024 * MemoryLayout<Float>.stride)
         }
 
         let decoderOutputArray = try extractFeatureValue(
@@ -408,8 +460,14 @@ internal struct TdtDecoder {
         let durationElements = config.tdtConfig.durations.count
         let vocabSize = totalElements - durationElements
 
+        // Debug: Log dimensions
+        if config.enableDebug {
+            print("DEBUG: Joint output - total: \(totalElements), vocab: \(vocabSize), durations: \(durationElements)")
+        }
+
         guard totalElements >= durationElements else {
-            throw ASRError.processingFailed("Logits dimension mismatch")
+            throw ASRError.processingFailed(
+                "Logits dimension mismatch: got \(totalElements), need at least \(durationElements)")
         }
 
         // Create views directly without copying - zero-copy operation
@@ -419,6 +477,20 @@ internal struct TdtDecoder {
         let tokenLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr, count: vocabSize))
         let durationLogits = ContiguousArray(
             UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
+
+        // Debug: Check for valid values
+        if config.enableDebug {
+            let tokenArray = Array(tokenLogits)
+            let maxToken = tokenArray.max() ?? -Float.infinity
+            let minToken = tokenArray.min() ?? Float.infinity
+            let argMaxToken = tokenArray.firstIndex(of: maxToken) ?? -1
+            print("DEBUG: Token logits range: [\(minToken), \(maxToken)], argmax: \(argMaxToken)")
+
+            // Check if all values are the same (indicating a problem)
+            if maxToken == minToken {
+                print("WARNING: All token logits have the same value: \(maxToken)")
+            }
+        }
 
         return (Array(tokenLogits), Array(durationLogits))
     }

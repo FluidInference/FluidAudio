@@ -40,11 +40,11 @@ extension AsrModels {
     }
 
     public enum ModelNames {
-        public static let melspectrogram = "Melspectrogram_v2.mlmodelc"
-        public static let encoder = "ParakeetEncoder_v2.mlmodelc"
-        public static let decoder = "ParakeetDecoder.mlmodelc"
-        public static let joint = "RNNTJoint.mlmodelc"
-        public static let vocabulary = "parakeet_vocab.json"
+        public static let melspectrogram = "Melspectogram.mlpackage"
+        public static let encoder = "ParakeetEncoder.mlpackage"
+        public static let decoder = "ParakeetDecoder.mlpackage"
+        public static let joint = "RNNTJoint_truly_fixed.mlpackage"  // Truly fixed with correct duration logits
+        public static let vocabulary = "parakeet_v3_vocab.json"
     }
 
     /// Load ASR models from a directory
@@ -108,21 +108,36 @@ extension AsrModels {
             decoder: decoderModel,
             joint: jointModel,
             configuration: config,
-            vocabulary: try loadVocabulary(from: directory)
+            vocabulary: try await loadVocabulary(from: directory)
         )
 
         logger.info("Successfully loaded all ASR models with optimized compute units")
         return asrModels
     }
 
-    private static func loadVocabulary(from directory: URL) throws -> [Int: String] {
+    private static func loadVocabulary(from directory: URL) async throws -> [Int: String] {
         let vocabPath = repoPath(from: directory).appendingPathComponent(ModelNames.vocabulary)
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            logger.warning(
-                "Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models."
-            )
-            throw AsrModelsError.modelNotFound(ModelNames.vocabulary, vocabPath)
+            // For v3, vocabulary file might not be included, try to download from v2 repo
+            logger.info("Vocabulary file not found locally, attempting to download from v2 repository...")
+
+            // Try to download vocabulary from the v2 repository
+            let vocabURL = URL(
+                string:
+                    "https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/resolve/main/parakeet_v3_vocab.json"
+            )!
+
+            do {
+                let (vocabData, _) = try await URLSession.shared.data(from: vocabURL)
+                try vocabData.write(to: vocabPath)
+                logger.info("Successfully downloaded vocabulary file from v2 repository")
+            } catch {
+                logger.warning(
+                    "Failed to download vocabulary file: \(error.localizedDescription). Please ensure parakeet_v3_vocab.json is downloaded with the models."
+                )
+                throw AsrModelsError.modelNotFound(ModelNames.vocabulary, vocabPath)
+            }
         }
 
         do {
@@ -286,7 +301,7 @@ extension AsrModels {
             }
         }
 
-        // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v2-coreml/
+        // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v3-coreml/
         // by DownloadUtils.loadModels, so we don't need to download separately
         let modelNames = [
             ModelNames.melspectrogram,

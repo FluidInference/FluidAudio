@@ -4,6 +4,41 @@ import OSLog
 
 extension AsrManager {
 
+    /// Transpose encoder output from [B, H, T] to [B, T, H]
+    private func transposeEncoderOutput(_ input: MLMultiArray) throws -> MLMultiArray {
+        let shape = input.shape
+        guard shape.count == 3 else {
+            throw ASRError.processingFailed("Invalid encoder output shape for transpose: \(shape)")
+        }
+
+        let batchSize = shape[0].intValue  // Should be 1
+        let hiddenSize = shape[1].intValue  // Should be 1024
+        let timeSteps = shape[2].intValue  // Should be ~126
+
+        // Create output array with transposed shape [B, T, H]
+        let output = try MLMultiArray(
+            shape: [batchSize, timeSteps, hiddenSize] as [NSNumber],
+            dataType: .float32
+        )
+
+        // Transpose by copying data
+        // Input layout: [batch][hidden][time]
+        // Output layout: [batch][time][hidden]
+        for b in 0..<batchSize {
+            for t in 0..<timeSteps {
+                for h in 0..<hiddenSize {
+                    // Input index: b * (hiddenSize * timeSteps) + h * timeSteps + t
+                    let inputIndex = b * (hiddenSize * timeSteps) + h * timeSteps + t
+                    // Output index: b * (timeSteps * hiddenSize) + t * hiddenSize + h
+                    let outputIndex = b * (timeSteps * hiddenSize) + t * hiddenSize + h
+                    output[outputIndex] = input[inputIndex]
+                }
+            }
+        }
+
+        return output
+    }
+
     internal func transcribeWithState(
         _ audioSamples: [Float], decoderState: inout DecoderState
     ) async throws -> ASRResult {
@@ -103,8 +138,11 @@ extension AsrManager {
             from: encoderOutput, key: "encoder_output_length",
             errorMessage: "Invalid encoder output length")
 
-        // Encoder_v2 already outputs in the correct format (B, T, D)
-        let encoderHiddenStates = rawEncoderOutput
+        // The encoder outputs in [B, H, T] format but we need [B, T, H]
+        // where B=batch, T=time, H=hidden
+        // So we need to transpose dimensions 1 and 2
+        let transposedOutput = try transposeEncoderOutput(rawEncoderOutput)
+        let encoderHiddenStates = transposedOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
         let tokenIds = try await tdtDecode(
@@ -132,6 +170,16 @@ extension AsrManager {
             logger.warning(
                 "⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))"
             )
+            if tokenIds.isEmpty {
+                logger.warning("   No tokens predicted - model only output blanks")
+            } else {
+                logger.warning("   Predicted tokens (first 10): \(Array(tokenIds.prefix(10)))")
+            }
+        } else if !text.isEmpty {
+            logger.info("✅ Transcribed: '\(text)'")
+            if tokenIds.count > 0 {
+                logger.info("   Token IDs (first 10): \(Array(tokenIds.prefix(10)))")
+            }
         }
 
         return ASRResult(

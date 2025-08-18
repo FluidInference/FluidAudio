@@ -39,14 +39,14 @@ jobs:
 
       - name: Download Models if Needed
         run: |
-          MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
+          MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
           VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
 
           # Check if all models exist
-          if [ -d "$MODELS_DIR/Melspectogram.mlmodelc" ] && \
-             [ -d "$MODELS_DIR/ParakeetEncoder.mlmodelc" ] && \
-             [ -d "$MODELS_DIR/ParakeetDecoder.mlmodelc" ] && \
-             [ -d "$MODELS_DIR/RNNTJoint.mlmodelc" ] && \
+          if [ -d "$MODELS_DIR/Melspectogram.mlpackage" ] && \
+             [ -d "$MODELS_DIR/ParakeetEncoder.mlpackage" ] && \
+             [ -d "$MODELS_DIR/ParakeetDecoder.mlpackage" ] && \
+             [ -d "$MODELS_DIR/RNNTJoint.mlpackage" ] && \
              [ -f "$MODELS_DIR/parakeet_vocab.json" ]; then
             echo "✅ Models already cached"
           else
@@ -56,12 +56,12 @@ jobs:
 
             TEMP_DIR=$(mktemp -d)
             cd "$TEMP_DIR"
-            GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml.git
-            cd parakeet-tdt-0.6b-v2-coreml
-            git lfs pull --include="*.mlmodelc/**"
+            GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/alexwengg/parakeet-tdt-0.6b-v3-coreml.git
+            cd parakeet-tdt-0.6b-v3-coreml
+            git lfs pull --include="*.mlpackage/**"
 
-            mv *.mlmodelc "$MODELS_DIR/"
-            mv parakeet_vocab.json "$MODELS_DIR/"
+            mv *.mlpackage "$MODELS_DIR/"
+            mv parakeet_vocab.json "$MODELS_DIR/" 2>/dev/null || echo "Note: vocab file may not exist in v3"
 
             cd /
             rm -rf "$TEMP_DIR"

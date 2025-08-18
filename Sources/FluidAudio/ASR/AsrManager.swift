@@ -35,8 +35,9 @@ public final class AsrManager {
     private var microphoneDecoderState: DecoderState
     private var systemDecoderState: DecoderState
 
-    let blankId = 1024
-    let sosId = 1024
+    // Special token IDs for v3 models (must match TdtDecoder.swift)
+    let blankId = 8192  // v3 models use 8192 as blank token
+    let sosId = 2  // v3 models use <pad> token as SOS
 
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
@@ -163,16 +164,17 @@ public final class AsrManager {
         }
 
         // Fallback to copying if zero-copy fails
+        // Note: v3 models have a typo in the output name ("melspectogram" instead of "melspectrogram")
         let melspectrogram = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectrogram",
+            from: melspectrogramOutput, key: "melspectogram",
             errorMessage: "Invalid mel-spectrogram output")
         let melspectrogramLength = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectrogram_length",
+            from: melspectrogramOutput, key: "melspectogram_length",
             errorMessage: "Invalid mel-spectrogram length output")
 
         return try createFeatureProvider(features: [
-            ("audio_signal", melspectrogram),
-            ("length", melspectrogramLength),
+            ("melspectogram", melspectrogram),
+            ("melspectogram_length", melspectrogramLength),
         ])
     }
 
@@ -362,16 +364,30 @@ public final class AsrManager {
             }
         }
 
+        // Debug: Show raw token IDs first
+        if !tokenIds.isEmpty {
+            // print("DEBUG: Raw token IDs (\(tokenIds.count) total): \(tokenIds.prefix(50))")
+            // if tokenIds.count > 50 {
+            //     print("       ... and \(tokenIds.count - 50) more tokens")
+            // }
+        }
+
         // SentencePiece-compatible decoding algorithm:
-        // 1. Convert token IDs to token strings
+        // 1. Convert token IDs to token strings (temporarily NOT filtering for debugging)
         var tokens: [String] = []
         var tokenInfos: [(token: String, tokenId: Int, timing: TokenTiming?)] = []
 
         for (index, tokenId) in tokenIds.enumerated() {
             if let token = vocabulary[tokenId], !token.isEmpty {
+                // For now, include ALL tokens to see what we're getting
                 tokens.append(token)
                 let timing = index < timings.count ? timings[index] : nil
                 tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
+
+                // Debug output for first few tokens
+                // if index < 10 {
+                //     print("DEBUG: Token \(tokenId) -> '\(token)'")
+                // }
             }
         }
 
