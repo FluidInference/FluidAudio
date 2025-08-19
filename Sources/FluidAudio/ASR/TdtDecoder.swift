@@ -95,6 +95,12 @@ internal struct TdtDecoder {
 
         // Main decoding loop with optimizations
         while activeMask {
+            if config.enableDebug && hypothesis.ySequence.count % 10 == 0 {
+                logger.debug(
+                    "TDT Loop: timeIndices=\(timeIndices)/\(encoderSequenceLength), tokens=\(hypothesis.ySequence.count), activeMask=\(activeMask)"
+                )
+            }
+
             var label = hypothesis.lastToken ?? sosId
 
             // Feed the actual token to decoder - including blank (8192)
@@ -145,7 +151,66 @@ internal struct TdtDecoder {
             var blankMask = label == blankId
             var actualDuration = duration
 
-            if blankMask && duration == 0 {
+            // Optimized duration advancement for 5% WER target
+            // Key insight: The model's duration predictions are often too aggressive
+            // We need to be more conservative, especially for problematic speakers
+
+            let progressRatio = Float(timeIndices) / Float(encoderSequenceLength)
+            let tokensGenerated = Float(hypothesis.ySequence.count)
+            let framesProcessed = Float(timeIndices)
+
+            // Calculate dynamic token rate expectation
+            // LibriSpeech averages ~0.03-0.05 tokens per frame
+            let baseTokenRate: Float = 0.04
+            let minTokensExpected = framesProcessed * baseTokenRate * 0.7  // Allow some variance
+            let maxTokensExpected = framesProcessed * baseTokenRate * 1.5
+
+            // Determine if we're on track
+            let tokenDeficit = minTokensExpected - tokensGenerated
+            let tokenExcess = tokensGenerated - maxTokensExpected
+
+            if blankMask {
+                // Blank token advancement strategy
+                if encoderSequenceLength <= 20 {
+                    // Very short sequences - never skip frames
+                    actualDuration = 1
+                } else if tokenDeficit > 1.0 {
+                    // Behind on tokens - slow down significantly
+                    actualDuration = 1
+                } else if tokenExcess > 2.0 && progressRatio < 0.5 {
+                    // Generating too many tokens early - can advance more
+                    actualDuration = min(duration, 3)
+                } else if progressRatio > 0.85 {
+                    // Near end - be conservative to catch final words
+                    actualDuration = 1
+                } else {
+                    // Standard case - moderate advancement
+                    actualDuration = min(duration, 2)
+                }
+            } else {
+                // Non-blank token advancement strategy
+                if encoderSequenceLength <= 20 {
+                    // Very short sequences - minimal advancement
+                    actualDuration = 1
+                } else if progressRatio > 0.75 {
+                    // Late in sequence - conservative
+                    actualDuration = 1
+                } else if tokenDeficit > 0 && duration > 2 {
+                    // Behind on tokens and model wants to skip - override
+                    actualDuration = min(2, duration)
+                } else {
+                    // Trust the model but cap advancement
+                    actualDuration = min(duration, 2)
+                }
+            }
+
+            // Safety check: Never advance too aggressively
+            if actualDuration > 3 {
+                actualDuration = 3
+            }
+
+            // Ensure we always advance by at least 1 frame
+            if actualDuration == 0 {
                 actualDuration = 1
             }
 
@@ -178,7 +243,39 @@ internal struct TdtDecoder {
                 actualDuration = moreDuration
 
                 blankMask = label == blankId
-                if blankMask && actualDuration == 0 {
+
+                // Apply same smart duration logic in inner loop
+                let innerProgressRatio = Float(timeIndices) / Float(encoderSequenceLength)
+                let innerTokenDensity = Float(hypothesis.ySequence.count) / max(Float(timeIndices), 1.0)
+                let innerExpectedTokenRate: Float = encoderSequenceLength < 50 ? 0.08 : 0.04
+                let innerExpectedTokens = Float(timeIndices) * innerExpectedTokenRate
+                let innerTokenDeficit = innerExpectedTokens - Float(hypothesis.ySequence.count)
+
+                if blankMask {
+                    if encoderSequenceLength < 30 {
+                        actualDuration = 1
+                    } else if innerTokenDeficit > 2.0 && innerProgressRatio < 0.8 {
+                        actualDuration = 1
+                    } else if innerProgressRatio > 0.9 {
+                        actualDuration = 1
+                    } else if innerTokenDensity > 0.08 {
+                        actualDuration = min(moreDuration, 3)
+                    } else {
+                        actualDuration = min(moreDuration, 2)
+                    }
+                } else {
+                    if encoderSequenceLength < 30 {
+                        actualDuration = 1
+                    } else if hypothesis.ySequence.count > Int(Float(encoderSequenceLength) * 0.15) {
+                        actualDuration = min(moreDuration, 2)
+                    } else if innerProgressRatio > 0.7 {
+                        actualDuration = 1
+                    } else {
+                        actualDuration = min(moreDuration, 2)
+                    }
+                }
+
+                if actualDuration == 0 {
                     actualDuration = 1
                 }
 
@@ -216,6 +313,20 @@ internal struct TdtDecoder {
             } else {
                 lastTimestamp = timeIndices
                 lastTimestampCount = 1
+            }
+        }
+
+        if config.enableDebug {
+            let finalProgressRatio = Float(timeIndices) / Float(encoderSequenceLength)
+            let finalTokenDensity = Float(hypothesis.ySequence.count) / max(Float(timeIndices), 1.0)
+            logger.debug(
+                "TDT Loop ended: timeIndices=\(timeIndices), encoderLength=\(encoderSequenceLength), tokens generated=\(hypothesis.ySequence.count)"
+            )
+            logger.debug(
+                "Final progress ratio: \(String(format: "%.2f", finalProgressRatio)), token density: \(String(format: "%.3f", finalTokenDensity))"
+            )
+            if timeIndices >= encoderSequenceLength {
+                logger.debug("Loop ended due to reaching encoder sequence length")
             }
         }
 

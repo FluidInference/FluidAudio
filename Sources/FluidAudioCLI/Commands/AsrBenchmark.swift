@@ -138,11 +138,31 @@ public class ASRBenchmark {
                         asrManager: asrManager, file: audioFile)
                 }
 
-                // Print the hypothesis and reference for debugging
-                print("\n📝 File: \(audioFile.fileName)")
-                print("   Reference: \(result.reference)")
-                print("   Hypothesis: \(result.hypothesis)")
-                print("   WER: \(String(format: "%.1f%%", result.metrics.wer * 100))")
+                // Only log files with WER > 5%
+                if result.metrics.wer > 0.05 {
+                    print(
+                        "\n⚠️ File: \(audioFile.fileName) - WER: \(String(format: "%.1f%%", result.metrics.wer * 100))")
+                    print("   Reference: \(result.reference.lowercased())")
+                    print("   Hypothesis: \(result.hypothesis)")
+                    print("   Reference length: \(result.reference.split(separator: " ").count) words")
+                    print("   Hypothesis length: \(result.hypothesis.split(separator: " ").count) words")
+
+                    // Check for common issues
+                    if result.hypothesis.count < result.reference.count / 2 {
+                        print("   🔴 ISSUE: Output appears truncated (less than 50% of reference length)")
+                    }
+
+                    // Check if hypothesis ends abruptly
+                    let lastWords = result.hypothesis.suffix(20)
+                    if lastWords.contains("ory") || lastWords.contains("ess") || lastWords.contains("ce") {
+                        print("   🔴 ISSUE: Possible decoding error - incomplete word at end")
+                    }
+
+                    // Check for repeated dots or spaces
+                    if result.hypothesis.contains(". .") || result.hypothesis.contains("  ") {
+                        print("   🔴 ISSUE: Unusual formatting with repeated punctuation/spaces")
+                    }
+                }
 
                 results.append(result)
 
@@ -300,8 +320,23 @@ public class ASRBenchmark {
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization
     public func calculateASRMetrics(hypothesis: String, reference: String) -> ASRMetrics {
-        let normalizedHypothesis = TextNormalizer.normalize(hypothesis)
-        let normalizedReference = TextNormalizer.normalize(reference)
+        let normalizedHypothesis =
+            config.useSimpleNormalization
+            ? TextNormalizer.normalizeSimple(hypothesis)
+            : TextNormalizer.normalize(hypothesis)
+        let normalizedReference =
+            config.useSimpleNormalization
+            ? TextNormalizer.normalizeSimple(reference)
+            : TextNormalizer.normalize(reference)
+
+        // Debug: Log normalization for first few comparisons
+        if config.debugMode {
+            print("DEBUG Normalization:")
+            print("  Original ref: \(reference.prefix(100))")
+            print("  Normalized ref: \(normalizedReference.prefix(100))")
+            print("  Original hyp: \(hypothesis.prefix(100))")
+            print("  Normalized hyp: \(normalizedHypothesis.prefix(100))")
+        }
 
         let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
@@ -545,6 +580,10 @@ extension ASRBenchmark {
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
         var streamingChunkDuration = 0.1  // Default 100ms chunks
+        var useBeamSearch = false
+        var beamWidth = 5
+        var useSimpleNormalization = false  // Use NVIDIA-style simple normalization
+        var useCpuOnly = false  // Use CPU-only for maximum accuracy
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -588,6 +627,22 @@ extension ASRBenchmark {
                     }
                     i += 1
                 }
+            case "--beam-search":
+                useBeamSearch = true
+            case "--beam-width":
+                if i + 1 < arguments.count {
+                    if let width = Int(arguments[i + 1]), width > 0 {
+                        beamWidth = width
+                    } else {
+                        print("Invalid beam width: \(arguments[i + 1])")
+                        exit(1)
+                    }
+                    i += 1
+                }
+            case "--simple-normalization", "--nvidia-normalization":
+                useSimpleNormalization = true
+            case "--cpu-only", "--cpu":
+                useCpuOnly = true
             default:
                 print("Unknown option: \(arguments[i])")
             }
@@ -603,6 +658,9 @@ extension ASRBenchmark {
         if testStreaming {
             print("   Chunk duration: \(streamingChunkDuration)s")
         }
+        print("   Beam search: \(useBeamSearch ? "enabled (width=\(beamWidth))" : "disabled (greedy)")")
+        print("   Normalization: \(useSimpleNormalization ? "NVIDIA-style (simple)" : "HuggingFace (full)")")
+        print("   Compute units: \(useCpuOnly ? "CPU-only (Float32)" : "CPU+ANE (optimized)")")
 
         let config = ASRBenchmarkConfig(
             dataset: "librispeech",
@@ -611,7 +669,8 @@ extension ASRBenchmark {
             debugMode: debugMode,
             longAudioOnly: false,
             testStreaming: testStreaming,
-            streamingChunkDuration: streamingChunkDuration
+            streamingChunkDuration: streamingChunkDuration,
+            useSimpleNormalization: useSimpleNormalization
         )
 
         let benchmark = ASRBenchmark(config: config)
@@ -626,7 +685,9 @@ extension ASRBenchmark {
                 durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
                 maxSymbolsPerStep: 3
-            )
+            ),
+            enableBeamSearch: useBeamSearch,
+            beamWidth: beamWidth
         )
 
         let asrManager = AsrManager(config: asrConfig)
@@ -636,7 +697,9 @@ extension ASRBenchmark {
 
             print("Initializing ASR system...")
             do {
-                let models = try await AsrModels.downloadAndLoad()
+                // Use CPU-only configuration if requested for maximum accuracy
+                let modelConfig = useCpuOnly ? AsrModels.cpuOnlyConfiguration() : nil
+                let models = try await AsrModels.downloadAndLoad(configuration: modelConfig)
                 try await asrManager.initialize(models: models)
                 print("ASR system initialized successfully")
 

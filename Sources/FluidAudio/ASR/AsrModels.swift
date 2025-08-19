@@ -6,7 +6,12 @@ import OSLog
 public struct AsrModels: Sendable {
 
     /// Required model names for ASR
-    public static let requiredModelNames = ModelNames.ASR.requiredModels
+    public static let requiredModelNames: Set<String> = [
+        "Melspectogram.mlpackage",
+        "ParakeetEncoder.mlpackage",
+        "ParakeetDecoder.mlpackage",
+        "RNNTJoint.mlpackage",
+    ]
 
     public let melspectrogram: MLModel
     public let encoder: MLModel
@@ -50,8 +55,14 @@ extension AsrModels {
         public static let decoder = "ParakeetDecoder.mlpackage"
         public static let joint = "RNNTJoint.mlpackage"  // Original working version
         public static let vocabulary = "parakeet_v3_vocab.json"
+
+        // File names for compatibility
+        public static let melspectrogramFile = melspectrogram
+        public static let encoderFile = encoder
+        public static let decoderFile = decoder
+        public static let jointFile = joint
     }
-    
+
     // Use centralized model names (alias for compatibility with main)
     private typealias Names = ModelNames
 
@@ -204,6 +215,15 @@ extension AsrModels {
         config.allowLowPrecisionAccumulationOnGPU = true
         // Always use CPU+ANE for optimal performance
         config.computeUnits = .cpuAndNeuralEngine
+        return config
+    }
+
+    /// Create CPU-only configuration for maximum accuracy (matches NeMo notebook)
+    public static func cpuOnlyConfiguration() -> MLModelConfiguration {
+        let config = MLModelConfiguration()
+        config.allowLowPrecisionAccumulationOnGPU = false
+        // CPU-only for Float32 precision (matches the notebook's approach)
+        config.computeUnits = .cpuOnly
         return config
     }
 

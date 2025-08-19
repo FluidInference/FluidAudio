@@ -9,6 +9,8 @@ public struct ASRConfig: Sendable {
     public let realtimeMode: Bool
     public let chunkSizeMs: Int
     public let tdtConfig: TdtConfig
+    public let enableBeamSearch: Bool
+    public let beamWidth: Int
 
     public static let `default` = ASRConfig()
 
@@ -20,7 +22,14 @@ public struct ASRConfig: Sendable {
             durations: [0, 1, 2, 3, 4],
             includeTokenDuration: true,
             maxSymbolsPerStep: 3
-        )
+        ),
+        enableBeamSearch: false,
+        beamWidth: 1
+    )
+
+    public static let beamSearch = ASRConfig(
+        enableBeamSearch: true,
+        beamWidth: 5
     )
 
     public init(
@@ -29,7 +38,9 @@ public struct ASRConfig: Sendable {
         enableDebug: Bool = false,
         realtimeMode: Bool = false,
         chunkSizeMs: Int = 1500,
-        tdtConfig: TdtConfig = .default
+        tdtConfig: TdtConfig = .default,
+        enableBeamSearch: Bool = false,
+        beamWidth: Int = 5
     ) {
         self.sampleRate = sampleRate
         self.maxSymbolsPerFrame = maxSymbolsPerFrame
@@ -37,6 +48,8 @@ public struct ASRConfig: Sendable {
         self.realtimeMode = realtimeMode
         self.chunkSizeMs = chunkSizeMs
         self.tdtConfig = tdtConfig
+        self.enableBeamSearch = enableBeamSearch
+        self.beamWidth = beamWidth
     }
 }
 

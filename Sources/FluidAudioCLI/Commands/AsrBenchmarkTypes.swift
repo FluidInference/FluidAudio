@@ -108,10 +108,12 @@ public struct ASRBenchmarkConfig: Sendable {
     public let longAudioOnly: Bool
     public let testStreaming: Bool
     public let streamingChunkDuration: Double
+    public let useSimpleNormalization: Bool
 
     public init(
         dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false,
-        longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1
+        longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1,
+        useSimpleNormalization: Bool = false
     ) {
         self.dataset = dataset
         self.subset = subset
@@ -120,6 +122,7 @@ public struct ASRBenchmarkConfig: Sendable {
         self.longAudioOnly = longAudioOnly
         self.testStreaming = testStreaming
         self.streamingChunkDuration = streamingChunkDuration
+        self.useSimpleNormalization = useSimpleNormalization
     }
 }
 

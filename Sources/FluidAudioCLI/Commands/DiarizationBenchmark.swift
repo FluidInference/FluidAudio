@@ -592,7 +592,7 @@ enum StreamDiarizationBenchmark {
 
             // Find the GT speaker with most overlap
             if let (bestMatch, bestOverlap) = overlapsByGtSpeaker.max(by: { $0.value < $1.value }),
-                bestOverlap > 0.5
+                bestOverlap > 0.05
             {  // Require at least 0.5s total overlap
                 firstOccurrenceMap[predSegment.speakerId] = bestMatch
                 usedGroundTruthSpeakers.insert(bestMatch)

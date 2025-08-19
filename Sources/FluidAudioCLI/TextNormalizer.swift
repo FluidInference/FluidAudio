@@ -11,6 +11,38 @@ struct TextNormalizer {
         "þ": "th", "Þ": "th", "ł": "l", "Ł": "L",
     ]
 
+    /// Simple NVIDIA-style normalization that only removes punctuation and lowercases
+    /// This matches NVIDIA's evaluation methodology for Parakeet models
+    static func normalizeSimple(_ text: String) -> String {
+        var normalized = text
+
+        // Convert to lowercase
+        normalized = normalized.lowercased()
+
+        // Remove all punctuation (keep only letters, numbers, and spaces)
+        let punctuationPattern = try! NSRegularExpression(pattern: "[^\\w\\s]", options: [])
+        normalized = punctuationPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: " "
+        )
+
+        // Normalize whitespace to single spaces
+        let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
+        normalized = whitespacePattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: " "
+        )
+
+        // Trim leading/trailing whitespace
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return normalized
+    }
+
     /// Normalize text using HuggingFace ASR leaderboard standards
     /// This matches the normalization used in the official leaderboard evaluation
     static func normalize(_ text: String) -> String {
@@ -97,6 +129,129 @@ struct TextNormalizer {
 
         for (contraction, expansion) in contractions {
             normalized = normalized.replacingOccurrences(of: contraction, with: expansion)
+        }
+
+        // Normalize British to American spelling variations
+        let spellingVariations = [
+            "counselled": "counseled",
+            "counselling": "counseling",
+            "travelled": "traveled",
+            "travelling": "traveling",
+            "modelled": "modeled",
+            "modelling": "modeling",
+            "labelled": "labeled",
+            "labelling": "labeling",
+            "honour": "honor",
+            "honours": "honors",
+            "honoured": "honored",
+            "honouring": "honoring",
+            "colour": "color",
+            "colours": "colors",
+            "coloured": "colored",
+            "colouring": "coloring",
+            "favour": "favor",
+            "favours": "favors",
+            "favoured": "favored",
+            "favouring": "favoring",
+            "behaviour": "behavior",
+            "behaviours": "behaviors",
+            "neighbour": "neighbor",
+            "neighbours": "neighbors",
+            "labour": "labor",
+            "labours": "labors",
+            "laboured": "labored",
+            "labouring": "laboring",
+            "centre": "center",
+            "centres": "centers",
+            "centred": "centered",
+            "theatre": "theater",
+            "theatres": "theaters",
+            "metre": "meter",
+            "metres": "meters",
+            "litre": "liter",
+            "litres": "liters",
+            "defence": "defense",
+            "defences": "defenses",
+            "offence": "offense",
+            "offences": "offenses",
+            "licence": "license",
+            "licences": "licenses",
+            "practise": "practice",
+            "practising": "practicing",
+            "practised": "practiced",
+            "analyse": "analyze",
+            "analyses": "analyzes",
+            "analysed": "analyzed",
+            "analysing": "analyzing",
+            "paralyse": "paralyze",
+            "paralysed": "paralyzed",
+            "recognise": "recognize",
+            "recognised": "recognized",
+            "recognising": "recognizing",
+            "organise": "organize",
+            "organised": "organized",
+            "organising": "organizing",
+            "realise": "realize",
+            "realised": "realized",
+            "realising": "realizing",
+            "apologise": "apologize",
+            "apologised": "apologized",
+            "apologising": "apologizing",
+            "emphasise": "emphasize",
+            "emphasised": "emphasized",
+            "emphasising": "emphasizing",
+            "specialise": "specialize",
+            "specialised": "specialized",
+            "specialising": "specializing",
+            "summarise": "summarize",
+            "summarised": "summarized",
+            "summarising": "summarizing",
+            "authorise": "authorize",
+            "authorised": "authorized",
+            "authorising": "authorizing",
+            "maximise": "maximize",
+            "maximised": "maximized",
+            "maximising": "maximizing",
+            "minimise": "minimize",
+            "minimised": "minimized",
+            "minimising": "minimizing",
+            "optimise": "optimize",
+            "optimised": "optimized",
+            "optimising": "optimizing",
+            "standardise": "standardize",
+            "standardised": "standardized",
+            "standardising": "standardizing",
+            "categorise": "categorize",
+            "categorised": "categorized",
+            "categorising": "categorizing",
+            "prioritise": "prioritize",
+            "prioritised": "prioritized",
+            "prioritising": "prioritizing",
+            "memorise": "memorize",
+            "memorised": "memorized",
+            "memorising": "memorizing",
+            "criticise": "criticize",
+            "criticised": "criticized",
+            "criticising": "criticizing",
+            "publicise": "publicize",
+            "publicised": "publicized",
+            "publicising": "publicizing",
+            "advertise": "advertize",
+            "advertised": "advertized",
+            "advertising": "advertizing",
+            "grey": "gray",
+            "greys": "grays",
+            "greyed": "grayed",
+            "greying": "graying",
+        ]
+
+        for (british, american) in spellingVariations {
+            let pattern = "\\b" + british + "\\b"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: american,
+                options: .regularExpression
+            )
         }
 
         let abbreviations = [
