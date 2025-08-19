@@ -269,14 +269,8 @@ private struct ChunkProcessor {
             let (chunkTokens, newDecoderState) = try await processChunk(
                 at: position, chunkIndex: chunkIndex, using: manager, decoderState: decoderState)
 
-            if chunkIndex == 0 {
-                // First chunk: use all tokens
-                allTokens.append(contentsOf: chunkTokens)
-            } else {
-                // With no overlap, just append all tokens from subsequent chunks
-                // No deduplication needed since there's no overlap
-                allTokens.append(contentsOf: chunkTokens)
-            }
+            // Simply append all tokens from all chunks
+            allTokens.append(contentsOf: chunkTokens)
 
             // Only update state if not resetting between chunks
             if !resetStateBetweenChunks {

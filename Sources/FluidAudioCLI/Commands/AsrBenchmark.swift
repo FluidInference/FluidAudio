@@ -102,7 +102,7 @@ public class ASRBenchmark {
             )
         }
 
-        let maxFiles = 100
+        let maxFiles = config.maxFiles ?? filteredFiles.count
         let filesToProcess = Array(filteredFiles.prefix(maxFiles))
 
         print(
