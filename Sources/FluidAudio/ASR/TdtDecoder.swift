@@ -29,7 +29,7 @@ public struct TdtConfig: Sendable {
     }
 }
 
-/// Hypothesis for TDT beam search decoding
+/// Hypothesis for TDT decoding
 struct TdtHypothesis: Sendable {
     var score: Float = 0.0
     var ySequence: [Int] = []

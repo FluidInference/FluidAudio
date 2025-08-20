@@ -8,7 +8,7 @@ public struct AsrModels: Sendable {
     /// Required model names for ASR
     public static let requiredModelNames: Set<String> = [
         "Melspectogram.mlpackage",
-        "ParakeetEncoder.mlpackage",
+        "ParakeetEncoder_v2.mlpackage",
         "ParakeetDecoder.mlpackage",
         "RNNTJoint.mlpackage",
     ]
@@ -51,7 +51,7 @@ extension AsrModels {
     // Model names for v3
     public enum ModelNames {
         public static let melspectrogram = "Melspectogram.mlpackage"
-        public static let encoder = "ParakeetEncoder.mlpackage"
+        public static let encoder = "ParakeetEncoder_v2.mlpackage"
         public static let decoder = "ParakeetDecoder.mlpackage"
         public static let joint = "RNNTJoint.mlpackage"  // Original working version
         public static let vocabulary = "parakeet_v3_vocab.json"
@@ -161,14 +161,30 @@ extension AsrModels {
 
         do {
             let data = try Data(contentsOf: vocabPath)
-            let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
+
+            // Parse JSON as Any first to handle various value types
+            guard let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                logger.error("Vocabulary file is not a valid JSON dictionary")
+                throw AsrModelsError.loadingFailed("Invalid vocabulary JSON format")
+            }
 
             var vocabulary: [Int: String] = [:]
 
-            for (key, value) in jsonDict {
+            for (key, value) in jsonObject {
                 if let tokenId = Int(key) {
-                    vocabulary[tokenId] = value
+                    // Convert value to String, handling various types
+                    if let stringValue = value as? String {
+                        vocabulary[tokenId] = stringValue
+                    } else {
+                        // Convert other types to string representation
+                        vocabulary[tokenId] = String(describing: value)
+                    }
                 }
+            }
+
+            // Validate we have enough tokens (v3 has 8192 tokens)
+            if vocabulary.count < 1000 {
+                logger.warning("Vocabulary seems too small: \(vocabulary.count) tokens. Expected ~8192 for v3")
             }
 
             logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
@@ -177,7 +193,7 @@ extension AsrModels {
             logger.error(
                 "Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)"
             )
-            throw AsrModelsError.loadingFailed("Vocabulary parsing failed")
+            throw AsrModelsError.loadingFailed("Vocabulary parsing failed: \(error.localizedDescription)")
         }
     }
 
@@ -215,15 +231,6 @@ extension AsrModels {
         config.allowLowPrecisionAccumulationOnGPU = true
         // Always use CPU+ANE for optimal performance
         config.computeUnits = .cpuAndNeuralEngine
-        return config
-    }
-
-    /// Create CPU-only configuration for maximum accuracy (matches NeMo notebook)
-    public static func cpuOnlyConfiguration() -> MLModelConfiguration {
-        let config = MLModelConfiguration()
-        config.allowLowPrecisionAccumulationOnGPU = false
-        // CPU-only for Float32 precision (matches the notebook's approach)
-        config.computeUnits = .cpuOnly
         return config
     }
 

@@ -312,27 +312,15 @@ public final class AsrManager {
         // Note: Decoder state initialization is now handled by the caller
         // Use resetDecoderState() to explicitly reset when needed
 
-        if config.enableBeamSearch {
-            // Use beam search for better accuracy
-            let decoder = TdtBeamSearch(config: config, beamWidth: config.beamWidth)
-            return try await decoder.decode(
-                encoderOutput: encoderOutput,
-                encoderSequenceLength: encoderSequenceLength,
-                decoderModel: decoderModel!,
-                jointModel: jointModel!,
-                decoderState: &decoderState
-            )
-        } else {
-            // Use greedy decoding for speed
-            let decoder = TdtDecoder(config: config)
-            return try await decoder.decode(
-                encoderOutput: encoderOutput,
-                encoderSequenceLength: encoderSequenceLength,
-                decoderModel: decoderModel!,
-                jointModel: jointModel!,
-                decoderState: &decoderState
-            )
-        }
+        // Always use greedy decoding
+        let decoder = TdtDecoder(config: config)
+        return try await decoder.decode(
+            encoderOutput: encoderOutput,
+            encoderSequenceLength: encoderSequenceLength,
+            decoderModel: decoderModel!,
+            jointModel: jointModel!,
+            decoderState: &decoderState
+        )
     }
 
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
@@ -359,32 +347,6 @@ public final class AsrManager {
             try await initializeDecoderState(decoderState: &systemDecoderState)
         }
         logger.info("Decoder state reset for source: \(String(describing: source))")
-    }
-
-    /// Remove leading punctuation that the model sometimes hallucinates
-    /// This is a common issue with v3 multilingual models generating periods/commas at the start
-    private func removeLeadingPunctuation(_ text: String) -> String {
-        var processedText = text
-
-        // Remove leading periods, commas, and other punctuation marks that shouldn't start sentences
-        // Keep iterating in case there are multiple punctuation marks
-        while !processedText.isEmpty {
-            let firstChar = processedText.first!
-
-            // Check if it's a punctuation mark that shouldn't start a sentence
-            // Allow apostrophes and quotes as they can legitimately start sentences
-            if firstChar == "." || firstChar == "," || firstChar == ";" || firstChar == ":" || firstChar == "!"
-                || firstChar == "?"
-            {
-                processedText.removeFirst()
-                // Also remove any spaces after the removed punctuation
-                processedText = processedText.trimmingCharacters(in: .whitespaces)
-            } else {
-                break
-            }
-        }
-
-        return processedText
     }
 
     internal func convertTokensWithExistingTimings(
@@ -436,11 +398,6 @@ public final class AsrManager {
         // 3. Replace ▁ with space (SentencePiece standard)
         var text = concatenated.replacingOccurrences(of: "▁", with: " ")
             .trimmingCharacters(in: .whitespaces)
-
-        // 4. Post-process to fix punctuation hallucination
-        // Remove leading punctuation marks that the model sometimes hallucinates
-        // This is a common issue with v3 models generating periods at the start
-        text = removeLeadingPunctuation(text)
 
         // 4. For now, return original timings as-is
         // Note: Proper timing alignment would require tracking character positions
