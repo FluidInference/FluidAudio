@@ -1,3 +1,4 @@
+#if os(macOS)
 //
 //  AsrBenchmarkTypes.swift
 //  FluidAudio
@@ -129,3 +130,4 @@ public struct LibriSpeechFile {
     public let audioPath: URL
     public let transcript: String
 }
+#endif

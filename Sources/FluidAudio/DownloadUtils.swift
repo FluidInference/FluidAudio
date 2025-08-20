@@ -19,6 +19,7 @@ public class DownloadUtils {
     }()
 
     private static func configureProxySettings() -> [String: Any]? {
+        #if os(macOS)
         var proxyConfig: [String: Any] = [:]
         var hasProxyConfig = false
 
@@ -39,9 +40,14 @@ public class DownloadUtils {
         }
 
         return hasProxyConfig ? proxyConfig : nil
+        #else
+        // Proxy configuration not available on iOS
+        return nil
+        #endif
     }
 
     private static func parseProxyURL(_ proxyURLString: String, type: String) -> [String: Any]? {
+        #if os(macOS)
         guard let proxyURL = URL(string: proxyURLString),
             let host = proxyURL.host,
             let port = proxyURL.port
@@ -70,6 +76,10 @@ public class DownloadUtils {
 
         logger.info("Configured \(type) proxy: \(host):\(port)")
         return config
+        #else
+        // Proxy configuration not available on iOS
+        return nil
+        #endif
     }
 
     /// Download progress callback

@@ -1,3 +1,4 @@
+#if os(macOS)
 import AVFoundation
 import FluidAudio
 import Foundation
@@ -1088,3 +1089,4 @@ enum StreamDiarizationBenchmark {
         }
     }
 }
+#endif
