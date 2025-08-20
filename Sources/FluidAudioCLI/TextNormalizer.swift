@@ -11,38 +11,6 @@ struct TextNormalizer {
         "þ": "th", "Þ": "th", "ł": "l", "Ł": "L",
     ]
 
-    /// Simple NVIDIA-style normalization that only removes punctuation and lowercases
-    /// This matches NVIDIA's evaluation methodology for Parakeet models
-    static func normalizeSimple(_ text: String) -> String {
-        var normalized = text
-
-        // Convert to lowercase
-        normalized = normalized.lowercased()
-
-        // Remove all punctuation (keep only letters, numbers, and spaces)
-        let punctuationPattern = try! NSRegularExpression(pattern: "[^\\w\\s]", options: [])
-        normalized = punctuationPattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: " "
-        )
-
-        // Normalize whitespace to single spaces
-        let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
-        normalized = whitespacePattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: " "
-        )
-
-        // Trim leading/trailing whitespace
-        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return normalized
-    }
-
     /// Normalize text using HuggingFace ASR leaderboard standards
     /// This matches the normalization used in the official leaderboard evaluation
     static func normalize(_ text: String) -> String {

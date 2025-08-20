@@ -312,7 +312,6 @@ public final class AsrManager {
         // Note: Decoder state initialization is now handled by the caller
         // Use resetDecoderState() to explicitly reset when needed
 
-        // Always use greedy decoding
         let decoder = TdtDecoder(config: config)
         return try await decoder.decode(
             encoderOutput: encoderOutput,
@@ -365,30 +364,16 @@ public final class AsrManager {
             }
         }
 
-        // Debug: Show raw token IDs first
-        if !tokenIds.isEmpty {
-            // print("DEBUG: Raw token IDs (\(tokenIds.count) total): \(tokenIds.prefix(50))")
-            // if tokenIds.count > 50 {
-            //     print("       ... and \(tokenIds.count - 50) more tokens")
-            // }
-        }
-
         // SentencePiece-compatible decoding algorithm:
-        // 1. Convert token IDs to token strings (temporarily NOT filtering for debugging)
+        // 1. Convert token IDs to token strings
         var tokens: [String] = []
         var tokenInfos: [(token: String, tokenId: Int, timing: TokenTiming?)] = []
 
         for (index, tokenId) in tokenIds.enumerated() {
             if let token = vocabulary[tokenId], !token.isEmpty {
-                // For now, include ALL tokens to see what we're getting
                 tokens.append(token)
                 let timing = index < timings.count ? timings[index] : nil
                 tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
-
-                // Debug output for first few tokens
-                // if index < 10 {
-                //     print("DEBUG: Token \(tokenId) -> '\(token)'")
-                // }
             }
         }
 

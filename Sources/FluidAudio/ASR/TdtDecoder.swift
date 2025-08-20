@@ -95,21 +95,12 @@ internal struct TdtDecoder {
 
         // Main decoding loop with optimizations
         while activeMask {
-            if config.enableDebug && hypothesis.ySequence.count % 10 == 0 {
-                logger.debug(
-                    "TDT Loop: timeIndices=\(timeIndices)/\(encoderSequenceLength), tokens=\(hypothesis.ySequence.count), activeMask=\(activeMask)"
-                )
-            }
 
             var label = hypothesis.lastToken ?? sosId
 
-            // Feed the actual token to decoder - including blank (8192)
-            // The decoder can and must handle the blank token for proper RNNT decoding
-            let decoderInputToken = label  // Use actual token, no mapping!
-
             // Use cached decoder inputs
             let decoderResult = try runDecoderOptimized(
-                token: decoderInputToken,
+                token: label,
                 state: hypothesis.decState ?? decoderState,
                 model: decoderModel
             )
@@ -124,26 +115,9 @@ internal struct TdtDecoder {
                 model: jointModel
             )
 
-            // Use raw logits directly, like Python does
             let (tokenLogits, durationLogits) = try splitLogits(logits)
 
-            // Simple argmax on raw logits
             label = argmaxSIMD(tokenLogits)
-
-            // Debug: Log decoded tokens
-            if config.enableDebug {
-                if label >= 8192 {
-                    print("DEBUG: Got blank token \(label)")
-                } else if hypothesis.ySequence.count < 10 {
-                    // Log first 10 tokens for debugging
-                    let topScores = tokenLogits.enumerated()
-                        .sorted { $0.element > $1.element }
-                        .prefix(3)
-                        .map { "(\($0.offset): \(String(format: "%.2f", $0.element)))" }
-                        .joined(separator: ", ")
-                    print("DEBUG: Token \(hypothesis.ySequence.count): selected \(label), top scores: \(topScores)")
-                }
-            }
 
             var score = tokenLogits[label]
             let duration = config.tdtConfig.durations[argmaxSIMD(durationLogits)]
@@ -151,67 +125,8 @@ internal struct TdtDecoder {
             var blankMask = label == blankId
             var actualDuration = duration
 
-            // Optimized duration advancement for 5% WER target
-            // Key insight: The model's duration predictions are often too aggressive
-            // We need to be more conservative, especially for problematic speakers
-
-            let progressRatio = Float(timeIndices) / Float(encoderSequenceLength)
-            let tokensGenerated = Float(hypothesis.ySequence.count)
-            let framesProcessed = Float(timeIndices)
-
-            // Calculate dynamic token rate expectation
-            // LibriSpeech averages ~0.03-0.05 tokens per frame
-            let baseTokenRate: Float = 0.04
-            let minTokensExpected = framesProcessed * baseTokenRate * 0.7  // Allow some variance
-            let maxTokensExpected = framesProcessed * baseTokenRate * 1.5
-
-            // Determine if we're on track
-            let tokenDeficit = minTokensExpected - tokensGenerated
-            let tokenExcess = tokensGenerated - maxTokensExpected
-
             if blankMask {
-                // Blank token advancement strategy
-                if encoderSequenceLength <= 20 {
-                    // Very short sequences - never skip frames
-                    actualDuration = 1
-                } else if tokenDeficit > 1.0 {
-                    // Behind on tokens - slow down significantly
-                    actualDuration = 1
-                } else if tokenExcess > 2.0 && progressRatio < 0.5 {
-                    // Generating too many tokens early - can advance more
-                    actualDuration = min(duration, 3)
-                } else if progressRatio > 0.85 {
-                    // Near end - be conservative to catch final words
-                    actualDuration = 1
-                } else {
-                    // Standard case - moderate advancement
-                    actualDuration = min(duration, 2)
-                }
-            } else {
-                // Non-blank token advancement strategy
-                if encoderSequenceLength <= 20 {
-                    // Very short sequences - minimal advancement
-                    actualDuration = 1
-                } else if progressRatio > 0.75 {
-                    // Late in sequence - conservative
-                    actualDuration = 1
-                } else if tokenDeficit > 0 && duration > 2 {
-                    // Behind on tokens and model wants to skip - override
-                    actualDuration = min(2, duration)
-                } else {
-                    // Trust the model but cap advancement
-                    actualDuration = min(duration, 2)
-                }
-            }
-
-            // Safety check: Never advance too aggressively
-            if actualDuration > 3 {
-                actualDuration = 3
-            }
-
-            // Ensure we always advance by at least 1 frame
-            if actualDuration == 0 {
-                actualDuration = 1
+                actualDuration = min(duration, 2)
             }
 
             timeIndicesCurrentLabels = timeIndices
@@ -244,35 +159,11 @@ internal struct TdtDecoder {
 
                 blankMask = label == blankId
 
-                // Apply same smart duration logic in inner loop
-                let innerProgressRatio = Float(timeIndices) / Float(encoderSequenceLength)
-                let innerTokenDensity = Float(hypothesis.ySequence.count) / max(Float(timeIndices), 1.0)
-                let innerExpectedTokenRate: Float = encoderSequenceLength < 50 ? 0.08 : 0.04
-                let innerExpectedTokens = Float(timeIndices) * innerExpectedTokenRate
-                let innerTokenDeficit = innerExpectedTokens - Float(hypothesis.ySequence.count)
+                if encoderSequenceLength < 30 {
+                    actualDuration = 1
 
-                if blankMask {
-                    if encoderSequenceLength < 30 {
-                        actualDuration = 1
-                    } else if innerTokenDeficit > 2.0 && innerProgressRatio < 0.8 {
-                        actualDuration = 1
-                    } else if innerProgressRatio > 0.9 {
-                        actualDuration = 1
-                    } else if innerTokenDensity > 0.08 {
-                        actualDuration = min(moreDuration, 3)
-                    } else {
-                        actualDuration = min(moreDuration, 2)
-                    }
                 } else {
-                    if encoderSequenceLength < 30 {
-                        actualDuration = 1
-                    } else if hypothesis.ySequence.count > Int(Float(encoderSequenceLength) * 0.15) {
-                        actualDuration = min(moreDuration, 2)
-                    } else if innerProgressRatio > 0.7 {
-                        actualDuration = 1
-                    } else {
-                        actualDuration = min(moreDuration, 2)
-                    }
+                    actualDuration = min(moreDuration, 2)
                 }
 
                 if actualDuration == 0 {
@@ -316,20 +207,6 @@ internal struct TdtDecoder {
             }
         }
 
-        if config.enableDebug {
-            let finalProgressRatio = Float(timeIndices) / Float(encoderSequenceLength)
-            let finalTokenDensity = Float(hypothesis.ySequence.count) / max(Float(timeIndices), 1.0)
-            logger.debug(
-                "TDT Loop ended: timeIndices=\(timeIndices), encoderLength=\(encoderSequenceLength), tokens generated=\(hypothesis.ySequence.count)"
-            )
-            logger.debug(
-                "Final progress ratio: \(String(format: "%.2f", finalProgressRatio)), token density: \(String(format: "%.3f", finalTokenDensity))"
-            )
-            if timeIndices >= encoderSequenceLength {
-                logger.debug("Loop ended due to reaching encoder sequence length")
-            }
-        }
-
         if let finalState = hypothesis.decState {
             decoderState = finalState
         }
@@ -351,22 +228,7 @@ internal struct TdtDecoder {
             throw ASRError.processingFailed("Invalid encoder output shape: \(shape)")
         }
 
-        // Shape is [batch, time, hidden] = [1, 126, 1024]
-        let batchSize = shape[0].intValue
-        let sequenceLength = shape[1].intValue
         let hiddenSize = shape[2].intValue
-
-        guard batchSize == 1 else {
-            throw ASRError.processingFailed("Expected batch size 1, got \(batchSize)")
-        }
-
-        guard hiddenSize == 1024 else {
-            throw ASRError.processingFailed("Expected hidden size 1024, got \(hiddenSize)")
-        }
-
-        guard length <= sequenceLength else {
-            throw ASRError.processingFailed("Requested length \(length) exceeds sequence length \(sequenceLength)")
-        }
 
         var frames = EncoderFrameArray()
         frames.reserveCapacity(length)
@@ -570,11 +432,6 @@ internal struct TdtDecoder {
         let durationElements = config.tdtConfig.durations.count
         let vocabSize = totalElements - durationElements
 
-        // Debug: Log dimensions
-        if config.enableDebug {
-            print("DEBUG: Joint output - total: \(totalElements), vocab: \(vocabSize), durations: \(durationElements)")
-        }
-
         guard totalElements >= durationElements else {
             throw ASRError.processingFailed(
                 "Logits dimension mismatch: got \(totalElements), need at least \(durationElements)")
@@ -587,20 +444,6 @@ internal struct TdtDecoder {
         let tokenLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr, count: vocabSize))
         let durationLogits = ContiguousArray(
             UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
-
-        // Debug: Check for valid values
-        if config.enableDebug {
-            let tokenArray = Array(tokenLogits)
-            let maxToken = tokenArray.max() ?? -Float.infinity
-            let minToken = tokenArray.min() ?? Float.infinity
-            let argMaxToken = tokenArray.firstIndex(of: maxToken) ?? -1
-            print("DEBUG: Token logits range: [\(minToken), \(maxToken)], argmax: \(argMaxToken)")
-
-            // Check if all values are the same (indicating a problem)
-            if maxToken == minToken {
-                print("WARNING: All token logits have the same value: \(maxToken)")
-            }
-        }
 
         return (Array(tokenLogits), Array(durationLogits))
     }

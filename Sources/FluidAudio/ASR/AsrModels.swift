@@ -6,12 +6,7 @@ import OSLog
 public struct AsrModels: Sendable {
 
     /// Required model names for ASR
-    public static let requiredModelNames: Set<String> = [
-        "Melspectogram.mlpackage",
-        "ParakeetEncoder_v2.mlpackage",
-        "ParakeetDecoder.mlpackage",
-        "RNNTJoint.mlpackage",
-    ]
+    public static let requiredModelNames = ModelNames.ASR.requiredModels
 
     public let melspectrogram: MLModel
     public let encoder: MLModel
@@ -48,23 +43,8 @@ extension AsrModels {
             .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
     }
 
-    // Model names for v3
-    public enum ModelNames {
-        public static let melspectrogram = "Melspectogram.mlpackage"
-        public static let encoder = "ParakeetEncoder_v2.mlpackage"
-        public static let decoder = "ParakeetDecoder.mlpackage"
-        public static let joint = "RNNTJoint.mlpackage"  // Original working version
-        public static let vocabulary = "parakeet_v3_vocab.json"
-
-        // File names for compatibility
-        public static let melspectrogramFile = melspectrogram
-        public static let encoderFile = encoder
-        public static let decoderFile = decoder
-        public static let jointFile = joint
-    }
-
-    // Use centralized model names (alias for compatibility with main)
-    private typealias Names = ModelNames
+    // Use centralized model names
+    private typealias Names = ModelNames.ASR
 
     /// Load ASR models from a directory
     ///
@@ -89,10 +69,10 @@ extension AsrModels {
 
         // Load each model with its optimal compute unit configuration
         let modelConfigs: [(name: String, modelType: ANEOptimizer.ModelType)] = [
-            (Names.melspectrogram, .melSpectrogram),
-            (Names.encoder, .encoder),
-            (Names.decoder, .decoder),
-            (Names.joint, .joint),
+            (Names.melspectrogramFile, .melSpectrogram),
+            (Names.encoderFile, .encoder),
+            (Names.decoderFile, .decoder),
+            (Names.jointFile, .joint),
         ]
 
         var loadedModels: [String: MLModel] = [:]
@@ -113,10 +93,10 @@ extension AsrModels {
             }
         }
 
-        guard let melModel = loadedModels[Names.melspectrogram],
-            let encoderModel = loadedModels[Names.encoder],
-            let decoderModel = loadedModels[Names.decoder],
-            let jointModel = loadedModels[Names.joint]
+        guard let melModel = loadedModels[Names.melspectrogramFile],
+            let encoderModel = loadedModels[Names.encoderFile],
+            let decoderModel = loadedModels[Names.decoderFile],
+            let jointModel = loadedModels[Names.jointFile]
         else {
             throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
         }
@@ -137,64 +117,23 @@ extension AsrModels {
     private static func loadVocabulary(from directory: URL) async throws -> [Int: String] {
         let vocabPath = repoPath(from: directory).appendingPathComponent(Names.vocabulary)
 
-        if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            // For v3, vocabulary file might not be included, try to download from v2 repo
-            logger.info("Vocabulary file not found locally, attempting to download from v2 repository...")
+        guard FileManager.default.fileExists(atPath: vocabPath.path) else {
+            logger.error("Vocabulary file not found at \(vocabPath.path)")
+            throw AsrModelsError.modelNotFound(Names.vocabulary, vocabPath)
+        }
 
-            // Try to download vocabulary from the v2 repository
-            let vocabURL = URL(
-                string:
-                    "https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/resolve/main/parakeet_v3_vocab.json"
-            )!
+        let data = try Data(contentsOf: vocabPath)
+        let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
 
-            do {
-                let (vocabData, _) = try await URLSession.shared.data(from: vocabURL)
-                try vocabData.write(to: vocabPath)
-                logger.info("Successfully downloaded vocabulary file from v2 repository")
-            } catch {
-                logger.warning(
-                    "Failed to download vocabulary file: \(error.localizedDescription). Please ensure parakeet_v3_vocab.json is downloaded with the models."
-                )
-                throw AsrModelsError.modelNotFound(Names.vocabulary, vocabPath)
+        var vocabulary: [Int: String] = [:]
+        for (key, value) in jsonDict {
+            if let tokenId = Int(key) {
+                vocabulary[tokenId] = String(describing: value)
             }
         }
 
-        do {
-            let data = try Data(contentsOf: vocabPath)
-
-            // Parse JSON as Any first to handle various value types
-            guard let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                logger.error("Vocabulary file is not a valid JSON dictionary")
-                throw AsrModelsError.loadingFailed("Invalid vocabulary JSON format")
-            }
-
-            var vocabulary: [Int: String] = [:]
-
-            for (key, value) in jsonObject {
-                if let tokenId = Int(key) {
-                    // Convert value to String, handling various types
-                    if let stringValue = value as? String {
-                        vocabulary[tokenId] = stringValue
-                    } else {
-                        // Convert other types to string representation
-                        vocabulary[tokenId] = String(describing: value)
-                    }
-                }
-            }
-
-            // Validate we have enough tokens (v3 has 8192 tokens)
-            if vocabulary.count < 1000 {
-                logger.warning("Vocabulary seems too small: \(vocabulary.count) tokens. Expected ~8192 for v3")
-            }
-
-            logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
-            return vocabulary
-        } catch {
-            logger.error(
-                "Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)"
-            )
-            throw AsrModelsError.loadingFailed("Vocabulary parsing failed: \(error.localizedDescription)")
-        }
+        logger.info("Loaded vocabulary with \(vocabulary.count) tokens")
+        return vocabulary
     }
 
     public static func loadFromCache(

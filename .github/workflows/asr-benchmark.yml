@@ -37,37 +37,6 @@ jobs:
       - name: Build
         run: swift build -c release
 
-      - name: Download Models if Needed
-        run: |
-          MODELS_DIR="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
-          VOCAB_FILE="$HOME/Library/Application Support/FluidAudio/parakeet_vocab.json"
-
-          # Check if all models exist
-          if [ -d "$MODELS_DIR/Melspectogram.mlpackage" ] && \
-             [ -d "$MODELS_DIR/ParakeetEncoder.mlpackage" ] && \
-             [ -d "$MODELS_DIR/ParakeetDecoder.mlpackage" ] && \
-             [ -d "$MODELS_DIR/RNNTJoint.mlpackage" ] && \
-             [ -f "$MODELS_DIR/parakeet_vocab.json" ]; then
-            echo "✅ Models already cached"
-          else
-            echo "📥 Downloading models..."
-            rm -rf "$MODELS_DIR"
-            mkdir -p "$MODELS_DIR"
-
-            TEMP_DIR=$(mktemp -d)
-            cd "$TEMP_DIR"
-            GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/alexwengg/parakeet-tdt-0.6b-v3-coreml.git
-            cd parakeet-tdt-0.6b-v3-coreml
-            git lfs pull --include="*.mlpackage/**"
-
-            mv *.mlpackage "$MODELS_DIR/"
-            mv parakeet_vocab.json "$MODELS_DIR/" 2>/dev/null || echo "Note: vocab file may not exist in v3"
-
-            cd /
-            rm -rf "$TEMP_DIR"
-            echo "✅ Models downloaded"
-          fi
-
       - name: Run Benchmarks
         id: benchmark
         run: |
@@ -83,13 +52,13 @@ jobs:
             local MAX=$2
             local OUTPUT=$3
             local EXTRA_ARGS="${4:-}"
-            
+
             echo "========================================="
             echo "Running ASR benchmark: $SUBSET (max $MAX files)"
             echo "Output: $OUTPUT"
             echo "Extra args: $EXTRA_ARGS"
             echo "========================================="
-            
+
             if swift run -c release fluidaudio asr-benchmark \
               --subset "$SUBSET" --max-files "$MAX" \
               --auto-download --output "$OUTPUT" $EXTRA_ARGS 2>&1 | tee benchmark_log.txt; then
@@ -110,7 +79,7 @@ jobs:
           run_benchmark "test-other" "$MAX_FILES" "asr_results_other.json" || OTHER_FAILED=1
 
           # Run streaming benchmark (smaller file count for faster CI)
-          run_benchmark "test-clean" "5" "asr_results_streaming.json" "--test-streaming --chunk-duration 0.5" || STREAMING_FAILED=1 
+          run_benchmark "test-clean" "5" "asr_results_streaming.json" "--test-streaming --chunk-duration 0.5" || STREAMING_FAILED=1
 
 
           # Extract metrics with error handling
@@ -198,7 +167,7 @@ jobs:
             const benchmarkStatus = '${{ steps.benchmark.outputs.BENCHMARK_STATUS }}';
             const statusEmoji = benchmarkStatus === 'SUCCESS' ? '✅' : '⚠️';
             const statusText = benchmarkStatus === 'SUCCESS' ? 'All benchmarks passed' : 'Some benchmarks failed (see logs)';
-            
+
             const body = `## ASR Benchmark Results ${statusEmoji}
 
             **Status:** ${statusText}

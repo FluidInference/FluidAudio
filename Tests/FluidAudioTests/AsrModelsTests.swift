@@ -10,12 +10,12 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Model Names Tests
 
     func testModelNames() {
-        // v3 models use .mlpackage format
-        XCTAssertEqual(AsrModels.ModelNames.melspectrogram, "Melspectogram.mlpackage")
-        XCTAssertEqual(AsrModels.ModelNames.encoder, "ParakeetEncoder_transposed_int8.mlpackage")
-        XCTAssertEqual(AsrModels.ModelNames.decoder, "ParakeetDecoder.mlpackage")
-        XCTAssertEqual(AsrModels.ModelNames.joint, "RNNTJoint.mlpackage")
-        XCTAssertEqual(AsrModels.ModelNames.vocabulary, "parakeet_v3_vocab.json")
+        // v3 models use .mlmodelc format for better performance
+        XCTAssertEqual(ModelNames.ASR.melspectrogramFile, "Melspectogram.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.encoderFile, "ParakeetEncoder_v2.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.decoderFile, "ParakeetDecoder.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.jointFile, "RNNTJoint.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
     }
 
     // MARK: - Configuration Tests

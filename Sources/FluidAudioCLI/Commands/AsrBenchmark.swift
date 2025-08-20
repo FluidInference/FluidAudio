@@ -320,26 +320,9 @@ public class ASRBenchmark {
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization
     public func calculateASRMetrics(hypothesis: String, reference: String) -> ASRMetrics {
-        // TODO: Remove simple normalization option - it's a hack for comparing with NVIDIA benchmarks
-        // We should always use HuggingFace normalization for consistency with the leaderboard
-        // The "simple" option is only kept for backwards compatibility and debugging
-        let normalizedHypothesis =
-            config.useSimpleNormalization
-            ? TextNormalizer.normalizeSimple(hypothesis)
-            : TextNormalizer.normalize(hypothesis)
-        let normalizedReference =
-            config.useSimpleNormalization
-            ? TextNormalizer.normalizeSimple(reference)
-            : TextNormalizer.normalize(reference)
-
-        // Debug: Log normalization for first few comparisons
-        if config.debugMode {
-            print("DEBUG Normalization:")
-            print("  Original ref: \(reference.prefix(100))")
-            print("  Normalized ref: \(normalizedReference.prefix(100))")
-            print("  Original hyp: \(hypothesis.prefix(100))")
-            print("  Normalized hyp: \(normalizedHypothesis.prefix(100))")
-        }
+        // Always use HuggingFace normalization for consistency with the leaderboard
+        let normalizedHypothesis = TextNormalizer.normalize(hypothesis)
+        let normalizedReference = TextNormalizer.normalize(reference)
 
         let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
@@ -583,7 +566,6 @@ extension ASRBenchmark {
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
         var streamingChunkDuration = 0.1  // Default 100ms chunks
-        var useSimpleNormalization = false  // Use NVIDIA-style simple normalization
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -627,8 +609,6 @@ extension ASRBenchmark {
                     }
                     i += 1
                 }
-            case "--simple-normalization", "--nvidia-normalization":
-                useSimpleNormalization = true
             default:
                 print("Unknown option: \(arguments[i])")
             }
@@ -644,7 +624,6 @@ extension ASRBenchmark {
         if testStreaming {
             print("   Chunk duration: \(streamingChunkDuration)s")
         }
-        print("   Normalization: \(useSimpleNormalization ? "NVIDIA-style (simple)" : "HuggingFace (full)")")
 
         let config = ASRBenchmarkConfig(
             dataset: "librispeech",
@@ -653,8 +632,7 @@ extension ASRBenchmark {
             debugMode: debugMode,
             longAudioOnly: false,
             testStreaming: testStreaming,
-            streamingChunkDuration: streamingChunkDuration,
-            useSimpleNormalization: useSimpleNormalization
+            streamingChunkDuration: streamingChunkDuration
         )
 
         let benchmark = ASRBenchmark(config: config)
@@ -728,12 +706,6 @@ extension ASRBenchmark {
 
             let results = try await benchmark.runLibriSpeechBenchmark(
                 asrManager: asrManager, subset: subset)
-
-            guard !results.isEmpty else {
-                print("\n❌ No files were successfully processed")
-                print("   Please check the error messages above for details")
-                return
-            }
 
             let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
             let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)

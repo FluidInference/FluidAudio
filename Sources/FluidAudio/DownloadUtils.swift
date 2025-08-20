@@ -89,7 +89,7 @@ public class DownloadUtils {
     /// Model repositories on HuggingFace
     public enum Repo: String, CaseIterable {
         case vad = "FluidInference/silero-vad-coreml"
-        case parakeet = "alexwengg/parakeet-tdt-0.6b-v3-coreml"
+        case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
         case diarizer = "FluidInference/speaker-diarization-coreml"
 
         var folderName: String {
