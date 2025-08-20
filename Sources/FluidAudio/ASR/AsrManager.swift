@@ -164,16 +164,17 @@ public final class AsrManager {
         }
 
         // Fallback to copying if zero-copy fails
+        // Extract with correct spelling (melspectrogram outputs correct names)
         let melspectrogram = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectogram",
+            from: melspectrogramOutput, key: "melspectrogram",
             errorMessage: "Invalid mel-spectrogram output")
         let melspectrogramLength = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectogram_length",
+            from: melspectrogramOutput, key: "melspectrogram_length",
             errorMessage: "Invalid mel-spectrogram length output")
 
         return try createFeatureProvider(features: [
-            ("melspectogram", melspectrogram),
-            ("melspectogram_length", melspectrogramLength),
+            ("melspectrogram", melspectrogram),
+            ("melspectrogram_length", melspectrogramLength),
         ])
     }
 

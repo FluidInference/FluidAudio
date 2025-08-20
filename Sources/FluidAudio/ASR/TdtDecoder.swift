@@ -228,7 +228,14 @@ internal struct TdtDecoder {
             throw ASRError.processingFailed("Invalid encoder output shape: \(shape)")
         }
 
+        // Encoder output is NOW [batch, time, hidden] format (after transpose fix)
+        let timeSteps = shape[1].intValue
         let hiddenSize = shape[2].intValue
+
+        // Validate frame size
+        guard hiddenSize == 1024 else {
+            throw ASRError.processingFailed("Invalid encoder frame size: \(hiddenSize), expected 1024")
+        }
 
         var frames = EncoderFrameArray()
         frames.reserveCapacity(length)
@@ -239,19 +246,18 @@ internal struct TdtDecoder {
             let floatPtr = encoderOutput.dataPointer.bindMemory(
                 to: Float.self, capacity: encoderOutput.count)
 
-            // The data is laid out as [batch, time, hidden]
-            // So for batch 0, time t, the data starts at: t * hiddenSize
+            // The data is NOW laid out as [batch, time, hidden]
+            // Can extract each time frame contiguously
             for timeIdx in 0..<length {
+                var frame = [Float](repeating: 0, count: hiddenSize)
+
+                // Copy the hidden values for this time step (contiguous in memory)
                 let startIdx = timeIdx * hiddenSize
+                for hiddenIdx in 0..<hiddenSize {
+                    frame[hiddenIdx] = floatPtr[startIdx + hiddenIdx]
+                }
 
-                // Create a lightweight wrapper that references the original memory
-                let frameView = UnsafeBufferPointer(
-                    start: floatPtr + startIdx,
-                    count: hiddenSize
-                )
-
-                // Only copy when absolutely necessary (for now, to maintain compatibility)
-                frames.append(Array(frameView))
+                frames.append(frame)
             }
         } else {
             // Fallback for non-float32 types
