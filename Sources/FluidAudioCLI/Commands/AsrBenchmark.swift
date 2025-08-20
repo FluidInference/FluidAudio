@@ -318,8 +318,9 @@ public class ASRBenchmark {
         return result
     }
 
-    /// Calculate WER and CER metrics with HuggingFace-compatible normalization
+    /// Calculate WER and CER metrics using standard ASR evaluation normalization
     public func calculateASRMetrics(hypothesis: String, reference: String) -> ASRMetrics {
+        // Use standard HuggingFace-aligned normalization
         let normalizedHypothesis = TextNormalizer.normalize(hypothesis)
         let normalizedReference = TextNormalizer.normalize(reference)
 
@@ -559,7 +560,7 @@ private func editDistance<T: Equatable>(_ seq1: [T], _ seq2: [T]) -> EditDistanc
 extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
         var subset = "test-clean"
-        var maxFiles: Int?
+        var maxFiles: Int? = 100  // Default to 100 files for standard evaluation
         var outputFile = "asr_benchmark_results.json"
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
@@ -615,7 +616,7 @@ extension ASRBenchmark {
         }
 
         print("\nStarting ASR benchmark on LibriSpeech \(subset)")
-        print("   Max files: \(maxFiles?.description ?? "all")")
+        print("   Max files: \(maxFiles?.description ?? "all") (default: 100)")
         print("   Output file: \(outputFile)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
@@ -910,7 +911,7 @@ extension ASRBenchmark {
                 fluidaudio asr-benchmark
 
                 # Benchmark with 100 files from test-other subset
-                fluidaudio asr-benchmark --subset test-other --max-files 100
+                fluidaudio asr-benchmark --subset test-other --max-files 100r
 
                 # Test streaming performance with 0.5s chunks
                 fluidaudio asr-benchmark --test-streaming --chunk-duration 0.5

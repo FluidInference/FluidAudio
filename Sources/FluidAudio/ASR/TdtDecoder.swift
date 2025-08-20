@@ -16,17 +16,96 @@ public struct TdtConfig: Sendable {
     public let includeTokenDuration: Bool
     public let maxSymbolsPerStep: Int?
 
+    // Configurable thresholds for duration logic
+    public let veryShortSequenceThreshold: Int  // Default: 10 frames
+    public let shortSequenceThreshold: Int  // Default: 30 frames
+    public let veryShortSequenceMaxSkip: Int  // Default: 2 frames
+    public let blankTokenMaxSkip: Int  // Default: 2 frames
+    public let nonBlankTokenMaxSkip: Int  // Default: 4 frames
+
     public static let `default` = TdtConfig()
+
+    /// Conservative configuration for maximum accuracy (medical, legal transcription)
+    public static let conservative = TdtConfig(
+        veryShortSequenceThreshold: 15,
+        shortSequenceThreshold: 50,
+        veryShortSequenceMaxSkip: 1,
+        blankTokenMaxSkip: 1,
+        nonBlankTokenMaxSkip: 2
+    )
+
+    /// Balanced configuration for general ASR (default settings)
+    public static let balanced = TdtConfig()
+
+    /// Aggressive configuration for maximum speed (real-time, streaming)
+    public static let aggressive = TdtConfig(
+        veryShortSequenceThreshold: 5,
+        shortSequenceThreshold: 20,
+        veryShortSequenceMaxSkip: 3,
+        blankTokenMaxSkip: 3,
+        nonBlankTokenMaxSkip: 6
+    )
+
+    /// Configuration for conversational speech (short utterances, quick turns)
+    public static let conversational = TdtConfig(
+        veryShortSequenceThreshold: 12,
+        shortSequenceThreshold: 40,
+        veryShortSequenceMaxSkip: 2,
+        blankTokenMaxSkip: 2,
+        nonBlankTokenMaxSkip: 3
+    )
+
+    /// Configuration for long-form audio (audiobooks, podcasts)
+    public static let longForm = TdtConfig(
+        veryShortSequenceThreshold: 8,
+        shortSequenceThreshold: 25,
+        veryShortSequenceMaxSkip: 2,
+        blankTokenMaxSkip: 3,
+        nonBlankTokenMaxSkip: 5
+    )
 
     public init(
         durations: [Int] = [0, 1, 2, 3, 4],
         includeTokenDuration: Bool = true,
-        maxSymbolsPerStep: Int? = nil
+        maxSymbolsPerStep: Int? = nil,
+        veryShortSequenceThreshold: Int = 10,
+        shortSequenceThreshold: Int = 30,
+        veryShortSequenceMaxSkip: Int = 2,
+        blankTokenMaxSkip: Int = 2,
+        nonBlankTokenMaxSkip: Int = 4
     ) {
         self.durations = durations
         self.includeTokenDuration = includeTokenDuration
         self.maxSymbolsPerStep = maxSymbolsPerStep
+        self.veryShortSequenceThreshold = veryShortSequenceThreshold
+        self.shortSequenceThreshold = shortSequenceThreshold
+        self.veryShortSequenceMaxSkip = veryShortSequenceMaxSkip
+        self.blankTokenMaxSkip = blankTokenMaxSkip
+        self.nonBlankTokenMaxSkip = nonBlankTokenMaxSkip
     }
+}
+
+/// Configuration for TDT decoder model parameters
+struct TdtDecoderConfig {
+    /// Vocabulary size for the model (number of regular tokens)
+    let vocabSize: Int = 8192
+
+    /// Blank token ID used for CTC/RNNT alignment
+    let blankTokenId: Int = 8192
+
+    /// Start-of-sequence token ID (same as blank for RNNT)
+    let startOfSequenceId: Int = 8192
+
+    /// Expected encoder hidden dimension size
+    let encoderHiddenSize: Int = 1024
+
+    /// Total number of output tokens (vocab + blank + duration tokens)
+    let totalOutputTokens: Int = 8193
+
+    /// Number of duration tokens (for TDT models)
+    let durationTokens: Int = 5
+
+    static let `default` = TdtDecoderConfig()
 }
 
 /// Hypothesis for TDT decoding
@@ -46,21 +125,17 @@ internal struct TdtDecoder {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
+    private let decoderConfig: TdtDecoderConfig
     private let predictionOptions = AsrModels.optimizedPredictionOptions()
 
-    init(config: ASRConfig) {
+    init(config: ASRConfig, decoderConfig: TdtDecoderConfig = .default) {
         self.config = config
+        self.decoderConfig = decoderConfig
     }
 
-    // Special token Indexes for v3 models
-    // The joint network outputs 8193 vocab tokens (0-8192) + 5 duration tokens
-    // Token 8192 is the blank token (vocabulary size boundary)
-    // The decoder DOES accept tokens 0-8192 (including blank), contrary to previous assumption
-    private let blankId = 8192  // v3 models use 8192 as blank token
-
-    // Start-of-Sequence: Python starts with blank token for RNNT
-    // This is crucial for proper RNNT decoding - the decoder needs to see the blank token
-    private let sosId = 8192  // Start with blank token like Python does
+    // Convenience accessors for frequently used values
+    private var blankId: Int { decoderConfig.blankTokenId }
+    private var sosId: Int { decoderConfig.startOfSequenceId }
 
     /// Execute optimized TDT decoding
     func decode(
@@ -126,7 +201,7 @@ internal struct TdtDecoder {
             var actualDuration = duration
 
             if blankMask {
-                actualDuration = min(duration, 2)
+                actualDuration = min(duration, config.tdtConfig.blankTokenMaxSkip)
             }
 
             timeIndicesCurrentLabels = timeIndices
@@ -159,11 +234,11 @@ internal struct TdtDecoder {
 
                 blankMask = label == blankId
 
-                if encoderSequenceLength < 30 {
+                if encoderSequenceLength < config.tdtConfig.shortSequenceThreshold {
                     actualDuration = 1
 
                 } else {
-                    actualDuration = min(moreDuration, 2)
+                    actualDuration = min(moreDuration, config.tdtConfig.blankTokenMaxSkip)
                 }
 
                 if actualDuration == 0 {
@@ -233,8 +308,9 @@ internal struct TdtDecoder {
         let hiddenSize = shape[2].intValue
 
         // Validate frame size
-        guard hiddenSize == 1024 else {
-            throw ASRError.processingFailed("Invalid encoder frame size: \(hiddenSize), expected 1024")
+        guard hiddenSize == decoderConfig.encoderHiddenSize else {
+            throw ASRError.processingFailed(
+                "Invalid encoder frame size: \(hiddenSize), expected \(decoderConfig.encoderHiddenSize)")
         }
 
         var frames = EncoderFrameArray()
@@ -322,21 +398,22 @@ internal struct TdtDecoder {
     ) throws -> MLMultiArray {
 
         // Create ANE-aligned encoder array for optimal performance
-        // The encoder step is a single frame of size 1024 (hidden dimension)
+        // The encoder step is a single frame of the configured hidden dimension
         let encoderArray = try ANEOptimizer.createANEAlignedArray(
-            shape: [1, 1, 1024],
+            shape: [1, 1, decoderConfig.encoderHiddenSize] as [NSNumber],
             dataType: .float32
         )
 
         // Use optimized memory copy
-        // Ensure we copy exactly 1024 values (the encoder hidden dimension)
-        guard encoderStep.count == 1024 else {
-            throw ASRError.processingFailed("Invalid encoder frame size: \(encoderStep.count), expected 1024")
+        // Ensure we have the correct number of values for the encoder hidden dimension
+        guard encoderStep.count == decoderConfig.encoderHiddenSize else {
+            throw ASRError.processingFailed(
+                "Invalid encoder frame size: \(encoderStep.count), expected \(decoderConfig.encoderHiddenSize)")
         }
         encoderStep.withUnsafeBufferPointer { buffer in
             let destPtr = encoderArray.dataPointer.bindMemory(
-                to: Float.self, capacity: 1024)
-            memcpy(destPtr, buffer.baseAddress!, 1024 * MemoryLayout<Float>.stride)
+                to: Float.self, capacity: decoderConfig.encoderHiddenSize)
+            memcpy(destPtr, buffer.baseAddress!, decoderConfig.encoderHiddenSize * MemoryLayout<Float>.stride)
         }
 
         let decoderOutputArray = try extractFeatureValue(
@@ -412,14 +489,16 @@ internal struct TdtDecoder {
         // Determine the actual number of frames to skip
         let actualSkip: Int
 
-        if sequenceLength < 10 && skip > 2 {
-            // For very short audio (< 10 frames), limit skip to 2 frames max
+        if sequenceLength < config.tdtConfig.veryShortSequenceThreshold
+            && skip > config.tdtConfig.veryShortSequenceMaxSkip
+        {
+            // For very short audio, limit skip to configured max
             // This ensures we don't miss important tokens in brief utterances
-            actualSkip = 2
+            actualSkip = config.tdtConfig.veryShortSequenceMaxSkip
         } else {
-            // For normal audio, allow up to 4 frames skip
-            // Even if model predicts more, cap at 4 for stability
-            actualSkip = min(skip, 4)
+            // For normal audio, allow up to configured max frames skip
+            // Even if model predicts more, cap for stability
+            actualSkip = min(skip, config.tdtConfig.nonBlankTokenMaxSkip)
         }
 
         // Move forward by actualSkip frames, but don't exceed sequence bounds
