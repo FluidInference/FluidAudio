@@ -19,7 +19,7 @@ public enum ModelNames {
 
     /// ASR model names
     public enum ASR {
-        public static let melspectrogram = "Melspectogram"  // Note: typo in original model name
+        public static let melspectrogram = "Melspectogram"
         public static let encoder = "ParakeetEncoder_v2"
         public static let decoder = "ParakeetDecoder"
         public static let joint = "RNNTJoint"

@@ -164,7 +164,6 @@ public final class AsrManager {
         }
 
         // Fallback to copying if zero-copy fails
-        // Note: v3 models have a typo in the output name ("melspectogram" instead of "melspectrogram")
         let melspectrogram = try extractFeatureValue(
             from: melspectrogramOutput, key: "melspectogram",
             errorMessage: "Invalid mel-spectrogram output")

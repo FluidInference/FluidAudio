@@ -110,19 +110,16 @@ public class DownloadUtils {
                 repo, modelNames: modelNames,
                 directory: directory, computeUnits: computeUnits)
         } catch {
-            // 1st attempt failed → DO NOT delete cache, just fail
+            // 1st attempt failed → wipe cache to signal redownload
             logger.warning("⚠️ First load failed: \(error.localizedDescription)")
-            logger.info("🚫 NOT deleting cache - letting it fail instead")
-            // let repoPath = directory.appendingPathComponent(repo.folderName)
-            // try? FileManager.default.removeItem(at: repoPath)
+            logger.info("🔄 Deleting cache and re-downloading…")
+            let repoPath = directory.appendingPathComponent(repo.folderName)
+            try? FileManager.default.removeItem(at: repoPath)
 
-            // Just throw the error instead of retrying
-            throw error
-
-            // // 2nd attempt after fresh download
-            // return try await loadModelsOnce(
-            //     repo, modelNames: modelNames,
-            //     directory: directory, computeUnits: computeUnits)
+            // 2nd attempt after fresh download
+            return try await loadModelsOnce(
+                repo, modelNames: modelNames,
+                directory: directory, computeUnits: computeUnits)
         }
     }
 
@@ -133,7 +130,6 @@ public class DownloadUtils {
     ///   - directory: Base directory to store repos (e.g., ~/Library/Application Support/FluidAudio)
     ///   - computeUnits: CoreML compute units to use (default: CPU and Neural Engine)
     /// - Returns: Dictionary mapping model names to loaded MLModel instances
-    @available(macOS 13.0, iOS 16.0, *)
     private static func loadModelsOnce(
         _ repo: Repo,
         modelNames: [String],
@@ -185,60 +181,19 @@ public class DownloadUtils {
                         ])
                 }
 
-                // Check for essential model files based on format
-                if name.hasSuffix(".mlmodelc") {
-                    let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
-                    guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
-                        logger.error("Missing coremldata.bin in \(name)")
-                        throw CocoaError(
-                            .fileReadCorruptFile,
-                            userInfo: [
-                                NSFilePathErrorKey: coremlDataPath.path,
-                                NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
-                            ])
-                    }
-                } else if name.hasSuffix(".mlpackage") {
-                    // For .mlpackage, check for Data subdirectory or model.mil
-                    let dataPath = modelPath.appendingPathComponent("Data")
-                    let milPath = modelPath.appendingPathComponent("model.mil")
-                    guard
-                        FileManager.default.fileExists(atPath: dataPath.path)
-                            || FileManager.default.fileExists(atPath: milPath.path)
-                    else {
-                        logger.error("Missing Data directory or model.mil in \(name)")
-                        throw CocoaError(
-                            .fileReadCorruptFile,
-                            userInfo: [
-                                NSFilePathErrorKey: modelPath.path,
-                                NSLocalizedDescriptionKey: "Missing Data directory or model.mil in mlpackage: \(name)",
-                            ])
-                    }
+                let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
+                guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
+                    logger.error("Missing coremldata.bin in \(name)")
+                    throw CocoaError(
+                        .fileReadCorruptFile,
+                        userInfo: [
+                            NSFilePathErrorKey: coremlDataPath.path,
+                            NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
+                        ])
                 }
 
-                // For .mlpackage files, we need to compile them first
-                if name.hasSuffix(".mlpackage") {
-                    // Check if we have a cached compiled version
-                    let compiledName = name.replacingOccurrences(of: ".mlpackage", with: ".mlmodelc")
-                    let compiledPath = repoPath.appendingPathComponent(compiledName)
-
-                    if FileManager.default.fileExists(atPath: compiledPath.path) {
-                        logger.info("Using cached compiled model: \(compiledName)")
-                        models[name] = try MLModel(contentsOf: compiledPath, configuration: config)
-                    } else {
-                        logger.info("Compiling mlpackage model: \(name)")
-                        let compiledURL = try await MLModel.compileModel(at: modelPath)
-
-                        // Cache the compiled model for future use
-                        try FileManager.default.moveItem(at: compiledURL, to: compiledPath)
-                        logger.info("Cached compiled model at: \(compiledPath.path)")
-
-                        models[name] = try MLModel(contentsOf: compiledPath, configuration: config)
-                    }
-                    logger.info("Loaded compiled model: \(name)")
-                } else {
-                    models[name] = try MLModel(contentsOf: modelPath, configuration: config)
-                    logger.info("Loaded model: \(name)")
-                }
+                models[name] = try MLModel(contentsOf: modelPath, configuration: config)
+                logger.info("Loaded model: \(name)")
             } catch {
                 logger.error("Failed to load model \(name): \(error)")
 
@@ -286,7 +241,7 @@ public class DownloadUtils {
 
         for file in files {
             switch file.type {
-            case "directory" where file.path.hasSuffix(".mlmodelc") || file.path.hasSuffix(".mlpackage"):
+            case "directory" where file.path.hasSuffix(".mlmodelc"):
                 // Only download if this model is in our required list
                 if requiredModels.contains(file.path) {
                     logger.info("Downloading required model: \(file.path)")

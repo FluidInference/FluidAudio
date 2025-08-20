@@ -320,7 +320,6 @@ public class ASRBenchmark {
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization
     public func calculateASRMetrics(hypothesis: String, reference: String) -> ASRMetrics {
-        // Always use HuggingFace normalization for consistency with the leaderboard
         let normalizedHypothesis = TextNormalizer.normalize(hypothesis)
         let normalizedReference = TextNormalizer.normalize(reference)
 
