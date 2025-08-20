@@ -33,10 +33,13 @@ jobs:
       - name: Build for iOS Simulator
         run: |
           echo "Building for iOS Simulator..."
-          swift build --product FluidAudio \
-            --sdk $(xcrun --sdk iphonesimulator --show-sdk-path) \
-            --triple arm64-apple-ios16.0-simulator \
-            -Xswiftc -target -Xswiftc arm64-apple-ios16.0-simulator
+          # List available simulators first
+          xcrun simctl list devices available | head -20
+          # Build for generic iOS Simulator
+          xcodebuild -scheme FluidAudio \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/ios-simulator \
+            build
       
       - name: Clean build artifacts
         run: rm -rf .build .swiftpm
@@ -44,10 +47,10 @@ jobs:
       - name: Build for iOS Device
         run: |
           echo "Building for iOS Device..."
-          swift build --product FluidAudio \
-            --sdk $(xcrun --sdk iphoneos --show-sdk-path) \
-            --triple arm64-apple-ios16.0 \
-            -Xswiftc -target -Xswiftc arm64-apple-ios16.0
+          xcodebuild -scheme FluidAudio \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath .build/ios-device \
+            build
 
   build-and-test-macos:
     name: Build and Test Swift Package (macOS)
@@ -103,24 +106,14 @@ jobs:
         run: |
           rm -rf .swiftpm .build
 
-      - name: Build iOS library using Swift PM (simulator)
+      - name: Build iOS library using xcodebuild (simulator)
         run: |
           set -e
-          echo "Building FluidAudio library for iOS Simulator using Swift Package Manager..."
-          swift build --product FluidAudio \
-            --sdk $(xcrun --sdk iphonesimulator --show-sdk-path) \
-            --triple arm64-apple-ios16.0-simulator \
-            -Xswiftc -target -Xswiftc arm64-apple-ios16.0-simulator
-
-      - name: Clean up build artifacts
-        run: |
-          rm -rf .swiftpm .build
-
-      - name: Build iOS library (simulator with xcodebuild)
-        run: |
-          set -e
-          echo "Building FluidAudio library for iOS Simulator with xcodebuild..."
-          xcodebuild -scheme FluidAudio -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' build
+          echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
+          xcodebuild -scheme FluidAudio \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/ios-simulator \
+            build
 
       - name: Clean up build artifacts
         run: |
@@ -130,4 +123,4 @@ jobs:
         run: |
           set -e
           echo "Building FluidAudio library for iOS Device..."
-          xcodebuild -scheme FluidAudio -destination 'platform=iOS,name=Any iOS Device' build
+          xcodebuild -scheme FluidAudio -destination 'generic/platform=iOS' build
