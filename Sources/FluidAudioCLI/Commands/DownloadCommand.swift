@@ -1,3 +1,4 @@
+#if os(macOS)
 import FluidAudio
 import Foundation
 
@@ -126,3 +127,4 @@ enum DownloadCommand {
         )
     }
 }
+#endif

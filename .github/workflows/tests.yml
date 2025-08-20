@@ -107,7 +107,8 @@ jobs:
         run: |
           set -e
           echo "Building FluidAudio library for iOS Simulator using Swift Package Manager..."
-          swift build --sdk $(xcrun --sdk iphonesimulator --show-sdk-path) \
+          swift build --product FluidAudio \
+            --sdk $(xcrun --sdk iphonesimulator --show-sdk-path) \
             --triple arm64-apple-ios16.0-simulator \
             -Xswiftc -target -Xswiftc arm64-apple-ios16.0-simulator
 

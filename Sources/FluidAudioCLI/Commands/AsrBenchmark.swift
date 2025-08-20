@@ -1,3 +1,4 @@
+#if os(macOS)
 import AVFoundation
 import FluidAudio
 import OSLog
@@ -902,3 +903,4 @@ extension ASRBenchmark {
         )
     }
 }
+#endif
