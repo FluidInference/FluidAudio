@@ -31,6 +31,12 @@ public actor StreamingAsrManager {
         return audioSource
     }
 
+    // Sliding window management
+    private var audioHistory: [Float] = []
+    private var transcriptionHistory: [TokenizedResult] = []
+    private var lastProcessedSamples: Int = 0
+    private var chunkIndex: Int = 0
+
     // Metrics
     private var startTime: Date?
     private var processedChunks: Int = 0
@@ -88,7 +94,7 @@ public actor StreamingAsrManager {
 
             logger.info("Recognition task started, waiting for audio...")
 
-            for await pcmBuffer in await self.inputSequence {
+            for await pcmBuffer in self.inputSequence {
                 do {
                     // Convert to 16kHz mono
                     let samples = try await audioConverter.convertToAsrFormat(pcmBuffer)
@@ -96,13 +102,8 @@ public actor StreamingAsrManager {
                     // Add to buffer
                     try await audioBuffer.append(samples)
 
-                    // Process when we have enough samples
-                    let availableSamples = await audioBuffer.availableSamples()
-                    if availableSamples >= config.chunkSizeInSamples {
-                        if let chunk = await audioBuffer.getChunk(size: config.chunkSizeInSamples) {
-                            await self.processChunk(chunk)
-                        }
-                    }
+                    // Process all available chunks with sliding window
+                    await self.processAllAvailableChunks(from: audioBuffer)
                 } catch {
                     let streamingError = StreamingAsrError.audioBufferProcessingFailed(error)
                     logger.error(
@@ -162,10 +163,11 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Return complete transcription
-        let finalText = confirmedTranscript + volatileTranscript
-        logger.info("Final transcription: \(finalText.count) characters")
+        // Return the volatile text as it contains the complete transcription
+        // The confirmed text is fragmented due to overlap issues
+        let finalText = volatileTranscript.isEmpty ? confirmedTranscript : volatileTranscript
 
+        logger.info("Final transcription: \(finalText.count) characters")
         return finalText
     }
 
@@ -174,6 +176,10 @@ public actor StreamingAsrManager {
         volatileTranscript = ""
         confirmedTranscript = ""
         processedChunks = 0
+        chunkIndex = 0
+        audioHistory.removeAll()
+        transcriptionHistory.removeAll()
+        lastProcessedSamples = 0
         startTime = Date()
 
         // Reset decoder state for the current audio source
@@ -203,7 +209,113 @@ public actor StreamingAsrManager {
 
     // MARK: - Private Methods
 
-    /// Process an audio chunk
+    /// Process all available overlapping chunks from the buffer
+    private func processAllAvailableChunks(from audioBuffer: AudioBuffer) async {
+        let totalSamples = await audioBuffer.availableSamples()
+
+        // Process all possible chunks starting from the current chunk index
+        while true {
+            let startSample = chunkIndex * config.slidingWindowStepInSamples
+            let endSample = startSample + config.chunkSizeInSamples
+
+            // Check if we have enough samples for this chunk
+            guard endSample <= totalSamples else {
+                break
+            }
+
+            // Get the chunk samples
+            if let samples = await audioBuffer.getSamples(from: startSample, count: config.chunkSizeInSamples) {
+                logger.debug(
+                    "Processing sliding window chunk \(self.chunkIndex): samples \(startSample)-\(endSample)")
+
+                // Process chunk with the current chunk index
+                await self.processChunkWithOverlap(samples, chunkIndex: self.chunkIndex)
+
+                // Move to next chunk
+                chunkIndex += 1
+            } else {
+                break
+            }
+        }
+    }
+
+    /// Get a sliding window chunk from the audio buffer
+    private func getSlidingWindowChunk(from audioBuffer: AudioBuffer) async -> [Float]? {
+        let totalSamples = await audioBuffer.availableSamples()
+
+        // Calculate the start position for this chunk
+        let startSample = chunkIndex * config.slidingWindowStepInSamples
+        let endSample = startSample + config.chunkSizeInSamples
+
+        // Ensure we don't exceed available samples
+        guard endSample <= totalSamples else { return nil }
+
+        // Get the chunk samples
+        if let samples = await audioBuffer.getSamples(from: startSample, count: config.chunkSizeInSamples) {
+            logger.debug("Sliding window chunk \(self.chunkIndex): samples \(startSample)-\(endSample)")
+            return samples
+        }
+
+        return nil
+    }
+
+    /// Process a chunk with overlap handling
+    private func processChunkWithOverlap(_ chunk: [Float], chunkIndex: Int) async {
+        guard let asrManager = asrManager else { return }
+
+        do {
+            let chunkStartTime = Date()
+            let startSample = chunkIndex * config.slidingWindowStepInSamples
+            let endSample = startSample + config.chunkSizeInSamples
+
+            // Transcribe the chunk using the configured audio source
+            let result = try await asrManager.transcribe(chunk, source: audioSource)
+
+            let processingTime = Date().timeIntervalSince(chunkStartTime)
+            processedChunks += 1
+
+            logger.debug(
+                "Chunk \(chunkIndex): '\(result.text)' (confidence: \(result.confidence), time: \(String(format: "%.3f", processingTime))s)"
+            )
+
+            // Store result with tokenization for overlap processing
+            if let tokens = try? await asrManager.getTokens(from: chunk, source: audioSource) {
+                let tokenizedResult = TokenizedResult(
+                    tokens: tokens,
+                    text: result.text,
+                    confidence: result.confidence,
+                    chunkIndex: chunkIndex,
+                    startSample: startSample,
+                    endSample: endSample
+                )
+
+                // Merge with previous results considering overlap
+                await mergeWithOverlap(tokenizedResult)
+            } else {
+                // Fallback to simple confidence-based update
+                await updateTranscriptionState(with: result)
+            }
+
+            // Emit update
+            let update = StreamingTranscriptionUpdate(
+                text: result.text,
+                isConfirmed: result.confidence >= config.confirmationThreshold,
+                confidence: result.confidence,
+                timestamp: Date()
+            )
+
+            updateContinuation?.yield(update)
+
+        } catch {
+            let streamingError = StreamingAsrError.modelProcessingFailed(error)
+            logger.error("Model processing error: \(streamingError.localizedDescription)")
+
+            // Attempt error recovery
+            await attemptErrorRecovery(error: streamingError)
+        }
+    }
+
+    /// Process an audio chunk (legacy method for non-overlapping chunks)
     private func processChunk(_ chunk: [Float]) async {
         guard let asrManager = asrManager else { return }
 
@@ -240,6 +352,88 @@ public actor StreamingAsrManager {
             // Attempt error recovery
             await attemptErrorRecovery(error: streamingError)
         }
+    }
+
+    /// Merge new tokenized result with overlap handling
+    private func mergeWithOverlap(_ newResult: TokenizedResult) async {
+        // Add to history
+        transcriptionHistory.append(newResult)
+
+        // If this is the first chunk, just use it directly
+        if transcriptionHistory.count == 1 {
+            volatileTranscript = newResult.text
+            logger.debug("First chunk: '\(newResult.text)'")
+            return
+        }
+
+        // Find overlapping region with previous chunk
+        let previousResult = transcriptionHistory[transcriptionHistory.count - 2]
+        let overlapStartSample = newResult.startSample
+        let overlapEndSample = previousResult.endSample
+
+        if overlapStartSample < overlapEndSample {
+            // There's an overlap - merge the transcriptions using LCS
+            let mergeResult = mergeOverlappingTranscriptions(previous: previousResult, current: newResult)
+
+            logger.debug(
+                "Merged overlap: '\(mergeResult.mergedText)' (new portion: '\(mergeResult.newPortion)', overlap: \(mergeResult.overlapLength) words)"
+            )
+
+            // Update transcription state with merged result
+            if newResult.confidence >= config.confirmationThreshold {
+                // For high confidence with overlap, only add the truly new portion
+                if mergeResult.overlapLength > 0 && !mergeResult.newPortion.isEmpty {
+                    // We have a good overlap, append only new content
+                    let combinedText = [confirmedTranscript, mergeResult.newPortion]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " ")
+                    confirmedTranscript = combinedText
+                } else if mergeResult.overlapLength == 0 {
+                    // No overlap detected, treat as new content
+                    let combinedText = [confirmedTranscript, newResult.text]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " ")
+                    confirmedTranscript = combinedText
+                }
+                volatileTranscript = ""
+            } else {
+                // Low confidence - use the merged text as volatile
+                volatileTranscript = mergeResult.mergedText
+            }
+        } else {
+            // No overlap - append
+            if newResult.confidence >= config.confirmationThreshold {
+                // Append to confirmed transcript, maintaining accumulation
+                let combinedText = [confirmedTranscript, volatileTranscript, newResult.text]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+                confirmedTranscript = combinedText
+                volatileTranscript = ""
+            } else {
+                // Update volatile with new text
+                volatileTranscript = newResult.text
+            }
+
+            logger.debug("No overlap - appended: '\(newResult.text)'")
+        }
+
+        // Keep only recent history to prevent memory growth
+        if transcriptionHistory.count > 5 {
+            transcriptionHistory.removeFirst()
+        }
+    }
+
+    /// Merge overlapping transcriptions using LCS-based text alignment
+    private func mergeOverlappingTranscriptions(
+        previous: TokenizedResult, current: TokenizedResult
+    ) -> LCSMerge.MergeResult {
+        // Use LCS-based text merging for intelligent overlap detection and merging
+        return LCSMerge.mergeOverlappingTexts(
+            previousText: previous.text,
+            currentText: current.text,
+            previousConfidence: previous.confidence,
+            currentConfidence: current.confidence
+        )
     }
 
     /// Update transcription state based on confidence
@@ -330,14 +524,27 @@ public actor StreamingAsrManager {
     }
 }
 
+/// Tokenized transcription result for overlap processing
+struct TokenizedResult {
+    let tokens: [Int]
+    let text: String
+    let confidence: Float
+    let chunkIndex: Int
+    let startSample: Int
+    let endSample: Int
+}
+
 /// Configuration for StreamingAsrManager
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAsrConfig: Sendable {
     /// Confidence threshold for confirming transcriptions (0.0 - 1.0)
     public let confirmationThreshold: Float
 
-    /// Duration of each audio chunk in seconds
+    /// Duration of each audio chunk in seconds (fixed at 10s for encoder model)
     public let chunkDuration: TimeInterval
+
+    /// Overlap duration between chunks in seconds (for boundary handling)
+    public let overlapDuration: TimeInterval
 
     /// Enable debug logging
     public let enableDebug: Bool
@@ -345,45 +552,50 @@ public struct StreamingAsrConfig: Sendable {
     /// Default configuration with balanced settings
     public static let `default` = StreamingAsrConfig(
         confirmationThreshold: 0.85,
-        chunkDuration: 10.0,  // 10 second chunks for now
+        chunkDuration: 10.0,  // Fixed at 10s for encoder model
+        overlapDuration: 2.0,  // 2s overlap for boundary handling - optimal setting
         enableDebug: false
     )
 
     /// Low latency configuration with faster updates
     public static let lowLatency = StreamingAsrConfig(
         confirmationThreshold: 0.75,
-        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
+        chunkDuration: 10.0,  // Fixed at 10s for encoder model
+        overlapDuration: 1.0,  // 1s overlap for lower latency
         enableDebug: false
     )
 
     /// High accuracy configuration with conservative confirmation
     public static let highAccuracy = StreamingAsrConfig(
         confirmationThreshold: 0.9,
-        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
+        chunkDuration: 10.0,  // Fixed at 10s for encoder model
+        overlapDuration: 3.0,  // 3s overlap for better accuracy
         enableDebug: false
     )
 
     public init(
         confirmationThreshold: Float = 0.85,
         chunkDuration: TimeInterval = 10.0,
+        overlapDuration: TimeInterval = 2.0,
         enableDebug: Bool = false
     ) {
         self.confirmationThreshold = confirmationThreshold
         self.chunkDuration = chunkDuration
+        self.overlapDuration = overlapDuration
         self.enableDebug = enableDebug
     }
 
-    /// Custom configuration with specified chunk duration
-    /// - Note: The underlying model currently works best with 10s chunks
-    /// - Shorter chunk support is still being validated
+    /// Custom configuration with specified overlap duration
+    /// - Note: Chunk duration is fixed at 10s for the encoder model
     public static func custom(
-        chunkDuration: TimeInterval,
+        overlapDuration: TimeInterval,
         confirmationThreshold: Float = 0.85,
         enableDebug: Bool = false
     ) -> StreamingAsrConfig {
         StreamingAsrConfig(
             confirmationThreshold: confirmationThreshold,
-            chunkDuration: chunkDuration,
+            chunkDuration: 10.0,  // Fixed for encoder model
+            overlapDuration: overlapDuration,
             enableDebug: enableDebug
         )
     }
@@ -405,11 +617,21 @@ public struct StreamingAsrConfig: Sendable {
     }
 
     var bufferCapacity: Int {
-        Int(10.0 * 16000)  // 10 seconds at 16kHz
+        // For offline processing, we need to accumulate the entire audio file
+        // Use a reasonable buffer to handle most audio files (up to 10 minutes)
+        Int(10 * 60 * 16000)  // 10 minutes at 16kHz = 9.6M samples
     }
 
     var chunkSizeInSamples: Int {
         Int(chunkDuration * 16000)
+    }
+
+    var overlapSizeInSamples: Int {
+        Int(overlapDuration * 16000)
+    }
+
+    var slidingWindowStepInSamples: Int {
+        chunkSizeInSamples - overlapSizeInSamples
     }
 }
 

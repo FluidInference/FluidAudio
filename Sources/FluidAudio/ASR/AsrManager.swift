@@ -348,6 +348,32 @@ public final class AsrManager {
         logger.info("Decoder state reset for source: \(String(describing: source))")
     }
 
+    /// Get token IDs from audio samples for overlap processing
+    /// This method extracts the raw token sequence without text conversion
+    public func getTokens(from audioSamples: [Float], source: AudioSource) async throws -> [Int] {
+        guard isAvailable else { throw ASRError.notInitialized }
+        guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
+
+        var workingDecoderState: DecoderState
+        switch source {
+        case .microphone:
+            workingDecoderState = microphoneDecoderState
+        case .system:
+            workingDecoderState = systemDecoderState
+        }
+
+        let originalLength = audioSamples.count
+        let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
+        let (tokenIds, _) = try await executeMLInference(
+            paddedAudio,
+            originalLength: originalLength,
+            enableDebug: config.enableDebug,
+            decoderState: &workingDecoderState
+        )
+
+        return tokenIds
+    }
+
     internal func convertTokensWithExistingTimings(
         _ tokenIds: [Int], timings: [TokenTiming]
     ) -> (
@@ -371,6 +397,22 @@ public final class AsrManager {
 
         for (index, tokenId) in tokenIds.enumerated() {
             if let token = vocabulary[tokenId], !token.isEmpty {
+                // Filter out special tokens for v3 model
+                // Special tokens are typically in range 0-200 and have format <|...|>
+                if tokenId < 200 && token.hasPrefix("<|") && token.hasSuffix("|>") {
+                    // Skip special control tokens (language IDs, punctuation control, etc.)
+                    if config.enableDebug {
+                        logger.debug("Filtering special token: \(tokenId) -> '\(token)'")
+                    }
+                    continue
+                }
+                // Also filter the <|endoftext|> token which appears at the end
+                if token == "<|endoftext|>" {
+                    if config.enableDebug {
+                        logger.debug("Filtering endoftext token: \(tokenId)")
+                    }
+                    continue
+                }
                 tokens.append(token)
                 let timing = index < timings.count ? timings[index] : nil
                 tokenInfos.append((token: token, tokenId: tokenId, timing: timing))

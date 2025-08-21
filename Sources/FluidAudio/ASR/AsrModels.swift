@@ -117,6 +117,8 @@ extension AsrModels {
     private static func loadVocabulary(from directory: URL) async throws -> [Int: String] {
         let vocabPath = repoPath(from: directory).appendingPathComponent(Names.vocabulary)
 
+        logger.info("Loading vocabulary from: \(vocabPath.path)")
+
         guard FileManager.default.fileExists(atPath: vocabPath.path) else {
             logger.error("Vocabulary file not found at \(vocabPath.path)")
             throw AsrModelsError.modelNotFound(Names.vocabulary, vocabPath)
@@ -132,7 +134,14 @@ extension AsrModels {
             }
         }
 
-        logger.info("Loaded vocabulary with \(vocabulary.count) tokens")
+        logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.lastPathComponent)")
+
+        // Check if this is v3 vocabulary (should have 8192+ tokens)
+        if vocabulary.count >= 8192 {
+            logger.info("✅ Using v3 vocabulary with \(vocabulary.count) tokens")
+        } else {
+            logger.warning("⚠️ Vocabulary has only \(vocabulary.count) tokens - expected 8192+ for v3")
+        }
         return vocabulary
     }
 

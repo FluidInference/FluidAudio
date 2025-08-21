@@ -39,33 +39,22 @@ actor AudioBuffer {
 
     /// Append audio samples to the buffer
     func append(_ samples: [Float]) throws {
-        // Handle case where samples exceed total capacity
-        if samples.count > capacity {
+        // Check if we have enough capacity for new samples
+        guard count + samples.count <= capacity else {
+            logger.error(
+                "Buffer overflow: cannot fit \(samples.count) new samples (current: \(self.count), capacity: \(self.capacity))"
+            )
             throw AudioBufferError.bufferOverflow
         }
 
-        // If adding samples would overflow, make room by discarding old samples
-        let overflow = max(0, (count + samples.count) - capacity)
-        if overflow > 0 {
-            readPosition = (readPosition + overflow) % capacity
-            count -= overflow
-            logger.debug("Buffer overflow handled: discarded \(overflow) old samples")
-        }
-
-        // Write new samples
-        let newSamplesStartPos = writePosition
+        // Write new samples sequentially (no circular buffer for offline processing)
         for sample in samples {
             buffer[writePosition] = sample
-            writePosition = (writePosition + 1) % capacity
+            writePosition += 1
         }
         count += samples.count
 
-        // After overflow, if the new samples should be prioritized, adjust read position
-        // to start reading from the beginning of the newly added samples
-        if overflow > 0 {
-            readPosition = newSamplesStartPos
-            count = samples.count
-        }
+        logger.debug("Appended \(samples.count) samples, total now: \(self.count)")
     }
 
     /// Get a chunk of audio
@@ -194,5 +183,27 @@ actor AudioBuffer {
     /// Get buffer utilization percentage
     func utilization() -> Float {
         return Float(count) / Float(capacity) * 100.0
+    }
+
+    /// Get samples from a specific position in the buffer for sliding window
+    /// - Parameters:
+    ///   - from: Starting position (absolute position in buffer)
+    ///   - count: Number of samples to retrieve
+    /// - Returns: Array of samples or nil if not enough data
+    func getSamples(from startOffset: Int, count requestedCount: Int) -> [Float]? {
+        // Check if we have enough samples in total buffer
+        guard startOffset + requestedCount <= count else {
+            logger.debug(
+                "Not enough samples for sliding window: need range \(startOffset)-\(startOffset + requestedCount), have \(self.count) total"
+            )
+            return nil
+        }
+
+        // Extract samples directly from linear buffer
+        let endOffset = startOffset + requestedCount
+        let samples = Array(buffer[startOffset..<endOffset])
+
+        logger.debug("Retrieved \(requestedCount) samples from absolute offset \(startOffset)-\(endOffset)")
+        return samples
     }
 }

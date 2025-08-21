@@ -158,25 +158,21 @@ enum StreamingTranscribeCommand {
             let updateTask = Task {
                 for await update in await streamingAsr.transcriptionUpdates {
                     if update.isConfirmed {
-                        print(
-                            "✓ Confirmed: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
-                        )
+                        print("→ \(update.text)")
                         await tracker.addConfirmedUpdate(update.text)
                     } else {
-                        print(
-                            "~ Volatile: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
-                        )
+                        // Don't show volatile updates to reduce confusion
                         await tracker.addVolatileUpdate(update.text)
                     }
                 }
             }
 
-            // Simulate streaming by feeding audio in chunks
-            let chunkDuration = 0.1  // 100ms chunks
+            // Simulate streaming by feeding audio in larger chunks (closer to real streaming)
+            let chunkDuration = 1.0  // 1 second chunks to better match streaming behavior
             let samplesPerChunk = Int(chunkDuration * format.sampleRate)
             var position = 0
 
-            print("Streaming audio...")
+            print("Streaming audio in \(chunkDuration)s chunks...")
             while position < Int(buffer.frameLength) {
                 let remainingSamples = Int(buffer.frameLength) - position
                 let chunkSize = min(samplesPerChunk, remainingSamples)
@@ -206,37 +202,27 @@ enum StreamingTranscribeCommand {
                 // Stream the chunk
                 await streamingAsr.streamAudio(chunkBuffer)
 
-                // Process as fast as possible - no artificial delays
-
                 position += chunkSize
             }
+
+            // Cancel update task before finishing to avoid duplicate final update
+            updateTask.cancel()
 
             print("\nFinalizing transcription...")
             let finalText = try await streamingAsr.finish()
 
-            // Cancel update task
-            updateTask.cancel()
-
             // Print results
             print("\n" + String(repeating: "=", count: 50))
-            print("📝 TRANSCRIPTION RESULTS")
+            print("📝 FINAL TRANSCRIPTION")
             print(String(repeating: "=", count: 50))
-            print("\nFinal transcription:")
-            print(finalText)
-            print("\nStatistics:")
-            print("  Total volatile updates: \(await tracker.getVolatileCount())")
-            print("  Total confirmed updates: \(await tracker.getConfirmedCount())")
-            print("  Final confirmed text: \(await streamingAsr.confirmedTranscript)")
-            print("  Final volatile text: \(await streamingAsr.volatileTranscript)")
+            print("\n\(finalText)")
 
             let processingTime = Date().timeIntervalSince(startTime)
             let audioDuration = Double(audioFileHandle.length) / format.sampleRate
             let rtfx = audioDuration / processingTime
 
-            print("\nPerformance:")
-            print("  Audio duration: \(String(format: "%.2f", audioDuration))s")
-            print("  Processing time: \(String(format: "%.2f", processingTime))s")
-            print("  RTFx: \(String(format: "%.2f", rtfx))x")
+            print("\n" + String(repeating: "-", count: 50))
+            print("Performance: \(String(format: "%.1f", rtfx))x real-time")
 
         } catch {
             print("Streaming transcription failed: \(error)")

@@ -100,7 +100,7 @@ struct TdtDecoderConfig {
     let encoderHiddenSize: Int = 1024
 
     /// Total number of output tokens (vocab + blank + duration tokens)
-    let totalOutputTokens: Int = 8193
+    let totalOutputTokens: Int = 8198  // 8192 vocab + 1 blank + 5 duration = 8198
 
     /// Number of duration tokens (for TDT models)
     let durationTokens: Int = 5
