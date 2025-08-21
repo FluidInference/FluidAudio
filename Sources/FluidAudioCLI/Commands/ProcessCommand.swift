@@ -1,3 +1,4 @@
+#if os(macOS)
 import AVFoundation
 import FluidAudio
 
@@ -117,3 +118,4 @@ enum ProcessCommand {
         )
     }
 }
+#endif
