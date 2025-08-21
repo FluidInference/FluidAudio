@@ -154,12 +154,24 @@ private struct ChunkProcessor {
     let enableDebug: Bool
 
     private let stepSize: Int  // Calculated as chunkSize - overlap
+    private let overlapSize: Int  // Overlap between chunks
+
+    // Punctuation tokens for smarter boundary matching
+    private let punctuationTokens: Set<Int> = [
+        7877,  // comma ,
+        7883,  // period .
+        7956,  // question mark ?
+        8020,  // exclamation !
+        8033,  // colon :
+    ]
 
     init(audioSamples: [Float], chunkSize: Int, enableDebug: Bool) {
         self.audioSamples = audioSamples
         self.chunkSize = chunkSize
         self.enableDebug = enableDebug
-        self.stepSize = chunkSize  // No overlap, full chunk size
+        // Add 2 seconds overlap (32000 samples at 16kHz) to avoid boundary issues
+        self.overlapSize = min(32000, chunkSize / 5)  // 20% overlap or 2 seconds, whichever is smaller
+        self.stepSize = chunkSize - overlapSize
     }
 
     func process(using manager: AsrManager, startTime: Date) async throws -> ASRResult {
@@ -176,7 +188,66 @@ private struct ChunkProcessor {
             let (chunkTokens, newDecoderState) = try await processChunk(
                 at: position, chunkIndex: chunkIndex, using: manager, decoderState: decoderState)
 
-            allTokens.append(contentsOf: chunkTokens)
+            // Handle overlapping tokens from overlapping audio chunks
+            if chunkIndex > 0 && !allTokens.isEmpty && !chunkTokens.isEmpty {
+                // Filter trailing punctuation from previous chunk for better matching
+                let cleanedAllTokens = stripTrailingPunctuation(from: allTokens)
+                let cleanedChunkTokens = stripLeadingPunctuation(from: chunkTokens)
+
+                // Skip matching if either cleaned array is empty
+                if !cleanedAllTokens.isEmpty && !cleanedChunkTokens.isEmpty {
+                    // With audio overlap, we need to find and remove duplicate tokens
+                    // The overlap produces duplicate tokens that need to be merged
+
+                    // Estimate how many tokens might be in the overlap region
+                    // (this is approximate - actual token count depends on speech rate)
+                    let overlapRatio = Float(overlapSize) / Float(chunkSize)
+                    let estimatedOverlapTokens = max(1, Int(Float(cleanedChunkTokens.count) * overlapRatio * 0.5))  // Conservative estimate
+
+                    // Look for matching sequences at the boundary (fuzzy matching ignoring punctuation)
+                    var bestMatch = 0
+                    let searchRange = min(
+                        estimatedOverlapTokens + 10, min(cleanedAllTokens.count, cleanedChunkTokens.count))
+
+                    if searchRange > 0 {
+                        for overlapLen in 1...searchRange {
+                            let tailTokens = Array(cleanedAllTokens.suffix(overlapLen))
+                            let headTokens = Array(cleanedChunkTokens.prefix(overlapLen))
+
+                            if fuzzyTokenMatch(tailTokens, headTokens) {
+                                bestMatch = overlapLen
+                            }
+                        }
+                    }
+
+                    // Skip the overlapping tokens from the new chunk
+                    if bestMatch > 0 {
+                        // Use original tokens but skip the matched portion
+                        let skipCount = findOriginalSkipCount(
+                            cleanedTokens: Array(cleanedChunkTokens.prefix(bestMatch)),
+                            originalTokens: chunkTokens
+                        )
+                        allTokens.append(contentsOf: Array(chunkTokens.dropFirst(skipCount)))
+                        if enableDebug {
+                            print(
+                                "DEBUG: Chunk \(chunkIndex) - skipped \(skipCount) overlapping tokens (fuzzy matched \(bestMatch))"
+                            )
+                        }
+                    } else {
+                        // No clear overlap found, append all tokens but filter duplicate punctuation
+                        let mergedTokens = smartMergeTokens(allTokens, chunkTokens)
+                        allTokens = mergedTokens
+                    }
+                } else {
+                    // If cleaned arrays are empty, just merge with smart punctuation handling
+                    let mergedTokens = smartMergeTokens(allTokens, chunkTokens)
+                    allTokens = mergedTokens
+                }
+            } else {
+                allTokens.append(contentsOf: chunkTokens)
+            }
+
+            decoderState = newDecoderState  // Propagate decoder state as per NeMo's GreedyBatchedTDTInfer
 
             position += stepSize
             chunkIndex += 1
@@ -205,12 +276,94 @@ private struct ChunkProcessor {
         let (tokenIds, _) = try await manager.executeMLInference(
             paddedChunk, originalLength: chunkSamples.count, enableDebug: enableDebug, decoderState: &workingState)
 
-        if enableDebug && chunkIndex > 0 {
+        if enableDebug {
             print(
-                "DEBUG: Chunk \(chunkIndex) state - lastToken: \(workingState.lastToken ?? -1), tokens generated: \(tokenIds.count)"
+                "DEBUG: Chunk \(chunkIndex) - position: \(position)/\(audioSamples.count), "
+                    + "tokens generated: \(tokenIds.count), " + "state: lastToken=\(workingState.lastToken ?? -1), "
+                    + "decoderState propagated: \(decoderState.lastToken ?? -1) -> \(workingState.lastToken ?? -1)"
             )
+
+            // Debug suspicious tokens
+            if !tokenIds.isEmpty {
+                let suspiciousTokens = tokenIds.filter { $0 > 8000 || $0 == 7883 }  // 7883 is "."
+                if !suspiciousTokens.isEmpty {
+                    print("  WARNING: High/suspicious token IDs found: \(suspiciousTokens)")
+                }
+            }
         }
 
         return (tokenIds, workingState)
+    }
+
+    // Helper functions for smarter token boundary matching
+
+    private func stripTrailingPunctuation(from tokens: [Int]) -> [Int] {
+        var cleaned = tokens
+        while !cleaned.isEmpty && punctuationTokens.contains(cleaned.last!) {
+            cleaned.removeLast()
+        }
+        return cleaned
+    }
+
+    private func stripLeadingPunctuation(from tokens: [Int]) -> [Int] {
+        var cleaned = tokens
+        while !cleaned.isEmpty && punctuationTokens.contains(cleaned.first!) {
+            cleaned.removeFirst()
+        }
+        return cleaned
+    }
+
+    private func fuzzyTokenMatch(_ tokens1: [Int], _ tokens2: [Int]) -> Bool {
+        // Strip punctuation from both sequences for comparison
+        let clean1 = tokens1.filter { !punctuationTokens.contains($0) }
+        let clean2 = tokens2.filter { !punctuationTokens.contains($0) }
+
+        // If content tokens match, consider it a match
+        return clean1 == clean2 && !clean1.isEmpty
+    }
+
+    private func findOriginalSkipCount(cleanedTokens: [Int], originalTokens: [Int]) -> Int {
+        // Find how many original tokens correspond to the cleaned tokens
+        var skipCount = 0
+        var cleanedIndex = 0
+
+        for token in originalTokens {
+            if cleanedIndex >= cleanedTokens.count {
+                break
+            }
+            skipCount += 1
+            if !punctuationTokens.contains(token) {
+                cleanedIndex += 1
+            }
+        }
+
+        return skipCount
+    }
+
+    private func smartMergeTokens(_ existing: [Int], _ new: [Int]) -> [Int] {
+        // Remove trailing punctuation from existing if new starts with punctuation
+        var result = existing
+
+        // If last token of existing and first token of new are both punctuation,
+        // keep only one
+        if !result.isEmpty && !new.isEmpty && punctuationTokens.contains(result.last!)
+            && punctuationTokens.contains(new.first!)
+        {
+            // Keep the more significant punctuation (period over comma, etc.)
+            let lastPunc = result.last!
+            let firstPunc = new.first!
+
+            // Priority: . > ! > ? > : > ,
+            let priority: [Int: Int] = [7883: 5, 8020: 4, 7956: 3, 8033: 2, 7877: 1]
+
+            if (priority[firstPunc] ?? 0) > (priority[lastPunc] ?? 0) {
+                result.removeLast()
+            }
+            result.append(contentsOf: new)
+        } else {
+            result.append(contentsOf: new)
+        }
+
+        return result
     }
 }

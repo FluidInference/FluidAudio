@@ -118,6 +118,8 @@ struct TdtHypothesis: Sendable {
     /// Last non-blank token decoded in this hypothesis.
     /// Used to initialize the decoder for the next chunk, maintaining context across chunk boundaries.
     var lastToken: Int?
+    /// Track if tokens are near the boundary (for filtering)
+    var boundaryTokenIndices: Set<Int> = []
 }
 
 @available(macOS 13.0, iOS 16.0, *)
@@ -136,6 +138,15 @@ internal struct TdtDecoder {
     // Convenience accessors for frequently used values
     private var blankId: Int { decoderConfig.blankTokenId }
     private var sosId: Int { decoderConfig.startOfSequenceId }
+
+    // Punctuation tokens for boundary detection
+    private let punctuationTokens: Set<Int> = [
+        7877,  // comma ,
+        7883,  // period .
+        7956,  // question mark ?
+        8020,  // exclamation !
+        8033,  // colon :
+    ]
 
     /// Execute optimized TDT decoding
     func decode(
@@ -253,6 +264,12 @@ internal struct TdtDecoder {
 
             // Update hypothesis
             if label != blankId {
+                // Check if this is punctuation near the end of the sequence
+                let isNearBoundary = timeIndices >= (encoderSequenceLength - 10)
+                if isNearBoundary && punctuationTokens.contains(label) {
+                    hypothesis.boundaryTokenIndices.insert(hypothesis.ySequence.count)
+                }
+
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
@@ -289,7 +306,33 @@ internal struct TdtDecoder {
         // Save the last token for the next chunk
         decoderState.lastToken = hypothesis.lastToken
 
-        return hypothesis.ySequence
+        // Filter boundary punctuation if enabled
+        if config.enableDebug && !hypothesis.boundaryTokenIndices.isEmpty {
+            logger.debug("Boundary punctuation detected at indices: \(hypothesis.boundaryTokenIndices)")
+        }
+
+        return filterBoundaryPunctuation(
+            tokens: hypothesis.ySequence,
+            boundaryIndices: hypothesis.boundaryTokenIndices
+        )
+    }
+
+    /// Filter out boundary punctuation tokens that likely result from padding
+    private func filterBoundaryPunctuation(tokens: [Int], boundaryIndices: Set<Int>) -> [Int] {
+        guard !boundaryIndices.isEmpty else { return tokens }
+
+        var filtered: [Int] = []
+        for (index, token) in tokens.enumerated() {
+            // Skip punctuation tokens that were marked as boundary tokens
+            if boundaryIndices.contains(index) {
+                if config.enableDebug {
+                    logger.debug("Filtering boundary punctuation token \(token) at index \(index)")
+                }
+                continue
+            }
+            filtered.append(token)
+        }
+        return filtered
     }
 
     /// Pre-process encoder output into contiguous memory for faster access

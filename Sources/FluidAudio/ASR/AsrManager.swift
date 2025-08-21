@@ -36,7 +36,8 @@ public final class AsrManager {
     private var systemDecoderState: DecoderState
 
     // Special token IDs for v3 models (must match TdtDecoder.swift)
-    let blankId = 8192  // v3 models use 8192 as blank token
+    // Note: Vocabulary goes from 0-8191, so blank token is vocab_size (8192)
+    let blankId = 8192  // Blank token is one past the last vocab token
     let sosId = 8192  // Start with blank token for RNNT (same as blankId)
 
     // Cached prediction options for reuse
@@ -426,7 +427,15 @@ public final class AsrManager {
         var text = concatenated.replacingOccurrences(of: "▁", with: " ")
             .trimmingCharacters(in: .whitespaces)
 
-        // 4. For now, return original timings as-is
+        // 4. Post-process to clean up punctuation artifacts
+        text = cleanPunctuationArtifacts(text)
+
+        // Debug logging for suspicious patterns
+        if config.enableDebug && text.contains("Yeah") {
+            logger.warning("DEBUG: Text contains 'Yeah' - token IDs: \(tokenIds), tokens: \(tokens)")
+        }
+
+        // 5. For now, return original timings as-is
         // Note: Proper timing alignment would require tracking character positions
         // through the concatenation and replacement process
         let adjustedTimings = tokenInfos.compactMap { info in
@@ -442,6 +451,32 @@ public final class AsrManager {
         }
 
         return (text, adjustedTimings)
+    }
+
+    private func cleanPunctuationArtifacts(_ text: String) -> String {
+        var cleaned = text
+
+        // Replace multiple periods with single period
+        cleaned = cleaned.replacingOccurrences(of: #"\.\s*\."#, with: ".", options: .regularExpression)
+
+        // Clean up ". ." patterns
+        cleaned = cleaned.replacingOccurrences(of: " . . ", with: ". ")
+        cleaned = cleaned.replacingOccurrences(of: ". . ", with: ". ")
+        cleaned = cleaned.replacingOccurrences(of: " . .", with: ".")
+
+        // Remove isolated periods with excessive spacing
+        cleaned = cleaned.replacingOccurrences(of: #"\s+\.\s+"#, with: ". ", options: .regularExpression)
+
+        // Clean up multiple spaces
+        cleaned = cleaned.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+
+        // Ensure proper spacing after punctuation
+        cleaned = cleaned.replacingOccurrences(of: #"([.!?])\s*([A-Z])"#, with: "$1 $2", options: .regularExpression)
+
+        // Remove trailing periods if text already ends with other punctuation
+        cleaned = cleaned.replacingOccurrences(of: #"([!?])\.$"#, with: "$1", options: .regularExpression)
+
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     internal func extractFeatureValue(
