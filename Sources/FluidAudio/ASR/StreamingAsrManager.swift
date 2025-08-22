@@ -399,7 +399,9 @@ public struct StreamingAsrConfig: Sendable {
             tdtConfig: TdtConfig(
                 durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
-                maxSymbolsPerStep: 3
+                maxSymbolsPerStep: 3,
+                blankTokenMaxSkip: 0,  // No skipping for maximum coverage
+                nonBlankTokenMaxSkip: 1  // Minimal skipping to capture all content
             )
         )
     }

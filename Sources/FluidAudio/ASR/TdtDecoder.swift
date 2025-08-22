@@ -70,9 +70,9 @@ public struct TdtConfig: Sendable {
         maxSymbolsPerStep: Int? = nil,
         veryShortSequenceThreshold: Int = 10,
         shortSequenceThreshold: Int = 30,
-        veryShortSequenceMaxSkip: Int = 2,
-        blankTokenMaxSkip: Int = 2,
-        nonBlankTokenMaxSkip: Int = 4
+        veryShortSequenceMaxSkip: Int = 1,
+        blankTokenMaxSkip: Int = 0,  // No skipping on blanks for maximum coverage
+        nonBlankTokenMaxSkip: Int = 1  // Minimal skipping for near-complete content capture
     ) {
         self.durations = durations
         self.includeTokenDuration = includeTokenDuration
@@ -91,10 +91,10 @@ struct TdtDecoderConfig {
     let vocabSize: Int = 8192
 
     /// Blank token ID used for CTC/RNNT alignment
-    let blankTokenId: Int = 8192
+    let blankTokenId: Int = 8192  // Blank token is at position 8192 in the model
 
-    /// Start-of-sequence token ID (same as blank for RNNT)
-    let startOfSequenceId: Int = 8192
+    /// Start-of-sequence token ID
+    let startOfSequenceId: Int = 0  // Start token
 
     /// Expected encoder hidden dimension size
     let encoderHiddenSize: Int = 1024
@@ -168,8 +168,12 @@ internal struct TdtDecoder {
         var lastTimestamp = -1
         var lastTimestampCount = 0
 
+        // Debug: Track frames processed
+        var framesProcessed = 0
+
         // Main decoding loop with optimizations
         while activeMask {
+            framesProcessed += 1
 
             var label = hypothesis.lastToken ?? sosId
 
@@ -200,7 +204,13 @@ internal struct TdtDecoder {
             var blankMask = label == blankId
             var actualDuration = duration
 
-            if blankMask {
+            // Check if frame-skipping is disabled
+            let disableFrameSkipping = ProcessInfo.processInfo.environment["DISABLE_FRAME_SKIPPING"] != nil
+
+            if disableFrameSkipping {
+                // Always advance by 1 frame only (no skipping)
+                actualDuration = 1
+            } else if blankMask {
                 actualDuration = min(duration, config.tdtConfig.blankTokenMaxSkip)
             }
 
@@ -208,9 +218,11 @@ internal struct TdtDecoder {
             timeIndices += actualDuration
             safeTimeIndices = min(timeIndices, lastTimestep)
             activeMask = timeIndices < encoderSequenceLength
-            var advanceMask = activeMask && blankMask
 
-            // Optimized inner loop
+            // Disable inner loop if frame-skipping is disabled
+            var advanceMask = disableFrameSkipping ? false : (activeMask && blankMask)
+
+            // Optimized inner loop (skipped when frame-skipping disabled)
             while advanceMask {
                 timeIndicesCurrentLabels = timeIndices
 
@@ -288,6 +300,11 @@ internal struct TdtDecoder {
 
         // Save the last token for the next chunk
         decoderState.lastToken = hypothesis.lastToken
+
+        // Debug: Log processing stats
+        logger.info(
+            "TDT processed \(framesProcessed) iterations for \(encoderSequenceLength) encoder frames, decoded \(hypothesis.ySequence.count) tokens"
+        )
 
         return hypothesis.ySequence
     }
@@ -515,20 +532,27 @@ internal struct TdtDecoder {
     ) {
         let totalElements = logits.count
         let durationElements = config.tdtConfig.durations.count
-        let vocabSize = totalElements - durationElements
 
-        guard totalElements >= durationElements else {
+        // The model outputs: 8192 regular tokens + 1 blank token + 5 duration tokens = 8198 total
+        // We need to extract 8193 token logits (including blank at 8192) and 5 duration logits
+        let actualVocabSize = 8193  // 8192 regular tokens + 1 blank token
+
+        // Ensure we have enough elements
+        guard totalElements >= actualVocabSize + durationElements else {
             throw ASRError.processingFailed(
-                "Logits dimension mismatch: got \(totalElements), need at least \(durationElements)")
+                "Logits dimension mismatch: got \(totalElements), need at least \(actualVocabSize + durationElements)")
         }
 
         // Create views directly without copying - zero-copy operation
         let logitsPtr = logits.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
 
         // Use ContiguousArray for better cache locality
-        let tokenLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr, count: vocabSize))
+        // Take first 8193 tokens (0-8192, where 8192 is blank)
+        let tokenLogits = ContiguousArray(UnsafeBufferPointer(start: logitsPtr, count: actualVocabSize))
+
+        // Duration logits start after the token logits
         let durationLogits = ContiguousArray(
-            UnsafeBufferPointer(start: logitsPtr + vocabSize, count: durationElements))
+            UnsafeBufferPointer(start: logitsPtr + actualVocabSize, count: durationElements))
 
         return (Array(tokenLogits), Array(durationLogits))
     }

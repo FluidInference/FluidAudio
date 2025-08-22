@@ -312,14 +312,39 @@ public final class AsrManager {
         // Note: Decoder state initialization is now handled by the caller
         // Use resetDecoderState() to explicitly reset when needed
 
-        let decoder = TdtDecoder(config: config)
-        return try await decoder.decode(
-            encoderOutput: encoderOutput,
-            encoderSequenceLength: encoderSequenceLength,
-            decoderModel: decoderModel!,
-            jointModel: jointModel!,
-            decoderState: &decoderState
-        )
+        // Choose decoder based on environment variables
+        let useSimple = ProcessInfo.processInfo.environment["USE_SIMPLE_DECODER"] != nil
+        let useNemo = ProcessInfo.processInfo.environment["USE_NEMO_DECODER"] != nil
+
+        if useNemo {
+            // Exact NeMo replication
+            let decoder = NemoDecoder(config: config)
+            return try await decoder.decode(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderSequenceLength,
+                decoderModel: decoderModel!,
+                jointModel: jointModel!,
+                decoderState: &decoderState
+            )
+        } else if useSimple {
+            let decoder = SimpleDecoder(config: config)
+            return try await decoder.decode(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderSequenceLength,
+                decoderModel: decoderModel!,
+                jointModel: jointModel!,
+                decoderState: &decoderState
+            )
+        } else {
+            let decoder = TdtDecoder(config: config)
+            return try await decoder.decode(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderSequenceLength,
+                decoderModel: decoderModel!,
+                jointModel: jointModel!,
+                decoderState: &decoderState
+            )
+        }
     }
 
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
@@ -369,11 +394,103 @@ public final class AsrManager {
         var tokens: [String] = []
         var tokenInfos: [(token: String, tokenId: Int, timing: TokenTiming?)] = []
 
-        for (index, tokenId) in tokenIds.enumerated() {
-            if let token = vocabulary[tokenId], !token.isEmpty {
-                tokens.append(token)
-                let timing = index < timings.count ? timings[index] : nil
-                tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
+        // Check if ALL post-processing should be disabled (raw output)
+        let disableAllPostProcessing = ProcessInfo.processInfo.environment["DISABLE_ALL_POSTPROCESSING"] != nil
+
+        if disableAllPostProcessing {
+            // Raw mode: no filtering at all, just concatenate tokens
+            for tokenId in tokenIds {
+                if let token = vocabulary[tokenId], !token.isEmpty {
+                    tokens.append(token)
+                    let timing = tokens.count - 1 < timings.count ? timings[tokens.count - 1] : nil
+                    tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
+                }
+            }
+        } else {
+            // Check if punctuation filtering should be disabled (for multilingual support)
+            let disablePunctuationFilter = ProcessInfo.processInfo.environment["DISABLE_PUNCTUATION_FILTER"] != nil
+
+            // First pass: determine primary script from initial tokens
+            var primaryScript = ""
+            var scriptVotes: [String: Int] = [:]
+
+            // Sample first 20 tokens to determine primary script
+            for tokenId in tokenIds.prefix(20) {
+                if let token = vocabulary[tokenId], !token.isEmpty {
+                    if token.contains { ch in
+                        (ch >= "\u{0400}" && ch <= "\u{04FF}")  // Cyrillic
+                            || (ch >= "\u{0500}" && ch <= "\u{052F}")
+                    } {
+                        scriptVotes["cyrillic", default: 0] += 1
+                    }
+
+                    if token.contains { ch in
+                        (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z") || (ch >= "\u{00C0}" && ch <= "\u{024F}")  // Latin extended (includes French accents)
+                    } {
+                        scriptVotes["latin", default: 0] += 1
+                    }
+                }
+            }
+
+            // Determine primary script (default to latin for French/English)
+            if let latinVotes = scriptVotes["latin"], latinVotes > 0 {
+                primaryScript = "latin"
+            } else if let cyrillicVotes = scriptVotes["cyrillic"], cyrillicVotes > 0 {
+                primaryScript = "cyrillic"
+            } else {
+                primaryScript = "latin"  // Default
+            }
+
+            if config.enableDebug {
+                logger.debug("Detected primary script: \(primaryScript)")
+            }
+
+            for (index, tokenId) in tokenIds.enumerated() {
+                if let token = vocabulary[tokenId], !token.isEmpty {
+                    // Filter out Cyrillic tokens if we're in Latin mode
+                    if primaryScript == "latin" {
+                        let containsCyrillic = token.contains { ch in
+                            (ch >= "\u{0400}" && ch <= "\u{04FF}")  // Cyrillic block
+                                || (ch >= "\u{0500}" && ch <= "\u{052F}")  // Cyrillic supplement
+                        }
+
+                        let containsLatin = token.contains { ch in
+                            (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z")
+                                || (ch >= "\u{00C0}" && ch <= "\u{024F}")  // Latin extended
+                        }
+
+                        // Skip pure Cyrillic tokens in Latin context
+                        if containsCyrillic && !containsLatin {
+                            if config.enableDebug {
+                                logger.debug("Filtering Cyrillic token \(tokenId): '\(token)'")
+                            }
+                            continue
+                        }
+                    }
+                    // Filter out punctuation-only tokens (dots, commas, etc.)
+                    // Keep tokens that contain at least one letter or digit
+                    // Note: char.isLetter should handle accented characters correctly
+                    let containsAlphanumeric = token.contains { char in
+                        char.isLetter || char.isNumber || char == "▁"  // Keep space marker
+                    }
+
+                    // Skip pure punctuation tokens unless they're sentence-ending punctuation
+                    if !disablePunctuationFilter && !containsAlphanumeric {
+                        // Log what we're filtering for debugging French
+                        if config.enableDebug {
+                            logger.debug("Filtering out token \(tokenId): '\(token)'")
+                        }
+                        // Only keep important punctuation like ?, !, . at end of sentences
+                        let importantPunctuation = ["?", "!", ".", ":", ";"]
+                        if !importantPunctuation.contains(token.trimmingCharacters(in: .whitespaces)) {
+                            continue  // Skip this token
+                        }
+                    }
+
+                    tokens.append(token)
+                    let timing = index < timings.count ? timings[index] : nil
+                    tokenInfos.append((token: token, tokenId: tokenId, timing: timing))
+                }
             }
         }
 
@@ -382,6 +499,26 @@ public final class AsrManager {
 
         // 3. Replace ▁ with space (SentencePiece standard)
         var text = concatenated.replacingOccurrences(of: "▁", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+
+        // 4. Clean up excessive punctuation
+        // Remove multiple consecutive dots/punctuation
+        while text.contains("....") {
+            text = text.replacingOccurrences(of: "....", with: "...")
+        }
+        while text.contains("...") {
+            text = text.replacingOccurrences(of: "...", with: ".")
+        }
+        while text.contains("..") {
+            text = text.replacingOccurrences(of: "..", with: ".")
+        }
+        while text.contains(",,") {
+            text = text.replacingOccurrences(of: ",,", with: ",")
+        }
+
+        // Remove leading dots and spaces
+        text = text.replacingOccurrences(of: ". ", with: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ". ,"))
             .trimmingCharacters(in: .whitespaces)
 
         // 4. For now, return original timings as-is

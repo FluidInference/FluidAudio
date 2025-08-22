@@ -154,12 +154,34 @@ private struct ChunkProcessor {
     let enableDebug: Bool
 
     private let stepSize: Int  // Calculated as chunkSize - overlap
+    private let overlapSize: Int  // Overlap between chunks
 
     init(audioSamples: [Float], chunkSize: Int, enableDebug: Bool) {
         self.audioSamples = audioSamples
         self.chunkSize = chunkSize
         self.enableDebug = enableDebug
-        self.stepSize = chunkSize  // No overlap, full chunk size
+
+        // Check if sliding window is enabled
+        let useSlidingWindow = ProcessInfo.processInfo.environment["USE_SLIDING_WINDOW"] != nil
+
+        if useSlidingWindow {
+            // Default to 25% overlap (2.5 seconds for 10-second chunks)
+            let overlapRatioStr = ProcessInfo.processInfo.environment["OVERLAP_RATIO"] ?? "0.25"
+            let overlapRatio = Double(overlapRatioStr) ?? 0.25
+
+            // Calculate overlap in samples (16kHz sample rate)
+            self.overlapSize = Int(Double(chunkSize) * overlapRatio)
+            self.stepSize = chunkSize - overlapSize
+
+            if enableDebug {
+                print("Sliding window enabled: chunk=\(chunkSize), overlap=\(overlapSize), step=\(stepSize)")
+                print("Overlap ratio: \(overlapRatio) (\(Double(overlapSize)/16000.0) seconds)")
+            }
+        } else {
+            // No overlap, traditional chunking
+            self.overlapSize = 0
+            self.stepSize = chunkSize
+        }
     }
 
     func process(using manager: AsrManager, startTime: Date) async throws -> ASRResult {
@@ -171,13 +193,37 @@ private struct ChunkProcessor {
         var position = 0
         var chunkIndex = 0
         var decoderState = try DecoderState()
+        var previousChunkTokens: [Int] = []
+        var overlapTokenCount = 0
 
         while position < audioSamples.count {
             let (chunkTokens, newDecoderState) = try await processChunk(
                 at: position, chunkIndex: chunkIndex, using: manager, decoderState: decoderState)
 
-            allTokens.append(contentsOf: chunkTokens)
+            // Handle overlapping tokens when using sliding window
+            if overlapSize > 0 && chunkIndex > 0 {
+                // Estimate how many tokens to skip from the beginning of the current chunk
+                // This is approximate - ideally we'd track exact token positions
+                let overlapRatio = Double(overlapSize) / Double(chunkSize)
+                let estimatedOverlapTokens = Int(Double(chunkTokens.count) * overlapRatio * 0.8)  // Conservative estimate
 
+                // Skip the overlapping tokens at the beginning of this chunk
+                let tokensToAdd = Array(chunkTokens.dropFirst(max(0, estimatedOverlapTokens)))
+
+                if enableDebug {
+                    print(
+                        "Chunk \(chunkIndex): \(chunkTokens.count) tokens, skipping first \(estimatedOverlapTokens), adding \(tokensToAdd.count)"
+                    )
+                }
+
+                allTokens.append(contentsOf: tokensToAdd)
+            } else {
+                // First chunk or no overlap - add all tokens
+                allTokens.append(contentsOf: chunkTokens)
+            }
+
+            previousChunkTokens = chunkTokens
+            decoderState = newDecoderState  // Maintain decoder state across chunks
             position += stepSize
             chunkIndex += 1
         }
