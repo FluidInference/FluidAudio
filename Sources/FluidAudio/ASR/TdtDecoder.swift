@@ -5,7 +5,7 @@
 //  Copyright © 2025 Brandon Weng. All rights reserved.
 //
 
-/// Optimized TDT decoder with hybrid CoreML + Metal acceleration
+/// TDT decoder with hybrid CoreML + Metal acceleration
 import Accelerate
 import CoreML
 import Foundation
@@ -52,8 +52,9 @@ internal struct TdtDecoder {
         self.config = config
     }
 
+    // Parakeet-TDT-0.6b-v3 uses 8192 regular tokens + blank token at index 8192
     private var blankId: Int = 8192
-    private var sosId: Int = 8192
+    private var sosId: Int = 8192  // SOS same as blank for TDT models
 
     /// Execute optimized TDT decoding
     func decode(
@@ -83,8 +84,7 @@ internal struct TdtDecoder {
         var activeMask = true
         let lastTimestep = encoderSequenceLength - 1
 
-        var lastTimestamp = -1
-        var lastTimestampCount = 0
+        // Variables removed - no longer needed with simplified max_symbols logic
 
         // Pre-allocate reusable MLMultiArrays for decoder to avoid repeated allocations
         let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
@@ -96,7 +96,7 @@ internal struct TdtDecoder {
             var label = hypothesis.lastToken ?? sosId
 
             // Use cached decoder inputs
-            let decoderResult = try runDecoderOptimized(
+            let decoderResult = try runDecoder(
                 token: label,
                 state: hypothesis.decState ?? decoderState,
                 model: decoderModel,
@@ -108,30 +108,35 @@ internal struct TdtDecoder {
             let encoderStep = encoderFrames[safeTimeIndices]
 
             // Batch process joint network if possible
-            let logits = try runJointOptimized(
+            let logits = try runJoint(
                 encoderStep: encoderStep,
                 decoderOutput: decoderResult.output,
                 model: jointModel
             )
 
-            // Optimized token/duration prediction
+            // Token/duration prediction
             let (tokenLogits, durationLogits) = try splitLogits(logits)
             label = argmaxSIMD(tokenLogits)
             var score = tokenLogits[label]
             let duration = config.tdtConfig.durations[argmaxSIMD(durationLogits)]
 
-            var blankMask = label == blankId
+            let blankMask = label == blankId
             var actualDuration = duration
 
+            // NeMo rule: blank with duration=0 must advance by 1 to prevent infinite loops
             if blankMask && duration == 0 {
                 actualDuration = 1
             }
 
             timeIndicesCurrentLabels = timeIndices
 
-            // Check if we need to loop (when duration is 0, keep predicting at same time index)
-            var needLoop = (duration == 0) && !blankMask  // Don't loop for blank tokens
+            // Determine if we need inner loop (loop labels) - only for non-blank tokens with duration=0
+            let needLoop = (duration == 0) && !blankMask
             let originalNeedLoop = needLoop
+
+            // Debug logging for TDT algorithm
+            logger.debug(
+                "TDT: t=\(timeIndices) token=\(label) duration=\(duration) blank=\(blankMask) needLoop=\(needLoop)")
 
             // Track if we've advanced the time index yet
             var hasAdvanced = false
@@ -157,9 +162,11 @@ internal struct TdtDecoder {
             // Inner loop - continue predicting tokens at the same time index when duration == 0
             while advanceMask && innerLoopCount < maxInnerLoopIterations {
                 innerLoopCount += 1
+                logger.debug("TDT inner: iteration=\(innerLoopCount) at t=\(timeIndices)")
+
                 // Use the SAME encoder frame (don't advance safeTimeIndices)
                 let innerEncoderStep = encoderFrames[safeTimeIndices]
-                let innerLogits = try runJointOptimized(
+                let innerLogits = try runJoint(
                     encoderStep: innerEncoderStep,
                     decoderOutput: currentDecoderResult.output,
                     model: jointModel
@@ -174,22 +181,25 @@ internal struct TdtDecoder {
                 score = moreScore
                 actualDuration = moreDuration
 
-                blankMask = label == blankId
-                if blankMask && actualDuration == 0 {
+                let innerBlankMask = moreLabel == blankId
+                logger.debug("TDT inner: token=\(moreLabel) duration=\(moreDuration) blank=\(innerBlankMask)")
+
+                // Apply NeMo rule for blank tokens with duration=0
+                if innerBlankMask && moreDuration == 0 {
                     actualDuration = 1
                 }
 
                 // Update hypothesis for non-blank tokens immediately
-                if label != blankId {
-                    hypothesis.ySequence.append(label)
-                    hypothesis.score += score
+                if !innerBlankMask {
+                    hypothesis.ySequence.append(moreLabel)
+                    hypothesis.score += moreScore
                     hypothesis.timestamps.append(timeIndicesCurrentLabels)
-                    hypothesis.lastToken = label
+                    hypothesis.lastToken = moreLabel
                     innerLoopTokensEmitted += 1
 
                     // Update decoder state with the new token
-                    currentDecoderResult = try runDecoderOptimized(
-                        token: label,
+                    currentDecoderResult = try runDecoder(
+                        token: moreLabel,
                         state: currentDecoderResult.newState,
                         model: decoderModel,
                         targetArray: reusableTargetArray,
@@ -198,55 +208,50 @@ internal struct TdtDecoder {
                     hypothesis.decState = currentDecoderResult.newState
                 }
 
-                // Check if we should continue looping
-                needLoop = (moreDuration == 0)
-
-                // If we're not looping anymore, advance the time index
-                if !needLoop && !hasAdvanced {
-                    timeIndices += actualDuration
-                    safeTimeIndices = min(timeIndices, lastTimestep)
-                    hasAdvanced = true
+                // Exit conditions: blank token OR non-zero duration
+                if innerBlankMask || moreDuration > 0 {
+                    // Advance time index if not already done
+                    if !hasAdvanced {
+                        let skipFrames = innerBlankMask && moreDuration == 0 ? 1 : moreDuration
+                        timeIndices += skipFrames
+                        safeTimeIndices = min(timeIndices, lastTimestep)
+                        hasAdvanced = true
+                    }
+                    break
                 }
 
+                // Continue loop only for non-blank tokens with duration=0
                 activeMask = timeIndices < encoderSequenceLength
-                advanceMask = activeMask && needLoop
+                advanceMask = activeMask && (moreDuration == 0) && !innerBlankMask
             }
 
-            // Update hypothesis only if not already updated in inner loop
-            if label != blankId && !originalNeedLoop {
+            // Debug logging after inner loop
+            if originalNeedLoop {
+                logger.debug(
+                    "TDT inner loop complete: emitted \(innerLoopTokensEmitted) tokens, final timeIdx=\(timeIndices)")
+            }
+
+            // Only update decoder state if we went through the inner loop
+            if originalNeedLoop {
+                hypothesis.decState = currentDecoderResult.newState
+            } else if label != blankId {
+                // Handle single token without inner loop
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.decState = currentDecoderResult.newState
                 hypothesis.lastToken = label
-            } else if originalNeedLoop {
-                // If we went through the inner loop, use the updated decoder state
-                hypothesis.decState = currentDecoderResult.newState
             }
 
-            // Force blank logic - account for tokens emitted in inner loop
+            // Simplified max_symbols_per_step logic matching NeMo implementation
             if let maxSymbols = config.tdtConfig.maxSymbolsPerStep {
-                let totalTokensAtTimeIndex =
-                    originalNeedLoop
-                    ? innerLoopTokensEmitted
-                    : (lastTimestamp == timeIndices ? lastTimestampCount + (label != blankId ? 1 : 0) : 1)
-
-                if totalTokensAtTimeIndex >= maxSymbols {
+                let tokensAtCurrentTime = originalNeedLoop ? innerLoopTokensEmitted : (label != blankId ? 1 : 0)
+                if tokensAtCurrentTime >= maxSymbols {
+                    // Force advance by 1 frame
                     timeIndices += 1
                     safeTimeIndices = min(timeIndices, lastTimestep)
                     activeMask = timeIndices < encoderSequenceLength
-                    lastTimestamp = timeIndices - 1  // Reset for the forced advancement
-                    lastTimestampCount = 0
                 }
-            }
-
-            // Update timestamp tracking
-            if lastTimestamp == timeIndices {
-                let tokensToAdd = originalNeedLoop ? innerLoopTokensEmitted : (label != blankId ? 1 : 0)
-                lastTimestampCount += tokensToAdd
-            } else {
-                lastTimestamp = timeIndices
-                lastTimestampCount = originalNeedLoop ? innerLoopTokensEmitted : (label != blankId ? 1 : 0)
             }
         }
 
@@ -315,8 +320,8 @@ internal struct TdtDecoder {
         return frames
     }
 
-    /// Optimized decoder execution
-    private func runDecoderOptimized(
+    /// Decoder execution
+    private func runDecoder(
         token: Int,
         state: DecoderState,
         model: MLModel,
@@ -346,8 +351,8 @@ internal struct TdtDecoder {
         return (output, newState)
     }
 
-    /// Optimized joint network execution with zero-copy
-    private func runJointOptimized(
+    /// Joint network execution with zero-copy
+    private func runJoint(
         encoderStep: [Float],
         decoderOutput: MLFeatureProvider,
         model: MLModel
@@ -434,7 +439,8 @@ internal struct TdtDecoder {
     ) {
         let totalElements = logits.count
         let durationElements = config.tdtConfig.durations.count
-        // 8193 for tdt V3
+        // Parakeet-TDT-0.6b-v3: 8192 regular tokens + 1 blank token = 8193 total vocab
+        // Joint network outputs: [8193 token logits] + [5 duration logits]
         let vocabSize = totalElements - durationElements
 
         guard totalElements >= durationElements else {
