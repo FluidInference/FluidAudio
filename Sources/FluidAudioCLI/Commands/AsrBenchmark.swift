@@ -143,10 +143,17 @@ public class ASRBenchmark {
                 if result.metrics.wer > 0.05 {
                     print(
                         "\n⚠️ File: \(audioFile.fileName) - WER: \(String(format: "%.1f%%", result.metrics.wer * 100))")
-                    print("   Reference: \(result.reference.lowercased())")
                     print("   Hypothesis: \(result.hypothesis)")
-                    print("   Reference length: \(result.reference.split(separator: " ").count) words")
-                    print("   Hypothesis length: \(result.hypothesis.split(separator: " ").count) words")
+
+                    // Show normalized versions with highlighted differences
+                    let normalizedRef = TextNormalizer.normalize(result.reference)
+                    let normalizedHyp = TextNormalizer.normalize(result.hypothesis)
+                    let highlightedComparison = highlightDifferences(
+                        reference: normalizedRef,
+                        hypothesis: normalizedHyp
+                    )
+                    print("   Normalized Reference: \(highlightedComparison.reference)")
+                    print("   Normalized Hypothesis: \(highlightedComparison.hypothesis)")
 
                     // Check for common issues
                     if result.hypothesis.count < result.reference.count / 2 {
@@ -466,6 +473,119 @@ public class ASRBenchmark {
 
         print("Dataset extracted successfully")
     }
+}
+
+// MARK: - Text Highlighting
+
+private struct HighlightedComparison {
+    let reference: String
+    let hypothesis: String
+}
+
+/// Highlight differences between reference and hypothesis text using ANSI escape codes
+private func highlightDifferences(reference: String, hypothesis: String) -> HighlightedComparison {
+    let refWords = reference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+    let hypWords = hypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+
+    // Use edit distance to align the sequences and identify operations
+    let alignment = getAlignment(refWords, hypWords)
+
+    var highlightedRef = ""
+    var highlightedHyp = ""
+
+    for operation in alignment {
+        switch operation {
+        case .match(let word):
+            highlightedRef += word + " "
+            highlightedHyp += word + " "
+        case .substitute(let refWord, let hypWord):
+            highlightedRef += "\u{001B}[41m\(refWord)\u{001B}[0m "  // Red background for reference
+            highlightedHyp += "\u{001B}[43m\(hypWord)\u{001B}[0m "  // Yellow background for hypothesis
+        case .delete(let word):
+            highlightedRef += "\u{001B}[41m\(word)\u{001B}[0m "  // Red background for deleted
+            highlightedHyp += "\u{001B}[90m[DELETED]\u{001B}[0m "  // Gray for placeholder
+        case .insert(let word):
+            highlightedRef += "\u{001B}[90m[INSERTED]\u{001B}[0m "  // Gray for placeholder
+            highlightedHyp += "\u{001B}[42m\(word)\u{001B}[0m "  // Green background for inserted
+        }
+    }
+
+    return HighlightedComparison(
+        reference: highlightedRef.trimmingCharacters(in: .whitespaces),
+        hypothesis: highlightedHyp.trimmingCharacters(in: .whitespaces)
+    )
+}
+
+/// Alignment operations for highlighting differences
+private enum AlignmentOperation {
+    case match(String)
+    case substitute(String, String)
+    case delete(String)
+    case insert(String)
+}
+
+/// Get alignment between two word sequences to identify operations
+private func getAlignment(_ seq1: [String], _ seq2: [String]) -> [AlignmentOperation] {
+    let m = seq1.count
+    let n = seq2.count
+
+    if m == 0 {
+        return seq2.map { .insert($0) }
+    }
+    if n == 0 {
+        return seq1.map { .delete($0) }
+    }
+
+    // Dynamic programming table for edit distance
+    var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+
+    for i in 0...m {
+        dp[i][0] = i
+    }
+    for j in 0...n {
+        dp[0][j] = j
+    }
+
+    for i in 1...m {
+        for j in 1...n {
+            if seq1[i - 1] == seq2[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1]
+            } else {
+                dp[i][j] =
+                    1
+                    + min(
+                        dp[i - 1][j],  // deletion
+                        dp[i][j - 1],  // insertion
+                        dp[i - 1][j - 1]  // substitution
+                    )
+            }
+        }
+    }
+
+    // Backtrack to get the alignment
+    var operations: [AlignmentOperation] = []
+    var i = m
+    var j = n
+
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && seq1[i - 1] == seq2[j - 1] {
+            operations.append(.match(seq1[i - 1]))
+            i -= 1
+            j -= 1
+        } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
+            operations.append(.substitute(seq1[i - 1], seq2[j - 1]))
+            i -= 1
+            j -= 1
+        } else if i > 0 && (j == 0 || dp[i][j] == dp[i - 1][j] + 1) {
+            operations.append(.delete(seq1[i - 1]))
+            i -= 1
+        } else if j > 0 {
+            operations.append(.insert(seq2[j - 1]))
+            j -= 1
+        }
+    }
+
+    return operations.reversed()
 }
 
 // MARK: - Edit Distance Algorithm
