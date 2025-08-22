@@ -35,8 +35,8 @@ public final class AsrManager {
     private var microphoneDecoderState: DecoderState
     private var systemDecoderState: DecoderState
 
-    let blankId = 1024
-    let sosId = 1024
+    let blankId = 8192  // v3 models use 8192 as blank token
+    let sosId = 8192  // Start with blank token for RNNT (same as blankId)
 
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {

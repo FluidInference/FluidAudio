@@ -93,7 +93,7 @@ Our goal is to offer a similar API to what Apple will introudce in OS26: https:/
 
 ## Automatic Speech Recognition (ASR)
 
-- **Model**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
+- **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Real-time Factor**: Optimized for near-real-time transcription with chunking support
 - **Streaming Support**: Follows the same API as OS 26
 

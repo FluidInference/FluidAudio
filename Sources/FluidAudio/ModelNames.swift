@@ -23,7 +23,7 @@ public enum ModelNames {
         public static let encoder = "ParakeetEncoder_v2"
         public static let decoder = "ParakeetDecoder"
         public static let joint = "RNNTJoint"
-        public static let vocabulary = "parakeet_vocab.json"
+        public static let vocabulary = "parakeet_v3_vocab.json"
 
         public static let melspectrogramFile = melspectrogram + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"

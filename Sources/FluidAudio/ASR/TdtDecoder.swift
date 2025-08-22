@@ -52,15 +52,8 @@ internal struct TdtDecoder {
         self.config = config
     }
 
-    // Special token Indexes matching Parakeet TDT model's vocabulary (1024 word tokens)
-    // OUTPUT from joint network during decoding
-    // 0-1023 represents characters, numbers, punctuations
-    // 1024 represents, BLANK or nonexistent
-    private let blankId = 1024
-
-    // sosId (Start-of-Sequence)
-    // sosId is INPUT when there's no real previous token
-    private let sosId = 1024
+    private var blankId: Int = 8192
+    private var sosId: Int = 8192
 
     /// Execute optimized TDT decoding
     func decode(

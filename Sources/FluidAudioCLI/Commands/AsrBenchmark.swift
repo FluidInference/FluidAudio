@@ -653,7 +653,7 @@ extension ASRBenchmark {
                     print("🔍 CI Debug Information:")
                     let modelsDir = FileManager.default.homeDirectoryForCurrentUser
                         .appendingPathComponent(
-                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
+                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
                         )
                     print("   Models directory: \(modelsDir.path)")
                     print(

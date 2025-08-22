@@ -175,7 +175,7 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Helper Method Tests
 
     func testRepoPathCalculation() {
-        let modelsDir = URL(fileURLWithPath: "/test/Models/parakeet-tdt-0.6b-v2-coreml")
+        let modelsDir = URL(fileURLWithPath: "/test/Models/parakeet-tdt-0.6b-v3-coreml")
         let repoPath = modelsDir.deletingLastPathComponent()
             .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
 
