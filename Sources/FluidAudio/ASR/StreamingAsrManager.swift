@@ -397,7 +397,6 @@ public struct StreamingAsrConfig: Sendable {
             realtimeMode: true,
             chunkSizeMs: Int(chunkDuration * 1000),
             tdtConfig: TdtConfig(
-                durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
                 maxSymbolsPerStep: 3
             )

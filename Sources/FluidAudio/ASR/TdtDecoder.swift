@@ -12,18 +12,15 @@ import Foundation
 import OSLog
 
 public struct TdtConfig: Sendable {
-    public let durations: [Int]
     public let includeTokenDuration: Bool
     public let maxSymbolsPerStep: Int?
 
     public static let `default` = TdtConfig()
 
     public init(
-        durations: [Int] = [0, 1, 2, 3, 4],
         includeTokenDuration: Bool = true,
         maxSymbolsPerStep: Int? = nil
     ) {
-        self.durations = durations
         self.includeTokenDuration = includeTokenDuration
         self.maxSymbolsPerStep = maxSymbolsPerStep
     }
@@ -47,6 +44,8 @@ internal struct TdtDecoder {
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
     private let config: ASRConfig
     private let predictionOptions = AsrModels.optimizedPredictionOptions()
+    // Parakeet‑TDT‑v3: duration head has 5 bins mapping directly to frame advances
+    private let durationBins: [Int] = [0, 1, 2, 3, 4]
 
     init(config: ASRConfig) {
         self.config = config
@@ -118,7 +117,7 @@ internal struct TdtDecoder {
             let (tokenLogits, durationLogits) = try splitLogits(logits)
             label = argmaxSIMD(tokenLogits)
             var score = tokenLogits[label]
-            let duration = config.tdtConfig.durations[argmaxSIMD(durationLogits)]
+            let duration = durationBins[argmaxSIMD(durationLogits)]
 
             let blankMask = label == blankId
             var actualDuration = duration
@@ -175,7 +174,7 @@ internal struct TdtDecoder {
                 let (innerTokenLogits, innerDurationLogits) = try splitLogits(innerLogits)
                 let moreLabel = argmaxSIMD(innerTokenLogits)
                 let moreScore = innerTokenLogits[moreLabel]
-                let moreDuration = config.tdtConfig.durations[argmaxSIMD(innerDurationLogits)]
+                let moreDuration = durationBins[argmaxSIMD(innerDurationLogits)]
 
                 label = moreLabel
                 score = moreScore
@@ -438,13 +437,19 @@ internal struct TdtDecoder {
         tokenLogits: [Float], durationLogits: [Float]
     ) {
         let totalElements = logits.count
-        let durationElements = config.tdtConfig.durations.count
+        let durationElements = durationBins.count
         // Parakeet-TDT-0.6b-v3: 8192 regular tokens + 1 blank token = 8193 total vocab
         // Joint network outputs: [8193 token logits] + [5 duration logits]
         let vocabSize = totalElements - durationElements
 
         guard totalElements >= durationElements else {
             throw ASRError.processingFailed("Logits dimension mismatch")
+        }
+
+        // Sanity check for expected logits size (strict for Parakeet‑TDT‑v3)
+        let expectedTotal = 8193 + durationBins.count
+        if totalElements != expectedTotal {
+            logger.warning("TDT logits size unexpected: got \(totalElements), expected \(expectedTotal)")
         }
 
         // Create views directly without copying - zero-copy operation
@@ -485,7 +490,7 @@ internal struct TdtDecoder {
         bestDuration: Int, duration: Int
     ) {
         let bestDurationIdx = argmaxSIMD(durationLogits)
-        let duration = config.tdtConfig.durations[bestDurationIdx]
+        let duration = durationBins[bestDurationIdx]
         return (bestDurationIdx, duration)
     }
     internal func extractEncoderTimeStep(
