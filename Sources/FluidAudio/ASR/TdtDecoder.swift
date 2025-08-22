@@ -76,12 +76,37 @@ public struct TdtConfig: Sendable {
     ) {
         self.durations = durations
         self.includeTokenDuration = includeTokenDuration
-        self.maxSymbolsPerStep = maxSymbolsPerStep
+
+        // Allow environment variable overrides for testing
+        if let envMaxSymbols = ProcessInfo.processInfo.environment["MAX_SYMBOLS"],
+            let maxSymbols = Int(envMaxSymbols)
+        {
+            self.maxSymbolsPerStep = maxSymbols == 0 ? nil : maxSymbols
+        } else if ProcessInfo.processInfo.environment["NO_SYMBOL_LIMIT"] != nil {
+            self.maxSymbolsPerStep = nil
+        } else {
+            self.maxSymbolsPerStep = maxSymbolsPerStep
+        }
         self.veryShortSequenceThreshold = veryShortSequenceThreshold
         self.shortSequenceThreshold = shortSequenceThreshold
         self.veryShortSequenceMaxSkip = veryShortSequenceMaxSkip
-        self.blankTokenMaxSkip = blankTokenMaxSkip
-        self.nonBlankTokenMaxSkip = nonBlankTokenMaxSkip
+
+        // Allow environment variable overrides for skip parameters
+        if let envBlankSkip = ProcessInfo.processInfo.environment["BLANK_SKIP"],
+            let blankSkip = Int(envBlankSkip)
+        {
+            self.blankTokenMaxSkip = blankSkip
+        } else {
+            self.blankTokenMaxSkip = blankTokenMaxSkip
+        }
+
+        if let envNonBlankSkip = ProcessInfo.processInfo.environment["NON_BLANK_SKIP"],
+            let nonBlankSkip = Int(envNonBlankSkip)
+        {
+            self.nonBlankTokenMaxSkip = nonBlankSkip
+        } else {
+            self.nonBlankTokenMaxSkip = nonBlankTokenMaxSkip
+        }
     }
 }
 
@@ -146,9 +171,15 @@ internal struct TdtDecoder {
         decoderState: inout DecoderState
     ) async throws -> [Int] {
 
+        if config.enableDebug {
+            print("DEBUG TDT decode: received encoderSequenceLength=\(encoderSequenceLength)")
+        }
         logger.debug("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
 
         guard encoderSequenceLength > 1 else {
+            if config.enableDebug {
+                print("DEBUG TDT: WARNING - Encoder sequence too short (\(encoderSequenceLength)), returning empty")
+            }
             logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
             return []
         }
@@ -159,6 +190,14 @@ internal struct TdtDecoder {
 
         var hypothesis = TdtHypothesis(decState: decoderState)
         hypothesis.lastToken = decoderState.lastToken  // Preserve last token from previous chunk
+
+        // Debug: Log decoder state continuity
+        if config.enableDebug && decoderState.lastToken != nil {
+            print("DEBUG TDT: Starting new chunk with lastToken=\(decoderState.lastToken!) (continuing from previous)")
+        } else if config.enableDebug {
+            print("DEBUG TDT: Starting new chunk with SOS token (fresh start)")
+        }
+
         var timeIndices = 0
         var safeTimeIndices = 0
         var timeIndicesCurrentLabels = 0
@@ -201,6 +240,10 @@ internal struct TdtDecoder {
             var score = tokenLogits[label]
             let duration = config.tdtConfig.durations[argmaxSIMD(durationLogits)]
 
+            if config.enableDebug && framesProcessed == 1 {
+                print("DEBUG TDT first frame: label=\(label), duration=\(duration), blankId=\(blankId)")
+            }
+
             var blankMask = label == blankId
             var actualDuration = duration
 
@@ -212,18 +255,51 @@ internal struct TdtDecoder {
                 actualDuration = 1
             } else if blankMask {
                 actualDuration = min(duration, config.tdtConfig.blankTokenMaxSkip)
+                // Ensure we always advance at least 1 frame
+                if actualDuration == 0 {
+                    actualDuration = 1
+                }
+                if config.enableDebug && framesProcessed == 1 {
+                    print(
+                        "DEBUG TDT: blank token - duration=\(duration), blankTokenMaxSkip=\(config.tdtConfig.blankTokenMaxSkip), actualDuration=\(actualDuration)"
+                    )
+                }
             }
 
             timeIndicesCurrentLabels = timeIndices
             timeIndices += actualDuration
             safeTimeIndices = min(timeIndices, lastTimestep)
+
+            if config.enableDebug && framesProcessed == 1 {
+                print(
+                    "DEBUG TDT first frame after update: timeIndices=\(timeIndices), actualDuration=\(actualDuration), encoderSequenceLength=\(encoderSequenceLength)"
+                )
+            }
+
             activeMask = timeIndices < encoderSequenceLength
+
+            if config.enableDebug && framesProcessed == 1 {
+                print(
+                    "DEBUG TDT first frame: activeMask=\(activeMask) (timeIndices=\(timeIndices) < encoderSequenceLength=\(encoderSequenceLength))"
+                )
+            }
+
+            if config.enableDebug && !activeMask && framesProcessed <= 2 {
+                print(
+                    "DEBUG TDT: Early exit - timeIndices=\(timeIndices), encoderSequenceLength=\(encoderSequenceLength), label=\(label), duration=\(duration), actualDuration=\(actualDuration)"
+                )
+            }
 
             // Disable inner loop if frame-skipping is disabled
             var advanceMask = disableFrameSkipping ? false : (activeMask && blankMask)
 
             // Optimized inner loop (skipped when frame-skipping disabled)
+            if config.enableDebug && advanceMask && framesProcessed == 1 {
+                print("DEBUG TDT: Entering inner blank loop at timeIndices=\(timeIndices)")
+            }
+            var innerIterations = 0
             while advanceMask {
+                innerIterations += 1
                 timeIndicesCurrentLabels = timeIndices
 
                 let innerEncoderStep = encoderFrames[safeTimeIndices]
@@ -261,6 +337,11 @@ internal struct TdtDecoder {
                 safeTimeIndices = min(timeIndices, lastTimestep)
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && blankMask
+            }
+            if config.enableDebug && innerIterations > 0 && framesProcessed == 1 {
+                print(
+                    "DEBUG TDT: Exited inner loop after \(innerIterations) iterations, timeIndices=\(timeIndices), activeMask=\(activeMask)"
+                )
             }
 
             // Update hypothesis
@@ -300,6 +381,11 @@ internal struct TdtDecoder {
 
         // Save the last token for the next chunk
         decoderState.lastToken = hypothesis.lastToken
+
+        if config.enableDebug {
+            print("DEBUG TDT: Chunk complete - saving lastToken=\(hypothesis.lastToken ?? -1) for next chunk")
+            print("DEBUG TDT: Generated \(hypothesis.ySequence.count) tokens, processed \(framesProcessed) frames")
+        }
 
         // Debug: Log processing stats
         logger.info(

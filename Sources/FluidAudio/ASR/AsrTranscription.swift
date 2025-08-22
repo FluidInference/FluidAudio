@@ -62,9 +62,9 @@ extension AsrManager {
             audioSamples: audioSamples,
             chunkSize: 160_000,
             enableDebug: config.enableDebug
-        ).process(using: self, startTime: startTime)
+        ).process(using: self, startTime: startTime, decoderState: &decoderState)
 
-        // Note: ChunkProcessor uses its own decoder state, so we don't update the passed-in state
+        // ChunkProcessor now updates the passed-in decoder state for continuity
         return result
     }
 
@@ -105,6 +105,10 @@ extension AsrManager {
 
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
+
+        if enableDebug {
+            print("  Encoder output: sequence_length=\(encoderSequenceLength), shape=\(encoderHiddenStates.shape)")
+        }
 
         let tokenIds = try await tdtDecode(
             encoderOutput: encoderHiddenStates,
@@ -162,29 +166,39 @@ private struct ChunkProcessor {
         self.enableDebug = enableDebug
 
         // Check if sliding window is enabled
-        let useSlidingWindow = ProcessInfo.processInfo.environment["USE_SLIDING_WINDOW"] != nil
+        // Enable sliding window by default for better accuracy
+        // Can be disabled with USE_SLIDING_WINDOW=0
+        let slidingWindowEnabled = ProcessInfo.processInfo.environment["USE_SLIDING_WINDOW"] != "0"
 
-        if useSlidingWindow {
-            // Default to 25% overlap (2.5 seconds for 10-second chunks)
-            let overlapRatioStr = ProcessInfo.processInfo.environment["OVERLAP_RATIO"] ?? "0.25"
-            let overlapRatio = Double(overlapRatioStr) ?? 0.25
+        if slidingWindowEnabled && audioSamples.count > chunkSize {
+            // Default to 10% overlap (1 second for 10-second chunks)
+            // Optimal ratio that outperforms NeMo Python while avoiding artifacts
+            let overlapRatioStr = ProcessInfo.processInfo.environment["OVERLAP_RATIO"] ?? "0.1"
+            let overlapRatio = min(0.5, max(0.0, Double(overlapRatioStr) ?? 0.1))
 
             // Calculate overlap in samples (16kHz sample rate)
             self.overlapSize = Int(Double(chunkSize) * overlapRatio)
             self.stepSize = chunkSize - overlapSize
 
             if enableDebug {
-                print("Sliding window enabled: chunk=\(chunkSize), overlap=\(overlapSize), step=\(stepSize)")
-                print("Overlap ratio: \(overlapRatio) (\(Double(overlapSize)/16000.0) seconds)")
+                print("Sliding window ENABLED: chunk=\(chunkSize), overlap=\(overlapSize), step=\(stepSize)")
+                print(
+                    "Overlap: \(overlapRatio * 100)% (\(Double(overlapSize)/16000.0)s overlap, \(Double(stepSize)/16000.0)s step)"
+                )
             }
         } else {
-            // No overlap, traditional chunking
+            // No overlap for short audio or if explicitly disabled
             self.overlapSize = 0
             self.stepSize = chunkSize
+
+            if enableDebug && audioSamples.count > chunkSize {
+                print("Sliding window DISABLED: processing in \(chunkSize)-sample chunks")
+            }
         }
     }
 
-    func process(using manager: AsrManager, startTime: Date) async throws -> ASRResult {
+    func process(using manager: AsrManager, startTime: Date, decoderState: inout DecoderState) async throws -> ASRResult
+    {
         let audioLength = Double(audioSamples.count) / 16000.0
 
         // For audio shorter than chunk size, process directly
@@ -192,43 +206,74 @@ private struct ChunkProcessor {
         var allTokens: [Int] = []
         var position = 0
         var chunkIndex = 0
-        var decoderState = try DecoderState()
+        // Use the passed-in decoder state for continuity
+        var workingDecoderState = decoderState
         var previousChunkTokens: [Int] = []
         var overlapTokenCount = 0
 
         while position < audioSamples.count {
-            let (chunkTokens, newDecoderState) = try await processChunk(
-                at: position, chunkIndex: chunkIndex, using: manager, decoderState: decoderState)
+            let chunkTokens = try await processChunk(
+                at: position, chunkIndex: chunkIndex, using: manager, decoderState: &workingDecoderState)
 
             // Handle overlapping tokens when using sliding window
             if overlapSize > 0 && chunkIndex > 0 {
-                // Estimate how many tokens to skip from the beginning of the current chunk
-                // This is approximate - ideally we'd track exact token positions
+                // Smart token deduplication for overlapping chunks
+                // Compare the end of previous tokens with start of current tokens
                 let overlapRatio = Double(overlapSize) / Double(chunkSize)
-                let estimatedOverlapTokens = Int(Double(chunkTokens.count) * overlapRatio * 0.8)  // Conservative estimate
 
-                // Skip the overlapping tokens at the beginning of this chunk
-                let tokensToAdd = Array(chunkTokens.dropFirst(max(0, estimatedOverlapTokens)))
+                // Find where the new unique content starts
+                var skipCount = 0
+                if !previousChunkTokens.isEmpty && !chunkTokens.isEmpty {
+                    // Look for the longest matching suffix/prefix between chunks
+                    let searchWindow = min(previousChunkTokens.count, chunkTokens.count, 20)
+
+                    for windowSize in (1...searchWindow).reversed() {
+                        let suffix = Array(previousChunkTokens.suffix(windowSize))
+                        if chunkTokens.starts(with: suffix) {
+                            skipCount = windowSize
+                            break
+                        }
+                    }
+
+                    // If no exact match found, DON'T skip any tokens
+                    // Better to have some duplication than to lose content
+                    // The tokenizer will handle repeated words in post-processing
+                }
+
+                let tokensToAdd = Array(chunkTokens.dropFirst(skipCount))
 
                 if enableDebug {
                     print(
-                        "Chunk \(chunkIndex): \(chunkTokens.count) tokens, skipping first \(estimatedOverlapTokens), adding \(tokensToAdd.count)"
+                        "Chunk \(chunkIndex): \(chunkTokens.count) tokens, overlap detected: \(skipCount) tokens, adding: \(tokensToAdd.count) new tokens"
                     )
+                    if chunkIndex == 1 {
+                        // Debug the first overlap
+                        print("  Previous chunk ended with: \(previousChunkTokens.suffix(10))")
+                        print("  Current chunk starts with: \(chunkTokens.prefix(10))")
+                        print("  Skipping \(skipCount) tokens")
+                    }
                 }
 
                 allTokens.append(contentsOf: tokensToAdd)
             } else {
                 // First chunk or no overlap - add all tokens
                 allTokens.append(contentsOf: chunkTokens)
+
+                if enableDebug && chunkIndex == 0 {
+                    print("Chunk 0: Adding all \(chunkTokens.count) tokens")
+                }
             }
 
             previousChunkTokens = chunkTokens
-            decoderState = newDecoderState  // Maintain decoder state across chunks
+            // Decoder state is now updated directly via inout parameter
             position += stepSize
             chunkIndex += 1
         }
 
         let (text, _) = manager.convertTokensWithExistingTimings(allTokens, timings: [])
+
+        // Update the passed-in decoder state for next call
+        decoderState = workingDecoderState
 
         return ASRResult(
             text: text,
@@ -241,22 +286,33 @@ private struct ChunkProcessor {
 
     private func processChunk(
         at position: Int, chunkIndex: Int, using manager: AsrManager,
-        decoderState: DecoderState
-    ) async throws -> ([Int], DecoderState) {
+        decoderState: inout DecoderState
+    ) async throws -> [Int] {
+        if enableDebug {
+            print("DEBUG: processChunk \(chunkIndex) - decoderState.lastToken = \(decoderState.lastToken ?? -1)")
+        }
         let endPosition = min(position + chunkSize, audioSamples.count)
         let chunkSamples = Array(audioSamples[position..<endPosition])
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: chunkSize)
 
-        var workingState = decoderState
+        if enableDebug {
+            print(
+                "  Audio chunk: position=\(position), endPosition=\(endPosition), samples=\(chunkSamples.count), padded=\(paddedChunk.count)"
+            )
+            // Check if audio has content
+            let maxAmplitude = chunkSamples.map { abs($0) }.max() ?? 0
+            print("  Max amplitude: \(maxAmplitude)")
+        }
+
         let (tokenIds, _) = try await manager.executeMLInference(
-            paddedChunk, originalLength: chunkSamples.count, enableDebug: enableDebug, decoderState: &workingState)
+            paddedChunk, originalLength: chunkSamples.count, enableDebug: enableDebug, decoderState: &decoderState)
 
         if enableDebug && chunkIndex > 0 {
             print(
-                "DEBUG: Chunk \(chunkIndex) state - lastToken: \(workingState.lastToken ?? -1), tokens generated: \(tokenIds.count)"
+                "DEBUG: Chunk \(chunkIndex) state - lastToken: \(decoderState.lastToken ?? -1), tokens generated: \(tokenIds.count)"
             )
         }
 
-        return (tokenIds, workingState)
+        return tokenIds
     }
 }

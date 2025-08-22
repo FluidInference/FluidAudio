@@ -312,39 +312,15 @@ public final class AsrManager {
         // Note: Decoder state initialization is now handled by the caller
         // Use resetDecoderState() to explicitly reset when needed
 
-        // Choose decoder based on environment variables
-        let useSimple = ProcessInfo.processInfo.environment["USE_SIMPLE_DECODER"] != nil
-        let useNemo = ProcessInfo.processInfo.environment["USE_NEMO_DECODER"] != nil
-
-        if useNemo {
-            // Exact NeMo replication
-            let decoder = NemoDecoder(config: config)
-            return try await decoder.decode(
-                encoderOutput: encoderOutput,
-                encoderSequenceLength: encoderSequenceLength,
-                decoderModel: decoderModel!,
-                jointModel: jointModel!,
-                decoderState: &decoderState
-            )
-        } else if useSimple {
-            let decoder = SimpleDecoder(config: config)
-            return try await decoder.decode(
-                encoderOutput: encoderOutput,
-                encoderSequenceLength: encoderSequenceLength,
-                decoderModel: decoderModel!,
-                jointModel: jointModel!,
-                decoderState: &decoderState
-            )
-        } else {
-            let decoder = TdtDecoder(config: config)
-            return try await decoder.decode(
-                encoderOutput: encoderOutput,
-                encoderSequenceLength: encoderSequenceLength,
-                decoderModel: decoderModel!,
-                jointModel: jointModel!,
-                decoderState: &decoderState
-            )
-        }
+        // Use TDT decoder (production decoder)
+        let decoder = TdtDecoder(config: config)
+        return try await decoder.decode(
+            encoderOutput: encoderOutput,
+            encoderSequenceLength: encoderSequenceLength,
+            decoderModel: decoderModel!,
+            jointModel: jointModel!,
+            decoderState: &decoderState
+        )
     }
 
     public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {

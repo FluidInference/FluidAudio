@@ -26,6 +26,10 @@ public actor StreamingAsrManager {
     public private(set) var volatileTranscript: String = ""
     public private(set) var confirmedTranscript: String = ""
 
+    // Sliding window support
+    private var previousChunkTokens: [Int] = []
+    private var lastProcessedPosition: Int = 0
+
     /// The audio source this stream is configured for
     public var source: AudioSource {
         return audioSource
@@ -76,7 +80,8 @@ public actor StreamingAsrManager {
         asrManager = AsrManager(config: config.asrConfig)
         try await asrManager?.initialize(models: models)
 
-        // Reset decoder state for the specific source
+        // Reset decoder state only for new transcription sessions
+        // This ensures clean state for each new audio file
         try await asrManager?.resetDecoderState(for: source)
 
         startTime = Date()
@@ -390,7 +395,15 @@ public struct StreamingAsrConfig: Sendable {
 
     // Internal ASR configuration
     var asrConfig: ASRConfig {
-        ASRConfig(
+        // Get environment variable overrides if available
+        let blankSkip = ProcessInfo.processInfo.environment["BLANK_SKIP"].flatMap(Int.init) ?? 0
+        let nonBlankSkip = ProcessInfo.processInfo.environment["NON_BLANK_SKIP"].flatMap(Int.init) ?? 0
+        let maxSymbols = ProcessInfo.processInfo.environment["MAX_SYMBOLS"].flatMap(Int.init)
+        let noSymbolLimit = ProcessInfo.processInfo.environment["NO_SYMBOL_LIMIT"] != nil
+
+        let maxSymbolsPerStep: Int? = noSymbolLimit ? nil : (maxSymbols ?? 5)
+
+        return ASRConfig(
             sampleRate: 16000,
             maxSymbolsPerFrame: 3,
             enableDebug: enableDebug,
@@ -399,9 +412,9 @@ public struct StreamingAsrConfig: Sendable {
             tdtConfig: TdtConfig(
                 durations: [0, 1, 2, 3, 4],
                 includeTokenDuration: true,
-                maxSymbolsPerStep: 3,
-                blankTokenMaxSkip: 0,  // No skipping for maximum coverage
-                nonBlankTokenMaxSkip: 1  // Minimal skipping to capture all content
+                maxSymbolsPerStep: maxSymbolsPerStep,
+                blankTokenMaxSkip: blankSkip,
+                nonBlankTokenMaxSkip: nonBlankSkip
             )
         )
     }

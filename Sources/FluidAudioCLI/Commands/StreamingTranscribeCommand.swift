@@ -30,6 +30,63 @@ actor TranscriptionTracker {
 @available(macOS 13.0, *)
 enum StreamingTranscribeCommand {
 
+    /// Convert audio buffer to 16kHz mono
+    private static func convertTo16kHzMono(_ buffer: AVAudioPCMBuffer) async throws -> [Float] {
+        let format = buffer.format
+        let sourceRate = Float(format.sampleRate)
+        let targetRate: Float = 16000.0
+        let frameCount = buffer.frameLength
+
+        // Get channel data
+        guard let channelData = buffer.floatChannelData else {
+            throw NSError(
+                domain: "Transcribe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to access audio data"])
+        }
+
+        let channelCount = Int(format.channelCount)
+
+        // First, convert to mono if needed
+        var monoSamples: [Float]
+        if channelCount > 1 {
+            // Average all channels
+            monoSamples = Array(repeating: 0, count: Int(frameCount))
+            for frame in 0..<Int(frameCount) {
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += channelData[channel][frame]
+                }
+                monoSamples[frame] = sum / Float(channelCount)
+            }
+        } else {
+            // Already mono
+            monoSamples = Array(UnsafeBufferPointer(start: channelData[0], count: Int(frameCount)))
+        }
+
+        // Then resample if needed
+        if sourceRate != targetRate {
+            let resampleRatio = targetRate / sourceRate
+            let outputLength = Int(Float(monoSamples.count) * resampleRatio)
+            var resampled = Array(repeating: Float(0), count: outputLength)
+
+            // Simple linear interpolation resampling
+            for i in 0..<outputLength {
+                let sourceIndex = Float(i) / resampleRatio
+                let index = Int(sourceIndex)
+                let fraction = sourceIndex - Float(index)
+
+                if index < monoSamples.count - 1 {
+                    resampled[i] = monoSamples[index] * (1 - fraction) + monoSamples[index + 1] * fraction
+                } else if index < monoSamples.count {
+                    resampled[i] = monoSamples[index]
+                }
+            }
+
+            return resampled
+        } else {
+            return monoSamples
+        }
+    }
+
     static func run(arguments: [String]) async {
         // Parse arguments
         guard !arguments.isEmpty else {
@@ -40,11 +97,14 @@ enum StreamingTranscribeCommand {
 
         let audioFile = arguments[0]
         var configType = "default"
+        var useBatchMode = false
 
         // Parse options
         var i = 1
         while i < arguments.count {
             switch arguments[i] {
+            case "--batch":
+                useBatchMode = true
             case "--config":
                 if i + 1 < arguments.count {
                     configType = arguments[i + 1]
@@ -62,14 +122,109 @@ enum StreamingTranscribeCommand {
         print("🎤 Audio Transcription")
         print("=====================\n")
 
-        // Test loading audio at different sample rates
-        await testAudioConversion(audioFile: audioFile)
+        if useBatchMode {
+            // Use batch processing with sliding window support
+            await runBatchTranscription(audioFile: audioFile)
+        } else {
+            // Test loading audio at different sample rates
+            await testAudioConversion(audioFile: audioFile)
 
-        // Test transcription with StreamingAsrManager
-        await testStreamingTranscription(
-            audioFile: audioFile,
-            configType: configType
-        )
+            // Test transcription with StreamingAsrManager
+            await testStreamingTranscription(
+                audioFile: audioFile,
+                configType: configType
+            )
+        }
+    }
+
+    /// Run batch transcription using AsrManager directly (with sliding window support)
+    private static func runBatchTranscription(audioFile: String) async {
+        print("🎙️ Batch Transcription Mode (with sliding window)")
+        print("--------------------------------------------------")
+
+        // Show sliding window configuration
+        let overlapRatio = ProcessInfo.processInfo.environment["OVERLAP_RATIO"] ?? "0.1"
+        let enableDebug = ProcessInfo.processInfo.environment["LOG_LEVEL"] == "DEBUG"
+        print("Configuration:")
+        print("  Sliding window: ENABLED")
+        print("  Overlap ratio: \(overlapRatio) (\(Int(Double(overlapRatio)! * 100))%)")
+        print("  Chunk size: 10 seconds")
+        print("  Debug mode: \(enableDebug)")
+        print()
+
+        do {
+            // Load audio file
+            let audioFileURL = URL(fileURLWithPath: audioFile)
+            let audioFile = try AVAudioFile(forReading: audioFileURL)
+            let format = audioFile.processingFormat
+            let frameCount = UInt32(audioFile.length)
+
+            print("Audio Info:")
+            print("  Sample rate: \(format.sampleRate) Hz")
+            print("  Duration: \(String(format: "%.2f", Double(frameCount) / format.sampleRate)) seconds")
+            print()
+
+            // Read audio data
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                print("Failed to create audio buffer")
+                return
+            }
+
+            try audioFile.read(into: buffer)
+
+            // Convert to 16kHz mono if needed
+            let audioSamples: [Float]
+            if format.sampleRate != 16000 || format.channelCount != 1 {
+                print("Converting to 16kHz mono...")
+                audioSamples = try await convertTo16kHzMono(buffer)
+            } else {
+                guard let floatData = buffer.floatChannelData else {
+                    print("Failed to access audio data")
+                    return
+                }
+                audioSamples = Array(UnsafeBufferPointer(start: floatData[0], count: Int(frameCount)))
+            }
+
+            // Load models
+            print("Loading ASR models...")
+            let models = try await AsrModels.downloadAndLoad()
+
+            // Create ASR manager with debug config if needed
+            let asrConfig = ASRConfig(
+                sampleRate: 16000,
+                maxSymbolsPerFrame: 3,
+                enableDebug: enableDebug
+            )
+            let asrManager = AsrManager(config: asrConfig)
+            try await asrManager.initialize(models: models)
+
+            // Process with AsrManager.transcribe (uses ChunkProcessor with sliding window)
+            print("Starting transcription with sliding window...")
+            let startTime = Date()
+
+            let result = try await asrManager.transcribe(audioSamples)
+
+            let processingTime = Date().timeIntervalSince(startTime)
+            let audioDuration = Double(audioSamples.count) / 16000.0
+            let rtfx = audioDuration / processingTime
+
+            print()
+            print("==================================================")
+            print("📝 TRANSCRIPTION RESULT (Batch Mode)")
+            print("==================================================")
+            print()
+            print(result.text)
+            print()
+            print("==================================================")
+            print("Performance:")
+            print("  Audio duration: \(String(format: "%.2f", audioDuration))s")
+            print("  Processing time: \(String(format: "%.2f", processingTime))s")
+            print("  RTFx: \(String(format: "%.2f", rtfx))x")
+            print("  Confidence: \(String(format: "%.3f", result.confidence))")
+
+        } catch {
+            print("Error: \(error)")
+        }
     }
 
     /// Test audio conversion capabilities
@@ -226,7 +381,7 @@ enum StreamingTranscribeCommand {
             print("\nStatistics:")
             print("  Total volatile updates: \(await tracker.getVolatileCount())")
             print("  Total confirmed updates: \(await tracker.getConfirmedCount())")
-            print("  Final confirmed text: \(await streamingAsr.confirmedTranscript)")
+            print("\(await streamingAsr.confirmedTranscript)")
             print("  Final volatile text: \(await streamingAsr.volatileTranscript)")
 
             let processingTime = Date().timeIntervalSince(startTime)
@@ -251,14 +406,21 @@ enum StreamingTranscribeCommand {
                 fluidaudio transcribe <audio_file> [options]
 
             Options:
+                --batch            Use batch mode with sliding window (better accuracy)
                 --config <type>    Configuration type: default, low-latency, high-accuracy
                 --help, -h         Show this help message
 
-            Examples:
-                fluidaudio transcribe audio.wav
-                fluidaudio transcribe audio.wav --config low-latency
+            Environment Variables (for batch mode):
+                OVERLAP_RATIO=0.3  Set sliding window overlap (0.0-0.5, default 0.1)
+                BLANK_SKIP=0       Control blank frame skipping (default 0)
+                NON_BLANK_SKIP=0   Control non-blank frame skipping (default 1)
 
-            This command uses StreamingAsrManager which provides:
+            Examples:
+                fluidaudio transcribe audio.wav                    # Streaming mode
+                fluidaudio transcribe audio.wav --batch            # Batch mode with sliding window
+                OVERLAP_RATIO=0.2 fluidaudio transcribe audio.wav --batch
+
+            Streaming mode uses StreamingAsrManager which provides:
             - Automatic audio format conversion to 16kHz mono
             - Real-time transcription updates
             - Volatile (unconfirmed) and confirmed text states
