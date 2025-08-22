@@ -82,31 +82,6 @@ final class TdtDecoderTests: XCTestCase {
         }
     }
 
-    // MARK: - Calculate Next Time Index Tests
-
-    func testCalculateNextTimeIndex() {
-
-        // Test normal skip in long sequence
-        var nextIdx = decoder.calculateNextTimeIndex(currentIdx: 5, skip: 3, sequenceLength: 100)
-        XCTAssertEqual(nextIdx, 8)
-
-        // Test capped skip in long sequence
-        nextIdx = decoder.calculateNextTimeIndex(currentIdx: 5, skip: 10, sequenceLength: 100)
-        XCTAssertEqual(nextIdx, 9)  // Capped at 4
-
-        // Test skip at sequence boundary
-        nextIdx = decoder.calculateNextTimeIndex(currentIdx: 98, skip: 5, sequenceLength: 100)
-        XCTAssertEqual(nextIdx, 100)  // Should not exceed sequence length
-
-        // Test short sequence behavior
-        nextIdx = decoder.calculateNextTimeIndex(currentIdx: 2, skip: 5, sequenceLength: 8)
-        XCTAssertEqual(nextIdx, 4)  // Limited to 2 for short sequences
-
-        // Test zero skip
-        nextIdx = decoder.calculateNextTimeIndex(currentIdx: 5, skip: 0, sequenceLength: 100)
-        XCTAssertEqual(nextIdx, 5)  // No movement
-    }
-
     // MARK: - Prepare Decoder Input Tests
 
     func testPrepareDecoderInput() throws {

@@ -86,6 +86,11 @@ internal struct TdtDecoder {
         var lastTimestamp = -1
         var lastTimestampCount = 0
 
+        // Pre-allocate reusable MLMultiArrays for decoder to avoid repeated allocations
+        let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
+        let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
+        reusableTargetLengthArray[0] = NSNumber(value: 1)  // This never changes
+
         // Main decoding loop with optimizations
         while activeMask {
             var label = hypothesis.lastToken ?? sosId
@@ -94,7 +99,9 @@ internal struct TdtDecoder {
             let decoderResult = try runDecoderOptimized(
                 token: label,
                 state: hypothesis.decState ?? decoderState,
-                model: decoderModel
+                model: decoderModel,
+                targetArray: reusableTargetArray,
+                targetLengthArray: reusableTargetLengthArray
             )
 
             // Fast encoder frame access
@@ -121,19 +128,40 @@ internal struct TdtDecoder {
             }
 
             timeIndicesCurrentLabels = timeIndices
-            timeIndices += actualDuration
-            safeTimeIndices = min(timeIndices, lastTimestep)
+
+            // Check if we need to loop (when duration is 0, keep predicting at same time index)
+            var needLoop = (duration == 0) && !blankMask  // Don't loop for blank tokens
+            let originalNeedLoop = needLoop
+
+            // Track if we've advanced the time index yet
+            var hasAdvanced = false
+
+            // Only advance time if we have a non-zero duration
+            if !needLoop {
+                timeIndices += actualDuration
+                safeTimeIndices = min(timeIndices, lastTimestep)
+                hasAdvanced = true
+            }
+
             activeMask = timeIndices < encoderSequenceLength
-            var advanceMask = activeMask && blankMask
+            var advanceMask = activeMask && needLoop
 
-            // Optimized inner loop
-            while advanceMask {
-                timeIndicesCurrentLabels = timeIndices
+            // Track the current decoder result for state updates
+            var currentDecoderResult = decoderResult
 
+            // Add inner loop iteration limit to prevent runaway memory usage
+            var innerLoopCount = 0
+            let maxInnerLoopIterations = 10
+            var innerLoopTokensEmitted = 0
+
+            // Inner loop - continue predicting tokens at the same time index when duration == 0
+            while advanceMask && innerLoopCount < maxInnerLoopIterations {
+                innerLoopCount += 1
+                // Use the SAME encoder frame (don't advance safeTimeIndices)
                 let innerEncoderStep = encoderFrames[safeTimeIndices]
                 let innerLogits = try runJointOptimized(
                     encoderStep: innerEncoderStep,
-                    decoderOutput: decoderResult.output,
+                    decoderOutput: currentDecoderResult.output,
                     model: jointModel
                 )
 
@@ -151,37 +179,74 @@ internal struct TdtDecoder {
                     actualDuration = 1
                 }
 
-                timeIndices += actualDuration
-                safeTimeIndices = min(timeIndices, lastTimestep)
+                // Update hypothesis for non-blank tokens immediately
+                if label != blankId {
+                    hypothesis.ySequence.append(label)
+                    hypothesis.score += score
+                    hypothesis.timestamps.append(timeIndicesCurrentLabels)
+                    hypothesis.lastToken = label
+                    innerLoopTokensEmitted += 1
+
+                    // Update decoder state with the new token
+                    currentDecoderResult = try runDecoderOptimized(
+                        token: label,
+                        state: currentDecoderResult.newState,
+                        model: decoderModel,
+                        targetArray: reusableTargetArray,
+                        targetLengthArray: reusableTargetLengthArray
+                    )
+                    hypothesis.decState = currentDecoderResult.newState
+                }
+
+                // Check if we should continue looping
+                needLoop = (moreDuration == 0)
+
+                // If we're not looping anymore, advance the time index
+                if !needLoop && !hasAdvanced {
+                    timeIndices += actualDuration
+                    safeTimeIndices = min(timeIndices, lastTimestep)
+                    hasAdvanced = true
+                }
+
                 activeMask = timeIndices < encoderSequenceLength
-                advanceMask = activeMask && blankMask
+                advanceMask = activeMask && needLoop
             }
 
-            // Update hypothesis
-            if label != blankId {
+            // Update hypothesis only if not already updated in inner loop
+            if label != blankId && !originalNeedLoop {
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
-                hypothesis.decState = decoderResult.newState
+                hypothesis.decState = currentDecoderResult.newState
                 hypothesis.lastToken = label
+            } else if originalNeedLoop {
+                // If we went through the inner loop, use the updated decoder state
+                hypothesis.decState = currentDecoderResult.newState
             }
 
-            // Force blank logic
+            // Force blank logic - account for tokens emitted in inner loop
             if let maxSymbols = config.tdtConfig.maxSymbolsPerStep {
-                if label != blankId && lastTimestamp == timeIndices
-                    && lastTimestampCount >= maxSymbols
-                {
+                let totalTokensAtTimeIndex =
+                    originalNeedLoop
+                    ? innerLoopTokensEmitted
+                    : (lastTimestamp == timeIndices ? lastTimestampCount + (label != blankId ? 1 : 0) : 1)
+
+                if totalTokensAtTimeIndex >= maxSymbols {
                     timeIndices += 1
                     safeTimeIndices = min(timeIndices, lastTimestep)
                     activeMask = timeIndices < encoderSequenceLength
+                    lastTimestamp = timeIndices - 1  // Reset for the forced advancement
+                    lastTimestampCount = 0
                 }
             }
 
+            // Update timestamp tracking
             if lastTimestamp == timeIndices {
-                lastTimestampCount += 1
+                let tokensToAdd = originalNeedLoop ? innerLoopTokensEmitted : (label != blankId ? 1 : 0)
+                lastTimestampCount += tokensToAdd
             } else {
                 lastTimestamp = timeIndices
-                lastTimestampCount = 1
+                lastTimestampCount = originalNeedLoop ? innerLoopTokensEmitted : (label != blankId ? 1 : 0)
             }
         }
 
@@ -254,15 +319,14 @@ internal struct TdtDecoder {
     private func runDecoderOptimized(
         token: Int,
         state: DecoderState,
-        model: MLModel
+        model: MLModel,
+        targetArray: MLMultiArray,
+        targetLengthArray: MLMultiArray
     ) throws -> (output: MLFeatureProvider, newState: DecoderState) {
 
-        // Create input arrays
-        let targetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
+        // Reuse pre-allocated arrays
         targetArray[0] = NSNumber(value: token)
-
-        let targetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
-        targetLengthArray[0] = NSNumber(value: 1)
+        // targetLengthArray[0] is already set to 1 and never changes
 
         let input = try MLDictionaryFeatureProvider(dictionary: [
             "targets": MLFeatureValue(multiArray: targetArray),
@@ -360,35 +424,6 @@ internal struct TdtDecoder {
         }
     }
 
-    /// Calculate next time index based on duration prediction
-    ///
-    /// This implementation is based on NVIDIA's NeMo Parakeet TDT decoder optimization.
-    /// The adaptive skip logic ensures stability for both short and long utterances.
-    /// Source: Adapted from NVIDIA NeMo's TDT decoding strategy for production use.
-    ///
-    /// - Parameters:
-    ///   - currentIdx: Current position in the audio sequence
-    ///   - skip: Number of frames to skip (predicted by the model)
-    ///   - sequenceLength: Total number of frames in the audio
-    /// - Returns: The next frame index to process
-    internal func calculateNextTimeIndex(currentIdx: Int, skip: Int, sequenceLength: Int) -> Int {
-        // Determine the actual number of frames to skip
-        let actualSkip: Int
-
-        if sequenceLength < 10 && skip > 2 {
-            // For very short audio (< 10 frames), limit skip to 2 frames max
-            // This ensures we don't miss important tokens in brief utterances
-            actualSkip = 2
-        } else {
-            // For normal audio, allow up to 4 frames skip
-            // Even if model predicts more, cap at 4 for stability
-            actualSkip = min(skip, 4)
-        }
-
-        // Move forward by actualSkip frames, but don't exceed sequence bounds
-        return min(currentIdx + actualSkip, sequenceLength)
-    }
-
     // MARK: - Private Helper Methods
 
     /// Split joint logits into token and duration components with optimized memory access
@@ -399,6 +434,7 @@ internal struct TdtDecoder {
     ) {
         let totalElements = logits.count
         let durationElements = config.tdtConfig.durations.count
+        // 8193 for tdt V3
         let vocabSize = totalElements - durationElements
 
         guard totalElements >= durationElements else {
