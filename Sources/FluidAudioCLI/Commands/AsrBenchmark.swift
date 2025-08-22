@@ -72,14 +72,13 @@ public class ASRBenchmark {
 
     /// Run ASR benchmark on LibriSpeech
     public func runLibriSpeechBenchmark(
-        asrManager: AsrManager, subset: String = "test-clean"
+        asrManager: AsrManager, subset: String = "test-clean", singleFile: String? = nil
     )
         async throws -> [ASRBenchmarkResult]
     {
         #if DEBUG
         print("")
         print("WARNING: Running in DEBUG mode!")
-        print("Performance will be significantly slower (~2x).")
         print("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
         print("")
         // Add a small delay so user sees the warning
@@ -95,7 +94,16 @@ public class ASRBenchmark {
         let audioFiles = try collectLibriSpeechFiles(from: datasetPath)
 
         var filteredFiles = audioFiles
-        if config.longAudioOnly {
+
+        // Handle single file processing
+        if let singleFileName = singleFile {
+            let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
+            filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
+            if filteredFiles.isEmpty {
+                throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+            }
+            print("🔍 Processing single file: \(targetFileName)")
+        } else if config.longAudioOnly {
             filteredFiles = try await filterFilesByDuration(
                 audioFiles, minDuration: 4.0, maxDuration: 20.0)
             print(
@@ -103,7 +111,7 @@ public class ASRBenchmark {
             )
         }
 
-        let maxFiles = config.maxFiles ?? filteredFiles.count  // Process all files if not specified
+        let maxFiles = singleFile != nil ? filteredFiles.count : (config.maxFiles ?? filteredFiles.count)
         let filesToProcess = Array(filteredFiles.prefix(maxFiles))
 
         print(
@@ -128,6 +136,9 @@ public class ASRBenchmark {
                 }
 
                 // Reset decoder state for each new file
+                if config.debugMode {
+                    logger.info("🔍 Resetting decoder state for new file: \(audioFile.fileName)")
+                }
                 try await asrManager.resetDecoderState(for: .microphone)
 
                 let result: ASRBenchmarkResult
@@ -195,10 +206,13 @@ public class ASRBenchmark {
         let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
 
         if config.debugMode {
-            logger.info("Starting streaming simulation for \(file.fileName)")
-            logger.info("  Audio length: \(audioLength)s")
-            logger.info("  Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
-            logger.info("  Samples per chunk: \(samplesPerChunk)")
+            logger.info("🔍 Starting streaming simulation for \(file.fileName)")
+            logger.info("🔍   Audio length: \(audioLength)s")
+            logger.info("🔍   Total samples: \(audioSamples.count)")
+            logger.info("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
+            logger.info("🔍   Samples per chunk: \(samplesPerChunk)")
+            let totalChunks = (audioSamples.count + samplesPerChunk - 1) / samplesPerChunk
+            logger.info("🔍   Expected total chunks: \(totalChunks)")
         }
 
         // For streaming, we'll use the full file but measure chunk-by-chunk processing
@@ -209,10 +223,19 @@ public class ASRBenchmark {
         // Process the full audio file but track metrics as if streaming
         while processedSamples < audioSamples.count {
             let chunkStartTime = Date()
+            let chunkNumber = chunkProcessingTimes.count + 1
 
             // Calculate how many samples we've "streamed" so far
             let nextChunkEnd = min(processedSamples + samplesPerChunk, audioSamples.count)
             let totalSamplesToProcess = nextChunkEnd
+            let chunkSamples = nextChunkEnd - processedSamples
+            let isLastChunk = nextChunkEnd >= audioSamples.count
+
+            if config.debugMode {
+                logger.info(
+                    "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
+                )
+            }
 
             // Process all audio up to this point (simulating accumulated streaming)
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
@@ -224,16 +247,23 @@ public class ASRBenchmark {
             }
 
             // Update accumulated text
+            let previousText = accumulatedText
             accumulatedText = result.text
 
             let chunkProcessingTime = Date().timeIntervalSince(chunkStartTime)
             chunkProcessingTimes.append(chunkProcessingTime)
 
             if config.debugMode {
-                let chunkDuration = Double(nextChunkEnd - processedSamples) / 16000.0
+                let chunkDuration = Double(chunkSamples) / 16000.0
                 logger.info(
-                    "  Chunk \(chunkProcessingTimes.count): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s"
+                    "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s"
                 )
+
+                if isLastChunk {
+                    logger.info(
+                        "🔍   FINAL CHUNK \(chunkNumber): text change: '\(previousText)' -> '\(accumulatedText)'")
+                    logger.info("🔍   FINAL CHUNK processing complete")
+                }
             }
 
             processedSamples = nextChunkEnd
@@ -554,7 +584,7 @@ extension ASRBenchmark {
     /// Print detailed analysis for a single file
     private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) {
         let werPercent = result.metrics.wer * 100
-        print("\n📄 File: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%)")
+        print("\nFile: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%)")
         print(String(repeating: "-", count: 60))
 
         // Normalize the texts for comparison
@@ -567,8 +597,8 @@ extension ASRBenchmark {
         // Generate inline diff
         let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
-        print("\nReference:  \(referenceDiff)")
-        print("Hypothesis: \(hypothesisDiff)")
+        print("\n Normalized Reference:\t\(referenceDiff)")
+        print("Normalized Hypothesis:\t\(hypothesisDiff)")
     }
 
     /// Generate word-level differences between reference and hypothesis
@@ -764,6 +794,7 @@ extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
         var subset = "test-clean"
         var maxFiles: Int?
+        var singleFile: String?
         var outputFile = "asr_benchmark_results.json"
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
@@ -787,6 +818,11 @@ extension ASRBenchmark {
             case "--max-files":
                 if i + 1 < arguments.count {
                     maxFiles = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--single-file":
+                if i + 1 < arguments.count {
+                    singleFile = arguments[i + 1]
                     i += 1
                 }
             case "--output":
@@ -819,7 +855,11 @@ extension ASRBenchmark {
         }
 
         print("\nStarting ASR benchmark on LibriSpeech \(subset)")
-        print("   Max files: \(maxFiles?.description ?? "all")")
+        if singleFile != nil {
+            print("   Processing single file: \(singleFile!)")
+        } else {
+            print("   Max files: \(maxFiles?.description ?? "all")")
+        }
         print("   Output file: \(outputFile)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
@@ -866,14 +906,6 @@ extension ASRBenchmark {
 
                 // Profile Neural Engine optimizations
                 asrManager.profilePerformance()
-
-                if ProcessInfo.processInfo.environment["CI"] != nil {
-                    print("🔍 CI: Verifying ASR models with test audio...")
-                    let testSamples = Array(repeating: Float(0.0), count: 16000)  // 1 second of silence
-                    let testResult = try await asrManager.transcribe(testSamples)
-                    print("   Test transcription result: '\(testResult.text)'")
-                    print("   Models appear to be working: \(asrManager.isAvailable)")
-                }
             } catch {
                 print("Failed to initialize ASR system: \(error)")
                 print("   Error type: \(type(of: error))")
@@ -908,7 +940,7 @@ extension ASRBenchmark {
             }
 
             let results = try await benchmark.runLibriSpeechBenchmark(
-                asrManager: asrManager, subset: subset)
+                asrManager: asrManager, subset: subset, singleFile: singleFile)
 
             let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
             let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)
@@ -939,11 +971,6 @@ extension ASRBenchmark {
             )
 
             print("--- Benchmark Results ---")
-            #if DEBUG
-            print("   Mode: DEBUG (slow performance)")
-            #else
-            print("   Mode: RELEASE (optimal performance)")
-            #endif
             print("   Dataset: \(config.dataset) \(config.subset)")
             print("   Files processed: \(results.count)")
             let overallRTFx = totalAudioDuration / totalProcessingTime
@@ -1091,6 +1118,7 @@ extension ASRBenchmark {
                 --subset <name>           LibriSpeech subset to use (default: test-clean)
                                          Available: test-clean, test-other, dev-clean, dev-other
                 --max-files <number>      Maximum number of files to process (default: all)
+                --single-file <id>        Process only a specific file (e.g., 1089-134686-0011)
                 --output <file>           Output JSON file path (default: asr_benchmark_results.json)
                 --debug                   Enable debug logging
                 --auto-download           Automatically download LibriSpeech dataset (default)
@@ -1118,6 +1146,9 @@ extension ASRBenchmark {
 
                 # Benchmark with 100 files from test-other subset
                 fluidaudio asr-benchmark --subset test-other --max-files 100
+                
+                # Process a single specific file
+                fluidaudio asr-benchmark --single-file 1089-134686-0011 --debug
 
                 # Test streaming performance with 0.5s chunks
                 fluidaudio asr-benchmark --test-streaming --chunk-duration 0.5
