@@ -2,6 +2,7 @@
 import AVFoundation
 import FluidAudio
 import OSLog
+import Foundation
 
 /// LibriSpeech dataset manager and ASR benchmarking
 @available(macOS 13.0, *)
@@ -139,10 +140,34 @@ public class ASRBenchmark {
                         asrManager: asrManager, file: audioFile)
                 }
 
-                // Only log files with WER > 5%
+                // Log file processing details
+                print("   =========================================")
+                print("   File: \(audioFile.fileName)")
+                print("   Duration: \(String(format: "%.2f", result.audioLength))s")
+
+                // Show actual chunk information
+                if let chunkOutputs = result.chunkOutputs {
+                    print("   Chunks processed: \(chunkOutputs.count)")
+                    print("   Transcription calls: \(chunkOutputs.count)")
+
+                    // Display chunk outputs
+                    print("   Chunk outputs:")
+                    for chunk in chunkOutputs {
+                        let timeRange =
+                            "[\(String(format: "%.1f", chunk.startTime))-\(String(format: "%.1f", chunk.endTime))s]"
+                        print("     \(timeRange): \"\(chunk.text)\"")
+                    }
+                } else if let streamingMetrics = result.streamingMetrics {
+                    print("   Chunks processed: \(streamingMetrics.totalChunks)")
+                    print("   Transcription calls: \(streamingMetrics.totalChunks)")
+                } else {
+                    print("   Single chunk processed (no chunking data available)")
+                }
+
+                // Only show error details for files with WER > 5%
                 if result.metrics.wer > 0.05 {
                     print(
-                        "\n⚠️ File: \(audioFile.fileName) - WER: \(String(format: "%.1f%%", result.metrics.wer * 100))")
+                        "   ⚠️ WER: \(String(format: "%.1f%%", result.metrics.wer * 100))")
                     print("   Hypothesis: \(result.hypothesis)")
 
                     // Show normalized versions with highlighted differences
@@ -154,22 +179,8 @@ public class ASRBenchmark {
                     )
                     print("   Normalized Reference: \(highlightedComparison.reference)")
                     print("   Normalized Hypothesis: \(highlightedComparison.hypothesis)")
-
-                    // Check for common issues
-                    if result.hypothesis.count < result.reference.count / 2 {
-                        print("   🔴 ISSUE: Output appears truncated (less than 50% of reference length)")
-                    }
-
-                    // Check if hypothesis ends abruptly
-                    let lastWords = result.hypothesis.suffix(20)
-                    if lastWords.contains("ory") || lastWords.contains("ess") || lastWords.contains("ce") {
-                        print("   🔴 ISSUE: Possible decoding error - incomplete word at end")
-                    }
-
-                    // Check for repeated dots or spaces
-                    if result.hypothesis.contains(". .") || result.hypothesis.contains("  ") {
-                        print("   🔴 ISSUE: Unusual formatting with repeated punctuation/spaces")
-                    }
+                } else {
+                    print("   ✅ WER: \(String(format: "%.1f%%", result.metrics.wer * 100))")
                 }
 
                 results.append(result)
@@ -194,7 +205,7 @@ public class ASRBenchmark {
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
-        let asrResult = try await transcribeAudio(
+        let (asrResult, chunkOutputs) = try await transcribeAudioWithChunks(
             asrManager: asrManager, audioSamples: audioSamples)
 
         let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
@@ -207,7 +218,8 @@ public class ASRBenchmark {
             reference: file.transcript,
             metrics: metrics,
             processingTime: processingTime,
-            audioLength: audioLength
+            audioLength: audioLength,
+            chunkOutputs: chunkOutputs
         )
     }
 
@@ -307,14 +319,140 @@ public class ASRBenchmark {
         )
     }
 
+    /// Transcribe audio with chunk tracking - captures detailed chunk outputs
+    internal func transcribeAudioWithChunks(
+        asrManager: AsrManager, audioSamples: [Float]
+    ) async throws -> (result: ASRResult, chunkOutputs: [ChunkOutput]) {
+
+        let audioLength = Double(audioSamples.count) / 16000.0
+
+        // For short audio (<=10s), use single chunk processing
+        if audioLength <= 10.0 {
+            let chunkStartTime = Date()
+            let result = try await asrManager.transcribe(audioSamples)
+            let processingTime = Date().timeIntervalSince(chunkStartTime)
+
+            let chunkOutput = ChunkOutput(
+                chunkIndex: 0,
+                startTime: 0.0,
+                endTime: audioLength,
+                text: result.text,
+                tokenCount: result.text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count,
+                processingTime: processingTime
+            )
+
+            return (result: result, chunkOutputs: [chunkOutput])
+        }
+
+        // For longer audio, use sliding window with chunk tracking
+        let chunkSizeSeconds = 10.0  // 10 second chunks
+        let overlapSeconds = 1.0  // 1 second overlap
+        let stepSizeSeconds = chunkSizeSeconds - overlapSeconds  // 9 seconds
+        let chunkSizeSamples = Int(chunkSizeSeconds * 16000.0)
+        let stepSizeSamples = Int(stepSizeSeconds * 16000.0)
+
+        var chunkOutputs: [ChunkOutput] = []
+        var position = 0
+        var chunkIndex = 0
+        var previousTokens: [String] = []
+        var allText = ""
+
+        while position < audioSamples.count {
+            let chunkStartTime = Date()
+
+            let endPosition = min(position + chunkSizeSamples, audioSamples.count)
+            let chunkSamples = Array(audioSamples[position..<endPosition])
+
+            // Pad audio if needed (simplified local implementation)
+            let paddedChunk: [Float]
+            if chunkSamples.count < chunkSizeSamples {
+                paddedChunk = chunkSamples + Array(repeating: 0, count: chunkSizeSamples - chunkSamples.count)
+            } else {
+                paddedChunk = chunkSamples
+            }
+
+            // Calculate actual time bounds for this chunk
+            let startTimeSeconds = Double(position) / 16000.0
+            let endTimeSeconds = Double(endPosition) / 16000.0
+
+            // Get transcription for this chunk
+            let chunkResult = try await asrManager.transcribe(paddedChunk)
+            let processingTime = Date().timeIntervalSince(chunkStartTime)
+
+            // Extract words from the result
+            let chunkWords = chunkResult.text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+
+            // For overlapping chunks, try to identify new content
+            var newWords: [String] = []
+            if chunkIndex > 0 && !previousTokens.isEmpty && !chunkWords.isEmpty {
+                // Find where the new content starts by looking for overlap
+                var skipCount = 0
+                let searchWindow = min(previousTokens.count, chunkWords.count, 10)
+
+                for windowSize in (1...searchWindow).reversed() {
+                    let suffix = Array(previousTokens.suffix(windowSize))
+                    if chunkWords.starts(with: suffix) {
+                        skipCount = windowSize
+                        break
+                    }
+                }
+
+                newWords = Array(chunkWords.dropFirst(skipCount))
+
+                if config.debugMode {
+                    print(
+                        "DEBUG: Chunk \(chunkIndex) overlap - skipping \(skipCount) words, adding \(newWords.count) new words"
+                    )
+                }
+            } else {
+                newWords = chunkWords
+            }
+
+            let chunkText = newWords.joined(separator: " ")
+
+            // Create chunk output
+            let chunkOutput = ChunkOutput(
+                chunkIndex: chunkIndex,
+                startTime: startTimeSeconds,
+                endTime: endTimeSeconds,
+                text: chunkText,
+                tokenCount: newWords.count,
+                processingTime: processingTime
+            )
+            chunkOutputs.append(chunkOutput)
+
+            // Accumulate text
+            if !chunkText.isEmpty {
+                if !allText.isEmpty && !allText.hasSuffix(" ") && !chunkText.hasPrefix(" ") {
+                    allText += " "
+                }
+                allText += chunkText
+            }
+
+            previousTokens = chunkWords
+            position += stepSizeSamples
+            chunkIndex += 1
+        }
+
+        // Create final result
+        let finalResult = ASRResult(
+            text: allText,
+            confidence: 1.0,
+            duration: audioLength,
+            processingTime: chunkOutputs.reduce(0.0) { $0 + $1.processingTime },
+            tokenTimings: nil
+        )
+
+        return (result: finalResult, chunkOutputs: chunkOutputs)
+    }
+
     /// Transcribe audio - now supports long files through AsrManager chunking
     internal func transcribeAudio(
         asrManager: AsrManager, audioSamples: [Float]
     ) async throws
         -> ASRResult
     {
-        // Use optimized transcription with Neural Engine optimizations
-        let result = try await asrManager.transcribe(audioSamples)
+        let (result, _) = try await transcribeAudioWithChunks(asrManager: asrManager, audioSamples: audioSamples)
 
         if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
             print("⚠️ CI: Transcription returned empty text")

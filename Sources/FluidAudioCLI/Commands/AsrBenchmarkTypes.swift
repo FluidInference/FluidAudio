@@ -32,6 +32,32 @@ public struct ASRMetrics: Sendable {
     }
 }
 
+/// Individual chunk output from ASR processing
+public struct ChunkOutput: Sendable {
+    public let chunkIndex: Int
+    public let startTime: Double  // Start time in seconds
+    public let endTime: Double  // End time in seconds
+    public let text: String  // Transcribed text for this chunk
+    public let tokenCount: Int  // Number of tokens generated
+    public let processingTime: Double  // Time to process this chunk
+
+    public init(
+        chunkIndex: Int,
+        startTime: Double,
+        endTime: Double,
+        text: String,
+        tokenCount: Int,
+        processingTime: Double
+    ) {
+        self.chunkIndex = chunkIndex
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+        self.tokenCount = tokenCount
+        self.processingTime = processingTime
+    }
+}
+
 /// Streaming-specific metrics for ASR benchmarking
 public struct StreamingMetrics: Sendable {
     public let avgChunkProcessingTime: Double  // Average time to process each chunk
@@ -71,10 +97,11 @@ public struct ASRBenchmarkResult: Sendable {
     public let audioLength: TimeInterval
     public let rtfx: Double  // Real-Time Factor (inverse)
     public let streamingMetrics: StreamingMetrics?  // Optional streaming metrics
+    public let chunkOutputs: [ChunkOutput]?  // Optional array of chunk outputs
 
     public init(
         fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval,
-        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil
+        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil, chunkOutputs: [ChunkOutput]? = nil
     ) {
         self.fileName = fileName
         self.hypothesis = hypothesis
@@ -84,6 +111,7 @@ public struct ASRBenchmarkResult: Sendable {
         self.audioLength = audioLength
         self.rtfx = audioLength / processingTime
         self.streamingMetrics = streamingMetrics
+        self.chunkOutputs = chunkOutputs
     }
 }
 
