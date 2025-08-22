@@ -799,7 +799,7 @@ extension ASRBenchmark {
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
-        var streamingChunkDuration = 0.1  // Default 100ms chunks
+        var streamingChunkDuration = 10.0
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -1151,7 +1151,7 @@ extension ASRBenchmark {
                 fluidaudio asr-benchmark --single-file 1089-134686-0011 --debug
 
                 # Test streaming performance with 0.5s chunks
-                fluidaudio asr-benchmark --test-streaming --chunk-duration 0.5
+                fluidaudio asr-benchmark --test-streaming --chunk-duration 1-
 
                 # Debug mode with custom output file
                 fluidaudio asr-benchmark --debug --output my_results.json
