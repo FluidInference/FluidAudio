@@ -189,23 +189,22 @@ public final class AsrManager {
             throw ASRError.notInitialized
         }
 
-        var freshState = try TdtDecoderState()
+        // Reset the existing decoder state to clear all cached values including predictorOutput
+        decoderState.reset()
 
         let initDecoderInput = try prepareDecoderInput(
-            hiddenState: freshState.hiddenState,
-            cellState: freshState.cellState
+            hiddenState: decoderState.hiddenState,
+            cellState: decoderState.cellState
         )
 
         let initDecoderOutput = try decoderModel.prediction(
             from: initDecoderInput, options: predictionOptions)
 
-        freshState.update(from: initDecoderOutput)
+        decoderState.update(from: initDecoderOutput)
 
         if config.enableDebug {
             logger.info("Decoder state initialized cleanly")
         }
-
-        decoderState = freshState
     }
 
     private func loadModel(

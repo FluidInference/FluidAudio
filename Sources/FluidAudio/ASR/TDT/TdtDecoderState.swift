@@ -67,6 +67,14 @@ struct TdtDecoderState {
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
     }
+
+    /// Reset all state variables to initial values
+    mutating func reset() {
+        hiddenState.resetData(to: 0)
+        cellState.resetData(to: 0)
+        lastToken = nil
+        predictorOutput = nil
+    }
 }
 
 extension MLMultiArray {

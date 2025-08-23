@@ -136,9 +136,7 @@ public class ASRBenchmark {
                 }
 
                 // Reset decoder state for each new file
-                if config.debugMode {
-                    logger.info("🔍 Resetting decoder state for new file: \(audioFile.fileName)")
-                }
+                print("Resetting decoder state for new file: \(audioFile.fileName)")
                 try await asrManager.resetDecoderState(for: .microphone)
 
                 let result: ASRBenchmarkResult
@@ -171,6 +169,9 @@ public class ASRBenchmark {
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
+        print(
+            "Transcribing \(file.fileName) with \(audioSamples.count) samples (\(String(format: "%.2f", audioLength))s)"
+        )
         let asrResult = try await transcribeAudio(
             asrManager: asrManager, audioSamples: audioSamples)
 

@@ -234,6 +234,48 @@ final class TdtDecoderStateTests: XCTestCase {
         XCTAssertEqual(totalElements, expectedElements * 2)
     }
 
+    // MARK: - Reset Tests
+
+    func testDecoderStateReset() throws {
+        var state = try TdtDecoderState()
+
+        // Set some test values
+        state.hiddenState[0] = NSNumber(value: 42.0)
+        state.cellState[0] = NSNumber(value: 24.0)
+        state.lastToken = 123
+
+        // Create a mock predictorOutput
+        let mockPredictorOutput = try MLMultiArray(shape: [1, 1, 256], dataType: .float32)
+        mockPredictorOutput[0] = NSNumber(value: 99.0)
+        state.predictorOutput = mockPredictorOutput
+
+        // Verify initial state is set
+        XCTAssertEqual(state.hiddenState[0].floatValue, 42.0, accuracy: 0.0001)
+        XCTAssertEqual(state.cellState[0].floatValue, 24.0, accuracy: 0.0001)
+        XCTAssertEqual(state.lastToken, 123)
+        XCTAssertNotNil(state.predictorOutput)
+        XCTAssertEqual(state.predictorOutput?[0].floatValue ?? 0, 99.0, accuracy: 0.0001)
+
+        // Reset the state
+        state.reset()
+
+        // Verify everything is reset
+        XCTAssertEqual(state.hiddenState[0].floatValue, 0.0, accuracy: 0.0001)
+        XCTAssertEqual(state.cellState[0].floatValue, 0.0, accuracy: 0.0001)
+        XCTAssertNil(state.lastToken)
+        XCTAssertNil(state.predictorOutput)
+
+        // Check that all elements are zero
+        for i in 0..<state.hiddenState.count {
+            XCTAssertEqual(
+                state.hiddenState[i].floatValue, 0.0, accuracy: 0.0001,
+                "Hidden state at index \(i) should be zero after reset")
+            XCTAssertEqual(
+                state.cellState[i].floatValue, 0.0, accuracy: 0.0001,
+                "Cell state at index \(i) should be zero after reset")
+        }
+    }
+
     // MARK: - Thread Safety Tests
 
     func testDecoderStateConcurrentAccess() throws {
