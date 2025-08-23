@@ -54,6 +54,7 @@ internal struct TdtDecoder {
     // Parakeet-TDT-0.6b-v3 uses 8192 regular tokens + blank token at index 8192
     private var blankId: Int = 8192
     private var sosId: Int = 8192  // SOS same as blank for TDT models
+    private static var hasLoggedDimensions = false
 
     /// Execute optimized TDT decoding
     func decode(
@@ -261,6 +262,28 @@ internal struct TdtDecoder {
         // Save the last token for the next chunk
         decoderState.lastToken = hypothesis.lastToken
 
+        let enableDiagnostics = ProcessInfo.processInfo.environment["CHUNK_DEBUG"] != nil || config.enableDebug
+        if enableDiagnostics {
+            logger.info("\n🎯 TDT Decode Summary:")
+            logger.info("  - Total tokens: \(hypothesis.ySequence.count)")
+            logger.info("  - Final score: \(String(format: "%.4f", hypothesis.score))")
+
+            // Count token types
+            let blankCount = hypothesis.ySequence.filter { $0 == blankId }.count
+            let periodCount = hypothesis.ySequence.filter { $0 == 7883 }.count
+            logger.info("  - Blank tokens: \(blankCount)")
+            logger.info("  - Period tokens: \(periodCount)")
+
+            if hypothesis.ySequence.count > 0 {
+                let uniqueTokens = Set(hypothesis.ySequence).count
+                logger.info("  - Unique tokens: \(uniqueTokens)")
+
+                if uniqueTokens == 1 && hypothesis.ySequence.contains(7883) {
+                    logger.error("  ❌ ONLY PERIODS GENERATED IN TDT!")
+                }
+            }
+        }
+
         return hypothesis.ySequence
     }
 
@@ -389,8 +412,53 @@ internal struct TdtDecoder {
             options: predictionOptions
         )
 
-        return try extractFeatureValue(
+        let logits = try extractFeatureValue(
             from: output, key: "logits", errorMessage: "Joint network output missing logits")
+
+        // Diagnostic logging for joint network output
+        let enableDiagnostics = ProcessInfo.processInfo.environment["CHUNK_DEBUG"] != nil
+        if enableDiagnostics {
+            // Check logits characteristics
+            var maxLogit: Float = -Float.infinity
+            var minLogit: Float = Float.infinity
+            var sumLogits: Float = 0
+            let logitCount = logits.count
+
+            for i in 0..<min(logitCount, 100) {  // Sample first 100 values
+                let value = logits[i].floatValue
+                maxLogit = max(maxLogit, value)
+                minLogit = min(minLogit, value)
+                sumLogits += value
+            }
+
+            let avgLogit = sumLogits / Float(min(logitCount, 100))
+
+            // Find top 3 logits
+            var topIndices: [(index: Int, value: Float)] = []
+            for i in 0..<min(logitCount, 8193) {  // Check vocab range
+                let value = logits[i].floatValue
+                topIndices.append((index: i, value: value))
+            }
+            topIndices.sort { $0.value > $1.value }
+            let top3 = topIndices.prefix(3)
+
+            logger.debug("Joint network output:")
+            logger.debug("  - Logit range: [\(String(format: "%.2f", minLogit)), \(String(format: "%.2f", maxLogit))]")
+            logger.debug("  - Avg logit: \(String(format: "%.2f", avgLogit))")
+            logger.debug(
+                "  - Top 3: \(top3.map { "\($0.index):\(String(format: "%.2f", $0.value))" }.joined(separator: ", "))")
+
+            // Check if period token dominates
+            if logitCount > 7883 {
+                let periodScore = logits[7883].floatValue
+                let blankScore = logits[8192].floatValue
+                logger.debug(
+                    "  - Period(7883): \(String(format: "%.2f", periodScore)), Blank(8192): \(String(format: "%.2f", blankScore))"
+                )
+            }
+        }
+
+        return logits
     }
     /// Predict token and duration from joint logits
     internal func predictTokenAndDuration(
@@ -446,10 +514,22 @@ internal struct TdtDecoder {
             throw ASRError.processingFailed("Logits dimension mismatch")
         }
 
+        // Always log dimensions on first call for debugging
+        if !Self.hasLoggedDimensions {
+            logger.info(
+                "TDT logits dimensions: total=\(totalElements), vocab=\(vocabSize), duration=\(durationElements)")
+            Self.hasLoggedDimensions = true
+        }
+
         // Sanity check for expected logits size (strict for Parakeet‑TDT‑v3)
         let expectedTotal = 8193 + durationBins.count
         if totalElements != expectedTotal {
             logger.warning("TDT logits size unexpected: got \(totalElements), expected \(expectedTotal)")
+            logger.warning("  vocabSize=\(vocabSize), durationElements=\(durationElements)")
+            // Log if blank token might be out of bounds
+            if blankId >= vocabSize {
+                logger.error("CRITICAL: blankId \(blankId) is out of bounds for vocabSize \(vocabSize)")
+            }
         }
 
         // Create views directly without copying - zero-copy operation

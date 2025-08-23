@@ -226,7 +226,7 @@ enum StreamingTranscribeCommand {
             print("\nStatistics:")
             print("  Total volatile updates: \(await tracker.getVolatileCount())")
             print("  Total confirmed updates: \(await tracker.getConfirmedCount())")
-            print("  Final confirmed text: \(await streamingAsr.confirmedTranscript)")
+            print("\(await streamingAsr.confirmedTranscript)")
             print("  Final volatile text: \(await streamingAsr.volatileTranscript)")
 
             let processingTime = Date().timeIntervalSince(startTime)

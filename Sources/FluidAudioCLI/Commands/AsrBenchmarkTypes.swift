@@ -61,6 +61,27 @@ public struct StreamingMetrics: Sendable {
     }
 }
 
+/// Per-chunk transcription detail
+public struct ChunkTranscription: Sendable {
+    public let chunkIndex: Int
+    public let startTime: Double
+    public let endTime: Double
+    public let text: String
+    public let audioSamples: Int
+    public let paddingSamples: Int
+
+    public init(
+        chunkIndex: Int, startTime: Double, endTime: Double, text: String, audioSamples: Int, paddingSamples: Int
+    ) {
+        self.chunkIndex = chunkIndex
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+        self.audioSamples = audioSamples
+        self.paddingSamples = paddingSamples
+    }
+}
+
 /// Single ASR benchmark result
 public struct ASRBenchmarkResult: Sendable {
     public let fileName: String
@@ -71,10 +92,12 @@ public struct ASRBenchmarkResult: Sendable {
     public let audioLength: TimeInterval
     public let rtfx: Double  // Real-Time Factor (inverse)
     public let streamingMetrics: StreamingMetrics?  // Optional streaming metrics
+    public let chunkTranscriptions: [ChunkTranscription]?  // Per-chunk outputs
 
     public init(
         fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval,
-        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil
+        audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil,
+        chunkTranscriptions: [ChunkTranscription]? = nil
     ) {
         self.fileName = fileName
         self.hypothesis = hypothesis
@@ -84,6 +107,7 @@ public struct ASRBenchmarkResult: Sendable {
         self.audioLength = audioLength
         self.rtfx = audioLength / processingTime
         self.streamingMetrics = streamingMetrics
+        self.chunkTranscriptions = chunkTranscriptions
     }
 }
 
@@ -109,10 +133,13 @@ public struct ASRBenchmarkConfig: Sendable {
     public let longAudioOnly: Bool
     public let testStreaming: Bool
     public let streamingChunkDuration: Double
+    public let minDurationSeconds: Double?
+    public let overlapSeconds: Double?
 
     public init(
         dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false,
-        longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1
+        longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1,
+        minDurationSeconds: Double? = nil, overlapSeconds: Double? = nil
     ) {
         self.dataset = dataset
         self.subset = subset
@@ -121,6 +148,8 @@ public struct ASRBenchmarkConfig: Sendable {
         self.longAudioOnly = longAudioOnly
         self.testStreaming = testStreaming
         self.streamingChunkDuration = streamingChunkDuration
+        self.minDurationSeconds = minDurationSeconds
+        self.overlapSeconds = overlapSeconds
     }
 }
 

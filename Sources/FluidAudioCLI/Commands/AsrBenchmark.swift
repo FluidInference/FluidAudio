@@ -95,19 +95,45 @@ public class ASRBenchmark {
 
         var filteredFiles = audioFiles
 
-        // Handle single file processing
+        // Handle single file processing - support both LibriSpeech IDs and direct file paths
         if let singleFileName = singleFile {
-            let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
-            filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
-            if filteredFiles.isEmpty {
-                throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+            // Check if it's a direct file path
+            if FileManager.default.fileExists(atPath: singleFileName) {
+                // Direct file path provided
+                let url = URL(fileURLWithPath: singleFileName)
+                let fileName = url.lastPathComponent
+                let fileId = fileName.replacingOccurrences(of: ".flac", with: "")
+                    .replacingOccurrences(of: ".wav", with: "")
+
+                // Create a dummy LibriSpeechFile for the external file
+                let dummyFile = LibriSpeechFile(
+                    fileName: fileName,
+                    audioPath: url,
+                    transcript: ""  // Empty for external files without reference
+                )
+                filteredFiles = [dummyFile]
+                print("🔍 Processing external file: \(fileName)")
+            } else {
+                // LibriSpeech ID provided
+                let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
+                filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
+                if filteredFiles.isEmpty {
+                    throw ASRError.processingFailed(
+                        "Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+                }
+                print("🔍 Processing LibriSpeech file: \(targetFileName)")
             }
-            print("🔍 Processing single file: \(targetFileName)")
         } else if config.longAudioOnly {
             filteredFiles = try await filterFilesByDuration(
                 audioFiles, minDuration: 4.0, maxDuration: 20.0)
             print(
                 "Filtered to \(filteredFiles.count) files with duration 4-20 seconds (from \(audioFiles.count) total)"
+            )
+        } else if let minDuration = config.minDurationSeconds {
+            filteredFiles = try await filterFilesByDuration(
+                audioFiles, minDuration: minDuration, maxDuration: nil)
+            print(
+                "Filtered to \(filteredFiles.count) files with duration >= \(minDuration) seconds (from \(audioFiles.count) total)"
             )
         }
 
@@ -151,6 +177,28 @@ public class ASRBenchmark {
                 }
                 results.append(result)
 
+                // For single file, especially external files, print the transcription
+                if singleFile != nil {
+                    print("\n📝 Transcription Result:")
+                    print(String(repeating: "─", count: 50))
+                    print(result.hypothesis)
+                    print(String(repeating: "─", count: 50))
+
+                    // If there's a reference (LibriSpeech file), show comparison
+                    if !result.reference.isEmpty {
+                        print("\n📊 Comparison:")
+                        print("  Reference: \(result.reference)")
+                        print("  WER: \(String(format: "%.1f%%", result.metrics.wer))")
+                    }
+
+                    // Show performance metrics
+                    let rtfx = result.audioLength / result.processingTime
+                    print("\n⚡ Performance:")
+                    print("  Audio duration: \(String(format: "%.2f", result.audioLength))s")
+                    print("  Processing time: \(String(format: "%.2f", result.processingTime))s")
+                    print("  RTFx: \(String(format: "%.1f", rtfx))x")
+                }
+
             } catch {
                 logger.error("Failed to process \(audioFile.fileName): \(error)")
                 print("ERROR: Failed to process \(audioFile.fileName): \(error)")
@@ -174,17 +222,39 @@ public class ASRBenchmark {
         let asrResult = try await transcribeAudio(
             asrManager: asrManager, audioSamples: audioSamples)
 
-        let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
+        // For external files without reference, skip metrics calculation
+        let metrics =
+            file.transcript.isEmpty
+            ? ASRMetrics(
+                wer: 0.0, cer: 0.0, insertions: 0, deletions: 0, substitutions: 0, totalWords: 0, totalCharacters: 0)
+            : calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
+
+        // Normalize both hypothesis and reference for storage
+        let normalizedHypothesis = TextNormalizer.normalize(asrResult.text)
+        let normalizedReference = TextNormalizer.normalize(file.transcript)
 
         let processingTime = Date().timeIntervalSince(startTime)
 
+        // Convert ChunkDetail to ChunkTranscription if available
+        let chunkTranscriptions = asrResult.chunkDetails?.map { detail in
+            ChunkTranscription(
+                chunkIndex: detail.chunkIndex,
+                startTime: detail.startTime,
+                endTime: detail.endTime,
+                text: detail.text,
+                audioSamples: detail.audioSamples,
+                paddingSamples: detail.paddingSamples
+            )
+        }
+
         return ASRBenchmarkResult(
             fileName: file.fileName,
-            hypothesis: asrResult.text,
-            reference: file.transcript,
+            hypothesis: normalizedHypothesis,
+            reference: normalizedReference,
             metrics: metrics,
             processingTime: processingTime,
-            audioLength: audioLength
+            audioLength: audioLength,
+            chunkTranscriptions: chunkTranscriptions
         )
     }
 
@@ -273,6 +343,10 @@ public class ASRBenchmark {
         let finalText = accumulatedText
         let metrics = calculateASRMetrics(hypothesis: finalText, reference: file.transcript)
 
+        // Normalize both hypothesis and reference for storage
+        let normalizedHypothesis = TextNormalizer.normalize(finalText)
+        let normalizedReference = TextNormalizer.normalize(file.transcript)
+
         let totalProcessingTime = Date().timeIntervalSince(startTime)
         let firstTokenLatency = firstTokenTime.map { $0.timeIntervalSince(startTime) }
 
@@ -294,8 +368,8 @@ public class ASRBenchmark {
 
         return ASRBenchmarkResult(
             fileName: file.fileName,
-            hypothesis: finalText,
-            reference: file.transcript,
+            hypothesis: normalizedHypothesis,
+            reference: normalizedReference,
             metrics: metrics,
             processingTime: totalProcessingTime,
             audioLength: audioLength,
@@ -355,7 +429,7 @@ public class ASRBenchmark {
 
     /// Filter files by duration range
     private func filterFilesByDuration(
-        _ files: [LibriSpeechFile], minDuration: Double, maxDuration: Double
+        _ files: [LibriSpeechFile], minDuration: Double, maxDuration: Double? = nil
     ) async throws -> [LibriSpeechFile] {
         var filteredFiles: [LibriSpeechFile] = []
 
@@ -364,7 +438,10 @@ public class ASRBenchmark {
                 let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
                 let duration = Double(audioSamples.count) / 16000.0
 
-                if duration >= minDuration && duration <= maxDuration {
+                let meetsMinimum = duration >= minDuration
+                let meetsMaximum = maxDuration == nil || duration <= maxDuration!
+
+                if meetsMinimum && meetsMaximum {
                     filteredFiles.append(file)
                 }
             } catch {
@@ -692,6 +769,21 @@ extension ASRBenchmark {
         let m = reference.count
         let n = hypothesis.count
 
+        // Handle edge cases
+        if m == 0 && n == 0 {
+            return ("", "")
+        }
+        if m == 0 {
+            // All hypothesis words are insertions
+            let hypColored = hypothesis.map { "\u{001B}[32m\($0)\u{001B}[0m" }.joined(separator: " ")
+            return ("", hypColored)
+        }
+        if n == 0 {
+            // All reference words are deletions
+            let refColored = reference.map { "\u{001B}[31m\($0)\u{001B}[0m" }.joined(separator: " ")
+            return (refColored, "")
+        }
+
         // Create DP table for edit distance with backtracking
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
 
@@ -795,13 +887,16 @@ extension ASRBenchmark {
 extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
         var subset = "test-clean"
-        var maxFiles: Int?
-        var singleFile: String?
+        var filesSpec: [String] = []  // Can be file paths, LibriSpeech IDs, or a count
         var outputFile = "asr_benchmark_results.json"
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
         var streamingChunkDuration = 10.0
+        var resetDecoderBetweenChunks = false
+        var minDurationSeconds: Double? = nil
+        var overlapSeconds: Double? = nil
+        var removeDuplicates = false
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -817,14 +912,23 @@ extension ASRBenchmark {
                     subset = arguments[i + 1]
                     i += 1
                 }
-            case "--max-files":
-                if i + 1 < arguments.count {
-                    maxFiles = Int(arguments[i + 1])
+            case "--files":
+                // Collect all arguments until the next flag or end
+                i += 1
+                while i < arguments.count && !arguments[i].starts(with: "--") && !arguments[i].starts(with: "-") {
+                    filesSpec.append(arguments[i])
                     i += 1
                 }
-            case "--single-file":
+                i -= 1  // Back up one since the outer loop will increment
+            // Legacy support for old arguments
+            case "--max-files":
                 if i + 1 < arguments.count {
-                    singleFile = arguments[i + 1]
+                    filesSpec = [arguments[i + 1]]
+                    i += 1
+                }
+            case "--single-file", "-single-file":
+                if i + 1 < arguments.count {
+                    filesSpec = [arguments[i + 1]]
                     i += 1
                 }
             case "--output":
@@ -850,15 +954,61 @@ extension ASRBenchmark {
                     }
                     i += 1
                 }
+            case "--reset-decoder-between-chunks":
+                resetDecoderBetweenChunks = true
+            case "--min-duration":
+                if i + 1 < arguments.count {
+                    if let duration = Double(arguments[i + 1]), duration > 0 {
+                        minDurationSeconds = duration
+                    } else {
+                        print("Invalid minimum duration: \(arguments[i + 1])")
+                        exit(1)
+                    }
+                    i += 1
+                }
+            case "--overlap":
+                if i + 1 < arguments.count {
+                    if let overlap = Double(arguments[i + 1]), overlap >= 0 {
+                        overlapSeconds = overlap
+                    } else {
+                        print("Invalid overlap duration: \(arguments[i + 1])")
+                        exit(1)
+                    }
+                    i += 1
+                }
+            case "--remove-duplicates":
+                removeDuplicates = true
             default:
                 print("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
+        // Parse filesSpec to determine what to process
+        var singleFile: String? = nil
+        var maxFiles: Int? = nil
+
+        if filesSpec.count == 1 {
+            let spec = filesSpec[0]
+            // Check if it's a number (count of files)
+            if let count = Int(spec) {
+                maxFiles = count
+            } else if spec.lowercased() == "all" {
+                maxFiles = nil  // Process all files
+            } else {
+                // It's a single file (either path or LibriSpeech ID)
+                singleFile = spec
+            }
+        } else if filesSpec.count > 1 {
+            // Multiple files specified - for now just process the first one
+            // TODO: Support processing multiple specific files
+            singleFile = filesSpec[0]
+            print("Note: Multiple files specified, currently processing only the first: \(singleFile!)")
+        }
+
         print("\nStarting ASR benchmark on LibriSpeech \(subset)")
-        if singleFile != nil {
-            print("   Processing single file: \(singleFile!)")
+        if let file = singleFile {
+            print("   Processing single file: \(file)")
         } else {
             print("   Max files: \(maxFiles?.description ?? "all")")
         }
@@ -869,6 +1019,13 @@ extension ASRBenchmark {
         if testStreaming {
             print("   Chunk duration: \(streamingChunkDuration)s")
         }
+        print("   Reset decoder between chunks: \(resetDecoderBetweenChunks ? "enabled" : "disabled")")
+        if let minDuration = minDurationSeconds {
+            print("   Minimum duration filter: >= \(minDuration) seconds")
+        }
+        if let overlap = overlapSeconds {
+            print("   Chunk overlap: \(overlap) seconds")
+        }
 
         let config = ASRBenchmarkConfig(
             dataset: "librispeech",
@@ -877,7 +1034,9 @@ extension ASRBenchmark {
             debugMode: debugMode,
             longAudioOnly: false,
             testStreaming: testStreaming,
-            streamingChunkDuration: streamingChunkDuration
+            streamingChunkDuration: streamingChunkDuration,
+            minDurationSeconds: minDurationSeconds,
+            overlapSeconds: overlapSeconds
         )
 
         let benchmark = ASRBenchmark(config: config)
@@ -891,7 +1050,10 @@ extension ASRBenchmark {
             tdtConfig: TdtConfig(
                 includeTokenDuration: true,
                 maxSymbolsPerStep: 3
-            )
+            ),
+            resetDecoderBetweenChunks: resetDecoderBetweenChunks,
+            overlapSeconds: overlapSeconds ?? 0.0,
+            removeDuplicates: removeDuplicates
         )
 
         let asrManager = AsrManager(config: asrConfig)
@@ -1060,11 +1222,17 @@ extension ASRBenchmark {
                 }
             }
 
+            // Filter results with WER > 5% and sort by WER
+            let filteredResults = results.filter { $0.metrics.wer > 0.05 }
+                .sorted { $0.metrics.wer < $1.metrics.wer }
+
+            print("\n📊 Filtering results: \(filteredResults.count) files with WER > 5% (out of \(results.count) total)")
+
             let output =
                 [
                     "config": configDict,
                     "summary": summaryDict,
-                    "results": results.map { result in
+                    "results": filteredResults.map { result in
                         var resultDict: [String: Any] = [
                             "fileName": result.fileName,
                             "hypothesis": result.hypothesis,
@@ -1087,6 +1255,20 @@ extension ASRBenchmark {
                                 "streamingRTFx": streamingMetrics.streamingRTFx,
                                 "chunkDuration": streamingMetrics.chunkDuration,
                             ]
+                        }
+
+                        // Add chunk transcriptions if available
+                        if let chunkTranscriptions = result.chunkTranscriptions {
+                            resultDict["chunkTranscriptions"] = chunkTranscriptions.map { chunk in
+                                [
+                                    "chunkIndex": chunk.chunkIndex,
+                                    "startTime": chunk.startTime,
+                                    "endTime": chunk.endTime,
+                                    "text": chunk.text,
+                                    "audioSamples": chunk.audioSamples,
+                                    "paddingSamples": chunk.paddingSamples,
+                                ]
+                            }
                         }
 
                         return resultDict
@@ -1118,14 +1300,22 @@ extension ASRBenchmark {
             Options:
                 --subset <name>           LibriSpeech subset to use (default: test-clean)
                                          Available: test-clean, test-other, dev-clean, dev-other
-                --max-files <number>      Maximum number of files to process (default: all)
-                --single-file <id>        Process only a specific file (e.g., 1089-134686-0011)
+                --files <spec...>         Specify which files to process:
+                                         - Direct file path: --files french.wav
+                                         - Multiple files: --files audio1.wav audio2.wav
+                                         - LibriSpeech ID: --files 1089-134686-0011
+                                         - Count: --files 100 (process first 100 files)
+                                         - All: --files all (process entire dataset)
                 --output <file>           Output JSON file path (default: asr_benchmark_results.json)
                 --debug                   Enable debug logging
                 --auto-download           Automatically download LibriSpeech dataset (default)
                 --no-auto-download        Disable automatic dataset download
                 --test-streaming          Enable streaming simulation mode
                 --chunk-duration <secs>   Chunk duration for streaming mode (default: 0.1s, min: 1.0s)
+                --reset-decoder-between-chunks  Reset decoder state between chunks (default: false)
+                --min-duration <secs>     Only process files with duration >= specified seconds
+                --overlap <secs>          Overlap duration between chunks in seconds (e.g., 0.5, 1.0)
+                --remove-duplicates      Enable post-processing to remove duplicate patterns (default: false)
                 --help, -h               Show this help message
 
             Description:
@@ -1146,13 +1336,19 @@ extension ASRBenchmark {
                 fluidaudio asr-benchmark
 
                 # Benchmark with 100 files from test-other subset
-                fluidaudio asr-benchmark --subset test-other --max-files 100
+                fluidaudio asr-benchmark --subset test-other --files 100
                 
-                # Process a single specific file
-                fluidaudio asr-benchmark --single-file 1089-134686-0011 --debug
+                # Process a single LibriSpeech file by ID
+                fluidaudio asr-benchmark --files 1089-134686-0011 --debug
+                
+                # Process an external audio file
+                fluidaudio asr-benchmark --files french.wav --reset-decoder-between-chunks
+                
+                # Process multiple external files (coming soon)
+                fluidaudio asr-benchmark --files audio1.wav audio2.wav audio3.wav
 
-                # Test streaming performance with 0.5s chunks
-                fluidaudio asr-benchmark --test-streaming --chunk-duration 1-
+                # Test streaming performance with 1.0s chunks
+                fluidaudio asr-benchmark --test-streaming --chunk-duration 1.0
 
                 # Debug mode with custom output file
                 fluidaudio asr-benchmark --debug --output my_results.json

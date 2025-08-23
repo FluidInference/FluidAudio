@@ -60,7 +60,7 @@ public final class AsrManager {
             self.systemDecoderState = DecoderState(fallback: true)
         }
 
-        logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
+        logger.info("TDT enabled with token duration: \(config.tdtConfig.includeTokenDuration)")
 
         // Optimization models will be loaded during initialize()
 
@@ -193,25 +193,16 @@ public final class AsrManager {
     }
 
     internal func initializeDecoderState(decoderState: inout DecoderState) async throws {
-        guard let decoderModel = decoderModel else {
-            throw ASRError.notInitialized
-        }
-
+        // Create a fresh zero state for the decoder
+        // This is used when resetting between chunks for better accuracy
         var freshState = try DecoderState()
 
-        let initDecoderInput = try prepareDecoderInput(
-            targetToken: blankId,
-            hiddenState: freshState.hiddenState,
-            cellState: freshState.cellState
-        )
-
-        let initDecoderOutput = try decoderModel.prediction(
-            from: initDecoderInput, options: predictionOptions)
-
-        freshState.update(from: initDecoderOutput)
+        // Keep the state as zeros - don't run through decoder
+        // Running through decoder with blank token creates non-zero states
+        // which causes issues with subsequent chunks
 
         if config.enableDebug {
-            logger.info("Decoder state initialized cleanly")
+            logger.info("Decoder state reset to zeros")
         }
 
         decoderState = freshState
@@ -354,13 +345,13 @@ public final class AsrManager {
         guard !tokenIds.isEmpty else { return ("", []) }
 
         // Debug: print token mappings
-        if config.enableDebug {
-            for tokenId in tokenIds {
-                if let token = vocabulary[tokenId] {
-                    print("  Token \(tokenId) -> '\(token)'")
-                }
-            }
-        }
+        // if config.enableDebug {
+        //     for tokenId in tokenIds {
+        //         if let token = vocabulary[tokenId] {
+        //             print("  Token \(tokenId) -> '\(token)'")
+        //         }
+        //     }
+        // }
 
         // SentencePiece-compatible decoding algorithm:
         // 1. Convert token IDs to token strings

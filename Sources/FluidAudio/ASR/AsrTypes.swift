@@ -9,6 +9,9 @@ public struct ASRConfig: Sendable {
     public let realtimeMode: Bool
     public let chunkSizeMs: Int
     public let tdtConfig: TdtConfig
+    public let resetDecoderBetweenChunks: Bool
+    public let overlapSeconds: Double
+    public let removeDuplicates: Bool
 
     public static let `default` = ASRConfig()
 
@@ -28,7 +31,10 @@ public struct ASRConfig: Sendable {
         enableDebug: Bool = false,
         realtimeMode: Bool = false,
         chunkSizeMs: Int = 1500,
-        tdtConfig: TdtConfig = .default
+        tdtConfig: TdtConfig = .default,
+        resetDecoderBetweenChunks: Bool = false,
+        overlapSeconds: Double = 0.0,
+        removeDuplicates: Bool = false
     ) {
         self.sampleRate = sampleRate
         self.maxSymbolsPerFrame = maxSymbolsPerFrame
@@ -36,10 +42,34 @@ public struct ASRConfig: Sendable {
         self.realtimeMode = realtimeMode
         self.chunkSizeMs = chunkSizeMs
         self.tdtConfig = tdtConfig
+        self.resetDecoderBetweenChunks = resetDecoderBetweenChunks
+        self.overlapSeconds = overlapSeconds
+        self.removeDuplicates = removeDuplicates
     }
 }
 
 // MARK: - Results
+
+/// Per-chunk transcription detail for debugging
+public struct ChunkDetail: Sendable {
+    public let chunkIndex: Int
+    public let startTime: Double
+    public let endTime: Double
+    public let text: String
+    public let audioSamples: Int
+    public let paddingSamples: Int
+
+    public init(
+        chunkIndex: Int, startTime: Double, endTime: Double, text: String, audioSamples: Int, paddingSamples: Int
+    ) {
+        self.chunkIndex = chunkIndex
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+        self.audioSamples = audioSamples
+        self.paddingSamples = paddingSamples
+    }
+}
 
 public struct ASRResult: Sendable {
     public let text: String
@@ -48,11 +78,13 @@ public struct ASRResult: Sendable {
     public let processingTime: TimeInterval
     public let tokenTimings: [TokenTiming]?
     public let performanceMetrics: ASRPerformanceMetrics?
+    public let chunkDetails: [ChunkDetail]?
 
     public init(
         text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval,
         tokenTimings: [TokenTiming]? = nil,
-        performanceMetrics: ASRPerformanceMetrics? = nil
+        performanceMetrics: ASRPerformanceMetrics? = nil,
+        chunkDetails: [ChunkDetail]? = nil
     ) {
         self.text = text
         self.confidence = confidence
@@ -60,6 +92,7 @@ public struct ASRResult: Sendable {
         self.processingTime = processingTime
         self.tokenTimings = tokenTimings
         self.performanceMetrics = performanceMetrics
+        self.chunkDetails = chunkDetails
     }
 
     /// Real-time factor (RTFx) - how many times faster than real-time

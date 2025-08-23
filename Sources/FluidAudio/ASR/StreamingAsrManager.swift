@@ -390,7 +390,17 @@ public struct StreamingAsrConfig: Sendable {
 
     // Internal ASR configuration
     var asrConfig: ASRConfig {
-        ASRConfig(
+        // Check environment variable for max symbols override
+        let maxSymbols: Int? =
+            if let envValue = ProcessInfo.processInfo.environment["MAX_SYMBOLS"],
+                let intValue = Int(envValue), intValue == 0
+            {
+                nil  // Disable max symbols limit
+            } else {
+                3  // Default value
+            }
+
+        return ASRConfig(
             sampleRate: 16000,
             maxSymbolsPerFrame: 3,
             enableDebug: enableDebug,
@@ -398,7 +408,7 @@ public struct StreamingAsrConfig: Sendable {
             chunkSizeMs: Int(chunkDuration * 1000),
             tdtConfig: TdtConfig(
                 includeTokenDuration: true,
-                maxSymbolsPerStep: 3
+                maxSymbolsPerStep: maxSymbols
             )
         )
     }
