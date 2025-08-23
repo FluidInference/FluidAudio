@@ -49,7 +49,7 @@ internal struct TdtDecoder {
         // Track whether we've emitted any non-blank tokens yet (for NeMo parity)
         var hasEmittedNonBlank =
             decoderState.lastToken != nil && decoderState.lastToken != config.tdtConfig.blankId
-            && decoderState.lastToken != 0
+            
 
         // Save the initial decoder state to reuse for blanks at utterance start
         let initialDecoderState = decoderState

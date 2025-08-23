@@ -169,12 +169,11 @@ public final class AsrManager {
         ])
     }
 
-    func prepareDecoderInput(
-        targetToken: Int,
+    private func prepareDecoderInput(
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
     ) throws -> MLFeatureProvider {
-        let targetArray = try createScalarArray(value: targetToken, shape: [1, 1])
+        let targetArray = try createScalarArray(value: 0, shape: [1, 1])
         let targetLengthArray = try createScalarArray(value: 1)
 
         return try createFeatureProvider(features: [
@@ -193,7 +192,6 @@ public final class AsrManager {
         var freshState = try DecoderState()
 
         let initDecoderInput = try prepareDecoderInput(
-            targetToken: 0,  // Use SOS token (0) instead of blankId for proper initialization
             hiddenState: freshState.hiddenState,
             cellState: freshState.cellState
         )
