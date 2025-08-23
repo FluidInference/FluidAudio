@@ -599,8 +599,9 @@ extension ASRBenchmark {
         // Generate inline diff
         let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
-        print("\n Normalized Reference:\t\(referenceDiff)")
+        print("\nNormalized Reference:\t\(referenceDiff)")
         print("Normalized Hypothesis:\t\(hypothesisDiff)")
+        print("Original Hypothesis:\t\(result.hypothesis)")
     }
 
     /// Generate word-level differences between reference and hypothesis
