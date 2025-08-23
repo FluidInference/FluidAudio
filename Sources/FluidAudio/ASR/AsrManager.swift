@@ -35,9 +35,6 @@ public final class AsrManager {
     private var microphoneDecoderState: DecoderState
     private var systemDecoderState: DecoderState
 
-    let blankId = 8192  // v3 models use 8192 as blank token
-    let sosId = 8192  // Start with blank token for RNNT (same as blankId)
-
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
         AsrModels.optimizedPredictionOptions()
@@ -59,8 +56,6 @@ public final class AsrManager {
             self.microphoneDecoderState = DecoderState(fallback: true)
             self.systemDecoderState = DecoderState(fallback: true)
         }
-
-        // Optimization models will be loaded during initialize()
 
         // Pre-warm caches if possible
         Task {
@@ -198,7 +193,7 @@ public final class AsrManager {
         var freshState = try DecoderState()
 
         let initDecoderInput = try prepareDecoderInput(
-            targetToken: blankId,
+            targetToken: config.tdtConfig.blankId,
             hiddenState: freshState.hiddenState,
             cellState: freshState.cellState
         )
