@@ -692,6 +692,24 @@ extension ASRBenchmark {
         let m = reference.count
         let n = hypothesis.count
 
+        // Handle empty hypothesis or reference
+        if n == 0 {
+            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+            let redColor = supportsColor ? "\u{001B}[31m" : "["
+            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+            let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
+            let hypString = ""
+            return (refString, hypString)
+        }
+        if m == 0 {
+            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+            let greenColor = supportsColor ? "\u{001B}[32m" : "["
+            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+            let refString = ""
+            let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
+            return (refString, hypString)
+        }
+
         // Create DP table for edit distance with backtracking
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
 
@@ -884,7 +902,6 @@ extension ASRBenchmark {
 
         // Initialize ASR manager with fast benchmark preset
         let asrConfig = ASRConfig(
-            maxSymbolsPerFrame: 3,
             enableDebug: debugMode,
             realtimeMode: false,
             chunkSizeMs: 2000,

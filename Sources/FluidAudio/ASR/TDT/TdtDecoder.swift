@@ -53,10 +53,10 @@ internal struct TdtDecoder {
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         reusableTargetLengthArray[0] = NSNumber(value: 1)  // This never changes
 
-        // Main decoding loop with optimizations
         while activeMask {
             var label = hypothesis.lastToken ?? config.tdtConfig.blankId
-
+            var finalDuration = 0  // Track the final duration to apply
+            
             // Use cached decoder inputs
             let decoderResult = try runDecoder(
                 token: label,
@@ -84,33 +84,38 @@ internal struct TdtDecoder {
             let duration = config.tdtConfig.durationBins[argmaxSIMD(durationLogits)]
 
             let blankMask = label == config.tdtConfig.blankId
-            var actualDuration = duration
-
-            // NeMo rule: blank with duration=0 must advance by 1 to prevent infinite loops
-            if blankMask && duration == 0 {
-                actualDuration = 1
-            }
-
-            timeIndicesCurrentLabels = timeIndices
 
             // Determine if we need inner loop (loop labels) - only for non-blank tokens with duration=0
             let needLoop = (duration == 0) && !blankMask
             let originalNeedLoop = needLoop
 
+            // Apply NeMo safeguard for outer loop blank as well
+            var actualDuration = duration
+            if blankMask && duration == 0 {
+                actualDuration = 1
+                logger.debug("TDT: Outer loop blank with duration=0, forcing duration=1")
+            }
+
+            // Set the final duration initially
+            finalDuration = actualDuration
+
             // Debug logging for TDT algorithm
             logger.debug(
-                "TDT: t=\(timeIndices) token=\(label) duration=\(duration) blank=\(blankMask) needLoop=\(needLoop)")
+                "TDT: t=\(timeIndices) token=\(label) duration=\(duration) actualDuration=\(actualDuration) blank=\(blankMask) needLoop=\(needLoop)")
 
             // Track if we've advanced the time index yet
             var hasAdvanced = false
 
-            // Only advance time if we have a non-zero duration
+            // Save current time index for token timestamps
+            timeIndicesCurrentLabels = timeIndices
+
+            // Only advance time if we have a non-zero duration OR blank
             if !needLoop {
                 timeIndices += actualDuration
                 safeTimeIndices = min(timeIndices, lastTimestep)
                 hasAdvanced = true
             }
-
+            
             activeMask = timeIndices < encoderSequenceLength
             var advanceMask = activeMask && needLoop
 
@@ -153,11 +158,14 @@ internal struct TdtDecoder {
                 // Apply NeMo rule IMMEDIATELY for blank tokens with duration=0
                 var actualDuration = moreDuration
                 let innerBlankMask = moreLabel == config.tdtConfig.blankId
-                
+
                 if innerBlankMask && moreDuration == 0 {
                     actualDuration = 1
                     logger.debug("TDT: Applying blank duration=0 safeguard, forcing duration=1")
                 }
+
+                // Update final duration with the last predicted duration
+                finalDuration = actualDuration
                 
                 logger.debug("TDT inner: token=\(moreLabel) duration=\(moreDuration) actualDuration=\(actualDuration) blank=\(innerBlankMask)")
 
@@ -194,7 +202,17 @@ internal struct TdtDecoder {
                 // Continue loop only for non-blank tokens with duration=0
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && (actualDuration == 0) && !innerBlankMask
+            }  // End of inner loop
+            
+            // Safety check matching NeMo - if we still have duration=0, force advance by 1
+            // This prevents infinite loops
+            if finalDuration == 0 && !hasAdvanced {
+                finalDuration = 1
+                timeIndices += 1
+                safeTimeIndices = min(timeIndices, lastTimestep)
+                logger.debug("TDT: Safety check - forcing duration=1 to prevent infinite loop")
             }
+
             // Update predictor state
             if originalNeedLoop {
                 // Inner loop already advanced predictor on each emission; capture final state.
