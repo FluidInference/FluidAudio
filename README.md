@@ -178,11 +178,7 @@ import FluidAudio
 
 // Initialize ASR with configuration
 let asrConfig = ASRConfig(
-    realtimeMode: true,
-    chunkSizeMs: 1500,          // Process in 1.5 second chunks
-    tdtConfig: TdtConfig(
-        maxSymbolsPerStep: 3
-    )
+    tdtConfig: TdtConfig()
 )
 
 // Transcribe audio

@@ -903,12 +903,7 @@ extension ASRBenchmark {
         // Initialize ASR manager with fast benchmark preset
         let asrConfig = ASRConfig(
             enableDebug: debugMode,
-            realtimeMode: false,
-            chunkSizeMs: 2000,
-            tdtConfig: TdtConfig(
-                includeTokenDuration: true,
-                maxSymbolsPerStep: 3
-            )
+            tdtConfig: TdtConfig()
         )
 
         let asrManager = AsrManager(config: asrConfig)

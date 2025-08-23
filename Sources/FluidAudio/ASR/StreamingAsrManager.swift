@@ -393,12 +393,7 @@ public struct StreamingAsrConfig: Sendable {
         ASRConfig(
             sampleRate: 16000,
             enableDebug: enableDebug,
-            realtimeMode: true,
-            chunkSizeMs: Int(chunkDuration * 1000),
-            tdtConfig: TdtConfig(
-                includeTokenDuration: true,
-                maxSymbolsPerStep: 3
-            )
+            tdtConfig: TdtConfig()
         )
     }
 

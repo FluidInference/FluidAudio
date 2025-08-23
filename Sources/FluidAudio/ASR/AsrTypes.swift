@@ -5,32 +5,17 @@ import Foundation
 public struct ASRConfig: Sendable {
     public let sampleRate: Int
     public let enableDebug: Bool
-    public let realtimeMode: Bool
-    public let chunkSizeMs: Int
     public let tdtConfig: TdtConfig
 
     public static let `default` = ASRConfig()
 
-    public static let fastBenchmark = ASRConfig(
-        realtimeMode: false,
-        chunkSizeMs: 2000,
-        tdtConfig: TdtConfig(
-            includeTokenDuration: true,
-            maxSymbolsPerStep: 3
-        )
-    )
-
     public init(
         sampleRate: Int = 16000,
         enableDebug: Bool = false,
-        realtimeMode: Bool = false,
-        chunkSizeMs: Int = 1500,
         tdtConfig: TdtConfig = .default
     ) {
         self.sampleRate = sampleRate
         self.enableDebug = enableDebug
-        self.realtimeMode = realtimeMode
-        self.chunkSizeMs = chunkSizeMs
         self.tdtConfig = tdtConfig
     }
 }
