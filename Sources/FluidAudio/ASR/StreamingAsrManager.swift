@@ -349,20 +349,6 @@ public struct StreamingAsrConfig: Sendable {
         enableDebug: false
     )
 
-    /// Low latency configuration with faster updates
-    public static let lowLatency = StreamingAsrConfig(
-        confirmationThreshold: 0.75,
-        chunkDuration: 15.0,  // 15 second chunks
-        enableDebug: false
-    )
-
-    /// High accuracy configuration with conservative confirmation
-    public static let highAccuracy = StreamingAsrConfig(
-        confirmationThreshold: 0.9,
-        chunkDuration: 15.0,  // 15 second chunks
-        enableDebug: false
-    )
-
     public init(
         confirmationThreshold: Float = 0.85,
         chunkDuration: TimeInterval = 15.0,

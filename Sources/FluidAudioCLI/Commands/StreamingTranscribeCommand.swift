@@ -39,17 +39,11 @@ enum StreamingTranscribeCommand {
         }
 
         let audioFile = arguments[0]
-        var configType = "default"
 
         // Parse options
         var i = 1
         while i < arguments.count {
             switch arguments[i] {
-            case "--config":
-                if i + 1 < arguments.count {
-                    configType = arguments[i + 1]
-                    i += 1
-                }
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -66,10 +60,7 @@ enum StreamingTranscribeCommand {
         await testAudioConversion(audioFile: audioFile)
 
         // Test transcription with StreamingAsrManager
-        await testStreamingTranscription(
-            audioFile: audioFile,
-            configType: configType
-        )
+        await testStreamingTranscription(audioFile: audioFile)
     }
 
     /// Test audio conversion capabilities
@@ -101,26 +92,13 @@ enum StreamingTranscribeCommand {
     }
 
     /// Test streaming transcription
-    private static func testStreamingTranscription(
-        audioFile: String,
-        configType: String
-    ) async {
+    private static func testStreamingTranscription(audioFile: String) async {
         print("🎙️ Testing Streaming Transcription")
         print("----------------------------------")
 
-        // Select configuration
-        let config: StreamingAsrConfig
-        switch configType {
-        case "low-latency":
-            config = .lowLatency
-            print("Using low-latency configuration")
-        case "high-accuracy":
-            config = .highAccuracy
-            print("Using high-accuracy configuration")
-        default:
-            config = .default
-            print("Using default configuration")
-        }
+        // Use default configuration
+        let config = StreamingAsrConfig.default
+        print("Using default configuration")
 
         print("Configuration:")
         print("  Chunk duration: \(config.chunkDuration)s")
@@ -251,12 +229,10 @@ enum StreamingTranscribeCommand {
                 fluidaudio transcribe <audio_file> [options]
 
             Options:
-                --config <type>    Configuration type: default, low-latency, high-accuracy
                 --help, -h         Show this help message
 
             Examples:
                 fluidaudio transcribe audio.wav
-                fluidaudio transcribe audio.wav --config low-latency
 
             This command uses StreamingAsrManager which provides:
             - Automatic audio format conversion to 16kHz mono

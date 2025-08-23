@@ -79,9 +79,7 @@ final class StreamingAsrSessionTests: XCTestCase {
 
         // Test that session can be created with different configs
         let configs = [
-            StreamingAsrConfig.default,
-            StreamingAsrConfig.lowLatency,
-            StreamingAsrConfig.highAccuracy,
+            StreamingAsrConfig.default
         ]
 
         // Verify all configs are valid

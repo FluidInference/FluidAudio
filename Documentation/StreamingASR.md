@@ -19,7 +19,7 @@
 import AVFoundation
 import FluidAudio
 
-// Initialize
+// Initialize with default configuration
 let streamingAsr = StreamingAsrManager()
 try await streamingAsr.start()
 
@@ -53,33 +53,19 @@ let finalTranscript = try await streamingAsr.finish()
 
 ### Default Configuration
 ```swift
+let streamingAsr = StreamingAsrManager() // Uses default config
+// or explicitly:
 let streamingAsr = StreamingAsrManager(config: .default)
-// Chunk duration: 10.0s (optimized for TDT decoder)
+// Chunk duration: 15.0s (optimized for TDT decoder)
 // Confirmation threshold: 0.85
 // Balanced accuracy and latency
-```
-
-### Low Latency Configuration
-```swift
-let streamingAsr = StreamingAsrManager(config: .lowLatency)
-// Chunk duration: 5.0s (minimum viable for TDT decoder)
-// Confirmation threshold: 0.75
-// Faster updates with slightly lower accuracy
-```
-
-### High Accuracy Configuration
-```swift
-let streamingAsr = StreamingAsrManager(config: .highAccuracy)
-// Chunk duration: 10.0s (optimal for TDT decoder accuracy)
-// Confirmation threshold: 0.90
-// More accurate with slightly higher latency
 ```
 
 ### Custom Configuration
 ```swift
 let config = StreamingAsrConfig(
     confirmationThreshold: 0.8,
-    chunkDuration: 2.2,
+    chunkDuration: 15.0,
     enableDebug: true
 )
 let streamingAsr = StreamingAsrManager(config: config)
@@ -110,7 +96,7 @@ class TranscriptionViewModel: ObservableObject {
     private var streamingAsr: StreamingAsrManager?
     
     func startTranscribing() async throws {
-        streamingAsr = StreamingAsrManager()
+        streamingAsr = StreamingAsrManager() // Uses default config
         try await streamingAsr?.start()
         
         // Set up audio capture...
