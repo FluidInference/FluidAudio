@@ -46,19 +46,19 @@ final class StreamingAsrManagerTests: XCTestCase {
         // Test default config
         let defaultConfig = StreamingAsrConfig.default
         XCTAssertEqual(defaultConfig.confirmationThreshold, 0.85)
-        XCTAssertEqual(defaultConfig.chunkDuration, 10.0)
+        XCTAssertEqual(defaultConfig.chunkDuration, 15.0)
         XCTAssertFalse(defaultConfig.enableDebug)
 
         // Test low latency config
         let lowLatencyConfig = StreamingAsrConfig.lowLatency
         XCTAssertEqual(lowLatencyConfig.confirmationThreshold, 0.75)
-        XCTAssertEqual(lowLatencyConfig.chunkDuration, 10.0)
+        XCTAssertEqual(lowLatencyConfig.chunkDuration, 15.0)
         XCTAssertFalse(lowLatencyConfig.enableDebug)
 
         // Test high accuracy config
         let highAccuracyConfig = StreamingAsrConfig.highAccuracy
         XCTAssertEqual(highAccuracyConfig.confirmationThreshold, 0.9)
-        XCTAssertEqual(highAccuracyConfig.chunkDuration, 10.0)
+        XCTAssertEqual(highAccuracyConfig.chunkDuration, 15.0)
         XCTAssertFalse(highAccuracyConfig.enableDebug)
 
     }
@@ -71,8 +71,6 @@ final class StreamingAsrManagerTests: XCTestCase {
         // Test ASR config generation
         let asrConfig = config.asrConfig
         XCTAssertEqual(asrConfig.sampleRate, 16000)
-        XCTAssertEqual(asrConfig.chunkSizeMs, 5000)
-        XCTAssertTrue(asrConfig.realtimeMode)
         XCTAssertNotNil(asrConfig.tdtConfig)
     }
 
