@@ -967,22 +967,6 @@ extension ASRBenchmark {
             let seconds = Int(testRuntime) % 60
             let runtimeString = "\(minutes)m \(seconds)s"
 
-            print(
-                "\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)"
-            )
-
-            print("--- Benchmark Results ---")
-            print("   Dataset: \(config.dataset) \(config.subset)")
-            print("   Files processed: \(results.count)")
-            let overallRTFx = totalAudioDuration / totalProcessingTime
-
-            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
-            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
-            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
-            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            print(
-                "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
-            )
 
             // Print streaming metrics if available
             if config.testStreaming {
@@ -1008,6 +992,8 @@ extension ASRBenchmark {
                     }
                 }
             }
+
+            let overallRTFx: Double = totalProcessingTime > 0 ? (totalAudioDuration / totalProcessingTime) : 0
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -1099,6 +1085,23 @@ extension ASRBenchmark {
 
             // Print detailed analysis for files with high WER
             benchmark.printDetailedWERAnalysis(results)
+
+            print(
+                "\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)"
+            )
+
+            print("--- Benchmark Results ---")
+            print("   Dataset: \(config.dataset) \(config.subset)")
+            print("   Files processed: \(results.count)")
+            
+
+            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
+            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
+            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+            print(
+                "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
+            )
 
             print("\nResults saved to: \(outputFile)")
             print("ASR benchmark completed successfully")

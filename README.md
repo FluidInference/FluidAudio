@@ -182,7 +182,6 @@ let asrConfig = ASRConfig(
     realtimeMode: true,
     chunkSizeMs: 1500,          // Process in 1.5 second chunks
     tdtConfig: TdtConfig(
-        durations: [0, 1, 2, 3, 4],
         maxSymbolsPerStep: 3
     )
 )

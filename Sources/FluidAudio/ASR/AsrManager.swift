@@ -60,8 +60,6 @@ public final class AsrManager {
             self.systemDecoderState = DecoderState(fallback: true)
         }
 
-        logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
-
         // Optimization models will be loaded during initialize()
 
         // Pre-warm caches if possible
