@@ -52,7 +52,7 @@ struct TextNormalizer {
         "aeroplane": "airplane",
         "maths": "math",
         "mum": "mom",
-        // Add more as needed
+            // Add more as needed
     ]
 
     /// Normalize text using HuggingFace ASR leaderboard standards

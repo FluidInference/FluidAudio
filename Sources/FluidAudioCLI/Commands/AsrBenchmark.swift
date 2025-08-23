@@ -967,7 +967,6 @@ extension ASRBenchmark {
             let seconds = Int(testRuntime) % 60
             let runtimeString = "\(minutes)m \(seconds)s"
 
-
             // Print streaming metrics if available
             if config.testStreaming {
                 print("\n--- Streaming Metrics ---")
@@ -1093,7 +1092,6 @@ extension ASRBenchmark {
             print("--- Benchmark Results ---")
             print("   Dataset: \(config.dataset) \(config.subset)")
             print("   Files processed: \(results.count)")
-            
 
             print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
             print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")

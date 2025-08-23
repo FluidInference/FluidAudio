@@ -164,7 +164,8 @@ final class TdtDecoderTests: XCTestCase {
             logits[10 + i] = NSNumber(value: Float(i == 2 ? 0.8 : 0.2))
         }
 
-        let (token, score, duration) = try decoder.predictTokenAndDuration(logits, durationBins: config.tdtConfig.durationBins)
+        let (token, score, duration) = try decoder.predictTokenAndDuration(
+            logits, durationBins: config.tdtConfig.durationBins)
 
         XCTAssertEqual(token, 5)
         XCTAssertEqual(score, 0.9, accuracy: 0.0001)
