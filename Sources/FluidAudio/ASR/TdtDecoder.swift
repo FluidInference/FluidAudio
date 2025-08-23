@@ -1,10 +1,3 @@
-//
-//  TdtDecoder.swift
-//  FluidAudio
-//
-//  Copyright © 2025 Brandon Weng. All rights reserved.
-//
-
 /// TDT decoder with hybrid CoreML + Metal acceleration
 import Accelerate
 import CoreML
@@ -13,16 +6,22 @@ import OSLog
 
 public struct TdtConfig: Sendable {
     public let includeTokenDuration: Bool
-    public let maxSymbolsPerStep: Int?
+    public let maxSymbolsPerStep: Int
+    public let durationBins: [Int] 
+    public let blankId: Int 
 
     public static let `default` = TdtConfig()
 
     public init(
         includeTokenDuration: Bool = true,
-        maxSymbolsPerStep: Int? = nil
+        maxSymbolsPerStep: Int = 1,
+        duartionBins: [Int] = [0, 1, 2, 3, 4],
+        blankId: Int = 8192,
     ) {
         self.includeTokenDuration = includeTokenDuration
         self.maxSymbolsPerStep = maxSymbolsPerStep
+        self.durationBins = duartionBins
+        self.blankId = blankId
     }
 }
 
@@ -45,15 +44,12 @@ internal struct TdtDecoder {
     private let config: ASRConfig
     private let predictionOptions = AsrModels.optimizedPredictionOptions()
     // Parakeet‑TDT‑v3: duration head has 5 bins mapping directly to frame advances
-    private let durationBins: [Int] = [0, 1, 2, 3, 4]
 
     init(config: ASRConfig) {
         self.config = config
     }
 
     // Parakeet-TDT-0.6b-v3 uses 8192 regular tokens + blank token at index 8192
-    private var blankId: Int = 8192
-    private var sosId: Int = 8192  // SOS same as blank for TDT models
 
     /// Execute optimized TDT decoding
     func decode(
@@ -91,8 +87,8 @@ internal struct TdtDecoder {
         reusableTargetLengthArray[0] = NSNumber(value: 1)  // This never changes
 
         // Main decoding loop with optimizations
-        while activeMask {
-            var label = hypothesis.lastToken ?? sosId
+        while activeMask  {
+            var label = hypothesis.lastToken ?? config.tdtConfig.blankId
 
             // Use cached decoder inputs
             let decoderResult = try runDecoder(
@@ -114,12 +110,12 @@ internal struct TdtDecoder {
             )
 
             // Token/duration prediction
-            let (tokenLogits, durationLogits) = try splitLogits(logits)
+            let (tokenLogits, durationLogits) = try splitLogits(logits, durationElements: config.tdtConfig.durationBins.count)
             label = argmaxSIMD(tokenLogits)
             var score = tokenLogits[label]
-            let duration = durationBins[argmaxSIMD(durationLogits)]
+            let duration = config.tdtConfig.durationBins[argmaxSIMD(durationLogits)]
 
-            let blankMask = label == blankId
+            let blankMask = label == config.tdtConfig.blankId
             var actualDuration = duration
 
             // NeMo rule: blank with duration=0 must advance by 1 to prevent infinite loops
@@ -153,15 +149,21 @@ internal struct TdtDecoder {
             // Track the current decoder result for state updates
             var currentDecoderResult = decoderResult
 
-            // Add inner loop iteration limit to prevent runaway memory usage
+            // Track tokens emitted at this frame (duration==0 case)
             var innerLoopCount = 0
-            let maxInnerLoopIterations = 10
             var innerLoopTokensEmitted = 0
 
             // Inner loop - continue predicting tokens at the same time index when duration == 0
-            while advanceMask && innerLoopCount < maxInnerLoopIterations {
+            while advanceMask {
+                // NeMo parity: if we've emitted max symbols on this frame, force t += 1 and break
+                if innerLoopTokensEmitted >= config.tdtConfig.maxSymbolsPerStep {
+                    timeIndices += 1
+                    safeTimeIndices = min(timeIndices, lastTimestep)
+                    hasAdvanced = true
+                    break
+                }
+
                 innerLoopCount += 1
-                logger.debug("TDT inner: iteration=\(innerLoopCount) at t=\(timeIndices)")
 
                 // Use the SAME encoder frame (don't advance safeTimeIndices)
                 let innerEncoderStep = encoderFrames[safeTimeIndices]
@@ -171,16 +173,16 @@ internal struct TdtDecoder {
                     model: jointModel
                 )
 
-                let (innerTokenLogits, innerDurationLogits) = try splitLogits(innerLogits)
+                let (innerTokenLogits, innerDurationLogits) = try splitLogits(innerLogits, durationElements: config.tdtConfig.durationBins.count)
                 let moreLabel = argmaxSIMD(innerTokenLogits)
                 let moreScore = innerTokenLogits[moreLabel]
-                let moreDuration = durationBins[argmaxSIMD(innerDurationLogits)]
+                let moreDuration = config.tdtConfig.durationBins[argmaxSIMD(innerDurationLogits)]
 
                 label = moreLabel
                 score = moreScore
                 actualDuration = moreDuration
 
-                let innerBlankMask = moreLabel == blankId
+                let innerBlankMask = moreLabel == config.tdtConfig.blankId
                 logger.debug("TDT inner: token=\(moreLabel) duration=\(moreDuration) blank=\(innerBlankMask)")
 
                 // Apply NeMo rule for blank tokens with duration=0
@@ -224,34 +226,29 @@ internal struct TdtDecoder {
                 advanceMask = activeMask && (moreDuration == 0) && !innerBlankMask
             }
 
-            // Debug logging after inner loop
+            // Update predictor state
             if originalNeedLoop {
-                logger.debug(
-                    "TDT inner loop complete: emitted \(innerLoopTokensEmitted) tokens, final timeIdx=\(timeIndices)")
-            }
-
-            // Only update decoder state if we went through the inner loop
-            if originalNeedLoop {
+                // Inner loop already advanced predictor on each emission; capture final state.
                 hypothesis.decState = currentDecoderResult.newState
-            } else if label != blankId {
-                // Handle single token without inner loop
+            } else if label != config.tdtConfig.blankId {
+                // Handle single token without inner loop: emit + immediately advance predictor (NeMo parity).
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
-                hypothesis.decState = currentDecoderResult.newState
                 hypothesis.lastToken = label
+
+                // Advance predictor immediately so state mirrors NeMo greedy behavior
+                let step = try runDecoder(
+                    token: label,
+                    state: currentDecoderResult.newState,
+                    model: decoderModel,
+                    targetArray: reusableTargetArray,
+                    targetLengthArray: reusableTargetLengthArray
+                )
+                hypothesis.decState = step.newState
+                currentDecoderResult = step // keep in sync (optional, but nice)
             }
 
-            // Simplified max_symbols_per_step logic matching NeMo implementation
-            if let maxSymbols = config.tdtConfig.maxSymbolsPerStep {
-                let tokensAtCurrentTime = originalNeedLoop ? innerLoopTokensEmitted : (label != blankId ? 1 : 0)
-                if tokensAtCurrentTime >= maxSymbols {
-                    // Force advance by 1 frame
-                    timeIndices += 1
-                    safeTimeIndices = min(timeIndices, lastTimestep)
-                    activeMask = timeIndices < encoderSequenceLength
-                }
-            }
         }
 
         if let finalState = hypothesis.decState {
@@ -392,13 +389,15 @@ internal struct TdtDecoder {
         return try extractFeatureValue(
             from: output, key: "logits", errorMessage: "Joint network output missing logits")
     }
+    
     /// Predict token and duration from joint logits
     internal func predictTokenAndDuration(
-        _ logits: MLMultiArray
+        _ logits: MLMultiArray,
+        durationBins: [Int]
     ) throws -> (
         token: Int, score: Float, duration: Int
     ) {
-        let (tokenLogits, durationLogits) = try splitLogits(logits)
+        let (tokenLogits, durationLogits) = try splitLogits(logits, durationElements: durationBins.count)
 
         let bestToken = argmax(tokenLogits)
         let tokenScore = tokenLogits[bestToken]
@@ -432,12 +431,13 @@ internal struct TdtDecoder {
 
     /// Split joint logits into token and duration components with optimized memory access
     private func splitLogits(
-        _ logits: MLMultiArray
+        _ logits: MLMultiArray,
+        durationElements: Int 
     ) throws -> (
         tokenLogits: [Float], durationLogits: [Float]
     ) {
         let totalElements = logits.count
-        let durationElements = durationBins.count
+        let durationElements = durationElements
         // Parakeet-TDT-0.6b-v3: 8192 regular tokens + 1 blank token = 8193 total vocab
         // Joint network outputs: [8193 token logits] + [5 duration logits]
         let vocabSize = totalElements - durationElements
@@ -447,9 +447,10 @@ internal struct TdtDecoder {
         }
 
         // Sanity check for expected logits size (strict for Parakeet‑TDT‑v3)
-        let expectedTotal = 8193 + durationBins.count
-        if totalElements != expectedTotal {
-            logger.warning("TDT logits size unexpected: got \(totalElements), expected \(expectedTotal)")
+        let expectedTotal = 8193 + durationElements
+        guard totalElements == expectedTotal else {
+            throw ASRError.processingFailed(
+                "Unexpected logits size: \(totalElements), expected \(expectedTotal)")
         }
 
         // Create views directly without copying - zero-copy operation
@@ -485,7 +486,8 @@ internal struct TdtDecoder {
 
     /// Process duration logits to get duration value
     private func processDurationLogits(
-        _ durationLogits: [Float]
+        _ durationLogits: [Float],
+        durationBins: [Int] = [0, 1, 2, 3, 4]
     ) throws -> (
         bestDuration: Int, duration: Int
     ) {
@@ -493,6 +495,7 @@ internal struct TdtDecoder {
         let duration = durationBins[bestDurationIdx]
         return (bestDurationIdx, duration)
     }
+
     internal func extractEncoderTimeStep(
         _ encoderOutput: MLMultiArray, timeIndex: Int
     ) throws
