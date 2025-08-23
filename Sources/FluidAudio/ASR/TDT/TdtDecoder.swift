@@ -67,7 +67,7 @@ internal struct TdtDecoder {
 
             // For NeMo parity: Use initial state if we haven't emitted non-blank tokens and we're starting with SOS
             let stateToUse =
-                (!hasEmittedNonBlank && label == 0)
+                (!hasEmittedNonBlank && hypothesis.lastToken == nil)
                 ? initialDecoderState : (hypothesis.decState ?? decoderState)
 
             // Use cached decoder inputs
@@ -111,11 +111,6 @@ internal struct TdtDecoder {
 
             // Set the final duration initially
             finalDuration = actualDuration
-
-            // Debug logging for TDT algorithm
-            // print(
-            //     "TDT: t=\(timeIndices) token=\(label) duration=\(duration) actualDuration=\(actualDuration) blank=\(blankMask) needLoop=\(needLoop)"
-            // )
 
             // Track if we've advanced the time index yet
             var hasAdvanced = false
