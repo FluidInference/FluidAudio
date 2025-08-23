@@ -30,7 +30,7 @@ internal struct TdtDecoder {
         // print("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
 
         guard encoderSequenceLength > 1 else {
-            logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
+            print("TDT: Encoder sequence too short (\(encoderSequenceLength))")
             return []
         }
 
@@ -46,13 +46,10 @@ internal struct TdtDecoder {
         var activeMask = true
         let lastTimestep = encoderSequenceLength - 1
 
-        // Track whether we've emitted any non-blank tokens yet (for NeMo parity)
-        var hasEmittedNonBlank =
-            decoderState.lastToken != nil && decoderState.lastToken != config.tdtConfig.blankId
-            
-
-        // Save the initial decoder state to reuse for blanks at utterance start
-        let initialTdtDecoderState = decoderState
+        // Gate loop-labels by blank margin (logit units). Typical good range: 1.5–3.0.
+        // We apply it most aggressively before the first real emission.
+        let LOOP_LABEL_MARGIN_BEFORE_FIRST: Float = 4.0
+        let LOOP_LABEL_MARGIN_AFTER_FIRST:  Float = 0.5
 
         // Variables removed - no longer needed with simplified max_symbols logic
 
@@ -61,28 +58,76 @@ internal struct TdtDecoder {
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         reusableTargetLengthArray[0] = NSNumber(value: 1)  // This never changes
 
-        while activeMask {
-            var label = hypothesis.lastToken ?? 0  // Use SOS token (0) instead of blankId when no previous token
-            var finalDuration = 0  // Track the final duration to apply
+        // --- DEBUG: chunk start context ---
+        let chunkTag = String(UUID().uuidString.prefix(6))
+        print("[\(chunkTag)] chunk start len=\(encoderSequenceLength), lastToken=\(String(describing: decoderState.lastToken))")
 
-            // For NeMo parity: Use initial state if we haven't emitted non-blank tokens and we're starting with SOS
-            let stateToUse =
-                (!hasEmittedNonBlank && hypothesis.lastToken == nil)
-                ? initialTdtDecoderState : (hypothesis.decState ?? decoderState)
+        print("[\(chunkTag)] state.h L2=\(decoderState.hiddenState.l2Normf()), state.c L2=\(decoderState.cellState.l2Normf())")
+        // Ensure a clean predictor state for a NEW utterance (NeMo parity).
+        // NeMo calls decoder with state=None at start; do the same by zeroing ours.
+        if decoderState.lastToken == nil && decoderState.predictorOutput == nil {
+            let zero = TdtDecoderState(fallback: true) // allocates zeroed h/c
+            decoderState.hiddenState.copyData(from: zero.hiddenState)
+            decoderState.cellState.copyData(from: zero.cellState)
+            print("[\(chunkTag)] RESET predictor LSTM at start (zero state)")
+        }
 
-            // Use cached decoder inputs
-            let decoderResult = try runDecoder(
-                token: label,
-                state: stateToUse,
+        // --- SOS (blank-as-pad) predictor priming (one-time at utterance start) ---
+        if decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
+            let sos = config.tdtConfig.blankId
+            let primed = try runDecoder(
+                token: sos,
+                state: decoderState,
                 model: decoderModel,
                 targetArray: reusableTargetArray,
                 targetLengthArray: reusableTargetLengthArray
             )
+            let proj = try extractFeatureValue(from: primed.output, key: "decoder_output", errorMessage: "Invalid decoder output")
+            decoderState.predictorOutput = proj
+            hypothesis.decState = primed.newState
 
+            print("[\(chunkTag)] SOS primed (blank-as-pad=\(sos)); decoder_output shape=\(proj.shapeString) L2=\(proj.l2Normf())")
+            print("[\(chunkTag)] primed.h L2=\(hypothesis.decState?.hiddenState.l2Normf() ?? -1), primed.c L2=\(hypothesis.decState?.cellState.l2Normf() ?? -1)")
+        }
+
+        // OUTER loop - advance time index by predicted duration
+        while activeMask {
+            var label = hypothesis.lastToken ?? config.tdtConfig.blankId
+            var finalDuration = 0  // Track the final duration to apply
+
+            // After SOS priming we MUST use the primed predictor state (hypothesis.decState), not zeros.
+            // Fall back to decoderState only if we truly have no primed state yet.
+            let stateToUse = hypothesis.decState ?? decoderState
+
+            // Use cached predictor output if available; DO NOT advance predictor until a non-blank is emitted.
+            let decoderResult: (output: MLFeatureProvider, newState: TdtDecoderState)
+            if let cached = decoderState.predictorOutput {
+                let provider = try MLDictionaryFeatureProvider(dictionary: [
+                    "decoder_output": MLFeatureValue(multiArray: cached)
+                ])
+                decoderResult = (output: provider, newState: stateToUse)
+                // IMPORTANT: do NOT clear the cache here. It is reused on every frame until a non-blank is emitted.
+                print("[\(chunkTag)] Joint uses cached predictor_output; t=\(timeIndices)")
+            } else {
+                // Fallback: only happens after we've emitted a non-blank and refreshed the cache,
+                // or if SOS priming was somehow skipped.
+                decoderResult = try runDecoder(
+                    token: label,
+                    state: stateToUse,
+                    model: decoderModel,
+                    targetArray: reusableTargetArray,
+                    targetLengthArray: reusableTargetLengthArray
+                )
+                if hypothesis.lastToken == nil {
+                    print("[\(chunkTag)] WARNING: no cached predictor_output but no token emitted yet; decoder ran with label=\(label)")
+                }
+            }
             // Fast encoder frame access
             let encoderStep = encoderFrames[safeTimeIndices]
 
-            // Batch process joint network if possible
+            // Batch process joint network if possible\
+            print("[\(chunkTag)] pre-Joint t=\(timeIndices) safe=\(safeTimeIndices) lastToken=\(String(describing: hypothesis.lastToken))")
+
             let logits = try runJoint(
                 encoderStep: encoderStep,
                 decoderOutput: decoderResult.output,
@@ -92,9 +137,23 @@ internal struct TdtDecoder {
             // Token/duration prediction
             let (tokenLogits, durationLogits) = try splitLogits(
                 logits, durationElements: config.tdtConfig.durationBins.count)
+
             label = argmaxSIMD(tokenLogits)
             var score = tokenLogits[label]
             let duration = config.tdtConfig.durationBins[argmaxSIMD(durationLogits)]
+            print("[\(chunkTag)] Joint@t=\(timeIndices) -> label=\(label) score=\(score) dur=\(duration) blank=\(label == config.tdtConfig.blankId) needLoop=\((duration == 0) && (label != config.tdtConfig.blankId))")
+            // --- loop-label gating vs blank (OUTER) ---
+            let blankLogit = tokenLogits[config.tdtConfig.blankId]
+            let marginOuter = score - blankLogit
+            let reqOuter = (hypothesis.lastToken == nil) ? LOOP_LABEL_MARGIN_BEFORE_FIRST : LOOP_LABEL_MARGIN_AFTER_FIRST
+
+            if (duration == 0) && (label != config.tdtConfig.blankId) && (marginOuter < reqOuter) {
+                // Treat this as a BLANK step to avoid early hallucinations.
+                print("[\(chunkTag)] gate@outer: token \(label) margin=\(marginOuter) < \(reqOuter) → treat as BLANK; advance by max(1,dur)")
+                // Convert to blank behavior:
+                label = config.tdtConfig.blankId
+                score = blankLogit
+            }
 
             let blankMask = label == config.tdtConfig.blankId
 
@@ -103,10 +162,14 @@ internal struct TdtDecoder {
             let originalNeedLoop = needLoop
 
             // Apply NeMo safeguard for outer loop blank as well
+            // Prevent frame skipping for blanks until first token is emitted
             var actualDuration = duration
             if blankMask && duration == 0 {
                 actualDuration = 1
                 // print("TDT: Outer loop blank with duration=0, forcing duration=1")
+            } else if blankMask && hypothesis.lastToken == nil {
+                actualDuration = 1  // Force duration=1 for all blanks before first real token
+                print("[\(chunkTag)] BLANK before first token: forcing duration=1 (was \(duration))")
             }
 
             // Set the final duration initially
@@ -135,10 +198,12 @@ internal struct TdtDecoder {
             var innerLoopCount = 0
             var innerLoopTokensEmitted = 0
 
-            // Inner loop - continue predicting tokens at the same time index when duration == 0
+            // INNER LOOP - continue predicting tokens at the same time index when duration == 0
             while advanceMask {
+                print("[\(chunkTag)] innerLoop#\(innerLoopCount) t=\(timeIndices) (no time advance yet)")
                 // NeMo parity: if we've emitted max symbols on this frame, force t += 1 and break
                 if innerLoopTokensEmitted >= config.tdtConfig.maxSymbolsPerStep {
+                    print("[\(chunkTag)] hit maxSymbols=\(config.tdtConfig.maxSymbolsPerStep) at t=\(timeIndices) → t+=1 and break")
                     timeIndices += 1
                     safeTimeIndices = min(timeIndices, lastTimestep)
                     hasAdvanced = true
@@ -163,22 +228,36 @@ internal struct TdtDecoder {
 
                 label = moreLabel
                 score = moreScore
+                print("[\(chunkTag)] inner Joint -> label=\(moreLabel) score=\(moreScore) dur=\(moreDuration) blank=\(moreLabel == config.tdtConfig.blankId)")
+                
+                // --- loop-label gating vs blank (INNER) ---
+                let innerBlankLogit = innerTokenLogits[config.tdtConfig.blankId]
+                let marginInner = moreScore - innerBlankLogit
+                let reqInner = (hypothesis.lastToken == nil) ? LOOP_LABEL_MARGIN_BEFORE_FIRST : LOOP_LABEL_MARGIN_AFTER_FIRST
+                var gatedToBlank = false
+                if (moreDuration == 0) && (moreLabel != config.tdtConfig.blankId) && (marginInner < reqInner) {
+                    print("[\(chunkTag)] gate@inner: token \(moreLabel) margin=\(marginInner) < \(reqInner) → BLANK@+1")
+                    // Force a blank with duration 1 to get more acoustic context and exit the loop cleanly.
+                    label = config.tdtConfig.blankId
+                    score = innerBlankLogit
+                    gatedToBlank = true
+                }
 
                 // Apply NeMo rule IMMEDIATELY for blank tokens with duration=0
                 var actualDuration = moreDuration
-                let innerBlankMask = moreLabel == config.tdtConfig.blankId
+                let innerBlankMask = (label == config.tdtConfig.blankId) || gatedToBlank
 
-                if innerBlankMask && moreDuration == 0 {
+                if innerBlankMask && (moreDuration == 0 || gatedToBlank) {
                     actualDuration = 1
-                    // print("TDT: Applying blank duration=0 safeguard, forcing duration=1")
+                    print("TDT: Applying blank duration=0 safeguard, forcing duration=1")
                 }
-
+                
                 // Update final duration with the last predicted duration
                 finalDuration = actualDuration
 
-                // print(
-                //     "TDT inner: token=\(moreLabel) duration=\(moreDuration) actualDuration=\(actualDuration) blank=\(innerBlankMask)"
-                // )
+                print(
+                    "TDT inner: token=\(moreLabel) duration=\(moreDuration) actualDuration=\(actualDuration) blank=\(innerBlankMask)"
+                )
 
                 // Update hypothesis for non-blank tokens immediately
                 if !innerBlankMask {
@@ -186,22 +265,31 @@ internal struct TdtDecoder {
                     hypothesis.score += moreScore
                     hypothesis.timestamps.append(timeIndicesCurrentLabels)
                     hypothesis.lastToken = moreLabel
-                    hasEmittedNonBlank = true  // Mark that we've emitted a non-blank token
                     innerLoopTokensEmitted += 1
+                    print("[\(chunkTag)] EMIT token=\(moreLabel) at t=\(timeIndicesCurrentLabels) (inner)")
 
-                    // Update decoder state with the new token
-                    currentDecoderResult = try runDecoder(
+                    // Advance predictor ONLY after a non-blank; refresh the cache for subsequent frames.
+                    let step = try runDecoder(
                         token: moreLabel,
                         state: currentDecoderResult.newState,
                         model: decoderModel,
                         targetArray: reusableTargetArray,
                         targetLengthArray: reusableTargetLengthArray
                     )
-                    hypothesis.decState = currentDecoderResult.newState
+                    currentDecoderResult = step
+                    hypothesis.decState = step.newState
+                    decoderState.predictorOutput = try extractFeatureValue(
+                        from: step.output,
+                        key: "decoder_output",
+                        errorMessage: "Invalid decoder output"
+                    )
+                    print("[\(chunkTag)] EMIT \(moreLabel) → refreshed predictor cache (inner)")
                 }
 
                 // Exit conditions: blank token OR non-zero duration
                 if innerBlankMask || actualDuration > 0 {
+                    print("[\(chunkTag)] advance due to blank/dur or maxSymbols → t += \(actualDuration == 0 ? 1 : actualDuration)")
+
                     // Advance time index by actualDuration (which may be 1 for blank+duration=0)
                     if !hasAdvanced {
                         timeIndices += actualDuration
@@ -215,6 +303,7 @@ internal struct TdtDecoder {
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && (actualDuration == 0) && !innerBlankMask
             }  // End of inner loop
+            print("[\(chunkTag)] step end: finalDuration=\(finalDuration) hasAdvanced=\(hasAdvanced) next t=\(timeIndices)")
 
             // Safety check matching NeMo - if we still have duration=0, force advance by 1
             // This prevents infinite loops
@@ -235,20 +324,30 @@ internal struct TdtDecoder {
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.lastToken = label
-                hasEmittedNonBlank = true  // Mark that we've emitted a non-blank token
 
-                // Use the existing decoder result - but only commit state if we've moved beyond initial blanks
-                hypothesis.decState = decoderResult.newState
+                // Advance predictor ONLY NOW: run the decoder with the just-emitted label
+                // to get the next predictor state + projected output for subsequent frames.
+                let step = try runDecoder(
+                    token: label,
+                    state: decoderResult.newState,            // state that produced this Joint
+                    model: decoderModel,
+                    targetArray: reusableTargetArray,
+                    targetLengthArray: reusableTargetLengthArray
+                )
+                hypothesis.decState = step.newState
+                decoderState.predictorOutput = try extractFeatureValue(
+                    from: step.output,
+                    key: "decoder_output",
+                    errorMessage: "Invalid decoder output"
+                )
+                print("[\(chunkTag)] EMIT \(label) → runDecoder+refresh predictor cache (outer)")
             } else if label == config.tdtConfig.blankId {
-                // For blanks at utterance start, don't advance decoder state (NeMo parity)
-                if hasEmittedNonBlank {
-                    // Only advance state for blanks after we've emitted non-blank tokens
-                    hypothesis.decState = decoderResult.newState
-                }
-                // Otherwise, keep the previous state unchanged
+                // BLANK: do NOT update predictor state or predictorOutput cache.
+                print("[\(chunkTag)] BLANK at t=\(timeIndices); predictor state/output unchanged")
             }
 
         }
+        print("[\(chunkTag)] chunk end: final t=\(timeIndices) len=\(encoderSequenceLength) overrun=\(max(0, timeIndices - encoderSequenceLength)) emitted=\(hypothesis.ySequence.count) lastToken=\(String(describing: hypothesis.lastToken))")
 
         if let finalState = hypothesis.decState {
             decoderState = finalState
@@ -444,13 +543,7 @@ internal struct TdtDecoder {
         guard totalElements >= durationElements else {
             throw ASRError.processingFailed("Logits dimension mismatch")
         }
-
-        // Sanity check for expected logits size (strict for Parakeet‑TDT‑v3)
-        let expectedTotal = 8193 + durationElements
-        guard totalElements == expectedTotal else {
-            throw ASRError.processingFailed(
-                "Unexpected logits size: \(totalElements), expected \(expectedTotal)")
-        }
+        guard vocabSize > 0 else { throw ASRError.processingFailed("Logits dim mismatch") }
 
         // Create views directly without copying - zero-copy operation
         let logitsPtr = logits.dataPointer.bindMemory(to: Float.self, capacity: totalElements)
@@ -563,4 +656,25 @@ internal struct TdtDecoder {
         }
         return value
     }
+}
+
+
+extension MLMultiArray {
+    /// Fast L2 norm (float32 optimized)
+    func l2Normf() -> Float {
+        let n = self.count
+        if self.dataType == .float32 {
+            return self.dataPointer.withMemoryRebound(to: Float.self, capacity: n) { ptr in
+                var ss: Float = 0
+                vDSP_svesq(ptr, 1, &ss, vDSP_Length(n))
+                return sqrtf(ss)
+            }
+        } else {
+            var ss: Float = 0
+            for i in 0..<n { let v = self[i].floatValue; ss += v * v }
+            return sqrtf(ss)
+        }
+    }
+    /// "BxTxH" style string
+    var shapeString: String { shape.map { "\($0.intValue)" }.joined(separator: "x") }
 }

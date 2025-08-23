@@ -12,6 +12,10 @@ struct TdtDecoderState {
     /// ensuring proper context continuity for real-time transcription.
     var lastToken: Int?
 
+    // Cached CoreML "decoder_output" used for the very first Joint at utterance/chunk start.
+    // This mirrors NeMo's behavior where SOS == blankId is used only to prime the predictor.
+    var predictorOutput: MLMultiArray?
+
     enum InitError: Error {
         case aneAllocationFailed(String)
     }
