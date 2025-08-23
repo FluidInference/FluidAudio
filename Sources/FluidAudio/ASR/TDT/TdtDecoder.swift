@@ -46,6 +46,14 @@ internal struct TdtDecoder {
         var activeMask = true
         let lastTimestep = encoderSequenceLength - 1
 
+        // Track whether we've emitted any non-blank tokens yet (for NeMo parity)
+        var hasEmittedNonBlank =
+            decoderState.lastToken != nil && decoderState.lastToken != config.tdtConfig.blankId
+            && decoderState.lastToken != 0
+
+        // Save the initial decoder state to reuse for blanks at utterance start
+        let initialDecoderState = decoderState
+
         // Variables removed - no longer needed with simplified max_symbols logic
 
         // Pre-allocate reusable MLMultiArrays for decoder to avoid repeated allocations
@@ -54,13 +62,18 @@ internal struct TdtDecoder {
         reusableTargetLengthArray[0] = NSNumber(value: 1)  // This never changes
 
         while activeMask {
-            var label = hypothesis.lastToken ?? config.tdtConfig.blankId
+            var label = hypothesis.lastToken ?? 0  // Use SOS token (0) instead of blankId when no previous token
             var finalDuration = 0  // Track the final duration to apply
+
+            // For NeMo parity: Use initial state if we haven't emitted non-blank tokens and we're starting with SOS
+            let stateToUse =
+                (!hasEmittedNonBlank && label == 0)
+                ? initialDecoderState : (hypothesis.decState ?? decoderState)
 
             // Use cached decoder inputs
             let decoderResult = try runDecoder(
                 token: label,
-                state: hypothesis.decState ?? decoderState,
+                state: stateToUse,
                 model: decoderModel,
                 targetArray: reusableTargetArray,
                 targetLengthArray: reusableTargetLengthArray
@@ -178,6 +191,7 @@ internal struct TdtDecoder {
                     hypothesis.score += moreScore
                     hypothesis.timestamps.append(timeIndicesCurrentLabels)
                     hypothesis.lastToken = moreLabel
+                    hasEmittedNonBlank = true  // Mark that we've emitted a non-blank token
                     innerLoopTokensEmitted += 1
 
                     // Update decoder state with the new token
@@ -226,10 +240,17 @@ internal struct TdtDecoder {
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.lastToken = label
+                hasEmittedNonBlank = true  // Mark that we've emitted a non-blank token
 
-                // Use the existing decoder result from line 61 - do NOT call decoder again
-                // The double decoder call was corrupting the LSTM state
+                // Use the existing decoder result - but only commit state if we've moved beyond initial blanks
                 hypothesis.decState = decoderResult.newState
+            } else if label == config.tdtConfig.blankId {
+                // For blanks at utterance start, don't advance decoder state (NeMo parity)
+                if hasEmittedNonBlank {
+                    // Only advance state for blanks after we've emitted non-blank tokens
+                    hypothesis.decState = decoderResult.newState
+                }
+                // Otherwise, keep the previous state unchanged
             }
 
         }

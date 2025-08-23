@@ -193,7 +193,7 @@ public final class AsrManager {
         var freshState = try DecoderState()
 
         let initDecoderInput = try prepareDecoderInput(
-            targetToken: config.tdtConfig.blankId,
+            targetToken: 0,  // Use SOS token (0) instead of blankId for proper initialization
             hiddenState: freshState.hiddenState,
             cellState: freshState.cellState
         )
