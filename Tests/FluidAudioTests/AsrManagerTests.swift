@@ -84,42 +84,20 @@ final class AsrManagerTests: XCTestCase {
 
     // MARK: - Decoder Input Preparation Tests
 
-    func testPrepareDecoderInput() throws {
-        let targetToken = 42
-        let hiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        let cellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+    func testDecoderStateInitialization() async throws {
+        // Since prepareDecoderInput is now private and requires models to be loaded,
+        // we test that the manager correctly handles the not initialized state
 
-        // Fill states with test values
-        for i in 0..<hiddenState.count {
-            hiddenState[i] = NSNumber(value: Float(i) * 0.01)
-            cellState[i] = NSNumber(value: Float(i) * 0.02)
+        // Test that resetDecoderState throws notInitialized when models aren't loaded
+        do {
+            try await manager.resetDecoderState(for: .microphone)
+            XCTFail("Expected notInitialized error")
+        } catch ASRError.notInitialized {
+            // Expected behavior when models aren't loaded
+            XCTAssertTrue(true, "Correctly threw notInitialized error")
+        } catch {
+            XCTFail("Expected notInitialized error, got: \(error)")
         }
-
-        let input = try manager.prepareDecoderInput(
-            targetToken: targetToken,
-            hiddenState: hiddenState,
-            cellState: cellState
-        )
-
-        // Verify targets
-        guard let targets = input.featureValue(for: "targets")?.multiArrayValue else {
-            XCTFail("Missing targets feature")
-            return
-        }
-        XCTAssertEqual(targets.shape, [1, 1] as [NSNumber])
-        XCTAssertEqual(targets[0].intValue, 42)
-
-        // Verify target_lengths
-        guard let targetLengths = input.featureValue(for: "target_lengths")?.multiArrayValue else {
-            XCTFail("Missing target_lengths feature")
-            return
-        }
-        XCTAssertEqual(targetLengths.shape, [1] as [NSNumber])
-        XCTAssertEqual(targetLengths[0].intValue, 1)
-
-        // Verify states are passed through
-        XCTAssertNotNil(input.featureValue(for: "h_in")?.multiArrayValue)
-        XCTAssertNotNil(input.featureValue(for: "c_in")?.multiArrayValue)
     }
 
     // MARK: - Feature Extraction Tests

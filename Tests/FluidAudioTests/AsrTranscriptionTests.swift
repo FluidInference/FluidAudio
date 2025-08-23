@@ -77,6 +77,7 @@ final class AsrTranscriptionTests: XCTestCase {
         XCTAssertEqual(result.confidence, 1.0)
         XCTAssertEqual(result.duration, 1.0, accuracy: 0.01)
         XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)
+        XCTAssertTrue(result.tokenTimings?.isEmpty == true)  // No timestamps provided, should be empty array
     }
 
     func testProcessTranscriptionResultWithTimings() {
@@ -99,6 +100,40 @@ final class AsrTranscriptionTests: XCTestCase {
         XCTAssertEqual(result.duration, 3.0, accuracy: 0.01)
         XCTAssertNotNil(result.tokenTimings)
         // Note: Actual timing count may differ due to convertTokensWithExistingTimings filtering
+    }
+
+    func testProcessTranscriptionResultWithTimestamps() {
+        let tokenIds = [100, 200, 300]
+        let timestamps = [10, 20, 30]  // Frame indices
+        let audioSamples = Array(repeating: Float(0), count: 32_000)  // 2 seconds
+        let processingTime = 0.8
+
+        let result = manager.processTranscriptionResult(
+            tokenIds: tokenIds,
+            timestamps: timestamps,
+            encoderSequenceLength: 100,
+            audioSamples: audioSamples,
+            processingTime: processingTime
+        )
+
+        XCTAssertEqual(result.confidence, 1.0)
+        XCTAssertEqual(result.duration, 2.0, accuracy: 0.01)
+        XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)
+
+        // Should have token timings from timestamps
+        XCTAssertNotNil(result.tokenTimings)
+        XCTAssertEqual(result.tokenTimings?.count, 3)
+
+        if let tokenTimings = result.tokenTimings {
+            // Verify timing calculations (80ms per frame)
+            XCTAssertEqual(tokenTimings[0].startTime, 0.8, accuracy: 0.01)  // Frame 10 * 0.08
+            XCTAssertEqual(tokenTimings[1].startTime, 1.6, accuracy: 0.01)  // Frame 20 * 0.08
+            XCTAssertEqual(tokenTimings[2].startTime, 2.4, accuracy: 0.01)  // Frame 30 * 0.08
+
+            XCTAssertEqual(tokenTimings[0].tokenId, 100)
+            XCTAssertEqual(tokenTimings[1].tokenId, 200)
+            XCTAssertEqual(tokenTimings[2].tokenId, 300)
+        }
     }
 
     // MARK: - Chunk Processing Logic Tests
@@ -132,9 +167,6 @@ final class AsrTranscriptionTests: XCTestCase {
         // without actually running ML models
 
         let testAudio = Array(repeating: Float(0.1), count: 160_000)
-
-        // Verify the executeMLInference method can be called (indirectly through transcribe)
-        // This tests the method exists without actually running ML models
 
         // Verify padded audio would be correct size
         let padded = manager.padAudioIfNeeded(testAudio, targetLength: 160_000)

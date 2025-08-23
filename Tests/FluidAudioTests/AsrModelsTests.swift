@@ -14,7 +14,7 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertEqual(ModelNames.ASR.encoderFile, "ParakeetEncoder_15s.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "ParakeetDecoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "RNNTJoint.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_vocab.json")
+        XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
     }
 
     // MARK: - Configuration Tests
