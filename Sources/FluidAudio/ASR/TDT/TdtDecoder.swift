@@ -25,7 +25,7 @@ internal struct TdtDecoder {
         encoderSequenceLength: Int,
         decoderModel: MLModel,
         jointModel: MLModel,
-        decoderState: inout DecoderState
+        decoderState: inout TdtDecoderState
     ) async throws -> [Int] {
         // print("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
 
@@ -52,7 +52,7 @@ internal struct TdtDecoder {
             
 
         // Save the initial decoder state to reuse for blanks at utterance start
-        let initialDecoderState = decoderState
+        let initialTdtDecoderState = decoderState
 
         // Variables removed - no longer needed with simplified max_symbols logic
 
@@ -68,7 +68,7 @@ internal struct TdtDecoder {
             // For NeMo parity: Use initial state if we haven't emitted non-blank tokens and we're starting with SOS
             let stateToUse =
                 (!hasEmittedNonBlank && hypothesis.lastToken == nil)
-                ? initialDecoderState : (hypothesis.decState ?? decoderState)
+                ? initialTdtDecoderState : (hypothesis.decState ?? decoderState)
 
             // Use cached decoder inputs
             let decoderResult = try runDecoder(
@@ -318,11 +318,11 @@ internal struct TdtDecoder {
     /// Decoder execution
     private func runDecoder(
         token: Int,
-        state: DecoderState,
+        state: TdtDecoderState,
         model: MLModel,
         targetArray: MLMultiArray,
         targetLengthArray: MLMultiArray
-    ) throws -> (output: MLFeatureProvider, newState: DecoderState) {
+    ) throws -> (output: MLFeatureProvider, newState: TdtDecoderState) {
 
         // Reuse pre-allocated arrays
         targetArray[0] = NSNumber(value: token)
@@ -413,7 +413,7 @@ internal struct TdtDecoder {
         score: Float,
         duration: Int,
         timeIdx: Int,
-        decoderState: DecoderState
+        decoderState: TdtDecoderState
     ) {
         hypothesis.ySequence.append(token)
         hypothesis.score += score

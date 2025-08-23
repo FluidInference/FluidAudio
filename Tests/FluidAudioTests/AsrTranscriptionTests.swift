@@ -165,7 +165,7 @@ final class AsrTranscriptionTests: XCTestCase {
 
     func testTranscriptionWithStateStructure() async throws {
         // Verify the transcribeWithState method structure
-        let decoderState = try DecoderState()
+        let decoderState = try TdtDecoderState()
 
         // Verify decoder state is properly initialized
         XCTAssertEqual(decoderState.hiddenState.shape, [2, 1, 640] as [NSNumber])

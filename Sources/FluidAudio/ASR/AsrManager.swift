@@ -32,8 +32,8 @@ public final class AsrManager {
     }
     #endif
 
-    private var microphoneDecoderState: DecoderState
-    private var systemDecoderState: DecoderState
+    private var microphoneDecoderState: TdtDecoderState
+    private var systemDecoderState: TdtDecoderState
 
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
@@ -48,13 +48,13 @@ public final class AsrManager {
 
         // Initialize decoder states with fallback
         do {
-            self.microphoneDecoderState = try DecoderState()
-            self.systemDecoderState = try DecoderState()
+            self.microphoneDecoderState = try TdtDecoderState()
+            self.systemDecoderState = try TdtDecoderState()
         } catch {
             logger.warning("Failed to create ANE-aligned decoder states, using standard allocation")
             // This should rarely happen, but if it does, we'll create them during first use
-            self.microphoneDecoderState = DecoderState(fallback: true)
-            self.systemDecoderState = DecoderState(fallback: true)
+            self.microphoneDecoderState = TdtDecoderState(fallback: true)
+            self.systemDecoderState = TdtDecoderState(fallback: true)
         }
 
         // Pre-warm caches if possible
@@ -184,12 +184,12 @@ public final class AsrManager {
         ])
     }
 
-    internal func initializeDecoderState(decoderState: inout DecoderState) async throws {
+    internal func initializeDecoderState(decoderState: inout TdtDecoderState) async throws {
         guard let decoderModel = decoderModel else {
             throw ASRError.notInitialized
         }
 
-        var freshState = try DecoderState()
+        var freshState = try TdtDecoderState()
 
         let initDecoderInput = try prepareDecoderInput(
             hiddenState: freshState.hiddenState,
@@ -258,8 +258,8 @@ public final class AsrManager {
         decoderModel = nil
         jointModel = nil
         // Reset decoder states - use fallback initializer that won't throw
-        microphoneDecoderState = DecoderState(fallback: true)
-        systemDecoderState = DecoderState(fallback: true)
+        microphoneDecoderState = TdtDecoderState(fallback: true)
+        systemDecoderState = TdtDecoderState(fallback: true)
         logger.info("AsrManager resources cleaned up")
     }
 
@@ -296,7 +296,7 @@ public final class AsrManager {
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
         originalAudioSamples: [Float],
-        decoderState: inout DecoderState
+        decoderState: inout TdtDecoderState
     ) async throws -> [Int] {
         // Note: Decoder state initialization is now handled by the caller
         // Use resetDecoderState() to explicitly reset when needed

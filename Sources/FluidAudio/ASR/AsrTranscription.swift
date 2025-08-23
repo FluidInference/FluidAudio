@@ -5,7 +5,7 @@ import OSLog
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout DecoderState
+        _ audioSamples: [Float], decoderState: inout TdtDecoderState
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
@@ -72,7 +72,7 @@ extension AsrManager {
         _ paddedAudio: [Float],
         originalLength: Int? = nil,
         enableDebug: Bool = false,
-        decoderState: inout DecoderState
+        decoderState: inout TdtDecoderState
     ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
@@ -161,7 +161,7 @@ private struct ChunkProcessor {
 
         var position = 0
         var chunkIndex = 0
-        var decoderState = try DecoderState()
+        var decoderState = try TdtDecoderState()
 
         while position < audioSamples.count {
             let text = try await processChunk(
@@ -182,7 +182,7 @@ private struct ChunkProcessor {
 
     private func processChunk(
         at position: Int, chunkIndex: Int, using manager: AsrManager,
-        decoderState: inout DecoderState
+        decoderState: inout TdtDecoderState
     ) async throws -> String {
         let endPosition = min(position + chunkSize, audioSamples.count)
         let chunkSamples = Array(audioSamples[position..<endPosition])
