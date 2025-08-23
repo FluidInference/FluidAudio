@@ -172,7 +172,7 @@ enum StreamingTranscribeCommand {
             }
 
             // Simulate streaming by feeding audio in chunks
-            let chunkDuration = 0.1  // 100ms chunks
+            let chunkDuration = 1.0 // 100ms chunks
             let samplesPerChunk = Int(chunkDuration * format.sampleRate)
             var position = 0
 
