@@ -291,22 +291,40 @@ public final class AsrManager {
         logger.info("  Combined improvement: 3.6-9x over baseline")
     }
 
+    /// Deprecated: use `tdtDecodeWithTimings` and ignore timestamps if not needed
+    @available(*, deprecated, message: "Use tdtDecodeWithTimings to also retrieve emission timestamps")
     internal func tdtDecode(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
         originalAudioSamples: [Float],
         decoderState: inout TdtDecoderState
     ) async throws -> [Int] {
-        // Note: Decoder state initialization is now handled by the caller
-        // Use resetDecoderState() to explicitly reset when needed
+        let (tokens, _) = try await tdtDecodeWithTimings(
+            encoderOutput: encoderOutput,
+            encoderSequenceLength: encoderSequenceLength,
+            originalAudioSamples: originalAudioSamples,
+            decoderState: &decoderState
+        )
+        return tokens
+    }
 
+    internal func tdtDecodeWithTimings(
+        encoderOutput: MLMultiArray,
+        encoderSequenceLength: Int,
+        originalAudioSamples: [Float],
+        decoderState: inout TdtDecoderState,
+        startFrameOffset: Int = 0,
+        lastProcessedFrame: Int = 0
+    ) async throws -> (tokens: [Int], timestamps: [Int]) {
         let decoder = TdtDecoder(config: config)
-        return try await decoder.decode(
+        return try await decoder.decodeWithTimings(
             encoderOutput: encoderOutput,
             encoderSequenceLength: encoderSequenceLength,
             decoderModel: decoderModel!,
             jointModel: jointModel!,
-            decoderState: &decoderState
+            decoderState: &decoderState,
+            startFrameOffset: startFrameOffset,
+            lastProcessedFrame: lastProcessedFrame
         )
     }
 

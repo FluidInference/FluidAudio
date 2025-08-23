@@ -39,13 +39,13 @@ public class ASRBenchmark {
             }
 
             if transcriptCount >= 5 {
-                logger.info("LibriSpeech \(subset) already downloaded")
+                print("LibriSpeech \(subset) already downloaded")
                 print("LibriSpeech \(subset) already available (dataset found)")
                 return
             }
         }
 
-        logger.info("Downloading LibriSpeech \(subset)...")
+        print("Downloading LibriSpeech \(subset)...")
 
         let downloadURL: String
         switch subset {
@@ -67,7 +67,7 @@ public class ASRBenchmark {
             expectedSubpath: "LibriSpeech/\(subset)"
         )
 
-        logger.info("LibriSpeech \(subset) downloaded successfully")
+        print("LibriSpeech \(subset) downloaded successfully")
     }
 
     /// Run ASR benchmark on LibriSpeech
@@ -118,22 +118,18 @@ public class ASRBenchmark {
             "📋 Processing \(filesToProcess.count) files (max files limit: \(config.maxFiles?.description ?? "unlimited"))"
         )
 
-        logger.info(
+        print(
             "Running ASR benchmark on \(filesToProcess.count) files from LibriSpeech \(subset)")
 
         var results: [ASRBenchmarkResult] = []
 
         for (index, audioFile) in filesToProcess.enumerated() {
             do {
-                if config.debugMode {
-                    logger.info(
+                    print(
                         "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)"
                     )
-                }
 
-                if config.debugMode && index > 0 {
-                    logger.info("   🔍 Processing file \(index + 1)")
-                }
+                    print("   🔍 Processing file \(index + 1)")
 
                 // Reset decoder state for each new file
                 print("Resetting decoder state for new file: \(audioFile.fileName)")
@@ -206,15 +202,13 @@ public class ASRBenchmark {
         // Calculate chunk size in samples (minimum 1 second to ensure reasonable context)
         let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
 
-        if config.debugMode {
-            logger.info("🔍 Starting streaming simulation for \(file.fileName)")
-            logger.info("🔍   Audio length: \(audioLength)s")
-            logger.info("🔍   Total samples: \(audioSamples.count)")
-            logger.info("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
-            logger.info("🔍   Samples per chunk: \(samplesPerChunk)")
+            print("🔍 Starting streaming simulation for \(file.fileName)")
+            print("🔍   Audio length: \(audioLength)s")
+            print("🔍   Total samples: \(audioSamples.count)")
+            print("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
+            print("🔍   Samples per chunk: \(samplesPerChunk)")
             let totalChunks = (audioSamples.count + samplesPerChunk - 1) / samplesPerChunk
-            logger.info("🔍   Expected total chunks: \(totalChunks)")
-        }
+            print("🔍   Expected total chunks: \(totalChunks)")
 
         // For streaming, we'll use the full file but measure chunk-by-chunk processing
         // This simulates how streaming would work with continuous audio
@@ -232,11 +226,9 @@ public class ASRBenchmark {
             let chunkSamples = nextChunkEnd - processedSamples
             let isLastChunk = nextChunkEnd >= audioSamples.count
 
-            if config.debugMode {
-                logger.info(
+                print(
                     "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
                 )
-            }
 
             // Process all audio up to this point (simulating accumulated streaming)
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
@@ -254,17 +246,15 @@ public class ASRBenchmark {
             let chunkProcessingTime = Date().timeIntervalSince(chunkStartTime)
             chunkProcessingTimes.append(chunkProcessingTime)
 
-            if config.debugMode {
-                let chunkDuration = Double(chunkSamples) / 16000.0
-                logger.info(
-                    "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s"
-                )
+            let chunkDuration = Double(chunkSamples) / 16000.0
+            print(
+                "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s"
+            )
 
-                if isLastChunk {
-                    logger.info(
-                        "🔍   FINAL CHUNK \(chunkNumber): text change: '\(previousText)' -> '\(accumulatedText)'")
-                    logger.info("🔍   FINAL CHUNK processing complete")
-                }
+            if isLastChunk {
+                print(
+                    "🔍   FINAL CHUNK \(chunkNumber): text change: '\(previousText)' -> '\(accumulatedText)'")
+                print("🔍   FINAL CHUNK processing complete")
             }
 
             processedSamples = nextChunkEnd

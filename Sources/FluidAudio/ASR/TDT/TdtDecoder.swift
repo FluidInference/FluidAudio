@@ -19,18 +19,21 @@ internal struct TdtDecoder {
         self.config = config
     }
 
-    /// Execute optimized TDT decoding
-    func decode(
+    /// Execute TDT decoding and return tokens with emission timestamps (encoder frame indices)
+    /// - Returns: Tuple of decoded token IDs and their emission timestamps in encoder-frame indices
+    func decodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
         decoderModel: MLModel,
         jointModel: MLModel,
-        decoderState: inout TdtDecoderState
-    ) async throws -> [Int] {
-        // print("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
+        decoderState: inout TdtDecoderState,
+        startFrameOffset: Int = 0,
+        lastProcessedFrame: Int = 0
+    ) async throws -> (tokens: [Int], timestamps: [Int]) {
+        // Reuse the main decode implementation but keep the timestamps from the hypothesis
 
         guard encoderSequenceLength > 1 else {
-            return []
+            return ([], [])
         }
 
         // Pre-process encoder output for faster access
@@ -38,39 +41,41 @@ internal struct TdtDecoder {
             encoderOutput, length: encoderSequenceLength)
 
         var hypothesis = TdtHypothesis(decState: decoderState)
-        hypothesis.lastToken = decoderState.lastToken  // Preserve last token from previous chunk
-        var timeIndices = 0
-        var safeTimeIndices = 0
-        var timeIndicesCurrentLabels = 0
+        hypothesis.lastToken = decoderState.lastToken
+        var timeIndices = startFrameOffset
+        var safeTimeIndices = min(startFrameOffset, encoderSequenceLength - 1)
+        var timeIndicesCurrentLabels = startFrameOffset
         var activeMask = true
         let lastTimestep = encoderSequenceLength - 1
 
-        // Variables removed - no longer needed with simplified max_symbols logic
-
-        // Pre-allocate reusable MLMultiArrays for decoder to avoid repeated allocations
         let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
-        reusableTargetLengthArray[0] = NSNumber(value: 1)  // This never changes
+        reusableTargetLengthArray[0] = NSNumber(value: 1)
 
         // --- DEBUG: chunk start context ---
         let chunkTag = String(UUID().uuidString.prefix(6))
         print(
             "[\(chunkTag)] chunk start len=\(encoderSequenceLength), lastToken=\(String(describing: decoderState.lastToken)) timestamp=\(Date())"
         )
+        print(
+            "[\(chunkTag)] TOTAL encoder frames available: \(encoderFrames.count), processing: \(encoderSequenceLength) (pre-sliced)"
+        )
 
         print(
             "[\(chunkTag)] state.h L2=\(decoderState.hiddenState.l2Normf()), state.c L2=\(decoderState.cellState.l2Normf())"
         )
-        // Ensure a clean predictor state for a NEW utterance (NeMo parity).
-        // NeMo calls decoder with state=None at start; do the same by zeroing ours.
+
+        // Ensure a clean predictor state for a NEW utterance (same behavior as decode)
         if decoderState.lastToken == nil && decoderState.predictorOutput == nil {
-            let zero = TdtDecoderState(fallback: true)  // allocates zeroed h/c
+            let zero = TdtDecoderState(fallback: true)
             decoderState.hiddenState.copyData(from: zero.hiddenState)
             decoderState.cellState.copyData(from: zero.cellState)
-            print("[\(chunkTag)] RESET predictor LSTM at start (zero state)")
         }
 
-        // --- SOS (blank-as-pad) predictor priming (one-time at utterance start) ---
+        // Clear cached predictor output if starting a new chunk
+        // This prevents using stale cached decoder outputs from previous chunks
+        // decoderState.predictorOutput = nil
+
         if decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
             let sos = config.tdtConfig.blankId
             let primed = try runDecoder(
@@ -84,7 +89,6 @@ internal struct TdtDecoder {
                 from: primed.output, key: "decoder_output", errorMessage: "Invalid decoder output")
             decoderState.predictorOutput = proj
             hypothesis.decState = primed.newState
-
             print(
                 "[\(chunkTag)] SOS primed (blank-as-pad=\(sos)); decoder_output shape=\(proj.shapeString) L2=\(proj.l2Normf())"
             )
@@ -93,19 +97,14 @@ internal struct TdtDecoder {
             )
         }
 
-        // Prevent infinite loops with max_symbols_per_step
         var lastEmissionTimestamp = -1
         var emissionsAtThisTimestamp = 0
         let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep
 
-        // OUTER loop - advance time index by predicted duration (NeMo-parity: blank-looping)
         while activeMask {
             var label = hypothesis.lastToken ?? config.tdtConfig.blankId
-
-            // After SOS priming, always use the primed predictor state until we emit a non-blank.
             let stateToUse = hypothesis.decState ?? decoderState
 
-            // Use cached predictor output if available (don’t advance predictor until a non-blank is emitted).
             let decoderResult: (output: MLFeatureProvider, newState: TdtDecoderState)
             if let cached = decoderState.predictorOutput {
                 let provider = try MLDictionaryFeatureProvider(dictionary: [
@@ -122,7 +121,6 @@ internal struct TdtDecoder {
                 )
             }
 
-            // 1) Joint at current time index
             let encoderStep = encoderFrames[safeTimeIndices]
             let logits = try runJoint(
                 encoderStep: encoderStep,
@@ -136,28 +134,20 @@ internal struct TdtDecoder {
             var score = tokenLogits[label]
             var duration = config.tdtConfig.durationBins[argmaxSIMD(durationLogits)]
 
-            // NeMo safeguard: for BLANK, force duration >= 1
             let blankId = config.tdtConfig.blankId
             var blankMask = (label == blankId)
             if blankMask && duration == 0 { duration = 1 }
 
-            // Save timestamp (t) where this label was decided
             timeIndicesCurrentLabels = timeIndices
-
-            // Pre-advance time by predicted duration (NeMo does this before the blank loop)
             timeIndices += duration
             safeTimeIndices = min(timeIndices, lastTimestep)
 
-            // Determine loop condition: keep probing while we are BLANK and still active
             activeMask = timeIndices < encoderSequenceLength
             var advanceMask = activeMask && blankMask
 
-            // 2) INNER LOOP (NeMo-style): advance through BLANKs, re-running Joint at new t each time
             while advanceMask {
-                // Store timestamp for this probe (used if/when we find a non-blank)
                 timeIndicesCurrentLabels = timeIndices
 
-                // Joint again at the NEW time index (same predictor output; we haven’t emitted yet)
                 let innerEncoderStep = encoderFrames[safeTimeIndices]
                 let innerLogits = try runJoint(
                     encoderStep: innerEncoderStep,
@@ -172,38 +162,32 @@ internal struct TdtDecoder {
                 duration = config.tdtConfig.durationBins[argmaxSIMD(innerDurationLogits)]
 
                 blankMask = (label == blankId)
-                if blankMask && duration == 0 { duration = 1 }  // blank safeguard
+                if blankMask && duration == 0 { duration = 1 }
 
-                // Advance time by this (blank) duration and check if we should continue blank-looping
                 timeIndices += duration
                 safeTimeIndices = min(timeIndices, lastTimestep)
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && blankMask
             }
 
-            // 3) If we found a NON-BLANK while still active, emit it and advance predictor ONCE
             if activeMask && label != blankId {
+                print("[\(chunkTag)] Emitting token \(label) at frame \(timeIndicesCurrentLabels)")
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.lastToken = label
 
-                // Advance predictor using the emitted label; refresh predictor cache for subsequent frames
                 let step = try runDecoder(
                     token: label,
-                    state: decoderResult.newState,  // state that produced this Joint
+                    state: decoderResult.newState,
                     model: decoderModel,
                     targetArray: reusableTargetArray,
                     targetLengthArray: reusableTargetLengthArray
                 )
                 hypothesis.decState = step.newState
                 decoderState.predictorOutput = try extractFeatureValue(
-                    from: step.output,
-                    key: "decoder_output",
-                    errorMessage: "Invalid decoder output"
-                )
+                    from: step.output, key: "decoder_output", errorMessage: "Invalid decoder output")
 
-                // --- ADD BELOW: track emissions at the same timestamp and force a 1-frame advance if needed ---
                 if timeIndicesCurrentLabels == lastEmissionTimestamp {
                     emissionsAtThisTimestamp += 1
                 } else {
@@ -212,17 +196,9 @@ internal struct TdtDecoder {
                 }
 
                 if emissionsAtThisTimestamp >= maxSymbolsPerStep {
-                    // Force a blank advance of 1 frame (do NOT touch predictor state/output)
                     let forcedAdvance = 1
                     timeIndices = min(timeIndices + forcedAdvance, lastTimestep)
                     safeTimeIndices = min(timeIndices, lastTimestep)
-
-                    // Optional: log for debug
-                    print(
-                        "[\(chunkTag)] hit maxSymbols=\(maxSymbolsPerStep) at t=\(timeIndicesCurrentLabels) → forced t+=1"
-                    )
-
-                    // Reset the counter for the new frame
                     emissionsAtThisTimestamp = 0
                     lastEmissionTimestamp = -1
                 }
@@ -232,15 +208,18 @@ internal struct TdtDecoder {
         print(
             "[\(chunkTag)] chunk end: final t=\(timeIndices) len=\(encoderSequenceLength) overrun=\(max(0, timeIndices - encoderSequenceLength)) emitted=\(hypothesis.ySequence.count) lastToken=\(String(describing: hypothesis.lastToken))"
         )
+        print("[\(chunkTag)] Final hypothesis tokens: \(hypothesis.ySequence)")
+        print(
+            "[\(chunkTag)] Decoder state preserved: lastToken=\(String(describing: decoderState.lastToken)), predictorOutput=\(decoderState.predictorOutput != nil)"
+        )
 
         if let finalState = hypothesis.decState {
             decoderState = finalState
         }
-
-        // Save the last token for the next chunk
         decoderState.lastToken = hypothesis.lastToken
 
-        return hypothesis.ySequence
+        // No filtering at decoder level - let post-processing handle deduplication
+        return (hypothesis.ySequence, hypothesis.timestamps)
     }
 
     /// Pre-process encoder output into contiguous memory for faster access
