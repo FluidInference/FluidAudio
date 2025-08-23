@@ -27,7 +27,7 @@ internal struct TdtDecoder {
         jointModel: MLModel,
         decoderState: inout DecoderState
     ) async throws -> [Int] {
-        logger.debug("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
+        // print("TDT decode: encoderSequenceLength=\(encoderSequenceLength)")
 
         guard encoderSequenceLength > 1 else {
             logger.warning("TDT: Encoder sequence too short (\(encoderSequenceLength))")
@@ -93,16 +93,16 @@ internal struct TdtDecoder {
             var actualDuration = duration
             if blankMask && duration == 0 {
                 actualDuration = 1
-                logger.debug("TDT: Outer loop blank with duration=0, forcing duration=1")
+                // print("TDT: Outer loop blank with duration=0, forcing duration=1")
             }
 
             // Set the final duration initially
             finalDuration = actualDuration
 
             // Debug logging for TDT algorithm
-            logger.debug(
-                "TDT: t=\(timeIndices) token=\(label) duration=\(duration) actualDuration=\(actualDuration) blank=\(blankMask) needLoop=\(needLoop)"
-            )
+            // print(
+            //     "TDT: t=\(timeIndices) token=\(label) duration=\(duration) actualDuration=\(actualDuration) blank=\(blankMask) needLoop=\(needLoop)"
+            // )
 
             // Track if we've advanced the time index yet
             var hasAdvanced = false
@@ -162,15 +162,15 @@ internal struct TdtDecoder {
 
                 if innerBlankMask && moreDuration == 0 {
                     actualDuration = 1
-                    logger.debug("TDT: Applying blank duration=0 safeguard, forcing duration=1")
+                    // print("TDT: Applying blank duration=0 safeguard, forcing duration=1")
                 }
 
                 // Update final duration with the last predicted duration
                 finalDuration = actualDuration
 
-                logger.debug(
-                    "TDT inner: token=\(moreLabel) duration=\(moreDuration) actualDuration=\(actualDuration) blank=\(innerBlankMask)"
-                )
+                // print(
+                //     "TDT inner: token=\(moreLabel) duration=\(moreDuration) actualDuration=\(actualDuration) blank=\(innerBlankMask)"
+                // )
 
                 // Update hypothesis for non-blank tokens immediately
                 if !innerBlankMask {
@@ -213,7 +213,7 @@ internal struct TdtDecoder {
                 finalDuration = 1
                 timeIndices += 1
                 safeTimeIndices = min(timeIndices, lastTimestep)
-                logger.debug("TDT: Safety check - forcing duration=1 to prevent infinite loop")
+                // print("TDT: Safety check - forcing duration=1 to prevent infinite loop")
             }
 
             // Update predictor state
@@ -221,22 +221,15 @@ internal struct TdtDecoder {
                 // Inner loop already advanced predictor on each emission; capture final state.
                 hypothesis.decState = currentDecoderResult.newState
             } else if label != config.tdtConfig.blankId {
-                // Handle single token without inner loop: emit + immediately advance predictor (NeMo parity).
+                // Handle single token without inner loop: emit token and use existing decoder result
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.lastToken = label
 
-                // Advance predictor immediately so state mirrors NeMo greedy behavior
-                let step = try runDecoder(
-                    token: label,
-                    state: currentDecoderResult.newState,
-                    model: decoderModel,
-                    targetArray: reusableTargetArray,
-                    targetLengthArray: reusableTargetLengthArray
-                )
-                hypothesis.decState = step.newState
-                currentDecoderResult = step  // keep in sync (optional, but nice)
+                // Use the existing decoder result from line 61 - do NOT call decoder again
+                // The double decoder call was corrupting the LSTM state
+                hypothesis.decState = decoderResult.newState
             }
 
         }
