@@ -60,7 +60,7 @@ public final class AsrManager {
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
-                ([1, 160000], .float32),
+                ([1, 240000], .float32),
                 ([1], .int32),
                 ([2, 1, 640], .float32),
             ])
@@ -149,7 +149,7 @@ public final class AsrManager {
             if let melLength = melspectrogramOutput.featureValue(for: "melspectrogram_length") {
                 let features = [
                     "audio_signal": provider.featureValue(for: "audio_signal")!,
-                    "length": melLength,
+                    "length": melLength,  // Fixed: encoder expects "length", not "melspectrogram_length"
                 ]
                 return ZeroCopyFeatureProvider(features: features)
             }
@@ -165,7 +165,7 @@ public final class AsrManager {
 
         return try createFeatureProvider(features: [
             ("audio_signal", melspectrogram),
-            ("length", melspectrogramLength),
+            ("length", melspectrogramLength),  // Fixed: encoder expects "length", not "melspectrogram_length"
         ])
     }
 

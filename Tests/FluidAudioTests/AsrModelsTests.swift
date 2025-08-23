@@ -10,8 +10,8 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Model Names Tests
 
     func testModelNames() {
-        XCTAssertEqual(ModelNames.ASR.melspectrogramFile, "Melspectrogram_v2.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.encoderFile, "ParakeetEncoder_v2.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.melspectrogramFile, "Melspectrogram_15s.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.encoderFile, "ParakeetEncoder_15s.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "ParakeetDecoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "RNNTJoint.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_vocab.json")

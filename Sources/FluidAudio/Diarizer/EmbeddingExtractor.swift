@@ -22,7 +22,7 @@ public class EmbeddingExtractor {
         // Pre-allocate ANE-aligned buffers
         do {
             self.waveformBuffer = try memoryOptimizer.createAlignedArray(
-                shape: [3, 160000] as [NSNumber],
+                shape: [3, 240000] as [NSNumber],
                 dataType: .float32
             )
 

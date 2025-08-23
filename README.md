@@ -178,7 +178,6 @@ import FluidAudio
 
 // Initialize ASR with configuration
 let asrConfig = ASRConfig(
-    maxSymbolsPerFrame: 3,
     realtimeMode: true,
     chunkSizeMs: 1500,          // Process in 1.5 second chunks
     tdtConfig: TdtConfig(

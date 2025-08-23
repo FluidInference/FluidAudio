@@ -47,7 +47,7 @@ enum StreamDiarizationBenchmark {
                 --dataset <name>         Dataset to benchmark (default: ami-sdm)
                 --single-file <name>     Process a specific meeting (e.g., ES2004a)
                 --max-files <n>          Maximum number of files to process
-                --chunk-seconds <sec>    Chunk duration for streaming (default: 10.0)
+                --chunk-seconds <sec>    Chunk duration for streaming (default: 15.0)
                 --overlap-seconds <sec>  Overlap between chunks (default: 0.0)
                 --threshold <value>      Clustering threshold (default: 0.7)
                 --assignment-threshold   Threshold for assigning to existing speakers (default: 0.84)
@@ -88,7 +88,7 @@ enum StreamDiarizationBenchmark {
         var dataset = "ami-sdm"
         var singleFile: String?
         var maxFiles: Int?
-        var chunkSeconds: Double = 10.0
+        var chunkSeconds: Double = 15.0
         var overlapSeconds: Double = 0.0
         var threshold: Float = 0.7
         var assignmentThreshold: Float = 0.84
@@ -120,7 +120,7 @@ enum StreamDiarizationBenchmark {
                 }
             case "--chunk-seconds":
                 if i + 1 < arguments.count {
-                    chunkSeconds = Double(arguments[i + 1]) ?? 10.0
+                    chunkSeconds = Double(arguments[i + 1]) ?? 15.0
                     i += 1
                 }
             case "--overlap-seconds":

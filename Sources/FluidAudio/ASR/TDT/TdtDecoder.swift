@@ -56,7 +56,7 @@ internal struct TdtDecoder {
         while activeMask {
             var label = hypothesis.lastToken ?? config.tdtConfig.blankId
             var finalDuration = 0  // Track the final duration to apply
-            
+
             // Use cached decoder inputs
             let decoderResult = try runDecoder(
                 token: label,
@@ -101,7 +101,8 @@ internal struct TdtDecoder {
 
             // Debug logging for TDT algorithm
             logger.debug(
-                "TDT: t=\(timeIndices) token=\(label) duration=\(duration) actualDuration=\(actualDuration) blank=\(blankMask) needLoop=\(needLoop)")
+                "TDT: t=\(timeIndices) token=\(label) duration=\(duration) actualDuration=\(actualDuration) blank=\(blankMask) needLoop=\(needLoop)"
+            )
 
             // Track if we've advanced the time index yet
             var hasAdvanced = false
@@ -115,7 +116,7 @@ internal struct TdtDecoder {
                 safeTimeIndices = min(timeIndices, lastTimestep)
                 hasAdvanced = true
             }
-            
+
             activeMask = timeIndices < encoderSequenceLength
             var advanceMask = activeMask && needLoop
 
@@ -154,7 +155,7 @@ internal struct TdtDecoder {
 
                 label = moreLabel
                 score = moreScore
-                
+
                 // Apply NeMo rule IMMEDIATELY for blank tokens with duration=0
                 var actualDuration = moreDuration
                 let innerBlankMask = moreLabel == config.tdtConfig.blankId
@@ -166,8 +167,10 @@ internal struct TdtDecoder {
 
                 // Update final duration with the last predicted duration
                 finalDuration = actualDuration
-                
-                logger.debug("TDT inner: token=\(moreLabel) duration=\(moreDuration) actualDuration=\(actualDuration) blank=\(innerBlankMask)")
+
+                logger.debug(
+                    "TDT inner: token=\(moreLabel) duration=\(moreDuration) actualDuration=\(actualDuration) blank=\(innerBlankMask)"
+                )
 
                 // Update hypothesis for non-blank tokens immediately
                 if !innerBlankMask {
@@ -203,7 +206,7 @@ internal struct TdtDecoder {
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && (actualDuration == 0) && !innerBlankMask
             }  // End of inner loop
-            
+
             // Safety check matching NeMo - if we still have duration=0, force advance by 1
             // This prevents infinite loops
             if finalDuration == 0 && !hasAdvanced {
@@ -389,7 +392,7 @@ internal struct TdtDecoder {
         let bestToken = argmax(tokenLogits)
         let tokenScore = tokenLogits[bestToken]
 
-        let (_, duration) = try processDurationLogits(durationLogits)
+        let (_, duration) = try processDurationLogits(durationLogits, durationBins: durationBins)
 
         return (token: bestToken, score: tokenScore, duration: duration)
     }
@@ -474,7 +477,7 @@ internal struct TdtDecoder {
     /// Process duration logits to get duration value
     private func processDurationLogits(
         _ durationLogits: [Float],
-        durationBins: [Int] = [0, 1, 2, 3, 4]
+        durationBins: [Int]
     ) throws -> (
         bestDuration: Int, duration: Int
     ) {
@@ -552,4 +555,3 @@ internal struct TdtDecoder {
         return value
     }
 }
-

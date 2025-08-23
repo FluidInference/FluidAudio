@@ -345,27 +345,27 @@ public struct StreamingAsrConfig: Sendable {
     /// Default configuration with balanced settings
     public static let `default` = StreamingAsrConfig(
         confirmationThreshold: 0.85,
-        chunkDuration: 10.0,  // 10 second chunks for now
+        chunkDuration: 15.0,  // 15 second chunks
         enableDebug: false
     )
 
     /// Low latency configuration with faster updates
     public static let lowLatency = StreamingAsrConfig(
         confirmationThreshold: 0.75,
-        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
+        chunkDuration: 15.0,  // 15 second chunks
         enableDebug: false
     )
 
     /// High accuracy configuration with conservative confirmation
     public static let highAccuracy = StreamingAsrConfig(
         confirmationThreshold: 0.9,
-        chunkDuration: 10.0,  // 10 second chunks for now, need to fix streaming impl
+        chunkDuration: 15.0,  // 15 second chunks
         enableDebug: false
     )
 
     public init(
         confirmationThreshold: Float = 0.85,
-        chunkDuration: TimeInterval = 10.0,
+        chunkDuration: TimeInterval = 15.0,
         enableDebug: Bool = false
     ) {
         self.confirmationThreshold = confirmationThreshold
@@ -374,7 +374,7 @@ public struct StreamingAsrConfig: Sendable {
     }
 
     /// Custom configuration with specified chunk duration
-    /// - Note: The underlying model currently works best with 10s chunks
+    /// - Note: The underlying model currently works best with 15s chunks
     /// - Shorter chunk support is still being validated
     public static func custom(
         chunkDuration: TimeInterval,
@@ -392,7 +392,6 @@ public struct StreamingAsrConfig: Sendable {
     var asrConfig: ASRConfig {
         ASRConfig(
             sampleRate: 16000,
-            maxSymbolsPerFrame: 3,
             enableDebug: enableDebug,
             realtimeMode: true,
             chunkSizeMs: Int(chunkDuration * 1000),
@@ -404,7 +403,7 @@ public struct StreamingAsrConfig: Sendable {
     }
 
     var bufferCapacity: Int {
-        Int(10.0 * 16000)  // 10 seconds at 16kHz
+        Int(15.0 * 16000)  // 15 seconds at 16kHz
     }
 
     var chunkSizeInSamples: Int {

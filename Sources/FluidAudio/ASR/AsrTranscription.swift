@@ -26,9 +26,9 @@ extension AsrManager {
 
         let startTime = Date()
 
-        if audioSamples.count <= 160_000 {
+        if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
-            let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
+            let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 240_000)
             let (tokenIds, encoderSequenceLength) = try await executeMLInference(
                 paddedAudio,
                 originalLength: originalLength,
@@ -60,7 +60,7 @@ extension AsrManager {
 
         let result = try await ChunkProcessor(
             audioSamples: audioSamples,
-            chunkSize: 160_000,
+            chunkSize: 240_000,
             enableDebug: config.enableDebug
         ).process(using: self, startTime: startTime)
 
@@ -88,6 +88,7 @@ extension AsrManager {
         }
 
         let encoderInput = try prepareEncoderInput(melspectrogramOutput)
+
         guard
             let encoderOutput = try encoderModel?.prediction(
                 from: encoderInput,

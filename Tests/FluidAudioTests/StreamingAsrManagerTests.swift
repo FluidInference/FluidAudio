@@ -65,7 +65,7 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     func testConfigCalculatedProperties() {
         let config = StreamingAsrConfig(chunkDuration: 5.0)
-        XCTAssertEqual(config.bufferCapacity, 160000)  // 10 seconds at 16kHz
+        XCTAssertEqual(config.bufferCapacity, 240000)  // 15 seconds at 16kHz
         XCTAssertEqual(config.chunkSizeInSamples, 80000)  // 5 seconds at 16kHz
 
         // Test ASR config generation

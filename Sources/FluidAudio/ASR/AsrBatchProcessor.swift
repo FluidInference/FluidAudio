@@ -127,7 +127,7 @@ public actor AsrBatchProcessor {
     private func prewarmCache() async {
         let commonShapes: [(shape: [NSNumber], dataType: MLMultiArrayDataType)] = [
             // Mel-spectrogram shapes
-            ([1, 160000], .float32),
+            ([1, 240000], .float32),
             ([1], .int32),
 
             // Encoder shapes

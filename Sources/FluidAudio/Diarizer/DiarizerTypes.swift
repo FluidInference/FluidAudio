@@ -27,7 +27,7 @@ public struct DiarizerConfig: Sendable {
     public var debugMode: Bool = false
 
     /// Duration of audio chunks for processing (seconds).
-    public var chunkDuration: Float = 10.0
+    public var chunkDuration: Float = 15.0
 
     /// Overlap between chunks (seconds).
     public var chunkOverlap: Float = 0.0
@@ -42,7 +42,7 @@ public struct DiarizerConfig: Sendable {
         numClusters: Int = -1,
         minActiveFramesCount: Float = 10.0,
         debugMode: Bool = false,
-        chunkDuration: Float = 10.0,
+        chunkDuration: Float = 15.0,
         chunkOverlap: Float = 0.0
     ) {
         self.clusteringThreshold = clusteringThreshold
