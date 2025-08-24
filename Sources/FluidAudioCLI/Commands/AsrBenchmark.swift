@@ -904,8 +904,6 @@ extension ASRBenchmark {
                 try await asrManager.initialize(models: models)
                 print("ASR system initialized successfully")
 
-                // Profile Neural Engine optimizations
-                asrManager.profilePerformance()
             } catch {
                 print("Failed to initialize ASR system: \(error)")
                 print("   Error type: \(type(of: error))")

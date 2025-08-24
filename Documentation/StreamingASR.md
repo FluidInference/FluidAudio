@@ -9,7 +9,6 @@
 - **Automatic Audio Conversion**: Accepts any audio format and converts to 16kHz mono
 - **AsyncStream-based API**: Natural Swift concurrency patterns
 - **Two-tier Transcription**: Volatile (unconfirmed) and confirmed text states
-- **Confidence-based Confirmation**: Automatic text confirmation based on confidence thresholds
 - **No Manual Buffering**: Handles all audio buffering internally
 - **Automatic Final Processing**: Processes remaining audio when stream ends
 

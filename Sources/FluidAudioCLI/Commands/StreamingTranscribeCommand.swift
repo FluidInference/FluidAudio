@@ -120,8 +120,6 @@ enum StreamingTranscribeCommand {
 
         print("Configuration:")
         print("  Chunk duration: \(config.chunkDuration)s")
-        print("  Confirmation threshold: \(config.confirmationThreshold)")
-        print()
 
         // Create StreamingAsrManager
         let streamingAsr = StreamingAsrManager(config: config)

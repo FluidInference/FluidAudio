@@ -21,6 +21,7 @@ public actor StreamingAsrManager {
     private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
+    private var slidingAdapter: SlidingWindowAdapter?
 
     // Two-tier transcription state (like Apple's Speech API)
     public private(set) var volatileTranscript: String = ""
@@ -78,6 +79,15 @@ public actor StreamingAsrManager {
 
         // Reset decoder state for the specific source
         try await asrManager?.resetDecoderState(for: source)
+
+        // Initialize shared sliding-window adapter so streaming matches offline chunking
+        slidingAdapter = SlidingWindowAdapter(
+            sampleRate: config.asrConfig.sampleRate,
+            centerSeconds: 10.0,
+            leftContextSeconds: 2.0,
+            rightContextSeconds: 2.0,
+            enableDebug: config.enableDebug
+        )
 
         startTime = Date()
 
@@ -181,6 +191,15 @@ public actor StreamingAsrManager {
             try await asrManager.resetDecoderState(for: audioSource)
         }
 
+        // Reset sliding window continuity
+        slidingAdapter = SlidingWindowAdapter(
+            sampleRate: config.asrConfig.sampleRate,
+            centerSeconds: 10.0,
+            leftContextSeconds: 2.0,
+            rightContextSeconds: 2.0,
+            enableDebug: config.enableDebug
+        )
+
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
 
@@ -210,24 +229,50 @@ public actor StreamingAsrManager {
         do {
             let chunkStartTime = Date()
 
-            // Transcribe the chunk using the configured audio source
-            let result = try await asrManager.transcribe(chunk, source: audioSource)
+            // Use unified sliding-window path for streaming
+            if slidingAdapter == nil {
+                slidingAdapter = SlidingWindowAdapter(
+                    sampleRate: config.asrConfig.sampleRate,
+                    centerSeconds: 10.0,
+                    leftContextSeconds: 2.0,
+                    rightContextSeconds: 2.0,
+                    enableDebug: config.enableDebug
+                )
+            }
+            guard var adapter = slidingAdapter else { return }
+
+            let (tokens, timestamps, _) = try await adapter.processStreamingChunk(
+                manager: asrManager,
+                source: audioSource,
+                chunkSamples: chunk
+            )
+            // Persist updated adapter state
+            slidingAdapter = adapter
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1
 
+            // Convert tokens to text + timings via shared manager utility
+            let interim = asrManager.processTranscriptionResult(
+                tokenIds: tokens,
+                timestamps: timestamps,
+                encoderSequenceLength: 0,
+                audioSamples: chunk,
+                processingTime: processingTime
+            )
+
             logger.debug(
-                "Chunk \(self.processedChunks): '\(result.text)' (confidence: \(result.confidence), time: \(String(format: "%.3f", processingTime))s)"
+                "Chunk \(self.processedChunks): '\(interim.text)' (confidence: \(interim.confidence), time: \(String(format: "%.3f", processingTime))s)"
             )
 
             // Apply confidence-based confirmation logic
-            await updateTranscriptionState(with: result)
+            await updateTranscriptionState(with: interim)
 
             // Emit update
             let update = StreamingTranscriptionUpdate(
-                text: result.text,
-                isConfirmed: result.confidence >= config.confirmationThreshold,
-                confidence: result.confidence,
+                text: interim.text,
+                isConfirmed: interim.confidence >= config.confirmationThreshold,
+                confidence: interim.confidence,
                 timestamp: Date()
             )
 

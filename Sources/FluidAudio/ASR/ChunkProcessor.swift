@@ -43,19 +43,21 @@ struct ChunkProcessor {
 
             // For chunks after the first, check for and remove duplicated token sequences
             if segmentIndex > 0 && !allTokens.isEmpty && !windowTokens.isEmpty {
-                let deduplicatedTokens = removeDuplicateSequence(previous: allTokens, current: windowTokens)
-
-                // Calculate how many tokens were removed and adjust timestamps accordingly
-                let removedCount = windowTokens.count - deduplicatedTokens.count
+                let adapter = SlidingWindowAdapter(
+                    sampleRate: sampleRate,
+                    centerSeconds: centerSeconds,
+                    leftContextSeconds: leftContextSeconds,
+                    rightContextSeconds: rightContextSeconds,
+                    enableDebug: enableDebug
+                )
+                let (deduped, removedCount) = adapter.removeDuplicateSequence(previous: allTokens, current: windowTokens)
                 let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
 
-                allTokens.append(contentsOf: deduplicatedTokens)
+                allTokens.append(contentsOf: deduped)
                 allTimestamps.append(contentsOf: adjustedTimestamps)
 
-                if enableDebug && deduplicatedTokens.count != windowTokens.count {
-                    print(
-                        "CHUNK \(segmentIndex): removed \(windowTokens.count - deduplicatedTokens.count) duplicate tokens"
-                    )
+                if enableDebug && removedCount > 0 {
+                    print("CHUNK \(segmentIndex): removed \(removedCount) duplicate tokens")
                 }
             } else {
                 allTokens.append(contentsOf: windowTokens)
@@ -96,21 +98,17 @@ struct ChunkProcessor {
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
         // Calculate encoder frame offset based on where previous chunk ended
-        let startFrameOffset: Int
-        if segmentIndex == 0 {
-            // First chunk: process all frames
-            startFrameOffset = 0
-        } else {
-            // Subsequent chunks: use fixed offset calculation but track last processed frame for filtering
-            let exactEncoderFrameRate = 12.6
-            let leftContextFrames = Int(round(leftContextSeconds * exactEncoderFrameRate))
-            let fixedOffset = leftContextFrames + 2  // Original calculation: ~29
-
-            // Use the fixed offset for consistency, rely on decoder filtering to prevent repetition
-            startFrameOffset = fixedOffset
-
+        let adapter = SlidingWindowAdapter(
+            sampleRate: sampleRate,
+            centerSeconds: centerSeconds,
+            leftContextSeconds: leftContextSeconds,
+            rightContextSeconds: rightContextSeconds,
+            enableDebug: enableDebug
+        )
+        let startFrameOffset: Int = adapter.startFrameOffset(forSegment: segmentIndex)
+        if segmentIndex > 0 {
             print(
-                "CHUNK \(segmentIndex): lastProcessedFrame=\(lastProcessedFrame), fixedOffset=\(fixedOffset), startFrameOffset=\(startFrameOffset)"
+                "CHUNK \(segmentIndex): lastProcessedFrame=\(lastProcessedFrame), startFrameOffset=\(startFrameOffset)"
             )
         }
 
@@ -144,40 +142,5 @@ struct ChunkProcessor {
         )
 
         return (filteredTokens, filteredTimestamps, maxFrame)
-    }
-
-    /// Remove duplicate token sequences from the beginning of current chunk that match the end of previous chunk
-    private func removeDuplicateSequence(previous: [Int], current: [Int]) -> [Int] {
-        // Look for subsequence matches within reasonable bounds
-        let maxSearchLength = min(15, previous.count)  // Look at last 15 tokens of previous
-        let maxMatchLength = min(12, current.count)  // Look at first 12 tokens of current
-
-        // Ensure we have at least 3 tokens to check for duplication
-        guard maxSearchLength >= 3 && maxMatchLength >= 3 else {
-            return current
-        }
-
-        // Try different overlap lengths, prioritizing longer matches
-        for overlapLength in (3...min(maxSearchLength, maxMatchLength)).reversed() {
-            // Look for this overlap length anywhere in the tail of previous
-            for startIndex in max(0, previous.count - maxSearchLength)..<(previous.count - overlapLength + 1) {
-                let previousSubsequence = Array(previous[startIndex..<startIndex + overlapLength])
-
-                // Check multiple positions in current chunk, not just the beginning
-                for currentStartIndex in 0..<min(5, current.count - overlapLength + 1) {
-                    let currentSubsequence = Array(current[currentStartIndex..<currentStartIndex + overlapLength])
-
-                    if previousSubsequence == currentSubsequence {
-                        print(
-                            "Found duplicate sequence of length \(overlapLength) at position \(currentStartIndex): \(previousSubsequence)"
-                        )
-                        return Array(current.dropFirst(currentStartIndex + overlapLength))
-                    }
-                }
-            }
-        }
-
-        // No duplication found, return original tokens
-        return current
     }
 }

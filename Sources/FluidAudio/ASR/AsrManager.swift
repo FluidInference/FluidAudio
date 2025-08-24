@@ -32,8 +32,8 @@ public final class AsrManager {
     }
     #endif
 
-    private var microphoneDecoderState: TdtDecoderState
-    private var systemDecoderState: TdtDecoderState
+    internal var microphoneDecoderState: TdtDecoderState
+    internal var systemDecoderState: TdtDecoderState
 
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
@@ -260,35 +260,6 @@ public final class AsrManager {
         microphoneDecoderState = TdtDecoderState(fallback: true)
         systemDecoderState = TdtDecoderState(fallback: true)
         logger.info("AsrManager resources cleaned up")
-    }
-
-    /// Profile Neural Engine utilization and memory efficiency
-    public func profilePerformance() {
-        logger.info("=== ASR Pipeline Performance Profile ===")
-
-        // Log compute unit assignments
-        if asrModels != nil {
-            logger.info("Compute Unit Configuration:")
-            logger.info("  Mel-spectrogram: CPU+GPU (FFT operations)")
-            logger.info("  Encoder: CPU+ANE (Transformer layers)")
-            logger.info("  Decoder: CPU+ANE (LSTM layers)")
-            logger.info("  Joint: ANE only (Dense layers)")
-            logger.info("  Token Duration: ANE only (Classification)")
-        }
-
-        // Log memory optimizations
-        logger.info("Memory Optimizations:")
-        logger.info("  ANE-aligned buffers: Enabled (64-byte alignment)")
-        logger.info("  Zero-copy chaining: Enabled (persistent providers)")
-        logger.info("  FP16 inference: Enabled (Neural Engine)")
-        logger.info("  Memory pool reuse: Active")
-
-        // Log expected performance gains
-        logger.info("Expected Performance Gains:")
-        logger.info("  Compute unit optimization: 2-3x")
-        logger.info("  ANE memory alignment: 1.5-2x")
-        logger.info("  FP16 inference: 1.2-1.5x")
-        logger.info("  Combined improvement: 3.6-9x over baseline")
     }
 
     /// Deprecated: use `tdtDecodeWithTimings` and ignore timestamps if not needed

@@ -224,11 +224,4 @@ final class AsrManagerTests: XCTestCase {
         // Note: Actual zero-copy behavior depends on implementation details
     }
 
-    // MARK: - Performance Profile Tests
-
-    func testPerformanceProfile() {
-        // Test that profile method doesn't crash
-        manager.profilePerformance()
-        // This just ensures the logging works without errors
-    }
 }

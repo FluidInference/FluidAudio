@@ -118,6 +118,39 @@ extension AsrManager {
         return (tokens, timestamps, encoderSequenceLength)
     }
 
+    /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
+    /// This is used by both sliding window chunking and streaming paths to unify behavior.
+    internal func transcribeStreamingChunk(
+        _ chunkSamples: [Float],
+        source: AudioSource,
+        startFrameOffset: Int,
+        lastProcessedFrame: Int,
+        enableDebug: Bool
+    ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
+        // Select and copy decoder state for the source
+        var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
+
+        let originalLength = chunkSamples.count
+        let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
+        let (tokens, timestamps, encLen) = try await executeMLInferenceWithTimings(
+            padded,
+            originalLength: originalLength,
+            enableDebug: enableDebug,
+            decoderState: &state,
+            startFrameOffset: startFrameOffset,
+            lastProcessedFrame: lastProcessedFrame
+        )
+
+        // Persist updated state back to the source-specific slot
+        if source == .microphone {
+            microphoneDecoderState = state
+        } else {
+            systemDecoderState = state
+        }
+
+        return (tokens, timestamps, encLen)
+    }
+
     internal func processTranscriptionResult(
         tokenIds: [Int],
         timestamps: [Int] = [],
