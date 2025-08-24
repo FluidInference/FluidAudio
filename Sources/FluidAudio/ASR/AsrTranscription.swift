@@ -125,6 +125,7 @@ extension AsrManager {
         source: AudioSource,
         startFrameOffset: Int,
         lastProcessedFrame: Int,
+        previousTokens: [Int] = [],
         enableDebug: Bool
     ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
@@ -146,6 +147,18 @@ extension AsrManager {
             microphoneDecoderState = state
         } else {
             systemDecoderState = state
+        }
+
+        // Apply token deduplication if previous tokens are provided
+        if !previousTokens.isEmpty && !tokens.isEmpty {
+            let (deduped, removedCount) = removeDuplicateTokenSequence(previous: previousTokens, current: tokens)
+            let adjustedTimestamps = removedCount > 0 ? Array(timestamps.dropFirst(removedCount)) : timestamps
+
+            if enableDebug && removedCount > 0 {
+                logger.debug("Streaming chunk: removed \(removedCount) duplicate tokens")
+            }
+
+            return (deduped, adjustedTimestamps, encLen)
         }
 
         return (tokens, timestamps, encLen)
@@ -251,6 +264,50 @@ extension AsrManager {
         }
 
         return slicedArray
+    }
+
+    /// Remove duplicate token sequences at the start of the current list that overlap
+    /// with the tail of the previous accumulated tokens. Returns deduplicated current tokens
+    /// and the number of removed leading tokens so caller can drop aligned timestamps.
+    internal func removeDuplicateTokenSequence(
+        previous: [Int], current: [Int], maxOverlap: Int = 12
+    ) -> (deduped: [Int], removedCount: Int) {
+        let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
+        let maxMatchLength = min(maxOverlap, current.count)  // first 12 tokens of current
+
+        guard maxSearchLength >= 3 && maxMatchLength >= 3 else {
+            return (current, 0)
+        }
+
+        for overlapLength in (3...min(maxSearchLength, maxMatchLength)).reversed() {
+            let prevStart = max(0, previous.count - maxSearchLength)
+            let prevEnd = previous.count - overlapLength + 1
+            if prevEnd <= prevStart { continue }
+            for startIndex in prevStart..<prevEnd {
+                let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
+                let currEnd = max(0, current.count - overlapLength + 1)
+                for currentStart in 0..<min(5, currEnd) {
+                    let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
+                    if prevSub == currSub {
+                        if config.enableDebug {
+                            logger.debug(
+                                "Duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)")
+                        }
+                        let removed = currentStart + overlapLength
+                        return (Array(current.dropFirst(removed)), removed)
+                    }
+                }
+            }
+        }
+        return (current, 0)
+    }
+
+    /// Calculate start frame offset for a sliding window segment
+    internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
+        guard segmentIndex > 0 else { return 0 }
+        let exactEncoderFrameRate = 12.6
+        let leftContextFrames = Int(round(leftContextSeconds * exactEncoderFrameRate))
+        return leftContextFrames + 2
     }
 
 }

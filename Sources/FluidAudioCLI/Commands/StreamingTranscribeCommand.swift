@@ -119,7 +119,9 @@ enum StreamingTranscribeCommand {
         print("Using default configuration")
 
         print("Configuration:")
-        print("  Chunk duration: \(config.chunkDuration)s")
+        print(
+            "  Chunk: \(config.chunkSeconds)s  Left: \(config.leftContextSeconds)s  Right: \(config.rightContextSeconds)s"
+        )
 
         // Create StreamingAsrManager
         let streamingAsr = StreamingAsrManager(config: config)
@@ -223,11 +225,6 @@ enum StreamingTranscribeCommand {
             print(String(repeating: "=", count: 50))
             print("\nFinal transcription:")
             print(finalText)
-            print("\nStatistics:")
-            print("  Total volatile updates: \(await tracker.getVolatileCount())")
-            print("  Total confirmed updates: \(await tracker.getConfirmedCount())")
-            print("  Final confirmed text: \(await streamingAsr.confirmedTranscript)")
-            print("  Final volatile text: \(await streamingAsr.volatileTranscript)")
 
             let processingTime = await tracker.getElapsedProcessingTime()
             let audioDuration = Double(audioFileHandle.length) / format.sampleRate

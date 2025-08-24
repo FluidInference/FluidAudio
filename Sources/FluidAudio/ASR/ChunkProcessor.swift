@@ -8,7 +8,7 @@ struct ChunkProcessor {
 
     // 10 + 2 + 2 seconds context at 16kHz
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 10.0
+    private let centerSeconds: Double = 11.0
     private let leftContextSeconds: Double = 2.0
     private let rightContextSeconds: Double = 2.0
 
@@ -43,14 +43,8 @@ struct ChunkProcessor {
 
             // For chunks after the first, check for and remove duplicated token sequences
             if segmentIndex > 0 && !allTokens.isEmpty && !windowTokens.isEmpty {
-                let adapter = SlidingWindowAdapter(
-                    sampleRate: sampleRate,
-                    centerSeconds: centerSeconds,
-                    leftContextSeconds: leftContextSeconds,
-                    rightContextSeconds: rightContextSeconds,
-                    enableDebug: enableDebug
-                )
-                let (deduped, removedCount) = adapter.removeDuplicateSequence(previous: allTokens, current: windowTokens)
+                let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
+                    previous: allTokens, current: windowTokens)
                 let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
 
                 allTokens.append(contentsOf: deduped)
@@ -98,14 +92,10 @@ struct ChunkProcessor {
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
         // Calculate encoder frame offset based on where previous chunk ended
-        let adapter = SlidingWindowAdapter(
-            sampleRate: sampleRate,
-            centerSeconds: centerSeconds,
-            leftContextSeconds: leftContextSeconds,
-            rightContextSeconds: rightContextSeconds,
-            enableDebug: enableDebug
+        let startFrameOffset = manager.calculateStartFrameOffset(
+            segmentIndex: segmentIndex,
+            leftContextSeconds: leftContextSeconds
         )
-        let startFrameOffset: Int = adapter.startFrameOffset(forSegment: segmentIndex)
         if segmentIndex > 0 {
             print(
                 "CHUNK \(segmentIndex): lastProcessedFrame=\(lastProcessedFrame), startFrameOffset=\(startFrameOffset)"
