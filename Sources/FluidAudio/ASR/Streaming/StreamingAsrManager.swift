@@ -47,7 +47,7 @@ public actor StreamingAsrManager {
         self.inputBuilder = continuation
 
         logger.info(
-            "Initialized StreamingAsrManager with config: chunkDuration=\(config.chunkDuration)s, confirmationThreshold=\(config.confirmationThreshold)"
+            "Initialized StreamingAsrManager with config: chunkDuration=\(config.chunkDuration)s"
         )
     }
 
@@ -271,7 +271,7 @@ public actor StreamingAsrManager {
             // Emit update
             let update = StreamingTranscriptionUpdate(
                 text: interim.text,
-                isConfirmed: interim.confidence >= config.confirmationThreshold,
+                isConfirmed: interim.confidence >= 0.5,
                 confidence: interim.confidence,
                 timestamp: Date()
             )
@@ -289,29 +289,22 @@ public actor StreamingAsrManager {
 
     /// Update transcription state based on confidence
     private func updateTranscriptionState(with result: ASRResult) async {
-        if result.confidence >= config.confirmationThreshold {
-            // High confidence: move volatile to confirmed and update volatile
-            if !volatileTranscript.isEmpty {
-                var components: [String] = []
-                if !confirmedTranscript.isEmpty {
-                    components.append(confirmedTranscript)
-                }
-                components.append(volatileTranscript)
-
-                // Join with spaces, avoiding double spaces
-                confirmedTranscript = components.joined(separator: " ")
+        // High confidence: move volatile to confirmed and update volatile
+        if !volatileTranscript.isEmpty {
+            var components: [String] = []
+            if !confirmedTranscript.isEmpty {
+                components.append(confirmedTranscript)
             }
-            volatileTranscript = result.text
+            components.append(volatileTranscript)
 
-            logger.debug(
-                "High confidence (\(result.confidence)): confirmed '\(self.volatileTranscript)' -> volatile '\(result.text)'"
-            )
-        } else {
-            // Low confidence: just update volatile
-            volatileTranscript = result.text
-            logger.debug(
-                "Low confidence (\(result.confidence)): volatile updated to '\(result.text)'")
+            // Join with spaces, avoiding double spaces
+            confirmedTranscript = components.joined(separator: " ")
         }
+        volatileTranscript = result.text
+
+        logger.debug(
+            "High confidence (\(result.confidence)): confirmed '\(self.volatileTranscript)' -> volatile '\(result.text)'"
+        )
     }
 
     /// Attempt to recover from processing errors
@@ -378,9 +371,6 @@ public actor StreamingAsrManager {
 /// Configuration for StreamingAsrManager
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAsrConfig: Sendable {
-    /// Confidence threshold for confirming transcriptions (0.0 - 1.0)
-    public let confirmationThreshold: Float
-
     /// Duration of each audio chunk in seconds
     public let chunkDuration: TimeInterval
 
@@ -389,17 +379,14 @@ public struct StreamingAsrConfig: Sendable {
 
     /// Default configuration with balanced settings
     public static let `default` = StreamingAsrConfig(
-        confirmationThreshold: 0.85,
         chunkDuration: 15.0,  // 15 second chunks
         enableDebug: false
     )
 
     public init(
-        confirmationThreshold: Float = 0.85,
         chunkDuration: TimeInterval = 15.0,
         enableDebug: Bool = false
     ) {
-        self.confirmationThreshold = confirmationThreshold
         self.chunkDuration = chunkDuration
         self.enableDebug = enableDebug
     }
@@ -409,11 +396,9 @@ public struct StreamingAsrConfig: Sendable {
     /// - Shorter chunk support is still being validated
     public static func custom(
         chunkDuration: TimeInterval,
-        confirmationThreshold: Float = 0.85,
         enableDebug: Bool = false
     ) -> StreamingAsrConfig {
         StreamingAsrConfig(
-            confirmationThreshold: confirmationThreshold,
             chunkDuration: chunkDuration,
             enableDebug: enableDebug
         )

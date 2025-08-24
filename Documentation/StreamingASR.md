@@ -56,7 +56,6 @@ let streamingAsr = StreamingAsrManager() // Uses default config
 // or explicitly:
 let streamingAsr = StreamingAsrManager(config: .default)
 // Chunk duration: 15.0s (optimized for TDT decoder)
-// Confirmation threshold: 0.85
 // Balanced accuracy and latency
 ```
 
