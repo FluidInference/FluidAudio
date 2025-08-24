@@ -31,20 +31,18 @@ jobs:
       - name: Clean build artifacts
         run: rm -rf .build .swiftpm
       
-      - name: List available simulators and install iOS runtime if needed
+      - name: List available simulators and runtimes
         run: |
           echo "=== Available simulators ==="
           xcrun simctl list devices available
           echo "=== Available runtimes ==="  
           xcrun simctl list runtimes
-          echo "=== Installing iOS runtime if needed ==="
-          sudo xcodebuild -downloadPlatform iOS || echo "Platform already available or download failed"
           
       - name: Build for iOS Simulator
         run: |
           echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
           xcodebuild -scheme FluidAudio \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/ios-simulator \
             build
       
@@ -121,9 +119,7 @@ jobs:
       - name: Build for iOS Simulator  
         run: |
           echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
-          # First ensure iOS runtime is available
-          sudo xcodebuild -downloadPlatform iOS || echo "Platform already available or download failed"
           xcodebuild -scheme FluidAudio \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/ios-simulator \
             build
