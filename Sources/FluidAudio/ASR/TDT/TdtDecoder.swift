@@ -42,9 +42,19 @@ internal struct TdtDecoder {
 
         var hypothesis = TdtHypothesis(decState: decoderState)
         hypothesis.lastToken = decoderState.lastToken
-        var timeIndices = startFrameOffset
-        var safeTimeIndices = min(startFrameOffset, encoderSequenceLength - 1)
-        var timeIndicesCurrentLabels = startFrameOffset
+
+        // Initialize time indices with time jump consideration for streaming
+        var timeIndices: Int
+        if let prevTimeJump = decoderState.timeJump {
+            // Streaming continuation: adjust for previous chunk's time jump
+            timeIndices = max(0, prevTimeJump + startFrameOffset)
+        } else {
+            // First chunk: start from frame offset
+            timeIndices = startFrameOffset
+        }
+
+        var safeTimeIndices = min(timeIndices, encoderSequenceLength - 1)
+        var timeIndicesCurrentLabels = timeIndices
         var activeMask = true
         let lastTimestep = encoderSequenceLength - 1
 
@@ -55,7 +65,7 @@ internal struct TdtDecoder {
         // --- DEBUG: chunk start context ---
         let chunkTag = String(UUID().uuidString.prefix(6))
         print(
-            "[\(chunkTag)] chunk start len=\(encoderSequenceLength), lastToken=\(String(describing: decoderState.lastToken)) timestamp=\(Date())"
+            "[\(chunkTag)] chunk start len=\(encoderSequenceLength), lastToken=\(String(describing: decoderState.lastToken)), timeJump=\(String(describing: decoderState.timeJump)), timeIndices=\(timeIndices) timestamp=\(Date())"
         )
         print(
             "[\(chunkTag)] TOTAL encoder frames available: \(encoderFrames.count), processing: \(encoderSequenceLength) (pre-sliced)"
@@ -217,6 +227,14 @@ internal struct TdtDecoder {
             decoderState = finalState
         }
         decoderState.lastToken = hypothesis.lastToken
+
+        // Calculate and store time jump for streaming continuity
+        // timeJump = current_position - encoder_length
+        decoderState.timeJump = timeIndices - encoderSequenceLength
+
+        print(
+            "[\(chunkTag)] Final timeJump calculated: \(decoderState.timeJump!) (timeIndices=\(timeIndices), encoderLen=\(encoderSequenceLength))"
+        )
 
         // No filtering at decoder level - let post-processing handle deduplication
         return (hypothesis.ySequence, hypothesis.timestamps)
