@@ -171,7 +171,6 @@ public class FLEURSBenchmark {
             let files = try JSONDecoder().decode([HFFile].self, from: data)
 
             // Find transcript file and audio files
-            var transFileFound = false
             var audioFiles: [String] = []
 
             for file in files where file.type == "file" {
@@ -182,7 +181,6 @@ public class FLEURSBenchmark {
                         string: "https://huggingface.co/datasets/\(datasetRepo)/resolve/main/\(file.path)")!
                     let (transData, _) = try await DownloadUtils.sharedSession.data(from: downloadURL)
                     try transData.write(to: transFile)
-                    transFileFound = true
 
                     let transcriptContent = String(data: transData, encoding: .utf8) ?? ""
                     let lines = transcriptContent.components(separatedBy: .newlines).filter { !$0.isEmpty }
