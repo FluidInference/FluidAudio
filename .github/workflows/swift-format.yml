@@ -14,7 +14,7 @@ jobs:
       - name: Setup Swift
         uses: swift-actions/setup-swift@v2
         with:
-          swift-version: '6.0'
+          swift-version: '6.1'
           
       - name: Run swift-format lint
         run: |
