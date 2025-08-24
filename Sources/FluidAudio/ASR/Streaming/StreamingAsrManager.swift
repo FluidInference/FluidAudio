@@ -343,13 +343,13 @@ public actor StreamingAsrManager {
                 "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
             )
 
-            // Apply confidence-based confirmation logic
+            // Apply confidence-based confirmation logic (uses configured threshold)
             await updateTranscriptionState(with: interim)
 
             // Emit update
             let update = StreamingTranscriptionUpdate(
                 text: interim.text,
-                isConfirmed: interim.confidence >= 0.5,
+                isConfirmed: Double(interim.confidence) >= config.confirmationThreshold,
                 confidence: interim.confidence,
                 timestamp: Date()
             )
@@ -367,22 +367,24 @@ public actor StreamingAsrManager {
 
     /// Update transcription state based on confidence
     private func updateTranscriptionState(with result: ASRResult) async {
-        // High confidence: move volatile to confirmed and update volatile
-        if !volatileTranscript.isEmpty {
-            var components: [String] = []
-            if !confirmedTranscript.isEmpty {
-                components.append(confirmedTranscript)
+        let isHighConfidence = Double(result.confidence) >= config.confirmationThreshold
+
+        if isHighConfidence {
+            if !volatileTranscript.isEmpty {
+                var components: [String] = []
+                if !confirmedTranscript.isEmpty {
+                    components.append(confirmedTranscript)
+                }
+                components.append(volatileTranscript)
+                confirmedTranscript = components.joined(separator: " ")
             }
-            components.append(volatileTranscript)
-
-            // Join with spaces, avoiding double spaces
-            confirmedTranscript = components.joined(separator: " ")
+            volatileTranscript = result.text
+            logger.debug("High confidence (\(result.confidence)): promoted to confirmed; new volatile '\(result.text)'")
+        } else {
+            // Only update volatile text
+            volatileTranscript = result.text
+            logger.debug("Low confidence (\(result.confidence)): updated volatile '\(result.text)'")
         }
-        volatileTranscript = result.text
-
-        logger.debug(
-            "High confidence (\(result.confidence)): confirmed '\(self.volatileTranscript)' -> volatile '\(result.text)'"
-        )
     }
 
     /// Attempt to recover from processing errors
@@ -458,13 +460,16 @@ public struct StreamingAsrConfig: Sendable {
 
     /// Enable debug logging
     public let enableDebug: Bool
+    /// Confidence threshold for promoting volatile text to confirmed (0.0...1.0)
+    public let confirmationThreshold: Double
 
-    /// Default configuration aligned with NeMo streaming: 10-2-2 (L-C-R), ~4s latency
+    /// Default configuration aligned with previous API expectations
     public static let `default` = StreamingAsrConfig(
-        chunkSeconds: 10.0,
-        leftContextSeconds: 2.0,
+        chunkSeconds: 15.0,
+        leftContextSeconds: 10.0,
         rightContextSeconds: 2.0,
-        enableDebug: false
+        enableDebug: false,
+        confirmationThreshold: 0.85
     )
 
     /// Optimized streaming configuration: Match ChunkProcessor settings (11-2-2)
@@ -473,19 +478,52 @@ public struct StreamingAsrConfig: Sendable {
         chunkSeconds: 5.0,  // Match ChunkProcessor centerSeconds
         leftContextSeconds: 8.0,
         rightContextSeconds: 2.0,
-        enableDebug: false
+        enableDebug: false,
+        confirmationThreshold: 0.85
     )
 
     public init(
         chunkSeconds: TimeInterval = 10.0,
         leftContextSeconds: TimeInterval = 2.0,
         rightContextSeconds: TimeInterval = 2.0,
-        enableDebug: Bool = false
+        enableDebug: Bool = false,
+        confirmationThreshold: Double = 0.85
     ) {
         self.chunkSeconds = chunkSeconds
         self.leftContextSeconds = leftContextSeconds
         self.rightContextSeconds = rightContextSeconds
         self.enableDebug = enableDebug
+        self.confirmationThreshold = confirmationThreshold
+    }
+
+    /// Backward-compatible convenience initializer used by tests (chunkDuration label)
+    public init(
+        confirmationThreshold: Double = 0.85,
+        chunkDuration: TimeInterval,
+        enableDebug: Bool = false
+    ) {
+        self.init(
+            chunkSeconds: chunkDuration,
+            leftContextSeconds: 10.0,
+            rightContextSeconds: 2.0,
+            enableDebug: enableDebug,
+            confirmationThreshold: confirmationThreshold
+        )
+    }
+
+    /// Custom configuration factory expected by tests
+    public static func custom(
+        chunkDuration: TimeInterval,
+        confirmationThreshold: Double,
+        enableDebug: Bool
+    ) -> StreamingAsrConfig {
+        StreamingAsrConfig(
+            chunkSeconds: chunkDuration,
+            leftContextSeconds: 10.0,
+            rightContextSeconds: 2.0,
+            enableDebug: enableDebug,
+            confirmationThreshold: confirmationThreshold
+        )
     }
 
     // Internal ASR configuration
