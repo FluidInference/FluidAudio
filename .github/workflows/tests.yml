@@ -31,19 +31,22 @@ jobs:
       - name: Clean build artifacts
         run: rm -rf .build .swiftpm
       
+      - name: List available simulators and install iOS runtime if needed
+        run: |
+          echo "=== Available simulators ==="
+          xcrun simctl list devices available
+          echo "=== Available runtimes ==="  
+          xcrun simctl list runtimes
+          echo "=== Installing iOS runtime if needed ==="
+          sudo xcodebuild -downloadPlatform iOS || echo "Platform already available or download failed"
+          
       - name: Build for iOS Simulator
         run: |
-          echo "Building for iOS Simulator..."
-          # List available simulators first
-          xcrun simctl list devices available | head -20
-          # Build for generic iOS Simulator
+          echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
           xcodebuild -scheme FluidAudio \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
             -derivedDataPath .build/ios-simulator \
             build
-      
-      - name: Clean build artifacts
-        run: rm -rf .build .swiftpm
       
       - name: Build for iOS Device
         run: |
@@ -115,21 +118,12 @@ jobs:
         run: |
           rm -rf .swiftpm .build
 
-      - name: Build iOS library using xcodebuild (simulator)
+      - name: Build for iOS Simulator  
         run: |
-          set -e
           echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
+          # First ensure iOS runtime is available
+          sudo xcodebuild -downloadPlatform iOS || echo "Platform already available or download failed"
           xcodebuild -scheme FluidAudio \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
             -derivedDataPath .build/ios-simulator \
             build
-
-      - name: Clean up build artifacts
-        run: |
-          rm -rf .swiftpm .build
-
-      - name: Build iOS library (device)
-        run: |
-          set -e
-          echo "Building FluidAudio library for iOS Device..."
-          xcodebuild -scheme FluidAudio -destination 'generic/platform=iOS' build
