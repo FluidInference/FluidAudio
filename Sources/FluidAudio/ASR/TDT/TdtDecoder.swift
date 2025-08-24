@@ -171,7 +171,7 @@ internal struct TdtDecoder {
             }
 
             if activeMask && label != blankId {
-                print("[\(chunkTag)] Emitting token \(label) at frame \(timeIndicesCurrentLabels)")
+                // print("[\(chunkTag)] Emitting token \(label) at frame \(timeIndicesCurrentLabels)")
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)

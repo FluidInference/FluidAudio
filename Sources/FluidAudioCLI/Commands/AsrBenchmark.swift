@@ -125,14 +125,9 @@ public class ASRBenchmark {
 
         for (index, audioFile) in filesToProcess.enumerated() {
             do {
-                    print(
-                        "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)"
-                    )
-
-                    print("   🔍 Processing file \(index + 1)")
-
-                // Reset decoder state for each new file
-                print("Resetting decoder state for new file: \(audioFile.fileName)")
+                print(
+                    "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)"
+                )
                 try await asrManager.resetDecoderState(for: .microphone)
 
                 let result: ASRBenchmarkResult
@@ -202,13 +197,13 @@ public class ASRBenchmark {
         // Calculate chunk size in samples (minimum 1 second to ensure reasonable context)
         let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
 
-            print("🔍 Starting streaming simulation for \(file.fileName)")
-            print("🔍   Audio length: \(audioLength)s")
-            print("🔍   Total samples: \(audioSamples.count)")
-            print("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
-            print("🔍   Samples per chunk: \(samplesPerChunk)")
-            let totalChunks = (audioSamples.count + samplesPerChunk - 1) / samplesPerChunk
-            print("🔍   Expected total chunks: \(totalChunks)")
+        print("🔍 Starting streaming simulation for \(file.fileName)")
+        print("🔍   Audio length: \(audioLength)s")
+        print("🔍   Total samples: \(audioSamples.count)")
+        print("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
+        print("🔍   Samples per chunk: \(samplesPerChunk)")
+        let totalChunks = (audioSamples.count + samplesPerChunk - 1) / samplesPerChunk
+        print("🔍   Expected total chunks: \(totalChunks)")
 
         // For streaming, we'll use the full file but measure chunk-by-chunk processing
         // This simulates how streaming would work with continuous audio
@@ -226,9 +221,9 @@ public class ASRBenchmark {
             let chunkSamples = nextChunkEnd - processedSamples
             let isLastChunk = nextChunkEnd >= audioSamples.count
 
-                print(
-                    "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
-                )
+            print(
+                "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
+            )
 
             // Process all audio up to this point (simulating accumulated streaming)
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])

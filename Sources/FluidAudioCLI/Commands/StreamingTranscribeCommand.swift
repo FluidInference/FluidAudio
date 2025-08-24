@@ -3,11 +3,17 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Thread-safe tracker for transcription updates
+/// Thread-safe tracker for transcription updates and audio position
 @available(macOS 13.0, *)
 actor TranscriptionTracker {
     private var volatileUpdates: [String] = []
     private var confirmedUpdates: [String] = []
+    private var currentAudioPosition: Double = 0.0
+    private let startTime: Date
+
+    init() {
+        self.startTime = Date()
+    }
 
     func addVolatileUpdate(_ text: String) {
         volatileUpdates.append(text)
@@ -15,6 +21,18 @@ actor TranscriptionTracker {
 
     func addConfirmedUpdate(_ text: String) {
         confirmedUpdates.append(text)
+    }
+
+    func updateAudioPosition(_ position: Double) {
+        currentAudioPosition = position
+    }
+
+    func getCurrentAudioPosition() -> Double {
+        return currentAudioPosition
+    }
+
+    func getElapsedProcessingTime() -> Double {
+        return Date().timeIntervalSince(startTime)
     }
 
     func getVolatileCount() -> Int {
@@ -130,19 +148,21 @@ enum StreamingTranscribeCommand {
 
             // Track transcription updates
             let tracker = TranscriptionTracker()
-            let startTime = Date()
 
             // Listen for updates
             let updateTask = Task {
                 for await update in await streamingAsr.transcriptionUpdates {
+                    let audioPos = await tracker.getCurrentAudioPosition()
+                    let audioTimestamp = String(format: "%.2f", audioPos)
+
                     if update.isConfirmed {
                         print(
-                            "✓ Confirmed: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
+                            "[\(audioTimestamp)s] ✓ Confirmed: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
                         )
                         await tracker.addConfirmedUpdate(update.text)
                     } else {
                         print(
-                            "~ Volatile: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
+                            "[\(audioTimestamp)s] ~ Volatile: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
                         )
                         await tracker.addVolatileUpdate(update.text)
                     }
@@ -150,7 +170,7 @@ enum StreamingTranscribeCommand {
             }
 
             // Simulate streaming by feeding audio in chunks
-            let chunkDuration = 1.0  // 100ms chunks
+            let chunkDuration = 1.0  // 1 second chunks
             let samplesPerChunk = Int(chunkDuration * format.sampleRate)
             var position = 0
 
@@ -181,6 +201,10 @@ enum StreamingTranscribeCommand {
                 }
                 chunkBuffer.frameLength = AVAudioFrameCount(chunkSize)
 
+                // Update audio time position in tracker
+                let audioTimePosition = Double(position) / format.sampleRate
+                await tracker.updateAudioPosition(audioTimePosition)
+
                 // Stream the chunk
                 await streamingAsr.streamAudio(chunkBuffer)
 
@@ -207,7 +231,7 @@ enum StreamingTranscribeCommand {
             print("  Final confirmed text: \(await streamingAsr.confirmedTranscript)")
             print("  Final volatile text: \(await streamingAsr.volatileTranscript)")
 
-            let processingTime = Date().timeIntervalSince(startTime)
+            let processingTime = await tracker.getElapsedProcessingTime()
             let audioDuration = Double(audioFileHandle.length) / format.sampleRate
             let rtfx = audioDuration / processingTime
 
