@@ -21,7 +21,16 @@ public actor StreamingAsrManager {
     private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
-    private var slidingAdapter: SlidingWindowAdapter?
+
+    // Sliding window state
+    private var segmentIndex: Int = 0
+    private var lastProcessedFrame: Int = 0
+    private var accumulatedTokens: [Int] = []
+
+    // Raw sample buffer for sliding-window assembly (absolute indexing)
+    private var sampleBuffer: [Float] = []
+    private var bufferStartIndex: Int = 0  // absolute index of sampleBuffer[0]
+    private var nextWindowCenterStart: Int = 0  // absolute index where next chunk (center) begins
 
     // Two-tier transcription state (like Apple's Speech API)
     public private(set) var volatileTranscript: String = ""
@@ -47,7 +56,7 @@ public actor StreamingAsrManager {
         self.inputBuilder = continuation
 
         logger.info(
-            "Initialized StreamingAsrManager with config: chunkDuration=\(config.chunkDuration)s"
+            "Initialized StreamingAsrManager with config: chunk=\(config.chunkSeconds)s left=\(config.leftContextSeconds)s right=\(config.rightContextSeconds)s"
         )
     }
 
@@ -80,22 +89,15 @@ public actor StreamingAsrManager {
         // Reset decoder state for the specific source
         try await asrManager?.resetDecoderState(for: source)
 
-        // Initialize shared sliding-window adapter so streaming matches offline chunking
-        slidingAdapter = SlidingWindowAdapter(
-            sampleRate: config.asrConfig.sampleRate,
-            centerSeconds: 10.0,
-            leftContextSeconds: 2.0,
-            rightContextSeconds: 2.0,
-            enableDebug: config.enableDebug
-        )
+        // Reset sliding window state
+        segmentIndex = 0
+        lastProcessedFrame = 0
+        accumulatedTokens.removeAll()
 
         startTime = Date()
 
         // Start background recognition task
         recognizerTask = Task {
-
-            let audioBuffer = AudioBuffer(capacity: config.bufferCapacity)
-
             logger.info("Recognition task started, waiting for audio...")
 
             for await pcmBuffer in await self.inputSequence {
@@ -103,16 +105,8 @@ public actor StreamingAsrManager {
                     // Convert to 16kHz mono
                     let samples = try await audioConverter.convertToAsrFormat(pcmBuffer)
 
-                    // Add to buffer
-                    try await audioBuffer.append(samples)
-
-                    // Process when we have enough samples
-                    let availableSamples = await audioBuffer.availableSamples()
-                    if availableSamples >= config.chunkSizeInSamples {
-                        if let chunk = await audioBuffer.getChunk(size: config.chunkSizeInSamples) {
-                            await self.processChunk(chunk)
-                        }
-                    }
+                    // Append to raw sample buffer and attempt windowed processing
+                    await self.appendSamplesAndProcess(samples)
                 } catch {
                     let streamingError = StreamingAsrError.audioBufferProcessingFailed(error)
                     logger.error(
@@ -121,15 +115,8 @@ public actor StreamingAsrManager {
                 }
             }
 
-            // Process any remaining audio when stream ends
-            let remainingSamples = await audioBuffer.availableSamples()
-            if remainingSamples > 0 {
-                logger.info("Processing \(remainingSamples) remaining samples...")
-                let remaining = await audioBuffer.peekAvailable()
-                if !remaining.isEmpty {
-                    await self.processChunk(remaining)
-                }
-            }
+            // Stream ended: flush remaining audio (without requiring full right context)
+            await self.flushRemaining()
 
             logger.info("Recognition task completed")
         }
@@ -185,20 +172,19 @@ public actor StreamingAsrManager {
         confirmedTranscript = ""
         processedChunks = 0
         startTime = Date()
+        sampleBuffer.removeAll(keepingCapacity: false)
+        bufferStartIndex = 0
+        nextWindowCenterStart = 0
 
         // Reset decoder state for the current audio source
         if let asrManager = asrManager {
             try await asrManager.resetDecoderState(for: audioSource)
         }
 
-        // Reset sliding window continuity
-        slidingAdapter = SlidingWindowAdapter(
-            sampleRate: config.asrConfig.sampleRate,
-            centerSeconds: 10.0,
-            leftContextSeconds: 2.0,
-            rightContextSeconds: 2.0,
-            enableDebug: config.enableDebug
-        )
+        // Reset sliding window state
+        segmentIndex = 0
+        lastProcessedFrame = 0
+        accumulatedTokens.removeAll()
 
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -222,32 +208,110 @@ public actor StreamingAsrManager {
 
     // MARK: - Private Methods
 
-    /// Process an audio chunk
-    private func processChunk(_ chunk: [Float]) async {
+    /// Append new samples and process as many windows as available
+    private func appendSamplesAndProcess(_ samples: [Float]) async {
+        // Append samples to buffer
+        sampleBuffer.append(contentsOf: samples)
+
+        // Process while we have at least chunk + right ahead of the current center start
+        let chunk = config.chunkSamples
+        let right = config.rightContextSamples
+        let left = config.leftContextSamples
+        let sampleRate = config.asrConfig.sampleRate
+
+        var currentAbsEnd = bufferStartIndex + sampleBuffer.count
+        while currentAbsEnd >= (nextWindowCenterStart + chunk + right) {
+            let leftStartAbs = max(0, nextWindowCenterStart - left)
+            let rightEndAbs = nextWindowCenterStart + chunk + right
+            let startIdx = max(leftStartAbs - bufferStartIndex, 0)
+            let endIdx = rightEndAbs - bufferStartIndex
+            if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx {
+                break
+            }
+
+            let window = Array(sampleBuffer[startIdx..<endIdx])
+            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
+            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+
+            // Advance by chunk size
+            nextWindowCenterStart += chunk
+
+            // Trim buffer to keep only what's needed for left context
+            let trimToAbs = max(0, nextWindowCenterStart - left)
+            let dropCount = max(0, trimToAbs - bufferStartIndex)
+            if dropCount > 0 && dropCount <= sampleBuffer.count {
+                sampleBuffer.removeFirst(dropCount)
+                bufferStartIndex += dropCount
+            }
+
+            currentAbsEnd = bufferStartIndex + sampleBuffer.count
+        }
+    }
+
+    /// Flush any remaining audio at end of stream (no right-context requirement)
+    private func flushRemaining() async {
+        let chunk = config.chunkSamples
+        let left = config.leftContextSamples
+        let sampleRate = config.asrConfig.sampleRate
+
+        var currentAbsEnd = bufferStartIndex + sampleBuffer.count
+        while currentAbsEnd > nextWindowCenterStart {  // process until we exhaust
+            // If we have less than a chunk ahead, process the final partial chunk
+            let availableAhead = currentAbsEnd - nextWindowCenterStart
+            if availableAhead <= 0 { break }
+            let effectiveChunk = min(chunk, availableAhead)
+
+            let leftStartAbs = max(0, nextWindowCenterStart - left)
+            let rightEndAbs = nextWindowCenterStart + effectiveChunk
+            let startIdx = max(leftStartAbs - bufferStartIndex, 0)
+            let endIdx = max(rightEndAbs - bufferStartIndex, startIdx)
+            if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
+
+            let window = Array(sampleBuffer[startIdx..<endIdx])
+            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
+            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+
+            nextWindowCenterStart += effectiveChunk
+
+            // Trim
+            let trimToAbs = max(0, nextWindowCenterStart - left)
+            let dropCount = max(0, trimToAbs - bufferStartIndex)
+            if dropCount > 0 && dropCount <= sampleBuffer.count {
+                sampleBuffer.removeFirst(dropCount)
+                bufferStartIndex += dropCount
+            }
+
+            currentAbsEnd = bufferStartIndex + sampleBuffer.count
+        }
+    }
+
+    /// Process a single assembled window: [left, chunk, right]
+    private func processWindow(_ windowSamples: [Float], actualLeftSeconds: Double) async {
         guard let asrManager = asrManager else { return }
 
         do {
             let chunkStartTime = Date()
 
-            // Use unified sliding-window path for streaming
-            if slidingAdapter == nil {
-                slidingAdapter = SlidingWindowAdapter(
-                    sampleRate: config.asrConfig.sampleRate,
-                    centerSeconds: 10.0,
-                    leftContextSeconds: 2.0,
-                    rightContextSeconds: 2.0,
-                    enableDebug: config.enableDebug
-                )
-            }
-            guard var adapter = slidingAdapter else { return }
-
-            let (tokens, timestamps, _) = try await adapter.processStreamingChunk(
-                manager: asrManager,
-                source: audioSource,
-                chunkSamples: chunk
+            // Calculate start frame offset
+            let startOffset = asrManager.calculateStartFrameOffset(
+                segmentIndex: segmentIndex,
+                leftContextSeconds: actualLeftSeconds
             )
-            // Persist updated adapter state
-            slidingAdapter = adapter
+
+            // Call AsrManager directly with deduplication
+            let (tokens, timestamps, _) = try await asrManager.transcribeStreamingChunk(
+                windowSamples,
+                source: audioSource,
+                startFrameOffset: startOffset,
+                lastProcessedFrame: lastProcessedFrame,
+                previousTokens: accumulatedTokens,
+                enableDebug: config.enableDebug
+            )
+
+            // Update state
+            accumulatedTokens.append(contentsOf: tokens)
+            lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? 0)
+            segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1
@@ -257,7 +321,7 @@ public actor StreamingAsrManager {
                 tokenIds: tokens,
                 timestamps: timestamps,
                 encoderSequenceLength: 0,
-                audioSamples: chunk,
+                audioSamples: windowSamples,
                 processingTime: processingTime
             )
 
@@ -371,37 +435,34 @@ public actor StreamingAsrManager {
 /// Configuration for StreamingAsrManager
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAsrConfig: Sendable {
-    /// Duration of each audio chunk in seconds
-    public let chunkDuration: TimeInterval
+    /// New chunk size per update (seconds). Typical streaming: 2.0s
+    public let chunkSeconds: TimeInterval
+    /// Left context appended to each window (seconds). Typical: 10.0s
+    public let leftContextSeconds: TimeInterval
+    /// Right context lookahead (seconds). Typical: 2.0s (adds latency)
+    public let rightContextSeconds: TimeInterval
 
     /// Enable debug logging
     public let enableDebug: Bool
 
-    /// Default configuration with balanced settings
+    /// Default configuration aligned with NeMo streaming: 10-2-2 (L-C-R), ~4s latency
     public static let `default` = StreamingAsrConfig(
-        chunkDuration: 15.0,  // 15 second chunks
+        chunkSeconds: 10.0,
+        leftContextSeconds: 2.0,
+        rightContextSeconds: 2.0,
         enableDebug: false
     )
 
     public init(
-        chunkDuration: TimeInterval = 15.0,
+        chunkSeconds: TimeInterval = 10.0,
+        leftContextSeconds: TimeInterval = 2.0,
+        rightContextSeconds: TimeInterval = 2.0,
         enableDebug: Bool = false
     ) {
-        self.chunkDuration = chunkDuration
+        self.chunkSeconds = chunkSeconds
+        self.leftContextSeconds = leftContextSeconds
+        self.rightContextSeconds = rightContextSeconds
         self.enableDebug = enableDebug
-    }
-
-    /// Custom configuration with specified chunk duration
-    /// - Note: The underlying model currently works best with 15s chunks
-    /// - Shorter chunk support is still being validated
-    public static func custom(
-        chunkDuration: TimeInterval,
-        enableDebug: Bool = false
-    ) -> StreamingAsrConfig {
-        StreamingAsrConfig(
-            chunkDuration: chunkDuration,
-            enableDebug: enableDebug
-        )
     }
 
     // Internal ASR configuration
@@ -413,13 +474,15 @@ public struct StreamingAsrConfig: Sendable {
         )
     }
 
-    var bufferCapacity: Int {
-        Int(15.0 * 16000)  // 15 seconds at 16kHz
-    }
+    // Sample counts at 16 kHz
+    var chunkSamples: Int { Int(chunkSeconds * 16000) }
+    var leftContextSamples: Int { Int(leftContextSeconds * 16000) }
+    var rightContextSamples: Int { Int(rightContextSeconds * 16000) }
 
-    var chunkSizeInSamples: Int {
-        Int(chunkDuration * 16000)
-    }
+    // Backward-compat convenience for existing call-sites/tests
+    var chunkDuration: TimeInterval { chunkSeconds }
+    var bufferCapacity: Int { Int(15.0 * 16000) }
+    var chunkSizeInSamples: Int { chunkSamples }
 }
 
 /// Transcription update from streaming ASR
