@@ -17,10 +17,11 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
-      - name: Check Swift version
-        run: swift --version
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
       
       - name: Build for macOS
         run: |
@@ -58,7 +59,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
 
       - name: Check versions and directory structure
         run: |
@@ -91,7 +96,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
 
       - name: Check versions and debug
         run: |
