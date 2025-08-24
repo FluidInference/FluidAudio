@@ -15,6 +15,7 @@ func printUsage() {
             diarization-benchmark   Run diarization benchmark
             vad-benchmark           Run VAD-specific benchmark
             asr-benchmark           Run ASR benchmark on LibriSpeech
+            fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             download                Download evaluation datasets
@@ -28,6 +29,8 @@ func printUsage() {
             fluidaudio diarization-benchmark --single-file ES2004a
 
             fluidaudio asr-benchmark --subset test-clean --max-files 100
+            
+            fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 
             fluidaudio transcribe audio.wav --low-latency
 
@@ -61,6 +64,13 @@ Task {
             await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
         } else {
             print("ASR benchmark requires macOS 13.0 or later")
+            exit(1)
+        }
+    case "fleurs-benchmark":
+        if #available(macOS 13.0, *) {
+            await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        } else {
+            print("FLEURS benchmark requires macOS 13.0 or later")
             exit(1)
         }
     case "transcribe":
