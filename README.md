@@ -95,9 +95,15 @@ Our goal is to offer a similar API to what Apple will introudce in OS26: https:/
 
 - **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Real-time Factor**: Optimized for near-real-time transcription with chunking support
-- **Streaming Support**: Follows the same API as OS 26
+- **Streaming Support (beta, unstable)**: Aligns with the OS 26 APIs. Behavior, accuracy/latency tuning, and configuration are still in flux.
 
 `RTFx - ~110x on a M4 Pro`
+
+Quick benchmark (one-liner):
+
+```bash
+swift run fluidaudio asr-benchmark --subset test-clean --max-files 25
+```
 
 ## Showcase
 
@@ -136,70 +142,33 @@ swift format lint --recursive --configuration .swift-format Sources/ Tests/ Exam
 - GitHub Actions runs formatting checks on all Swift file changes
 - See `.swift-format` for style configuration
 
-## Quick Start
-
-### Streaming ASR (Reccomended)
+## Batch ASR Quick Start
 
 ```swift
 import AVFoundation
 import FluidAudio
 
-// Simple streaming ASR - handles everything automatically
-let streamingAsr = StreamingAsrManager()
-try await streamingAsr.start()
-
-// Set up audio capture (any format - auto-converts to 16kHz mono)
-let audioEngine = AVAudioEngine()
-let inputNode = audioEngine.inputNode
-inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputNode.outputFormat(forBus: 0)) { buffer, _ in
-    streamingAsr.streamAudio(buffer)  // No conversion needed!
-}
-
-// Listen for transcription updates
+// Minimal batch transcription from a file (16kHz mono handled automatically)
 Task {
-    for await update in streamingAsr.transcriptionUpdates {
-        if update.isConfirmed {
-            print("✓ \(update.text)")  // High confidence
-        } else {
-            print("~ \(update.text)")  // Low confidence (show in purple)
-        }
-    }
-}
-
-try audioEngine.start()
-// ... recording ...
-let finalText = try await streamingAsr.finish()
-```
-
-## Manual ASR
-
-```swift
-import FluidAudio
-
-// Initialize ASR with configuration
-let asrConfig = ASRConfig(
-    tdtConfig: TdtConfig()
-)
-
-// Transcribe audio
-Task {
-    let asrManager = AsrManager(config: asrConfig)
-
-    // Load models (automatic download if needed)
+    // 1) Create ASR manager and load models
+    let asrManager = AsrManager() // Uses default config
     let models = try await AsrModels.downloadAndLoad()
     try await asrManager.initialize(models: models)
 
-    let audioSamples: [Float] = // your 16kHz audio data
-    let result = try await asrManager.transcribe(audioSamples)
+    // 2) Load an audio file and convert to 16kHz mono Float32 samples
+    let url = URL(fileURLWithPath: "path/to/audio.wav")
+    let file = try AVAudioFile(forReading: url)
+    let format = file.processingFormat
+    let frameCount = AVAudioFrameCount(file.length)
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
+    try file.read(into: buffer)
 
-    print("Transcription: \(result.text)")
-    print("Processing time: \(result.processingTime)s")
+    let converter = AudioConverter()
+    let samples = try await converter.convertToAsrFormat(buffer)
 
-    // For streaming/chunked transcription
-    let chunkResult = try await asrManager.transcribeChunk(
-        audioChunk,
-        source: .microphone  // or .system for system audio
-    )
+    // 3) Transcribe the samples
+    let result = try await asrManager.transcribe(samples)
+    print(result.text)
 }
 ```
 

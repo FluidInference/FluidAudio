@@ -115,7 +115,7 @@ enum StreamingTranscribeCommand {
         print("----------------------------------")
 
         // Use default configuration
-        let config = StreamingAsrConfig.default
+        let config = StreamingAsrConfig.streaming
         print("Using default configuration")
 
         print("Configuration:")
@@ -157,12 +157,12 @@ enum StreamingTranscribeCommand {
 
                     if update.isConfirmed {
                         print(
-                            "[\(audioTimestamp)s] ✓ Confirmed: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
+                            "[\(audioTimestamp)s] ✓ Confirmed: '\(update.text)'"
                         )
                         await tracker.addConfirmedUpdate(update.text)
                     } else {
                         print(
-                            "[\(audioTimestamp)s] ~ Volatile: '\(update.text)' (confidence: \(String(format: "%.3f", update.confidence)))"
+                            "[\(audioTimestamp)s] ~ Volatile: '\(update.text)'"
                         )
                         await tracker.addVolatileUpdate(update.text)
                     }

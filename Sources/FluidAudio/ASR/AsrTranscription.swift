@@ -272,6 +272,15 @@ extension AsrManager {
     internal func removeDuplicateTokenSequence(
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
+        // Handle single punctuation token duplicates first
+        let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
+        if !previous.isEmpty && !current.isEmpty && previous.last == current.first
+            && punctuationTokens.contains(current.first!)
+        {
+            // Remove the duplicate punctuation token from the beginning of current
+            return (Array(current.dropFirst()), 1)
+        }
+
         let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
         let maxMatchLength = min(maxOverlap, current.count)  // first 12 tokens of current
 
@@ -305,9 +314,10 @@ extension AsrManager {
     /// Calculate start frame offset for a sliding window segment
     internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
         guard segmentIndex > 0 else { return 0 }
-        let exactEncoderFrameRate = 12.6
-        let leftContextFrames = Int(round(leftContextSeconds * exactEncoderFrameRate))
-        return leftContextFrames + 2
+        // Use exact encoder frame rate: 80ms per frame = 12.5 fps
+        let encoderFrameRate = 1.0 / 0.08  // 12.5 frames per second
+        let leftContextFrames = Int(round(leftContextSeconds * encoderFrameRate))
+        return leftContextFrames
     }
 
 }

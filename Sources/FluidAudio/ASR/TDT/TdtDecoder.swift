@@ -228,6 +228,15 @@ internal struct TdtDecoder {
         }
         decoderState.lastToken = hypothesis.lastToken
 
+        // Clear cached predictor output if ending with punctuation to prevent re-emission
+        if let lastToken = hypothesis.lastToken {
+            let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
+            if punctuationTokens.contains(lastToken) {
+                decoderState.predictorOutput = nil
+                print("[\(chunkTag)] Cleared predictor cache for punctuation token \(lastToken)")
+            }
+        }
+
         // Calculate and store time jump for streaming continuity
         // timeJump = current_position - encoder_length
         decoderState.timeJump = timeIndices - encoderSequenceLength

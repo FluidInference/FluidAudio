@@ -159,10 +159,23 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Return complete transcription
-        let finalText = confirmedTranscript + volatileTranscript
-        logger.info("Final transcription: \(finalText.count) characters")
+        // Convert final accumulated tokens to text (proper way to avoid duplicates)
+        let finalText: String
+        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
+            let finalResult = asrManager.processTranscriptionResult(
+                tokenIds: accumulatedTokens,
+                timestamps: [],
+                encoderSequenceLength: 0,
+                audioSamples: [],  // Not needed for final text conversion
+                processingTime: 0
+            )
+            finalText = finalResult.text
+        } else {
+            // Fallback to text concatenation if no tokens available
+            finalText = confirmedTranscript + volatileTranscript
+        }
 
+        logger.info("Final transcription: \(finalText.count) characters")
         return finalText
     }
 
@@ -316,9 +329,10 @@ public actor StreamingAsrManager {
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1
 
-            // Convert tokens to text + timings via shared manager utility
+            // Convert only the current chunk tokens to text for clean incremental updates
+            // The final result will use all accumulated tokens for proper deduplication
             let interim = asrManager.processTranscriptionResult(
-                tokenIds: tokens,
+                tokenIds: tokens,  // Only current chunk tokens for progress updates
                 timestamps: timestamps,
                 encoderSequenceLength: 0,
                 audioSamples: windowSamples,
@@ -326,7 +340,7 @@ public actor StreamingAsrManager {
             )
 
             logger.debug(
-                "Chunk \(self.processedChunks): '\(interim.text)' (confidence: \(interim.confidence), time: \(String(format: "%.3f", processingTime))s)"
+                "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
             )
 
             // Apply confidence-based confirmation logic
@@ -449,6 +463,15 @@ public struct StreamingAsrConfig: Sendable {
     public static let `default` = StreamingAsrConfig(
         chunkSeconds: 10.0,
         leftContextSeconds: 2.0,
+        rightContextSeconds: 2.0,
+        enableDebug: false
+    )
+
+    /// Optimized streaming configuration: Match ChunkProcessor settings (11-2-2)
+    /// Uses same chunking as batch processing for consistency
+    public static let streaming = StreamingAsrConfig(
+        chunkSeconds: 5.0,  // Match ChunkProcessor centerSeconds
+        leftContextSeconds: 8.0,
         rightContextSeconds: 2.0,
         enableDebug: false
     )
