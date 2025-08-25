@@ -395,9 +395,13 @@ public class FLEURSBenchmark {
         var totalProcessingTime = 0.0
         var processedCount = 0
         var skippedCount = 0
-        
+
         // Track high WER cases for analysis
-        var highWERCases: [(sampleId: String, reference: String, hypothesis: String, normalizedRef: String, normalizedHyp: String, wer: Double)] = []
+        var highWERCases:
+            [(
+                sampleId: String, reference: String, hypothesis: String, normalizedRef: String, normalizedHyp: String,
+                wer: Double
+            )] = []
 
         for (index, sample) in samples.enumerated() {
             // Skip if audio file doesn't exist
@@ -450,19 +454,20 @@ public class FLEURSBenchmark {
                     )
                     totalWER += metrics.wer
                     totalCER += metrics.cer
-                    
+
                     // Track cases with WER > 8% for analysis
                     if metrics.wer > 0.08 {
                         let normalizedRef = TextNormalizer.normalize(sample.transcription)
                         let normalizedHyp = TextNormalizer.normalize(result.text)
-                        highWERCases.append((
-                            sampleId: sample.sampleId,
-                            reference: sample.transcription,
-                            hypothesis: result.text,
-                            normalizedRef: normalizedRef,
-                            normalizedHyp: normalizedHyp,
-                            wer: metrics.wer
-                        ))
+                        highWERCases.append(
+                            (
+                                sampleId: sample.sampleId,
+                                reference: sample.transcription,
+                                hypothesis: result.text,
+                                normalizedRef: normalizedRef,
+                                normalizedHyp: normalizedHyp,
+                                wer: metrics.wer
+                            ))
                     }
                 }
 
@@ -486,7 +491,7 @@ public class FLEURSBenchmark {
         let avgWER = processedCount > 0 ? totalWER / Double(processedCount) : 0.0
         let avgCER = processedCount > 0 ? totalCER / Double(processedCount) : 0.0
         let rtfx = totalProcessingTime > 0 ? totalDuration / totalProcessingTime : 0.0
-        
+
         // Print high WER cases for analysis
         if !highWERCases.isEmpty {
             print("\n🔍 High WER Cases (>8%) for \(supportedLanguages[language] ?? language):")
