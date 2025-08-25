@@ -17,11 +17,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
       
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.1"
+      - name: Check Swift version
+        run: swift --version
       
       - name: Build for macOS
         run: |
@@ -31,20 +30,19 @@ jobs:
       - name: Clean build artifacts
         run: rm -rf .build .swiftpm
       
-      - name: List available simulators and runtimes
-        run: |
-          echo "=== Available simulators ==="
-          xcrun simctl list devices available
-          echo "=== Available runtimes ==="  
-          xcrun simctl list runtimes
-          
       - name: Build for iOS Simulator
         run: |
-          echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
+          echo "Building for iOS Simulator..."
+          # List available simulators first
+          xcrun simctl list devices available | head -20
+          # Build for generic iOS Simulator
           xcodebuild -scheme FluidAudio \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/ios-simulator \
             build
+      
+      - name: Clean build artifacts
+        run: rm -rf .build .swiftpm
       
       - name: Build for iOS Device
         run: |
@@ -60,11 +58,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
-
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.1"
+        uses: actions/checkout@v4
 
       - name: Check versions and directory structure
         run: |
@@ -97,11 +91,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
-
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.1"
+        uses: actions/checkout@v4
 
       - name: Check versions and debug
         run: |
@@ -116,10 +106,21 @@ jobs:
         run: |
           rm -rf .swiftpm .build
 
-      - name: Build for iOS Simulator  
+      - name: Build iOS library using xcodebuild (simulator)
         run: |
+          set -e
           echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
           xcodebuild -scheme FluidAudio \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/ios-simulator \
             build
+
+      - name: Clean up build artifacts
+        run: |
+          rm -rf .swiftpm .build
+
+      - name: Build iOS library (device)
+        run: |
+          set -e
+          echo "Building FluidAudio library for iOS Device..."
+          xcodebuild -scheme FluidAudio -destination 'generic/platform=iOS' build
