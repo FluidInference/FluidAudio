@@ -561,7 +561,6 @@ extension FLEURSBenchmark {
         var cacheDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/FluidAudio/FLEURS").path
         var debugMode = false
-        var autoDownload = true  // Default to auto-download
 
         // Parse arguments
         var i = 0
@@ -594,8 +593,6 @@ extension FLEURSBenchmark {
                 }
             case "--debug":
                 debugMode = true
-            case "--no-download":
-                autoDownload = false
             case "--help", "-h":
                 printUsage()
                 exit(0)

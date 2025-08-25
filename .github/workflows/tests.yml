@@ -31,26 +31,12 @@ jobs:
       - name: Clean build artifacts
         run: rm -rf .build .swiftpm
       
-      - name: Build for iOS Simulator
+      - name: Build for iOS
         run: |
-          echo "Building for iOS Simulator..."
-          # List available simulators first
-          xcrun simctl list devices available | head -20
-          # Build for generic iOS Simulator
+          echo "Building for iOS..."
           xcodebuild -scheme FluidAudio \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath .build/ios-simulator \
-            build
-      
-      - name: Clean build artifacts
-        run: rm -rf .build .swiftpm
-      
-      - name: Build for iOS Device
-        run: |
-          echo "Building for iOS Device..."
-          xcodebuild -scheme FluidAudio \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath .build/ios-device \
+            -sdk iphonesimulator \
+            -derivedDataPath .build/ios \
             build
 
   build-and-test-macos:
@@ -61,23 +47,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check versions and directory structure
+      - name: Check versions
         run: |
           swift --version
           xcodebuild -version
-          echo "=== Repository structure ==="
-          find . -name "Tests" -type d
-          echo "=== Root directory contents ==="
-          ls -la
-          echo "=== Looking for Tests anywhere ==="
-          find . -name "*Tests*" -type d
-          echo "=== Checking if Tests exists ==="
-          if [ -d "Tests" ]; then
-            echo "Tests directory exists"
-            ls -la Tests/
-          else
-            echo "Tests directory does not exist"
-          fi
 
       - name: Build package
         run: swift build
@@ -86,42 +59,3 @@ jobs:
         run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 10
 
-  build-ios-library:
-    name: Build FluidAudio Library (iOS)
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Check versions and debug
-        run: |
-          swift --version
-          xcodebuild -version
-          echo "=== Root directory contents ==="
-          ls -la
-          echo "=== Package.swift contents ==="
-          cat Package.swift
-
-      - name: Clean up any build artifacts
-        run: |
-          rm -rf .swiftpm .build
-
-      - name: Build iOS library using xcodebuild (simulator)
-        run: |
-          set -e
-          echo "Building FluidAudio library for iOS Simulator using xcodebuild..."
-          xcodebuild -scheme FluidAudio \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath .build/ios-simulator \
-            build
-
-      - name: Clean up build artifacts
-        run: |
-          rm -rf .swiftpm .build
-
-      - name: Build iOS library (device)
-        run: |
-          set -e
-          echo "Building FluidAudio library for iOS Device..."
-          xcodebuild -scheme FluidAudio -destination 'generic/platform=iOS' build
