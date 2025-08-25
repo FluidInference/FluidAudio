@@ -15,7 +15,7 @@ public class FLEURSBenchmark {
     let supportedLanguages: [String: String] = [
         // Best performing languages (WER < 5%) - Using FLEURS language codes
         "en_us": "English (US)",  // 4.85% WER
-        "es_es": "Spanish (Spain)",  // 3.45% WER (FLEURS code)
+        "es_419": "Spanish (Spain)",  // 3.45% WER (FLEURS code)
         "it_it": "Italian (Italy)",  // 3.00% WER
         "fr_fr": "French (France)",  // 5.15% WER
         "de_de": "German (Germany)",  // 5.04% WER
@@ -145,7 +145,7 @@ public class FLEURSBenchmark {
         // Use the existing HuggingFace download infrastructure
         let datasetRepo = "FluidInference/fleurs"
         // Use the official API with path query to list files in subfolder
-        let apiBaseURL = "https://huggingface.co/api/datasets/\(datasetRepo)/tree/main?path=\(language)"
+        let apiBaseURL = "https://huggingface.co/api/datasets/\(datasetRepo)/tree/main/\(language)"
 
         do {
             // List files in the language directory using HuggingFace API
@@ -177,6 +177,7 @@ public class FLEURSBenchmark {
 
             for file in files where file.type == "file" {
                 let fileName = URL(fileURLWithPath: file.path).lastPathComponent
+
                 if fileName == "\(language).trans.txt" {
                     // Download transcript file
                     let downloadURL = URL(

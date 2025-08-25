@@ -92,7 +92,7 @@ struct ChunkProcessor {
             segmentIndex: segmentIndex,
             leftContextSeconds: leftContextSeconds
         )
-    
+
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
