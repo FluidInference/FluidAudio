@@ -285,7 +285,7 @@ extension AsrModels {
             }
         }
 
-        // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v2-coreml/
+        // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v3-coreml/
         // by DownloadUtils.loadModels, so we don't need to download separately
         let modelNames = [
             Names.melspectrogramFile,

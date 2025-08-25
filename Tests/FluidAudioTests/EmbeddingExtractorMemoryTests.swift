@@ -22,7 +22,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
 
         // Test waveform buffer creation
         let waveformBuffer = try optimizer.createAlignedArray(
-            shape: [3, 160000] as [NSNumber],
+            shape: [3, 240000] as [NSNumber],
             dataType: .float32
         )
 
@@ -109,7 +109,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
 
         // Create aligned buffers
         let waveformBuffer = try optimizer.createAlignedArray(
-            shape: [3, 160000] as [NSNumber],
+            shape: [3, 240000] as [NSNumber],
             dataType: .float32
         )
 
@@ -163,7 +163,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
                     // Each thread gets its own waveform buffer
                     let waveformBuffer = try optimizer.getPooledBuffer(
                         key: "concurrent_waveform_\(index)",
-                        shape: [3, 160000] as [NSNumber],
+                        shape: [3, 240000] as [NSNumber],
                         dataType: .float32
                     )
 

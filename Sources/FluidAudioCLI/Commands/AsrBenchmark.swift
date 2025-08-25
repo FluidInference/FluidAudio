@@ -39,13 +39,13 @@ public class ASRBenchmark {
             }
 
             if transcriptCount >= 5 {
-                logger.info("LibriSpeech \(subset) already downloaded")
+                print("LibriSpeech \(subset) already downloaded")
                 print("LibriSpeech \(subset) already available (dataset found)")
                 return
             }
         }
 
-        logger.info("Downloading LibriSpeech \(subset)...")
+        print("Downloading LibriSpeech \(subset)...")
 
         let downloadURL: String
         switch subset {
@@ -67,19 +67,18 @@ public class ASRBenchmark {
             expectedSubpath: "LibriSpeech/\(subset)"
         )
 
-        logger.info("LibriSpeech \(subset) downloaded successfully")
+        print("LibriSpeech \(subset) downloaded successfully")
     }
 
     /// Run ASR benchmark on LibriSpeech
     public func runLibriSpeechBenchmark(
-        asrManager: AsrManager, subset: String = "test-clean"
+        asrManager: AsrManager, subset: String = "test-clean", singleFile: String? = nil
     )
         async throws -> [ASRBenchmarkResult]
     {
         #if DEBUG
         print("")
         print("WARNING: Running in DEBUG mode!")
-        print("Performance will be significantly slower (~2x).")
         print("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
         print("")
         // Add a small delay so user sees the warning
@@ -95,7 +94,16 @@ public class ASRBenchmark {
         let audioFiles = try collectLibriSpeechFiles(from: datasetPath)
 
         var filteredFiles = audioFiles
-        if config.longAudioOnly {
+
+        // Handle single file processing
+        if let singleFileName = singleFile {
+            let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
+            filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
+            if filteredFiles.isEmpty {
+                throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+            }
+            print("🔍 Processing single file: \(targetFileName)")
+        } else if config.longAudioOnly {
             filteredFiles = try await filterFilesByDuration(
                 audioFiles, minDuration: 4.0, maxDuration: 20.0)
             print(
@@ -103,31 +111,26 @@ public class ASRBenchmark {
             )
         }
 
-        let maxFiles = config.maxFiles ?? filteredFiles.count  // Process all files if not specified
+        let maxFiles = singleFile != nil ? filteredFiles.count : (config.maxFiles ?? filteredFiles.count)
         let filesToProcess = Array(filteredFiles.prefix(maxFiles))
 
         print(
             "📋 Processing \(filesToProcess.count) files (max files limit: \(config.maxFiles?.description ?? "unlimited"))"
         )
 
-        logger.info(
+        print(
             "Running ASR benchmark on \(filesToProcess.count) files from LibriSpeech \(subset)")
 
         var results: [ASRBenchmarkResult] = []
 
         for (index, audioFile) in filesToProcess.enumerated() {
             do {
-                if config.debugMode {
-                    logger.info(
-                        "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)"
-                    )
-                }
-
-                if config.debugMode && index > 0 {
-                    logger.info("   🔍 Processing file \(index + 1)")
-                }
+                print(
+                    "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)"
+                )
 
                 // Reset decoder state for each new file
+                print("Resetting decoder state for new file: \(audioFile.fileName)")
                 try await asrManager.resetDecoderState(for: .microphone)
 
                 let result: ASRBenchmarkResult
@@ -160,6 +163,9 @@ public class ASRBenchmark {
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
+        print(
+            "Transcribing \(file.fileName) with \(audioSamples.count) samples (\(String(format: "%.2f", audioLength))s)"
+        )
         let asrResult = try await transcribeAudio(
             asrManager: asrManager, audioSamples: audioSamples)
 
@@ -194,12 +200,13 @@ public class ASRBenchmark {
         // Calculate chunk size in samples (minimum 1 second to ensure reasonable context)
         let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
 
-        if config.debugMode {
-            logger.info("Starting streaming simulation for \(file.fileName)")
-            logger.info("  Audio length: \(audioLength)s")
-            logger.info("  Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
-            logger.info("  Samples per chunk: \(samplesPerChunk)")
-        }
+        print("🔍 Starting streaming simulation for \(file.fileName)")
+        print("🔍   Audio length: \(audioLength)s")
+        print("🔍   Total samples: \(audioSamples.count)")
+        print("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
+        print("🔍   Samples per chunk: \(samplesPerChunk)")
+        let totalChunks = (audioSamples.count + samplesPerChunk - 1) / samplesPerChunk
+        print("🔍   Expected total chunks: \(totalChunks)")
 
         // For streaming, we'll use the full file but measure chunk-by-chunk processing
         // This simulates how streaming would work with continuous audio
@@ -209,10 +216,17 @@ public class ASRBenchmark {
         // Process the full audio file but track metrics as if streaming
         while processedSamples < audioSamples.count {
             let chunkStartTime = Date()
+            let chunkNumber = chunkProcessingTimes.count + 1
 
             // Calculate how many samples we've "streamed" so far
             let nextChunkEnd = min(processedSamples + samplesPerChunk, audioSamples.count)
             let totalSamplesToProcess = nextChunkEnd
+            let chunkSamples = nextChunkEnd - processedSamples
+            let isLastChunk = nextChunkEnd >= audioSamples.count
+
+            print(
+                "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
+            )
 
             // Process all audio up to this point (simulating accumulated streaming)
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
@@ -224,16 +238,21 @@ public class ASRBenchmark {
             }
 
             // Update accumulated text
+            let previousText = accumulatedText
             accumulatedText = result.text
 
             let chunkProcessingTime = Date().timeIntervalSince(chunkStartTime)
             chunkProcessingTimes.append(chunkProcessingTime)
 
-            if config.debugMode {
-                let chunkDuration = Double(nextChunkEnd - processedSamples) / 16000.0
-                logger.info(
-                    "  Chunk \(chunkProcessingTimes.count): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s"
-                )
+            let chunkDuration = Double(chunkSamples) / 16000.0
+            print(
+                "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s"
+            )
+
+            if isLastChunk {
+                print(
+                    "🔍   FINAL CHUNK \(chunkNumber): text change: '\(previousText)' -> '\(accumulatedText)'")
+                print("🔍   FINAL CHUNK processing complete")
             }
 
             processedSamples = nextChunkEnd
@@ -518,6 +537,257 @@ private func editDistance<T: Equatable>(_ seq1: [T], _ seq2: [T]) -> EditDistanc
     )
 }
 
+// MARK: - Detailed WER Analysis
+
+private struct WordDifference {
+    let position: Int
+    let reference: String?
+    let hypothesis: String?
+    let type: DifferenceType
+
+    enum DifferenceType {
+        case substitution
+        case insertion
+        case deletion
+    }
+}
+
+extension ASRBenchmark {
+    /// Print detailed analysis for files with WER > threshold
+    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.05) {
+        let highWERResults = results.filter { $0.metrics.wer > threshold }
+
+        guard !highWERResults.isEmpty else {
+            return
+        }
+
+        print("\n" + String(repeating: "=", count: 80))
+        print("📋 Detailed Analysis for Files with WER > \(Int(threshold * 100))%")
+        print(String(repeating: "=", count: 80))
+
+        for result in highWERResults.sorted(by: { $0.metrics.wer > $1.metrics.wer }) {
+            printSingleFileWERAnalysis(result)
+        }
+    }
+
+    /// Print detailed analysis for a single file
+    private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) {
+        let werPercent = result.metrics.wer * 100
+        print(
+            "\nFile: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
+        )
+        print(String(repeating: "-", count: 60))
+
+        // Normalize the texts for comparison
+        let normalizedReference = TextNormalizer.normalize(result.reference)
+        let normalizedHypothesis = TextNormalizer.normalize(result.hypothesis)
+
+        let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+
+        // Generate inline diff
+        let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
+
+        print("\nNormalized Reference:\t\(referenceDiff)")
+        print("Normalized Hypothesis:\t\(hypothesisDiff)")
+        print("Original Hypothesis:\t\(result.hypothesis)")
+    }
+
+    /// Generate word-level differences between reference and hypothesis
+    private func generateWordDifferences(reference: [String], hypothesis: [String]) -> [WordDifference] {
+        let m = reference.count
+        let n = hypothesis.count
+        var differences: [WordDifference] = []
+
+        // Create DP table for edit distance with backtracking
+        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+
+        // Initialize base cases
+        for i in 0...m { dp[i][0] = i }
+        for j in 0...n { dp[0][j] = j }
+
+        // Fill DP table
+        for i in 1...m {
+            for j in 1...n {
+                if reference[i - 1] == hypothesis[j - 1] {
+                    dp[i][j] = dp[i - 1][j - 1]
+                } else {
+                    dp[i][j] =
+                        1
+                        + min(
+                            dp[i - 1][j],  // deletion
+                            dp[i][j - 1],  // insertion
+                            dp[i - 1][j - 1]  // substitution
+                        )
+                }
+            }
+        }
+
+        // Backtrack to find actual differences
+        var i = m
+        var j = n
+        var position = max(m, n) - 1
+
+        while i > 0 || j > 0 {
+            if i > 0 && j > 0 && reference[i - 1] == hypothesis[j - 1] {
+                // Match - no difference
+                i -= 1
+                j -= 1
+                position -= 1
+            } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
+                // Substitution
+                differences.append(
+                    WordDifference(
+                        position: position,
+                        reference: reference[i - 1],
+                        hypothesis: hypothesis[j - 1],
+                        type: .substitution
+                    ))
+                i -= 1
+                j -= 1
+                position -= 1
+            } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
+                // Deletion
+                differences.append(
+                    WordDifference(
+                        position: position,
+                        reference: reference[i - 1],
+                        hypothesis: nil,
+                        type: .deletion
+                    ))
+                i -= 1
+                position -= 1
+            } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
+                // Insertion
+                differences.append(
+                    WordDifference(
+                        position: position,
+                        reference: nil,
+                        hypothesis: hypothesis[j - 1],
+                        type: .insertion
+                    ))
+                j -= 1
+                position -= 1
+            } else {
+                // Shouldn't happen, but break to avoid infinite loop
+                break
+            }
+        }
+
+        return differences.reversed()  // Reverse to get correct order
+    }
+
+    /// Generate inline diff with full lines and highlighted differences
+    private func generateInlineDiff(reference: [String], hypothesis: [String]) -> (String, String) {
+        let m = reference.count
+        let n = hypothesis.count
+
+        // Handle empty hypothesis or reference
+        if n == 0 {
+            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+            let redColor = supportsColor ? "\u{001B}[31m" : "["
+            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+            let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
+            let hypString = ""
+            return (refString, hypString)
+        }
+        if m == 0 {
+            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+            let greenColor = supportsColor ? "\u{001B}[32m" : "["
+            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+            let refString = ""
+            let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
+            return (refString, hypString)
+        }
+
+        // Create DP table for edit distance with backtracking
+        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+
+        // Initialize base cases
+        for i in 0...m { dp[i][0] = i }
+        for j in 0...n { dp[0][j] = j }
+
+        // Fill DP table
+        for i in 1...m {
+            for j in 1...n {
+                if reference[i - 1] == hypothesis[j - 1] {
+                    dp[i][j] = dp[i - 1][j - 1]
+                } else {
+                    dp[i][j] =
+                        1
+                        + min(
+                            dp[i - 1][j],  // deletion
+                            dp[i][j - 1],  // insertion
+                            dp[i - 1][j - 1]  // substitution
+                        )
+                }
+            }
+        }
+
+        // Check if terminal supports colors
+        let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+        let redColor = supportsColor ? "\u{001B}[31m" : "["
+        let greenColor = supportsColor ? "\u{001B}[32m" : "["
+        let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+
+        // Backtrack to identify differences
+        var i = m
+        var j = n
+        var refDiffWords: [(String, Bool)] = []  // (word, isDifferent)
+        var hypDiffWords: [(String, Bool)] = []  // (word, isDifferent)
+
+        while i > 0 || j > 0 {
+            if i > 0 && j > 0 && reference[i - 1] == hypothesis[j - 1] {
+                // Match
+                refDiffWords.insert((reference[i - 1], false), at: 0)
+                hypDiffWords.insert((hypothesis[j - 1], false), at: 0)
+                i -= 1
+                j -= 1
+            } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
+                // Substitution
+                refDiffWords.insert((reference[i - 1], true), at: 0)
+                hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
+                i -= 1
+                j -= 1
+            } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
+                // Deletion (word in reference but not in hypothesis)
+                refDiffWords.insert((reference[i - 1], true), at: 0)
+                i -= 1
+            } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
+                // Insertion (word in hypothesis but not in reference)
+                hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
+                j -= 1
+            } else {
+                break
+            }
+        }
+
+        // Build the formatted strings
+        var refString = ""
+        var hypString = ""
+
+        for (word, isDifferent) in refDiffWords {
+            if !refString.isEmpty { refString += " " }
+            if isDifferent {
+                refString += "\(redColor)\(word)\(resetColor)"
+            } else {
+                refString += word
+            }
+        }
+
+        for (word, isDifferent) in hypDiffWords {
+            if !hypString.isEmpty { hypString += " " }
+            if isDifferent {
+                hypString += "\(greenColor)\(word)\(resetColor)"
+            } else {
+                hypString += word
+            }
+        }
+
+        return (refString, hypString)
+    }
+}
+
 // IMPORTANT: RTFx Performance in CI Environments
 // GitHub Actions and other CI environments use virtualized M1/M2 Macs where
 // Neural Engine access is severely restricted. This results in significantly
@@ -534,11 +804,12 @@ extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
         var subset = "test-clean"
         var maxFiles: Int?
+        var singleFile: String?
         var outputFile = "asr_benchmark_results.json"
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
-        var streamingChunkDuration = 0.1  // Default 100ms chunks
+        var streamingChunkDuration = 10.0
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -557,6 +828,11 @@ extension ASRBenchmark {
             case "--max-files":
                 if i + 1 < arguments.count {
                     maxFiles = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--single-file":
+                if i + 1 < arguments.count {
+                    singleFile = arguments[i + 1]
                     i += 1
                 }
             case "--output":
@@ -589,7 +865,11 @@ extension ASRBenchmark {
         }
 
         print("\nStarting ASR benchmark on LibriSpeech \(subset)")
-        print("   Max files: \(maxFiles?.description ?? "all")")
+        if singleFile != nil {
+            print("   Processing single file: \(singleFile!)")
+        } else {
+            print("   Max files: \(maxFiles?.description ?? "all")")
+        }
         print("   Output file: \(outputFile)")
         print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
@@ -612,15 +892,8 @@ extension ASRBenchmark {
 
         // Initialize ASR manager with fast benchmark preset
         let asrConfig = ASRConfig(
-            maxSymbolsPerFrame: 3,
             enableDebug: debugMode,
-            realtimeMode: false,
-            chunkSizeMs: 2000,
-            tdtConfig: TdtConfig(
-                durations: [0, 1, 2, 3, 4],
-                includeTokenDuration: true,
-                maxSymbolsPerStep: 3
-            )
+            tdtConfig: TdtConfig()
         )
 
         let asrManager = AsrManager(config: asrConfig)
@@ -634,16 +907,6 @@ extension ASRBenchmark {
                 try await asrManager.initialize(models: models)
                 print("ASR system initialized successfully")
 
-                // Profile Neural Engine optimizations
-                asrManager.profilePerformance()
-
-                if ProcessInfo.processInfo.environment["CI"] != nil {
-                    print("🔍 CI: Verifying ASR models with test audio...")
-                    let testSamples = Array(repeating: Float(0.0), count: 16000)  // 1 second of silence
-                    let testResult = try await asrManager.transcribe(testSamples)
-                    print("   Test transcription result: '\(testResult.text)'")
-                    print("   Models appear to be working: \(asrManager.isAvailable)")
-                }
             } catch {
                 print("Failed to initialize ASR system: \(error)")
                 print("   Error type: \(type(of: error))")
@@ -653,7 +916,7 @@ extension ASRBenchmark {
                     print("🔍 CI Debug Information:")
                     let modelsDir = FileManager.default.homeDirectoryForCurrentUser
                         .appendingPathComponent(
-                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
+                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
                         )
                     print("   Models directory: \(modelsDir.path)")
                     print(
@@ -678,7 +941,7 @@ extension ASRBenchmark {
             }
 
             let results = try await benchmark.runLibriSpeechBenchmark(
-                asrManager: asrManager, subset: subset)
+                asrManager: asrManager, subset: subset, singleFile: singleFile)
 
             let totalWER = results.reduce(0.0) { $0 + $1.metrics.wer } / Double(results.count)
             let totalCER = results.reduce(0.0) { $0 + $1.metrics.cer } / Double(results.count)
@@ -704,28 +967,6 @@ extension ASRBenchmark {
             let seconds = Int(testRuntime) % 60
             let runtimeString = "\(minutes)m \(seconds)s"
 
-            print(
-                "\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)"
-            )
-
-            print("--- Benchmark Results ---")
-            #if DEBUG
-            print("   Mode: DEBUG (slow performance)")
-            #else
-            print("   Mode: RELEASE (optimal performance)")
-            #endif
-            print("   Dataset: \(config.dataset) \(config.subset)")
-            print("   Files processed: \(results.count)")
-            let overallRTFx = totalAudioDuration / totalProcessingTime
-
-            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
-            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
-            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
-            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            print(
-                "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
-            )
-
             // Print streaming metrics if available
             if config.testStreaming {
                 print("\n--- Streaming Metrics ---")
@@ -750,6 +991,8 @@ extension ASRBenchmark {
                     }
                 }
             }
+
+            let overallRTFx: Double = totalProcessingTime > 0 ? (totalAudioDuration / totalProcessingTime) : 0
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -839,6 +1082,25 @@ extension ASRBenchmark {
                 withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
             try jsonData.write(to: URL(fileURLWithPath: outputFile))
 
+            // Print detailed analysis for files with high WER
+            benchmark.printDetailedWERAnalysis(results)
+
+            print(
+                "\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)"
+            )
+
+            print("--- Benchmark Results ---")
+            print("   Dataset: \(config.dataset) \(config.subset)")
+            print("   Files processed: \(results.count)")
+
+            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
+            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
+            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+            print(
+                "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
+            )
+
             print("\nResults saved to: \(outputFile)")
             print("ASR benchmark completed successfully")
 
@@ -858,6 +1120,7 @@ extension ASRBenchmark {
                 --subset <name>           LibriSpeech subset to use (default: test-clean)
                                          Available: test-clean, test-other, dev-clean, dev-other
                 --max-files <number>      Maximum number of files to process (default: all)
+                --single-file <id>        Process only a specific file (e.g., 1089-134686-0011)
                 --output <file>           Output JSON file path (default: asr_benchmark_results.json)
                 --debug                   Enable debug logging
                 --auto-download           Automatically download LibriSpeech dataset (default)
@@ -885,9 +1148,12 @@ extension ASRBenchmark {
 
                 # Benchmark with 100 files from test-other subset
                 fluidaudio asr-benchmark --subset test-other --max-files 100
+                
+                # Process a single specific file
+                fluidaudio asr-benchmark --single-file 1089-134686-0011 --debug
 
                 # Test streaming performance with 0.5s chunks
-                fluidaudio asr-benchmark --test-streaming --chunk-duration 0.5
+                fluidaudio asr-benchmark --test-streaming --chunk-duration 1-
 
                 # Debug mode with custom output file
                 fluidaudio asr-benchmark --debug --output my_results.json

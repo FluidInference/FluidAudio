@@ -46,33 +46,18 @@ final class StreamingAsrManagerTests: XCTestCase {
         // Test default config
         let defaultConfig = StreamingAsrConfig.default
         XCTAssertEqual(defaultConfig.confirmationThreshold, 0.85)
-        XCTAssertEqual(defaultConfig.chunkDuration, 10.0)
+        XCTAssertEqual(defaultConfig.chunkDuration, 15.0)
         XCTAssertFalse(defaultConfig.enableDebug)
-
-        // Test low latency config
-        let lowLatencyConfig = StreamingAsrConfig.lowLatency
-        XCTAssertEqual(lowLatencyConfig.confirmationThreshold, 0.75)
-        XCTAssertEqual(lowLatencyConfig.chunkDuration, 10.0)
-        XCTAssertFalse(lowLatencyConfig.enableDebug)
-
-        // Test high accuracy config
-        let highAccuracyConfig = StreamingAsrConfig.highAccuracy
-        XCTAssertEqual(highAccuracyConfig.confirmationThreshold, 0.9)
-        XCTAssertEqual(highAccuracyConfig.chunkDuration, 10.0)
-        XCTAssertFalse(highAccuracyConfig.enableDebug)
-
     }
 
     func testConfigCalculatedProperties() {
         let config = StreamingAsrConfig(chunkDuration: 5.0)
-        XCTAssertEqual(config.bufferCapacity, 160000)  // 10 seconds at 16kHz
+        XCTAssertEqual(config.bufferCapacity, 240000)  // 15 seconds at 16kHz
         XCTAssertEqual(config.chunkSizeInSamples, 80000)  // 5 seconds at 16kHz
 
         // Test ASR config generation
         let asrConfig = config.asrConfig
         XCTAssertEqual(asrConfig.sampleRate, 16000)
-        XCTAssertEqual(asrConfig.chunkSizeMs, 5000)
-        XCTAssertTrue(asrConfig.realtimeMode)
         XCTAssertNotNil(asrConfig.tdtConfig)
     }
 
@@ -122,92 +107,18 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     func testStreamAudioBuffering() async throws {
         throw XCTSkip("Skipping test that requires model initialization")
-        let manager = StreamingAsrManager()
-
-        // Create a test audio buffer
-        let sampleRate = 16000.0
-        let duration = 1.0
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: 1,
-            interleaved: false
-        )!
-
-        let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: AVAudioFrameCount(sampleRate * duration)
-        )!
-        buffer.frameLength = buffer.frameCapacity
-
-        // Stream audio (should not throw)
-        await manager.streamAudio(buffer)
     }
 
     func testTranscriptionUpdatesStream() async throws {
         throw XCTSkip("Skipping test that requires model initialization")
-        let manager = StreamingAsrManager()
-
-        // Create expectation for updates
-        let expectation = self.expectation(description: "Receive transcription updates")
-        expectation.isInverted = true  // We don't expect updates without starting
-
-        Task {
-            for await _ in await manager.transcriptionUpdates {
-                expectation.fulfill()
-                break
-            }
-        }
-
-        await fulfillment(of: [expectation], timeout: 0.5)
     }
 
     func testResetFunctionality() async throws {
         throw XCTSkip("Skipping test that requires model initialization")
-        let manager = StreamingAsrManager()
-
-        // Simulate some state (these would normally be set during transcription)
-        // Note: We can't directly set these as they're private(set), but we can test reset behavior
-
-        // Reset
-        try await manager.reset()
-
-        // Verify state is cleared
-        let volatileTranscript = await manager.volatileTranscript
-        let confirmedTranscript = await manager.confirmedTranscript
-        XCTAssertEqual(volatileTranscript, "")
-        XCTAssertEqual(confirmedTranscript, "")
     }
 
     func testCancelFunctionality() async throws {
         throw XCTSkip("Skipping test that requires model initialization")
-        let manager = StreamingAsrManager()
-
-        // Create a task that will be cancelled
-        let expectation = self.expectation(description: "Stream cancelled")
-
-        let task = Task {
-            do {
-                for await _ in await manager.transcriptionUpdates {
-                    // Should not receive any updates
-                }
-                expectation.fulfill()
-            } catch {
-                // Task cancellation is expected
-                expectation.fulfill()
-            }
-        }
-
-        // Give the task a moment to start
-        try await Task.sleep(nanoseconds: 100_000_000)  // 0.1 seconds
-
-        // Cancel the manager
-        await manager.cancel()
-
-        // Cancel the task as well
-        task.cancel()
-
-        await fulfillment(of: [expectation], timeout: 1.0)
     }
 
     // MARK: - Update Structure Tests
@@ -252,14 +163,6 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     func testAudioSourceConfiguration() async throws {
         throw XCTSkip("Skipping test that requires model initialization")
-        let manager = StreamingAsrManager()
-
-        // Default should be microphone
-        let source = await manager.source
-        XCTAssertEqual(source, .microphone)
-
-        // Test with mock models (would need to be expanded for real testing)
-        // This is a placeholder for when models can be mocked
     }
 
     // MARK: - Custom Configuration Tests

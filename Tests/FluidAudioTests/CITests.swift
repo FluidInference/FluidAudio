@@ -187,7 +187,7 @@ final class CITests: XCTestCase {
 
     func testAudioProcessingPerformance() {
         // Test that basic audio operations are reasonably fast
-        let largeAudio = Array(repeating: Float(0.5), count: 160000)  // 10 seconds at 16kHz
+        let largeAudio = Array(repeating: Float(0.5), count: 240000)  // 15 seconds at 16kHz
 
         measure {
             let manager = DiarizerManager()

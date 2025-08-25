@@ -22,7 +22,7 @@ final class ANEMemoryOptimizerTests: XCTestCase {
     // MARK: - Buffer Creation Tests
 
     func testCreateAlignedArray() throws {
-        let shape = [3, 160000] as [NSNumber]
+        let shape = [3, 240000] as [NSNumber]
         let array = try optimizer.createAlignedArray(
             shape: shape,
             dataType: .float32
@@ -160,7 +160,7 @@ final class ANEMemoryOptimizerTests: XCTestCase {
 
     func testZeroCopyFeatureProvider() throws {
         let waveform = try optimizer.createAlignedArray(
-            shape: [3, 160000] as [NSNumber],
+            shape: [3, 240000] as [NSNumber],
             dataType: .float32
         )
         let mask = try optimizer.createAlignedArray(

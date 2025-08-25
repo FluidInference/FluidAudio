@@ -5,7 +5,7 @@ import OSLog
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout DecoderState
+        _ audioSamples: [Float], decoderState: inout TdtDecoderState
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
@@ -26,10 +26,10 @@ extension AsrManager {
 
         let startTime = Date()
 
-        if audioSamples.count <= 160_000 {
+        if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
-            let paddedAudio = padAudioIfNeeded(audioSamples, targetLength: 160_000)
-            let (tokenIds, encoderSequenceLength) = try await executeMLInference(
+            let paddedAudio: [Float] = padAudioIfNeeded(audioSamples, targetLength: 240_000)
+            let (tokens, timestamps, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
                 originalLength: originalLength,
                 enableDebug: config.enableDebug,
@@ -37,7 +37,8 @@ extension AsrManager {
             )
 
             let result = processTranscriptionResult(
-                tokenIds: tokenIds,
+                tokenIds: tokens,
+                timestamps: timestamps,
                 encoderSequenceLength: encoderSequenceLength,
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
@@ -58,22 +59,19 @@ extension AsrManager {
             return result
         }
 
-        let result = try await ChunkProcessor(
-            audioSamples: audioSamples,
-            chunkSize: 160_000,
-            enableDebug: config.enableDebug
-        ).process(using: self, startTime: startTime)
-
-        // Note: ChunkProcessor uses its own decoder state, so we don't update the passed-in state
-        return result
+        // ChunkProcessor now uses the passed-in decoder state for continuity
+        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: config.enableDebug)
+        return try await processor.process(using: self, decoderState: &decoderState, startTime: startTime)
     }
 
-    internal func executeMLInference(
+    internal func executeMLInferenceWithTimings(
         _ paddedAudio: [Float],
         originalLength: Int? = nil,
         enableDebug: Bool = false,
-        decoderState: inout DecoderState
-    ) async throws -> (tokenIds: [Int], encoderSequenceLength: Int) {
+        decoderState: inout TdtDecoderState,
+        startFrameOffset: Int = 0,
+        lastProcessedFrame: Int = 0
+    ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
             paddedAudio, actualLength: originalLength)
@@ -88,6 +86,7 @@ extension AsrManager {
         }
 
         let encoderInput = try prepareEncoderInput(melspectrogramOutput)
+
         guard
             let encoderOutput = try encoderModel?.prediction(
                 from: encoderInput,
@@ -103,22 +102,70 @@ extension AsrManager {
             from: encoderOutput, key: "encoder_output_length",
             errorMessage: "Invalid encoder output length")
 
-        // Encoder_v2 already outputs in the correct format (B, T, D)
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
-        let tokenIds = try await tdtDecode(
+        let (tokens, timestamps) = try await tdtDecodeWithTimings(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
             originalAudioSamples: paddedAudio,
-            decoderState: &decoderState
+            decoderState: &decoderState,
+            startFrameOffset: startFrameOffset,
+            lastProcessedFrame: lastProcessedFrame
         )
 
-        return (tokenIds, encoderSequenceLength)
+        return (tokens, timestamps, encoderSequenceLength)
+    }
+
+    /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
+    /// This is used by both sliding window chunking and streaming paths to unify behavior.
+    internal func transcribeStreamingChunk(
+        _ chunkSamples: [Float],
+        source: AudioSource,
+        startFrameOffset: Int,
+        lastProcessedFrame: Int,
+        previousTokens: [Int] = [],
+        enableDebug: Bool
+    ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
+        // Select and copy decoder state for the source
+        var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
+
+        let originalLength = chunkSamples.count
+        let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
+        let (tokens, timestamps, encLen) = try await executeMLInferenceWithTimings(
+            padded,
+            originalLength: originalLength,
+            enableDebug: enableDebug,
+            decoderState: &state,
+            startFrameOffset: startFrameOffset,
+            lastProcessedFrame: lastProcessedFrame
+        )
+
+        // Persist updated state back to the source-specific slot
+        if source == .microphone {
+            microphoneDecoderState = state
+        } else {
+            systemDecoderState = state
+        }
+
+        // Apply token deduplication if previous tokens are provided
+        if !previousTokens.isEmpty && !tokens.isEmpty {
+            let (deduped, removedCount) = removeDuplicateTokenSequence(previous: previousTokens, current: tokens)
+            let adjustedTimestamps = removedCount > 0 ? Array(timestamps.dropFirst(removedCount)) : timestamps
+
+            if enableDebug && removedCount > 0 {
+                logger.debug("Streaming chunk: removed \(removedCount) duplicate tokens")
+            }
+
+            return (deduped, adjustedTimestamps, encLen)
+        }
+
+        return (tokens, timestamps, encLen)
     }
 
     internal func processTranscriptionResult(
         tokenIds: [Int],
+        timestamps: [Int] = [],
         encoderSequenceLength: Int,
         audioSamples: [Float],
         processingTime: TimeInterval,
@@ -128,18 +175,31 @@ extension AsrManager {
         let (text, finalTimings) = convertTokensWithExistingTimings(tokenIds, timings: tokenTimings)
         let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
 
+        // Convert timestamps to TokenTiming objects if provided
+        let timingsFromTimestamps = createTokenTimings(from: tokenIds, timestamps: timestamps)
+
+        // Use existing timings if provided, otherwise use timings from timestamps
+        let resultTimings = tokenTimings.isEmpty ? timingsFromTimestamps : finalTimings
+
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && duration > 1.0 {
             logger.warning(
                 "⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))"
             )
         }
 
+        // Calculate confidence based on audio duration and token density
+        let confidence = calculateConfidence(
+            duration: duration,
+            tokenCount: tokenIds.count,
+            isEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+
         return ASRResult(
             text: text,
-            confidence: 1.0,
+            confidence: confidence,
             duration: duration,
             processingTime: processingTime,
-            tokenTimings: finalTimings
+            tokenTimings: resultTimings
         )
     }
 
@@ -147,50 +207,155 @@ extension AsrManager {
         guard audioSamples.count < targetLength else { return audioSamples }
         return audioSamples + Array(repeating: 0, count: targetLength - audioSamples.count)
     }
-}
 
-private struct ChunkProcessor {
-    let audioSamples: [Float]
-    let chunkSize: Int
-    let enableDebug: Bool
-
-    func process(using manager: AsrManager, startTime: Date) async throws -> ASRResult {
-        var allTexts: [String] = []
-        let audioLength = Double(audioSamples.count) / 16000.0
-
-        var position = 0
-        var chunkIndex = 0
-        var decoderState = try DecoderState()
-
-        while position < audioSamples.count {
-            let text = try await processChunk(
-                at: position, chunkIndex: chunkIndex, using: manager, decoderState: &decoderState)
-            allTexts.append(text)
-            position += chunkSize
-            chunkIndex += 1
+    /// Calculate confidence score based on transcription characteristics
+    /// Returns a value between 0.0 and 1.0
+    private func calculateConfidence(duration: Double, tokenCount: Int, isEmpty: Bool) -> Float {
+        // Empty transcription gets low confidence
+        if isEmpty {
+            return 0.1
         }
 
-        return ASRResult(
-            text: allTexts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines),
-            confidence: 1.0,
-            duration: audioLength,
-            processingTime: Date().timeIntervalSince(startTime),
-            tokenTimings: nil
+        // Base confidence starts at 0.3
+        var confidence: Float = 0.3
+
+        // Duration factor: longer audio generally means more confident transcription
+        // Confidence increases with duration up to ~10 seconds, then plateaus
+        let durationFactor = min(duration / 10.0, 1.0)
+        confidence += Float(durationFactor) * 0.4  // Add up to 0.4
+
+        // Token density factor: more tokens per second indicates richer content
+        if duration > 0 {
+            let tokensPerSecond = Double(tokenCount) / duration
+            // Typical speech is 2-4 tokens per second
+            let densityFactor = min(tokensPerSecond / 3.0, 1.0)
+            confidence += Float(densityFactor) * 0.3  // Add up to 0.3
+        }
+
+        // Clamp between 0.1 and 1.0
+        return max(0.1, min(1.0, confidence))
+    }
+
+    /// Convert frame timestamps to TokenTiming objects
+    private func createTokenTimings(from tokenIds: [Int], timestamps: [Int]) -> [TokenTiming] {
+        guard !tokenIds.isEmpty && !timestamps.isEmpty && tokenIds.count == timestamps.count else {
+            return []
+        }
+
+        var timings: [TokenTiming] = []
+
+        for i in 0..<tokenIds.count {
+            let tokenId = tokenIds[i]
+            let frameIndex = timestamps[i]
+
+            // Convert encoder frame index to time (approximate: 80ms per frame)
+            let startTime = TimeInterval(frameIndex) * 0.08
+            let endTime = startTime + 0.08  // Approximate token duration
+
+            // Get token text from vocabulary if available
+            let tokenText = vocabulary[tokenId] ?? "token_\(tokenId)"
+
+            // Token confidence based on duration (longer tokens = higher confidence)
+            let tokenDuration = endTime - startTime
+            let tokenConfidence = Float(min(max(tokenDuration / 0.5, 0.5), 1.0))  // 0.5 to 1.0 based on duration
+
+            let timing = TokenTiming(
+                token: tokenText,
+                tokenId: tokenId,
+                startTime: startTime,
+                endTime: endTime,
+                confidence: tokenConfidence
+            )
+
+            timings.append(timing)
+        }
+
+        return timings
+    }
+
+    /// Slice encoder output to remove left context frames (following NeMo approach)
+    private func sliceEncoderOutput(
+        _ encoderOutput: MLMultiArray,
+        from startFrame: Int,
+        newLength: Int
+    ) throws -> MLMultiArray {
+        let shape = encoderOutput.shape
+        let batchSize = shape[0].intValue
+        let hiddenSize = shape[2].intValue
+
+        // Create new array with sliced dimensions
+        let slicedArray = try MLMultiArray(
+            shape: [batchSize, newLength, hiddenSize] as [NSNumber],
+            dataType: encoderOutput.dataType
         )
+
+        // Copy data from startFrame onwards
+        let sourcePtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
+        let destPtr = slicedArray.dataPointer.bindMemory(to: Float.self, capacity: slicedArray.count)
+
+        for t in 0..<newLength {
+            for h in 0..<hiddenSize {
+                let sourceIndex = (startFrame + t) * hiddenSize + h
+                let destIndex = t * hiddenSize + h
+                destPtr[destIndex] = sourcePtr[sourceIndex]
+            }
+        }
+
+        return slicedArray
     }
 
-    private func processChunk(
-        at position: Int, chunkIndex: Int, using manager: AsrManager,
-        decoderState: inout DecoderState
-    ) async throws -> String {
-        let endPosition = min(position + chunkSize, audioSamples.count)
-        let chunkSamples = Array(audioSamples[position..<endPosition])
-        let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: chunkSize)
+    /// Remove duplicate token sequences at the start of the current list that overlap
+    /// with the tail of the previous accumulated tokens. Returns deduplicated current tokens
+    /// and the number of removed leading tokens so caller can drop aligned timestamps.
+    internal func removeDuplicateTokenSequence(
+        previous: [Int], current: [Int], maxOverlap: Int = 12
+    ) -> (deduped: [Int], removedCount: Int) {
+        // Handle single punctuation token duplicates first
+        let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
+        if !previous.isEmpty && !current.isEmpty && previous.last == current.first
+            && punctuationTokens.contains(current.first!)
+        {
+            // Remove the duplicate punctuation token from the beginning of current
+            return (Array(current.dropFirst()), 1)
+        }
 
-        let (tokenIds, _) = try await manager.executeMLInference(
-            paddedChunk, originalLength: chunkSamples.count, enableDebug: false, decoderState: &decoderState)
-        let (text, _) = manager.convertTokensWithExistingTimings(tokenIds, timings: [])
+        let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
+        let maxMatchLength = min(maxOverlap, current.count)  // first 12 tokens of current
 
-        return text
+        guard maxSearchLength >= 3 && maxMatchLength >= 3 else {
+            return (current, 0)
+        }
+
+        for overlapLength in (3...min(maxSearchLength, maxMatchLength)).reversed() {
+            let prevStart = max(0, previous.count - maxSearchLength)
+            let prevEnd = previous.count - overlapLength + 1
+            if prevEnd <= prevStart { continue }
+            for startIndex in prevStart..<prevEnd {
+                let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
+                let currEnd = max(0, current.count - overlapLength + 1)
+                for currentStart in 0..<min(5, currEnd) {
+                    let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
+                    if prevSub == currSub {
+                        if config.enableDebug {
+                            logger.debug(
+                                "Duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)")
+                        }
+                        let removed = currentStart + overlapLength
+                        return (Array(current.dropFirst(removed)), removed)
+                    }
+                }
+            }
+        }
+        return (current, 0)
     }
+
+    /// Calculate start frame offset for a sliding window segment
+    internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
+        guard segmentIndex > 0 else { return 0 }
+        // Use exact encoder frame rate: 80ms per frame = 12.5 fps
+        let encoderFrameRate = 1.0 / 0.08  // 12.5 frames per second
+        let leftContextFrames = Int(round(leftContextSeconds * encoderFrameRate))
+        return leftContextFrames
+    }
+
 }

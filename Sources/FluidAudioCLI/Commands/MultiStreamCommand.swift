@@ -130,7 +130,6 @@ enum MultiStreamCommand {
             }
 
             let systemTask = Task {
-
                 for await update in await systemStream.transcriptionUpdates {
                     print("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                 }

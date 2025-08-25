@@ -11,12 +11,66 @@ struct TextNormalizer {
         "þ": "th", "Þ": "th", "ł": "l", "Ł": "L",
     ]
 
+    private static let britishToAmerican: [String: String] = [
+        "colour": "color",
+        "colourless": "colorless",
+        "colouring": "coloring",
+        "colourful": "colorful",
+        "colourist": "colorist",
+        "colourists": "colorists",
+        "favourite": "favorite",
+        "flavour": "flavor",
+        "favour": "favor",
+        "honour": "honor",
+        "labour": "labor",
+        "neighbour": "neighbor",
+        "centre": "center",
+        "theatre": "theater",
+        "metre": "meter",
+        "litre": "liter",
+        "defence": "defense",
+        "offence": "offense",
+        "licence": "license",
+        "travelling": "traveling",
+        "cancelled": "canceled",
+        "jewellery": "jewelry",
+        "cheque": "check",
+        "grey": "gray",
+        "plough": "plow",
+        "tyre": "tire",
+        "aluminium": "aluminum",
+        "organise": "organize",
+        "realise": "realize",
+        "recognise": "recognize",
+        "apologise": "apologize",
+        "analyse": "analyze",
+        "paralyse": "paralyze",
+        "catalogue": "catalog",
+        "dialogue": "dialog",
+        "programme": "program",
+        "pyjamas": "pajamas",
+        "aeroplane": "airplane",
+        "maths": "math",
+        "mum": "mom",
+            // Add more as needed
+    ]
+
     /// Normalize text using HuggingFace ASR leaderboard standards
     /// This matches the normalization used in the official leaderboard evaluation
     static func normalize(_ text: String) -> String {
         var normalized = text
 
         normalized = normalized.lowercased()
+
+        // British to American normalization
+        for (british, american) in britishToAmerican {
+            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: british) + "\\b"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: american,
+                options: .regularExpression
+            )
+        }
 
         let bracketsPattern = try! NSRegularExpression(pattern: "[<\\[].*?[>\\]]", options: [])
         normalized = bracketsPattern.stringByReplacingMatches(
