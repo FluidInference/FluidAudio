@@ -71,21 +71,32 @@ jobs:
         run: |
           echo "Building for iOS..."
           
-          # Boot a specific simulator to make it available as a destination
-          echo "Starting iPhone 16 Pro simulator..."
-          SIMULATOR_ID="C707DF3C-D29E-4CA9-B02F-06CBF9E434B2"  # iPhone 16 Pro from the list
-          xcrun simctl boot "$SIMULATOR_ID" || echo "Simulator already booted or failed to boot"
+          # Verify iOS SDK is available
+          xcodebuild -showsdks | grep -i ios
           
-          # Wait a moment for boot
-          sleep 5
-          
-          echo "Using simulator with ID: $SIMULATOR_ID"
-          xcodebuild -scheme FluidAudio \
+          # Try multiple destination approaches
+          echo "Attempting iOS build with generic destination..."
+          if xcodebuild -scheme FluidAudio \
             -sdk iphonesimulator \
-            -destination "id=$SIMULATOR_ID" \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/ios \
             build CODE_SIGNING_ALLOWED=NO \
-            -allowProvisioningUpdates
+            -allowProvisioningUpdates; then
+            echo "✅ Generic iOS build succeeded"
+          else
+            echo "⚠️ Generic destination failed, trying 'Any iOS Simulator'..."
+            if xcodebuild -scheme FluidAudio \
+              -sdk iphonesimulator \
+              -destination 'platform=iOS Simulator,name=Any iOS Simulator' \
+              -derivedDataPath .build/ios \
+              build CODE_SIGNING_ALLOWED=NO \
+              -allowProvisioningUpdates; then
+              echo "✅ 'Any iOS Simulator' build succeeded"
+            else
+              echo "❌ Both generic approaches failed"
+              exit 1
+            fi
+          fi
 
   build-and-test-macos:
     name: Build and Test Swift Package (macOS)
