@@ -3,7 +3,7 @@ import CoreML
 import Foundation
 
 /// Manages LSTM hidden and cell states for the Parakeet decoder
-struct DecoderState {
+struct TdtDecoderState {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
     /// Stores the last decoded token from the previous audio chunk.
@@ -11,6 +11,19 @@ struct DecoderState {
     /// When processing a new chunk, the decoder starts with this token instead of SOS,
     /// ensuring proper context continuity for real-time transcription.
     var lastToken: Int?
+
+    // Cached CoreML "decoder_output" used for the very first Joint at utterance/chunk start.
+    // This mirrors NeMo's behavior where SOS == blankId is used only to prime the predictor.
+    var predictorOutput: MLMultiArray?
+
+    /// Time jump tracking for streaming TDT decoding.
+    /// Represents how far ahead the decoder has progressed relative to encoder frames.
+    /// Formula: timeJump = timeIndices - encoderSequenceLength
+    /// - nil: First chunk or no streaming context
+    /// - negative: Decoder hasn't processed all encoder frames yet
+    /// - positive: Decoder has advanced beyond current encoder frames
+    /// - zero: Decoder exactly at the end of encoder frames
+    var timeJump: Int?
 
     enum InitError: Error {
         case aneAllocationFailed(String)
@@ -44,10 +57,11 @@ struct DecoderState {
         cellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue ?? cellState
     }
 
-    init(from other: DecoderState) throws {
+    init(from other: TdtDecoderState) throws {
         hiddenState = try MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
         cellState = try MLMultiArray(shape: other.cellState.shape, dataType: .float32)
         lastToken = other.lastToken
+        timeJump = other.timeJump
 
         hiddenState.copyData(from: other.hiddenState)
         cellState.copyData(from: other.cellState)
@@ -62,6 +76,15 @@ struct DecoderState {
         // Initialize to zeros
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
+    }
+
+    /// Reset all state variables to initial values
+    mutating func reset() {
+        hiddenState.resetData(to: 0)
+        cellState.resetData(to: 0)
+        lastToken = nil
+        predictorOutput = nil
+        timeJump = nil
     }
 }
 

@@ -14,7 +14,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: swift-actions/setup-swift@v2
         with:
@@ -30,7 +30,7 @@ jobs:
         with:
           path: |
             .build
-            ~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml
+            ~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml
             ~/Library/Application Support/FluidAudio/Datasets/LibriSpeech
           key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved') }}-v6
 

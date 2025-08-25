@@ -69,8 +69,8 @@ enum DownloadCommand {
                 let modelsDir = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Library/Application Support/FluidAudio/Models")
                 let modelNames = [
-                    "Melspectogram_v2.mlmodelc",
-                    "ParakeetEncoder_v2.mlmodelc",
+                    "Melspectogram_15s.mlmodelc",
+                    "ParakeetEncoder_15s.mlmodelc",
                     "ParakeetDecoder.mlmodelc",
                     "RNNTJoint.mlmodelc",
                 ]

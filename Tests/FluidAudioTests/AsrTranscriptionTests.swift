@@ -12,6 +12,24 @@ final class AsrTranscriptionTests: XCTestCase {
     override func setUp() {
         super.setUp()
         manager = AsrManager()
+
+        // Set up mock vocabulary for testing
+        #if DEBUG
+        let mockVocabulary = [
+            1: "hello",
+            2: "▁world",
+            3: "▁test",
+            4: "▁audio",
+            5: ".",
+            10: "hello",
+            20: "▁world",
+            30: "▁test",
+            100: "test",
+            200: "▁token",
+            300: "!",
+        ]
+        manager.setVocabularyForTesting(mockVocabulary)
+        #endif
     }
 
     override func tearDown() {
@@ -74,9 +92,12 @@ final class AsrTranscriptionTests: XCTestCase {
             processingTime: processingTime
         )
 
-        XCTAssertEqual(result.confidence, 1.0)
+        // Confidence is calculated based on duration (1.0s) and token count (5)
+        // Base: 0.3 + duration factor: 0.1 * 0.4 + density factor: 5.0 * 0.3 = 0.64
+        XCTAssertEqual(result.confidence, 0.64, accuracy: 0.01)
         XCTAssertEqual(result.duration, 1.0, accuracy: 0.01)
         XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)
+        XCTAssertTrue(result.tokenTimings?.isEmpty == true)  // No timestamps provided, should be empty array
     }
 
     func testProcessTranscriptionResultWithTimings() {
@@ -99,6 +120,42 @@ final class AsrTranscriptionTests: XCTestCase {
         XCTAssertEqual(result.duration, 3.0, accuracy: 0.01)
         XCTAssertNotNil(result.tokenTimings)
         // Note: Actual timing count may differ due to convertTokensWithExistingTimings filtering
+    }
+
+    func testProcessTranscriptionResultWithTimestamps() {
+        let tokenIds = [100, 200, 300]
+        let timestamps = [10, 20, 30]  // Frame indices
+        let audioSamples = Array(repeating: Float(0), count: 32_000)  // 2 seconds
+        let processingTime = 0.8
+
+        let result = manager.processTranscriptionResult(
+            tokenIds: tokenIds,
+            timestamps: timestamps,
+            encoderSequenceLength: 100,
+            audioSamples: audioSamples,
+            processingTime: processingTime
+        )
+
+        // Confidence is calculated based on duration (2.0s) and token count (3)
+        // Base: 0.3 + duration factor: 0.2 * 0.4 + density factor: 1.5 * 0.3 = 0.53
+        XCTAssertEqual(result.confidence, 0.53, accuracy: 0.01)
+        XCTAssertEqual(result.duration, 2.0, accuracy: 0.01)
+        XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)
+
+        // Should have token timings from timestamps
+        XCTAssertNotNil(result.tokenTimings)
+        XCTAssertEqual(result.tokenTimings?.count, 3)
+
+        if let tokenTimings = result.tokenTimings {
+            // Verify timing calculations (80ms per frame)
+            XCTAssertEqual(tokenTimings[0].startTime, 0.8, accuracy: 0.01)  // Frame 10 * 0.08
+            XCTAssertEqual(tokenTimings[1].startTime, 1.6, accuracy: 0.01)  // Frame 20 * 0.08
+            XCTAssertEqual(tokenTimings[2].startTime, 2.4, accuracy: 0.01)  // Frame 30 * 0.08
+
+            XCTAssertEqual(tokenTimings[0].tokenId, 100)
+            XCTAssertEqual(tokenTimings[1].tokenId, 200)
+            XCTAssertEqual(tokenTimings[2].tokenId, 300)
+        }
     }
 
     // MARK: - Chunk Processing Logic Tests
@@ -133,9 +190,6 @@ final class AsrTranscriptionTests: XCTestCase {
 
         let testAudio = Array(repeating: Float(0.1), count: 160_000)
 
-        // Verify the executeMLInference method can be called (indirectly through transcribe)
-        // This tests the method exists without actually running ML models
-
         // Verify padded audio would be correct size
         let padded = manager.padAudioIfNeeded(testAudio, targetLength: 160_000)
         XCTAssertEqual(padded.count, 160_000)
@@ -165,7 +219,7 @@ final class AsrTranscriptionTests: XCTestCase {
 
     func testTranscriptionWithStateStructure() async throws {
         // Verify the transcribeWithState method structure
-        let decoderState = try DecoderState()
+        let decoderState = try TdtDecoderState()
 
         // Verify decoder state is properly initialized
         XCTAssertEqual(decoderState.hiddenState.shape, [2, 1, 640] as [NSNumber])

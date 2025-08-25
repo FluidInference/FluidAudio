@@ -15,7 +15,7 @@ For custom use cases, feedback, more model support, and other platform requests,
 
 ## Features
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for streaming transcription
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) with Token Duration Transducer; supports 25 European languages
 - **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -93,11 +93,28 @@ Our goal is to offer a similar API to what Apple will introudce in OS26: https:/
 
 ## Automatic Speech Recognition (ASR)
 
-- **Model**: [`FluidInference/parakeet-tdt-0.6b-v2-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
-- **Real-time Factor**: Optimized for near-real-time transcription with chunking support
-- **Streaming Support**: Follows the same API as OS 26
+- **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
+- **Languages**: All European languages (25)
+- **Processing Mode**: Batch transcription for complete audio files
+- **Real-time Factor**: ~110x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
+- **Streaming Support**: Coming soon - batch processing is recommended for production use
+- **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
-`RTFx - ~110x on a M4 Pro`
+### CLI Transcription
+
+```bash
+# Transcribe an audio file using batch processing
+swift run fluidaudio transcribe audio.wav
+
+# Show help and usage options
+swift run fluidaudio transcribe --help
+```
+
+### Benchmark Performance
+
+```bash
+swift run fluidaudio asr-benchmark --subset test-clean --max-files 25
+```
 
 ## Showcase
 
@@ -136,76 +153,43 @@ swift format lint --recursive --configuration .swift-format Sources/ Tests/ Exam
 - GitHub Actions runs formatting checks on all Swift file changes
 - See `.swift-format` for style configuration
 
-## Quick Start
+## Batch ASR Usage
 
-### Streaming ASR (Reccomended)
+### CLI Command (Recommended)
+
+```bash
+# Simple transcription
+swift run fluidaudio transcribe audio.wav
+
+# This will output:
+# - Audio format information (sample rate, channels, duration)
+# - Final transcription text
+# - Performance metrics (processing time, RTFx, confidence)
+```
+
+### Programmatic API
 
 ```swift
 import AVFoundation
 import FluidAudio
 
-// Simple streaming ASR - handles everything automatically
-let streamingAsr = StreamingAsrManager()
-try await streamingAsr.start()
-
-// Set up audio capture (any format - auto-converts to 16kHz mono)
-let audioEngine = AVAudioEngine()
-let inputNode = audioEngine.inputNode
-inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputNode.outputFormat(forBus: 0)) { buffer, _ in
-    streamingAsr.streamAudio(buffer)  // No conversion needed!
-}
-
-// Listen for transcription updates
+// Batch transcription from an audio file
 Task {
-    for await update in streamingAsr.transcriptionUpdates {
-        if update.isConfirmed {
-            print("✓ \(update.text)")  // High confidence
-        } else {
-            print("~ \(update.text)")  // Low confidence (show in purple)
-        }
-    }
-}
-
-try audioEngine.start()
-// ... recording ...
-let finalText = try await streamingAsr.finish()
-```
-
-## Manual ASR
-
-```swift
-import FluidAudio
-
-// Initialize ASR with configuration
-let asrConfig = ASRConfig(
-    maxSymbolsPerFrame: 3,
-    realtimeMode: true,
-    chunkSizeMs: 1500,          // Process in 1.5 second chunks
-    tdtConfig: TdtConfig(
-        durations: [0, 1, 2, 3, 4],
-        maxSymbolsPerStep: 3
-    )
-)
-
-// Transcribe audio
-Task {
-    let asrManager = AsrManager(config: asrConfig)
-
-    // Load models (automatic download if needed)
+    // 1) Initialize ASR manager and load models
     let models = try await AsrModels.downloadAndLoad()
+    let asrManager = AsrManager(config: .default)
     try await asrManager.initialize(models: models)
 
-    let audioSamples: [Float] = // your 16kHz audio data
-    let result = try await asrManager.transcribe(audioSamples)
+    // 2) Load and convert audio to 16kHz mono Float32 samples
+    let samples = try await AudioProcessor.loadAudioFile(path: "path/to/audio.wav")
 
+    // 3) Transcribe the audio
+    let result = try await asrManager.transcribe(samples, source: .system)
     print("Transcription: \(result.text)")
-    print("Processing time: \(result.processingTime)s")
+    print("Confidence: \(result.confidence)")
 
-    // For streaming/chunked transcription
-    let chunkResult = try await asrManager.transcribeChunk(
-        audioChunk,
-        source: .microphone  // or .system for system audio
-    )
+    // 4) Cleanup
+    asrManager.cleanup()
 }
 ```
 
@@ -299,14 +283,17 @@ swift run fluidaudio diarization-benchmark --threshold 0.7 --output results.json
 swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.8
 ```
 
-### ASR Benchmark
+### ASR Commands
 
 ```bash
+# Transcribe an audio file (batch processing)
+swift run fluidaudio transcribe audio.wav
+
 # Run LibriSpeech ASR benchmark
 swift run fluidaudio asr-benchmark --subset test-clean --num-files 50
 
-# Benchmark with specific configuration
-swift run fluidaudio asr-benchmark --subset test-other --chunk-size 2000 --output asr_results.json
+# Benchmark with specific configuration  
+swift run fluidaudio asr-benchmark --subset test-other --output asr_results.json
 
 # Test with automatic download
 swift run fluidaudio asr-benchmark --auto-download --subset test-clean
@@ -352,11 +339,11 @@ swift run fluidaudio download --dataset librispeech-test-other
 
 **Automatic Speech Recognition:**
 
-- **`AsrManager`**: Main ASR class with TDT decoding
-- **`AsrModels`**: Model loading and management
+- **`AsrManager`**: Main ASR class with TDT decoding for batch processing
+- **`AsrModels`**: Model loading and management with automatic downloads
 - **`ASRConfig`**: Configuration for ASR processing
-- **`transcribe(_:)`**: Process complete audio and return transcription
-- **`transcribeChunk(_:source:)`**: Process audio chunks for streaming
+- **`transcribe(_:source:)`**: Process complete audio and return transcription results
+- **`AudioProcessor.loadAudioFile(path:)`**: Load and convert audio files to required format
 - **`AudioSource`**: Enum for microphone vs system audio separation
 
 ## License

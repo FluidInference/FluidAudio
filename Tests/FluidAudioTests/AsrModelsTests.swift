@@ -10,11 +10,11 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Model Names Tests
 
     func testModelNames() {
-        XCTAssertEqual(ModelNames.ASR.melspectrogramFile, "Melspectrogram_v2.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.encoderFile, "ParakeetEncoder_v2.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.melspectrogramFile, "Melspectrogram_15s.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.encoderFile, "ParakeetEncoder_15s.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "ParakeetDecoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "RNNTJoint.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_vocab.json")
+        XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
     }
 
     // MARK: - Configuration Tests
@@ -175,7 +175,7 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Helper Method Tests
 
     func testRepoPathCalculation() {
-        let modelsDir = URL(fileURLWithPath: "/test/Models/parakeet-tdt-0.6b-v2-coreml")
+        let modelsDir = URL(fileURLWithPath: "/test/Models/parakeet-tdt-0.6b-v3-coreml")
         let repoPath = modelsDir.deletingLastPathComponent()
             .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
 
