@@ -16,6 +16,10 @@ let package = Package(
             name: "fluidaudio",
             targets: ["FluidAudioCLI"]
         ),
+        .executable(
+            name: "voice-processing-test",
+            targets: ["VoiceProcessingTestApp"]
+        ),
     ],
     dependencies: [],
     targets: [
@@ -30,6 +34,11 @@ let package = Package(
             dependencies: ["FluidAudio"],
             path: "Sources/FluidAudioCLI",
             exclude: ["README.md"]
+        ),
+        .executableTarget(
+            name: "VoiceProcessingTestApp",
+            dependencies: ["FluidAudio"],
+            path: "Sources/VoiceProcessingTestApp"
         ),
         .testTarget(
             name: "FluidAudioTests",
