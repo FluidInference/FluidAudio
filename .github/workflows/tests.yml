@@ -43,28 +43,45 @@ jobs:
         run: |
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           
-          # Install iOS SDK if not present
-          if [ ! -d "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform" ]; then
-            echo "Installing iOS SDK..."
-            xcodebuild -downloadPlatform iOS
-          fi
+          # Install iOS Simulator runtime
+          echo "Installing iOS Simulator runtime..."
+          sudo xcodebuild -runFirstLaunch
           
-          # Install iOS Simulator SDK if not present  
-          if [ ! -d "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform" ]; then
-            echo "Installing iOS Simulator SDK..."
-            xcodebuild -downloadPlatform iOS-simulator
+          # Download and install iOS runtime if needed
+          LATEST_IOS_VERSION=$(xcodebuild -showsdks | grep "iOS " | tail -1 | sed 's/.*iOS \([0-9.]*\).*/\1/')
+          echo "Latest iOS version: $LATEST_IOS_VERSION"
+          
+          if [ ! -z "$LATEST_IOS_VERSION" ]; then
+            echo "Downloading iOS $LATEST_IOS_VERSION runtime..."
+            sudo xcodebuild -downloadPlatform iOS || echo "Platform download failed, continuing..."
+            
+            # Wait for runtime to be available
+            echo "Waiting for iOS runtime to be available..."
+            for i in {1..30}; do
+              if xcrun simctl list runtimes | grep -q "iOS.*$LATEST_IOS_VERSION"; then
+                echo "iOS runtime is now available"
+                break
+              fi
+              echo "Waiting... ($i/30)"
+              sleep 10
+            done
           fi
           
           # Verify SDKs are installed
-          xcodebuild -showsdks | grep -i ios || echo "iOS SDKs not found"
+          echo "Available SDKs:"
+          xcodebuild -showsdks | grep -i ios
           
-          # List available simulators
+          # List available runtimes and devices
+          echo "Available runtimes:"
+          xcrun simctl list runtimes
+          echo "Available devices:"
           xcrun simctl list devices available
           
-          # Create iPhone 15 simulator with latest iOS if available
-          LATEST_IOS=$(xcrun simctl list runtimes | grep "iOS" | tail -n 1 | awk '{print $NF}' | sed 's/[()]//g')
-          if [ ! -z "$LATEST_IOS" ]; then
-            xcrun simctl create "iPhone 15 Test" "iPhone 15" "$LATEST_IOS" 2>/dev/null || echo "Simulator creation failed"
+          # Create iPhone 15 simulator if runtime is available
+          LATEST_RUNTIME=$(xcrun simctl list runtimes | grep "iOS" | tail -1 | awk '{print $(NF-1)}' | tr -d '()')
+          if [ ! -z "$LATEST_RUNTIME" ]; then
+            echo "Creating simulator with runtime: $LATEST_RUNTIME"
+            xcrun simctl create "iPhone-15-Test" "iPhone 15" "$LATEST_RUNTIME" 2>/dev/null || echo "Simulator already exists or creation failed"
           fi
       
       - name: Build for iOS
@@ -72,9 +89,35 @@ jobs:
           echo "Building for iOS..."
           
           # Verify iOS SDK is available
+          echo "Available iOS SDKs:"
           xcodebuild -showsdks | grep -i ios
           
-          # Try multiple destination approaches
+          # List available simulators
+          echo "Available simulators:"
+          xcrun simctl list devices available | grep -i iphone || echo "No iPhone simulators found"
+          
+          # Get the first available iPhone simulator
+          SIMULATOR=$(xcrun simctl list devices available | grep -i "iphone" | head -1 | sed 's/^[[:space:]]*//' | sed 's/ (.*//')
+          
+          if [ ! -z "$SIMULATOR" ]; then
+            echo "Using simulator: $SIMULATOR"
+            
+            # Try building with specific simulator
+            echo "Attempting iOS build with simulator: $SIMULATOR"
+            if xcodebuild -scheme FluidAudio \
+              -sdk iphonesimulator \
+              -destination "platform=iOS Simulator,name=$SIMULATOR" \
+              -derivedDataPath .build/ios \
+              build CODE_SIGNING_ALLOWED=NO \
+              -allowProvisioningUpdates; then
+              echo "✅ iOS build succeeded with specific simulator"
+              exit 0
+            fi
+          fi
+          
+          # Fallback: Try multiple destination approaches
+          echo "Trying fallback approaches..."
+          
           echo "Attempting iOS build with generic destination..."
           if xcodebuild -scheme FluidAudio \
             -sdk iphonesimulator \
@@ -93,7 +136,7 @@ jobs:
               -allowProvisioningUpdates; then
               echo "✅ 'Any iOS Simulator' build succeeded"
             else
-              echo "❌ Both generic approaches failed"
+              echo "❌ All approaches failed"
               exit 1
             fi
           fi

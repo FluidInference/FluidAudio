@@ -15,7 +15,7 @@ For custom use cases, feedback, more model support, and other platform requests,
 
 ## Features
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT-0.6b model with Token Duration Transducer support for streaming transcription
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) with Token Duration Transducer; supports 25 European languages
 - **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -94,9 +94,11 @@ Our goal is to offer a similar API to what Apple will introudce in OS26: https:/
 ## Automatic Speech Recognition (ASR)
 
 - **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
+- **Languages**: All European languages (25)
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~110x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
 - **Streaming Support**: Coming soon - batch processing is recommended for production use
+- **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
 ### CLI Transcription
 
