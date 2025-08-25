@@ -376,6 +376,104 @@ final class AudioConverterTests: XCTestCase {
         XCTAssertTrue(error3.errorDescription!.contains("conversion failed"))
     }
 
+    // MARK: - Voice Processing Compatibility Tests
+
+    func testVoiceProcessingFormatConversion() async throws {
+        // Test the specific format change when voice processing is enabled:
+        // 48kHz 1-channel becomes 48kHz 3-channel (more realistic scenario)
+        let buffer = try createAudioBuffer(
+            sampleRate: 48000,  // Voice processing typically uses 48kHz
+            channels: 2,  // Use stereo to simulate multi-channel voice processing
+            duration: 1.0
+        )
+
+        let result = try await audioConverter.convertToAsrFormat(buffer)
+
+        // Should be converted to 16kHz mono regardless of input format
+        let expectedSampleCount = Int(16000 * 1.0)  // 1 second at 16kHz
+        XCTAssertEqual(result.count, expectedSampleCount, "Should downsample 48kHz multi-channel to 16kHz mono")
+        XCTAssertFalse(result.isEmpty, "Result should not be empty")
+
+        // Verify values are reasonable (sine wave should be averaged across channels)
+        for sample in result {
+            XCTAssertGreaterThanOrEqual(sample, -1.0, "Sample should be within valid range")
+            XCTAssertLessThanOrEqual(sample, 1.0, "Sample should be within valid range")
+        }
+    }
+
+    func testVoiceProcessing48kHzToMono() async throws {
+        // Test common voice processing scenario: 48kHz changes to multi-channel
+        let buffer = try createAudioBuffer(
+            sampleRate: 48000,
+            channels: 2,  // Use stereo instead of 3-channel
+            duration: 0.5
+        )
+
+        let result = try await audioConverter.convertToAsrFormat(buffer)
+
+        let expectedSampleCount = Int(16000 * 0.5)  // 0.5 seconds at 16kHz
+        XCTAssertEqual(result.count, expectedSampleCount, "Should convert 48kHz 3-channel correctly")
+    }
+
+    func testHighChannelCountConversion() async throws {
+        // Test extreme case with many channels (some voice processing can create up to 9 channels)
+        let audioFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48000,
+            channels: 8,  // High channel count
+            interleaved: false
+        )!
+
+        let frameCount: AVAudioFrameCount = 1000
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount) else {
+            XCTFail("Failed to create high-channel buffer")
+            return
+        }
+        buffer.frameLength = frameCount
+
+        // Fill each channel with different values to test averaging
+        if let channelData = buffer.floatChannelData {
+            for channel in 0..<8 {
+                for i in 0..<Int(frameCount) {
+                    channelData[channel][i] = Float(channel + 1) * 0.1  // Values: 0.1, 0.2, ..., 0.8
+                }
+            }
+        }
+
+        let result = try await audioConverter.convertToAsrFormat(buffer)
+
+        XCTAssertFalse(result.isEmpty, "Should handle high channel count")
+
+        // The expected sample count after downsampling from 48kHz to 16kHz
+        let expectedSampleCount = Int(Double(frameCount) * (16000.0 / 48000.0))
+        XCTAssertEqual(result.count, expectedSampleCount, "Should downsample correctly")
+
+        // Verify channel averaging worked (average of 0.1 to 0.8 should be 0.45)
+        let tolerance: Float = 0.1
+        for sample in result {
+            XCTAssertGreaterThanOrEqual(sample, 0.45 - tolerance, "Sample should reflect channel averaging")
+            XCTAssertLessThanOrEqual(sample, 0.45 + tolerance, "Sample should reflect channel averaging")
+        }
+    }
+
+    func testVoiceProcessingPerformance() async throws {
+        // Test performance with voice processing format (48kHz stereo)
+        let buffer = try createAudioBuffer(
+            sampleRate: 48000,  // Use more realistic sample rate
+            channels: 2,  // Use stereo instead of 3-channel
+            duration: 2.0
+        )
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let timeElapsed = CFAbsoluteTimeGetCurrent() - startTime
+
+        XCTAssertFalse(result.isEmpty, "Conversion should succeed")
+        XCTAssertLessThan(timeElapsed, 1.0, "Voice processing format conversion should be performant")
+
+        print("Voice processing format (48kHz stereo) conversion time: \(timeElapsed) seconds for 2-second audio")
+    }
+
     // MARK: - Memory Tests
 
     func testLargeBufferConversion() async throws {
