@@ -400,7 +400,7 @@ public class FLEURSBenchmark {
         var highWERCases:
             [(
                 sampleId: String, reference: String, hypothesis: String, normalizedRef: String, normalizedHyp: String,
-                wer: Double
+                wer: Double, duration: Double, audioPath: String
             )] = []
 
         for (index, sample) in samples.enumerated() {
@@ -466,7 +466,9 @@ public class FLEURSBenchmark {
                                 hypothesis: result.text,
                                 normalizedRef: normalizedRef,
                                 normalizedHyp: normalizedHyp,
-                                wer: metrics.wer
+                                wer: metrics.wer,
+                                duration: audioDuration,
+                                audioPath: sample.audioPath
                             ))
                     }
                 }
@@ -495,14 +497,32 @@ public class FLEURSBenchmark {
         // Print high WER cases for analysis
         if !highWERCases.isEmpty {
             print("\n🔍 High WER Cases (>8%) for \(supportedLanguages[language] ?? language):")
-            print("=" * 60)
+            print("=" * 80)
             for sample in highWERCases.sorted(by: { $0.wer > $1.wer }) {
-                print("\nSample ID: \(sample.sampleId)")
-                print("WER: \(String(format: "%.1f", sample.wer * 100))%")
-                print("Reference:    \(sample.reference)")
-                print("Hypothesis:   \(sample.hypothesis)")
-                print("Norm Ref:     \(sample.normalizedRef)")
-                print("Norm Hyp:     \(sample.normalizedHyp)")
+                let werPercent = sample.wer * 100
+                print(
+                    "\nFile: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
+                )
+                print("Path: \(sample.audioPath)")
+                print(String(repeating: "-", count: 60))
+
+                // Normalize the texts for comparison
+                let normalizedReference = sample.normalizedRef
+                let normalizedHypothesis = sample.normalizedHyp
+
+                let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
+                    !$0.isEmpty
+                }
+                let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter {
+                    !$0.isEmpty
+                }
+
+                // Generate inline diff
+                let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
+
+                print("\nNormalized Reference:\t\(referenceDiff)")
+                print("Normalized Hypothesis:\t\(hypothesisDiff)")
+                print("Original Hypothesis:\t\(sample.hypothesis)")
                 print(String(repeating: "-", count: 60))
             }
         }
@@ -564,6 +584,116 @@ public class FLEURSBenchmark {
         }
 
         return dp[m][n]
+    }
+
+    /// Generate inline diff with full lines and highlighted differences
+    private func generateInlineDiff(reference: [String], hypothesis: [String]) -> (String, String) {
+        let m = reference.count
+        let n = hypothesis.count
+
+        // Handle empty hypothesis or reference
+        if n == 0 {
+            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+            let redColor = supportsColor ? "\u{001B}[31m" : "["
+            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+            let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
+            let hypString = ""
+            return (refString, hypString)
+        }
+        if m == 0 {
+            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+            let greenColor = supportsColor ? "\u{001B}[32m" : "["
+            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+            let refString = ""
+            let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
+            return (refString, hypString)
+        }
+
+        // Create DP table for edit distance with backtracking
+        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+
+        // Initialize base cases
+        for i in 0...m { dp[i][0] = i }
+        for j in 0...n { dp[0][j] = j }
+
+        // Fill DP table
+        for i in 1...m {
+            for j in 1...n {
+                if reference[i - 1] == hypothesis[j - 1] {
+                    dp[i][j] = dp[i - 1][j - 1]
+                } else {
+                    dp[i][j] =
+                        1
+                        + min(
+                            dp[i - 1][j],  // deletion
+                            dp[i][j - 1],  // insertion
+                            dp[i - 1][j - 1]  // substitution
+                        )
+                }
+            }
+        }
+
+        // Check if terminal supports colors
+        let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+        let redColor = supportsColor ? "\u{001B}[31m" : "["
+        let greenColor = supportsColor ? "\u{001B}[32m" : "["
+        let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+
+        // Backtrack to identify differences
+        var i = m
+        var j = n
+        var refDiffWords: [(String, Bool)] = []  // (word, isDifferent)
+        var hypDiffWords: [(String, Bool)] = []  // (word, isDifferent)
+
+        while i > 0 || j > 0 {
+            if i > 0 && j > 0 && reference[i - 1] == hypothesis[j - 1] {
+                // Match
+                refDiffWords.insert((reference[i - 1], false), at: 0)
+                hypDiffWords.insert((hypothesis[j - 1], false), at: 0)
+                i -= 1
+                j -= 1
+            } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
+                // Substitution
+                refDiffWords.insert((reference[i - 1], true), at: 0)
+                hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
+                i -= 1
+                j -= 1
+            } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
+                // Deletion (word in reference but not in hypothesis)
+                refDiffWords.insert((reference[i - 1], true), at: 0)
+                i -= 1
+            } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
+                // Insertion (word in hypothesis but not in reference)
+                hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
+                j -= 1
+            } else {
+                break
+            }
+        }
+
+        // Build the formatted strings
+        var refString = ""
+        var hypString = ""
+
+        for (word, isDifferent) in refDiffWords {
+            if !refString.isEmpty { refString += " " }
+            if isDifferent {
+                refString += "\(redColor)\(word)\(resetColor)"
+            } else {
+                refString += word
+            }
+        }
+
+        for (word, isDifferent) in hypDiffWords {
+            if !hypString.isEmpty { hypString += " " }
+            if isDifferent {
+                hypString += "\(greenColor)\(word)\(resetColor)"
+            } else {
+                hypString += word
+            }
+        }
+
+        return (refString, hypString)
     }
 
     /// Save results to JSON
