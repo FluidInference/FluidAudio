@@ -39,21 +39,26 @@ jobs:
       - name: Clean build artifacts
         run: rm -rf .build .swiftpm
       
-      - name: Install iOS Simulator
+      - name: Setup iOS Simulator
         run: |
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           if [ ! -d "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform" ]; then
-            xcodebuild -downloadPlatform iOS
+            xcodebuild -downloadPlatform iOS || true
           fi
+          # List available simulators
+          xcrun simctl list devices
+          # Create iPhone 15 simulator if it doesn't exist
+          xcrun simctl create "iPhone 15" "iPhone 15" iOS17.0 2>/dev/null || true
       
       - name: Build for iOS
         run: |
           echo "Building for iOS..."
+          # Use generic iOS simulator destination that should work
           xcodebuild -scheme FluidAudio \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath .build/ios \
-            build
+            build CODE_SIGNING_ALLOWED=NO
 
   build-and-test-macos:
     name: Build and Test Swift Package (macOS)

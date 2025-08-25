@@ -149,7 +149,7 @@ public final class AsrManager {
             if let melLength = melspectrogramOutput.featureValue(for: "melspectrogram_length") {
                 let features = [
                     "audio_signal": provider.featureValue(for: "audio_signal")!,
-                    "length": melLength,  // Fixed: encoder expects "length", not "melspectrogram_length"
+                    "length": melLength,
                 ]
                 return ZeroCopyFeatureProvider(features: features)
             }
@@ -165,7 +165,7 @@ public final class AsrManager {
 
         return try createFeatureProvider(features: [
             ("audio_signal", melspectrogram),
-            ("length", melspectrogramLength),  // Fixed: encoder expects "length", not "melspectrogram_length"
+            ("length", melspectrogramLength),
         ])
     }
 
@@ -260,23 +260,6 @@ public final class AsrManager {
         microphoneDecoderState = TdtDecoderState(fallback: true)
         systemDecoderState = TdtDecoderState(fallback: true)
         logger.info("AsrManager resources cleaned up")
-    }
-
-    /// Deprecated: use `tdtDecodeWithTimings` and ignore timestamps if not needed
-    @available(*, deprecated, message: "Use tdtDecodeWithTimings to also retrieve emission timestamps")
-    internal func tdtDecode(
-        encoderOutput: MLMultiArray,
-        encoderSequenceLength: Int,
-        originalAudioSamples: [Float],
-        decoderState: inout TdtDecoderState
-    ) async throws -> [Int] {
-        let (tokens, _) = try await tdtDecodeWithTimings(
-            encoderOutput: encoderOutput,
-            encoderSequenceLength: encoderSequenceLength,
-            originalAudioSamples: originalAudioSamples,
-            decoderState: &decoderState
-        )
-        return tokens
     }
 
     internal func tdtDecodeWithTimings(
