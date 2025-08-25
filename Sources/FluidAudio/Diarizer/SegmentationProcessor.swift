@@ -18,14 +18,14 @@ public struct SegmentationProcessor {
     /// to detect speech activity and separate overlapping speakers.
     ///
     /// - Parameters:
-    ///   - audioChunk: 15-second audio chunk (16kHz)
+    ///   - audioChunk: 10-second audio chunk (16kHz)
     ///   - segmentationModel: Pre-loaded CoreML segmentation model
-    ///   - chunkSize: Expected audio size (default 240k samples = 15s)
+    ///   - chunkSize: Expected audio size (default 160k samples = 10s)
     /// - Returns: Tuple of (binarized segments, raw feature provider)
     func getSegments(
         audioChunk: ArraySlice<Float>,
         segmentationModel: MLModel,
-        chunkSize: Int = 240_000
+        chunkSize: Int = 160_000
     ) throws -> (segments: [[[Float]]], featureProvider: MLFeatureProvider) {
 
         // Create ANE-aligned audio array
