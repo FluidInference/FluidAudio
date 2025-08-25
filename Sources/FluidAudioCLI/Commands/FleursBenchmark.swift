@@ -425,14 +425,10 @@ public class FLEURSBenchmark {
                     // Provide more detailed error information for audio loading failures
                     if error.localizedDescription.contains("1954115647") {
                         print("  ⚠️ CoreAudio error for \(sample.sampleId): Unsupported audio format or corrupted file")
-                        print("    Suggestion: Check if file format is supported or try converting to WAV/MP3")
-                    } else if error.localizedDescription.contains("ffmpeg") {
-                        print("  ⚠️ Audio conversion failed for \(sample.sampleId): \(error.localizedDescription)")
-                        print(
-                            "    Suggestion: Install ffmpeg or provide audio files in supported formats (WAV, MP3, M4A)"
-                        )
+                        print("    File will be skipped. Supported formats: WAV, MP3, M4A, AIFF")
                     } else {
                         print("  ⚠️ Audio loading failed for \(sample.sampleId): \(error.localizedDescription)")
+                        print("    File will be skipped.")
                     }
 
                     // Continue to next sample instead of failing the entire benchmark
@@ -441,6 +437,9 @@ public class FLEURSBenchmark {
                 }
 
                 let audioDuration = Double(audioSamples.count) / 16000.0
+
+                // Reset decoder state for each new file to avoid contamination
+                try await asrManager.resetDecoderState(for: .microphone)
 
                 // Transcribe
                 let result = try await asrManager.transcribe(audioSamples)
