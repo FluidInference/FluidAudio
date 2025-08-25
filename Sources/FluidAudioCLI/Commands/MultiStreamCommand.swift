@@ -124,13 +124,13 @@ enum MultiStreamCommand {
 
             // Listen for updates from both streams (only if debug enabled)
             let micTask = Task {
-                for await update in micStream.transcriptionUpdates {
+                for await update in await micStream.transcriptionUpdates {
                     print("[MIC] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                 }
             }
 
             let systemTask = Task {
-                for await update in systemStream.transcriptionUpdates {
+                for await update in await systemStream.transcriptionUpdates {
                     print("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                 }
             }
