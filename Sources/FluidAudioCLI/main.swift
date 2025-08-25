@@ -75,7 +75,7 @@ Task {
         }
     case "transcribe":
         if #available(macOS 13.0, *) {
-            await StreamingTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+            await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         } else {
             print("Transcribe requires macOS 13.0 or later")
             exit(1)

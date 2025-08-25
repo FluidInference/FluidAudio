@@ -62,18 +62,7 @@ internal struct TdtDecoder {
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         reusableTargetLengthArray[0] = NSNumber(value: 1)
 
-        // --- DEBUG: chunk start context ---
         let chunkTag = String(UUID().uuidString.prefix(6))
-        print(
-            "[\(chunkTag)] chunk start len=\(encoderSequenceLength), lastToken=\(String(describing: decoderState.lastToken)), timeJump=\(String(describing: decoderState.timeJump)), timeIndices=\(timeIndices) timestamp=\(Date())"
-        )
-        print(
-            "[\(chunkTag)] TOTAL encoder frames available: \(encoderFrames.count), processing: \(encoderSequenceLength) (pre-sliced)"
-        )
-
-        print(
-            "[\(chunkTag)] state.h L2=\(decoderState.hiddenState.l2Normf()), state.c L2=\(decoderState.cellState.l2Normf())"
-        )
 
         // Ensure a clean predictor state for a NEW utterance (same behavior as decode)
         if decoderState.lastToken == nil && decoderState.predictorOutput == nil {
@@ -99,12 +88,6 @@ internal struct TdtDecoder {
                 from: primed.output, key: "decoder_output", errorMessage: "Invalid decoder output")
             decoderState.predictorOutput = proj
             hypothesis.decState = primed.newState
-            print(
-                "[\(chunkTag)] SOS primed (blank-as-pad=\(sos)); decoder_output shape=\(proj.shapeString) L2=\(proj.l2Normf())"
-            )
-            print(
-                "[\(chunkTag)] primed.h L2=\(hypothesis.decState?.hiddenState.l2Normf() ?? -1), primed.c L2=\(hypothesis.decState?.cellState.l2Normf() ?? -1)"
-            )
         }
 
         var lastEmissionTimestamp = -1
@@ -181,7 +164,6 @@ internal struct TdtDecoder {
             }
 
             if activeMask && label != blankId {
-                // print("[\(chunkTag)] Emitting token \(label) at frame \(timeIndicesCurrentLabels)")
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
@@ -215,14 +197,6 @@ internal struct TdtDecoder {
             }
         }
 
-        print(
-            "[\(chunkTag)] chunk end: final t=\(timeIndices) len=\(encoderSequenceLength) overrun=\(max(0, timeIndices - encoderSequenceLength)) emitted=\(hypothesis.ySequence.count) lastToken=\(String(describing: hypothesis.lastToken))"
-        )
-        print("[\(chunkTag)] Final hypothesis tokens: \(hypothesis.ySequence)")
-        print(
-            "[\(chunkTag)] Decoder state preserved: lastToken=\(String(describing: decoderState.lastToken)), predictorOutput=\(decoderState.predictorOutput != nil)"
-        )
-
         if let finalState = hypothesis.decState {
             decoderState = finalState
         }
@@ -233,17 +207,10 @@ internal struct TdtDecoder {
             let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
             if punctuationTokens.contains(lastToken) {
                 decoderState.predictorOutput = nil
-                print("[\(chunkTag)] Cleared predictor cache for punctuation token \(lastToken)")
             }
         }
 
-        // Calculate and store time jump for streaming continuity
-        // timeJump = current_position - encoder_length
         decoderState.timeJump = timeIndices - encoderSequenceLength
-
-        print(
-            "[\(chunkTag)] Final timeJump calculated: \(decoderState.timeJump!) (timeIndices=\(timeIndices), encoderLen=\(encoderSequenceLength))"
-        )
 
         // No filtering at decoder level - let post-processing handle deduplication
         return (hypothesis.ySequence, hypothesis.timestamps)

@@ -64,7 +64,6 @@ extension AsrManager {
         return try await processor.process(using: self, decoderState: &decoderState, startTime: startTime)
     }
 
-    /// Execute ML inference and return tokens with emission timestamps (encoder frame indices)
     internal func executeMLInferenceWithTimings(
         _ paddedAudio: [Float],
         originalLength: Int? = nil,
@@ -188,9 +187,16 @@ extension AsrManager {
             )
         }
 
+        // Calculate confidence based on audio duration and token density
+        let confidence = calculateConfidence(
+            duration: duration,
+            tokenCount: tokenIds.count,
+            isEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+
         return ASRResult(
             text: text,
-            confidence: 1.0,
+            confidence: confidence,
             duration: duration,
             processingTime: processingTime,
             tokenTimings: resultTimings
@@ -200,6 +206,34 @@ extension AsrManager {
     internal func padAudioIfNeeded(_ audioSamples: [Float], targetLength: Int) -> [Float] {
         guard audioSamples.count < targetLength else { return audioSamples }
         return audioSamples + Array(repeating: 0, count: targetLength - audioSamples.count)
+    }
+
+    /// Calculate confidence score based on transcription characteristics
+    /// Returns a value between 0.0 and 1.0
+    private func calculateConfidence(duration: Double, tokenCount: Int, isEmpty: Bool) -> Float {
+        // Empty transcription gets low confidence
+        if isEmpty {
+            return 0.1
+        }
+
+        // Base confidence starts at 0.3
+        var confidence: Float = 0.3
+
+        // Duration factor: longer audio generally means more confident transcription
+        // Confidence increases with duration up to ~10 seconds, then plateaus
+        let durationFactor = min(duration / 10.0, 1.0)
+        confidence += Float(durationFactor) * 0.4  // Add up to 0.4
+
+        // Token density factor: more tokens per second indicates richer content
+        if duration > 0 {
+            let tokensPerSecond = Double(tokenCount) / duration
+            // Typical speech is 2-4 tokens per second
+            let densityFactor = min(tokensPerSecond / 3.0, 1.0)
+            confidence += Float(densityFactor) * 0.3  // Add up to 0.3
+        }
+
+        // Clamp between 0.1 and 1.0
+        return max(0.1, min(1.0, confidence))
     }
 
     /// Convert frame timestamps to TokenTiming objects
@@ -221,12 +255,16 @@ extension AsrManager {
             // Get token text from vocabulary if available
             let tokenText = vocabulary[tokenId] ?? "token_\(tokenId)"
 
+            // Token confidence based on duration (longer tokens = higher confidence)
+            let tokenDuration = endTime - startTime
+            let tokenConfidence = Float(min(max(tokenDuration / 0.5, 0.5), 1.0))  // 0.5 to 1.0 based on duration
+
             let timing = TokenTiming(
                 token: tokenText,
                 tokenId: tokenId,
                 startTime: startTime,
                 endTime: endTime,
-                confidence: 1.0  // Default confidence
+                confidence: tokenConfidence
             )
 
             timings.append(timing)

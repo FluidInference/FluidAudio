@@ -346,10 +346,15 @@ public actor StreamingAsrManager {
             // Apply confidence-based confirmation logic (uses configured threshold)
             await updateTranscriptionState(with: interim)
 
-            // Emit update
+            // Emit update based on progressive confidence model
+            let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
+            let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
+            let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
+            let shouldConfirm = isHighConfidence && hasMinimumContext
+
             let update = StreamingTranscriptionUpdate(
                 text: interim.text,
-                isConfirmed: Double(interim.confidence) >= config.confirmationThreshold,
+                isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
                 timestamp: Date()
             )
@@ -365,11 +370,19 @@ public actor StreamingAsrManager {
         }
     }
 
-    /// Update transcription state based on confidence
+    /// Update transcription state based on confidence and context duration
     private func updateTranscriptionState(with result: ASRResult) async {
+        let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
+        let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
         let isHighConfidence = Double(result.confidence) >= config.confirmationThreshold
 
-        if isHighConfidence {
+        // Progressive confidence model:
+        // 1. Always show text immediately as volatile for responsiveness
+        // 2. Only confirm text when we have both high confidence AND sufficient context
+        let shouldConfirm = isHighConfidence && hasMinimumContext
+
+        if shouldConfirm {
+            // Move volatile text to confirmed and set new text as volatile
             if !volatileTranscript.isEmpty {
                 var components: [String] = []
                 if !confirmedTranscript.isEmpty {
@@ -379,11 +392,16 @@ public actor StreamingAsrManager {
                 confirmedTranscript = components.joined(separator: " ")
             }
             volatileTranscript = result.text
-            logger.debug("High confidence (\(result.confidence)): promoted to confirmed; new volatile '\(result.text)'")
+            logger.debug(
+                "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(result.text)'"
+            )
         } else {
-            // Only update volatile text
+            // Only update volatile text (hypothesis)
             volatileTranscript = result.text
-            logger.debug("Low confidence (\(result.confidence)): updated volatile '\(result.text)'")
+            let reason =
+                !hasMinimumContext
+                ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
+            logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
         }
     }
 
@@ -451,12 +469,16 @@ public actor StreamingAsrManager {
 /// Configuration for StreamingAsrManager
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAsrConfig: Sendable {
-    /// New chunk size per update (seconds). Typical streaming: 2.0s
+    /// Main chunk size for stable transcription (seconds). Should be 10-11s for best quality
     public let chunkSeconds: TimeInterval
+    /// Quick hypothesis chunk size for immediate feedback (seconds). Typical: 1.0s
+    public let hypothesisChunkSeconds: TimeInterval
     /// Left context appended to each window (seconds). Typical: 10.0s
     public let leftContextSeconds: TimeInterval
     /// Right context lookahead (seconds). Typical: 2.0s (adds latency)
     public let rightContextSeconds: TimeInterval
+    /// Minimum audio duration before confirming text (seconds). Should be ~10s
+    public let minContextForConfirmation: TimeInterval
 
     /// Enable debug logging
     public let enableDebug: Bool
@@ -466,32 +488,41 @@ public struct StreamingAsrConfig: Sendable {
     /// Default configuration aligned with previous API expectations
     public static let `default` = StreamingAsrConfig(
         chunkSeconds: 15.0,
+        hypothesisChunkSeconds: 2.0,
         leftContextSeconds: 10.0,
         rightContextSeconds: 2.0,
+        minContextForConfirmation: 10.0,
         enableDebug: false,
         confirmationThreshold: 0.85
     )
 
-    /// Optimized streaming configuration: Match ChunkProcessor settings (11-2-2)
-    /// Uses same chunking as batch processing for consistency
+    /// Optimized streaming configuration: Dual-track processing for best experience
+    /// Uses ChunkProcessor's proven 11-2-2 approach for stable transcription
+    /// Plus quick hypothesis updates for immediate feedback
     public static let streaming = StreamingAsrConfig(
-        chunkSeconds: 5.0,  // Match ChunkProcessor centerSeconds
-        leftContextSeconds: 8.0,
-        rightContextSeconds: 2.0,
+        chunkSeconds: 11.0,  // Match ChunkProcessor for stable transcription
+        hypothesisChunkSeconds: 1.0,  // Quick hypothesis updates
+        leftContextSeconds: 2.0,  // Match ChunkProcessor left context
+        rightContextSeconds: 2.0,  // Match ChunkProcessor right context
+        minContextForConfirmation: 10.0,  // Need sufficient context before confirming
         enableDebug: false,
-        confirmationThreshold: 0.85
+        confirmationThreshold: 0.80  // Higher threshold for more stable confirmations
     )
 
     public init(
         chunkSeconds: TimeInterval = 10.0,
+        hypothesisChunkSeconds: TimeInterval = 1.0,
         leftContextSeconds: TimeInterval = 2.0,
         rightContextSeconds: TimeInterval = 2.0,
+        minContextForConfirmation: TimeInterval = 10.0,
         enableDebug: Bool = false,
         confirmationThreshold: Double = 0.85
     ) {
         self.chunkSeconds = chunkSeconds
+        self.hypothesisChunkSeconds = hypothesisChunkSeconds
         self.leftContextSeconds = leftContextSeconds
         self.rightContextSeconds = rightContextSeconds
+        self.minContextForConfirmation = minContextForConfirmation
         self.enableDebug = enableDebug
         self.confirmationThreshold = confirmationThreshold
     }
@@ -504,8 +535,10 @@ public struct StreamingAsrConfig: Sendable {
     ) {
         self.init(
             chunkSeconds: chunkDuration,
+            hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
             leftContextSeconds: 10.0,
             rightContextSeconds: 2.0,
+            minContextForConfirmation: 10.0,
             enableDebug: enableDebug,
             confirmationThreshold: confirmationThreshold
         )
@@ -519,8 +552,10 @@ public struct StreamingAsrConfig: Sendable {
     ) -> StreamingAsrConfig {
         StreamingAsrConfig(
             chunkSeconds: chunkDuration,
+            hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
             leftContextSeconds: 10.0,
             rightContextSeconds: 2.0,
+            minContextForConfirmation: 10.0,
             enableDebug: enableDebug,
             confirmationThreshold: confirmationThreshold
         )
@@ -537,8 +572,10 @@ public struct StreamingAsrConfig: Sendable {
 
     // Sample counts at 16 kHz
     var chunkSamples: Int { Int(chunkSeconds * 16000) }
+    var hypothesisChunkSamples: Int { Int(hypothesisChunkSeconds * 16000) }
     var leftContextSamples: Int { Int(leftContextSeconds * 16000) }
     var rightContextSamples: Int { Int(rightContextSeconds * 16000) }
+    var minContextForConfirmationSamples: Int { Int(minContextForConfirmation * 16000) }
 
     // Backward-compat convenience for existing call-sites/tests
     var chunkDuration: TimeInterval { chunkSeconds }
