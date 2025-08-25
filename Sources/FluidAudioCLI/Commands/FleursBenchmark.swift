@@ -143,7 +143,8 @@ public class FLEURSBenchmark {
 
         // Use the existing HuggingFace download infrastructure
         let datasetRepo = "FluidInference/fleurs"
-        let apiBaseURL = "https://huggingface.co/api/datasets/\(datasetRepo)/tree/main/\(language)"
+        // Use the official API with path query to list files in subfolder
+        let apiBaseURL = "https://huggingface.co/api/datasets/\(datasetRepo)/tree/main?path=\(language)"
 
         do {
             // List files in the language directory using HuggingFace API
