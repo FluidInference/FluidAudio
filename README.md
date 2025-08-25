@@ -94,7 +94,7 @@ Our goal is to offer a similar API to what Apple will introudce in OS26: https:/
 ## Automatic Speech Recognition (ASR)
 
 - **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
-- **Languages**: All European languages (25)
+- **Languages**: 25 European languages — see the [model card](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~110x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
 - **Streaming Support**: Coming soon - batch processing is recommended for production use
