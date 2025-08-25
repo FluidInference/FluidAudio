@@ -15,11 +15,11 @@ public class FLEURSBenchmark {
     let supportedLanguages: [String: String] = [
         // Best performing languages (WER < 5%) - Using FLEURS language codes
         "en_us": "English (US)",  // 4.85% WER
-        "es_419": "Spanish (Latin America)",  // 3.45% WER - Fixed from es_es
+        "es_es": "Spanish (Spain)",  // 3.45% WER (FLEURS code)
         "it_it": "Italian (Italy)",  // 3.00% WER
         "fr_fr": "French (France)",  // 5.15% WER
-        "pt_br": "Portuguese (Brazil)",  // 4.76% WER - Fixed from pt_pt
         "de_de": "German (Germany)",  // 5.04% WER
+        "pt_pt": "Portuguese (Portugal)",  // 4.76% WER (FLEURS code)
 
         // Good performance (WER 5-10%)
         "ru_ru": "Russian (Russia)",  // 5.51% WER
@@ -138,11 +138,11 @@ public class FLEURSBenchmark {
             }
         }
 
-        // Download from Hugging Face dataset: alexwengg/fleurs-parakeet-test
-        print("    📥 Downloading from HuggingFace: alexwengg/fleurs-parakeet-test/\(language)...")
+        // Download from Hugging Face dataset: FluidInference/fleurs
+        print("    📥 Downloading from HuggingFace: FluidInference/fleurs/\(language)...")
 
         // Use the existing HuggingFace download infrastructure
-        let datasetRepo = "alexwengg/fleurs-parakeet-test"
+        let datasetRepo = "FluidInference/fleurs"
         let apiBaseURL = "https://huggingface.co/api/datasets/\(datasetRepo)/tree/main/\(language)"
 
         do {
@@ -679,6 +679,14 @@ extension FLEURSBenchmark {
     }
 
     private static func printUsage() {
+        // Build available languages list dynamically to avoid drift
+        let tmp = FLEURSBenchmark(
+            config: FLEURSConfig(languages: [], samplesPerLanguage: 0, outputFile: "", cacheDir: "", debugMode: false)
+        )
+        let langs = Array(tmp.supportedLanguages.keys).sorted()
+        let langsJoined = langs.joined(separator: ", ")
+        let count = langs.count
+
         print(
             """
 
@@ -687,12 +695,8 @@ extension FLEURSBenchmark {
 
             Options:
                 --languages <list>        Comma-separated list of language codes
-                                         (default: all 26 supported languages)
-                                         Available: bg_bg, cs_cz, da_dk, de_de, el_gr, en_us,
-                                                   es_es, et_ee, fi_fi, fr_fr, hr_hr, hu_hu,
-                                                   it_it, lt_lt, lv_lv, mt_mt, nl_nl, pl_pl,
-                                                   pt_pt, ro_ro, ru_ru, sk_sk, sl_si, sv_se,
-                                                   uk_ua
+                                         (default: all \(count) supported languages)
+                                         Available: \(langsJoined)
                 --samples <number|all>    Number of samples per language (default: all)
                 --output <file>          Output JSON file path
                 --cache-dir <path>       Directory for caching FLEURS data
@@ -700,7 +704,7 @@ extension FLEURSBenchmark {
                 --help, -h              Show this help message
 
             Examples:
-                # Test all 26 languages with all available samples (~350 per language)
+                # Test all \(count) languages with all available samples (~350 per language)
                 fluidaudio fleurs-benchmark
 
                 # Test specific languages only
@@ -716,7 +720,8 @@ extension FLEURSBenchmark {
                 The FLEURS dataset will be downloaded automatically if not present.
                 Audio files should be placed in the cache directory organized by language.
 
-            """)
+            """
+        )
     }
 }
 

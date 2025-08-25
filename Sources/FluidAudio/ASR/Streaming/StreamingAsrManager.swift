@@ -100,7 +100,7 @@ public actor StreamingAsrManager {
         recognizerTask = Task {
             logger.info("Recognition task started, waiting for audio...")
 
-            for await pcmBuffer in await self.inputSequence {
+            for await pcmBuffer in self.inputSequence {
                 do {
                     // Convert to 16kHz mono
                     let samples = try await audioConverter.convertToAsrFormat(pcmBuffer)

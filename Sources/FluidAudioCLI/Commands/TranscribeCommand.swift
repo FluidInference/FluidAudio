@@ -223,7 +223,7 @@ enum TranscribeCommand {
 
             // Listen for updates in real-time
             let updateTask = Task {
-                for await update in await streamingAsr.transcriptionUpdates {
+                for await update in streamingAsr.transcriptionUpdates {
                     // Debug: show transcription updates
                     let updateType = update.isConfirmed ? "CONFIRMED" : "VOLATILE"
                     print("[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")

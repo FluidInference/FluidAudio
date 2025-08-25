@@ -62,7 +62,7 @@ internal struct TdtDecoder {
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         reusableTargetLengthArray[0] = NSNumber(value: 1)
 
-        let chunkTag = String(UUID().uuidString.prefix(6))
+        
 
         // Ensure a clean predictor state for a NEW utterance (same behavior as decode)
         if decoderState.lastToken == nil && decoderState.predictorOutput == nil {
