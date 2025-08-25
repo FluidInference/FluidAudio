@@ -49,10 +49,6 @@ struct ChunkProcessor {
 
                 allTokens.append(contentsOf: deduped)
                 allTimestamps.append(contentsOf: adjustedTimestamps)
-
-                if enableDebug && removedCount > 0 {
-                    print("CHUNK \(segmentIndex): removed \(removedCount) duplicate tokens")
-                }
             } else {
                 allTokens.append(contentsOf: windowTokens)
                 allTimestamps.append(contentsOf: windowTimestamps)
@@ -96,19 +92,7 @@ struct ChunkProcessor {
             segmentIndex: segmentIndex,
             leftContextSeconds: leftContextSeconds
         )
-        if segmentIndex > 0 {
-            print(
-                "CHUNK \(segmentIndex): lastProcessedFrame=\(lastProcessedFrame), startFrameOffset=\(startFrameOffset)"
-            )
-        }
-
-        print(
-            "CHUNK \(segmentIndex): processing \(String(format: "%.2f", chunkAudioDuration))s audio, leftStart=\(leftStart), centerStart=\(centerStart), rightEnd=\(rightEnd)"
-        )
-        print(
-            "CHUNK \(segmentIndex): startFrameOffset=\(startFrameOffset), skipping \(startFrameOffset) encoder frames"
-        )
-
+    
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
@@ -126,10 +110,6 @@ struct ChunkProcessor {
         let filteredTokens = tokens
         let filteredTimestamps = timestamps
         let maxFrame = timestamps.max() ?? 0
-
-        print(
-            "CHUNK \(segmentIndex): audio_duration=\(String(format: "%.2f", chunkAudioDuration))s, startFrameOffset=\(startFrameOffset), taking all \(tokens.count) tokens"
-        )
 
         return (filteredTokens, filteredTimestamps, maxFrame)
     }
