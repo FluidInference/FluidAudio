@@ -281,7 +281,7 @@ final class SpeakerOperationsTests: XCTestCase {
 
     func testRemoveRawEmbedding() {
         let segmentId = UUID()
-        var rawEmbeddings = [
+        let rawEmbeddings = [
             RawEmbedding(segmentId: segmentId, embedding: createDistinctEmbedding(pattern: 2)),
             RawEmbedding(embedding: createDistinctEmbedding(pattern: 3)),
         ]

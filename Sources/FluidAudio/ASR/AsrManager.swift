@@ -32,11 +32,8 @@ public final class AsrManager {
     }
     #endif
 
-    private var microphoneDecoderState: DecoderState
-    private var systemDecoderState: DecoderState
-
-    let blankId = 1024
-    let sosId = 1024
+    internal var microphoneDecoderState: TdtDecoderState
+    internal var systemDecoderState: TdtDecoderState
 
     // Cached prediction options for reuse
     internal lazy var predictionOptions: MLPredictionOptions = {
@@ -51,23 +48,19 @@ public final class AsrManager {
 
         // Initialize decoder states with fallback
         do {
-            self.microphoneDecoderState = try DecoderState()
-            self.systemDecoderState = try DecoderState()
+            self.microphoneDecoderState = try TdtDecoderState()
+            self.systemDecoderState = try TdtDecoderState()
         } catch {
             logger.warning("Failed to create ANE-aligned decoder states, using standard allocation")
             // This should rarely happen, but if it does, we'll create them during first use
-            self.microphoneDecoderState = DecoderState(fallback: true)
-            self.systemDecoderState = DecoderState(fallback: true)
+            self.microphoneDecoderState = TdtDecoderState(fallback: true)
+            self.systemDecoderState = TdtDecoderState(fallback: true)
         }
-
-        logger.info("TDT enabled with durations: \(config.tdtConfig.durations)")
-
-        // Optimization models will be loaded during initialize()
 
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
-                ([1, 160000], .float32),
+                ([1, 240000], .float32),
                 ([1], .int32),
                 ([2, 1, 640], .float32),
             ])
@@ -176,12 +169,11 @@ public final class AsrManager {
         ])
     }
 
-    func prepareDecoderInput(
-        targetToken: Int,
+    private func prepareDecoderInput(
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
     ) throws -> MLFeatureProvider {
-        let targetArray = try createScalarArray(value: targetToken, shape: [1, 1])
+        let targetArray = try createScalarArray(value: 0, shape: [1, 1])
         let targetLengthArray = try createScalarArray(value: 1)
 
         return try createFeatureProvider(features: [
@@ -192,29 +184,27 @@ public final class AsrManager {
         ])
     }
 
-    internal func initializeDecoderState(decoderState: inout DecoderState) async throws {
+    internal func initializeDecoderState(decoderState: inout TdtDecoderState) async throws {
         guard let decoderModel = decoderModel else {
             throw ASRError.notInitialized
         }
 
-        var freshState = try DecoderState()
+        // Reset the existing decoder state to clear all cached values including predictorOutput
+        decoderState.reset()
 
         let initDecoderInput = try prepareDecoderInput(
-            targetToken: blankId,
-            hiddenState: freshState.hiddenState,
-            cellState: freshState.cellState
+            hiddenState: decoderState.hiddenState,
+            cellState: decoderState.cellState
         )
 
         let initDecoderOutput = try decoderModel.prediction(
             from: initDecoderInput, options: predictionOptions)
 
-        freshState.update(from: initDecoderOutput)
+        decoderState.update(from: initDecoderOutput)
 
         if config.enableDebug {
             logger.info("Decoder state initialized cleanly")
         }
-
-        decoderState = freshState
     }
 
     private func loadModel(
@@ -267,56 +257,28 @@ public final class AsrManager {
         decoderModel = nil
         jointModel = nil
         // Reset decoder states - use fallback initializer that won't throw
-        microphoneDecoderState = DecoderState(fallback: true)
-        systemDecoderState = DecoderState(fallback: true)
+        microphoneDecoderState = TdtDecoderState(fallback: true)
+        systemDecoderState = TdtDecoderState(fallback: true)
         logger.info("AsrManager resources cleaned up")
     }
 
-    /// Profile Neural Engine utilization and memory efficiency
-    public func profilePerformance() {
-        logger.info("=== ASR Pipeline Performance Profile ===")
-
-        // Log compute unit assignments
-        if asrModels != nil {
-            logger.info("Compute Unit Configuration:")
-            logger.info("  Mel-spectrogram: CPU+GPU (FFT operations)")
-            logger.info("  Encoder: CPU+ANE (Transformer layers)")
-            logger.info("  Decoder: CPU+ANE (LSTM layers)")
-            logger.info("  Joint: ANE only (Dense layers)")
-            logger.info("  Token Duration: ANE only (Classification)")
-        }
-
-        // Log memory optimizations
-        logger.info("Memory Optimizations:")
-        logger.info("  ANE-aligned buffers: Enabled (64-byte alignment)")
-        logger.info("  Zero-copy chaining: Enabled (persistent providers)")
-        logger.info("  FP16 inference: Enabled (Neural Engine)")
-        logger.info("  Memory pool reuse: Active")
-
-        // Log expected performance gains
-        logger.info("Expected Performance Gains:")
-        logger.info("  Compute unit optimization: 2-3x")
-        logger.info("  ANE memory alignment: 1.5-2x")
-        logger.info("  FP16 inference: 1.2-1.5x")
-        logger.info("  Combined improvement: 3.6-9x over baseline")
-    }
-
-    internal func tdtDecode(
+    internal func tdtDecodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
         originalAudioSamples: [Float],
-        decoderState: inout DecoderState
-    ) async throws -> [Int] {
-        // Note: Decoder state initialization is now handled by the caller
-        // Use resetDecoderState() to explicitly reset when needed
-
+        decoderState: inout TdtDecoderState,
+        startFrameOffset: Int = 0,
+        lastProcessedFrame: Int = 0
+    ) async throws -> (tokens: [Int], timestamps: [Int]) {
         let decoder = TdtDecoder(config: config)
-        return try await decoder.decode(
+        return try await decoder.decodeWithTimings(
             encoderOutput: encoderOutput,
             encoderSequenceLength: encoderSequenceLength,
             decoderModel: decoderModel!,
             jointModel: jointModel!,
-            decoderState: &decoderState
+            decoderState: &decoderState,
+            startFrameOffset: startFrameOffset,
+            lastProcessedFrame: lastProcessedFrame
         )
     }
 
