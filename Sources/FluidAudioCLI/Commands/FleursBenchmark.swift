@@ -68,6 +68,7 @@ public class FLEURSBenchmark {
         let cer: Double
         let rtfx: Double
         let samplesProcessed: Int
+        let samplesSkipped: Int
         let totalDuration: Double
         let processingTime: Double
     }
@@ -372,8 +373,9 @@ public class FLEURSBenchmark {
             results.append(languageResult)
 
             // Print language summary
+            let skippedInfo = languageResult.samplesSkipped > 0 ? ", \(languageResult.samplesSkipped) skipped" : ""
             print(
-                "  ✓ \(language): WER=\(String(format: "%.1f", languageResult.wer * 100))%, CER=\(String(format: "%.1f", languageResult.cer * 100))%, RTFx=\(String(format: "%.1f", languageResult.rtfx))x"
+                "  ✓ \(language): WER=\(String(format: "%.1f", languageResult.wer * 100))%, CER=\(String(format: "%.1f", languageResult.cer * 100))%, RTFx=\(String(format: "%.1f", languageResult.rtfx))x (\(languageResult.samplesProcessed) processed\(skippedInfo))"
             )
         }
 
@@ -391,6 +393,7 @@ public class FLEURSBenchmark {
         var totalDuration = 0.0
         var totalProcessingTime = 0.0
         var processedCount = 0
+        var skippedCount = 0
 
         for (index, sample) in samples.enumerated() {
             // Skip if audio file doesn't exist
@@ -406,7 +409,29 @@ public class FLEURSBenchmark {
             do {
                 // Load and process audio
                 let startTime = Date()
-                let audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
+                let audioSamples: [Float]
+
+                do {
+                    audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
+                } catch {
+                    // Provide more detailed error information for audio loading failures
+                    if error.localizedDescription.contains("1954115647") {
+                        print("  ⚠️ CoreAudio error for \(sample.sampleId): Unsupported audio format or corrupted file")
+                        print("    Suggestion: Check if file format is supported or try converting to WAV/MP3")
+                    } else if error.localizedDescription.contains("ffmpeg") {
+                        print("  ⚠️ Audio conversion failed for \(sample.sampleId): \(error.localizedDescription)")
+                        print(
+                            "    Suggestion: Install ffmpeg or provide audio files in supported formats (WAV, MP3, M4A)"
+                        )
+                    } else {
+                        print("  ⚠️ Audio loading failed for \(sample.sampleId): \(error.localizedDescription)")
+                    }
+
+                    // Continue to next sample instead of failing the entire benchmark
+                    skippedCount += 1
+                    continue
+                }
+
                 let audioDuration = Double(audioSamples.count) / 16000.0
 
                 // Transcribe
@@ -435,7 +460,7 @@ public class FLEURSBenchmark {
                 }
 
             } catch {
-                print("  ⚠️ Error processing \(sample.sampleId): \(error)")
+                print("  ⚠️ Transcription error for \(sample.sampleId): \(error.localizedDescription)")
             }
         }
 
@@ -450,6 +475,7 @@ public class FLEURSBenchmark {
             cer: avgCER,
             rtfx: rtfx,
             samplesProcessed: processedCount,
+            samplesSkipped: skippedCount,
             totalDuration: totalDuration,
             processingTime: totalProcessingTime
         )
@@ -526,6 +552,7 @@ public class FLEURSBenchmark {
                     "cer": sanitizeDouble(result.cer),
                     "rtfx": sanitizeDouble(result.rtfx),
                     "samplesProcessed": result.samplesProcessed,
+                    "samplesSkipped": result.samplesSkipped,
                     "totalDuration": result.totalDuration,
                     "processingTime": result.processingTime,
                 ]
@@ -535,6 +562,7 @@ public class FLEURSBenchmark {
                 "averageCER": results.reduce(0.0) { $0 + $1.cer } / Double(results.count),
                 "averageRTFx": results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count),
                 "totalSamples": results.reduce(0) { $0 + $1.samplesProcessed },
+                "totalSkipped": results.reduce(0) { $0 + $1.samplesSkipped },
                 "totalDuration": results.reduce(0.0) { $0 + $1.totalDuration },
                 "totalProcessingTime": results.reduce(0.0) { $0 + $1.processingTime },
             ],
@@ -656,17 +684,25 @@ extension FLEURSBenchmark {
                 print("  WER: \(String(format: "%.1f", result.wer * 100))%")
                 print("  CER: \(String(format: "%.1f", result.cer * 100))%")
                 print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
-                print("  Samples: \(result.samplesProcessed)")
+                print(
+                    "  Samples: \(result.samplesProcessed) processed\(result.samplesSkipped > 0 ? ", \(result.samplesSkipped) skipped" : "")"
+                )
             }
 
             let avgWER = results.reduce(0.0) { $0 + $1.wer } / Double(results.count)
             let avgCER = results.reduce(0.0) { $0 + $1.cer } / Double(results.count)
             let avgRTFx = results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count)
+            let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
+            let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
 
             print("\n📈 Overall Performance:")
             print("  Average WER: \(String(format: "%.1f", avgWER * 100))%")
             print("  Average CER: \(String(format: "%.1f", avgCER * 100))%")
             print("  Average RTFx: \(String(format: "%.1f", avgRTFx))x")
+            print("  Total Processed: \(totalProcessed) samples")
+            if totalSkipped > 0 {
+                print("  ⚠️ Total Skipped: \(totalSkipped) samples due to audio loading errors")
+            }
 
             print("\n✓ Results saved to: \(outputFile)")
 
