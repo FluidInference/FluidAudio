@@ -12,6 +12,24 @@ final class AsrTranscriptionTests: XCTestCase {
     override func setUp() {
         super.setUp()
         manager = AsrManager()
+
+        // Set up mock vocabulary for testing
+        #if DEBUG
+        let mockVocabulary = [
+            1: "hello",
+            2: "▁world",
+            3: "▁test",
+            4: "▁audio",
+            5: ".",
+            10: "hello",
+            20: "▁world",
+            30: "▁test",
+            100: "test",
+            200: "▁token",
+            300: "!",
+        ]
+        manager.setVocabularyForTesting(mockVocabulary)
+        #endif
     }
 
     override func tearDown() {

@@ -36,6 +36,7 @@ jobs:
           echo "Building for iOS..."
           xcodebuild -scheme FluidAudio \
             -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
             -derivedDataPath .build/ios \
             build
 
