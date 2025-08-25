@@ -92,7 +92,9 @@ final class AsrTranscriptionTests: XCTestCase {
             processingTime: processingTime
         )
 
-        XCTAssertEqual(result.confidence, 1.0)
+        // Confidence is calculated based on duration (1.0s) and token count (5)
+        // Base: 0.3 + duration factor: 0.1 * 0.4 + density factor: 5.0 * 0.3 = 0.64
+        XCTAssertEqual(result.confidence, 0.64, accuracy: 0.01)
         XCTAssertEqual(result.duration, 1.0, accuracy: 0.01)
         XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)
         XCTAssertTrue(result.tokenTimings?.isEmpty == true)  // No timestamps provided, should be empty array
@@ -134,7 +136,9 @@ final class AsrTranscriptionTests: XCTestCase {
             processingTime: processingTime
         )
 
-        XCTAssertEqual(result.confidence, 1.0)
+        // Confidence is calculated based on duration (2.0s) and token count (3)
+        // Base: 0.3 + duration factor: 0.2 * 0.4 + density factor: 1.5 * 0.3 = 0.53
+        XCTAssertEqual(result.confidence, 0.53, accuracy: 0.01)
         XCTAssertEqual(result.duration, 2.0, accuracy: 0.01)
         XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)
 
