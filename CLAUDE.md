@@ -1,8 +1,10 @@
-# FluidAudio - Claude Code Instructions
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-FluidAudio is a speaker diarization system for Apple platforms using Core ML models. The system processes audio to identify "who spoke when" by segmenting audio and clustering speaker embeddings.
+FluidAudio is a comprehensive Swift framework for local, low-latency audio processing on Apple platforms. It provides state-of-the-art speaker diarization, automatic speech recognition (ASR), and voice activity detection (VAD) through open-source models converted to Core ML. The system processes audio to identify "who spoke when" by segmenting audio and clustering speaker embeddings, with industry-competitive performance (17.7% DER).
 
 ## Critical Development Rules
 
@@ -76,45 +78,76 @@ DiarizerConfig(
 - Re-downloads corrupted models from Hugging Face
 - Up to 3 retry attempts with comprehensive logging
 
-## CLI Commands
+## Essential Development Commands
 
-### Benchmarking
-```bash
-# Full AMI benchmark
-swift run fluidaudio diarization-benchmark --auto-download
-
-# Single file with custom parameters
-swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7 --output results.json
-
-# Process individual audio
-swift run fluidaudio process meeting.wav --output results.json
-```
-
-### VAD Commands (Pending CLI Integration)
-```bash
-# Once integrated:
-swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.445
-```
-
-### Development
+### Core Commands
 ```bash
 # Build
-swift build
-swift build -c release
+swift build                             # Debug build
+swift build -c release                 # Release build (recommended for benchmarks)
 
 # Test
-swift test
-swift test --filter CITests
+swift test                             # Run all tests
+swift test --parallel                  # Parallel test execution
+swift test --filter CITests           # Run CI-specific tests only
+swift test --filter AsrManagerTests   # Run specific test class
 
-# Format code (requires Swift 6+)
+# Package management
+swift package update                   # Update dependencies
+swift package resolve                 # Resolve dependencies
+swift package clean                   # Clean build cache
+```
+
+### Code Quality
+```bash
+# Format code (requires Swift 6+ for development)
 swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/
 
 # Check formatting without modifying
 swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/
 
-# Package management
-swift package update
-swift package resolve
+# Verify formatting compliance (CI-style check)
+swift format --configuration .swift-format Sources/ Tests/ Examples/
+```
+
+### CLI Commands
+
+#### Benchmarking
+```bash
+# Diarization benchmarks
+swift run fluidaudio diarization-benchmark --auto-download
+swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7 --output results.json
+
+# ASR benchmarks
+swift run fluidaudio asr-benchmark --subset test-clean --max-files 100
+swift run fluidaudio asr-benchmark --subset test-other --output asr_results.json
+
+# FLEURS multilingual benchmark
+swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+# VAD benchmark
+swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.445
+```
+
+#### Audio Processing
+```bash
+# Transcription
+swift run fluidaudio transcribe audio.wav
+swift run fluidaudio transcribe audio.wav --low-latency
+
+# Multi-stream processing
+swift run fluidaudio multi-stream audio1.wav audio2.wav
+
+# Diarization processing
+swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
+```
+
+#### Dataset Management
+```bash
+# Download evaluation datasets
+swift run fluidaudio download --dataset ami-sdm
+swift run fluidaudio download --dataset librispeech-test-clean
+swift run fluidaudio download --dataset librispeech-test-other
 ```
 
 ## Parameter Tuning Guide
@@ -163,17 +196,103 @@ VADConfig(
 | threshold=0.8 | 18.0% | Very close to optimal |
 | threshold=0.9 | 40.2% | Under-clustering |
 
+## High-Level Architecture
+
+### Project Structure
+```
+FluidAudio/
+├── Sources/
+│   ├── FluidAudio/           # Main library
+│   │   ├── ASR/             # Automatic Speech Recognition
+│   │   ├── Diarizer/        # Speaker diarization system
+│   │   ├── VAD/             # Voice Activity Detection
+│   │   └── Shared/          # Common utilities (audio conversion, memory optimization)
+│   └── FluidAudioCLI/       # Command-line interface (macOS only)
+├── Tests/                   # Comprehensive test suite
+└── Datasets/               # Evaluation datasets (AMI corpus)
+```
+
+### Core Components
+
+#### 1. ASR (Automatic Speech Recognition)
+- **AsrManager**: Main class for speech-to-text processing
+- **TDT (Token Duration Transducer)**: Advanced decoding architecture
+- **Streaming Support**: Real-time processing with persistent decoder states
+- **Models**: Parakeet TDT v3 (0.6b) supporting 25 European languages
+- **Performance**: ~110x RTF on M4 Pro (0.5s to process 1 minute of audio)
+
+#### 2. Diarization System
+- **DiarizerManager**: Main orchestrator for speaker separation
+- **SegmentationProcessor**: Voice activity detection and segmentation
+- **EmbeddingExtractor**: Speaker embedding generation for clustering
+- **SpeakerManager**: Consistent speaker ID tracking across chunks
+- **Performance**: 17.7% DER on AMI dataset (competitive with research)
+
+#### 3. Voice Activity Detection
+- **VadManager**: Voice activity detection with CoreML models
+- **VadAudioProcessor**: Advanced processing with SNR filtering
+- **Adaptive Thresholding**: Dynamic adjustment to noise levels
+- **Performance**: 98% accuracy on MUSAN dataset
+
+#### 4. Shared Infrastructure
+- **ANEMemoryOptimizer**: Apple Neural Engine memory management
+- **AudioConverter**: Universal audio format conversion to 16kHz mono Float32
+- **ModelDownloader**: Automatic model retrieval from HuggingFace with recovery
+- **Zero-Copy Processing**: Efficient model chaining without data duplication
+
+### Processing Pipeline
+1. **Audio Input** → AudioConverter (16kHz mono Float32)
+2. **VAD Processing** → Voice activity segments
+3. **Diarization** → Speaker embeddings + clustering
+4. **ASR Processing** → Speech-to-text transcription
+5. **Output** → Timestamped speaker-attributed transcripts
+
+### Threading and Concurrency
+- **Actor-based Architecture**: Thread-safe processing without `@unchecked Sendable`
+- **Persistent States**: Decoder states maintained across chunks for streaming
+- **Memory Management**: Automatic cleanup and ANE optimization
+- **Parallel Processing**: Multi-stream support for batch operations
+
+### Model Management
+- **Automatic Downloads**: Models fetched from HuggingFace on first use
+- **Auto-Recovery**: Corrupt model detection and re-download
+- **CoreML Compilation**: Optimized for Apple Neural Engine
+- **Caching**: Local model storage with validation
+
 ## Architecture Notes
 
 - **Online diarization**: Works well with chunk-based processing
 - **10-second chunks**: No significant performance impact
 - **Speaker tracking**: Effective across chunks
 - **DER calculation**: Fixed with optimal speaker mapping (Hungarian algorithm)
+- **Cross-platform**: Supports macOS 13.0+, iOS 16.0+ (library), CLI macOS-only
 
 ## Streaming Diarization (Work in Progress)
 
 ### Goal
 Develop a custom streaming speaker diarization manager that maintains consistent speaker IDs across chunks WITHOUT using the Hungarian algorithm for retroactive remapping (which is "cheating" in real-time scenarios).
+
+## Development Environment
+
+### Requirements
+- **Swift**: 5.10+ (Swift 6+ required for contributors using swift-format)
+- **Platforms**: macOS 13.0+, iOS 16.0+ 
+- **Xcode**: Latest stable version for iOS development
+- **Hardware**: Apple Silicon recommended for optimal performance
+
+### CI/CD Pipeline
+The project uses GitHub Actions with the following workflows:
+- **swift-format.yml**: Code formatting compliance checks
+- **tests.yml**: Cross-platform build and test execution
+- **asr-benchmark.yml**: ASR performance validation
+- **diarizer-benchmark.yml**: Speaker diarization benchmarks
+- **vad-benchmark.yml**: Voice activity detection validation
+
+### Code Style Configuration
+- **Swift Format**: Enforced via `.swift-format` config
+- **Line Length**: 120 characters
+- **Indentation**: 4 spaces
+- **Formatting Rules**: Automatic via swift-format, CI enforced
 
 ## Development Guidelines
 
@@ -184,6 +303,7 @@ Develop a custom streaming speaker diarization manager that maintains consistent
 5. **Thread Safety**: Never use `@unchecked Sendable` - implement proper synchronization
 6. **Follow Instructions**: When the user asks to implement something specific, DO IT FIRST before explaining why it might not be optimal. Implementation first, explanation second.
 7. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested. Keep the codebase clean by only supporting current versions.
+8. **Code Formatting**: All code must pass swift-format checks before merge
 
 ## Next Steps
 
@@ -192,8 +312,41 @@ Develop a custom streaming speaker diarization manager that maintains consistent
 3. **Real-world testing**: Validate on non-AMI audio
 4. **Documentation**: Update API documentation
 
+## Testing Strategy
+
+### Test Categories
+- **Unit Tests**: Component-level testing for individual classes
+- **Integration Tests**: End-to-end workflow validation
+- **Performance Tests**: Benchmarking against standard datasets
+- **Memory Tests**: ANE memory optimization validation
+- **Edge Case Tests**: Boundary condition handling
+- **CI Tests**: Smoke tests for continuous integration
+
+### Key Test Classes
+- **CITests**: Lightweight tests for CI pipeline
+- **AsrManagerTests**: ASR functionality validation
+- **DiarizerMemoryTests**: Memory management validation
+- **SendableTests**: Thread safety compliance
+- **SegmentationProcessorTests**: Audio segmentation accuracy
+
+### Running Specific Tests
+```bash
+# CI-specific tests (lightweight)
+swift test --filter CITests
+
+# ASR component tests
+swift test --filter AsrManagerTests
+
+# Memory optimization tests
+swift test --filter ANEMemoryOptimizerTests
+
+# Edge case validation
+swift test --filter EdgeCaseTests
+```
+
 ## Model Sources
 
 - **Diarization**: [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
 - **VAD CoreML**: [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml)
+- **ASR Models**: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Test Data**: [alexwengg/musan_mini*](https://huggingface.co/datasets/alexwengg) variants
