@@ -39,26 +39,53 @@ jobs:
       - name: Clean build artifacts
         run: rm -rf .build .swiftpm
       
-      - name: Setup iOS Simulator
+      - name: Setup iOS SDK and Simulator
         run: |
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-          if [ ! -d "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform" ]; then
-            xcodebuild -downloadPlatform iOS || true
+          
+          # Install iOS SDK if not present
+          if [ ! -d "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform" ]; then
+            echo "Installing iOS SDK..."
+            xcodebuild -downloadPlatform iOS
           fi
+          
+          # Install iOS Simulator SDK if not present  
+          if [ ! -d "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform" ]; then
+            echo "Installing iOS Simulator SDK..."
+            xcodebuild -downloadPlatform iOS-simulator
+          fi
+          
+          # Verify SDKs are installed
+          xcodebuild -showsdks | grep -i ios || echo "iOS SDKs not found"
+          
           # List available simulators
-          xcrun simctl list devices
-          # Create iPhone 15 simulator if it doesn't exist
-          xcrun simctl create "iPhone 15" "iPhone 15" iOS17.0 2>/dev/null || true
+          xcrun simctl list devices available
+          
+          # Create iPhone 15 simulator with latest iOS if available
+          LATEST_IOS=$(xcrun simctl list runtimes | grep "iOS" | tail -n 1 | awk '{print $NF}' | sed 's/[()]//g')
+          if [ ! -z "$LATEST_IOS" ]; then
+            xcrun simctl create "iPhone 15 Test" "iPhone 15" "$LATEST_IOS" 2>/dev/null || echo "Simulator creation failed"
+          fi
       
       - name: Build for iOS
         run: |
           echo "Building for iOS..."
-          # Use generic iOS simulator destination that should work
+          
+          # Boot a specific simulator to make it available as a destination
+          echo "Starting iPhone 16 Pro simulator..."
+          SIMULATOR_ID="C707DF3C-D29E-4CA9-B02F-06CBF9E434B2"  # iPhone 16 Pro from the list
+          xcrun simctl boot "$SIMULATOR_ID" || echo "Simulator already booted or failed to boot"
+          
+          # Wait a moment for boot
+          sleep 5
+          
+          echo "Using simulator with ID: $SIMULATOR_ID"
           xcodebuild -scheme FluidAudio \
             -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "id=$SIMULATOR_ID" \
             -derivedDataPath .build/ios \
-            build CODE_SIGNING_ALLOWED=NO
+            build CODE_SIGNING_ALLOWED=NO \
+            -allowProvisioningUpdates
 
   build-and-test-macos:
     name: Build and Test Swift Package (macOS)
