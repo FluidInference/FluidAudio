@@ -82,22 +82,10 @@ public class VadManager: @unchecked Sendable {
     }
 
     private func getDefaultBaseDirectory() -> URL {
-        if let customDirectory = config.modelCacheDirectory {
-            return customDirectory
-        }
-
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
         return appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
-    }
-
-    /// Reset VAD state (for stateful processing if needed later)
-    public func resetState() {
-        audioProcessor.reset()
-        if config.debugMode {
-            logger.debug("VAD state reset")
-        }
     }
 
     /// Process audio chunk and return VAD result
@@ -144,7 +132,7 @@ public class VadManager: @unchecked Sendable {
         let rawProbability = try await processUnifiedModel(processedChunk, model: vadModel)
 
         // Apply audio processing (smoothing, SNR, etc.)
-        let (smoothedProbability, snrValue, spectralFeatures) = audioProcessor.processRawProbability(
+        let (smoothedProbability, snrValue, _) = audioProcessor.processRawProbability(
             rawProbability,
             audioChunk: processedChunk
         )
@@ -167,9 +155,7 @@ public class VadManager: @unchecked Sendable {
         return VadResult(
             probability: smoothedProbability,
             isVoiceActive: isVoiceActive,
-            processingTime: processingTime,
-            snrValue: snrValue,
-            spectralFeatures: spectralFeatures
+            processingTime: processingTime
         )
     }
 

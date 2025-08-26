@@ -5,20 +5,17 @@ public struct VadConfig: Sendable {
     public var threshold: Float
     public var debugMode: Bool
     public var computeUnits: MLComputeUnits
-    public var modelCacheDirectory: URL?
 
     public static let `default` = VadConfig()
 
     public init(
         threshold: Float = 0.5,
         debugMode: Bool = false,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        modelCacheDirectory: URL? = nil
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) {
         self.threshold = threshold
         self.debugMode = debugMode
         self.computeUnits = computeUnits
-        self.modelCacheDirectory = modelCacheDirectory
     }
 }
 
@@ -26,67 +23,37 @@ public struct VadResult: Sendable {
     public let probability: Float
     public let isVoiceActive: Bool
     public let processingTime: TimeInterval
-    public let snrValue: Float?
-    public let spectralFeatures: SpectralFeatures?
 
     public init(
-        probability: Float, isVoiceActive: Bool, processingTime: TimeInterval, snrValue: Float? = nil,
-        spectralFeatures: SpectralFeatures? = nil
+        probability: Float,
+        isVoiceActive: Bool,
+        processingTime: TimeInterval
     ) {
         self.probability = probability
         self.isVoiceActive = isVoiceActive
         self.processingTime = processingTime
-        self.snrValue = snrValue
-        self.spectralFeatures = spectralFeatures
     }
 }
 
-public struct SpectralFeatures: Sendable {
-    public let spectralCentroid: Float
-    public let spectralRolloff: Float
-    public let spectralFlux: Float
-    public let mfccFeatures: [Float]
-    public let zeroCrossingRate: Float
-    public let spectralEntropy: Float
-
-    public init(
-        spectralCentroid: Float, spectralRolloff: Float, spectralFlux: Float, mfccFeatures: [Float],
-        zeroCrossingRate: Float, spectralEntropy: Float
-    ) {
-        self.spectralCentroid = spectralCentroid
-        self.spectralRolloff = spectralRolloff
-        self.spectralFlux = spectralFlux
-        self.mfccFeatures = mfccFeatures
-        self.zeroCrossingRate = zeroCrossingRate
-        self.spectralEntropy = spectralEntropy
-    }
+// Internal struct for VadAudioProcessor compatibility
+internal struct SpectralFeatures {
+    let spectralFlux: Float
+    let mfccFeatures: [Float]
 }
 
 public enum VadError: Error, LocalizedError {
     case notInitialized
     case modelLoadingFailed
     case modelProcessingFailed(String)
-    case invalidAudioData
-    case invalidModelPath
-    case modelDownloadFailed
-    case modelCompilationFailed
 
     public var errorDescription: String? {
         switch self {
         case .notInitialized:
-            return "VAD system not initialized. Call initialize() first."
+            return "VAD system not initialized"
         case .modelLoadingFailed:
-            return "Failed to load VAD models."
+            return "Failed to load VAD model"
         case .modelProcessingFailed(let message):
             return "Model processing failed: \(message)"
-        case .invalidAudioData:
-            return "Invalid audio data provided."
-        case .invalidModelPath:
-            return "Invalid model path provided."
-        case .modelDownloadFailed:
-            return "Failed to download VAD models from Hugging Face."
-        case .modelCompilationFailed:
-            return "Failed to compile VAD models after multiple attempts."
         }
     }
 }

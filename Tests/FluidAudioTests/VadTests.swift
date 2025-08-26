@@ -87,12 +87,10 @@ final class VadTests: XCTestCase {
         let chunk = Array(repeating: Float(0.0), count: 512)
         _ = try await vad.processChunk(chunk)
 
-        // Reset state
-        vad.resetState()
-
-        // Should still work after reset
+        // No state to reset anymore - VAD is stateless
+        // Just verify it still works with subsequent calls
         let result = try await vad.processChunk(chunk)
-        XCTAssertNotNil(result, "Should process after reset")
+        XCTAssertNotNil(result, "Should process subsequent chunks")
     }
 
     func testVadPaddingAndTruncation() async throws {
