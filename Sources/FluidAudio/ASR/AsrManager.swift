@@ -251,6 +251,11 @@ public final class AsrManager {
         return directory.standardizedFileURL
     }
 
+    public func resetState() {
+        microphoneDecoderState = TdtDecoderState(fallback: true)
+        systemDecoderState = TdtDecoderState(fallback: true)
+    }
+
     public func cleanup() {
         melspectrogramModel = nil
         encoderModel = nil
@@ -287,13 +292,25 @@ public final class AsrManager {
     }
 
     public func transcribe(_ audioSamples: [Float], source: AudioSource) async throws -> ASRResult {
+        var result: ASRResult
         switch source {
         case .microphone:
-            return try await transcribeWithState(
+            result = try await transcribeWithState(
                 audioSamples, decoderState: &microphoneDecoderState)
         case .system:
-            return try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
+            result = try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
         }
+        
+        // When batching audio, assume that the state needs to be reset comepletely between calls
+        try await self.resetDecoderState()
+
+        return result
+    }
+
+    // Reset both decoder states
+    public func resetDecoderState() async throws {
+        try await resetDecoderState(for: .microphone)
+        try await resetDecoderState(for: .system)
     }
 
     /// Reset the decoder state for a specific audio source

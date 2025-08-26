@@ -173,7 +173,7 @@ swift run fluidaudio transcribe audio.wav
 import AVFoundation
 import FluidAudio
 
-// Batch transcription from an audio file
+// Batch transcription from an audio source
 Task {
     // 1) Initialize ASR manager and load models
     let models = try await AsrModels.downloadAndLoad()
@@ -187,9 +187,6 @@ Task {
     let result = try await asrManager.transcribe(samples, source: .system)
     print("Transcription: \(result.text)")
     print("Confidence: \(result.confidence)")
-
-    // 4) Cleanup
-    asrManager.cleanup()
 }
 ```
 
