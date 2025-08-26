@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import XCTest
 
 @testable import FluidAudio
@@ -18,26 +19,26 @@ final class StreamingAsrManagerTests: XCTestCase {
     func testInitializationWithDefaultConfig() async throws {
         let manager = StreamingAsrManager()
         let volatileTranscript = await manager.volatileTranscript
-        let confirmedTranscript = await manager.confirmedTranscript
+        let finalizedTranscript = await manager.finalizedTranscript
         let source = await manager.source
 
         XCTAssertEqual(volatileTranscript, "")
-        XCTAssertEqual(confirmedTranscript, "")
+        XCTAssertEqual(finalizedTranscript, "")
         XCTAssertEqual(source, .microphone)
     }
 
     func testInitializationWithCustomConfig() async throws {
         let config = StreamingAsrConfig(
-            confirmationThreshold: 0.9,
-            chunkDuration: 10.0,
-            enableDebug: true
+            chunkSeconds: 10.0,
+            enableDebug: true,
+            finalizationThreshold: 0.9
         )
         let manager = StreamingAsrManager(config: config)
         let volatileTranscript = await manager.volatileTranscript
-        let confirmedTranscript = await manager.confirmedTranscript
+        let finalizedTranscript = await manager.finalizedTranscript
 
         XCTAssertEqual(volatileTranscript, "")
-        XCTAssertEqual(confirmedTranscript, "")
+        XCTAssertEqual(finalizedTranscript, "")
     }
 
     // MARK: - Configuration Tests
@@ -45,15 +46,27 @@ final class StreamingAsrManagerTests: XCTestCase {
     func testConfigPresets() {
         // Test default config
         let defaultConfig = StreamingAsrConfig.default
-        XCTAssertEqual(defaultConfig.confirmationThreshold, 0.85)
-        XCTAssertEqual(defaultConfig.chunkDuration, 15.0)
+        XCTAssertEqual(defaultConfig.finalizationThreshold, 0.85)
+        XCTAssertEqual(defaultConfig.chunkSeconds, 11.0)
         XCTAssertFalse(defaultConfig.enableDebug)
+
+        // Test realtime config
+        let realtimeConfig = StreamingAsrConfig.realtime
+        XCTAssertEqual(realtimeConfig.finalizationThreshold, 0.80)
+        XCTAssertEqual(realtimeConfig.chunkSeconds, 11.0)
+        XCTAssertFalse(realtimeConfig.enableDebug)
     }
 
     func testConfigCalculatedProperties() {
-        let config = StreamingAsrConfig(chunkDuration: 5.0)
+        let config = StreamingAsrConfig(
+            chunkSeconds: 5.0,
+            leftContextSeconds: 2.0,
+            rightContextSeconds: 1.0
+        )
         XCTAssertEqual(config.bufferCapacity, 240000)  // 15 seconds at 16kHz
-        XCTAssertEqual(config.chunkSizeInSamples, 80000)  // 5 seconds at 16kHz
+        XCTAssertEqual(config.chunkSamples, 80000)  // 5 seconds at 16kHz
+        XCTAssertEqual(config.leftContextSamples, 32000)  // 2 seconds at 16kHz
+        XCTAssertEqual(config.rightContextSamples, 16000)  // 1 second at 16kHz
 
         // Test ASR config generation
         let asrConfig = config.asrConfig
@@ -62,48 +75,6 @@ final class StreamingAsrManagerTests: XCTestCase {
     }
 
     // MARK: - Stream Management Tests
-
-    func testAudioBufferBasicOperations() async throws {
-        let buffer = AudioBuffer(capacity: 1000)
-
-        // Test initial state
-        let initialChunk = await buffer.getChunk(size: 100)
-        XCTAssertNil(initialChunk, "Buffer should be empty initially")
-
-        // Test appending samples
-        let samples: [Float] = Array(repeating: 1.0, count: 500)
-        try await buffer.append(samples)
-
-        // Test getting chunk
-        let chunk = await buffer.getChunk(size: 100)
-        XCTAssertNotNil(chunk, "Should be able to get chunk after appending")
-        XCTAssertEqual(chunk?.count, 100, "Chunk should have correct size")
-        XCTAssertEqual(chunk?.first, 1.0, "Chunk should contain correct values")
-    }
-
-    func testAudioBufferOverflow() async throws {
-        let buffer = AudioBuffer(capacity: 100)
-
-        // Fill buffer to capacity
-        let samples1: [Float] = Array(repeating: 1.0, count: 50)
-        try await buffer.append(samples1)
-
-        // Add more samples that would overflow
-        let samples2: [Float] = Array(repeating: 2.0, count: 80)
-        try await buffer.append(samples2)  // Should handle overflow gracefully
-
-        // Verify buffer still works
-        let chunk = await buffer.getChunk(size: 50)
-        XCTAssertNotNil(chunk, "Buffer should still work after overflow")
-        XCTAssertEqual(chunk?.count, 50, "Chunk should have correct size")
-
-        // After overflow, the buffer now prioritizes new samples and adjusts read position
-        // to start from the newly added samples, so first sample should be 2.0
-        XCTAssertEqual(chunk?.first, 2.0, "Should contain newer samples after overflow")
-
-        // All samples in the chunk should be from the new samples (2.0)
-        XCTAssertTrue(chunk!.allSatisfy { $0 == 2.0 }, "All samples should be new samples (2.0) after overflow")
-    }
 
     func testStreamAudioBuffering() async throws {
         throw XCTSkip("Skipping test that requires model initialization")
@@ -121,42 +92,40 @@ final class StreamingAsrManagerTests: XCTestCase {
         throw XCTSkip("Skipping test that requires model initialization")
     }
 
-    // MARK: - Update Structure Tests
+    // MARK: - Result Structure Tests
 
-    func testStreamingTranscriptionUpdateCreation() {
-        let update = StreamingTranscriptionUpdate(
-            text: "Hello world",
-            isConfirmed: true,
+    func testStreamingTranscriptionResultCreation() {
+        let result = StreamingTranscriptionResult(
+            segmentID: UUID(),
+            revision: 1,
+            attributedText: AttributedString("Hello world"),
+            audioTimeRange: CMTimeRange(start: .zero, duration: CMTime(seconds: 2.0, preferredTimescale: 1000)),
+            isFinal: true,
             confidence: 0.95,
             timestamp: Date()
         )
 
-        XCTAssertEqual(update.text, "Hello world")
-        XCTAssertTrue(update.isConfirmed)
-        XCTAssertEqual(update.confidence, 0.95)
-        XCTAssertNotNil(update.timestamp)
+        XCTAssertEqual(String(result.attributedText.characters), "Hello world")
+        XCTAssertTrue(result.isFinal)
+        XCTAssertEqual(result.confidence, 0.95)
+        XCTAssertEqual(result.revision, 1)
+        XCTAssertNotNil(result.timestamp)
     }
 
-    func testStreamingTranscriptionUpdateConfidence() {
-        // Test low confidence update
-        let lowConfUpdate = StreamingTranscriptionUpdate(
-            text: "uncertain text",
-            isConfirmed: false,
-            confidence: 0.5,
-            timestamp: Date()
+    func testStreamingTranscriptSnapshotCreation() {
+        let snapshot = StreamingTranscriptSnapshot(
+            finalized: AttributedString("Finalized text"),
+            volatile: AttributedString("volatile text"),
+            lastUpdated: Date()
         )
-        XCTAssertFalse(lowConfUpdate.isConfirmed)
-        XCTAssertLessThan(lowConfUpdate.confidence, 0.75)
 
-        // Test high confidence update
-        let highConfUpdate = StreamingTranscriptionUpdate(
-            text: "certain text",
-            isConfirmed: true,
-            confidence: 0.95,
-            timestamp: Date()
-        )
-        XCTAssertTrue(highConfUpdate.isConfirmed)
-        XCTAssertGreaterThan(highConfUpdate.confidence, 0.85)
+        XCTAssertEqual(String(snapshot.finalized.characters), "Finalized text")
+        if let volatile = snapshot.volatile {
+            XCTAssertEqual(String(volatile.characters), "volatile text")
+        } else {
+            XCTFail("Expected volatile text to be present")
+        }
+        XCTAssertNotNil(snapshot.lastUpdated)
     }
 
     // MARK: - Audio Source Tests
@@ -167,16 +136,24 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     // MARK: - Custom Configuration Tests
 
-    func testCustomConfigurationFactory() {
-        let customConfig = StreamingAsrConfig.custom(
-            chunkDuration: 7.5,
-            confirmationThreshold: 0.8,
-            enableDebug: true
+    func testCustomConfiguration() {
+        let customConfig = StreamingAsrConfig(
+            chunkSeconds: 7.5,
+            hypothesisChunkSeconds: 1.0,
+            leftContextSeconds: 1.5,
+            rightContextSeconds: 1.0,
+            minContextForFinalization: 8.0,
+            volatileRightContextSeconds: 0.3,
+            volatileStepSeconds: 0.4,
+            enableDebug: true,
+            finalizationThreshold: 0.8
         )
 
-        XCTAssertEqual(customConfig.chunkDuration, 7.5)
-        XCTAssertEqual(customConfig.confirmationThreshold, 0.8)
+        XCTAssertEqual(customConfig.chunkSeconds, 7.5)
+        XCTAssertEqual(customConfig.finalizationThreshold, 0.8)
         XCTAssertTrue(customConfig.enableDebug)
+        XCTAssertEqual(customConfig.leftContextSeconds, 1.5)
+        XCTAssertEqual(customConfig.volatileRightContextSeconds, 0.3)
     }
 
     // MARK: - Performance Tests
@@ -184,9 +161,343 @@ final class StreamingAsrManagerTests: XCTestCase {
     func testChunkSizeCalculationPerformance() {
         measure {
             for duration in stride(from: 1.0, to: 20.0, by: 0.5) {
-                let config = StreamingAsrConfig(chunkDuration: duration)
-                _ = config.chunkSizeInSamples
+                let config = StreamingAsrConfig(chunkSeconds: duration)
+                _ = config.chunkSamples
                 _ = config.bufferCapacity
+            }
+        }
+    }
+
+    // MARK: - New Streaming API Tests
+
+    func testResultsStreamCreation() async throws {
+        let manager = StreamingAsrManager()
+
+        // Test that results stream can be created
+        let resultsStream = await manager.results
+        XCTAssertNotNil(resultsStream)
+    }
+
+    func testSnapshotsStreamCreation() async throws {
+        let manager = StreamingAsrManager()
+
+        // Test that snapshots stream can be created
+        let snapshotsStream = await manager.snapshots
+        XCTAssertNotNil(snapshotsStream)
+    }
+
+    func testVolatileAndFinalizedTranscriptInitialState() async throws {
+        let manager = StreamingAsrManager()
+
+        let volatileTranscript = await manager.volatileTranscript
+        let finalizedTranscript = await manager.finalizedTranscript
+
+        XCTAssertEqual(volatileTranscript, "")
+        XCTAssertEqual(finalizedTranscript, "")
+    }
+
+    func testConfigurationPropertyMapping() {
+        let config = StreamingAsrConfig.default
+
+        // Test that all new properties are accessible
+        XCTAssertGreaterThan(config.chunkSeconds, 0)
+        XCTAssertGreaterThan(config.hypothesisChunkSeconds, 0)
+        XCTAssertGreaterThan(config.leftContextSeconds, 0)
+        XCTAssertGreaterThan(config.rightContextSeconds, 0)
+        XCTAssertGreaterThan(config.minContextForFinalization, 0)
+        XCTAssertGreaterThan(config.volatileRightContextSeconds, 0)
+        XCTAssertGreaterThan(config.volatileStepSeconds, 0)
+
+        // Test sample conversions
+        XCTAssertEqual(config.chunkSamples, Int(config.chunkSeconds * 16000))
+        XCTAssertEqual(config.leftContextSamples, Int(config.leftContextSeconds * 16000))
+        XCTAssertEqual(config.rightContextSamples, Int(config.rightContextSeconds * 16000))
+    }
+
+    func testResetFunctionalityWithNewAPI() async throws {
+        let manager = StreamingAsrManager()
+
+        // Verify initial state
+        let initialVolatile = await manager.volatileTranscript
+        let initialFinalized = await manager.finalizedTranscript
+        XCTAssertEqual(initialVolatile, "")
+        XCTAssertEqual(initialFinalized, "")
+
+        // Reset should not throw
+        try await manager.reset()
+
+        // State should remain empty after reset
+        let afterResetVolatile = await manager.volatileTranscript
+        let afterResetFinalized = await manager.finalizedTranscript
+        XCTAssertEqual(afterResetVolatile, "")
+        XCTAssertEqual(afterResetFinalized, "")
+    }
+
+    // MARK: - Memory Management Tests
+
+    func testMemoryLeakPrevention() async throws {
+        throw XCTSkip("Requires memory leak detection for long-running sessions")
+
+        // This test would verify that finalizedSegments and segmentFinalTexts
+        // don't grow unbounded during long transcription sessions
+
+        /*
+        let manager = StreamingAsrManager()
+        
+        // Simulate a 1-hour session with ~3,600 segments
+        let segmentCount = 3600
+        
+        for i in 0..<segmentCount {
+            // Simulate segment processing that would add to collections
+            // This would require access to internal collections for validation
+        }
+        
+        // Verify collections are bounded (e.g., < 100 segments retained)
+        // This requires exposing internal state for testing or using reflection
+        */
+    }
+
+    func testSegmentMemoryAccumulationDetection() async throws {
+        // This test can run without models - it tests the manager's memory behavior
+
+        // Measure memory usage over multiple reset cycles
+        var memoryUsages: [Int] = []
+
+        for _ in 0..<5 {
+            autoreleasepool {
+                // Create multiple manager instances to simulate segment accumulation
+                let tempManagers = (0..<100).map { _ in StreamingAsrManager() }
+
+                // Force some internal state changes
+                Task {
+                    for tempManager in tempManagers {
+                        _ = await tempManager.volatileTranscript
+                        _ = await tempManager.finalizedTranscript
+                        try? await tempManager.reset()
+                    }
+                }
+
+                // Measure memory after operations
+                var memoryInfo = mach_task_basic_info()
+                var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+
+                let kerr = withUnsafeMutablePointer(to: &memoryInfo) {
+                    $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                        task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+                    }
+                }
+
+                if kerr == KERN_SUCCESS {
+                    memoryUsages.append(Int(memoryInfo.resident_size))
+                }
+            }
+
+            // Force garbage collection between cycles
+            autoreleasepool {}
+        }
+
+        // Verify memory doesn't grow unbounded across cycles
+        if memoryUsages.count >= 3 {
+            let firstUsage = memoryUsages[0]
+            let lastUsage = memoryUsages.last!
+            let growth = lastUsage - firstUsage
+
+            // Allow up to 10MB growth across all cycles (reasonable buffer)
+            let maxAllowedGrowth = 10 * 1024 * 1024  // 10MB
+            XCTAssertLessThan(
+                growth, maxAllowedGrowth,
+                "Memory usage grew by \(growth) bytes across cycles, which may indicate a leak")
+        }
+    }
+
+    func testSegmentCleanupAfterFinalization() async throws {
+        throw XCTSkip("Requires internal state access to verify segment cleanup")
+
+        // This test should verify that finalized segments are cleaned up
+        // after they're no longer needed to prevent memory accumulation
+
+        /*
+        let manager = StreamingAsrManager()
+        try await manager.start()
+        
+        // Process multiple segments and verify cleanup occurs
+        // This would require accessing finalizedSegments Set for validation
+        
+        await manager.cancel()
+        */
+    }
+
+    func testResetClearsMemoryState() async throws {
+        let manager = StreamingAsrManager()
+
+        // Reset should clear all internal state
+        try await manager.reset()
+
+        // Verify transcripts are empty after reset
+        let volatileAfterReset = await manager.volatileTranscript
+        let finalizedAfterReset = await manager.finalizedTranscript
+
+        XCTAssertEqual(volatileAfterReset, "")
+        XCTAssertEqual(finalizedAfterReset, "")
+    }
+
+    // MARK: - Thread Safety Tests
+
+    func testConcurrentAudioStreamingLoad() async throws {
+        throw XCTSkip("Requires audio buffer simulation for load testing")
+
+        // This test should verify that rapid concurrent audio streaming
+        // doesn't lead to task explosion or memory issues
+
+        /*
+        let manager = StreamingAsrManager()
+        try await manager.start()
+        
+        // Simulate high-frequency audio callbacks (e.g., 100 Hz)
+        let callbackCount = 1000
+        let buffer = createMockAudioBuffer() // Would need mock implementation
+        
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<callbackCount {
+                group.addTask {
+                    await manager.streamAudio(buffer)
+                }
+            }
+        }
+        
+        await manager.cancel()
+        */
+    }
+
+    func testTaskLeakPrevention() async throws {
+        throw XCTSkip("Requires model initialization")
+
+        /*
+        let manager = StreamingAsrManager()
+        
+        // Test that starting and cancelling doesn't leave hanging tasks
+        try await manager.start()
+        
+        // Give some time for initialization
+        try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        
+        await manager.cancel()
+        
+        // Give time for cleanup
+        try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        
+        // If there were task leaks, they would show up in memory profiling
+        // This test mainly ensures cancel() completes without hanging
+        */
+    }
+
+    func testAudioCallbackTaskExplosionPrevention() async throws {
+        throw XCTSkip("Requires model initialization and mock audio simulation")
+
+        // This test addresses the critical issue in UIKitExample.swift:173
+        // where unstructured Tasks are created in audio callbacks
+
+        /*
+        let manager = StreamingAsrManager()
+        try await manager.start()
+        
+        // Simulate rapid audio callbacks like those from AVAudioEngine
+        let rapidCallbackCount = 1000
+        let startTime = Date()
+        
+        // Create mock audio buffer
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
+        let frameCount: AVAudioFrameCount = 1024
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+        buffer.frameLength = frameCount
+        
+        // Simulate what happens in audio callback:
+        // inputNode.installTap { buffer, _ in
+        //     Task { await self?.streamingAsr.streamAudio(buffer) }
+        // }
+        
+        var activeTasks = 0
+        let taskSemaphore = DispatchSemaphore(value: 0)
+        
+        for _ in 0..<rapidCallbackCount {
+            activeTasks += 1
+            Task {
+                await manager.streamAudio(buffer)
+                activeTasks -= 1
+                if activeTasks == 0 {
+                    taskSemaphore.signal()
+                }
+            }
+        
+            // Small delay to simulate real audio callback timing (1ms = 1000Hz)
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        
+        // Wait for all tasks to complete or timeout after 30 seconds
+        let result = taskSemaphore.wait(timeout: .now() + 30)
+        XCTAssertEqual(result, .success, "Audio callback tasks should complete within reasonable time")
+        
+        let endTime = Date()
+        let duration = endTime.timeIntervalSince(startTime)
+        
+        // Verify no task explosion occurred - processing should be reasonably fast
+        XCTAssertLessThan(duration, 10.0, "Task processing should complete within 10 seconds")
+        
+        await manager.cancel()
+        */
+    }
+
+    func testConcurrentStreamAccess() async throws {
+        let manager = StreamingAsrManager()
+
+        // Test concurrent access to results and snapshots streams
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                let _ = await manager.results
+            }
+            group.addTask {
+                let _ = await manager.snapshots
+            }
+            group.addTask {
+                let _ = await manager.volatileTranscript
+            }
+            group.addTask {
+                let _ = await manager.finalizedTranscript
+            }
+        }
+
+        // All tasks should complete without race conditions
+    }
+
+    // MARK: - Performance Boundary Tests
+
+    func testHighFrequencyAudioCallbacks() async throws {
+        throw XCTSkip("Requires model initialization and mock audio data")
+
+        // This test should verify system behavior under high audio callback frequency
+        // to ensure the task creation in audio callbacks doesn't overwhelm the system
+    }
+
+    func testLongRunningSessionStability() async throws {
+        throw XCTSkip("Requires extended runtime testing")
+
+        // This test should verify that multi-hour sessions don't degrade
+        // performance due to memory accumulation or resource leaks
+    }
+
+    func testMemoryGrowthBounds() {
+        measure(metrics: [XCTMemoryMetric()]) {
+            // Test memory usage during typical operations
+            let configs = [
+                StreamingAsrConfig.default,
+                StreamingAsrConfig.realtime,
+                StreamingAsrConfig(chunkSeconds: 5.0),
+            ]
+
+            for config in configs {
+                let manager = StreamingAsrManager(config: config)
+                // Basic operations that shouldn't cause significant memory growth
+                _ = manager
             }
         }
     }

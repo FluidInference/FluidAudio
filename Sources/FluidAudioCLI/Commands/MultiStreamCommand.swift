@@ -40,15 +40,15 @@ enum MultiStreamCommand {
         let micAudioFile = audioFile1
         let systemAudioFile = audioFile2 ?? audioFile1
 
-        print("🎤 Multi-Stream ASR Test")
+        print("Multi-Stream ASR Test")
         print("========================\n")
 
         if audioFile2 != nil {
-            print("📁 Processing two different files:")
+            print("Processing two different files:")
             print("  Microphone: \(micAudioFile)")
             print("  System: \(systemAudioFile)\n")
         } else {
-            print("📁 Processing single file on both streams: \(audioFile1)\n")
+            print("Processing single file on both streams: \(audioFile1)\n")
         }
 
         do {
@@ -82,8 +82,8 @@ enum MultiStreamCommand {
             }
             try systemFileHandle.read(into: systemBuffer)
 
-            print("📊 Audio file info:")
-            print("🎙️ Microphone file:")
+            print("Audio file info:")
+            print("Microphone file:")
             print("  Sample rate: \(micFormat.sampleRate) Hz")
             print("  Channels: \(micFormat.channelCount)")
             print(
@@ -127,7 +127,7 @@ enum MultiStreamCommand {
                 for await snapshot in await micStream.snapshots {
                     let fin = String(snapshot.finalized.characters)
                     let vol = snapshot.volatile.map { String($0.characters) } ?? ""
-                    print("[MIC] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
+                    print("[SOURCE 1] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
                 }
             }
 
@@ -135,7 +135,7 @@ enum MultiStreamCommand {
                 for await snapshot in await systemStream.snapshots {
                     let fin = String(snapshot.finalized.characters)
                     let vol = snapshot.volatile.map { String($0.characters) } ?? ""
-                    print("[SYS] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
+                    print("[SOURCE 2] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
                 }
             }
 
