@@ -357,3 +357,5 @@ Pyannote: https://github.com/pyannote/pyannote-audio
 Wewpeaker: https://github.com/wenet-e2e/wespeaker
 
 Parakeet-mlx: https://github.com/senstella/parakeet-mlx
+
+silero-vad: https://github.com/snakers4/silero-vad

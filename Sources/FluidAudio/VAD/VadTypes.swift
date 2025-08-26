@@ -3,53 +3,22 @@ import Foundation
 
 public struct VadConfig: Sendable {
     public var threshold: Float
-    public var chunkSize: Int
-    public var sampleRate: Int
-    public var modelCacheDirectory: URL?
     public var debugMode: Bool
-    public var adaptiveThreshold: Bool
-    public var minThreshold: Float
-    public var maxThreshold: Float
     public var computeUnits: MLComputeUnits
-
-    public var enableSNRFiltering: Bool
-    public var minSNRThreshold: Float
-    public var noiseFloorWindow: Int
-    public var spectralRolloffThreshold: Float
-    public var spectralCentroidRange: (min: Float, max: Float)
+    public var modelCacheDirectory: URL?
 
     public static let `default` = VadConfig()
 
     public init(
-        threshold: Float = 0.445,  // Optimal: 98% accuracy on MUSAN dataset
-        chunkSize: Int = 512,
-        sampleRate: Int = 16000,
-        modelCacheDirectory: URL? = nil,
+        threshold: Float = 0.5,
         debugMode: Bool = false,
-        adaptiveThreshold: Bool = true,  // Helps with varying audio conditions
-        minThreshold: Float = 0.1,
-        maxThreshold: Float = 0.7,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        enableSNRFiltering: Bool = true,
-        minSNRThreshold: Float = 6.0,
-        noiseFloorWindow: Int = 100,
-        spectralRolloffThreshold: Float = 0.85,
-        spectralCentroidRange: (min: Float, max: Float) = (200.0, 8000.0)
+        modelCacheDirectory: URL? = nil
     ) {
         self.threshold = threshold
-        self.chunkSize = chunkSize
-        self.sampleRate = sampleRate
-        self.modelCacheDirectory = modelCacheDirectory
         self.debugMode = debugMode
-        self.adaptiveThreshold = adaptiveThreshold
-        self.minThreshold = minThreshold
-        self.maxThreshold = maxThreshold
         self.computeUnits = computeUnits
-        self.enableSNRFiltering = enableSNRFiltering
-        self.minSNRThreshold = minSNRThreshold
-        self.noiseFloorWindow = noiseFloorWindow
-        self.spectralRolloffThreshold = spectralRolloffThreshold
-        self.spectralCentroidRange = spectralCentroidRange
+        self.modelCacheDirectory = modelCacheDirectory
     }
 }
 

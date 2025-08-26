@@ -38,20 +38,19 @@ internal class VadAudioProcessor {
         var spectralFeatures: SpectralFeatures?
         var enhancedProbability = rawProbability
 
-        if config.enableSNRFiltering {
-            // Calculate spectral features
-            spectralFeatures = calculateSpectralFeatures(audioChunk)
+        // Always calculate basic audio features for better accuracy
+        // Calculate spectral features
+        spectralFeatures = calculateSpectralFeatures(audioChunk)
 
-            // Calculate SNR
-            snrValue = calculateSNR(audioChunk)
+        // Calculate SNR
+        snrValue = calculateSNR(audioChunk)
 
-            // Apply SNR-based filtering
-            enhancedProbability = applyAudioQualityFiltering(
-                rawProbability: rawProbability,
-                snr: snrValue,
-                spectralFeatures: spectralFeatures
-            )
-        }
+        // Apply SNR-based filtering
+        enhancedProbability = applyAudioQualityFiltering(
+            rawProbability: rawProbability,
+            snr: snrValue,
+            spectralFeatures: spectralFeatures
+        )
 
         // Apply temporal smoothing
         let smoothedProbability = applySmoothingFilter(enhancedProbability)
@@ -115,7 +114,7 @@ internal class VadAudioProcessor {
         noiseFloorBuffer.append(powerDB)
 
         // Keep only recent samples for noise floor estimation
-        if noiseFloorBuffer.count > config.noiseFloorWindow {
+        if noiseFloorBuffer.count > 100 {  // Fixed window size
             noiseFloorBuffer.removeFirst()
         }
 
@@ -139,8 +138,8 @@ internal class VadAudioProcessor {
         var filteredProbability = rawProbability
 
         // SNR-based filtering - more aggressive
-        if let snr = snr, snr < config.minSNRThreshold {
-            let snrPenalty = max(0.0, (config.minSNRThreshold - snr) / config.minSNRThreshold)
+        if let snr = snr, snr < 6.0 {  // Min SNR threshold
+            let snrPenalty = max(0.0, (6.0 - snr) / 6.0)
             filteredProbability *= (1.0 - snrPenalty * 0.8)  // Reduce probability by up to 80%
         }
 
@@ -148,15 +147,15 @@ internal class VadAudioProcessor {
         if let features = spectralFeatures {
             // Check if spectral centroid is in expected speech range
             let centroidInRange =
-                features.spectralCentroid >= config.spectralCentroidRange.min
-                && features.spectralCentroid <= config.spectralCentroidRange.max
+                features.spectralCentroid >= 200.0
+                && features.spectralCentroid <= 8000.0
 
             if !centroidInRange {
                 filteredProbability *= 0.5  // Reduce probability by 50%
             }
 
             // Check spectral rolloff (speech should have energy distributed across frequencies)
-            if features.spectralRolloff > config.spectralRolloffThreshold {
+            if features.spectralRolloff > 0.85 {
                 filteredProbability *= 0.6  // Reduce probability by 40%
             }
 
@@ -254,7 +253,7 @@ internal class VadAudioProcessor {
 
         var weightedSum: Float = 0.0
         for (i, magnitude) in spectrum.enumerated() {
-            let frequency = Float(i) * Float(config.sampleRate) / Float(spectrum.count * 2)
+            let frequency = Float(i) * 16000.0 / Float(spectrum.count * 2)  // 16kHz sample rate
             weightedSum += frequency * magnitude
         }
 
@@ -268,17 +267,17 @@ internal class VadAudioProcessor {
         let totalEnergy = spectrum.map { $0 * $0 }.reduce(0, +)
         guard totalEnergy > 0 else { return 0.0 }
 
-        let rolloffThreshold = totalEnergy * config.spectralRolloffThreshold
+        let rolloffThreshold = totalEnergy * 0.85
         var cumulativeEnergy: Float = 0.0
 
         for (i, magnitude) in spectrum.enumerated() {
             cumulativeEnergy += magnitude * magnitude
             if cumulativeEnergy >= rolloffThreshold {
-                return Float(i) * Float(config.sampleRate) / Float(spectrum.count * 2)
+                return Float(i) * 16000.0 / Float(spectrum.count * 2)
             }
         }
 
-        return Float(spectrum.count - 1) * Float(config.sampleRate) / Float(spectrum.count * 2)
+        return Float(spectrum.count - 1) * 16000.0 / Float(spectrum.count * 2)
     }
 
     /// Calculate spectral entropy (measure of spectral complexity)
@@ -334,53 +333,81 @@ internal class VadAudioProcessor {
             values.append(rnnFeatures[i].floatValue)
         }
 
-        // Advanced feature extraction optimized for speech vs non-speech discrimination
-        let mean = values.reduce(0, +) / Float(values.count)
-        let variance = values.map { pow($0 - mean, 2) }.reduce(0, +) / Float(values.count)
+        // For RNN output shape [1, 4, 128], we want to focus on the last time step
+        // which contains the most recent context
+        let timeSteps = shape.count >= 3 ? shape[1] : 1
+        let features = shape.count >= 3 ? shape[2] : shape[1]
+
+        // Extract the last time step if we have temporal dimension
+        var lastTimeStepValues: [Float] = []
+        if timeSteps > 1 && features == 128 {
+            // Extract last time step features [last 128 values]
+            let startIdx = (timeSteps - 1) * features
+            for i in startIdx..<min(startIdx + features, values.count) {
+                lastTimeStepValues.append(values[i])
+            }
+        } else {
+            lastTimeStepValues = values
+        }
+
+        // Use the RNN output more directly - it should already encode voice activity
+        // The model output is designed to indicate voice activity probability
+        let mean = lastTimeStepValues.reduce(0, +) / Float(lastTimeStepValues.count)
+        let variance = lastTimeStepValues.map { pow($0 - mean, 2) }.reduce(0, +) / Float(lastTimeStepValues.count)
         let std = sqrt(variance)
 
-        // Energy-based features (fundamental for VAD)
-        let energy = values.map { $0 * $0 }.reduce(0, +) / Float(values.count)
+        // Calculate key statistics from RNN output
+        let maxValue = lastTimeStepValues.max() ?? 0.0
+        let minValue = lastTimeStepValues.min() ?? 0.0
+        let maxActivation = max(abs(maxValue), abs(minValue))
+        let meanAbsActivation = lastTimeStepValues.map { abs($0) }.reduce(0, +) / Float(lastTimeStepValues.count)
+
+        // Energy in the RNN features
+        let energy = lastTimeStepValues.map { $0 * $0 }.reduce(0, +) / Float(lastTimeStepValues.count)
         let logEnergy = log(max(energy, 1e-10))
 
-        // Temporal features
-        let zeroCrossingRate = calculateZeroCrossingRate(values)
-        let peakCount = calculatePeakCount(values)
-        let _ = Float(peakCount) / Float(values.count)  // peakRatio for future use
+        // Look for strong positive activations which often indicate voice
+        let positiveActivations = lastTimeStepValues.filter { $0 > 0 }
+        let positiveRatio = Float(positiveActivations.count) / Float(lastTimeStepValues.count)
+        let positiveMean =
+            positiveActivations.isEmpty ? 0 : positiveActivations.reduce(0, +) / Float(positiveActivations.count)
 
-        // Speech pattern analysis
-        let speechIndicator = calculateSpeechIndicator(values)
+        // RNN models often use specific neurons for voice detection
+        // Check for strong activations in any neuron
+        let strongActivations = lastTimeStepValues.filter { abs($0) > 0.5 }.count
+        let strongRatio = Float(strongActivations) / Float(lastTimeStepValues.count)
 
-        // Noise detection features
-        let isHighFrequencyNoise = zeroCrossingRate > 0.3  // Too many zero crossings = noise
-        let isVeryHighEnergy = logEnergy > -0.5  // Extremely high energy = often noise
-        let isTooManyPeaks = peakCount > 200  // Too many peaks = noise
+        // Primary scoring based on RNN characteristics
+        // Energy is key indicator - voice typically has higher energy than silence
+        let energyScore = 1.0 / (1.0 + exp(-2.0 * (logEnergy + 10.0)))
 
-        // Balanced feature weighting for better speech/noise discrimination
-        let energyScore = max(0.0, tanh(logEnergy + 5.0) * 0.3)  // Moderate energy threshold
-        let varianceScore = tanh(std * 2.0) * 0.15  // Moderate variance importance
-        let speechScore = speechIndicator * 0.4  // Strong weight for speech patterns
-        let crossingScore = tanh(zeroCrossingRate * 4.0) * 0.15  // Moderate crossing rate
+        // Max activation indicates strong signals
+        let maxScore = 1.0 / (1.0 + exp(-3.0 * (maxActivation - 0.3)))
 
-        // Refined noise detection with moderate penalties
-        var penalties: Float = 0.0
-        if isHighFrequencyNoise { penalties -= 0.2 }  // Moderate penalty for high-frequency noise
-        if isVeryHighEnergy { penalties -= 0.15 }  // Moderate penalty for very high energy
-        if isTooManyPeaks { penalties -= 0.15 }  // Moderate penalty for too many peaks
-        if speechIndicator < 0.3 { penalties -= 0.2 }  // Moderate penalty for non-speech patterns
+        // Mean absolute activation
+        let activationScore = 1.0 / (1.0 + exp(-5.0 * (meanAbsActivation - 0.1)))
 
-        // Moderate additional noise pattern detection
-        if std < 0.005 { penalties -= 0.15 }  // Very little variation = likely noise
-        if logEnergy > 3.0 { penalties -= 0.1 }  // Very high energy = potentially noise
-        if zeroCrossingRate > 0.5 { penalties -= 0.2 }  // Excessive zero crossings = noise
+        // Positive activation bias (voice often has more positive values)
+        let positiveScore = positiveRatio * positiveMean * 2.0
 
-        let baseScore = energyScore + varianceScore + speechScore + crossingScore
-        let combinedScore = max(0.0, baseScore + penalties)  // Ensure non-negative
+        // Strong activation indicator
+        let strongScore = min(1.0, strongRatio * 5.0)
 
-        // Balanced sigmoid for reasonable speech detection
-        let probability = 1.0 / (1.0 + exp(-8.0 * (combinedScore - 0.4)))
+        // Variance score (moderate variance is good for speech)
+        let varianceScore = 1.0 / (1.0 + exp(-4.0 * (std - 0.15)))
 
-        return max(0.0, min(1.0, probability))
+        // Weighted combination
+        let combinedScore =
+            (energyScore * 0.25 + maxScore * 0.20 + activationScore * 0.20 + positiveScore * 0.15 + strongScore * 0.10
+                + varianceScore * 0.10)
+
+        // Final probability with smoother curve
+        let probability = combinedScore
+
+        // Ensure we don't have extreme values
+        let clampedProbability = max(0.001, min(0.999, probability))
+
+        return clampedProbability
     }
 
     /// Calculate number of peaks (local maxima)

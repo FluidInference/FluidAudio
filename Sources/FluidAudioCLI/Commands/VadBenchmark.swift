@@ -62,29 +62,15 @@ struct VadBenchmark {
         print("   Test files: \(numFiles)")
         print("   VAD threshold: \(vadThreshold)")
 
-        let vadManager = VadManager(
+        // Use VadManager with the trained model
+        let vadManager = try await VadManager(
             config: VadConfig(
                 threshold: vadThreshold,
-                chunkSize: 512,
-                debugMode: true
+                debugMode: false
             ))
 
-        // VAD models will be automatically downloaded from Hugging Face if needed
-        print("🔄 VAD models will be auto-downloaded from Hugging Face if needed")
-
-        do {
-            print("🔧 Initializing VAD manager...")
-            try await vadManager.initialize()
-            print("VAD system initialized")
-        } catch {
-            print("Failed to initialize VAD: \(error)")
-            print("   Error type: \(type(of: error))")
-            if let vadError = error as? VadError {
-                print("   VAD Error: \(vadError.localizedDescription)")
-            }
-            print("   Make sure VAD models are available in vadCoreml/ or cached directory")
-            throw error
-        }
+        print("🔧 Using trained VAD model with SE modules")
+        print("VAD system initialized")
 
         // Download test files
         let testFiles = try await downloadVadTestFiles(
