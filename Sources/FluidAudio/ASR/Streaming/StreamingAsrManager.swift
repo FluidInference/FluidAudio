@@ -452,6 +452,9 @@ public actor StreamingAsrManager {
                 // Store the final text for this specific segment in chronological order
                 segmentFinalTexts.append((segmentID, trimmedText))
 
+                // Clean up old segments to prevent unbounded memory growth
+                cleanupOldSegments()
+
                 // Rebuild the complete finalized transcript from segment texts only
                 rebuildFinalizedTranscript()
 
@@ -469,6 +472,26 @@ public actor StreamingAsrManager {
     /// Rebuild the finalized transcript from stored segment texts in chronological order
     private func rebuildFinalizedTranscript() {
         finalizedTranscript = segmentFinalTexts.map { $0.1 }.joined(separator: " ")
+    }
+
+    /// Clean up old segments to prevent unbounded memory growth
+    /// Maintains only the most recent segments, keeping finalizedTranscript intact
+    private func cleanupOldSegments() {
+        let maxRetainedSegments = 50  // Keep only recent segments to prevent unbounded growth
+
+        guard segmentFinalTexts.count > maxRetainedSegments else { return }
+
+        // Remove oldest segments but keep the finalized transcript intact
+        let excessCount = segmentFinalTexts.count - maxRetainedSegments
+
+        // Get UUIDs of segments we're about to remove
+        let removedSegmentIDs = Set(segmentFinalTexts.prefix(excessCount).map { $0.0 })
+
+        // Remove from both collections
+        segmentFinalTexts.removeFirst(excessCount)
+        finalizedSegments.subtract(removedSegmentIDs)
+
+        logger.debug("Cleaned up \(excessCount) old segments, keeping \(self.segmentFinalTexts.count) recent segments")
     }
 
     /// Process current segment depending on available right-context; optionally force finalization
