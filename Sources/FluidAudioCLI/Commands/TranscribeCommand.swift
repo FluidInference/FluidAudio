@@ -268,7 +268,6 @@ enum TranscribeCommand {
             let logger = StreamingLogWriter(fileName: logName)
             await logger.open(
                 with: "# FluidAudio Streaming Log (volatile + final)\n# Created: \(iso.string(from: Date()))")
-            Swift.print("📝 Logging streaming events to: \(await logger.url.path)\n")
             var chunksProcessed = 0
 
             // Listen for snapshot updates in real-time (finalized + volatile)
