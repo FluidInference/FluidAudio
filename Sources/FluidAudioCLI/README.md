@@ -180,7 +180,7 @@ swift run fluidaudio download --list
 ```
 
 ### Transcription Output
-- Real-time updates showing volatile and confirmed text
+- Real-time updates showing volatile and finalized text
 - Final transcription with performance metrics
 - RTFx (Real-Time Factor) showing processing speed
 

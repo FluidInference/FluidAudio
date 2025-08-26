@@ -10,9 +10,11 @@ actor StreamingUI {
     private var terminalSize: (columns: Int, rows: Int)
     private var currentTranscription: String = ""
     private var volatileText: String = ""
-    private var confirmedText: String = ""
+    private var finalizedText: String = ""
     private var stats: StreamingStats = StreamingStats()
     private var isVisible: Bool = false
+    private var isInitialized: Bool = false
+    private var isCompleted: Bool = false
     private let supportsANSI: Bool
 
     struct StreamingStats {
@@ -36,10 +38,25 @@ actor StreamingUI {
         self.supportsANSI = TerminalUI.supportsANSI
     }
 
-    /// Initialize the UI display
+    /// Show initialization UI immediately
+    func showInitialization() {
+        if supportsANSI {
+            TerminalUI.clearScreen()
+            TerminalUI.hideCursor()
+            render()
+            isVisible = true
+        } else {
+            print("FluidAudio Streaming Transcription")
+            print("Initializing models and audio processing...")
+            print("")
+        }
+    }
+
+    /// Initialize the UI display after models are loaded
     func start(audioDuration: Double, totalChunks: Int) {
         stats.audioDuration = audioDuration
         stats.totalChunks = totalChunks
+        isInitialized = true
 
         if supportsANSI {
             TerminalUI.clearScreen()
@@ -48,16 +65,29 @@ actor StreamingUI {
             isVisible = true
         } else {
             // Fallback to simple text output
-            print("🎙️ FluidAudio Streaming Transcription")
+            print("FluidAudio Streaming Transcription")
             print("Audio Duration: \(String(format: "%.1f", audioDuration))s")
             print("Simulating real-time audio with 1-second chunks...")
             print("")
         }
     }
 
-    /// Clean up the UI
+    /// Clean up the UI with optional wait for user input
     func finish() {
         if supportsANSI && isVisible {
+            // Check if we're in CI environment
+            if ProcessInfo.processInfo.environment["CI"] != nil {
+                // In CI, exit immediately
+                TerminalUI.showCursor()
+                return
+            }
+
+            // Wait for user input before exiting (non-CI mode)
+            if isCompleted {
+                // Cursor is already positioned, just wait for Enter
+                _ = readLine()
+            }
+
             TerminalUI.showCursor()
         }
     }
@@ -83,10 +113,10 @@ actor StreamingUI {
     }
 
     /// Update transcription text
-    func updateTranscription(confirmed: String, volatile: String) {
-        confirmedText = confirmed
+    func updateTranscription(finalized: String, volatile: String) {
+        finalizedText = finalized
         volatileText = volatile
-        currentTranscription = confirmed + (volatile.isEmpty ? "" : " " + volatile)
+        currentTranscription = finalized + (volatile.isEmpty ? "" : " " + volatile)
 
         if supportsANSI && isVisible {
             render()
@@ -95,65 +125,53 @@ actor StreamingUI {
             if !volatile.isEmpty {
                 print("Volatile: \(volatile)")
             }
-            if !confirmed.isEmpty {
-                print("Confirmed: \(confirmed)")
+            if !finalized.isEmpty {
+                print("Finalized: \(finalized)")
             }
         }
     }
 
-    /// Add confirmed text update
-    func addConfirmedUpdate(_ text: String) {
-        if !confirmedText.isEmpty && !text.isEmpty {
-            confirmedText += " "
+    /// Add finalized text update
+    func addFinalizedUpdate(_ text: String) {
+        if !finalizedText.isEmpty && !text.isEmpty {
+            finalizedText += " "
         }
-        confirmedText += text
-        currentTranscription = confirmedText + (volatileText.isEmpty ? "" : " " + volatileText)
+        finalizedText += text
+        currentTranscription = finalizedText + (volatileText.isEmpty ? "" : " " + volatileText)
 
         if supportsANSI && isVisible {
             render()
         } else {
-            print("Confirmed: \(text)")
+            print("Finalized: \(text)")
         }
     }
 
     /// Update volatile text
     func updateVolatileText(_ text: String) {
         volatileText = text
-        currentTranscription = confirmedText + (volatileText.isEmpty ? "" : " " + volatileText)
+        currentTranscription = finalizedText + (volatileText.isEmpty ? "" : " " + volatileText)
 
         if supportsANSI && isVisible {
             render()
         }
     }
 
-    /// Show final results
+    /// Show final results in the TUI
     func showFinalResults(finalText: String, totalTime: Double) {
-        let finalRtfx = totalTime > 0 ? stats.audioDuration / totalTime : 0
+        // Update transcription to final text and mark as completed
+        finalizedText = finalText
+        volatileText = ""
+        currentTranscription = finalText
+        isCompleted = true
 
         if supportsANSI && isVisible {
-            // Move cursor below the box and show final results
-            let finalResultsRow = 12 + max(min(terminalSize.rows - 12, 6), 3) + 2
-            TerminalUI.moveTo(row: finalResultsRow, column: 1)
-            TerminalUI.showCursor()
-            Swift.print("\n" + String(repeating: "═", count: 50))
-            Swift.print("FINAL TRANSCRIPTION RESULTS")
-            Swift.print(String(repeating: "═", count: 50))
-            Swift.print("\nFinal transcription:")
-            Swift.print(finalText)
-            Swift.print("\nPerformance:")
-            Swift.print("  Audio duration: \(String(format: "%.2f", stats.audioDuration))s")
-            Swift.print("  Processing time: \(String(format: "%.2f", totalTime))s")
-            Swift.print("  RTFx: \(String(format: "%.2f", finalRtfx))x")
+            render()
         } else {
             Swift.print("\n" + String(repeating: "=", count: 50))
             Swift.print("FINAL TRANSCRIPTION RESULTS")
             Swift.print(String(repeating: "=", count: 50))
             Swift.print("\nFinal transcription:")
             Swift.print(finalText)
-            Swift.print("\nPerformance:")
-            Swift.print("  Audio duration: \(String(format: "%.2f", stats.audioDuration))s")
-            Swift.print("  Processing time: \(String(format: "%.2f", totalTime))s")
-            Swift.print("  RTFx: \(String(format: "%.2f", finalRtfx))x")
         }
     }
 
@@ -169,25 +187,36 @@ actor StreamingUI {
         TerminalUI.print("\n")
 
         // Subtitle
-        TerminalUI.print(box.contentLine(" Simulating real-time audio with 1-second chunks"))
+        if isCompleted {
+            TerminalUI.print(box.contentLine(" ✅ Transcription Complete - Press Enter to exit"))
+        } else if isInitialized {
+            TerminalUI.print(box.contentLine(" Audio is throttled to simulate real-time streaming..."))
+        } else {
+            TerminalUI.print(box.contentLine(" Initializing models and loading audio..."))
+        }
         TerminalUI.print("\n")
 
         // Divider
         TerminalUI.print(box.middleBorder())
         TerminalUI.print("\n")
 
-        // Progress section
-        let progressPercent = Int(stats.progressPercentage * 100)
-        let progressText =
-            "\(progressBar.render(progress: stats.progressPercentage)) \(progressPercent)% (\(String(format: "%.1f", Double(stats.chunksProcessed) / Double(stats.totalChunks) * stats.audioDuration))s / \(String(format: "%.1f", stats.audioDuration))s)"
-        TerminalUI.print(box.contentLine(" Progress: " + progressText))
-        TerminalUI.print("\n")
-
-        // Stats section
-        let statsText =
-            " Speed: \(String(format: "%.1f", stats.rtfx))x RTF | Chunks: \(stats.chunksProcessed)/\(stats.totalChunks) | Elapsed: \(String(format: "%.1f", stats.elapsedTime))s"
-        TerminalUI.print(box.contentLine(statsText))
-        TerminalUI.print("\n")
+        // Progress section - show elapsed time vs total duration
+        if isInitialized && !isCompleted {
+            let timeProgress = stats.audioDuration > 0 ? min(stats.elapsedTime / stats.audioDuration, 1.0) : 0.0
+            let progressPercent = Int(timeProgress * 100)
+            let progressText =
+                "\(progressBar.render(progress: timeProgress)) \(progressPercent)% (\(String(format: "%.1f", stats.elapsedTime))s / \(String(format: "%.1f", stats.audioDuration))s)"
+            TerminalUI.print(box.contentLine(" Progress: " + progressText))
+            TerminalUI.print("\n")
+        } else if isCompleted {
+            // Show completion status
+            let progressText = "\(progressBar.render(progress: 1.0)) 100% - Transcription completed"
+            TerminalUI.print(box.contentLine(" Status: " + progressText))
+            TerminalUI.print("\n")
+        } else {
+            TerminalUI.print(box.contentLine(" Status: Initializing models and loading audio..."))
+            TerminalUI.print("\n")
+        }
 
         // Divider
         TerminalUI.print(box.middleBorder())
@@ -216,7 +245,7 @@ actor StreamingUI {
             let lineIndex = startIndex + i
             if lineIndex < transcriptionLines.count {
                 let line = transcriptionLines[lineIndex]
-                // Highlight confirmed vs volatile text
+                // Highlight finalized vs volatile text
                 let formattedLine = formatTranscriptionLine(line)
                 TerminalUI.print(box.contentLine(" " + formattedLine))
             } else {
@@ -260,13 +289,13 @@ actor StreamingUI {
         return lines.isEmpty ? [""] : lines
     }
 
-    /// Format transcription line with colors for confirmed vs volatile text
+    /// Format transcription line with colors for finalized vs volatile text
     private func formatTranscriptionLine(_ line: String) -> String {
         guard supportsANSI else { return line }
 
         // Simple approach: if the line contains text from volatile part, show it dimmed
         if volatileText.isEmpty {
-            return line  // All confirmed text
+            return line  // All finalized text
         }
 
         // Find where volatile text starts in the current line

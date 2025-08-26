@@ -1,13 +1,31 @@
 #if os(macOS)
 import AVFoundation
+import CoreMedia
 import FluidAudio
 import Foundation
 
-/// Thread-safe tracker for transcription updates and audio position
+/// Debug utility for tracking transcription metrics and performance
+///
+/// **Note**: This is only used by the CLI for debugging and metrics collection.
+/// For UI applications, use `StreamingAsrManager.snapshots` or `StreamingAsrManager.results` directly.
+///
+/// Example:
+/// ```swift
+/// let tracker = TranscriptionTracker()
+///
+/// // Track metrics during streaming
+/// await tracker.addVolatileUpdate("Partial text...")
+/// await tracker.addFinalizedUpdate("Final text")
+/// await tracker.updateAudioPosition(15.3) // seconds
+///
+/// // Get performance stats
+/// let stats = await tracker.getPerformanceStats()
+/// print("Processed \(stats.volatileCount) volatile updates in \(stats.elapsedTime)s")
+/// ```
 @available(macOS 13.0, *)
 actor TranscriptionTracker {
     private var volatileUpdates: [String] = []
-    private var confirmedUpdates: [String] = []
+    private var finalizedUpdates: [String] = []
     private var currentAudioPosition: Double = 0.0
     private let startTime: Date
 
@@ -19,8 +37,8 @@ actor TranscriptionTracker {
         volatileUpdates.append(text)
     }
 
-    func addConfirmedUpdate(_ text: String) {
-        confirmedUpdates.append(text)
+    func addFinalizedUpdate(_ text: String) {
+        finalizedUpdates.append(text)
     }
 
     func updateAudioPosition(_ position: Double) {
@@ -39,8 +57,67 @@ actor TranscriptionTracker {
         return volatileUpdates.count
     }
 
-    func getConfirmedCount() -> Int {
-        return confirmedUpdates.count
+    func getFinalizedCount() -> Int {
+        return finalizedUpdates.count
+    }
+
+    /// Get comprehensive performance statistics
+    func getPerformanceStats() -> PerformanceStats {
+        return PerformanceStats(
+            volatileCount: volatileUpdates.count,
+            finalizedCount: finalizedUpdates.count,
+            elapsedTime: Date().timeIntervalSince(startTime),
+            audioPosition: currentAudioPosition
+        )
+    }
+}
+
+/// Performance statistics from transcription tracking
+struct PerformanceStats {
+    let volatileCount: Int
+    let finalizedCount: Int
+    let elapsedTime: TimeInterval
+    let audioPosition: TimeInterval
+}
+
+/// Thread-safe file logger for streaming events
+@available(macOS 13.0, *)
+actor StreamingLogWriter {
+    private var handle: FileHandle?
+    private(set) var url: URL
+
+    init(fileName: String) {
+        let cwd = FileManager.default.currentDirectoryPath
+        self.url = URL(fileURLWithPath: cwd).appendingPathComponent(fileName)
+    }
+
+    func open(with header: String) async {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        do {
+            handle = try FileHandle(forWritingTo: url)
+            if let data = (header + "\n").data(using: .utf8) {
+                try handle?.write(contentsOf: data)
+            }
+        } catch {
+            Swift.print("⚠️ Failed to open log file: \(error)")
+        }
+    }
+
+    func write(_ line: String) async {
+        guard let h = handle else { return }
+        do {
+            if let data = (line + "\n").data(using: .utf8) {
+                try h.write(contentsOf: data)
+            }
+        } catch {}
+    }
+
+    func close() async {
+        do {
+            try handle?.synchronize()
+            try handle?.close()
+        } catch {}
+        handle = nil
     }
 }
 
@@ -77,45 +154,12 @@ enum TranscribeCommand {
         print("Audio Transcription")
         print("===================\n")
 
-        // Test loading audio at different sample rates
-        await testAudioConversion(audioFile: audioFile)
-
         if streamingMode {
-            print(
-                "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
-            )
+            print("Streaming mode enabled: volatile and finalized updates.\n")
             await testStreamingTranscription(audioFile: audioFile)
         } else {
             print("Using batch mode with direct processing\n")
             await testBatchTranscription(audioFile: audioFile)
-        }
-    }
-
-    /// Test audio conversion capabilities
-    private static func testAudioConversion(audioFile: String) async {
-        print("Testing Audio Conversion")
-        print("--------------------------")
-
-        do {
-            // Load the audio file info
-            let audioFileURL = URL(fileURLWithPath: audioFile)
-            let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
-            let format = audioFileHandle.processingFormat
-
-            print("Original format:")
-            print("  Sample rate: \(format.sampleRate) Hz")
-            print("  Channels: \(format.channelCount)")
-            print("  Format: \(format.commonFormat.rawValue)")
-            print(
-                "  Duration: \(String(format: "%.2f", Double(audioFileHandle.length) / format.sampleRate)) seconds"
-            )
-            print()
-
-            // The StreamingAsrManager will handle conversion automatically
-            print("StreamingAsrManager will automatically convert to 16kHz mono\n")
-
-        } catch {
-            print("Failed to load audio file info: \(error)")
         }
     }
 
@@ -172,9 +216,6 @@ enum TranscribeCommand {
             print("  RTFx: \(String(format: "%.2f", rtfx))x")
             print("  Confidence: \(String(format: "%.3f", result.confidence))")
 
-            // Cleanup
-            asrManager.cleanup()
-
         } catch {
             print("Batch transcription failed: \\(error)")
         }
@@ -182,8 +223,8 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(audioFile: String) async {
-        // Use optimized streaming configuration
-        let config = StreamingAsrConfig.streaming
+        // Use optimized real-time configuration
+        let config = StreamingAsrConfig.realtime
 
         // Create StreamingAsrManager
         let streamingAsr = StreamingAsrManager(config: config)
@@ -219,42 +260,56 @@ enum TranscribeCommand {
 
             // Track transcription updates
             let tracker = TranscriptionTracker()
+            // Logging setup
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let ts = iso.string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let logName = "asr_stream_\(ts).log"
+            let logger = StreamingLogWriter(fileName: logName)
+            await logger.open(
+                with: "# FluidAudio Streaming Log (volatile + final)\n# Created: \(iso.string(from: Date()))")
+            Swift.print("📝 Logging streaming events to: \(await logger.url.path)\n")
             var chunksProcessed = 0
 
-            // Listen for updates in real-time
+            // Listen for snapshot updates in real-time (finalized + volatile)
             let updateTask = Task {
-                for await update in await streamingAsr.transcriptionUpdates {
-                    // Debug: show transcription updates
-                    let updateType = update.isConfirmed ? "CONFIRMED" : "VOLATILE"
-                    print("[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
-
-                    if update.isConfirmed {
-                        await streamingUI.addConfirmedUpdate(update.text)
-                        await tracker.addConfirmedUpdate(update.text)
-                    } else {
-                        await streamingUI.updateVolatileText(update.text)
-                        await tracker.addVolatileUpdate(update.text)
+                for await snapshot in await streamingAsr.snapshots {
+                    let finalized = String(snapshot.finalized.characters)
+                    let volatile = snapshot.volatile.map { String($0.characters) } ?? ""
+                    await streamingUI.updateTranscription(finalized: finalized, volatile: volatile)
+                    if !volatile.isEmpty {
+                        await tracker.addVolatileUpdate(volatile)
+                    }
+                    if !finalized.isEmpty {
+                        await tracker.addFinalizedUpdate(finalized)
                     }
                 }
             }
 
-            // Stream audio chunks continuously - no artificial delays
+            // Log precise volatile/final events from segment results
+            let loggingTask = Task {
+                for await result in await streamingAsr.results {
+                    let now = iso.string(from: Date())
+                    let kind = result.isFinal ? "FINAL" : "VOLATILE"
+                    let start = result.audioTimeRange.start.seconds
+                    let dur = result.audioTimeRange.duration.seconds
+                    let conf = String(format: "%.3f", result.confidence)
+                    let text = String(result.attributedText.characters)
+                    let line =
+                        "[\(now)] [\(kind)] seg=\(result.segmentID.uuidString.prefix(8)) rev=\(result.revision) t=\(String(format: "%.2f", start)) dur=\(String(format: "%.2f", dur)) conf=\(conf) text=\(text)"
+                    await logger.write(line)
+                }
+            }
+
             var position = 0
             let startTime = Date()
-
-            print("Streaming audio continuously (no artificial delays)...")
-            print(
-                "Using \(String(format: "%.1f", chunkDuration))s chunks with \(String(format: "%.1f", config.leftContextSeconds))s left context, \(String(format: "%.1f", config.rightContextSeconds))s right context"
-            )
-            print("Watch for real-time hypothesis updates being replaced by confirmed text\n")
 
             while position < Int(buffer.frameLength) {
                 let remainingSamples = Int(buffer.frameLength) - position
                 let chunkSize = min(samplesPerChunk, remainingSamples)
 
-                // Create a chunk buffer
                 guard
-                    let chunkBuffer = AVAudioPCMBuffer(
+                    let chunkBuffer: AVAudioPCMBuffer = AVAudioPCMBuffer(
                         pcmFormat: format,
                         frameCapacity: AVAudioFrameCount(chunkSize)
                     )
@@ -289,22 +344,27 @@ enum TranscribeCommand {
                 position += chunkSize
 
                 // Small yield to allow UI updates to show
+                try await Task.sleep(nanoseconds: 100_000_000)  // 100ms yield
                 await Task.yield()
+
             }
 
             // Allow brief time for final processing
-            try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+            try await Task.sleep(nanoseconds: 1000_000_000)  // 1 second delay
 
             // Finalize transcription
             let finalText = try await streamingAsr.finish()
 
-            // Cancel update task
+            // Cancel background tasks
             updateTask.cancel()
+            loggingTask.cancel()
 
             // Show final results with actual processing performance
             let processingTime = await tracker.getElapsedProcessingTime()
             await streamingUI.showFinalResults(finalText: finalText, totalTime: processingTime)
             await streamingUI.finish()
+            await logger.write("# Final transcription:\n\(finalText)")
+            await logger.close()
 
         } catch {
             print("Streaming transcription failed: \(error)")

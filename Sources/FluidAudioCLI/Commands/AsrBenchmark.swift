@@ -81,8 +81,6 @@ public class ASRBenchmark {
         print("WARNING: Running in DEBUG mode!")
         print("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
         print("")
-        // Add a small delay so user sees the warning
-        try? await Task.sleep(nanoseconds: 2_000_000_000)  // 2 seconds
         #else
         print("Running in RELEASE mode - optimal performance")
         #endif

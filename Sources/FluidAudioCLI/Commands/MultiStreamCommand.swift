@@ -122,16 +122,20 @@ enum MultiStreamCommand {
             )
             print("Created system audio stream\n")
 
-            // Listen for updates from both streams (only if debug enabled)
+            // Listen for snapshot updates from both streams
             let micTask = Task {
-                for await update in await micStream.transcriptionUpdates {
-                    print("[MIC] \(update.isConfirmed ? "✓" : "~") \(update.text)")
+                for await snapshot in await micStream.snapshots {
+                    let fin = String(snapshot.finalized.characters)
+                    let vol = snapshot.volatile.map { String($0.characters) } ?? ""
+                    print("[MIC] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
                 }
             }
 
             let systemTask = Task {
-                for await update in await systemStream.transcriptionUpdates {
-                    print("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
+                for await snapshot in await systemStream.snapshots {
+                    let fin = String(snapshot.finalized.characters)
+                    let vol = snapshot.volatile.map { String($0.characters) } ?? ""
+                    print("[SYS] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
                 }
             }
 

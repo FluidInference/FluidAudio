@@ -82,7 +82,6 @@ struct ChunkProcessor {
         if leftStart >= rightEnd { return ([], [], 0) }
 
         let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
-        let chunkAudioDuration = Double(chunkSamples.count) / Double(sampleRate)
 
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
