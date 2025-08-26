@@ -341,7 +341,7 @@ public class FLEURSBenchmark {
 
     /// Run multilingual benchmark
     public func runMultilingualBenchmark(asrManager: AsrManager) async throws -> [LanguageResults] {
-        print("\n🌍 Starting FLEURS Multilingual ASR Benchmark")
+        print("\n Starting FLEURS Multilingual ASR Benchmark")
         print("=" * 50)
 
         var results: [LanguageResults] = []
@@ -437,9 +437,6 @@ public class FLEURSBenchmark {
                 }
 
                 let audioDuration = Double(audioSamples.count) / 16000.0
-
-                // Reset decoder state for each new file to avoid contamination
-                try await asrManager.resetDecoderState(for: .microphone)
 
                 // Transcribe
                 let result = try await asrManager.transcribe(audioSamples)
@@ -800,7 +797,7 @@ extension FLEURSBenchmark {
         // If no languages specified, use all supported languages
         let finalLanguages = languages ?? Array(tempBenchmark.supportedLanguages.keys).sorted()
 
-        print("\n🌍 FLEURS Multilingual ASR Benchmark")
+        print("\n FLEURS Multilingual ASR Benchmark")
         print("=" * 50)
         print(
             "Languages: \(finalLanguages.count == tempBenchmark.supportedLanguages.count ? "all (\(finalLanguages.count) languages)" : finalLanguages.joined(separator: ", "))"
