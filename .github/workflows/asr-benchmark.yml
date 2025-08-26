@@ -177,17 +177,17 @@ jobs:
             | test-clean | ${{ steps.benchmark.outputs.CLEAN_WER_AVG }}% | ${{ steps.benchmark.outputs.CLEAN_WER_MED }}% | ${{ steps.benchmark.outputs.CLEAN_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.CLEAN_WER_AVG }}') < 10 ? '✅' : '${{ steps.benchmark.outputs.CLEAN_WER_AVG }}' === 'N/A' ? '❌' : '⚠️'} |
             | test-other | ${{ steps.benchmark.outputs.OTHER_WER_AVG }}% | ${{ steps.benchmark.outputs.OTHER_WER_MED }}% | ${{ steps.benchmark.outputs.OTHER_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.OTHER_WER_AVG }}') < 20 ? '✅' : '${{ steps.benchmark.outputs.OTHER_WER_AVG }}' === 'N/A' ? '❌' : '⚠️'} |
 
-            ### Streaming Infrastructure Test
-            | Metric | Value | Description |
-            |--------|-------|-------------|
-            | WER | ${{ steps.benchmark.outputs.STREAMING_WER }}% | Word Error Rate in streaming mode |
-            | RTFx | ${{ steps.benchmark.outputs.STREAMING_RTFx }}x | Streaming real-time factor |
-            | Avg Chunk Time | ${{ steps.benchmark.outputs.STREAMING_AVG_CHUNK }}s | Average time to process each chunk |
-            | Max Chunk Time | ${{ steps.benchmark.outputs.STREAMING_MAX_CHUNK }}s | Maximum chunk processing time |
-            | First Token | ${{ steps.benchmark.outputs.STREAMING_FIRST_TOKEN }}s | Latency to first transcription token |
-            | Total Chunks | ${{ steps.benchmark.outputs.STREAMING_CHUNKS }} | Number of chunks processed |
+            ### 🚀 Streaming Performance Test
+            | Metric | Value | Status | Description |
+            |--------|-------|--------|-------------|
+            | WER | ${{ steps.benchmark.outputs.STREAMING_WER }}% | ${parseFloat('${{ steps.benchmark.outputs.STREAMING_WER }}') < 15 ? '✅' : '${{ steps.benchmark.outputs.STREAMING_WER }}' === 'N/A' ? '❌' : '⚠️'} | Word Error Rate in streaming mode |
+            | RTFx | ${{ steps.benchmark.outputs.STREAMING_RTFx }}x | ${parseFloat('${{ steps.benchmark.outputs.STREAMING_RTFx }}') > 0.1 ? '✅' : '❌'} | Streaming real-time factor |
+            | Avg Chunk Time | ${{ steps.benchmark.outputs.STREAMING_AVG_CHUNK }}s | ${parseFloat('${{ steps.benchmark.outputs.STREAMING_AVG_CHUNK }}') < 2.0 ? '✅' : '⚠️'} | Average time to process each chunk |
+            | Max Chunk Time | ${{ steps.benchmark.outputs.STREAMING_MAX_CHUNK }}s | ${parseFloat('${{ steps.benchmark.outputs.STREAMING_MAX_CHUNK }}') < 5.0 ? '✅' : '⚠️'} | Maximum chunk processing time |
+            | First Token | ${{ steps.benchmark.outputs.STREAMING_FIRST_TOKEN }}s | ${parseFloat('${{ steps.benchmark.outputs.STREAMING_FIRST_TOKEN }}') < 3.0 ? '✅' : '${{ steps.benchmark.outputs.STREAMING_FIRST_TOKEN }}' === 'N/A' ? '❌' : '⚠️'} | Latency to first transcription token |
+            | Total Chunks | ${{ steps.benchmark.outputs.STREAMING_CHUNKS }} | ${parseFloat('${{ steps.benchmark.outputs.STREAMING_CHUNKS }}') > 0 ? '✅' : '❌'} | Number of chunks processed |
 
-            <sub>*Streaming test uses 5 files with 0.5s chunks to simulate real-time audio streaming*</sub>
+            <sub>*Streaming test validates --streaming option with 5 files using 0.5s chunks to simulate real-time audio streaming*</sub>
 
             <sub>${{ steps.benchmark.outputs.FILES_COUNT }} files per dataset • Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
 

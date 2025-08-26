@@ -131,7 +131,6 @@ actor StreamingUI {
         }
     }
 
-    /// Add finalized text update
     func addFinalizedUpdate(_ text: String) {
         if !finalizedText.isEmpty && !text.isEmpty {
             finalizedText += " "
@@ -156,9 +155,7 @@ actor StreamingUI {
         }
     }
 
-    /// Show final results in the TUI
     func showFinalResults(finalText: String, totalTime: Double) {
-        // Update transcription to final text and mark as completed
         finalizedText = finalText
         volatileText = ""
         currentTranscription = finalText
@@ -190,7 +187,13 @@ actor StreamingUI {
         if isCompleted {
             TerminalUI.print(box.contentLine(" ✅ Transcription Complete - Press Enter to exit"))
         } else if isInitialized {
-            TerminalUI.print(box.contentLine(" Audio is throttled to simulate real-time streaming..."))
+            if stats.audioDuration < 0 {
+                // Microphone mode
+                TerminalUI.print(box.contentLine(" 🎙️ Live microphone transcription - Press Enter to stop"))
+            } else {
+                // File mode
+                TerminalUI.print(box.contentLine(" Audio is throttled to simulate real-time streaming..."))
+            }
         } else {
             TerminalUI.print(box.contentLine(" Initializing models and loading audio..."))
         }
@@ -202,11 +205,11 @@ actor StreamingUI {
 
         // Progress section - show elapsed time vs total duration
         if isInitialized && !isCompleted {
-            let timeProgress = stats.audioDuration > 0 ? min(stats.elapsedTime / stats.audioDuration, 1.0) : 0.0
-            let progressPercent = Int(timeProgress * 100)
-            let progressText =
-                "\(progressBar.render(progress: timeProgress)) \(progressPercent)% (\(String(format: "%.1f", stats.elapsedTime))s / \(String(format: "%.1f", stats.audioDuration))s)"
-            TerminalUI.print(box.contentLine(" Progress: " + progressText))
+            if stats.audioDuration < 0 {
+                // Microphone mode - just show elapsed time
+                let elapsedText = String(format: "%.1f", stats.elapsedTime)
+                TerminalUI.print(box.contentLine(" Status: Recording... (\(elapsedText)s elapsed)"))
+            }
             TerminalUI.print("\n")
         } else if isCompleted {
             // Show completion status

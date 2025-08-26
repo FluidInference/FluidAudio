@@ -11,74 +11,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  cross-platform-build:
-    name: Cross-Platform Build Check
-    runs-on: macos-15
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-      
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.1"
-      
-      - name: Cache iOS Platform
-        uses: actions/cache@v4
-        with:
-          path: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform
-          key: ios-platform-${{ runner.os }}-xcode-${{ hashFiles('/Applications/Xcode.app/Contents/version.plist') }}
-          restore-keys: |
-            ios-platform-${{ runner.os }}-xcode-
-      
-      - name: Build for macOS
-        run: |
-          echo "Building for macOS..."
-          swift build --product FluidAudio
-      
-      - name: Clean build artifacts
-        run: rm -rf .build .swiftpm
-      
-      - name: Setup iOS Platform
-        run: |
-          echo "Ensuring iOS platform is installed..."
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-          sudo xcodebuild -downloadPlatform iOS || echo "iOS platform download failed, may already be installed"
-          
-          echo "Available SDKs:"
-          xcodebuild -showsdks
-          
-          echo "Available iOS simulators:"
-          xcrun simctl list devices available | grep iPhone
-      
-      - name: Build for iOS
-        run: |
-          echo "Building for iOS..."
-          
-          # Show available destinations
-          echo "Available destinations:"
-          xcodebuild -scheme FluidAudio -showdestinations
-          
-          # Try building with iPhone 16 Pro and iOS 18.1 (known to be available on macOS 15)
-          echo "Building with iPhone 16 Pro (iOS 18.1)..."
-          xcodebuild -scheme FluidAudio \
-            -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.1' \
-            -derivedDataPath .build/ios \
-            build CODE_SIGNING_ALLOWED=NO
-
   build-and-test-macos:
-    name: Build and Test Swift Package (macOS)
+    name: Build and Test (macOS)
     runs-on: macos-15
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Check versions
-        run: |
-          swift --version
-          xcodebuild -version
 
       - name: Build package
         run: swift build
@@ -87,3 +26,41 @@ jobs:
         run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 10
 
+      - name: Run streaming-specific tests  
+        run: |
+          echo "Testing streaming functionality..."
+          swift test --filter StreamingIntegrationTests
+          swift test --filter StreamingAsrManagerTests
+        timeout-minutes: 5
+
+      - name: Test CLI streaming flag validation
+        run: |
+          echo "Testing CLI streaming option parsing..."
+          # Test that the streaming flag exists and is parseable
+          swift run fluidaudio transcribe --help | grep -q "streaming" || (echo "Error: --streaming option not found in help"; exit 1)
+          swift run fluidaudio asr-benchmark --help | grep -q "test-streaming" || (echo "Error: --test-streaming option not found in help"; exit 1)
+          echo "✅ CLI streaming options validated successfully"
+        timeout-minutes: 2
+
+  build-ios:
+    name: Build (iOS)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: List available simulators
+        run: xcrun simctl list devices available
+
+      - name: Install iOS platform
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.app
+          xcodebuild -downloadPlatform iOS
+
+      - name: Build for iOS
+        run: |
+          xcodebuild -scheme FluidAudio \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath .build \
+            build
