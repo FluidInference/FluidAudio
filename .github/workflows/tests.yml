@@ -23,14 +23,6 @@ jobs:
         with:
           swift-version: "6.1"
       
-      - name: Cache iOS Platform
-        uses: actions/cache@v4
-        with:
-          path: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform
-          key: ios-platform-${{ runner.os }}-xcode-${{ hashFiles('/Applications/Xcode.app/Contents/version.plist') }}
-          restore-keys: |
-            ios-platform-${{ runner.os }}-xcode-
-      
       - name: Build for macOS
         run: |
           echo "Building for macOS..."
@@ -41,29 +33,26 @@ jobs:
       
       - name: Setup iOS Platform
         run: |
-          echo "Ensuring iOS platform is installed..."
+          echo "Setting up iOS platform..."
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-          sudo xcodebuild -downloadPlatform iOS || echo "iOS platform download failed, may already be installed"
           
-          echo "Available SDKs:"
+          # Accept license and run first launch
+          sudo xcodebuild -license accept || true
+          xcodebuild -runFirstLaunch || true
+          
+          # Download iOS platform (this takes ~10 minutes)
+          echo "Downloading iOS platform (this may take up to 10 minutes)..."
+          xcodebuild -downloadPlatform iOS
+          
+          # Verify installation
+          echo "Verifying iOS platform installation..."
           xcodebuild -showsdks
-          
-          echo "Available iOS simulators:"
-          xcrun simctl list devices available | grep iPhone
       
       - name: Build for iOS
         run: |
-          echo "Building for iOS..."
-          
-          # Show available destinations
-          echo "Available destinations:"
-          xcodebuild -scheme FluidAudio -showdestinations
-          
-          # Try building with iPhone 16 Pro and iOS 18.1 (known to be available on macOS 15)
-          echo "Building with iPhone 16 Pro (iOS 18.1)..."
+          echo "Building for iOS (generic)..."
           xcodebuild -scheme FluidAudio \
-            -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.1' \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath .build/ios \
             build CODE_SIGNING_ALLOWED=NO
 
@@ -86,4 +75,3 @@ jobs:
       - name: Run tests
         run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 10
-
