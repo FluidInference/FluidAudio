@@ -102,6 +102,22 @@ jobs:
           if [ ! -z "$SIMULATOR" ]; then
             echo "Using simulator: $SIMULATOR"
             
+            # Verify simulator is accessible to xcodebuild with retry mechanism
+            echo "Verifying simulator availability for xcodebuild..."
+            for attempt in {1..5}; do
+              echo "Verification attempt $attempt/5"
+              if xcodebuild -scheme FluidAudio -showdestinations -quiet 2>/dev/null | grep -q "$SIMULATOR"; then
+                echo "✅ Simulator verified for xcodebuild"
+                break
+              elif [ $attempt -eq 5 ]; then
+                echo "⚠️ Simulator not available to xcodebuild after 5 attempts"
+                break
+              else
+                echo "Waiting for simulator to be available..."
+                sleep 5
+              fi
+            done
+            
             # Try building with specific simulator
             echo "Attempting iOS build with simulator: $SIMULATOR"
             if xcodebuild -scheme FluidAudio \
@@ -117,6 +133,10 @@ jobs:
           
           # Fallback: Try multiple destination approaches
           echo "Trying fallback approaches..."
+          
+          # Show available destinations for debugging
+          echo "📱 Available destinations for FluidAudio:"
+          xcodebuild -scheme FluidAudio -showdestinations 2>/dev/null | grep -E "(platform|name)" || echo "Failed to get destinations"
           
           echo "Attempting iOS build with generic destination..."
           if xcodebuild -scheme FluidAudio \
@@ -136,8 +156,26 @@ jobs:
               -allowProvisioningUpdates; then
               echo "✅ 'Any iOS Simulator' build succeeded"
             else
-              echo "❌ All approaches failed"
-              exit 1
+              echo "⚠️ 'Any iOS Simulator' failed, trying with any available simulator UUID..."
+              # Try with first available simulator by UUID
+              SIMULATOR_UUID=$(xcrun simctl list devices available | grep -i "iphone" | head -1 | grep -o '([A-F0-9-]\{36\})' | tr -d '()')
+              if [ ! -z "$SIMULATOR_UUID" ]; then
+                echo "Trying with simulator UUID: $SIMULATOR_UUID"
+                if xcodebuild -scheme FluidAudio \
+                  -sdk iphonesimulator \
+                  -destination "platform=iOS Simulator,id=$SIMULATOR_UUID" \
+                  -derivedDataPath .build/ios \
+                  build CODE_SIGNING_ALLOWED=NO \
+                  -allowProvisioningUpdates; then
+                  echo "✅ UUID-based iOS build succeeded"
+                else
+                  echo "❌ All approaches failed (including UUID-based)"
+                  exit 1
+                fi
+              else
+                echo "❌ No simulator UUID found - all approaches failed"
+                exit 1
+              fi
             fi
           fi
 
