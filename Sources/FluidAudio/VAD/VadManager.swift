@@ -60,13 +60,13 @@ public class VadManager: @unchecked Sendable {
         // Use DownloadUtils to load the model (handles downloading if needed)
         let models = try await DownloadUtils.loadModels(
             .vad,
-            modelNames: ["silero_vad"],
+            modelNames: ["silero_vad.mlmodelc"],
             directory: baseDirectory.appendingPathComponent("Models"),
             computeUnits: config.computeUnits
         )
 
         // Get the VAD model
-        guard let vadModel = models["silero_vad"] else {
+        guard let vadModel = models["silero_vad.mlmodelc"] else {
             logger.error("Failed to load VAD model from downloaded models")
             throw VadError.modelLoadingFailed
         }
