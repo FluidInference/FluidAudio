@@ -56,29 +56,23 @@ public class VadManager: @unchecked Sendable {
 
     private func loadUnifiedModel(from directory: URL? = nil) async throws {
         let baseDirectory = directory ?? getDefaultBaseDirectory()
-        let modelURL =
-            baseDirectory
-            .appendingPathComponent("Models")
-            .appendingPathComponent("silero-vad-coreml")
-            .appendingPathComponent("silero_vad.mlmodelc")
 
-        // Check if model exists at expected location
-        guard FileManager.default.fileExists(atPath: modelURL.path) else {
-            logger.error("VAD model not found at: \(modelURL.path)")
+        // Use DownloadUtils to load the model (handles downloading if needed)
+        let models = try await DownloadUtils.loadModels(
+            .vad,
+            modelNames: ["silero_vad"],
+            directory: baseDirectory.appendingPathComponent("Models"),
+            computeUnits: config.computeUnits
+        )
+
+        // Get the VAD model
+        guard let vadModel = models["silero_vad"] else {
+            logger.error("Failed to load VAD model from downloaded models")
             throw VadError.modelLoadingFailed
         }
 
-        // Load the model with appropriate compute units
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits = config.computeUnits
-
-        do {
-            self.vadModel = try await MLModel.load(contentsOf: modelURL, configuration: configuration)
-            logger.info("VAD model loaded successfully from: \(modelURL.path)")
-        } catch {
-            logger.error("Failed to load VAD model: \(error)")
-            throw VadError.modelLoadingFailed
-        }
+        self.vadModel = vadModel
+        logger.info("VAD model loaded successfully")
     }
 
     private func getDefaultBaseDirectory() -> URL {
