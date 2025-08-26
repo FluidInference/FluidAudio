@@ -300,7 +300,7 @@ public final class AsrManager {
         case .system:
             result = try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
         }
-        
+
         // When batching audio, assume that the state needs to be reset comepletely between calls
         try await self.resetDecoderState()
 
