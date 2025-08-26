@@ -131,7 +131,6 @@ public class ASRBenchmark {
 
                 // Reset decoder state for each new file
                 print("Resetting decoder state for new file: \(audioFile.fileName)")
-                try await asrManager.resetDecoderState(for: .microphone)
 
                 let result: ASRBenchmarkResult
                 if config.testStreaming {

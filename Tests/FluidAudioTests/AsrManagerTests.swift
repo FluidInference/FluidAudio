@@ -90,7 +90,7 @@ final class AsrManagerTests: XCTestCase {
 
         // Test that resetDecoderState throws notInitialized when models aren't loaded
         do {
-            try await manager.resetDecoderState(for: .microphone)
+            try await manager.resetDecoderState()
             XCTFail("Expected notInitialized error")
         } catch ASRError.notInitialized {
             // Expected behavior when models aren't loaded
