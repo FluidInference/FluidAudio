@@ -303,6 +303,7 @@ The project uses GitHub Actions with the following workflows:
 5. **Thread Safety**: Never use `@unchecked Sendable` - implement proper synchronization
 6. **Follow Instructions**: When the user asks to implement something specific, DO IT FIRST before explaining why it might not be optimal. Implementation first, explanation second.
 7. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested. Keep the codebase clean by only supporting current versions.
+8. **Git Operations**: NEVER run `git push` unless explicitly requested by the user. Only commit when asked.
 8. **Code Formatting**: All code must pass swift-format checks before merge
 
 ## Next Steps
