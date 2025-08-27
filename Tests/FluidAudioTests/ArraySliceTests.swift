@@ -45,8 +45,9 @@ final class ArraySliceTests: XCTestCase {
         let fullAudio = Array(repeating: Float(0.1), count: 160000)  // 10 seconds
         let slice = fullAudio[0..<160000]
 
-        // Create dummy masks
-        let masks = [[Float](repeating: 1.0, count: 1000)]
+        // Create dummy masks with correct size (589 frames for 10 seconds of audio)
+        // The model expects 589 frames based on the error message
+        let masks = [[Float](repeating: 1.0, count: 589)]
 
         // Test that extraction works with ArraySlice
         let embeddings = try extractor.getEmbeddings(
