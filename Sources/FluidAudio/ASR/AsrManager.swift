@@ -85,8 +85,10 @@ public final class AsrManager {
         logger.info("Initializing AsrManager with provided models")
 
         // Log model configuration info
-        logger.debug("🔍 Model configuration - computeUnits: \(String(describing: models.configuration.computeUnits))")
-        logger.debug("🔍 Vocabulary size: \(models.vocabulary.count)")
+        logger.debug(
+            "🔍 Model configuration - computeUnits: \(String(describing: models.configuration.computeUnits), privacy: .public)"
+        )
+        logger.debug("🔍 Vocabulary size: \(models.vocabulary.count, privacy: .public)")
 
         self.asrModels = models
         self.melspectrogramModel = models.melspectrogram
@@ -97,11 +99,13 @@ public final class AsrManager {
 
         // Log key model descriptions
         if let encoderOutput = models.encoder.modelDescription.outputDescriptionsByName.first {
-            logger.debug("🔍 Encoder primary output: \(encoderOutput.key) - \(encoderOutput.value)")
+            logger.debug(
+                "🔍 Encoder primary output: \(encoderOutput.key, privacy: .public) - \(encoderOutput.value, privacy: .public)"
+            )
         }
 
         if let decoderOutput = models.decoder.modelDescription.outputDescriptionsByName["decoder_output"] {
-            logger.debug("🔍 Decoder output description: \(decoderOutput)")
+            logger.debug("🔍 Decoder output description: \(decoderOutput, privacy: .public)")
         }
 
         logger.info("Token duration optimization model loaded successfully")
@@ -342,7 +346,6 @@ public final class AsrManager {
         case .system:
             try await initializeDecoderState(decoderState: &systemDecoderState)
         }
-        logger.info("Decoder state reset for source: \(String(describing: source))")
     }
 
     internal func convertTokensWithExistingTimings(

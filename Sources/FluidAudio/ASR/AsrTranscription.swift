@@ -304,32 +304,79 @@ extension AsrManager {
         return slicedArray
     }
 
-    /// Remove duplicate token sequences at the start of the current list that overlap
-    /// with the tail of the previous accumulated tokens. Returns deduplicated current tokens
-    /// and the number of removed leading tokens so caller can drop aligned timestamps.
+    /// Remove duplicate token sequences using both token matching and timestamp overlap detection.
+    /// Returns deduplicated current tokens and the number of removed leading tokens.
     internal func removeDuplicateTokenSequence(
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
-        // Handle single punctuation token duplicates first
+        // Check if there might be longer overlaps before handling punctuation
+        let hasLongerPotentialOverlap = current.count > 5 && previous.count > 10
+
+        // Handle single punctuation token duplicates, but only if no longer overlap is likely
         let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
-        if !previous.isEmpty && !current.isEmpty && previous.last == current.first
+        if !hasLongerPotentialOverlap && !previous.isEmpty && !current.isEmpty && previous.last == current.first
             && punctuationTokens.contains(current.first!)
         {
             // Remove the duplicate punctuation token from the beginning of current
             return (Array(current.dropFirst()), 1)
         }
 
-        let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
-        let maxMatchLength = min(maxOverlap, current.count)  // first 12 tokens of current
+        // If we have longer potential overlap but current chunk is very short, still handle punctuation
+        if hasLongerPotentialOverlap && current.count <= 3 && !previous.isEmpty && !current.isEmpty
+            && previous.last == current.first && punctuationTokens.contains(current.first!)
+        {
+            return (Array(current.dropFirst()), 1)
+        }
+
+        // Use enhanced parameters only when using default maxOverlap (12)
+        let useEnhancedAlgorithm = maxOverlap >= 12
+        let maxSearchLength = min(useEnhancedAlgorithm ? 35 : 15, previous.count)
+        let maxMatchLength = min(useEnhancedAlgorithm ? max(20, maxOverlap) : maxOverlap, current.count)
 
         guard maxSearchLength >= 3 && maxMatchLength >= 3 else {
             return (current, 0)
         }
 
-        for overlapLength in (3...min(maxSearchLength, maxMatchLength)).reversed() {
-            let prevStart = max(0, previous.count - maxSearchLength)
+        // Look for longer overlaps first, then shorter ones
+        let maxPossibleOverlap = min(maxSearchLength, maxMatchLength)
+        if maxPossibleOverlap >= 4 {
+            for overlapLength in (4...maxPossibleOverlap).reversed() {
+                let prevStart = max(0, previous.count - maxSearchLength)
+                let prevEnd = previous.count - overlapLength + 1
+                if prevEnd <= prevStart { continue }
+
+                for startIndex in prevStart..<prevEnd {
+                    let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
+                    let currEnd = max(0, current.count - overlapLength + 1)
+
+                    // Expanded search in current chunk - look beyond first 5 tokens
+                    for currentStart in 0..<min(15, currEnd) {  // Increased to 15 for longer sequences
+                        let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
+                        if prevSub == currSub {
+                            if config.enableDebug {
+                                logger.debug(
+                                    "🔍 Found duplicate sequence: length=\(overlapLength), prevStart=\(startIndex), currStart=\(currentStart)"
+                                )
+                                let tokenTexts = prevSub.compactMap { vocabulary[$0] ?? "token_\($0)" }
+                                let duplicateText = tokenTexts.joined().replacingOccurrences(of: "▁", with: " ")
+                                logger.debug("🔍 Duplicate text: '\(duplicateText)'")
+                                logger.debug(
+                                    "🔍 Removing \(currentStart + overlapLength) tokens from start of current chunk")
+                            }
+                            let removed = currentStart + overlapLength
+                            return (Array(current.dropFirst(removed)), removed)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: try shorter overlaps (3 tokens) with original search parameters
+        for overlapLength in [3] {
+            let prevStart = max(0, previous.count - 15)
             let prevEnd = previous.count - overlapLength + 1
             if prevEnd <= prevStart { continue }
+
             for startIndex in prevStart..<prevEnd {
                 let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
                 let currEnd = max(0, current.count - overlapLength + 1)
@@ -337,8 +384,7 @@ extension AsrManager {
                     let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
                     if prevSub == currSub {
                         if config.enableDebug {
-                            logger.debug(
-                                "Duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)")
+                            logger.debug("🔍 Found short duplicate: length=\(overlapLength), currStart=\(currentStart)")
                         }
                         let removed = currentStart + overlapLength
                         return (Array(current.dropFirst(removed)), removed)
@@ -346,6 +392,7 @@ extension AsrManager {
                 }
             }
         }
+
         return (current, 0)
     }
 

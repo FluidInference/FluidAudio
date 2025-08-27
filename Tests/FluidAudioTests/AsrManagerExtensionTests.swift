@@ -225,15 +225,14 @@ final class AsrManagerExtensionTests: XCTestCase {
     }
 
     func testRemoveDuplicateTokenSequenceMaxOverlap() {
-        // Test with overlap longer than default maxOverlap (12)
+        // Test with overlap longer than original maxOverlap (12) but within enhanced limit (20)
         let previous = Array(1...20)
-        let current = Array(10...25)  // 10-21 overlaps with previous
+        let current = Array(10...25)  // 11-token overlap: [10,11,12,13,14,15,16,17,18,19,20]
 
         let (_, removedCount) = manager.removeDuplicateTokenSequence(previous: previous, current: current)
 
-        // Should find some overlap within maxOverlap limit
-        XCTAssertGreaterThan(removedCount, 0, "Should find some overlap")
-        XCTAssertLessThanOrEqual(removedCount, 12, "Should not exceed maxOverlap")
+        // Enhanced algorithm should find the full 11-token overlap
+        XCTAssertEqual(removedCount, 11, "Should find full 11-token overlap")
     }
 
     func testRemoveDuplicateTokenSequencePartialOverlap() {

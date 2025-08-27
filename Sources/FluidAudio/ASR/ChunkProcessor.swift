@@ -17,6 +17,8 @@ struct ChunkProcessor {
     private var rightContextSamples: Int { Int(rightContextSeconds * Double(sampleRate)) }
     private var maxModelSamples: Int { 240_000 }  // 15 seconds window capacity
 
+    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ChunkProcessor")
+
     func process(
         using manager: AsrManager, decoderState: inout TdtDecoderState, startTime: Date
     ) async throws -> ASRResult {
@@ -36,6 +38,26 @@ struct ChunkProcessor {
                 decoderState: &decoderState
             )
 
+            // Debug logging: Show tokens from this chunk
+            if enableDebug {
+                logger.debug(
+                    "🔍 Chunk \(segmentIndex): centerStart=\(centerStart), produced \(windowTokens.count) tokens")
+                if !windowTokens.isEmpty {
+                    let tokenTexts = windowTokens.compactMap { tokenId in
+                        manager.vocabulary[tokenId] ?? "token_\(tokenId)"
+                    }
+                    let chunkText = tokenTexts.joined().replacingOccurrences(of: "▁", with: " ").trimmingCharacters(
+                        in: .whitespaces)
+                    logger.debug("🔍 Chunk \(segmentIndex) text: '\(chunkText)'")
+                    logger.debug(
+                        "🔍 Chunk \(segmentIndex) timestamps: \(windowTimestamps.prefix(5))...\(windowTimestamps.suffix(5))"
+                    )
+                    logger.debug(
+                        "🔍 Chunk \(segmentIndex) time range: \(windowTimestamps.min() ?? 0) - \(windowTimestamps.max() ?? 0)"
+                    )
+                }
+            }
+
             // Update last processed frame for next chunk
             if maxFrame > 0 {
                 lastProcessedFrame = maxFrame
@@ -43,9 +65,18 @@ struct ChunkProcessor {
 
             // For chunks after the first, check for and remove duplicated token sequences
             if segmentIndex > 0 && !allTokens.isEmpty && !windowTokens.isEmpty {
+                if enableDebug {
+                    logger.debug(
+                        "🔍 Before deduplication: previous=\(allTokens.suffix(10)), current=\(windowTokens.prefix(10))")
+                }
+
                 let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
                     previous: allTokens, current: windowTokens)
                 let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
+
+                if enableDebug && removedCount > 0 {
+                    logger.debug("🔍 Deduplication removed \(removedCount) tokens from chunk \(segmentIndex)")
+                }
 
                 allTokens.append(contentsOf: deduped)
                 allTimestamps.append(contentsOf: adjustedTimestamps)
@@ -93,10 +124,17 @@ struct ChunkProcessor {
             leftContextSeconds: leftContextSeconds
         )
 
+        if enableDebug {
+            logger.debug(
+                "🔍 Processing chunk \(segmentIndex): samples [\(leftStart)..\(rightEnd-1)] = \(chunkSamples.count) samples (\(String(format: "%.2f", chunkAudioDuration))s)"
+            )
+            logger.debug("🔍 startFrameOffset=\(startFrameOffset), lastProcessedFrame=\(lastProcessedFrame)")
+        }
+
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
-            enableDebug: false,
+            enableDebug: enableDebug,
             decoderState: &decoderState,
             startFrameOffset: startFrameOffset,
             lastProcessedFrame: lastProcessedFrame

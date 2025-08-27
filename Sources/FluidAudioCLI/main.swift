@@ -23,6 +23,9 @@ func printUsage() {
 
         Run 'fluidaudio <command> --help' for command-specific options.
 
+        Environment Variables:
+            LOG_LEVEL               Set SDK logging level: DEBUG, INFO, WARNING, ERROR
+
         Examples:
             fluidaudio process audio.wav --output results.json
 
@@ -37,6 +40,8 @@ func printUsage() {
             fluidaudio multi-stream audio1.wav audio2.wav
 
             fluidaudio download --dataset ami-sdm
+
+            LOG_LEVEL=DEBUG fluidaudio transcribe audio.wav
         """
     )
 }
@@ -51,6 +56,7 @@ guard arguments.count > 1 else {
 
 let command = arguments[1]
 let semaphore = DispatchSemaphore(value: 0)
+
 
 // Use Task to handle async commands
 Task {

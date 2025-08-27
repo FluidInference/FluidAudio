@@ -63,7 +63,7 @@ extension AsrModels {
         from directory: URL,
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {
-        logger.info("Loading ASR models from: \(directory.path)")
+        logger.info("Loading ASR models from: \(directory.path, privacy: .public)")
 
         let config = configuration ?? defaultConfiguration()
 
@@ -78,7 +78,9 @@ extension AsrModels {
         var loadedModels: [String: MLModel] = [:]
 
         for (modelName, modelType) in modelConfigs {
-            logger.debug("🔍 Loading model: \(modelName) (type: \(String(describing: modelType)))")
+            logger.debug(
+                "🔍 Loading model: \(modelName, privacy: .public) (type: \(String(describing: modelType), privacy: .public))"
+            )
 
             // Use DownloadUtils with optimal compute units
             let models = try await DownloadUtils.loadModels(
@@ -91,32 +93,37 @@ extension AsrModels {
             if let model = models[modelName] {
                 loadedModels[modelName] = model
                 let computeUnitsDescription = String(describing: config.computeUnits)
-                logger.info("✅ Loaded \(modelName) with compute units: \(computeUnitsDescription)")
+                logger.info(
+                    "✅ Loaded \(modelName, privacy: .public) with compute units: \(computeUnitsDescription, privacy: .public)"
+                )
 
                 // Log model input/output descriptions for debugging
-                logger.debug("🔍 \(modelName) - inputs: \(model.modelDescription.inputDescriptionsByName.keys.sorted())")
                 logger.debug(
-                    "🔍 \(modelName) - outputs: \(model.modelDescription.outputDescriptionsByName.keys.sorted())")
+                    "🔍 \(modelName, privacy: .public) - inputs: \(model.modelDescription.inputDescriptionsByName.keys.sorted(), privacy: .public)"
+                )
+                logger.debug(
+                    "🔍 \(modelName, privacy: .public) - outputs: \(model.modelDescription.outputDescriptionsByName.keys.sorted(), privacy: .public)"
+                )
 
                 // Log specific shape information for key models
                 if modelName == Names.encoderFile {
                     for (inputName, inputDesc) in model.modelDescription.inputDescriptionsByName {
                         if let constraint = inputDesc.multiArrayConstraint {
                             logger.debug(
-                                "🔍 Encoder input '\(inputName)': shape=\(constraint.shape), dataType=\(constraint.dataType.rawValue)"
+                                "🔍 Encoder input '\(inputName, privacy: .public)': shape=\(constraint.shape, privacy: .public), dataType=\(constraint.dataType.rawValue, privacy: .public)"
                             )
                         }
                     }
                     for (outputName, outputDesc) in model.modelDescription.outputDescriptionsByName {
                         if let constraint = outputDesc.multiArrayConstraint {
                             logger.debug(
-                                "🔍 Encoder output '\(outputName)': shape=\(constraint.shape), dataType=\(constraint.dataType.rawValue)"
+                                "🔍 Encoder output '\(outputName, privacy: .public)': shape=\(constraint.shape, privacy: .public), dataType=\(constraint.dataType.rawValue, privacy: .public)"
                             )
                         }
                     }
                 }
             } else {
-                logger.error("❌ Failed to load model: \(modelName)")
+                logger.error("❌ Failed to load model: \(modelName, privacy: .public)")
             }
         }
 
@@ -146,7 +153,7 @@ extension AsrModels {
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
             logger.warning(
-                "Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models."
+                "Vocabulary file not found at \(vocabPath.path, privacy: .public). Please ensure parakeet_vocab.json is downloaded with the models."
             )
             throw AsrModelsError.modelNotFound(Names.vocabulary, vocabPath)
         }
@@ -163,11 +170,13 @@ extension AsrModels {
                 }
             }
 
-            logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
+            logger.info(
+                "Loaded vocabulary with \(vocabulary.count, privacy: .public) tokens from \(vocabPath.path, privacy: .public)"
+            )
             return vocabulary
         } catch {
             logger.error(
-                "Failed to load or parse vocabulary file at \(vocabPath.path): \(error.localizedDescription)"
+                "Failed to load or parse vocabulary file at \(vocabPath.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             throw AsrModelsError.loadingFailed("Vocabulary parsing failed")
         }
@@ -297,11 +306,11 @@ extension AsrModels {
         force: Bool = false
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory()
-        logger.info("Downloading ASR models to: \(targetDir.path)")
+        logger.info("Downloading ASR models to: \(targetDir.path, privacy: .public)")
         let parentDir = targetDir.deletingLastPathComponent()
 
         if !force && modelsExist(at: targetDir) {
-            logger.info("ASR models already present at: \(targetDir.path)")
+            logger.info("ASR models already present at: \(targetDir.path, privacy: .public)")
             return targetDir
         }
 

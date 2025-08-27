@@ -838,19 +838,36 @@ extension FLEURSBenchmark {
             try benchmark.saveResults(results, to: outputFile)
 
             // Print summary
-            print("\n" + "=" * 50)
+            print("\n" + "=" * 70)
             print("📊 BENCHMARK SUMMARY")
-            print("=" * 50)
+            print("=" * 70)
 
+            // Print table header
+            let header =
+                "Language".padding(toLength: 25, withPad: " ", startingAt: 0)
+                + "WER".padding(toLength: 8, withPad: " ", startingAt: 0)
+                + "CER".padding(toLength: 8, withPad: " ", startingAt: 0)
+                + "RTFx".padding(toLength: 8, withPad: " ", startingAt: 0)
+                + "Processed".padding(toLength: 12, withPad: " ", startingAt: 0) + "Skipped"
+            print(header)
+            print("-" * 70)
+
+            // Print results in table format
             for result in results {
                 let langName = benchmark.supportedLanguages[result.language] ?? result.language
-                print("\n\(langName):")
-                print("  WER: \(String(format: "%.1f", result.wer * 100))%")
-                print("  CER: \(String(format: "%.1f", result.cer * 100))%")
-                print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
-                print(
-                    "  Samples: \(result.samplesProcessed) processed\(result.samplesSkipped > 0 ? ", \(result.samplesSkipped) skipped" : "")"
-                )
+                let werStr = String(format: "%.1f%%", result.wer * 100)
+                let cerStr = String(format: "%.1f%%", result.cer * 100)
+                let rtfxStr = String(format: "%.1fx", result.rtfx)
+                let processedStr = String(result.samplesProcessed)
+                let skippedStr = result.samplesSkipped > 0 ? String(result.samplesSkipped) : "-"
+
+                let row =
+                    langName.padding(toLength: 25, withPad: " ", startingAt: 0)
+                    + werStr.padding(toLength: 8, withPad: " ", startingAt: 0)
+                    + cerStr.padding(toLength: 8, withPad: " ", startingAt: 0)
+                    + rtfxStr.padding(toLength: 8, withPad: " ", startingAt: 0)
+                    + processedStr.padding(toLength: 12, withPad: " ", startingAt: 0) + skippedStr
+                print(row)
             }
 
             let avgWER = results.reduce(0.0) { $0 + $1.wer } / Double(results.count)
@@ -859,13 +876,23 @@ extension FLEURSBenchmark {
             let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
             let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
 
-            print("\n📈 Overall Performance:")
-            print("  Average WER: \(String(format: "%.1f", avgWER * 100))%")
-            print("  Average CER: \(String(format: "%.1f", avgCER * 100))%")
-            print("  Average RTFx: \(String(format: "%.1f", avgRTFx))x")
-            print("  Total Processed: \(totalProcessed) samples")
+            print("-" * 70)
+            let avgWerStr = String(format: "%.1f%%", avgWER * 100)
+            let avgCerStr = String(format: "%.1f%%", avgCER * 100)
+            let avgRtfxStr = String(format: "%.1fx", avgRTFx)
+            let totalProcessedStr = String(totalProcessed)
+            let totalSkippedStr = totalSkipped > 0 ? String(totalSkipped) : "-"
+
+            let avgRow =
+                "AVERAGE".padding(toLength: 25, withPad: " ", startingAt: 0)
+                + avgWerStr.padding(toLength: 8, withPad: " ", startingAt: 0)
+                + avgCerStr.padding(toLength: 8, withPad: " ", startingAt: 0)
+                + avgRtfxStr.padding(toLength: 8, withPad: " ", startingAt: 0)
+                + totalProcessedStr.padding(toLength: 12, withPad: " ", startingAt: 0) + totalSkippedStr
+            print(avgRow)
+
             if totalSkipped > 0 {
-                print("  ⚠️ Total Skipped: \(totalSkipped) samples due to audio loading errors")
+                print("\n⚠️  Note: \(totalSkipped) samples were skipped due to audio loading errors")
             }
 
             print("\n✓ Results saved to: \(outputFile)")
