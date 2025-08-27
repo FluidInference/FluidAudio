@@ -415,6 +415,7 @@ public actor StreamingAsrManager {
                     text: trimmedText,
                     startTime: startTime,
                     endTime: endTime,
+                    confidence: 1.0  // TODO: Pass actual confidence from processing
                 )
                 timestampedSegments.append(timestampedSegment)
 

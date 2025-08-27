@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
+
 /// A finalized transcript segment with timing information
 @available(macOS 13.0, iOS 16.0, *)
 public struct TimestampedSegment: Sendable {
@@ -9,12 +10,14 @@ public struct TimestampedSegment: Sendable {
     public let text: String
     public let startTime: TimeInterval  // seconds from stream start
     public let endTime: TimeInterval  // seconds from stream start
+    public let confidence: Float
 
-    public init(id: UUID, text: String, startTime: TimeInterval, endTime: TimeInterval) {
+    public init(id: UUID, text: String, startTime: TimeInterval, endTime: TimeInterval, confidence: Float = 1.0) {
         self.id = id
         self.text = text
         self.startTime = startTime
         self.endTime = endTime
+        self.confidence = confidence
     }
 
     /// Duration of this segment in seconds
