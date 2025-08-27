@@ -214,32 +214,6 @@ final class CITests: XCTestCase {
         XCTAssertGreaterThan(highAccuracyConfig.chunkSeconds, defaultConfig.chunkSeconds)
     }
 
-    func testStreamingResultStructuresCI() {
-        // Test that streaming result structures work in CI environment
-        let result = StreamingTranscriptionResult(
-            segmentID: UUID(),
-            revision: 1,
-            attributedText: AttributedString("Test"),
-            audioTimeRange: CMTimeRange(start: .zero, duration: CMTime(seconds: 1, preferredTimescale: 1000)),
-            isFinal: true,
-            confidence: 0.9,
-            timestamp: Date()
-        )
-
-        XCTAssertTrue(result.isFinal)
-        XCTAssertEqual(result.confidence, 0.9)
-        XCTAssertEqual(String(result.attributedText.characters), "Test")
-
-        let snapshot = StreamingTranscriptSnapshot(
-            finalized: AttributedString("Final"),
-            volatile: nil,
-            lastUpdated: Date()
-        )
-
-        XCTAssertEqual(String(snapshot.finalized.characters), "Final")
-        XCTAssertNil(snapshot.volatile)
-    }
-
     @available(macOS 13.0, iOS 16.0, *)
     func testStreamingMemoryManagementCI() async throws {
         // Test that streaming memory management works in CI

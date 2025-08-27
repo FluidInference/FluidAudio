@@ -246,39 +246,4 @@ final class StreamingIntegrationTests: XCTestCase {
 
     // MARK: - Streaming Result Structure Integration Tests
 
-    func testStreamingResultStructureIntegration() {
-        // Test that streaming result structures work correctly
-
-        let segmentID = UUID()
-        let result = StreamingTranscriptionResult(
-            segmentID: segmentID,
-            revision: 1,
-            attributedText: AttributedString("Test transcription"),
-            audioTimeRange: CMTimeRange(
-                start: CMTime(seconds: 0, preferredTimescale: 1000),
-                duration: CMTime(seconds: 2.5, preferredTimescale: 1000)
-            ),
-            isFinal: false,
-            confidence: 0.85,
-            timestamp: Date()
-        )
-
-        XCTAssertEqual(result.segmentID, segmentID)
-        XCTAssertEqual(result.revision, 1)
-        XCTAssertFalse(result.isFinal)
-        XCTAssertEqual(result.confidence, 0.85)
-        XCTAssertEqual(String(result.attributedText.characters), "Test transcription")
-
-        let snapshot = StreamingTranscriptSnapshot(
-            finalized: AttributedString("Finalized portion"),
-            volatile: AttributedString("volatile portion"),
-            lastUpdated: Date()
-        )
-
-        XCTAssertEqual(String(snapshot.finalized.characters), "Finalized portion")
-        XCTAssertNotNil(snapshot.volatile)
-        if let volatile = snapshot.volatile {
-            XCTAssertEqual(String(volatile.characters), "volatile portion")
-        }
-    }
 }

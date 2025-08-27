@@ -48,6 +48,7 @@ public actor StreamingAsrManager {
     // Segment tracking to prevent duplicates
     private var finalizedSegments: Set<UUID> = []
     private var segmentFinalTexts: [(UUID, String)] = []  // Track final text per segment in order
+    private var timestampedSegments: [TimestampedSegment] = []  
     private let maxSegmentTexts = 100  // Circular buffer limit
     private var cachedFinalizedTranscript: String = ""  // Cache to avoid rebuilding
     private var lastFinalizedText: String = ""
@@ -136,6 +137,13 @@ public actor StreamingAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+
+        // Reset transcript tracking
+        finalizedSegments.removeAll()
+        segmentFinalTexts.removeAll()
+        timestampedSegments.removeAll()
+        finalizedTranscript = ""
+        volatileTranscript = ""
 
         startTime = Date()
 
@@ -349,14 +357,26 @@ public actor StreamingAsrManager {
                 return
             }
 
+            // Calculate timing information for this segment
+            let sampleRate = Double(config.asrConfig.sampleRate)
+            let startTimeSeconds = Double(centerStartAbs) / sampleRate
+            let endTimeSeconds = Double(centerStartAbs + chunkSamples) / sampleRate
+
             // Update transcript builder (volatile or final)
-            await updateTranscriptBuilder(text: trimmed, isFinal: isFinal, segmentID: segmentID)
+            await updateTranscriptBuilder(
+                text: trimmed,
+                isFinal: isFinal,
+                segmentID: segmentID,
+                startTime: startTimeSeconds,
+                endTime: endTimeSeconds
+            )
 
             // Emit snapshot
             let snapshot = StreamingTranscriptSnapshot(
                 finalized: AttributedString(finalizedTranscript),
                 volatile: volatileTranscript.isEmpty ? nil : AttributedString(volatileTranscript),
-                lastUpdated: Date()
+                lastUpdated: Date(),
+                timestampedSegments: timestampedSegments
             )
             // Safe continuation access
             if let continuation = snapshotsContinuation {
@@ -373,7 +393,9 @@ public actor StreamingAsrManager {
     }
 
     /// Update transcript strings for snapshotting
-    private func updateTranscriptBuilder(text: String, isFinal: Bool, segmentID: UUID) async {
+    private func updateTranscriptBuilder(
+        text: String, isFinal: Bool, segmentID: UUID, startTime: TimeInterval = 0, endTime: TimeInterval = 0
+    ) async {
         if isFinal {
             // Only process each segment once
             guard !finalizedSegments.contains(segmentID) else {
@@ -386,6 +408,15 @@ public actor StreamingAsrManager {
             if !trimmedText.isEmpty && !isGarbageText(trimmedText) {
                 // Store the final text for this specific segment in chronological order
                 segmentFinalTexts.append((segmentID, trimmedText))
+
+                // Store the timestamped segment with timing information
+                let timestampedSegment = TimestampedSegment(
+                    id: segmentID,
+                    text: trimmedText,
+                    startTime: startTime,
+                    endTime: endTime,
+                )
+                timestampedSegments.append(timestampedSegment)
 
                 // Clean up old segments to prevent unbounded memory growth
                 cleanupOldSegments()
@@ -437,8 +468,9 @@ public actor StreamingAsrManager {
         // Get UUIDs of segments we're about to remove
         let removedSegmentIDs = Set(segmentFinalTexts.prefix(excessCount).map { $0.0 })
 
-        // Remove from both collections
+        // Remove from all three collections
         segmentFinalTexts.removeFirst(excessCount)
+        timestampedSegments.removeFirst(excessCount)  // Keep in sync with segmentFinalTexts
         finalizedSegments.subtract(removedSegmentIDs)
 
         logger.debug("Cleaned up \(excessCount) old segments, keeping \(self.segmentFinalTexts.count) recent segments")

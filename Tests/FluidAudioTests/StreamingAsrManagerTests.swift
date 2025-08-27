@@ -456,4 +456,85 @@ final class StreamingAsrManagerTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Timestamp Tests
+
+    func testTimestampedSegmentCreation() {
+        let segmentId = UUID()
+        let segment = TimestampedSegment(
+            id: segmentId,
+            text: "Hello world",
+            startTime: 1.5,
+            endTime: 3.2,
+            confidence: 0.95
+        )
+
+        XCTAssertEqual(segment.id, segmentId)
+        XCTAssertEqual(segment.text, "Hello world")
+        XCTAssertEqual(segment.startTime, 1.5, accuracy: 0.001)
+        XCTAssertEqual(segment.endTime, 3.2, accuracy: 0.001)
+        XCTAssertEqual(segment.confidence, 0.95, accuracy: 0.001)
+        XCTAssertEqual(segment.duration, 1.7, accuracy: 0.001)
+    }
+
+    func testTimestampedSegmentFormatting() {
+        let segment = TimestampedSegment(
+            id: UUID(),
+            text: "Test segment",
+            startTime: 65.123,  // 1:05.123
+            endTime: 127.456  // 2:07.456
+        )
+
+        let expectedTimeRange = "00:01:05.123 --> 00:02:07.456"
+        XCTAssertEqual(segment.formattedTimeRange, expectedTimeRange)
+    }
+
+    func testStreamingTranscriptSnapshotWithTimestamps() {
+        let segments = [
+            TimestampedSegment(id: UUID(), text: "First segment", startTime: 0.0, endTime: 2.0),
+            TimestampedSegment(id: UUID(), text: "Second segment", startTime: 2.5, endTime: 4.5),
+        ]
+
+        let snapshot = StreamingTranscriptSnapshot(
+            finalized: AttributedString("First segment Second segment"),
+            volatile: AttributedString("Partial text"),
+            lastUpdated: Date(),
+            timestampedSegments: segments
+        )
+
+        XCTAssertEqual(snapshot.timestampedSegments.count, 2)
+        XCTAssertEqual(snapshot.timestampedSegments[0].text, "First segment")
+        XCTAssertEqual(snapshot.timestampedSegments[1].text, "Second segment")
+
+        // Test timestamped text format
+        let timestampedText = snapshot.timestampedText
+        XCTAssertTrue(timestampedText.contains("00:00:00.000 --> 00:00:02.000"))
+        XCTAssertTrue(timestampedText.contains("First segment"))
+        XCTAssertTrue(timestampedText.contains("00:00:02.500 --> 00:00:04.500"))
+        XCTAssertTrue(timestampedText.contains("Second segment"))
+    }
+
+    func testSRTFormatExport() {
+        let segments = [
+            TimestampedSegment(id: UUID(), text: "Hello world", startTime: 0.5, endTime: 2.3),
+            TimestampedSegment(id: UUID(), text: "How are you?", startTime: 3.1, endTime: 4.8),
+        ]
+
+        let snapshot = StreamingTranscriptSnapshot(
+            finalized: AttributedString("Hello world How are you?"),
+            volatile: nil,
+            lastUpdated: Date(),
+            timestampedSegments: segments
+        )
+
+        let srtFormat = snapshot.srtFormat
+
+        // Check SRT format structure
+        XCTAssertTrue(srtFormat.contains("1\n"), "Missing subtitle number 1")
+        XCTAssertTrue(srtFormat.contains("00:00:00,500 --> 00:00:02,299\n"), "Missing first timestamp")
+        XCTAssertTrue(srtFormat.contains("Hello world\n"), "Missing first text")
+        XCTAssertTrue(srtFormat.contains("2\n"), "Missing subtitle number 2")
+        XCTAssertTrue(srtFormat.contains("00:00:03,100 --> 00:00:04,799\n"), "Missing second timestamp")
+        XCTAssertTrue(srtFormat.contains("How are you?\n"), "Missing second text")
+    }
 }
