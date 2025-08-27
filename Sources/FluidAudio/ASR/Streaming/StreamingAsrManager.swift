@@ -48,7 +48,7 @@ public actor StreamingAsrManager {
     // Segment tracking to prevent duplicates
     private var finalizedSegments: Set<UUID> = []
     private var segmentFinalTexts: [(UUID, String)] = []  // Track final text per segment in order
-    private var timestampedSegments: [TimestampedSegment] = []  
+    private var timestampedSegments: [TimestampedSegment] = []
     private let maxSegmentTexts = 100  // Circular buffer limit
     private var cachedFinalizedTranscript: String = ""  // Cache to avoid rebuilding
     private var lastFinalizedText: String = ""
