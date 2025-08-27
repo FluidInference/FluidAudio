@@ -59,11 +59,18 @@ public final class AsrManager {
 
         // Pre-warm caches if possible
         Task {
+            logger.debug("🔍 Pre-warming MLArray cache with shapes for 15s models:")
+            logger.debug("🔍 - Audio: [1, 240000] (15s * 16kHz)")
+            logger.debug("🔍 - Length: [1]")
+            logger.debug("🔍 - Decoder state: [2, 1, 640]")
+
             await sharedMLArrayCache.prewarm(shapes: [
                 ([1, 240000], .float32),
                 ([1], .int32),
                 ([2, 1, 640], .float32),
             ])
+
+            logger.debug("✅ MLArray cache pre-warming completed")
         }
     }
 
@@ -77,12 +84,25 @@ public final class AsrManager {
     public func initialize(models: AsrModels) async throws {
         logger.info("Initializing AsrManager with provided models")
 
+        // Log model configuration info
+        logger.debug("🔍 Model configuration - computeUnits: \(String(describing: models.configuration.computeUnits))")
+        logger.debug("🔍 Vocabulary size: \(models.vocabulary.count)")
+
         self.asrModels = models
         self.melspectrogramModel = models.melspectrogram
         self.encoderModel = models.encoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
+
+        // Log key model descriptions
+        if let encoderOutput = models.encoder.modelDescription.outputDescriptionsByName.first {
+            logger.debug("🔍 Encoder primary output: \(encoderOutput.key) - \(encoderOutput.value)")
+        }
+
+        if let decoderOutput = models.decoder.modelDescription.outputDescriptionsByName["decoder_output"] {
+            logger.debug("🔍 Decoder output description: \(decoderOutput)")
+        }
 
         logger.info("Token duration optimization model loaded successfully")
 

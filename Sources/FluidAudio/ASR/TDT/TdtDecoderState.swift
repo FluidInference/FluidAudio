@@ -1,9 +1,12 @@
 import Accelerate
 import CoreML
 import Foundation
+import OSLog
 
 /// Manages LSTM hidden and cell states for the Parakeet decoder
 struct TdtDecoderState {
+    private static let logger = Logger(subsystem: "com.fluidinference.fluidaudio", category: "TdtDecoderState")
+
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
     /// Stores the last decoded token from the previous audio chunk.
@@ -30,6 +33,8 @@ struct TdtDecoderState {
     }
 
     init() throws {
+        Self.logger.debug("🔍 Initializing TdtDecoderState with shape [2, 1, 640]")
+
         // Use ANE-aligned arrays for optimal performance
         do {
             hiddenState = try ANEOptimizer.createANEAlignedArray(
@@ -40,12 +45,18 @@ struct TdtDecoderState {
                 shape: [2, 1, 640],
                 dataType: .float32
             )
+            Self.logger.debug("✅ ANE-aligned decoder state arrays created successfully")
         } catch {
             // Fall back to standard MLMultiArray if ANE allocation fails
-            print("Warning: ANE-aligned allocation failed, falling back to standard MLMultiArray: \(error)")
+            Self.logger.warning("⚠️ ANE-aligned allocation failed, falling back to standard MLMultiArray: \(error)")
             hiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
             cellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+            Self.logger.debug("✅ Standard MLMultiArray decoder state arrays created")
         }
+
+        let hiddenShape = hiddenState.shape
+        let cellShape = cellState.shape
+        Self.logger.debug("🔍 Created decoder state - hiddenState: \(hiddenShape), cellState: \(cellShape)")
 
         // Initialize to zeros using Accelerate
         hiddenState.resetData(to: 0)
@@ -53,8 +64,15 @@ struct TdtDecoderState {
     }
 
     mutating func update(from decoderOutput: MLFeatureProvider) {
-        hiddenState = decoderOutput.featureValue(for: "h_out")?.multiArrayValue ?? hiddenState
-        cellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue ?? cellState
+        let newHiddenState = decoderOutput.featureValue(for: "h_out")?.multiArrayValue
+        let newCellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue
+
+        Self.logger.debug(
+            "🔍 Updating decoder state - h_out shape: \(newHiddenState?.shape ?? []), c_out shape: \(newCellState?.shape ?? [])"
+        )
+
+        hiddenState = newHiddenState ?? hiddenState
+        cellState = newCellState ?? cellState
     }
 
     init(from other: TdtDecoderState) throws {
@@ -69,9 +87,15 @@ struct TdtDecoderState {
 
     /// Fallback initializer that never fails (for use in critical paths)
     init(fallback: Bool) {
+        Self.logger.debug("🔍 Using fallback TdtDecoderState initialization (no ANE optimization)")
+
         // Standard MLMultiArray allocation without ANE optimization
         hiddenState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
         cellState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+
+        let hiddenShape = hiddenState.shape
+        let cellShape = cellState.shape
+        Self.logger.debug("🔍 Fallback decoder state - hiddenState: \(hiddenShape), cellState: \(cellShape)")
 
         // Initialize to zeros
         hiddenState.resetData(to: 0)

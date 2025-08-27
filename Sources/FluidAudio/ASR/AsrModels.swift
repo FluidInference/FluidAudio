@@ -77,7 +77,9 @@ extension AsrModels {
 
         var loadedModels: [String: MLModel] = [:]
 
-        for (modelName, _) in modelConfigs {
+        for (modelName, modelType) in modelConfigs {
+            logger.debug("🔍 Loading model: \(modelName) (type: \(String(describing: modelType)))")
+
             // Use DownloadUtils with optimal compute units
             let models = try await DownloadUtils.loadModels(
                 .parakeet,
@@ -89,7 +91,32 @@ extension AsrModels {
             if let model = models[modelName] {
                 loadedModels[modelName] = model
                 let computeUnitsDescription = String(describing: config.computeUnits)
-                logger.info("Loaded \(modelName) with compute units: \(computeUnitsDescription)")
+                logger.info("✅ Loaded \(modelName) with compute units: \(computeUnitsDescription)")
+
+                // Log model input/output descriptions for debugging
+                logger.debug("🔍 \(modelName) - inputs: \(model.modelDescription.inputDescriptionsByName.keys.sorted())")
+                logger.debug(
+                    "🔍 \(modelName) - outputs: \(model.modelDescription.outputDescriptionsByName.keys.sorted())")
+
+                // Log specific shape information for key models
+                if modelName == Names.encoderFile {
+                    for (inputName, inputDesc) in model.modelDescription.inputDescriptionsByName {
+                        if let constraint = inputDesc.multiArrayConstraint {
+                            logger.debug(
+                                "🔍 Encoder input '\(inputName)': shape=\(constraint.shape), dataType=\(constraint.dataType.rawValue)"
+                            )
+                        }
+                    }
+                    for (outputName, outputDesc) in model.modelDescription.outputDescriptionsByName {
+                        if let constraint = outputDesc.multiArrayConstraint {
+                            logger.debug(
+                                "🔍 Encoder output '\(outputName)': shape=\(constraint.shape), dataType=\(constraint.dataType.rawValue)"
+                            )
+                        }
+                    }
+                }
+            } else {
+                logger.error("❌ Failed to load model: \(modelName)")
             }
         }
 

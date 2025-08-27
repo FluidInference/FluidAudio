@@ -174,6 +174,10 @@ internal struct TdtDecoder {
             // Get current audio frame features
             let encoderStep = encoderFrames[safeTimeIndices]
 
+            logger.debug(
+                "🔍 Accessing encoderFrames[\(safeTimeIndices)] - frame size: \(encoderStep.count), timeIndices: \(timeIndices)"
+            )
+
             // Run joint network: combines audio (encoder) + language (decoder) features
             // Output: logits for both token prediction and duration prediction
             let logits = try runJoint(
@@ -331,10 +335,16 @@ internal struct TdtDecoder {
         -> EncoderFrameArray
     {
         let shape = encoderOutput.shape
+        logger.debug(
+            "🔍 Encoder output shape: \(shape), dataType: \(encoderOutput.dataType.rawValue), count: \(encoderOutput.count), length param: \(length)"
+        )
+
         guard shape.count >= 3 else {
+            logger.error("❌ Invalid encoder output shape: \(shape) - expected at least 3 dimensions")
             throw ASRError.processingFailed("Invalid encoder output shape: \(shape)")
         }
         let hiddenSize = shape[2].intValue
+        logger.debug("🔍 Extracted hiddenSize from shape[2]: \(hiddenSize)")
 
         var frames = EncoderFrameArray()
         frames.reserveCapacity(length)
@@ -353,12 +363,19 @@ internal struct TdtDecoder {
                     start: floatPtr + startIdx,
                     count: hiddenSize
                 )
-
                 // Only copy when absolutely necessary (for now, to maintain compatibility)
-                frames.append(Array(frameView))
+                let frame = Array(frameView)
+                if timeIdx < 3 {  // Log first few frames for debugging
+                    logger.debug("🔍 Frame[\(timeIdx)] has \(frame.count) elements (expected: \(hiddenSize))")
+                }
+                frames.append(frame)
             }
         } else {
             // Fallback for non-float32 types
+            logger
+                .debug(
+                    "🔍 Using fallback path for dataType: \(encoderOutput.dataType.rawValue)"
+                )
             for timeIdx in 0..<length {
                 var frame = [Float]()
                 frame.reserveCapacity(hiddenSize)
@@ -368,13 +385,19 @@ internal struct TdtDecoder {
                     if index < encoderOutput.count {
                         frame.append(encoderOutput[index].floatValue)
                     } else {
+                        logger.error("❌ Index out of bounds in encoder output: \(index) >= \(encoderOutput.count)")
                         throw ASRError.processingFailed("Index out of bounds in encoder output")
                     }
                 }
 
+                if timeIdx < 3 {  // Log first few frames for debugging
+                    logger.debug("🔍 Fallback Frame[\(timeIdx)] has \(frame.count) elements (expected: \(hiddenSize))")
+                }
                 frames.append(frame)
             }
         }
+
+        logger.debug("🔍 Pre-processed \(frames.count) encoder frames, each with \(frames.first?.count ?? 0) elements")
 
         return frames
     }
@@ -417,11 +440,15 @@ internal struct TdtDecoder {
         model: MLModel
     ) throws -> MLMultiArray {
 
+        logger.debug("🔍 Joint model inputs - encoderStep.count: \(encoderStep.count) (expected: 1024)")
+
         // Create ANE-aligned encoder array for optimal performance
         let encoderArray = try ANEOptimizer.createANEAlignedArray(
             shape: [1, 1, encoderStep.count as NSNumber],
             dataType: .float32
         )
+
+        logger.debug("🔍 Created encoderArray with shape: \(encoderArray.shape)")
 
         // Use optimized memory copy
         encoderStep.withUnsafeBufferPointer { buffer in
@@ -432,6 +459,10 @@ internal struct TdtDecoder {
 
         let decoderOutputArray = try extractFeatureValue(
             from: decoderOutput, key: "decoder_output", errorMessage: "Invalid decoder output")
+
+        logger.debug(
+            "🔍 Joint model arrays - encoderArray: \(encoderArray.shape), decoderOutputArray: \(decoderOutputArray.shape)"
+        )
 
         // Prefetch arrays for ANE if available
         if #available(macOS 14.0, iOS 17.0, *) {
