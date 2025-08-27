@@ -322,7 +322,6 @@ public final class AsrManager {
         case .system:
             try await initializeDecoderState(decoderState: &systemDecoderState)
         }
-        logger.info("Decoder state reset for source: \(String(describing: source))")
     }
 
     internal func convertTokensWithExistingTimings(
