@@ -80,16 +80,22 @@ Make a PR if you want to add your app!
 
 - **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Languages**: All European languages (25)
-- **Processing Mode**: Batch transcription for complete audio files
-- **Real-time Factor**: ~110x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
-- **Streaming Support**: Coming soon - batch processing is recommended for production use
+- **Processing Modes**: Batch (files) and Streaming (live/continuous)
+- **Real-time Factor (batch)**: ~110x on M4 Pro (1 minute in ~0.5 seconds)
+- **Streaming Support**: Available via `StreamingAsrManager` and `StreamingAsrSession`
 - **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
 ### CLI Transcription
 
 ```bash
-# Transcribe an audio file using batch processing
+# Transcribe an audio file (batch mode by default)
 swift run fluidaudio transcribe audio.wav
+
+# Transcribe with streaming simulation (incremental updates)
+swift run fluidaudio transcribe audio.wav --streaming
+
+# Run two parallel streams with shared models (macOS)
+swift run fluidaudio multi-stream mic.wav system.wav
 
 # Show help and usage options
 swift run fluidaudio transcribe --help
@@ -127,7 +133,97 @@ Task {
 
 ### Streaming Transcription API
 
-This is best for long running use cases like meeting transcription or live recordings. 
+This is best for long-running use cases like meeting transcription or live recordings. Streaming provides:
+
+- **Volatile updates**: fast, speculative partial text for UI responsiveness.
+- **Final updates**: corrected text once sufficient right-context is available.
+- **Stateful decoding**: decoder state is preserved across chunks per `AudioSource`.
+
+Basic streaming with a single source:
+
+```swift
+import AVFoundation
+import FluidAudio
+
+@available(iOS 16.0, macOS 13.0, *)
+func runStreaming() async throws {
+    // 1) Pick a streaming preset
+    let config = StreamingAsrConfig.realtime // or .default for more stability
+
+    // 2) Create manager and start (downloads models if needed)
+    let streaming = StreamingAsrManager(config: config)
+    try await streaming.start(source: .microphone)
+
+    // 3) Subscribe to incremental updates
+    Task {
+        for await snapshot in await streaming.snapshots {
+            let final = String(snapshot.finalized.characters)
+            let volatile = snapshot.volatile.map { String($0.characters) } ?? ""
+            // Update your UI with final + volatile
+        }
+    }
+
+    // 4) Feed audio from AVAudioEngine (any format is OK; conversion is handled)
+    let engine = AVAudioEngine()
+    let input = engine.inputNode
+    let format = input.inputFormat(forBus: 0)
+    input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        Task { await streaming.streamAudio(buffer) }
+    }
+    try engine.start()
+
+    // ... later, when done recording
+    let finalText = try await streaming.finish()
+    print(finalText)
+}
+```
+
+Shared-models multi-stream (e.g., microphone + system audio):
+
+```swift
+@available(iOS 16.0, macOS 13.0, *)
+func runMultiStream() async throws {
+    let session = StreamingAsrSession()
+    try await session.initialize() // load once; shared across streams
+
+    let mic = try await session.createStream(source: .microphone, config: .default)
+    let sys = try await session.createStream(source: .system, config: .default)
+
+    Task { for await s in await mic.snapshots { /* update UI */ } }
+    Task { for await s in await sys.snapshots { /* update UI */ } }
+
+    // Feed your buffers: await mic.streamAudio(buffer) / await sys.streamAudio(buffer)
+
+    let micFinal = try await mic.finish()
+    let sysFinal = try await sys.finish()
+}
+```
+
+Configuration differences and impact:
+
+- `ASRConfig` (batch):
+  - Keys: `sampleRate` (default 16k), `tdtConfig`, `enableDebug`.
+  - Usage: pass into `AsrManager(config:)`. You provide 16kHz mono `Float` audio (`AudioProcessor.loadAudioFile(...)`).
+  - Behavior: each `transcribe` resets decoder state between calls.
+
+- `StreamingAsrConfig` (streaming):
+  - Keys that shape latency vs accuracy at runtime:
+    - `chunkSeconds` (default 11.0): core segment length. Larger → more stability, higher latency.
+    - `leftContextSeconds` (default 2.0): past audio appended for stability; too large increases compute.
+    - `rightContextSeconds` (default 2.0): lookahead before finalizing; smaller lowers latency, can reduce accuracy.
+    - `volatileRightContextSeconds` (default 0.5): lookahead for partial (volatile) updates; smaller → snappier UI.
+    - `volatileStepSeconds` (default 0.5): cadence of volatile updates; smaller → more frequent updates.
+    - `minContextForFinalization` (default 10.0): guard so finals occur with sufficient context.
+    - `finalizationThreshold` (default 0.85): confidence gate for finalizing segments.
+  - Presets: `.default` (balanced) and `.realtime` (more responsive: faster volatile cadence, lower lookahead).
+  - Usage: pass into `StreamingAsrManager(config:)` or `StreamingAsrSession.createStream(config:)`.
+  - Behavior: maintains per-`AudioSource` decoder state; call `reset()` to start a fresh session, or `finish()`/`cancel()`.
+
+Notes:
+
+- Audio conversion is automatic in streaming via an internal `AudioConverter` actor (any `AVAudioPCMBuffer` format is OK).
+- For iOS/macOS apps, prefer streaming and consume `snapshots` for simple UI, or `results` for granular segment/timing.
+- For file processing and benchmarks, prefer batch (`AsrManager`), which maximizes throughput and simplicity.
 
 
 
@@ -250,8 +346,14 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.8
 ### ASR Commands
 
 ```bash
-# Transcribe an audio file (batch processing)
+# Transcribe an audio file (batch)
 swift run fluidaudio transcribe audio.wav
+
+# Transcribe with streaming simulation (incremental updates)
+swift run fluidaudio transcribe audio.wav --streaming
+
+# Two parallel streams with shared models (macOS)
+swift run fluidaudio multi-stream mic.wav system.wav
 
 # Run LibriSpeech ASR benchmark
 swift run fluidaudio asr-benchmark --subset test-clean --num-files 50
