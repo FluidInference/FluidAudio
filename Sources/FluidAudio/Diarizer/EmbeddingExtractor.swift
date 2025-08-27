@@ -44,7 +44,8 @@ public class EmbeddingExtractor {
     /// to convert audio+masks into 256-dimensional speaker embeddings.
     ///
     /// - Parameters:
-    ///   - audio: Raw audio samples (16kHz) - can be Array, ArraySlice, or any RandomAccessCollection
+    ///   - audio: Raw audio samples (16kHz) - accepts any RandomAccessCollection of Float
+    ///           (Array, ArraySlice, ContiguousArray, or custom collections)
     ///   - masks: Speaker activity masks from segmentation
     ///   - minActivityThreshold: Minimum frames for valid speaker
     /// - Returns: Array of 256-dim embeddings for each speaker

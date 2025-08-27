@@ -64,6 +64,10 @@ public final class DiarizerManager {
     }
 
     /// Validate audio quality.
+    ///
+    /// - Parameter samples: Audio samples - accepts any Collection of Float
+    ///                     (Array, ArraySlice, or custom collections)
+    /// - Returns: AudioValidationResult with validity status and any issues
     public func validateAudio<C>(_ samples: C) -> AudioValidationResult
     where C: Collection, C.Element == Float {
         return audioValidation.validateAudio(samples)
@@ -85,7 +89,8 @@ public final class DiarizerManager {
     /// - Tracking consistent speaker IDs
     ///
     /// - Parameters:
-    ///   - samples: Audio samples (should be 16kHz mono) - can be Array, ArraySlice, or any RandomAccessCollection
+    ///   - samples: Audio samples (16kHz mono) - accepts any RandomAccessCollection of Float
+    ///             (Array, ArraySlice, ContiguousArray, or custom collections)
     ///   - sampleRate: Sample rate (default: 16000)
     /// - Returns: `DiarizationResult` containing:
     ///   - `segments`: Array of speaker segments with speaker IDs, timestamps, and embeddings
@@ -93,6 +98,19 @@ public final class DiarizerManager {
     ///   - `timings`: Performance metrics (only when debugMode enabled)
     /// - Throws: DiarizerError if not initialized or processing fails
     ///
+    /// Example usage:
+    /// ```swift
+    /// // With Array (traditional)
+    /// let audioArray = [Float](repeating: 0, count: 160000)
+    /// let result = try diarizer.performCompleteDiarization(audioArray)
+    ///
+    /// // With ArraySlice (zero-copy view)
+    /// let audioSlice = audioArray[8000..<24000]  // No copy!
+    /// let result = try diarizer.performCompleteDiarization(audioSlice)
+    ///
+    /// // With ContiguousArray (performance-optimized)
+    /// let audioContiguous = ContiguousArray<Float>(audioArray)
+    /// let result = try diarizer.performCompleteDiarization(audioContiguous)
     /// ```
     public func performCompleteDiarization<C>(
         _ samples: C, sampleRate: Int = 16000
