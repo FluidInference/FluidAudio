@@ -14,7 +14,7 @@ import OSLog
 /// let streamingAsr = StreamingAsrManager()
 /// try await streamingAsr.start()
 ///
-/// // Listen for UI updates
+/// // Listen for transcription updates
 /// for await snapshot in streamingAsr.snapshots {
 ///     updateUI(finalized: snapshot.finalized, volatile: snapshot.volatile)
 /// }
@@ -31,8 +31,7 @@ public actor StreamingAsrManager {
     private let inputSequence: AsyncStream<AVAudioPCMBuffer>
     private let inputBuilder: AsyncStream<AVAudioPCMBuffer>.Continuation
 
-    // Transcription output streams
-    private var resultsContinuation: AsyncStream<StreamingTranscriptionResult>.Continuation?
+    // Transcription output stream
     private var snapshotsContinuation: AsyncStream<StreamingTranscriptSnapshot>.Continuation?
 
     // ASR components
@@ -180,19 +179,6 @@ public actor StreamingAsrManager {
         inputBuilder.yield(buffer)
     }
 
-    /// Segment-based results stream (volatile iterations and final replacements)
-    public var results: AsyncStream<StreamingTranscriptionResult> {
-        AsyncStream { continuation in
-            self.resultsContinuation = continuation
-
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in
-                    await self?.clearResultsContinuation()
-                }
-            }
-        }
-    }
-
     /// Snapshot stream: the concatenated finalized + current volatile transcript
     public var snapshots: AsyncStream<StreamingTranscriptSnapshot> {
         AsyncStream { continuation in
@@ -247,8 +233,6 @@ public actor StreamingAsrManager {
         }
 
         // Clean up continuations safely
-        resultsContinuation?.finish()
-        resultsContinuation = nil
         snapshotsContinuation?.finish()
         snapshotsContinuation = nil
 
@@ -265,8 +249,6 @@ public actor StreamingAsrManager {
         recognizerTask?.cancel()
 
         // Clean up continuations safely
-        resultsContinuation?.finish()
-        resultsContinuation = nil
         snapshotsContinuation?.finish()
         snapshotsContinuation = nil
 
@@ -277,7 +259,6 @@ public actor StreamingAsrManager {
     }
 
     /// Clear continuations
-    private func clearResultsContinuation() { resultsContinuation = nil }
     private func clearSnapshotsContinuation() { snapshotsContinuation = nil }
 
     // MARK: - Private Methods
@@ -370,28 +351,6 @@ public actor StreamingAsrManager {
 
             // Update transcript builder (volatile or final)
             await updateTranscriptBuilder(text: trimmed, isFinal: isFinal, segmentID: segmentID)
-
-            // Build and emit result for this segment (using captured metadata)
-            let sampleRate = config.asrConfig.sampleRate
-            let start = CMTime(value: CMTimeValue(centerStartAbs), timescale: CMTimeScale(sampleRate))
-            let durationSamples = min(chunkSamples, windowSamples.count)
-            let duration = CMTime(
-                value: CMTimeValue(durationSamples), timescale: CMTimeScale(sampleRate)
-            )
-
-            let result = StreamingTranscriptionResult(
-                segmentID: segmentID,
-                revision: revision,
-                attributedText: AttributedString(trimmed),
-                audioTimeRange: CMTimeRange(start: start, duration: duration),
-                isFinal: isFinal,
-                confidence: interim.confidence,
-                timestamp: Date()
-            )
-            // Safe continuation access
-            if let continuation = resultsContinuation {
-                continuation.yield(result)
-            }
 
             // Emit snapshot
             let snapshot = StreamingTranscriptSnapshot(

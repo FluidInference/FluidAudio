@@ -47,7 +47,6 @@ final class StreamingIntegrationTests: XCTestCase {
         XCTAssertEqual(initialStats.processedChunks, 0)
 
         // Create streams to test continuation setup
-        let _ = await manager.results
         let _ = await manager.snapshots
 
         // Test transcripts
@@ -101,7 +100,6 @@ final class StreamingIntegrationTests: XCTestCase {
         // Perform multiple lifecycle operations
         for iteration in 0..<5 {
             // Create streams
-            let _ = await manager.results
             let _ = await manager.snapshots
 
             // Simulate some work
@@ -130,12 +128,6 @@ final class StreamingIntegrationTests: XCTestCase {
 
         // Test that multiple concurrent accesses don't cause issues
         await withTaskGroup(of: Void.self) { group in
-            // Multiple result stream accesses
-            for _ in 0..<10 {
-                group.addTask {
-                    let _ = await manager.results
-                }
-            }
 
             // Multiple snapshot stream accesses
             for _ in 0..<10 {
@@ -167,7 +159,7 @@ final class StreamingIntegrationTests: XCTestCase {
 
         // 1. Cancel then restart
         await manager.cancel()
-        let _ = await manager.results  // Should work after cancel
+        let _ = await manager.snapshots  // Should work after cancel
 
         // 2. Finish then access
         _ = try await manager.finish()

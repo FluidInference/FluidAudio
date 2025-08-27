@@ -247,7 +247,6 @@ final class CITests: XCTestCase {
 
         // Multiple lifecycle operations
         for _ in 0..<3 {
-            let _ = await manager.results
             let _ = await manager.snapshots
             _ = try await manager.finish()
 

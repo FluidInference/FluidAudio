@@ -305,18 +305,20 @@ enum TranscribeCommand {
                 }
             }
 
-            // Log precise volatile/final events from segment results
+            // Log snapshot updates for debugging
             let loggingTask = Task {
-                for await result in await streamingAsr.results {
+                for await snapshot in await streamingAsr.snapshots {
                     let now = iso.string(from: Date())
-                    let kind = result.isFinal ? "FINAL" : "VOLATILE"
-                    let start = result.audioTimeRange.start.seconds
-                    let dur = result.audioTimeRange.duration.seconds
-                    let conf = String(format: "%.3f", result.confidence)
-                    let text = String(result.attributedText.characters)
-                    let line =
-                        "[\(now)] [\(kind)] seg=\(result.segmentID.uuidString.prefix(8)) rev=\(result.revision) t=\(String(format: "%.2f", start)) dur=\(String(format: "%.2f", dur)) conf=\(conf) text=\(text)"
-                    await logger.write(line)
+                    let finalized = String(snapshot.finalized.characters)
+                    let volatile = snapshot.volatile.map { String($0.characters) } ?? ""
+                    if !volatile.isEmpty {
+                        let line = "[\(now)] [VOLATILE] text=\(volatile)"
+                        await logger.write(line)
+                    }
+                    if !finalized.isEmpty {
+                        let line = "[\(now)] [FINALIZED] text=\(finalized)"
+                        await logger.write(line)
+                    }
                 }
             }
 
@@ -439,18 +441,20 @@ enum TranscribeCommand {
                 }
             }
 
-            // Log precise volatile/final events from segment results
+            // Log snapshot updates for debugging
             let loggingTask = Task {
-                for await result in await streamingAsr.results {
+                for await snapshot in await streamingAsr.snapshots {
                     let now = iso.string(from: Date())
-                    let kind = result.isFinal ? "FINAL" : "VOLATILE"
-                    let start = result.audioTimeRange.start.seconds
-                    let dur = result.audioTimeRange.duration.seconds
-                    let conf = String(format: "%.3f", result.confidence)
-                    let text = String(result.attributedText.characters)
-                    let line =
-                        "[\(now)] [\(kind)] seg=\(result.segmentID.uuidString.prefix(8)) rev=\(result.revision) t=\(String(format: "%.2f", start)) dur=\(String(format: "%.2f", dur)) conf=\(conf) text=\(text)"
-                    await logger.write(line)
+                    let finalized = String(snapshot.finalized.characters)
+                    let volatile = snapshot.volatile.map { String($0.characters) } ?? ""
+                    if !volatile.isEmpty {
+                        let line = "[\(now)] [VOLATILE] text=\(volatile)"
+                        await logger.write(line)
+                    }
+                    if !finalized.isEmpty {
+                        let line = "[\(now)] [FINALIZED] text=\(finalized)"
+                        await logger.write(line)
+                    }
                 }
             }
 

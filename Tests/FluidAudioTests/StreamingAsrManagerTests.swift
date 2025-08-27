@@ -108,24 +108,6 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     // MARK: - Result Structure Tests
 
-    func testStreamingTranscriptionResultCreation() {
-        let result = StreamingTranscriptionResult(
-            segmentID: UUID(),
-            revision: 1,
-            attributedText: AttributedString("Hello world"),
-            audioTimeRange: CMTimeRange(start: .zero, duration: CMTime(seconds: 2.0, preferredTimescale: 1000)),
-            isFinal: true,
-            confidence: 0.95,
-            timestamp: Date()
-        )
-
-        XCTAssertEqual(String(result.attributedText.characters), "Hello world")
-        XCTAssertTrue(result.isFinal)
-        XCTAssertEqual(result.confidence, 0.95)
-        XCTAssertEqual(result.revision, 1)
-        XCTAssertNotNil(result.timestamp)
-    }
-
     func testStreamingTranscriptSnapshotCreation() {
         let snapshot = StreamingTranscriptSnapshot(
             finalized: AttributedString("Finalized text"),
@@ -177,14 +159,6 @@ final class StreamingAsrManagerTests: XCTestCase {
     }
 
     // MARK: - New Streaming API Tests
-
-    func testResultsStreamCreation() async throws {
-        let manager = StreamingAsrManager()
-
-        // Test that results stream can be created
-        let resultsStream = await manager.results
-        XCTAssertNotNil(resultsStream)
-    }
 
     func testSnapshotsStreamCreation() async throws {
         let manager = StreamingAsrManager()
@@ -353,11 +327,8 @@ final class StreamingAsrManagerTests: XCTestCase {
     func testConcurrentStreamAccess() async throws {
         let manager = StreamingAsrManager()
 
-        // Test concurrent access to results and snapshots streams
+        // Test concurrent access to snapshots stream
         await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                let _ = await manager.results
-            }
             group.addTask {
                 let _ = await manager.snapshots
             }
@@ -454,14 +425,10 @@ final class StreamingAsrManagerTests: XCTestCase {
         let manager = StreamingAsrManager()
 
         // Create multiple streams simultaneously
-        let results1 = await manager.results
-        let results2 = await manager.results
         let snapshots1 = await manager.snapshots
         let snapshots2 = await manager.snapshots
 
         // All should be valid stream references
-        XCTAssertNotNil(results1)
-        XCTAssertNotNil(results2)
         XCTAssertNotNil(snapshots1)
         XCTAssertNotNil(snapshots2)
 
