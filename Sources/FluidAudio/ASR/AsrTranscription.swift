@@ -11,16 +11,12 @@ extension AsrManager {
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
 
         if config.enableDebug {
-            logger.debug("transcribeWithState: processing \(audioSamples.count) samples")
             // Log decoder state values before processing
             let hiddenBefore = (
                 decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
             )
             let cellBefore = (
                 decoderState.cellState[0].intValue, decoderState.cellState[1].intValue
-            )
-            logger.debug(
-                "Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]"
             )
         }
 
@@ -50,10 +46,6 @@ extension AsrManager {
                     decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
                 )
                 let cellAfter = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
-                logger.debug(
-                    "Decoder state after: hidden[\(hiddenAfter.0),\(hiddenAfter.1)], cell[\(cellAfter.0),\(cellAfter.1)]"
-                )
-                logger.debug("Transcription result: '\(result.text)'")
             }
 
             return result
@@ -152,10 +144,6 @@ extension AsrManager {
         if !previousTokens.isEmpty && !tokens.isEmpty {
             let (deduped, removedCount) = removeDuplicateTokenSequence(previous: previousTokens, current: tokens)
             let adjustedTimestamps = removedCount > 0 ? Array(timestamps.dropFirst(removedCount)) : timestamps
-
-            if enableDebug && removedCount > 0 {
-                logger.debug("Streaming chunk: removed \(removedCount) duplicate tokens")
-            }
 
             return (deduped, adjustedTimestamps, encLen)
         }
@@ -336,10 +324,6 @@ extension AsrManager {
                 for currentStart in 0..<min(5, currEnd) {
                     let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
                     if prevSub == currSub {
-                        if config.enableDebug {
-                            logger.debug(
-                                "Duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)")
-                        }
                         let removed = currentStart + overlapLength
                         return (Array(current.dropFirst(removed)), removed)
                     }

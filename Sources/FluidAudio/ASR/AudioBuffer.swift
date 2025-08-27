@@ -49,7 +49,6 @@ actor AudioBuffer {
         if overflow > 0 {
             readPosition = (readPosition + overflow) % capacity
             count -= overflow
-            logger.debug("Buffer overflow handled: discarded \(overflow) old samples")
         }
 
         // Write new samples
@@ -72,11 +71,9 @@ actor AudioBuffer {
     /// - Parameter size: Size of the chunk in samples
     /// - Returns: Audio chunk or nil if not enough samples available
     func getChunk(size: Int) -> [Float]? {
-        logger.debug("getChunk: requestedSize=\(size), available=\(self.count)")
 
         // Check if we have enough samples
         guard count >= size else {
-            logger.debug("Not enough samples: need \(size), have \(self.count)")
             return nil
         }
 
@@ -94,10 +91,6 @@ actor AudioBuffer {
         // Update read position and count
         readPosition = (readPosition + size) % capacity
         count -= size
-
-        logger.debug(
-            "Advanced buffer: oldReadPos=\(oldReadPosition), newReadPos=\(self.readPosition), consumed=\(size), remaining=\(self.count)"
-        )
 
         // Track this chunk
         processedChunks.append(
@@ -121,9 +114,6 @@ actor AudioBuffer {
     ///   - allowPartial: If true, returns available samples even if less than requested
     /// - Returns: Audio chunk (may be smaller than requested if allowPartial is true)
     func getChunkWithPartial(requestedSize: Int, allowPartial: Bool = false) -> [Float]? {
-        logger.debug(
-            "getChunkWithPartial: requestedSize=\(requestedSize), available=\(self.count), allowPartial=\(allowPartial)"
-        )
 
         // If we have enough samples, use regular getChunk
         if count >= requestedSize {
@@ -132,13 +122,11 @@ actor AudioBuffer {
 
         // If partial chunks not allowed, return nil
         guard allowPartial && count > 0 else {
-            logger.debug("Not enough samples and partial not allowed")
             return nil
         }
 
         // Return all available samples as a partial chunk
         let partialSize = count
-        logger.debug("Returning partial chunk of \(partialSize) samples")
 
         var chunk: [Float] = []
         chunk.reserveCapacity(partialSize)

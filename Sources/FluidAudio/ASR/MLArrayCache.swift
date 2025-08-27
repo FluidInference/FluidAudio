@@ -27,12 +27,10 @@ actor MLArrayCache {
 
         // Check if we have a cached array
         if var arrays = cache[key], !arrays.isEmpty {
-            logger.debug("Cache hit for shape: \(shape)")
             return arrays.removeLast()
         }
 
         // Create new ANE-aligned array
-        logger.debug("Cache miss for shape: \(shape), creating ANE-aligned")
         return try ANEOptimizer.createANEAlignedArray(shape: shape, dataType: dataType)
     }
 
@@ -53,7 +51,6 @@ actor MLArrayCache {
             }
             arrays.append(array)
             cache[key] = arrays
-            logger.debug("Returned array to cache for shape: \(array.shape)")
         }
     }
 

@@ -319,14 +319,6 @@ public class DownloadUtils {
 
             case "file":
                 let expectedSize = item.lfs?.size ?? item.size
-
-                // Only log large files (>10MB) to reduce noise
-                if expectedSize > 10_000_000 {
-                    logger.info("📥 Downloading \(item.path) (\(formatBytes(expectedSize)))")
-                } else {
-                    logger.debug("Downloading \(item.path) (\(formatBytes(expectedSize)))")
-                }
-
                 try await downloadFile(
                     from: repo,
                     path: item.path,
