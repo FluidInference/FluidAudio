@@ -32,6 +32,7 @@ public actor StreamingAsrManager {
 
     // Transcription output stream
     private var snapshotsContinuation: AsyncStream<StreamingTranscriptSnapshot>.Continuation?
+    private var snapshotsStream: AsyncStream<StreamingTranscriptSnapshot>?
 
     // ASR components
     private var asrManager: AsrManager?
@@ -97,6 +98,11 @@ public actor StreamingAsrManager {
         let (stream, continuation) = AsyncStream<AVAudioPCMBuffer>.makeStream()
         self.inputSequence = stream
         self.inputBuilder = continuation
+
+        // Initialize snapshots stream eagerly to avoid race conditions
+        let (snapshotStream, snapshotContinuation) = AsyncStream<StreamingTranscriptSnapshot>.makeStream()
+        self.snapshotsStream = snapshotStream
+        self.snapshotsContinuation = snapshotContinuation
 
         logger.info(
             "Initialized StreamingAsrManager with mode: \(String(describing: config.mode)), chunk=\(config.chunkSeconds)s"
@@ -188,15 +194,14 @@ public actor StreamingAsrManager {
 
     /// Snapshot stream: the concatenated finalized + current volatile transcript
     public var snapshots: AsyncStream<StreamingTranscriptSnapshot> {
-        AsyncStream { continuation in
-            self.snapshotsContinuation = continuation
-
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in
-                    await self?.clearSnapshotsContinuation()
-                }
+        guard let stream = snapshotsStream else {
+            // Fallback - should not happen with eager initialization
+            logger.warning("Snapshots stream was not initialized, creating fallback")
+            return AsyncStream { continuation in
+                continuation.finish()
             }
         }
+        return stream
     }
 
     /// Finish streaming and get the final transcription
@@ -242,6 +247,7 @@ public actor StreamingAsrManager {
         // Clean up continuations safely
         snapshotsContinuation?.finish()
         snapshotsContinuation = nil
+        snapshotsStream = nil
 
         // Clean up audio converter state
         await audioConverter.cleanup()
@@ -258,6 +264,7 @@ public actor StreamingAsrManager {
         // Clean up continuations safely
         snapshotsContinuation?.finish()
         snapshotsContinuation = nil
+        snapshotsStream = nil
 
         // Cleanup audio converter state
         await audioConverter.cleanup()
@@ -266,7 +273,10 @@ public actor StreamingAsrManager {
     }
 
     /// Clear continuations
-    private func clearSnapshotsContinuation() { snapshotsContinuation = nil }
+    private func clearSnapshotsContinuation() {
+        snapshotsContinuation = nil
+        snapshotsStream = nil
+    }
 
     // MARK: - Private Methods
 

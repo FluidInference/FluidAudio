@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, *)
 public class ASRBenchmark {
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "Benchmark")
+    private let logger = ConsoleLogger(subsystem: "com.fluidinfluence.asr", category: "Benchmark")
     private let config: ASRBenchmarkConfig
 
     public init(config: ASRBenchmarkConfig = ASRBenchmarkConfig()) {
