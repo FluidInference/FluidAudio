@@ -338,6 +338,7 @@ extension AsrManager {
         }
 
         // Look for longer overlaps first, then shorter ones
+        // 4 is arbitrary minimum to avoid excessive computation based on the results from FLEURS benchmark
         let maxPossibleOverlap = min(maxSearchLength, maxMatchLength)
         if maxPossibleOverlap >= 4 {
             for overlapLength in (4...maxPossibleOverlap).reversed() {
@@ -353,16 +354,6 @@ extension AsrManager {
                     for currentStart in 0..<min(15, currEnd) {  // Increased to 15 for longer sequences
                         let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
                         if prevSub == currSub {
-                            if config.enableDebug {
-                                logger.debug(
-                                    "🔍 Found duplicate sequence: length=\(overlapLength), prevStart=\(startIndex), currStart=\(currentStart)"
-                                )
-                                let tokenTexts = prevSub.compactMap { vocabulary[$0] ?? "token_\($0)" }
-                                let duplicateText = tokenTexts.joined().replacingOccurrences(of: "▁", with: " ")
-                                logger.debug("🔍 Duplicate text: '\(duplicateText)'")
-                                logger.debug(
-                                    "🔍 Removing \(currentStart + overlapLength) tokens from start of current chunk")
-                            }
                             let removed = currentStart + overlapLength
                             return (Array(current.dropFirst(removed)), removed)
                         }
@@ -383,9 +374,6 @@ extension AsrManager {
                 for currentStart in 0..<min(5, currEnd) {
                     let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
                     if prevSub == currSub {
-                        if config.enableDebug {
-                            logger.debug("🔍 Found short duplicate: length=\(overlapLength), currStart=\(currentStart)")
-                        }
                         let removed = currentStart + overlapLength
                         return (Array(current.dropFirst(removed)), removed)
                     }

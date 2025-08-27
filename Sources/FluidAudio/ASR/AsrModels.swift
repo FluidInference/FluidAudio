@@ -63,8 +63,6 @@ extension AsrModels {
         from directory: URL,
         configuration: MLModelConfiguration? = nil
     ) async throws -> AsrModels {
-        logger.info("Loading ASR models from: \(directory.path, privacy: .public)")
-
         let config = configuration ?? defaultConfiguration()
 
         // Load each model with its optimal compute unit configuration
@@ -77,11 +75,7 @@ extension AsrModels {
 
         var loadedModels: [String: MLModel] = [:]
 
-        for (modelName, modelType) in modelConfigs {
-            logger.debug(
-                "🔍 Loading model: \(modelName, privacy: .public) (type: \(String(describing: modelType), privacy: .public))"
-            )
-
+        for (modelName, _) in modelConfigs {
             // Use DownloadUtils with optimal compute units
             let models = try await DownloadUtils.loadModels(
                 .parakeet,
@@ -92,38 +86,6 @@ extension AsrModels {
 
             if let model = models[modelName] {
                 loadedModels[modelName] = model
-                let computeUnitsDescription = String(describing: config.computeUnits)
-                logger.info(
-                    "✅ Loaded \(modelName, privacy: .public) with compute units: \(computeUnitsDescription, privacy: .public)"
-                )
-
-                // Log model input/output descriptions for debugging
-                logger.debug(
-                    "🔍 \(modelName, privacy: .public) - inputs: \(model.modelDescription.inputDescriptionsByName.keys.sorted(), privacy: .public)"
-                )
-                logger.debug(
-                    "🔍 \(modelName, privacy: .public) - outputs: \(model.modelDescription.outputDescriptionsByName.keys.sorted(), privacy: .public)"
-                )
-
-                // Log specific shape information for key models
-                if modelName == Names.encoderFile {
-                    for (inputName, inputDesc) in model.modelDescription.inputDescriptionsByName {
-                        if let constraint = inputDesc.multiArrayConstraint {
-                            logger.debug(
-                                "🔍 Encoder input '\(inputName, privacy: .public)': shape=\(constraint.shape, privacy: .public), dataType=\(constraint.dataType.rawValue, privacy: .public)"
-                            )
-                        }
-                    }
-                    for (outputName, outputDesc) in model.modelDescription.outputDescriptionsByName {
-                        if let constraint = outputDesc.multiArrayConstraint {
-                            logger.debug(
-                                "🔍 Encoder output '\(outputName, privacy: .public)': shape=\(constraint.shape, privacy: .public), dataType=\(constraint.dataType.rawValue, privacy: .public)"
-                            )
-                        }
-                    }
-                }
-            } else {
-                logger.error("❌ Failed to load model: \(modelName, privacy: .public)")
             }
         }
 
@@ -169,10 +131,6 @@ extension AsrModels {
                     vocabulary[tokenId] = value
                 }
             }
-
-            logger.info(
-                "Loaded vocabulary with \(vocabulary.count, privacy: .public) tokens from \(vocabPath.path, privacy: .public)"
-            )
             return vocabulary
         } catch {
             logger.error(

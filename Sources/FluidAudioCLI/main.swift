@@ -57,7 +57,6 @@ guard arguments.count > 1 else {
 let command = arguments[1]
 let semaphore = DispatchSemaphore(value: 0)
 
-
 // Use Task to handle async commands
 Task {
     switch command {
