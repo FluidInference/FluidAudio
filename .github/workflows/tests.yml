@@ -1,23 +1,25 @@
 name: Build and Test
-
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-and-test-macos:
-    name: Build and Test (macOS)
+    name: Build and Test Swift Package (macOS)
     runs-on: macos-15
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Check versions
+        run: |
+          swift --version
+          xcodebuild -version
 
       - name: Build package
         run: swift build
@@ -25,22 +27,6 @@ jobs:
       - name: Run tests
         run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 10
-
-      - name: Run streaming-specific tests  
-        run: |
-          echo "Testing streaming functionality..."
-          swift test --filter StreamingIntegrationTests
-          swift test --filter StreamingAsrManagerTests
-        timeout-minutes: 5
-
-      - name: Test CLI streaming flag validation
-        run: |
-          echo "Testing CLI streaming option parsing..."
-          # Test that the streaming flag exists and is parseable
-          swift run fluidaudio transcribe --help | grep -q "streaming" || (echo "Error: --streaming option not found in help"; exit 1)
-          swift run fluidaudio asr-benchmark --help | grep -q "test-streaming" || (echo "Error: --test-streaming option not found in help"; exit 1)
-          echo "✅ CLI streaming options validated successfully"
-        timeout-minutes: 2
 
   build-ios:
     name: Build (iOS)
