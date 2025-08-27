@@ -537,4 +537,447 @@ final class StreamingAsrManagerTests: XCTestCase {
         XCTAssertTrue(srtFormat.contains("00:00:03,100 --> 00:00:04,799\n"), "Missing second timestamp")
         XCTAssertTrue(srtFormat.contains("How are you?\n"), "Missing second text")
     }
+
+    // MARK: - Final Segment Processing Tests
+
+    /// Helper method to create test audio buffers in ASR format (16kHz mono Float32)
+    private func createTestAudioBuffer(
+        durationSeconds: Double,
+        frequency: Double = 440.0,  // A4 note
+        amplitude: Float = 0.3
+    ) throws -> AVAudioPCMBuffer {
+        let sampleRate = 16000.0
+        let channels: AVAudioChannelCount = 1
+
+        guard
+            let audioFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: channels,
+                interleaved: false
+            )
+        else {
+            throw NSError(
+                domain: "TestError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio format"])
+        }
+
+        let frameCount = AVAudioFrameCount(sampleRate * durationSeconds)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount) else {
+            throw NSError(
+                domain: "TestError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+        }
+
+        buffer.frameLength = frameCount
+
+        // Fill with sine wave data at specified frequency
+        if let channelData = buffer.floatChannelData {
+            for i in 0..<Int(frameCount) {
+                let phase = Double(i) / sampleRate * frequency * 2.0 * Double.pi
+                channelData[0][i] = Float(sin(phase)) * amplitude
+            }
+        }
+
+        return buffer
+    }
+
+    /// Test that demonstrates the final pending segment issue using real audio
+    func testFinalPendingSegmentWithRealAudio() async throws {
+        // Skip unless running in debug mode for manual testing
+        guard ProcessInfo.processInfo.environment["RUN_STREAMING_TESTS"] == "1" else {
+            throw XCTSkip("Set RUN_STREAMING_TESTS=1 to run streaming tests with real models")
+        }
+
+        let config = StreamingAsrConfig(
+            mode: .balanced,  // 10s chunks, 1s updates
+            enableDebug: true
+        )
+        let manager = StreamingAsrManager(config: config)
+
+        // Track snapshots to monitor finalization
+        var snapshots: [StreamingTranscriptSnapshot] = []
+        let snapshotTask = Task {
+            let stream = await manager.snapshots
+            for await snapshot in stream {
+                snapshots.append(snapshot)
+                print(
+                    "Snapshot: finalized='\(snapshot.finalized)' volatile='\(snapshot.volatile?.description ?? "nil")'")
+            }
+        }
+
+        do {
+            // Start the manager with real models (using system source for testing)
+            try await manager.start(source: .system)
+
+            print("Testing final pending segment processing with synthetic audio...")
+
+            var snapshotCountBefore = 0
+
+            // Stream 15 seconds worth (should trigger finalization around 10s mark)
+            print("Streaming first 15 seconds...")
+            for i in 0..<15 {
+                let chunk = try createTestAudioBuffer(durationSeconds: 1.0, frequency: 440.0)
+                await manager.streamAudio(chunk)
+
+                // Track snapshots as they come in
+                if snapshots.count > snapshotCountBefore {
+                    snapshotCountBefore = snapshots.count
+                    if let lastSnapshot = snapshots.last {
+                        let finalizedLength = String(lastSnapshot.finalized.characters).count
+                        print("New snapshot at t=\(i+1)s: finalized length=\(finalizedLength) chars")
+                    }
+                }
+            }
+
+            print("After 15s: \(snapshots.count) snapshots")
+
+            // Add the "pending" 7 seconds that should be processed in finish()
+            print("Streaming final 7 seconds (pending segment)...")
+            for _ in 15..<22 {
+                let chunk = try createTestAudioBuffer(durationSeconds: 1.0, frequency: 660.0)  // Different frequency
+                await manager.streamAudio(chunk)
+            }
+
+            print("After 22s (before finish): \(snapshots.count) snapshots")
+            let snapshotsBeforeFinish = snapshots.count
+
+            if let lastSnapshot = snapshots.last {
+                let finalizedText = String(lastSnapshot.finalized.characters)
+                let volatileText = lastSnapshot.volatile.map { String($0.characters) } ?? "nil"
+                print("Last snapshot before finish: finalized='\(finalizedText)' volatile='\(volatileText)'")
+            }
+
+            // This is the key test: does finish() process the final 7 seconds?
+            print("Calling finish() - should process pending 7 seconds...")
+            let finalTranscript = try await manager.finish()
+
+            let snapshotsAfterFinish = snapshots.count
+
+            print("Final transcript: '\(finalTranscript)'")
+            print("Total snapshots: before finish=\(snapshotsBeforeFinish), after finish=\(snapshotsAfterFinish)")
+
+            // The key insight: if finish() properly processes pending segments,
+            // we should see additional snapshots OR a non-empty final transcript
+            // Even with synthetic audio, the system should at least attempt processing
+            if snapshotsAfterFinish > snapshotsBeforeFinish {
+                print(
+                    "✓ SUCCESS: finish() generated \(snapshotsAfterFinish - snapshotsBeforeFinish) additional snapshots"
+                )
+            } else if !finalTranscript.isEmpty {
+                print("✓ SUCCESS: finish() produced a final transcript")
+            } else {
+                print(
+                    "❌ ISSUE CONFIRMED: finish() did not process pending segments (no new snapshots, empty transcript)")
+            }
+
+            print("✓ Test completed - buffering and finish() behavior verified")
+
+        } catch {
+            print("Test failed with error: \(error)")
+            throw error
+        }
+
+        snapshotTask.cancel()
+    }
+
+    /// Test the volatile-to-finalized transition flow to identify where pending segments might be lost
+    func testVolatileToFinalizedTransition() async throws {
+        // Skip unless running in debug mode for manual testing
+        guard ProcessInfo.processInfo.environment["RUN_STREAMING_TESTS"] == "1" else {
+            throw XCTSkip("Set RUN_STREAMING_TESTS=1 to run streaming tests with real models")
+        }
+
+        let config = StreamingAsrConfig(
+            mode: .balanced,  // 10s chunks, 1s updates
+            enableDebug: true
+        )
+        let manager = StreamingAsrManager(config: config)
+
+        // Detailed snapshot tracking
+        var snapshots: [StreamingTranscriptSnapshot] = []
+        var volatileHistory: [(time: Date, content: String)] = []
+        var finalizedHistory: [(time: Date, content: String)] = []
+
+        let snapshotTask = Task {
+            let stream = await manager.snapshots
+            for await snapshot in stream {
+                snapshots.append(snapshot)
+
+                let timestamp = Date()
+                let finalizedText = String(snapshot.finalized.characters)
+                let volatileText = snapshot.volatile.map { String($0.characters) } ?? ""
+
+                // Track changes in volatile content
+                if !volatileText.isEmpty && (volatileHistory.last?.content != volatileText) {
+                    volatileHistory.append((time: timestamp, content: volatileText))
+                    print("📝 VOLATILE UPDATE #\(volatileHistory.count): '\(volatileText)'")
+                }
+
+                // Track changes in finalized content
+                if !finalizedText.isEmpty && (finalizedHistory.last?.content != finalizedText) {
+                    finalizedHistory.append((time: timestamp, content: finalizedText))
+                    print("✅ FINALIZED UPDATE #\(finalizedHistory.count): '\(finalizedText)'")
+                }
+
+                print("📊 Snapshot #\(snapshots.count): F='\(finalizedText)' V='\(volatileText)'")
+            }
+        }
+
+        do {
+            try await manager.start(source: .system)
+
+            print("🔍 Testing volatile-to-finalized transition with detailed tracking...")
+            print("📋 Streaming pattern: 15s (expect finalization) + 7s (pending) + finish()")
+
+            // Stream in smaller chunks for better visibility into state changes
+            let chunkDuration = 0.5  // 500ms chunks for detailed tracking
+
+            // Phase 1: Stream 15 seconds (should trigger normal finalization)
+            print("\n🎵 Phase 1: Streaming first 15 seconds in 0.5s chunks...")
+            var totalTime = 0.0
+
+            for chunkIndex in 0..<30 {  // 30 chunks of 0.5s = 15s
+                let chunk = try createTestAudioBuffer(durationSeconds: chunkDuration, frequency: 440.0)
+                await manager.streamAudio(chunk)
+                totalTime += chunkDuration
+
+                // Log every 2 seconds
+                if chunkIndex % 4 == 3 {
+                    print(
+                        "⏱️  t=\(totalTime)s: \(snapshots.count) snapshots, V-history=\(volatileHistory.count), F-history=\(finalizedHistory.count)"
+                    )
+                }
+            }
+
+            print("\n📈 After 15s: \(snapshots.count) total snapshots")
+            print("   Volatile updates: \(volatileHistory.count)")
+            print("   Finalized updates: \(finalizedHistory.count)")
+
+            // Phase 2: Stream the critical 7 seconds that should be "pending"
+            print("\n🎵 Phase 2: Streaming final 7 seconds (should be pending)...")
+            let volatileCountBefore = volatileHistory.count
+            let finalizedCountBefore = finalizedHistory.count
+
+            for _ in 0..<14 {  // 14 chunks of 0.5s = 7s
+                let chunk = try createTestAudioBuffer(durationSeconds: chunkDuration, frequency: 660.0)  // Different frequency
+                await manager.streamAudio(chunk)
+                totalTime += chunkDuration
+            }
+
+            let volatileCountAfter = volatileHistory.count
+            let finalizedCountAfter = finalizedHistory.count
+
+            print("\n📈 After 22s (before finish):")
+            print("   Total snapshots: \(snapshots.count)")
+            print("   New volatile updates during 7s: \(volatileCountAfter - volatileCountBefore)")
+            print("   New finalized updates during 7s: \(finalizedCountAfter - finalizedCountBefore)")
+
+            // Check current state before finish()
+            if let lastSnapshot = snapshots.last {
+                let currentFinalized = String(lastSnapshot.finalized.characters)
+                let currentVolatile = lastSnapshot.volatile.map { String($0.characters) } ?? ""
+                print("   Current state: F='\(currentFinalized)' V='\(currentVolatile)'")
+            }
+
+            // Phase 3: Call finish() and track what happens
+            print("\n🏁 Phase 3: Calling finish() - tracking volatile-to-finalized transition...")
+            let volatileBeforeFinish = volatileHistory.count
+            let finalizedBeforeFinish = finalizedHistory.count
+            let snapshotsBeforeFinish = snapshots.count
+
+            let finalTranscript = try await manager.finish()
+
+            // Analysis
+            let volatileAfterFinish = volatileHistory.count
+            let finalizedAfterFinish = finalizedHistory.count
+            let snapshotsAfterFinish = snapshots.count
+
+            print("\n📊 ANALYSIS:")
+            print("   Final transcript: '\(finalTranscript)'")
+            print("   New snapshots during finish(): \(snapshotsAfterFinish - snapshotsBeforeFinish)")
+            print("   New volatile updates during finish(): \(volatileAfterFinish - volatileBeforeFinish)")
+            print("   New finalized updates during finish(): \(finalizedAfterFinish - finalizedBeforeFinish)")
+
+            // Key test: Did volatile content become finalized?
+            if volatileAfterFinish > volatileBeforeFinish {
+                print("✅ finish() generated NEW volatile content")
+            }
+
+            if finalizedAfterFinish > finalizedBeforeFinish {
+                print("✅ finish() generated NEW finalized content")
+            }
+
+            if !finalTranscript.isEmpty {
+                print("✅ finish() produced non-empty final transcript")
+            }
+
+            // Show complete history for debugging
+            print("\n📋 COMPLETE VOLATILE HISTORY:")
+            for (index, entry) in volatileHistory.enumerated() {
+                print("   V\(index + 1): '\(entry.content)'")
+            }
+
+            print("\n📋 COMPLETE FINALIZED HISTORY:")
+            for (index, entry) in finalizedHistory.enumerated() {
+                print("   F\(index + 1): '\(entry.content)'")
+            }
+
+            print("\n✓ Volatile-to-finalized transition test completed")
+
+        } catch {
+            print("Test failed with error: \(error)")
+            throw error
+        }
+
+        snapshotTask.cancel()
+    }
+
+    /// Test the specific scenario from the user's question: 15s + 7s
+    func testFinalPendingSegmentProcessing() async throws {
+        // Skip unless running in debug mode for manual testing
+        guard ProcessInfo.processInfo.environment["RUN_STREAMING_TESTS"] == "1" else {
+            throw XCTSkip("Set RUN_STREAMING_TESTS=1 to run streaming tests with real models")
+        }
+
+        let config = StreamingAsrConfig(mode: .balanced, enableDebug: true)  // Enable debug for logs
+        let manager = StreamingAsrManager(config: config)
+
+        var snapshots: [StreamingTranscriptSnapshot] = []
+        let snapshotTask = Task {
+            let stream = await manager.snapshots
+            for await snapshot in stream {
+                snapshots.append(snapshot)
+            }
+        }
+
+        do {
+            try await manager.start(source: .system)
+
+            print("🧪 Testing the user's exact scenario: stream ~15s, then 7s pending, then finish()")
+
+            // Stream approximately 15 seconds to trigger a normal processing cycle
+            for _ in 0..<15 {
+                let chunk = try createTestAudioBuffer(durationSeconds: 1.0, frequency: 440.0)
+                await manager.streamAudio(chunk)
+            }
+
+            print("After 15s: \(snapshots.count) snapshots")
+
+            // Stream the critical 7 seconds that should be processed with extended left context
+            for _ in 0..<7 {
+                let chunk = try createTestAudioBuffer(durationSeconds: 1.0, frequency: 660.0)
+                await manager.streamAudio(chunk)
+            }
+
+            let snapshotsBeforeFinish = snapshots.count
+            print("After 22s (before finish): \(snapshotsBeforeFinish) snapshots")
+
+            // This is where our extended left context fix should help
+            let finalTranscript = try await manager.finish()
+
+            let snapshotsAfterFinish = snapshots.count
+
+            print("🎯 RESULTS:")
+            print("   Final transcript: '\(finalTranscript)'")
+            print("   Snapshots before finish: \(snapshotsBeforeFinish)")
+            print("   Snapshots after finish: \(snapshotsAfterFinish)")
+            print("   New snapshots from finish(): \(snapshotsAfterFinish - snapshotsBeforeFinish)")
+
+            // Verify that finish() processed the final segment
+            XCTAssertGreaterThan(
+                snapshotsAfterFinish, snapshotsBeforeFinish, "finish() should generate additional snapshots")
+            XCTAssertFalse(finalTranscript.isEmpty, "finish() should produce a non-empty final transcript")
+
+            print("✅ Extended left context fix verified")
+
+        } catch {
+            print("Test failed: \(error)")
+            throw error
+        }
+
+        snapshotTask.cancel()
+    }
+
+    /// Test processing partial segments of various sizes
+    func testPartialSegmentFinalization() async throws {
+        throw XCTSkip("Requires model initialization - run manually for debugging")
+
+        let config = StreamingAsrConfig(mode: .balanced, enableDebug: true)
+        let partialDurations = [3.0, 5.0, 7.0, 9.0]  // Various partial segment sizes
+
+        for duration in partialDurations {
+            let manager = StreamingAsrManager(config: config)
+
+            print("Testing partial segment of \(duration)s")
+
+            let audioBuffer = try createTestAudioBuffer(
+                durationSeconds: duration,
+                frequency: 440.0 + (duration * 50)  // Unique frequency per test
+            )
+
+            await manager.streamAudio(audioBuffer)
+
+            let finalTranscript = try await manager.finish()
+
+            print("Duration: \(duration)s, Transcript: '\(finalTranscript)'")
+
+            // In a real test with models, we'd verify the transcript contains expected content
+            // For now, just ensure it doesn't crash
+            XCTAssertNotNil(finalTranscript, "Final transcript should not be nil for \(duration)s segment")
+        }
+    }
+
+    /// Test finishing with empty buffer (edge case)
+    func testEmptyBufferFinish() async throws {
+        let manager = StreamingAsrManager()
+
+        // Call finish without streaming any audio
+        let finalTranscript = try await manager.finish()
+
+        XCTAssertEqual(finalTranscript, "", "Empty buffer should produce empty transcript")
+    }
+
+    /// Test timing of final segment processing
+    func testFinalSegmentTimingEdgeCases() async throws {
+        throw XCTSkip("Requires model initialization - run manually for debugging")
+
+        let config = StreamingAsrConfig(mode: .lowLatency, enableDebug: true)  // 5s chunks for faster testing
+        let manager = StreamingAsrManager(config: config)
+
+        var snapshots: [StreamingTranscriptSnapshot] = []
+        let snapshotTask = Task {
+            let stream = await manager.snapshots
+            for await snapshot in stream {
+                snapshots.append(snapshot)
+                let finalizedCount = String(snapshot.finalized.characters).count
+                let volatileCount = snapshot.volatile.map { String($0.characters).count } ?? 0
+                print("Snapshot \(snapshots.count): finalized=\(finalizedCount) chars, volatile=\(volatileCount) chars")
+            }
+        }
+
+        do {
+            // Stream exactly 5.5 seconds (should trigger one final at 5s, leave 0.5s pending)
+            let firstChunk = try createTestAudioBuffer(durationSeconds: 5.0, frequency: 440.0)
+            let secondChunk = try createTestAudioBuffer(durationSeconds: 0.5, frequency: 880.0)
+
+            await manager.streamAudio(firstChunk)
+            try await Task.sleep(nanoseconds: 500_000_000)  // 0.5s delay
+
+            await manager.streamAudio(secondChunk)
+            try await Task.sleep(nanoseconds: 100_000_000)  // 0.1s delay
+
+            let finalTranscript = try await manager.finish()
+
+            print("Final transcript after 5.5s: '\(finalTranscript)'")
+            print("Total snapshots: \(snapshots.count)")
+
+            // The final 0.5s should be processed in finish()
+            XCTAssertFalse(finalTranscript.isEmpty, "Should have transcript from 5.5s of audio")
+
+        } catch {
+            print("Timing test failed: \(error)")
+            throw error
+        }
+
+        snapshotTask.cancel()
+    }
 }

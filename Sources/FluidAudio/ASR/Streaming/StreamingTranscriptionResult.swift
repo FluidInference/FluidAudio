@@ -40,7 +40,6 @@ public struct TimestampedSegment: Sendable {
     }
 }
 
-/// Enhanced snapshot with timing information for finalized segments
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingTranscriptSnapshot: Sendable {
     public let finalized: AttributedString
@@ -58,7 +57,6 @@ public struct StreamingTranscriptSnapshot: Sendable {
         self.timestampedSegments = timestampedSegments
     }
 
-    /// Get the full transcript with embedded timestamps
     public var timestampedText: String {
         guard !timestampedSegments.isEmpty else {
             return finalized.description

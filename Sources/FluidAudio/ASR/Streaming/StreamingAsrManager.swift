@@ -20,7 +20,6 @@ import OSLog
 /// }
 /// ```
 ///
-/// **For complete examples**, see `Examples/StreamingASR/` directory.
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "StreamingASR")
@@ -477,7 +476,7 @@ public actor StreamingAsrManager {
         logger.debug("Cleaned up \(excessCount) old segments, keeping \(self.segmentFinalTexts.count) recent segments")
     }
 
-    /// Process a final segment with full context
+    /// Process a final segment with extended left context for consistent window size
     private func processFinalSegment(center: Int, chunk: Int, currentAbsEnd: Int, forceFinalize: Bool) async -> Bool {
         let sampleRate = config.asrConfig.sampleRate
         let left = config.leftContextSamples
@@ -486,9 +485,29 @@ public actor StreamingAsrManager {
         let canEmitFinal = currentAbsEnd >= (center + chunk + rightFinal) || forceFinalize
         guard canEmitFinal else { return false }
 
-        let leftStartAbs = max(0, center - left)
         let availableAhead = max(0, currentAbsEnd - center)
         let effectiveChunk = min(chunk, availableAhead)
+
+        // Calculate extended left context to maintain consistent window size
+        let actualLeftContext: Int
+        if forceFinalize {
+            // For final segments, extend left context so that left + chunk = expected chunk size
+            // This ensures the model gets a consistent context window
+            let missingChunk = chunk - effectiveChunk  // How much shorter the final chunk is
+            let extendedLeft = left + missingChunk  // Compensate with more left context
+
+            // Ensure we don't exceed available audio (can't go before start)
+            let maxAvailableLeft = center
+            actualLeftContext = min(extendedLeft, maxAvailableLeft)
+
+            logger.debug(
+                "Final segment: extending left context from \(left) to \(actualLeftContext) samples (chunk: \(effectiveChunk)/\(chunk), missing: \(missingChunk))"
+            )
+        } else {
+            actualLeftContext = left
+        }
+
+        let leftStartAbs = max(0, center - actualLeftContext)
         let rightEndAbs = center + effectiveChunk + (forceFinalize ? 0 : rightFinal)
         let startIdx = max(leftStartAbs - bufferStartIndex, 0)
         let endIdx = max(rightEndAbs - bufferStartIndex, startIdx)
@@ -501,6 +520,13 @@ public actor StreamingAsrManager {
 
         currentSegment.emittedFinal = true
         currentSegment.revision = rev
+
+        // Log window size for debugging
+        let windowDuration = Double(window.count) / Double(sampleRate)
+        let leftDuration = Double(center - leftStartAbs) / Double(sampleRate)
+        logger.debug(
+            "Processing final segment: window=\(String(format: "%.1f", windowDuration))s, left=\(String(format: "%.1f", leftDuration))s, chunk=\(String(format: "%.1f", Double(effectiveChunk) / Double(sampleRate)))s"
+        )
 
         await self.processWindow(
             window,
