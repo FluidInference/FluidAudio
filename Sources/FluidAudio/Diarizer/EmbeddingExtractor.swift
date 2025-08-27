@@ -44,15 +44,16 @@ public class EmbeddingExtractor {
     /// to convert audio+masks into 256-dimensional speaker embeddings.
     ///
     /// - Parameters:
-    ///   - audio: Raw audio samples (16kHz)
+    ///   - audio: Raw audio samples (16kHz) - can be Array, ArraySlice, or any RandomAccessCollection
     ///   - masks: Speaker activity masks from segmentation
     ///   - minActivityThreshold: Minimum frames for valid speaker
     /// - Returns: Array of 256-dim embeddings for each speaker
-    public func getEmbeddings(
-        audio: [Float],
+    public func getEmbeddings<C>(
+        audio: C,
         masks: [[Float]],
         minActivityThreshold: Float = 10.0
-    ) throws -> [[Float]] {
+    ) throws -> [[Float]]
+    where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         // We need to return embeddings for ALL speakers, not just active ones
         // to maintain compatibility with the rest of the pipeline
         var embeddings: [[Float]] = []

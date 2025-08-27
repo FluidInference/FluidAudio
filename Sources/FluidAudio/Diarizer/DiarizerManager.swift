@@ -64,7 +64,8 @@ public final class DiarizerManager {
     }
 
     /// Validate audio quality.
-    public func validateAudio(_ samples: [Float]) -> AudioValidationResult {
+    public func validateAudio<C>(_ samples: C) -> AudioValidationResult
+    where C: Collection, C.Element == Float {
         return audioValidation.validateAudio(samples)
     }
 
@@ -84,7 +85,7 @@ public final class DiarizerManager {
     /// - Tracking consistent speaker IDs
     ///
     /// - Parameters:
-    ///   - samples: Audio samples (should be 16kHz mono)
+    ///   - samples: Audio samples (should be 16kHz mono) - can be Array, ArraySlice, or any RandomAccessCollection
     ///   - sampleRate: Sample rate (default: 16000)
     /// - Returns: `DiarizationResult` containing:
     ///   - `segments`: Array of speaker segments with speaker IDs, timestamps, and embeddings
@@ -93,11 +94,10 @@ public final class DiarizerManager {
     /// - Throws: DiarizerError if not initialized or processing fails
     ///
     /// ```
-    public func performCompleteDiarization(
-        _ samples: [Float], sampleRate: Int = 16000
-    ) throws
-        -> DiarizationResult
-    {
+    public func performCompleteDiarization<C>(
+        _ samples: C, sampleRate: Int = 16000
+    ) throws -> DiarizationResult
+    where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         guard let models else {
             throw DiarizerError.notInitialized
         }
@@ -114,10 +114,17 @@ public final class DiarizerManager {
 
         var allSegments: [TimedSpeakerSegment] = []
 
-        for chunkStart in stride(from: 0, to: samples.count, by: stepSize) {
-            let chunkEnd = min(chunkStart + chunkSize, samples.count)
+        let startIndex = samples.startIndex
+        let endIndex = samples.endIndex
+        let totalSamples = samples.distance(from: startIndex, to: endIndex)
+
+        for chunkStartOffset in stride(from: 0, to: totalSamples, by: stepSize) {
+            let chunkStart = samples.index(startIndex, offsetBy: chunkStartOffset)
+            let remainingSamples = samples.distance(from: chunkStart, to: endIndex)
+            let chunkEndOffset = min(chunkSize, remainingSamples)
+            let chunkEnd = samples.index(chunkStart, offsetBy: chunkEndOffset)
             let chunk = samples[chunkStart..<chunkEnd]
-            let chunkOffset = Double(chunkStart) / Double(sampleRate)
+            let chunkOffset = Double(chunkStartOffset) / Double(sampleRate)
 
             let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
                 chunk,
@@ -173,25 +180,35 @@ public final class DiarizerManager {
     /// - Handling both known and new speakers
     ///
     /// - Parameters:
-    ///   - chunk: Audio chunk to process
+    ///   - chunk: Audio chunk to process (can be any RandomAccessCollection)
     ///   - chunkOffset: Time offset of this chunk in the full audio
     ///   - models: Diarization models for processing
     ///   - sampleRate: Audio sample rate
     /// - Returns: Tuple of (segments with speaker IDs, timing metrics)
-    private func processChunkWithSpeakerTracking(
-        _ chunk: ArraySlice<Float>,
+    private func processChunkWithSpeakerTracking<C>(
+        _ chunk: C,
         chunkOffset: Double,
         models: DiarizerModels,
         sampleRate: Int = 16000
-    ) throws -> ([TimedSpeakerSegment], ChunkTimings) {
+    ) throws -> ([TimedSpeakerSegment], ChunkTimings)
+    where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         let segmentationStartTime = Date()
 
         let chunkSize = sampleRate * 10
-        var paddedChunk = chunk
-        if chunk.count < chunkSize {
+        let chunkCount = chunk.distance(from: chunk.startIndex, to: chunk.endIndex)
+
+        let paddedChunk: ArraySlice<Float>
+        if chunkCount < chunkSize {
             var padded = Array(repeating: 0.0 as Float, count: chunkSize)
-            padded.replaceSubrange(0..<chunk.count, with: chunk)
+            for (idx, element) in chunk.enumerated() {
+                padded[idx] = element
+            }
             paddedChunk = padded[...]
+        } else if let slice = chunk as? ArraySlice<Float> {
+            paddedChunk = slice
+        } else {
+            // Convert to ArraySlice for other collection types
+            paddedChunk = Array(chunk)[...]
         }
 
         let (binarizedSegments, _) = try segmentationProcessor.getSegments(
