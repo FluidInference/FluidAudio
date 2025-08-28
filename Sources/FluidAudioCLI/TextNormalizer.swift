@@ -19,6 +19,7 @@ struct TextNormalizer {
         "colourist": "colorist",
         "colourists": "colorists",
         "favourite": "favorite",
+        "counselled": "counseled",
         "flavour": "flavor",
         "favour": "favor",
         "honour": "honor",
