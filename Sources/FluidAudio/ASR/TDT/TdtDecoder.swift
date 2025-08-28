@@ -74,13 +74,8 @@ internal struct TdtDecoder {
         startFrameOffset: Int = 0,
         lastProcessedFrame: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int]) {
-        print(
-            "🎯 TDT DECODE START: encoderSeqLen=\(encoderSequenceLength), startOffset=\(startFrameOffset), lastProcessed=\(lastProcessedFrame)"
-        )
-
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
-            print("🚫 Early exit: encoderSequenceLength too short (\(encoderSequenceLength))")
             return ([], [])
         }
 
@@ -91,9 +86,6 @@ internal struct TdtDecoder {
 
         var hypothesis = TdtHypothesis(decState: decoderState)
         hypothesis.lastToken = decoderState.lastToken
-        print(
-            "🔄 DECODER STATE: lastToken=\(decoderState.lastToken?.description ?? "nil"), timeJump=\(decoderState.timeJump?.description ?? "nil")"
-        )
 
         // Initialize time tracking for frame navigation
         // timeIndices: Current position in encoder frames (advances by duration)
@@ -127,7 +119,6 @@ internal struct TdtDecoder {
         )
         // If startFrameOffset puts us beyond the available frames, return empty
         if timeIndices >= encoderSequenceLength {
-            print("🚫 EARLY EXIT: timeIndices (\(timeIndices)) >= encoderSequenceLength (\(encoderSequenceLength))")
             return ([], [])
         }
 
@@ -171,14 +162,8 @@ internal struct TdtDecoder {
         // ===== MAIN DECODING LOOP =====
         // Process each encoder frame until we've consumed all audio
         var loopIteration = 0
-        print("🔄 MAIN LOOP START: activeMask=\(activeMask), timeIndices=\(timeIndices)")
         while activeMask {
             loopIteration += 1
-            if loopIteration % 50 == 0 {  // Log every 50 iterations to avoid spam
-                print(
-                    "🔄 LOOP ITERATION \(loopIteration): timeIndices=\(timeIndices)/\(encoderSequenceLength), tokens so far=\(hypothesis.ySequence.count)"
-                )
-            }
             // Use last emitted token for decoder context, or blank if starting
             var label = hypothesis.lastToken ?? config.tdtConfig.blankId
             let stateToUse = hypothesis.decState ?? decoderState
@@ -235,34 +220,19 @@ internal struct TdtDecoder {
             // CRITICAL FIX: Prevent infinite loops when blank has duration=0
             // Always advance at least 1 frame to ensure forward progress
             if blankMask && duration == 0 {
-                print("⚠️ BLANK DURATION FIX: duration was 0, setting to 1")
                 duration = 1
             }
 
             // Advance through audio frames based on predicted duration
             timeIndicesCurrentLabels = timeIndices  // Remember where this token was emitted
             let newTimeIndices = timeIndices + duration
-            print("⏭️ FRAME ADVANCE: timeIndices \(timeIndices) + duration \(duration) = \(newTimeIndices)")
 
             timeIndices = newTimeIndices  // Jump forward by predicted duration
             safeTimeIndices = min(timeIndices, lastTimestep)  // Bounds check
 
-            if newTimeIndices > lastTimestep {
-                print(
-                    "⚠️ EXCEEDED BOUNDS: newTimeIndices=\(newTimeIndices) > lastTimestep=\(lastTimestep), clamped to \(safeTimeIndices)"
-                )
-            }
-
-            logger.debug(
-                "⏭️ Frame advance: token=\(label), duration=\(duration), timeIndices: \(timeIndicesCurrentLabels)→\(timeIndices), safeTimeIndices=\(safeTimeIndices)"
-            )
-
             activeMask = timeIndices < encoderSequenceLength  // Continue if more frames
             var advanceMask = activeMask && blankMask  // Enter inner loop for blank tokens
 
-            if blankMask {
-                logger.debug("⚪ Blank token detected, entering inner loop (advanceMask=\(advanceMask))")
-            }
 
             // ===== INNER LOOP: OPTIMIZED BLANK PROCESSING =====
             // When we predict a blank token, we enter this loop to quickly skip
@@ -303,13 +273,10 @@ internal struct TdtDecoder {
                 let innerDurationBin = argmaxSIMD(innerDurationLogits)
                 duration = config.tdtConfig.durationBins[innerDurationBin]
 
-                print("🕐 INNER LOOP DURATION: label=\(label), durationBin=\(innerDurationBin), duration=\(duration)")
-
                 blankMask = (label == blankId)
 
                 // Same duration=0 fix for inner loop
                 if blankMask && duration == 0 {
-                    print("⚠️ INNER BLANK DURATION FIX: duration was 0, setting to 1")
                     duration = 1
                 }
 
@@ -325,9 +292,6 @@ internal struct TdtDecoder {
             // IMPORTANT: Only emit tokens if they're beyond the already-processed region
             if activeMask && label != blankId {
                 let shouldEmit = timeIndicesCurrentLabels >= startFrameOffset
-                print(
-                    "🎤 NON-BLANK TOKEN: label=\(label), timeFrame=\(timeIndicesCurrentLabels), shouldEmit=\(shouldEmit), startOffset=\(startFrameOffset)"
-                )
 
                 if shouldEmit {
                     // Add token to output sequence
@@ -335,17 +299,6 @@ internal struct TdtDecoder {
                     hypothesis.score += score
                     hypothesis.timestamps.append(timeIndicesCurrentLabels)
                     hypothesis.lastToken = label  // Remember for next iteration
-
-                    print(
-                        "✅ EMITTED TOKEN \(hypothesis.ySequence.count): \(label) at frame \(timeIndicesCurrentLabels) (score: \(String(format: "%.3f", score)))"
-                    )
-                    logger.debug(
-                        "🎤 Emitting token: \(label) at frame \(timeIndicesCurrentLabels) (score: \(String(format: "%.3f", score)))"
-                    )
-                } else {
-                    print(
-                        "⏭️  SKIPPED TOKEN: \(label) at frame \(timeIndicesCurrentLabels) (before startOffset \(startFrameOffset))"
-                    )
                 }
 
                 // CRITICAL: Update decoder LSTM with the new token
@@ -376,9 +329,6 @@ internal struct TdtDecoder {
                 // force advancement to prevent getting stuck
                 if emissionsAtThisTimestamp >= maxSymbolsPerStep {
                     let forcedAdvance = 1
-                    print(
-                        "⚠️ FORCE ADVANCE: too many emissions (\(emissionsAtThisTimestamp)) at timestamp \(lastEmissionTimestamp)"
-                    )
                     timeIndices = min(timeIndices + forcedAdvance, lastTimestep)
                     safeTimeIndices = min(timeIndices, lastTimestep)
                     emissionsAtThisTimestamp = 0
@@ -389,14 +339,9 @@ internal struct TdtDecoder {
             // Update activeMask for next iteration
             let newActiveMask = timeIndices < encoderSequenceLength
             if activeMask && !newActiveMask {
-                print(
-                    "🏁 LOOP EXIT: timeIndices=\(timeIndices) reached/exceeded encoderSequenceLength=\(encoderSequenceLength)"
-                )
             }
             activeMask = newActiveMask
         }
-
-        print("🏁 MAIN LOOP END: completed \(loopIteration) iterations, emitted \(hypothesis.ySequence.count) tokens")
 
         if let finalState = hypothesis.decState {
             decoderState = finalState
@@ -408,40 +353,15 @@ internal struct TdtDecoder {
         if let lastToken = hypothesis.lastToken {
             let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
             if punctuationTokens.contains(lastToken) {
-                print(
-                    "🔤 PUNCTUATION CLEARING: lastToken=\(lastToken) is punctuation, clearing predictorOutput cache (keeping lastToken for context)"
-                )
                 decoderState.predictorOutput = nil
                 // Keep lastToken for linguistic context - deduplication handles duplicates at higher level
-            } else {
-                print("🔤 NO PUNCTUATION: lastToken=\(lastToken) is not punctuation, keeping cache")
-            }
-        } else {
-            print("🔤 NO LAST TOKEN: hypothesis.lastToken is nil")
-        }
+            } 
+        } 
 
         // Store time jump for streaming: how far beyond this chunk we've processed
         // Used to align timestamps when processing next chunk
         let finalTimeJump = timeIndices - encoderSequenceLength
         decoderState.timeJump = finalTimeJump
-
-        print(
-            "🏁 FINAL STATE: timeIndices=\(timeIndices), encoderSeqLen=\(encoderSequenceLength), timeJump=\(finalTimeJump)"
-        )
-        print("🏁 FINAL DECODER STATE: lastToken=\(decoderState.lastToken?.description ?? "nil")")
-        print(
-            "📝 FINAL OUTPUT: \(hypothesis.ySequence.count) tokens, timestamps range: [\(hypothesis.timestamps.min() ?? -1)...\(hypothesis.timestamps.max() ?? -1)]"
-        )
-        if !hypothesis.ySequence.isEmpty {
-            print("📝 LAST 5 TOKENS: \(hypothesis.ySequence.suffix(5))")
-        }
-
-        logger.debug(
-            "🏁 TDT decoder finished: timeIndices=\(timeIndices), encoderSequenceLength=\(encoderSequenceLength), timeJump=\(finalTimeJump)"
-        )
-        logger.debug(
-            "📝 Output: \(hypothesis.ySequence.count) tokens, timestamps range: [\(hypothesis.timestamps.min() ?? -1)...\(hypothesis.timestamps.max() ?? -1)]"
-        )
 
         // No filtering at decoder level - let post-processing handle deduplication
         return (hypothesis.ySequence, hypothesis.timestamps)
