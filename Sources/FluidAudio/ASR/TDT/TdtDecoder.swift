@@ -95,16 +95,27 @@ internal struct TdtDecoder {
             // Streaming continuation: adjust for previous chunk's time jump
             // This ensures smooth transitions between audio chunks
             timeIndices = max(0, prevTimeJump + startFrameOffset)
+            logger.debug(
+                "🔄 Streaming chunk: prevTimeJump=\(prevTimeJump), startFrameOffset=\(startFrameOffset), calculated timeIndices=\(timeIndices)"
+            )
         } else {
             // First chunk or non-streaming: start from frame offset
             timeIndices = startFrameOffset
+            logger.debug("🎬 First chunk: timeIndices=\(timeIndices) (startFrameOffset=\(startFrameOffset))")
         }
+        logger.debug(
+            "📊 Encoder info: sequenceLength=\(encoderSequenceLength), lastProcessedFrame=\(lastProcessedFrame), timeIndices=\(timeIndices)"
+        )
 
         // Key variables for frame navigation:
         var safeTimeIndices = min(timeIndices, encoderSequenceLength - 1)  // Bounds-checked index
         var timeIndicesCurrentLabels = timeIndices  // Frame where current token was emitted
         var activeMask = true  // Continue processing while we have frames left
         let lastTimestep = encoderSequenceLength - 1  // Maximum valid frame index
+
+        logger.debug(
+            "🎯 Frame navigation setup: safeTimeIndices=\(safeTimeIndices), lastTimestep=\(lastTimestep), activeMask=\(activeMask)"
+        )
 
         let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
@@ -206,8 +217,16 @@ internal struct TdtDecoder {
             timeIndices += duration  // Jump forward by predicted duration
             safeTimeIndices = min(timeIndices, lastTimestep)  // Bounds check
 
+            logger.debug(
+                "⏭️ Frame advance: token=\(label), duration=\(duration), timeIndices: \(timeIndicesCurrentLabels)→\(timeIndices), safeTimeIndices=\(safeTimeIndices)"
+            )
+
             activeMask = timeIndices < encoderSequenceLength  // Continue if more frames
             var advanceMask = activeMask && blankMask  // Enter inner loop for blank tokens
+
+            if blankMask {
+                logger.debug("⚪ Blank token detected, entering inner loop (advanceMask=\(advanceMask))")
+            }
 
             // ===== INNER LOOP: OPTIMIZED BLANK PROCESSING =====
             // When we predict a blank token, we enter this loop to quickly skip
@@ -268,6 +287,10 @@ internal struct TdtDecoder {
                 hypothesis.timestamps.append(timeIndicesCurrentLabels)
                 hypothesis.lastToken = label  // Remember for next iteration
 
+                logger.debug(
+                    "🎤 Emitting token: \(label) at frame \(timeIndicesCurrentLabels) (score: \(String(format: "%.3f", score)))"
+                )
+
                 // CRITICAL: Update decoder LSTM with the new token
                 // This updates the language model context for better predictions
                 // Only non-blank tokens update the decoder - this is key!
@@ -318,7 +341,15 @@ internal struct TdtDecoder {
 
         // Store time jump for streaming: how far beyond this chunk we've processed
         // Used to align timestamps when processing next chunk
-        decoderState.timeJump = timeIndices - encoderSequenceLength
+        let finalTimeJump = timeIndices - encoderSequenceLength
+        decoderState.timeJump = finalTimeJump
+
+        logger.debug(
+            "🏁 TDT decoder finished: timeIndices=\(timeIndices), encoderSequenceLength=\(encoderSequenceLength), timeJump=\(finalTimeJump)"
+        )
+        logger.debug(
+            "📝 Output: \(hypothesis.ySequence.count) tokens, timestamps range: [\(hypothesis.timestamps.min() ?? -1)...\(hypothesis.timestamps.max() ?? -1)]"
+        )
 
         // No filtering at decoder level - let post-processing handle deduplication
         return (hypothesis.ySequence, hypothesis.timestamps)

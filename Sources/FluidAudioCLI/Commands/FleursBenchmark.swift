@@ -422,15 +422,6 @@ public class FLEURSBenchmark {
                 do {
                     audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
                 } catch {
-                    // Provide more detailed error information for audio loading failures
-                    if error.localizedDescription.contains("1954115647") {
-                        print("  ⚠️ CoreAudio error for \(sample.sampleId): Unsupported audio format or corrupted file")
-                        print("    File will be skipped. Supported formats: WAV, MP3, M4A, AIFF")
-                    } else {
-                        print("  ⚠️ Audio loading failed for \(sample.sampleId): \(error.localizedDescription)")
-                        print("    File will be skipped.")
-                    }
-
                     // Continue to next sample instead of failing the entire benchmark
                     skippedCount += 1
                     continue
@@ -838,19 +829,31 @@ extension FLEURSBenchmark {
             try benchmark.saveResults(results, to: outputFile)
 
             // Print summary
-            print("\n" + "=" * 50)
+            print("\n" + "=" * 80)
             print("📊 BENCHMARK SUMMARY")
-            print("=" * 50)
+            print("=" * 80)
+
+            // Print table header
+            print()
+            print(
+                String(
+                    format: "%-25s | %6s | %6s | %7s | %9s | %7s", "Language", "WER%", "CER%", "RTFx", "Processed",
+                    "Skipped"))
+            print("-" * 80)
 
             for result in results {
                 let langName = benchmark.supportedLanguages[result.language] ?? result.language
-                print("\n\(langName):")
-                print("  WER: \(String(format: "%.1f", result.wer * 100))%")
-                print("  CER: \(String(format: "%.1f", result.cer * 100))%")
-                print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
+                let truncatedName = String(langName.prefix(24))
+                let werStr = String(format: "%.1f", result.wer * 100)
+                let cerStr = String(format: "%.1f", result.cer * 100)
+                let rtfxStr = String(format: "%.1f", result.rtfx)
+                let processedStr = String(result.samplesProcessed)
+                let skippedStr = result.samplesSkipped > 0 ? String(result.samplesSkipped) : "-"
+
                 print(
-                    "  Samples: \(result.samplesProcessed) processed\(result.samplesSkipped > 0 ? ", \(result.samplesSkipped) skipped" : "")"
-                )
+                    String(
+                        format: "%-25s | %6s | %6s | %7s | %9s | %7s",
+                        truncatedName, werStr, cerStr, rtfxStr, processedStr, skippedStr))
             }
 
             let avgWER = results.reduce(0.0) { $0 + $1.wer } / Double(results.count)
@@ -859,13 +862,20 @@ extension FLEURSBenchmark {
             let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
             let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
 
-            print("\n📈 Overall Performance:")
-            print("  Average WER: \(String(format: "%.1f", avgWER * 100))%")
-            print("  Average CER: \(String(format: "%.1f", avgCER * 100))%")
-            print("  Average RTFx: \(String(format: "%.1f", avgRTFx))x")
-            print("  Total Processed: \(totalProcessed) samples")
+            print("-" * 80)
+            let avgWerStr = String(format: "%.1f", avgWER * 100)
+            let avgCerStr = String(format: "%.1f", avgCER * 100)
+            let avgRtfxStr = String(format: "%.1f", avgRTFx)
+            let totalProcessedStr = String(totalProcessed)
+            let totalSkippedStr = totalSkipped > 0 ? String(totalSkipped) : "-"
+
+            print(
+                String(
+                    format: "%-25s | %6s | %6s | %7s | %9s | %7s",
+                    "AVERAGE", avgWerStr, avgCerStr, avgRtfxStr, totalProcessedStr, totalSkippedStr))
+
             if totalSkipped > 0 {
-                print("  ⚠️ Total Skipped: \(totalSkipped) samples due to audio loading errors")
+                print("\n⚠️ Note: \(totalSkipped) samples were skipped due to audio loading errors")
             }
 
             print("\n✓ Results saved to: \(outputFile)")
