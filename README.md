@@ -201,7 +201,7 @@ Task {
     let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
     diarizer.initialize(models: models)
 
-    let audioSamples: [Float] = // your 16kHz audio data
+    let audioSamples: audioSamples[1000..<5000]  // your 16kHz audio data, No memory copy!
     let result = try diarizer.performCompleteDiarization(audioSamples)
 
     for segment in result.segments {
@@ -323,6 +323,7 @@ swift run fluidaudio download --dataset librispeech-test-other
 
 - **`DiarizerManager`**: Main diarization class
 - **`performCompleteDiarization(_:sampleRate:)`**: Process audio and return speaker segments
+  - Accepts any `RandomAccessCollection<Float>` (Array, ArraySlice, ContiguousArray, etc.)
 - **`compareSpeakers(audio1:audio2:)`**: Compare similarity between two audio samples
 - **`validateAudio(_:)`**: Validate audio quality and characteristics
 
