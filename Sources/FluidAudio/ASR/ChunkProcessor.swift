@@ -8,14 +8,14 @@ struct ChunkProcessor {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ChunkProcessor")
 
-    // Frame-aligned configuration: 8 + 3.2 + 3.2 seconds context at 16kHz
-    // 8s center = exactly 100 encoder frames
-    // 3.2s context = exactly 40 encoder frames each
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 11.2  // Exactly 100 frames (8.0 * 12.5)
-    private let leftContextSeconds: Double = 1.6  // Exactly 40 frames (3.2 * 12.5)
-    private let rightContextSeconds: Double = 1.6  // Exactly 40 frames (3.2 * 12.5)
+    private let centerSeconds: Double = 8.0
+    private let leftContextSeconds: Double = 4.8
+    private let rightContextSeconds: Double = 1.6
+    // Encoder subsampling: exactly 1280 samples = 1 encoder frame (80ms at 16kHz)
+    // This avoids floating-point drift over time
+    private let samplesPerEncoderFrame = 1280
 
     private var centerSamples: Int { Int(centerSeconds * Double(sampleRate)) }
     private var leftContextSamples: Int { Int(leftContextSeconds * Double(sampleRate)) }
@@ -36,13 +36,17 @@ struct ChunkProcessor {
             // Determine if this is the last chunk
             let isLastChunk = (centerStart + centerSamples) >= audioSamples.count
 
-            // Process chunk with explicit last chunk detection
+            // Calculate global frame offset based on audio position
+            // Convert audio sample position to encoder frame position using exact integer division
+            let globalFrameOffset = centerStart / samplesPerEncoderFrame
 
+            // Process chunk with explicit last chunk detection
             let (windowTokens, windowTimestamps, maxFrame) = try await processWindowWithTokens(
                 centerStart: centerStart,
                 segmentIndex: segmentIndex,
                 lastProcessedFrame: lastProcessedFrame,
                 isLastChunk: isLastChunk,
+                globalFrameOffset: globalFrameOffset,
                 using: manager,
                 decoderState: &decoderState
             )
@@ -52,14 +56,22 @@ struct ChunkProcessor {
                 lastProcessedFrame = maxFrame
             }
 
-            // For chunks after the first, check for and remove duplicated token sequences
-            if segmentIndex > 0 && !allTokens.isEmpty && !windowTokens.isEmpty {
-                let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
-                    previous: allTokens, current: windowTokens)
-                let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
+            print("Window Tokens: \(windowTokens)")
+            print("Window Timestamps: \(windowTimestamps)")
+            print("Max Frame: \(maxFrame)")
 
-                allTokens.append(contentsOf: deduped)
-                allTimestamps.append(contentsOf: adjustedTimestamps)
+            // For chunks after the first, use timestamp-based merging to avoid overlaps
+            if segmentIndex > 0 {
+                let (mergedTokens, mergedTimestamps) = manager.mergeChunksByTimestamp(
+                    previousTokens: allTokens,
+                    previousTimestamps: allTimestamps,
+                    currentTokens: windowTokens,
+                    currentTimestamps: windowTimestamps,
+                    centerStart: centerStart,
+                    segmentIndex: segmentIndex
+                )
+                allTokens = mergedTokens
+                allTimestamps = mergedTimestamps
             } else {
                 allTokens.append(contentsOf: windowTokens)
                 allTimestamps.append(contentsOf: windowTimestamps)
@@ -67,12 +79,22 @@ struct ChunkProcessor {
             centerStart += centerSamples
             segmentIndex += 1
         }
-        return manager.processTranscriptionResult(
+
+        let finalResult = manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
             encoderSequenceLength: 0,  // Not relevant for chunk processing
             audioSamples: audioSamples,
             processingTime: Date().timeIntervalSince(startTime)
+        )
+
+        return ASRResult(
+            text: finalResult.text,
+            confidence: finalResult.confidence,
+            duration: finalResult.duration,
+            processingTime: finalResult.processingTime,
+            tokenTimings: finalResult.tokenTimings,
+            performanceMetrics: finalResult.performanceMetrics
         )
     }
 
@@ -81,6 +103,7 @@ struct ChunkProcessor {
         segmentIndex: Int,
         lastProcessedFrame: Int,
         isLastChunk: Bool,
+        globalFrameOffset: Int,
         using manager: AsrManager,
         decoderState: inout TdtDecoderState
     ) async throws -> (tokens: [Int], timestamps: [Int], maxFrame: Int) {
@@ -116,7 +139,8 @@ struct ChunkProcessor {
             decoderState: &decoderState,
             startFrameOffset: startFrameOffset,
             lastProcessedFrame: lastProcessedFrame,
-            isLastChunk: isLastChunk
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
         )
 
         if tokens.isEmpty || encLen == 0 {

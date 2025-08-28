@@ -274,7 +274,8 @@ public final class AsrManager {
         decoderState: inout TdtDecoderState,
         startFrameOffset: Int = 0,
         lastProcessedFrame: Int = 0,
-        isLastChunk: Bool = false
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int]) {
         let decoder = TdtDecoder(config: config)
         return try await decoder.decodeWithTimings(
@@ -285,7 +286,8 @@ public final class AsrManager {
             decoderState: &decoderState,
             startFrameOffset: startFrameOffset,
             lastProcessedFrame: lastProcessedFrame,
-            isLastChunk: isLastChunk
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
         )
     }
 
@@ -332,15 +334,6 @@ public final class AsrManager {
         text: String, timings: [TokenTiming]
     ) {
         guard !tokenIds.isEmpty else { return ("", []) }
-
-        // Debug: print token mappings
-        if config.enableDebug {
-            for tokenId in tokenIds {
-                if let token = vocabulary[tokenId] {
-                    print("  Token \(tokenId) -> '\(token)'")
-                }
-            }
-        }
 
         // SentencePiece-compatible decoding algorithm:
         // 1. Convert token IDs to token strings

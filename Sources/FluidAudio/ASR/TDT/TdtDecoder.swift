@@ -31,7 +31,7 @@ import Foundation
 import OSLog
 
 /// Pre-processed encoder frames for fast access
-/// Each frame is a vector of features extracted from ~80ms of audio
+/// Each frame is a vector of features extracted from exactly 80ms of audio (1280 samples at 16kHz)
 private typealias EncoderFrameArray = [[Float]]
 
 @available(macOS 13.0, iOS 16.0, *)
@@ -64,7 +64,7 @@ internal struct TdtDecoder {
     ///   - tokens: Array of token IDs (vocabulary indices) for recognized speech
     ///   - timestamps: Array of encoder frame indices when each token was emitted
     ///
-    /// - Note: Frame indices can be converted to time: frame_index * 0.08 = time_in_seconds
+    /// - Note: Frame indices can be converted to time: frame_index * 1280 samples / 16000 Hz = time_in_seconds
     func decodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
@@ -73,7 +73,8 @@ internal struct TdtDecoder {
         decoderState: inout TdtDecoderState,
         startFrameOffset: Int = 0,
         lastProcessedFrame: Int = 0,
-        isLastChunk: Bool = false
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int]) {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
@@ -100,6 +101,18 @@ internal struct TdtDecoder {
             // First chunk or non-streaming: start from frame offset
             timeIndices = startFrameOffset
         }
+
+        // CRITICAL FIX: Ensure we don't reprocess frames that were already handled by previous chunk
+        // For chunk processing, convert lastProcessedFrame from global frame index to local frame index
+        if lastProcessedFrame > 0 {
+            // Convert global lastProcessedFrame to local frame index within this chunk
+            let localLastProcessedFrame = lastProcessedFrame - globalFrameOffset
+            // Ensure we start processing after the last processed frame
+            if localLastProcessedFrame >= 0 && localLastProcessedFrame < encoderSequenceLength {
+                timeIndices = max(timeIndices, localLastProcessedFrame + 1)
+            }
+        }
+
         // Key variables for frame navigation:
         // IMPORTANT: When startFrameOffset > 0, we need to actually skip those frames to avoid duplicates
         var safeTimeIndices = min(timeIndices, encoderSequenceLength - 1)  // Bounds-checked index
@@ -282,7 +295,7 @@ internal struct TdtDecoder {
                     // Add token to output sequence
                     hypothesis.ySequence.append(label)
                     hypothesis.score += score
-                    hypothesis.timestamps.append(timeIndicesCurrentLabels)
+                    hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
                     hypothesis.lastToken = label  // Remember for next iteration
                 }
 
@@ -387,8 +400,8 @@ internal struct TdtDecoder {
                     // Emit final tokens
                     hypothesis.ySequence.append(token)
                     hypothesis.score += score
-                    // Use clamped timestamp to avoid going beyond encoder bounds
-                    hypothesis.timestamps.append(min(timeIndices, encoderSequenceLength - 1))
+                    // Use clamped timestamp to avoid going beyond encoder bounds, then add global offset
+                    hypothesis.timestamps.append(min(timeIndices, encoderSequenceLength - 1) + globalFrameOffset)
                     hypothesis.lastToken = token
 
                     // Update decoder state

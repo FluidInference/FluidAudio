@@ -73,7 +73,8 @@ extension AsrManager {
         decoderState: inout TdtDecoderState,
         startFrameOffset: Int = 0,
         lastProcessedFrame: Int = 0,
-        isLastChunk: Bool = false
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
@@ -115,7 +116,8 @@ extension AsrManager {
             decoderState: &decoderState,
             startFrameOffset: startFrameOffset,
             lastProcessedFrame: lastProcessedFrame,
-            isLastChunk: isLastChunk
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
         )
 
         return (tokens, timestamps, encoderSequenceLength)
@@ -129,7 +131,8 @@ extension AsrManager {
         startFrameOffset: Int,
         lastProcessedFrame: Int,
         previousTokens: [Int] = [],
-        enableDebug: Bool
+        enableDebug: Bool,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
@@ -142,7 +145,8 @@ extension AsrManager {
             enableDebug: enableDebug,
             decoderState: &state,
             startFrameOffset: startFrameOffset,
-            lastProcessedFrame: lastProcessedFrame
+            lastProcessedFrame: lastProcessedFrame,
+            globalFrameOffset: globalFrameOffset
         )
 
         // Persist updated state back to the source-specific slot
@@ -152,8 +156,10 @@ extension AsrManager {
             systemDecoderState = state
         }
 
-        // Apply token deduplication if previous tokens are provided
+        // Apply timestamp-based merging if previous tokens are provided
         if !previousTokens.isEmpty && !tokens.isEmpty {
+            // For streaming, we need to convert timestamps to match the expected format
+            // Since we don't have previous timestamps in streaming context, fallback to token-based deduplication for now
             let (deduped, removedCount) = removeDuplicateTokenSequence(previous: previousTokens, current: tokens)
             let adjustedTimestamps = removedCount > 0 ? Array(timestamps.dropFirst(removedCount)) : timestamps
 
@@ -187,7 +193,7 @@ extension AsrManager {
 
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && duration > 1.0 {
             logger.warning(
-                "⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))"
+                "Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))"
             )
         }
 
@@ -252,9 +258,10 @@ extension AsrManager {
             let tokenId = tokenIds[i]
             let frameIndex = timestamps[i]
 
-            // Convert encoder frame index to time (approximate: 80ms per frame)
-            let startTime = TimeInterval(frameIndex) * 0.08
-            let endTime = startTime + 0.08  // Approximate token duration
+            // Convert encoder frame index to time using exact arithmetic
+            // 1280 samples = 1 encoder frame = 80ms at 16kHz
+            let startTime = TimeInterval(frameIndex * 1280) / TimeInterval(config.sampleRate)
+            let endTime = startTime + (TimeInterval(1280) / TimeInterval(config.sampleRate))  // Exact frame duration
 
             // Get token text from vocabulary if available
             let tokenText = vocabulary[tokenId] ?? "token_\(tokenId)"
@@ -306,6 +313,72 @@ extension AsrManager {
         }
 
         return slicedArray
+    }
+
+    /// Merge chunks based on global timestamps, extracting only tokens from the center region of each chunk.
+    /// This approach uses the globally stable frame timestamps to identify the center portion of each chunk
+    /// and only keeps tokens from those frames, avoiding context region contamination.
+    /// Similar to NeMo's merge_ method but adapted for sliding window chunk processing.
+    ///
+    /// With the TDT decoder fix that respects lastProcessedFrame, overlaps should be minimal or non-existent.
+    internal func mergeChunksByTimestamp(
+        previousTokens: [Int],
+        previousTimestamps: [Int],
+        currentTokens: [Int],
+        currentTimestamps: [Int],
+        centerStart: Int = 0,
+        segmentIndex: Int = 0
+    ) -> (mergedTokens: [Int], mergedTimestamps: [Int]) {
+
+        // If no previous tokens, return current (first chunk gets all its tokens)
+        guard !previousTokens.isEmpty && !previousTimestamps.isEmpty else {
+            return (currentTokens, currentTimestamps)
+        }
+
+        // If no current tokens, return previous
+        guard !currentTokens.isEmpty && !currentTimestamps.isEmpty else {
+            return (previousTokens, previousTimestamps)
+        }
+
+        // Note: We previously tried to enforce strict center region boundaries,
+        // but found that the decoder's timestamp ranges don't align perfectly
+        // with calculated boundaries. The approach below is more robust.
+
+        // For the first chunk, take all tokens (no left context to worry about)
+        if segmentIndex == 0 {
+            return (previousTokens + currentTokens, previousTimestamps + currentTimestamps)
+        }
+
+        // For subsequent chunks, use a more flexible approach:
+        // Take tokens that are beyond the previous chunk's end timestamp
+        // This is more robust than strict center region boundaries
+        let lastPreviousTimestamp = previousTimestamps.last ?? -1
+
+        var centerTokens: [Int] = []
+        var centerTimestamps: [Int] = []
+
+        for (index, timestamp) in currentTimestamps.enumerated() {
+            // Take tokens that come after the previous chunk's last token
+            // This ensures we don't duplicate but also don't miss valid tokens
+            if timestamp > lastPreviousTimestamp {
+                centerTokens.append(currentTokens[index])
+                centerTimestamps.append(timestamp)
+            }
+        }
+
+        if config.enableDebug {
+            let totalTokens = currentTokens.count
+            let centerCount = centerTokens.count
+            logger.debug(
+                "Timestamp-based extraction: took \(centerCount)/\(totalTokens) tokens after timestamp \(lastPreviousTimestamp) for segment \(segmentIndex)"
+            )
+        }
+
+        // Concatenate previous tokens with center tokens from current chunk
+        let mergedTokens = previousTokens + centerTokens
+        let mergedTimestamps = previousTimestamps + centerTimestamps
+
+        return (mergedTokens, mergedTimestamps)
     }
 
     /// Remove duplicate token sequences at the start of the current list that overlap
@@ -386,9 +459,10 @@ extension AsrManager {
         guard segmentIndex > 0 else {
             return 0
         }
-        // Use exact encoder frame rate: 80ms per frame = 12.5 fps
-        let encoderFrameRate = 1.0 / 0.08  // 12.5 frames per second
-        let leftContextFrames = Int(round(leftContextSeconds * encoderFrameRate))
+        // Use exact encoder subsampling: 1280 samples = 1 encoder frame (80ms at 16kHz)
+        // This avoids floating-point drift
+        let leftContextSamples = Int(leftContextSeconds * Double(config.sampleRate))
+        let leftContextFrames = leftContextSamples / 1280
 
         return leftContextFrames
     }
