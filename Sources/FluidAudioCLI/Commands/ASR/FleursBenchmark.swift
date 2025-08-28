@@ -493,6 +493,7 @@ public class FLEURSBenchmark {
                 print("Path: \(sample.audioPath)")
                 print(String(repeating: "-", count: 60))
 
+                
                 // Normalize the texts for comparison
                 let normalizedReference = sample.normalizedRef
                 let normalizedHypothesis = sample.normalizedHyp
@@ -507,7 +508,7 @@ public class FLEURSBenchmark {
                 // Generate inline diff
                 let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
-                print("\nNormalized Reference:\t\(referenceDiff)")
+                print("Normalized Reference:\t\(referenceDiff)")
                 print("Normalized Hypothesis:\t\(hypothesisDiff)")
                 print("Original Hypothesis:\t\(sample.hypothesis)")
                 print(String(repeating: "-", count: 60))

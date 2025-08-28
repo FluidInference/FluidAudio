@@ -327,56 +327,14 @@ extension AsrManager {
         currentTokens: [Int],
         currentTimestamps: [Int],
         centerStart: Int = 0,
-        segmentIndex: Int = 0
+        rightContextFrames: Int = 0,
+        isFirstChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) -> (mergedTokens: [Int], mergedTimestamps: [Int]) {
 
-        // If no previous tokens, return current (first chunk gets all its tokens)
-        guard !previousTokens.isEmpty && !previousTimestamps.isEmpty else {
-            return (currentTokens, currentTimestamps)
-        }
-
-        // If no current tokens, return previous
-        guard !currentTokens.isEmpty && !currentTimestamps.isEmpty else {
-            return (previousTokens, previousTimestamps)
-        }
-
-        // Note: We previously tried to enforce strict center region boundaries,
-        // but found that the decoder's timestamp ranges don't align perfectly
-        // with calculated boundaries. The approach below is more robust.
-
-        // For the first chunk, take all tokens (no left context to worry about)
-        if segmentIndex == 0 {
-            return (previousTokens + currentTokens, previousTimestamps + currentTimestamps)
-        }
-
-        // For subsequent chunks, use a more flexible approach:
-        // Take tokens that are beyond the previous chunk's end timestamp
-        // This is more robust than strict center region boundaries
-        let lastPreviousTimestamp = previousTimestamps.last ?? -1
-
-        var centerTokens: [Int] = []
-        var centerTimestamps: [Int] = []
-
-        for (index, timestamp) in currentTimestamps.enumerated() {
-            // Take tokens that come after the previous chunk's last token
-            // This ensures we don't duplicate but also don't miss valid tokens
-            if timestamp > lastPreviousTimestamp {
-                centerTokens.append(currentTokens[index])
-                centerTimestamps.append(timestamp)
-            }
-        }
-
-        if config.enableDebug {
-            let totalTokens = currentTokens.count
-            let centerCount = centerTokens.count
-            logger.debug(
-                "Timestamp-based extraction: took \(centerCount)/\(totalTokens) tokens after timestamp \(lastPreviousTimestamp) for segment \(segmentIndex)"
-            )
-        }
-
         // Concatenate previous tokens with center tokens from current chunk
-        let mergedTokens = previousTokens + centerTokens
-        let mergedTimestamps = previousTimestamps + centerTimestamps
+        let mergedTokens = previousTokens + currentTokens
+        let mergedTimestamps = previousTimestamps + currentTimestamps
 
         return (mergedTokens, mergedTimestamps)
     }

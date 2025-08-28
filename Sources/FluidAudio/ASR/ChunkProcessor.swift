@@ -36,9 +36,10 @@ struct ChunkProcessor {
             // Determine if this is the last chunk
             let isLastChunk = (centerStart + centerSamples) >= audioSamples.count
 
-            // Calculate global frame offset based on audio position
-            // Convert audio sample position to encoder frame position using exact integer division
-            let globalFrameOffset = centerStart / samplesPerEncoderFrame
+            // Calculate global frame offset based on the left edge of the processing window
+            // This represents where we actually start processing (not the center)
+            let leftStart = max(0, centerStart - leftContextSamples)
+            let globalFrameOffset = leftStart / samplesPerEncoderFrame
 
             // Process chunk with explicit last chunk detection
             let (windowTokens, windowTimestamps, maxFrame) = try await processWindowWithTokens(
@@ -56,8 +57,11 @@ struct ChunkProcessor {
                 lastProcessedFrame = maxFrame
             }
 
+            let rightContextFrames = rightContextSamples / samplesPerEncoderFrame
+
             print("Window Tokens: \(windowTokens)")
             print("Window Timestamps: \(windowTimestamps)")
+            print("Right Context Frames: \(rightContextFrames)")
             print("Max Frame: \(maxFrame)")
 
             // For chunks after the first, use timestamp-based merging to avoid overlaps
@@ -68,17 +72,36 @@ struct ChunkProcessor {
                     currentTokens: windowTokens,
                     currentTimestamps: windowTimestamps,
                     centerStart: centerStart,
-                    segmentIndex: segmentIndex
+                    rightContextFrames: rightContextFrames,
+                    isFirstChunk: segmentIndex == 0,
+                    globalFrameOffset: globalFrameOffset
                 )
                 allTokens = mergedTokens
                 allTimestamps = mergedTimestamps
             } else {
-                allTokens.append(contentsOf: windowTokens)
-                allTimestamps.append(contentsOf: windowTimestamps)
+                // For first chunk, still apply right context filtering
+                let (filteredTokens, filteredTimestamps) = manager.mergeChunksByTimestamp(
+                    previousTokens: [],
+                    previousTimestamps: [],
+                    currentTokens: windowTokens,
+                    currentTimestamps: windowTimestamps,
+                    centerStart: centerStart,
+                    rightContextFrames: rightContextFrames,
+                    isFirstChunk: true,
+                    globalFrameOffset: globalFrameOffset
+                )
+                allTokens.append(contentsOf: filteredTokens)
+                allTimestamps.append(contentsOf: filteredTimestamps)
             }
-            centerStart += centerSamples
+            // Advance by center window minus right context to ensure overlap coverage
+            // This ensures frames in the right context of current chunk become left context of next chunk
+            let advanceAmount = centerSamples - rightContextSamples
+            centerStart += advanceAmount
             segmentIndex += 1
         }
+
+        print("Final Tokens: \(allTokens)")
+        print("Final Timestamps: \(allTimestamps)")
 
         let finalResult = manager.processTranscriptionResult(
             tokenIds: allTokens,
