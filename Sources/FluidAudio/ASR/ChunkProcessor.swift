@@ -110,8 +110,27 @@ struct ChunkProcessor {
         using manager: AsrManager,
         decoderState: inout TdtDecoderState
     ) async throws -> (tokens: [Int], timestamps: [Int], maxFrame: Int) {
+        // Check if this is likely the final chunk and if it needs adaptive context
+        let isLikelyFinalChunk = (centerStart + centerSamples) >= audioSamples.count
+        let actualCenterSize = min(centerSamples, audioSamples.count - centerStart)
+        let adaptiveLeftContextSamples: Int
+
+        if isLikelyFinalChunk && actualCenterSize < Int(Double(centerSamples) * 0.7) {
+            // For small final chunks, use adaptive left context to minimize padding
+            // Calculate how much left context to use so total window has minimal padding
+            let remainingAudio = audioSamples.count - centerStart
+            let maxUsableContext = min(centerStart, maxModelSamples - remainingAudio - rightContextSamples)
+            adaptiveLeftContextSamples = max(leftContextSamples, maxUsableContext)
+
+            logger.debug(
+                "🔄 ADAPTIVE CONTEXT: Final chunk detected, actualCenterSize=\(actualCenterSize), adaptiveLeftContext=\(Double(adaptiveLeftContextSamples)/Double(sampleRate))s (was \(Double(leftContextSamples)/Double(sampleRate))s)"
+            )
+        } else {
+            adaptiveLeftContextSamples = leftContextSamples
+        }
+
         // Compute window bounds in samples: [leftStart, rightEnd)
-        let leftStart = max(0, centerStart - leftContextSamples)
+        let leftStart = max(0, centerStart - adaptiveLeftContextSamples)
         let centerEnd = min(audioSamples.count, centerStart + centerSamples)
         let rightEnd = min(audioSamples.count, centerEnd + rightContextSamples)
 
@@ -143,9 +162,11 @@ struct ChunkProcessor {
         )
 
         // Calculate encoder frame offset based on where previous chunk ended
+        // Use adaptive context duration for proper frame offset calculation
+        let actualLeftContextSeconds = Double(adaptiveLeftContextSamples) / Double(sampleRate)
         let startFrameOffset = manager.calculateStartFrameOffset(
             segmentIndex: segmentIndex,
-            leftContextSeconds: leftContextSeconds
+            leftContextSeconds: actualLeftContextSeconds
         )
 
         // Calculate expected encoder frames for debugging
