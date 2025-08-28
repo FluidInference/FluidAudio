@@ -107,9 +107,15 @@ internal struct TdtDecoder {
         if lastProcessedFrame > 0 {
             // Convert global lastProcessedFrame to local frame index within this chunk
             let localLastProcessedFrame = lastProcessedFrame - globalFrameOffset
-            // Ensure we start processing after the last processed frame
+            print(
+                "TDT: lastProcessedFrame=\(lastProcessedFrame), globalFrameOffset=\(globalFrameOffset), localLastProcessedFrame=\(localLastProcessedFrame), encoderSequenceLength=\(encoderSequenceLength), startFrameOffset=\(startFrameOffset)"
+            )
+            // Ensure we start processing after the last processed frame, but respect left context requirements
             if localLastProcessedFrame >= 0 && localLastProcessedFrame < encoderSequenceLength {
+                // Only advance beyond lastProcessedFrame if it's greater than startFrameOffset
+                // This prevents skipping unprocessed frames in the gap between lastProcessedFrame and leftContext
                 timeIndices = max(timeIndices, localLastProcessedFrame + 1)
+                print("TDT: timeIndices after lastProcessedFrame adjustment: \(timeIndices)")
             }
         }
 

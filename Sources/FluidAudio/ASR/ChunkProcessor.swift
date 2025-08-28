@@ -53,12 +53,17 @@ struct ChunkProcessor {
             )
 
             // Update last processed frame for next chunk
+            // maxFrame is already a global frame index, keep it as-is
+            // The TDT decoder will convert it to local coordinates when needed
             if maxFrame > 0 {
                 lastProcessedFrame = maxFrame
             }
 
             let rightContextFrames = rightContextSamples / samplesPerEncoderFrame
 
+            print(
+                "Window \(segmentIndex): centerStart=\(centerStart), globalFrameOffset=\(globalFrameOffset), lastProcessedFrame=\(lastProcessedFrame)"
+            )
             print("Window Tokens: \(windowTokens)")
             print("Window Timestamps: \(windowTimestamps)")
             print("Right Context Frames: \(rightContextFrames)")
@@ -148,12 +153,9 @@ struct ChunkProcessor {
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
-        // Calculate encoder frame offset based on where previous chunk ended
-        let actualLeftContextSeconds = Double(adaptiveLeftContextSamples) / Double(sampleRate)
-        let startFrameOffset = manager.calculateStartFrameOffset(
-            segmentIndex: segmentIndex,
-            leftContextSeconds: actualLeftContextSeconds
-        )
+        // For chunk processing, don't use startFrameOffset - rely on lastProcessedFrame instead
+        // startFrameOffset is designed for different use cases and conflicts with lastProcessedFrame logic
+        let startFrameOffset = 0
 
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
