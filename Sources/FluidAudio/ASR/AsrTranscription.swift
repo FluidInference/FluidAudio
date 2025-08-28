@@ -310,43 +310,69 @@ extension AsrManager {
     internal func removeDuplicateTokenSequence(
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
+
         // Handle single punctuation token duplicates first
         let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
-        if !previous.isEmpty && !current.isEmpty && previous.last == current.first
-            && punctuationTokens.contains(current.first!)
+        var workingCurrent = current
+        var removedCount = 0
+
+        if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
+            && punctuationTokens.contains(workingCurrent.first!)
         {
             // Remove the duplicate punctuation token from the beginning of current
-            return (Array(current.dropFirst()), 1)
+            workingCurrent = Array(workingCurrent.dropFirst())
+            removedCount += 1
         }
 
+        // Check for suffix-prefix overlap: end of previous matches beginning of current
         let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
-        let maxMatchLength = min(maxOverlap, current.count)  // first 12 tokens of current
+        let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first 12 tokens of current
 
-        guard maxSearchLength >= 3 && maxMatchLength >= 3 else {
-            return (current, 0)
+        guard maxSearchLength >= 2 && maxMatchLength >= 2 else {
+            return (workingCurrent, removedCount)
         }
 
-        for overlapLength in (3...min(maxSearchLength, maxMatchLength)).reversed() {
+        // Search for overlapping sequences from longest to shortest
+        for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
+            // Check if the last `overlapLength` tokens of previous match the first `overlapLength` tokens of current
+            let prevSuffix = Array(previous.suffix(overlapLength))
+            let currPrefix = Array(workingCurrent.prefix(overlapLength))
+
+            if prevSuffix == currPrefix {
+                if config.enableDebug {
+                    logger.debug("Found exact suffix-prefix overlap of length \(overlapLength): \(prevSuffix)")
+                }
+                let finalRemoved = removedCount + overlapLength
+                return (Array(workingCurrent.dropFirst(overlapLength)), finalRemoved)
+            }
+        }
+
+        // Extended search: look for partial overlaps within the sequences
+        for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
             let prevStart = max(0, previous.count - maxSearchLength)
             let prevEnd = previous.count - overlapLength + 1
             if prevEnd <= prevStart { continue }
+
             for startIndex in prevStart..<prevEnd {
                 let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
-                let currEnd = max(0, current.count - overlapLength + 1)
-                for currentStart in 0..<min(5, currEnd) {
-                    let currSub = Array(current[currentStart..<(currentStart + overlapLength)])
+                let currEnd = max(0, workingCurrent.count - overlapLength + 1)
+
+                for currentStart in 0..<min(8, currEnd) {  // Increased search range
+                    let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
                     if prevSub == currSub {
                         if config.enableDebug {
                             logger.debug(
-                                "Duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)")
+                                "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)"
+                            )
                         }
-                        let removed = currentStart + overlapLength
-                        return (Array(current.dropFirst(removed)), removed)
+                        let finalRemoved = removedCount + currentStart + overlapLength
+                        return (Array(workingCurrent.dropFirst(currentStart + overlapLength)), finalRemoved)
                     }
                 }
             }
         }
-        return (current, 0)
+
+        return (workingCurrent, removedCount)
     }
 
     /// Calculate start frame offset for a sliding window segment

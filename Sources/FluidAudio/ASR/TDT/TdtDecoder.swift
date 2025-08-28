@@ -108,14 +108,19 @@ internal struct TdtDecoder {
         )
 
         // Key variables for frame navigation:
+        // IMPORTANT: When startFrameOffset > 0, we need to actually skip those frames to avoid duplicates
         var safeTimeIndices = min(timeIndices, encoderSequenceLength - 1)  // Bounds-checked index
         var timeIndicesCurrentLabels = timeIndices  // Frame where current token was emitted
-        var activeMask = true  // Continue processing while we have frames left
+        var activeMask = timeIndices < encoderSequenceLength  // Start processing only if we haven't exceeded bounds
         let lastTimestep = encoderSequenceLength - 1  // Maximum valid frame index
 
         logger.debug(
-            "🎯 Frame navigation setup: safeTimeIndices=\(safeTimeIndices), lastTimestep=\(lastTimestep), activeMask=\(activeMask)"
+            "🎯 Frame navigation setup: safeTimeIndices=\(safeTimeIndices), lastTimestep=\(lastTimestep), activeMask=\(activeMask), startFrameOffset=\(startFrameOffset)"
         )
+        // If startFrameOffset puts us beyond the available frames, return empty
+        if timeIndices >= encoderSequenceLength {
+            return ([], [])
+        }
 
         let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
@@ -280,20 +285,27 @@ internal struct TdtDecoder {
             // ===== END INNER LOOP =====
 
             // Process non-blank token: emit it and update decoder state
+            // IMPORTANT: Only emit tokens if they're beyond the already-processed region
             if activeMask && label != blankId {
-                // Add token to output sequence
-                hypothesis.ySequence.append(label)
-                hypothesis.score += score
-                hypothesis.timestamps.append(timeIndicesCurrentLabels)
-                hypothesis.lastToken = label  // Remember for next iteration
+                let shouldEmit = timeIndicesCurrentLabels >= startFrameOffset
 
-                logger.debug(
-                    "🎤 Emitting token: \(label) at frame \(timeIndicesCurrentLabels) (score: \(String(format: "%.3f", score)))"
-                )
+                if shouldEmit {
+                    // Add token to output sequence
+                    hypothesis.ySequence.append(label)
+                    hypothesis.score += score
+                    hypothesis.timestamps.append(timeIndicesCurrentLabels)
+                    hypothesis.lastToken = label  // Remember for next iteration
+
+                    logger.debug(
+                        "🎤 Emitting token: \(label) at frame \(timeIndicesCurrentLabels) (score: \(String(format: "%.3f", score)))"
+                    )
+                }
 
                 // CRITICAL: Update decoder LSTM with the new token
                 // This updates the language model context for better predictions
                 // Only non-blank tokens update the decoder - this is key!
+                // NOTE: We update the decoder state regardless of whether we emit the token
+                // to maintain proper language model context across chunk boundaries
                 let step = try runDecoder(
                     token: label,
                     state: decoderResult.newState,
