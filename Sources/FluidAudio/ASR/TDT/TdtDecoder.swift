@@ -95,18 +95,10 @@ internal struct TdtDecoder {
             // Streaming continuation: adjust for previous chunk's time jump
             // This ensures smooth transitions between audio chunks
             timeIndices = max(0, prevTimeJump + startFrameOffset)
-            logger.debug(
-                "🔄 Streaming chunk: prevTimeJump=\(prevTimeJump), startFrameOffset=\(startFrameOffset), calculated timeIndices=\(timeIndices)"
-            )
         } else {
             // First chunk or non-streaming: start from frame offset
             timeIndices = startFrameOffset
-            logger.debug("🎬 First chunk: timeIndices=\(timeIndices) (startFrameOffset=\(startFrameOffset))")
         }
-        logger.debug(
-            "📊 Encoder info: sequenceLength=\(encoderSequenceLength), lastProcessedFrame=\(lastProcessedFrame), timeIndices=\(timeIndices)"
-        )
-
         // Key variables for frame navigation:
         // IMPORTANT: When startFrameOffset > 0, we need to actually skip those frames to avoid duplicates
         var safeTimeIndices = min(timeIndices, encoderSequenceLength - 1)  // Bounds-checked index
@@ -114,9 +106,6 @@ internal struct TdtDecoder {
         var activeMask = timeIndices < encoderSequenceLength  // Start processing only if we haven't exceeded bounds
         let lastTimestep = encoderSequenceLength - 1  // Maximum valid frame index
 
-        logger.debug(
-            "🎯 Frame navigation setup: safeTimeIndices=\(safeTimeIndices), lastTimestep=\(lastTimestep), activeMask=\(activeMask), startFrameOffset=\(startFrameOffset)"
-        )
         // If startFrameOffset puts us beyond the available frames, return empty
         if timeIndices >= encoderSequenceLength {
             return ([], [])
@@ -161,9 +150,7 @@ internal struct TdtDecoder {
 
         // ===== MAIN DECODING LOOP =====
         // Process each encoder frame until we've consumed all audio
-        var loopIteration = 0
         while activeMask {
-            loopIteration += 1
             // Use last emitted token for decoder context, or blank if starting
             var label = hypothesis.lastToken ?? config.tdtConfig.blankId
             let stateToUse = hypothesis.decState ?? decoderState
@@ -232,7 +219,6 @@ internal struct TdtDecoder {
 
             activeMask = timeIndices < encoderSequenceLength  // Continue if more frames
             var advanceMask = activeMask && blankMask  // Enter inner loop for blank tokens
-
 
             // ===== INNER LOOP: OPTIMIZED BLANK PROCESSING =====
             // When we predict a blank token, we enter this loop to quickly skip
@@ -355,8 +341,8 @@ internal struct TdtDecoder {
             if punctuationTokens.contains(lastToken) {
                 decoderState.predictorOutput = nil
                 // Keep lastToken for linguistic context - deduplication handles duplicates at higher level
-            } 
-        } 
+            }
+        }
 
         // Store time jump for streaming: how far beyond this chunk we've processed
         // Used to align timestamps when processing next chunk

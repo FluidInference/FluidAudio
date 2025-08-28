@@ -311,10 +311,6 @@ public actor StreamingAsrManager {
                 leftContextSeconds: actualLeftSeconds
             )
 
-            logger.debug(
-                "📊 Streaming chunk \(self.segmentIndex): startOffset=\(startOffset), actualLeftSeconds=\(actualLeftSeconds), lastProcessedFrame=\(self.lastProcessedFrame)"
-            )
-
             // Call AsrManager directly with deduplication
             let (tokens, timestamps, _) = try await asrManager.transcribeStreamingChunk(
                 windowSamples,
@@ -326,15 +322,9 @@ public actor StreamingAsrManager {
             )
 
             // Update state
-            let previousAccumulated = accumulatedTokens.count
-            let previousLastFrame = lastProcessedFrame
             accumulatedTokens.append(contentsOf: tokens)
             lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? 0)
             segmentIndex += 1
-
-            logger.debug(
-                "🔄 State update: accumulatedTokens: \(previousAccumulated)→\(self.accumulatedTokens.count) (+\(tokens.count)), lastProcessedFrame: \(previousLastFrame)→\(self.lastProcessedFrame)"
-            )
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1

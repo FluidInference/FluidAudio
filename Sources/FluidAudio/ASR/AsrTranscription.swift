@@ -307,6 +307,8 @@ extension AsrManager {
     /// Remove duplicate token sequences at the start of the current list that overlap
     /// with the tail of the previous accumulated tokens. Returns deduplicated current tokens
     /// and the number of removed leading tokens so caller can drop aligned timestamps.
+    /// Ideally this is not needed. We need to make some more fixes to the TDT decoding logic,
+    /// this should be a temporary workaround.
     internal func removeDuplicateTokenSequence(
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
@@ -378,18 +380,11 @@ extension AsrManager {
     /// Calculate start frame offset for a sliding window segment
     internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
         guard segmentIndex > 0 else {
-            logger.debug("🎬 calculateStartFrameOffset: segmentIndex=0, returning 0")
             return 0
         }
         // Use exact encoder frame rate: 80ms per frame = 12.5 fps
         let encoderFrameRate = 1.0 / 0.08  // 12.5 frames per second
         let leftContextFrames = Int(round(leftContextSeconds * encoderFrameRate))
-        let exactCalculation = leftContextSeconds * encoderFrameRate
-
-        logger.debug(
-            "🔢 calculateStartFrameOffset: segmentIndex=\(segmentIndex), leftContextSeconds=\(leftContextSeconds), encoderFrameRate=\(encoderFrameRate)"
-        )
-        logger.debug("🎯 Frame offset calculation: exact=\(exactCalculation), rounded=\(leftContextFrames)")
 
         return leftContextFrames
     }
