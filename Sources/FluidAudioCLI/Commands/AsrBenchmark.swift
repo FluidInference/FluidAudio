@@ -553,7 +553,7 @@ private struct WordDifference {
 
 extension ASRBenchmark {
     /// Print detailed analysis for files with WER > threshold
-    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.05) {
+    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.10) {
         let highWERResults = results.filter { $0.metrics.wer > threshold }
 
         guard !highWERResults.isEmpty else {
