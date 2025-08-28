@@ -833,12 +833,21 @@ extension FLEURSBenchmark {
             print("📊 BENCHMARK SUMMARY")
             print(String(repeating: "=", count: 80))
 
+            // Check if we have results to display
+            guard !results.isEmpty else {
+                print("\n⚠️ No results to display - benchmark produced no valid results")
+                return
+            }
+
             // Print table header
             print()
             print(
-                String(
-                    format: "%-25s | %6s | %6s | %7s | %9s | %7s", "Language", "WER%", "CER%", "RTFx", "Processed",
-                    "Skipped"))
+                "Language".padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
+                    + "WER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + "CER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + "RTFx".padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                    + "Processed".padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
+                    + "Skipped".padding(toLength: 7, withPad: " ", startingAt: 0))
             print(String(repeating: "-", count: 80))
 
             for result in results {
@@ -851,9 +860,12 @@ extension FLEURSBenchmark {
                 let skippedStr = result.samplesSkipped > 0 ? String(result.samplesSkipped) : "-"
 
                 print(
-                    String(
-                        format: "%-25s | %6s | %6s | %7s | %9s | %7s", truncatedName, werStr, cerStr, rtfxStr,
-                        processedStr, skippedStr))
+                    truncatedName.padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
+                        + werStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                        + cerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                        + rtfxStr.padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                        + processedStr.padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
+                        + skippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
             }
 
             let avgWER = results.reduce(0.0) { $0 + $1.wer } / Double(results.count)
@@ -870,9 +882,12 @@ extension FLEURSBenchmark {
             let totalSkippedStr = totalSkipped > 0 ? String(totalSkipped) : "-"
 
             print(
-                String(
-                    format: "%-25s | %6s | %6s | %7s | %9s | %7s", "AVERAGE", avgWerStr, avgCerStr, avgRtfxStr,
-                    totalProcessedStr, totalSkippedStr))
+                "AVERAGE".padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
+                    + avgWerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + avgCerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + avgRtfxStr.padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                    + totalProcessedStr.padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
+                    + totalSkippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
 
             if totalSkipped > 0 {
                 print("\n⚠️ Note: \(totalSkipped) samples were skipped due to audio loading errors")
