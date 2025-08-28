@@ -565,9 +565,7 @@ extension ASRBenchmark {
         print(String(repeating: "=", count: 80))
 
         for result in highWERResults.sorted(by: { $0.metrics.wer > $1.metrics.wer }) {
-            if result.audioLength > 10.0 {
-                printSingleFileWERAnalysis(result)
-            }
+            printSingleFileWERAnalysis(result)
         }
     }
 
