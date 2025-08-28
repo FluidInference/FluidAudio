@@ -342,7 +342,7 @@ public class FLEURSBenchmark {
     /// Run multilingual benchmark
     public func runMultilingualBenchmark(asrManager: AsrManager) async throws -> [LanguageResults] {
         print("\n Starting FLEURS Multilingual ASR Benchmark")
-        print("=" * 50)
+        print(String(repeating: "=", count: 50))
 
         var results: [LanguageResults] = []
 
@@ -484,7 +484,7 @@ public class FLEURSBenchmark {
         // Print high WER cases for analysis
         if !highWERCases.isEmpty {
             print("\n🔍 High WER Cases (>8%) for \(supportedLanguages[language] ?? language):")
-            print("=" * 80)
+            print(String(repeating: "=", count: 80))
             for sample in highWERCases.sorted(by: { $0.wer > $1.wer }) {
                 let werPercent = sample.wer * 100
                 print(
@@ -789,7 +789,7 @@ extension FLEURSBenchmark {
         let finalLanguages = languages ?? Array(tempBenchmark.supportedLanguages.keys).sorted()
 
         print("\n FLEURS Multilingual ASR Benchmark")
-        print("=" * 50)
+        print(String(repeating: "=", count: 50))
         print(
             "Languages: \(finalLanguages.count == tempBenchmark.supportedLanguages.count ? "all (\(finalLanguages.count) languages)" : finalLanguages.joined(separator: ", "))"
         )
@@ -829,9 +829,9 @@ extension FLEURSBenchmark {
             try benchmark.saveResults(results, to: outputFile)
 
             // Print summary
-            print("\n" + "=" * 80)
+            print("\n" + String(repeating: "=", count: 80))
             print("📊 BENCHMARK SUMMARY")
-            print("=" * 80)
+            print(String(repeating: "=", count: 80))
 
             // Print table header
             print()
@@ -839,7 +839,7 @@ extension FLEURSBenchmark {
                 String(
                     format: "%-25s | %6s | %6s | %7s | %9s | %7s", "Language", "WER%", "CER%", "RTFx", "Processed",
                     "Skipped"))
-            print("-" * 80)
+            print(String(repeating: "-", count: 80))
 
             for result in results {
                 let langName = benchmark.supportedLanguages[result.language] ?? result.language
@@ -852,8 +852,8 @@ extension FLEURSBenchmark {
 
                 print(
                     String(
-                        format: "%-25s | %6s | %6s | %7s | %9s | %7s",
-                        truncatedName, werStr, cerStr, rtfxStr, processedStr, skippedStr))
+                        format: "%-25s | %6s | %6s | %7s | %9s | %7s", truncatedName, werStr, cerStr, rtfxStr,
+                        processedStr, skippedStr))
             }
 
             let avgWER = results.reduce(0.0) { $0 + $1.wer } / Double(results.count)
@@ -862,7 +862,7 @@ extension FLEURSBenchmark {
             let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
             let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
 
-            print("-" * 80)
+            print(String(repeating: "-", count: 80))
             let avgWerStr = String(format: "%.1f", avgWER * 100)
             let avgCerStr = String(format: "%.1f", avgCER * 100)
             let avgRtfxStr = String(format: "%.1f", avgRTFx)
@@ -871,8 +871,8 @@ extension FLEURSBenchmark {
 
             print(
                 String(
-                    format: "%-25s | %6s | %6s | %7s | %9s | %7s",
-                    "AVERAGE", avgWerStr, avgCerStr, avgRtfxStr, totalProcessedStr, totalSkippedStr))
+                    format: "%-25s | %6s | %6s | %7s | %9s | %7s", "AVERAGE", avgWerStr, avgCerStr, avgRtfxStr,
+                    totalProcessedStr, totalSkippedStr))
 
             if totalSkipped > 0 {
                 print("\n⚠️ Note: \(totalSkipped) samples were skipped due to audio loading errors")
