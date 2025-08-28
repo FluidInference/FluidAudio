@@ -330,15 +330,17 @@ internal struct TdtDecoder {
 
         // ===== LAST CHUNK FINALIZATION =====
         // For the last chunk, ensure we force emission of any pending tokens
-        // and properly finalize the decoder state
+        // Continue processing even after encoder frames are exhausted
         if isLastChunk {
-            // Force process any remaining frames that might have tokens
-            // This ensures we don't lose tokens at the end of audio
-            let maxAdditionalSteps = 5  // Limit to prevent infinite loops
             var additionalSteps = 0
+            var consecutiveBlanks = 0
+            let maxConsecutiveBlanks = 2  // Exit after 2 blanks in a row
             var lastToken = hypothesis.lastToken ?? config.tdtConfig.blankId
 
-            while additionalSteps < maxAdditionalSteps && timeIndices < encoderSequenceLength {
+            // Last chunk finalization - continue processing even after encoder frames are exhausted
+
+            // Continue until we get consecutive blanks or hit max steps
+            while additionalSteps < maxSymbolsPerStep && consecutiveBlanks < maxConsecutiveBlanks {
                 let stateToUse = hypothesis.decState ?? decoderState
 
                 // Get decoder output for final processing
@@ -358,8 +360,10 @@ internal struct TdtDecoder {
                     )
                 }
 
-                // Process remaining frames
-                let encoderStep = encoderFrames[min(timeIndices, encoderFrames.count - 1)]
+                // Use last valid encoder frame if beyond bounds
+                let frameIndex = min(timeIndices, encoderFrames.count - 1)
+                let encoderStep = encoderFrames[frameIndex]
+
                 let logits = try runJoint(
                     encoderStep: encoderStep,
                     decoderOutput: decoderResult.output,
@@ -371,14 +375,20 @@ internal struct TdtDecoder {
 
                 let token = argmaxSIMD(tokenLogits)
                 let score = tokenLogits[token]
-                let lastChunkDurationBinIndex = argmaxSIMD(durationLogits)
-                let duration = config.tdtConfig.durationBins[lastChunkDurationBinIndex]
 
-                if token != config.tdtConfig.blankId {
+                if token == config.tdtConfig.blankId {
+                    consecutiveBlanks += 1
+                    // Blank token - increment consecutive blank counter
+                } else {
+                    consecutiveBlanks = 0  // Reset on non-blank
+
+                    // Non-blank token found - emit it
+
                     // Emit final tokens
                     hypothesis.ySequence.append(token)
                     hypothesis.score += score
-                    hypothesis.timestamps.append(timeIndices)
+                    // Use clamped timestamp to avoid going beyond encoder bounds
+                    hypothesis.timestamps.append(min(timeIndices, encoderSequenceLength - 1))
                     hypothesis.lastToken = token
 
                     // Update decoder state
@@ -395,18 +405,14 @@ internal struct TdtDecoder {
                     lastToken = token
                 }
 
-                // Advance time or break if at end
-                timeIndices += max(duration, 1)  // Ensure progress
+                // Always increment steps (don't advance timeIndices beyond bounds)
                 additionalSteps += 1
-
-                if timeIndices >= encoderSequenceLength {
-                    break
-                }
             }
 
-            // Clear predictor output cache for final chunk to ensure clean state
-            decoderState.predictorOutput = nil
-            decoderState.timeJump = nil  // Clear time jump for final chunk
+            // Last chunk finalization completed
+
+            // Finalize decoder state
+            decoderState.finalizeLastChunk()
         }
 
         if let finalState = hypothesis.decState {

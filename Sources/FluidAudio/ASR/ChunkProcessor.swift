@@ -36,6 +36,8 @@ struct ChunkProcessor {
             // Determine if this is the last chunk
             let isLastChunk = (centerStart + centerSamples) >= audioSamples.count
 
+            // Process chunk with explicit last chunk detection
+
             let (windowTokens, windowTimestamps, maxFrame) = try await processWindowWithTokens(
                 centerStart: centerStart,
                 segmentIndex: segmentIndex,

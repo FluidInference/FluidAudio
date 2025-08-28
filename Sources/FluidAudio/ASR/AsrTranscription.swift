@@ -26,6 +26,8 @@ extension AsrManager {
 
         let startTime = Date()
 
+        // Route to appropriate processing method based on audio length
+
         if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
             let paddedAudio: [Float] = padAudioIfNeeded(audioSamples, targetLength: 240_000)
