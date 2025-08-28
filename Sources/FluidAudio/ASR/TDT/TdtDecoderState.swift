@@ -86,6 +86,19 @@ struct TdtDecoderState {
         predictorOutput = nil
         timeJump = nil
     }
+
+    /// Finalize the decoder state for the last chunk
+    /// Clears cached outputs and streaming-specific state while preserving linguistic context
+    mutating func finalizeLastChunk() {
+        // Clear predictor output cache to ensure clean state
+        predictorOutput = nil
+
+        // Clear time jump since there are no more chunks
+        timeJump = nil
+
+        // Keep lastToken for linguistic context - this may be useful for final post-processing
+        // Keep LSTM states as they represent the final linguistic context
+    }
 }
 
 extension MLMultiArray {
