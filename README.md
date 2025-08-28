@@ -1,6 +1,6 @@
 ![banner.png](banner.png)
 
-# FluidAudio | Transcription, Speaker Diarization, VAD via CoreML
+# FluidAudio - Swift SDK for Speaker Diarization and ASR with CoreML
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
@@ -257,7 +257,7 @@ Task {
     let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
     diarizer.initialize(models: models)
 
-    let audioSamples: [Float] = // your 16kHz audio data
+    let audioSamples: audioSamples[1000..<5000]  // your 16kHz audio data, No memory copy!
     let result = try diarizer.performCompleteDiarization(audioSamples)
 
     for segment in result.segments {
@@ -389,8 +389,14 @@ swift run fluidaudio download --dataset librispeech-test-other
 
 This project uses `swift-format` to maintain consistent code style. All pull requests are automatically checked for formatting compliance.
 
-**Local Development:**
 
+- **`DiarizerManager`**: Main diarization class
+- **`performCompleteDiarization(_:sampleRate:)`**: Process audio and return speaker segments
+  - Accepts any `RandomAccessCollection<Float>` (Array, ArraySlice, ContiguousArray, etc.)
+- **`compareSpeakers(audio1:audio2:)`**: Compare similarity between two audio samples
+- **`validateAudio(_:)`**: Validate audio quality and characteristics
+
+**Local Development:**
 ```bash
 # Format all code (requires Swift 6+ for contributors only)
 # Users of the library don't need Swift 6

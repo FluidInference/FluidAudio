@@ -14,8 +14,13 @@ let models = try await DiarizerModels.downloadIfNeeded()
 let diarizer = DiarizerManager()
 diarizer.initialize(models: models)
 
+// Supports any RandomAccessCollection<Float> - Array, ArraySlice, ContiguousArray, etc.
 let audioSamples: [Float] = loadAudioFile() // 16kHz mono
 let result = try diarizer.performCompleteDiarization(audioSamples)
+
+// Alternative: Use ArraySlice for zero-copy processing
+let audioSlice = audioSamples[1000..<5000]  // No memory copy!
+let sliceResult = try diarizer.performCompleteDiarization(audioSlice)
 
 // 4. Get results
 for segment in result.segments {
