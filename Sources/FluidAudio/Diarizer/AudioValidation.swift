@@ -3,8 +3,10 @@ import Foundation
 @available(macOS 13.0, iOS 16.0, *)
 internal struct AudioValidation {
 
-    func validateAudio(_ samples: [Float]) -> AudioValidationResult {
-        let duration = Float(samples.count) / 16000.0
+    func validateAudio<C>(_ samples: C) -> AudioValidationResult
+    where C: Collection, C.Element == Float {
+        let sampleCount = samples.count
+        let duration = Float(sampleCount) / 16000.0
         var issues: [String] = []
 
         if duration < 1.0 {
@@ -38,7 +40,8 @@ internal struct AudioValidation {
         return true
     }
 
-    private func calculateRMSEnergy(_ samples: [Float]) -> Float {
+    private func calculateRMSEnergy<C>(_ samples: C) -> Float
+    where C: Collection, C.Element == Float {
         guard !samples.isEmpty else { return 0 }
         let squaredSum = samples.reduce(0) { $0 + $1 * $1 }
         return sqrt(squaredSum / Float(samples.count))

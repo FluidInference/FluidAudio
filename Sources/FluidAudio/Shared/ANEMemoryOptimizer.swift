@@ -111,26 +111,47 @@ public class ANEMemoryOptimizer {
     }
 
     /// Copy data using ANE-optimized memory operations
-    public func optimizedCopy(
-        from source: [Float],
+    public func optimizedCopy<C>(
+        from source: C,
         to destination: MLMultiArray,
         offset: Int = 0
-    ) {
+    ) where C: Collection, C.Element == Float {
         guard destination.dataType == .float32 else { return }
 
         let destPtr = destination.dataPointer.assumingMemoryBound(to: Float.self)
         let count = min(source.count, destination.count - offset)
 
-        // Use vDSP for optimized memory copy
-        source.withUnsafeBufferPointer { srcBuffer in
-            vDSP_mmov(
-                srcBuffer.baseAddress!,
-                destPtr.advanced(by: offset),
-                vDSP_Length(count),
-                vDSP_Length(1),
-                vDSP_Length(1),
-                vDSP_Length(count)
-            )
+        // If source is contiguous array, use optimized copy
+        if let array = source as? [Float] {
+            array.withUnsafeBufferPointer { srcBuffer in
+                vDSP_mmov(
+                    srcBuffer.baseAddress!,
+                    destPtr.advanced(by: offset),
+                    vDSP_Length(count),
+                    vDSP_Length(1),
+                    vDSP_Length(1),
+                    vDSP_Length(count)
+                )
+            }
+        } else if let slice = source as? ArraySlice<Float> {
+            // ArraySlice may share contiguous memory
+            slice.withUnsafeBufferPointer { srcBuffer in
+                vDSP_mmov(
+                    srcBuffer.baseAddress!,
+                    destPtr.advanced(by: offset),
+                    vDSP_Length(count),
+                    vDSP_Length(1),
+                    vDSP_Length(1),
+                    vDSP_Length(count)
+                )
+            }
+        } else {
+            // Fallback for other collections - copy element by element
+            var destIndex = offset
+            for element in source.prefix(count) {
+                destPtr[destIndex] = element
+                destIndex += 1
+            }
         }
     }
 
