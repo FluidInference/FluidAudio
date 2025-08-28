@@ -9,7 +9,7 @@ public actor VadManager {
     /// Required model names for VAD
     public static let requiredModelNames = ModelNames.VAD.requiredModels
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "VAD")
+    private let logger = ConsoleLogger(subsystem: "com.fluidinfluence.vad", category: "VAD")
     private let config: VadConfig
 
     private var stftModel: MLModel?

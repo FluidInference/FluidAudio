@@ -23,6 +23,10 @@ func printUsage() {
 
         Run 'fluidaudio <command> --help' for command-specific options.
 
+        Environment Variables:
+            LOG_LEVEL               Control logging verbosity (DEBUG, INFO, WARNING, ERROR, FAULT)
+                                   Default: WARNING level
+
         Examples:
             fluidaudio process audio.wav --output results.json
 
@@ -37,6 +41,9 @@ func printUsage() {
             fluidaudio multi-stream audio1.wav audio2.wav
 
             fluidaudio download --dataset ami-sdm
+            
+            LOG_LEVEL=DEBUG fluidaudio asr-benchmark --debug
+            LOG_LEVEL=INFO fluidaudio transcribe audio.wav
         """
     )
 }

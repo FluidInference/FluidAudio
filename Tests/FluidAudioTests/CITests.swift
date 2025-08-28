@@ -1,3 +1,4 @@
+import CoreMedia
 import XCTest
 
 @testable import FluidAudio
@@ -181,6 +182,53 @@ final class CITests: XCTestCase {
         let config = DiarizerConfig(debugMode: true)
         let debugManager = DiarizerManager(config: config)
         XCTAssertFalse(debugManager.isAvailable)
+    }
+
+    // MARK: - Streaming Infrastructure Tests
+
+    @available(macOS 13.0, iOS 16.0, *)
+    func testStreamingManagerCIInitialization() async throws {
+        // Test that StreamingAsrManager can be initialized in CI
+        let manager = StreamingAsrManager()
+        let stats = await manager.memoryStats
+
+        XCTAssertEqual(stats.sampleBufferSize, 0)
+        XCTAssertEqual(stats.accumulatedTokens, 0)
+        XCTAssertEqual(stats.segmentTexts, 0)
+        XCTAssertEqual(stats.processedChunks, 0)
+
+        await manager.cancel()
+    }
+
+    func testStreamingConfigurationCI() {
+        // Test that streaming configurations are valid in CI
+        let defaultConfig = StreamingAsrConfig.default
+        XCTAssertGreaterThan(defaultConfig.chunkSamples, 0)
+        XCTAssertGreaterThan(defaultConfig.leftContextSamples, 0)
+        XCTAssertGreaterThan(defaultConfig.rightContextSamples, 0)
+
+        let lowLatencyConfig = StreamingAsrConfig(mode: .lowLatency)
+        XCTAssertLessThan(lowLatencyConfig.chunkSeconds, defaultConfig.chunkSeconds)
+
+        let highAccuracyConfig = StreamingAsrConfig(mode: .highAccuracy)
+        XCTAssertGreaterThan(highAccuracyConfig.chunkSeconds, defaultConfig.chunkSeconds)
+    }
+
+    @available(macOS 13.0, iOS 16.0, *)
+    func testStreamingMemoryManagementCI() async throws {
+        // Test that streaming memory management works in CI
+        let manager = StreamingAsrManager()
+
+        // Multiple lifecycle operations
+        for _ in 0..<3 {
+            let _ = await manager.snapshots
+            _ = try await manager.finish()
+
+            let stats = await manager.memoryStats
+            XCTAssertEqual(stats.accumulatedTokens, 0)
+        }
+
+        await manager.cancel()
     }
 
     // MARK: - Performance Baseline Tests
