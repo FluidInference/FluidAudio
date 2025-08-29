@@ -110,7 +110,7 @@ struct ChunkProcessor {
         )
 
         // Calculate expected encoder frames for debugging
-        let expectedEncoderFrames = Int(Double(chunkSamples.count) / 1280.0)  // 16kHz / 12.5 fps = 1280 samples per frame
+        let _ = Int(Double(chunkSamples.count) / 1280.0)  // 16kHz / 12.5 fps = 1280 samples per frame
 
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
