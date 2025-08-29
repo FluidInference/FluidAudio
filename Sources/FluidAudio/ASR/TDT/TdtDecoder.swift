@@ -102,20 +102,25 @@ internal struct TdtDecoder {
             timeIndices = startFrameOffset
         }
 
-        // CRITICAL FIX: Ensure we don't reprocess frames that were already handled by previous chunk
-        // For chunk processing, convert lastProcessedFrame from global frame index to local frame index
+        // CRITICAL FIX: Only skip frames where we actually emitted tokens, not just processed
+        // This prevents both missing tokens AND duplicates
         if lastProcessedFrame > 0 {
-            // Convert global lastProcessedFrame to local frame index within this chunk
             let localLastProcessedFrame = lastProcessedFrame - globalFrameOffset
             print(
                 "TDT: lastProcessedFrame=\(lastProcessedFrame), globalFrameOffset=\(globalFrameOffset), localLastProcessedFrame=\(localLastProcessedFrame), encoderSequenceLength=\(encoderSequenceLength), startFrameOffset=\(startFrameOffset)"
             )
-            // Ensure we start processing after the last processed frame, but respect left context requirements
+
+            // Only skip if the last processed frame is within our current chunk
+            // AND we're past the overlap region
             if localLastProcessedFrame >= 0 && localLastProcessedFrame < encoderSequenceLength {
-                // Only advance beyond lastProcessedFrame if it's greater than startFrameOffset
-                // This prevents skipping unprocessed frames in the gap between lastProcessedFrame and leftContext
+                // Skip to just after the last processed frame
+                // This ensures we don't reprocess frames that already emitted tokens
                 timeIndices = max(timeIndices, localLastProcessedFrame + 1)
                 print("TDT: timeIndices after lastProcessedFrame adjustment: \(timeIndices)")
+            } else if lastProcessedFrame < globalFrameOffset {
+                // Last processed frame is before our chunk starts - start from beginning
+                timeIndices = startFrameOffset
+                print("TDT: Starting from beginning of chunk, timeIndices: \(timeIndices)")
             }
         }
 
@@ -257,7 +262,10 @@ internal struct TdtDecoder {
             // - Avoids expensive LSTM computations for silence frames
             // - Maintains linguistic continuity across gaps in speech
             // - Speeds up processing by 2-3x for audio with silence
+            var innerLoopIterations = 0
+
             while advanceMask {
+                innerLoopIterations += 1
                 timeIndicesCurrentLabels = timeIndices
 
                 let innerEncoderStep = encoderFrames[safeTimeIndices]
@@ -276,9 +284,14 @@ internal struct TdtDecoder {
                 score = innerTokenLogits[label]
                 let innerDurationBinIndex = argmaxSIMD(innerDurationLogits)
                 duration = config.tdtConfig.durationBins[innerDurationBinIndex]
+                
+                duration = min(duration, 2)  // Cap at 2 frames max
+
 
                 blankMask = (label == blankId)
-
+                if innerLoopIterations == 1 || duration > 2 {
+                    print("Inner loop: frame \(timeIndices) -> \(timeIndices + duration), token=\(label), blank=\(blankMask), duration=\(duration)")
+                }
                 // Same duration=0 fix for inner loop
                 if blankMask && duration == 0 {
                     duration = 1
@@ -289,19 +302,24 @@ internal struct TdtDecoder {
                 safeTimeIndices = min(timeIndices, lastTimestep)
                 activeMask = timeIndices < encoderSequenceLength
                 advanceMask = activeMask && blankMask  // Exit loop if non-blank found
+                // In the inner loop, limit consecutive blank processing
+                if innerLoopIterations >= 5 {
+                    advanceMask = false  // Exit inner loop and re-evaluate
+                }
             }
             // ===== END INNER LOOP =====
 
             // Process non-blank token: emit it and update decoder state
             // IMPORTANT: Only emit tokens if they're beyond the already-processed region
             if activeMask && label != blankId {
-                let shouldEmit = timeIndicesCurrentLabels >= startFrameOffset
+                let globalFrameIndex = timeIndicesCurrentLabels + globalFrameOffset
+                let shouldEmit = globalFrameIndex > lastProcessedFrame  // Changed from >= startFrameOffset
 
                 if shouldEmit {
                     // Add token to output sequence
                     hypothesis.ySequence.append(label)
                     hypothesis.score += score
-                    hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
+                    hypothesis.timestamps.append(globalFrameIndex)  // Already includes globalFrameOffset
                     hypothesis.lastToken = label  // Remember for next iteration
                 }
 
@@ -438,16 +456,6 @@ internal struct TdtDecoder {
             decoderState = finalState
         }
         decoderState.lastToken = hypothesis.lastToken
-
-        // Clear cached predictor output if ending with punctuation
-        // This prevents punctuation from being duplicated at chunk boundaries
-        if let lastToken = hypothesis.lastToken {
-            let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
-            if punctuationTokens.contains(lastToken) {
-                decoderState.predictorOutput = nil
-                // Keep lastToken for linguistic context - deduplication handles duplicates at higher level
-            }
-        }
 
         // Store time jump for streaming: how far beyond this chunk we've processed
         // Used to align timestamps when processing next chunk

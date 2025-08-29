@@ -17,8 +17,8 @@ struct ChunkProcessor {
 
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 8.0
-    private let leftContextSeconds: Double = 4.8
+    private let centerSeconds: Double = 6.4
+    private let leftContextSeconds: Double = 6.4
     private let rightContextSeconds: Double = 1.6
     // Encoder subsampling: exactly 1280 samples = 1 encoder frame (80ms at 16kHz)
     // This avoids floating-point drift over time
@@ -125,7 +125,7 @@ struct ChunkProcessor {
         )
 
         return ASRResult(
-            text: cleanPunctuation(finalResult.text),
+            text: finalResult.text,
             confidence: finalResult.confidence,
             duration: finalResult.duration,
             processingTime: finalResult.processingTime,
