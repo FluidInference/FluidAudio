@@ -8,6 +8,13 @@ struct ChunkProcessor {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ChunkProcessor")
 
+    private func cleanPunctuation(_ text: String) -> String {
+        return
+            text
+            .replacingOccurrences(of: "\\.\\.", with: "", options: .regularExpression)
+            .replacingOccurrences(of: ",\\.", with: ",", options: .regularExpression)
+    }
+
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
     private let centerSeconds: Double = 8.0
@@ -40,6 +47,7 @@ struct ChunkProcessor {
             // This represents where we actually start processing (not the center)
             let leftStart = max(0, centerStart - leftContextSamples)
             let globalFrameOffset = leftStart / samplesPerEncoderFrame
+            print("==============Chunk \(segmentIndex)=================")
 
             // Process chunk with explicit last chunk detection
             let (windowTokens, windowTimestamps, maxFrame) = try await processWindowWithTokens(
@@ -62,10 +70,10 @@ struct ChunkProcessor {
             let rightContextFrames = rightContextSamples / samplesPerEncoderFrame
 
             print(
-                "Window \(segmentIndex): centerStart=\(centerStart), globalFrameOffset=\(globalFrameOffset), lastProcessedFrame=\(lastProcessedFrame)"
+                "Chunk \(segmentIndex): centerStart=\(centerStart), globalFrameOffset=\(globalFrameOffset), lastProcessedFrame=\(lastProcessedFrame)"
             )
-            print("Window Tokens: \(windowTokens)")
-            print("Window Timestamps: \(windowTimestamps)")
+            print("Chunk Tokens: \(windowTokens)")
+            print("Chunk Timestamps: \(windowTimestamps)")
             print("Right Context Frames: \(rightContextFrames)")
             print("Max Frame: \(maxFrame)")
 
@@ -117,7 +125,7 @@ struct ChunkProcessor {
         )
 
         return ASRResult(
-            text: finalResult.text,
+            text: cleanPunctuation(finalResult.text),
             confidence: finalResult.confidence,
             duration: finalResult.duration,
             processingTime: finalResult.processingTime,
@@ -149,7 +157,7 @@ struct ChunkProcessor {
         }
 
         let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
-
+        print("Processing chunk \(segmentIndex): samples \(leftStart) to \(rightEnd) (length \(chunkSamples.count))")
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
