@@ -173,7 +173,7 @@ public final class AsrManager {
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
     ) throws -> MLFeatureProvider {
-        let targetArray = try createScalarArray(value: 0, shape: [1, 1])
+        let targetArray = try createScalarArray(value: config.tdtConfig.blankId, shape: [1, 1])
         let targetLengthArray = try createScalarArray(value: 1)
 
         return try createFeatureProvider(features: [
@@ -299,7 +299,7 @@ public final class AsrManager {
 
         // Make sure state is reset
         try await self.resetDecoderState()
-        
+
         var result: ASRResult
         switch source {
         case .microphone:

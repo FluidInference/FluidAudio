@@ -285,7 +285,6 @@ internal struct TdtDecoder {
                 let innerDurationBinIndex = argmaxSIMD(innerDurationLogits)
                 duration = config.tdtConfig.durationBins[innerDurationBinIndex]
 
-
                 blankMask = (label == blankId)
                 // Same duration=0 fix for inner loop
                 if blankMask && duration == 0 {
