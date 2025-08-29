@@ -370,7 +370,7 @@ internal struct TdtDecoder {
                     model: jointModel
                 )
 
-                let (tokenLogits, _) = try splitLogits(
+                let (tokenLogits, durationLogits) = try splitLogits(
                     logits, durationElements: config.tdtConfig.durationBins.count)
 
                 let token = argmaxSIMD(tokenLogits)
