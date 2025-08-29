@@ -102,25 +102,25 @@ internal struct TdtDecoder {
             timeIndices = startFrameOffset
         }
 
-        // CRITICAL FIX: Only skip frames where we actually emitted tokens, not just processed
-        // This prevents both missing tokens AND duplicates
+        // Balanced approach: minimal skipping with large overlap buffer
+        // Process enough overlap to ensure we never miss content, while avoiding excessive processing
         if lastProcessedFrame > 0 {
-            let localLastProcessedFrame = lastProcessedFrame - globalFrameOffset
             print(
-                "TDT: lastProcessedFrame=\(lastProcessedFrame), globalFrameOffset=\(globalFrameOffset), localLastProcessedFrame=\(localLastProcessedFrame), encoderSequenceLength=\(encoderSequenceLength), startFrameOffset=\(startFrameOffset)"
+                "TDT: lastProcessedFrame=\(lastProcessedFrame), globalFrameOffset=\(globalFrameOffset), encoderSequenceLength=\(encoderSequenceLength), startFrameOffset=\(startFrameOffset)"
             )
 
-            // Only skip if the last processed frame is within our current chunk
-            // AND we're past the overlap region
-            if localLastProcessedFrame >= 0 && localLastProcessedFrame < encoderSequenceLength {
-                // Skip to just after the last processed frame
-                // This ensures we don't reprocess frames that already emitted tokens
-                timeIndices = max(timeIndices, localLastProcessedFrame + 1)
-                print("TDT: timeIndices after lastProcessedFrame adjustment: \(timeIndices)")
-            } else if lastProcessedFrame < globalFrameOffset {
-                // Last processed frame is before our chunk starts - start from beginning
-                timeIndices = startFrameOffset
-                print("TDT: Starting from beginning of chunk, timeIndices: \(timeIndices)")
+            let localLastProcessedFrame = lastProcessedFrame - globalFrameOffset
+            if localLastProcessedFrame >= 0 && localLastProcessedFrame < encoderSequenceLength - 5 {
+                // Conservative approach: start well before the last processed frame
+                // But still provide substantial overlap to ensure no content is missed
+                let generousBufferFrames = min(40, localLastProcessedFrame)  // Large overlap buffer
+                let balancedStartFrame = max(startFrameOffset, localLastProcessedFrame - generousBufferFrames)
+                timeIndices = max(timeIndices, balancedStartFrame)
+                print(
+                    "TDT: Balanced processing from frame \(balancedStartFrame) (buffer: \(generousBufferFrames) frames)"
+                )
+            } else {
+                print("TDT: Processing all frames for maximum coverage")
             }
         }
 
@@ -304,10 +304,12 @@ internal struct TdtDecoder {
             // ===== END INNER LOOP =====
 
             // Process non-blank token: emit it and update decoder state
-            // IMPORTANT: Only emit tokens if they're beyond the already-processed region
+            // NeMo-inspired approach: emit all tokens and handle deduplication downstream
             if activeMask && label != blankId {
                 let globalFrameIndex = timeIndicesCurrentLabels + globalFrameOffset
-                let shouldEmit = globalFrameIndex > lastProcessedFrame  // Changed from >= startFrameOffset
+                // Always emit non-blank tokens - let post-processing handle deduplication
+                // This ensures we never miss tokens due to overly restrictive filtering
+                let shouldEmit = true
 
                 if shouldEmit {
                     // Add token to output sequence
@@ -360,18 +362,17 @@ internal struct TdtDecoder {
         }
 
         // ===== LAST CHUNK FINALIZATION =====
-        // For the last chunk, ensure we force emission of any pending tokens
-        // Continue processing even after encoder frames are exhausted
+        // NeMo-inspired last chunk processing: be more aggressive about emitting final tokens
+        // Continue processing even after encoder frames are exhausted to catch trailing content
         if isLastChunk {
             var additionalSteps = 0
             var consecutiveBlanks = 0
-            let maxConsecutiveBlanks = 8  // Exit after 2 blanks in a row
+            let maxConsecutiveBlanks = 6  // Reduced threshold to be more aggressive
             var lastToken = hypothesis.lastToken ?? config.tdtConfig.blankId
-
-            // Last chunk finalization - continue processing even after encoder frames are exhausted
+            let maxAdditionalSteps = min(maxSymbolsPerStep, 15)  // Cap additional steps
 
             // Continue until we get consecutive blanks or hit max steps
-            while additionalSteps < maxSymbolsPerStep && consecutiveBlanks < maxConsecutiveBlanks {
+            while additionalSteps < maxAdditionalSteps && consecutiveBlanks < maxConsecutiveBlanks {
                 let stateToUse = hypothesis.decState ?? decoderState
 
                 // Get decoder output for final processing

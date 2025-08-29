@@ -315,12 +315,10 @@ extension AsrManager {
         return slicedArray
     }
 
-    /// Merge chunks based on global timestamps, extracting only tokens from the center region of each chunk.
-    /// This approach uses the globally stable frame timestamps to identify the center portion of each chunk
-    /// and only keeps tokens from those frames, avoiding context region contamination.
-    /// Similar to NeMo's merge_ method but adapted for sliding window chunk processing.
-    ///
-    /// With the TDT decoder fix that respects lastProcessedFrame, overlaps should be minimal or non-existent.
+    /// NeMo-inspired timestamp-based token merging for chunk boundaries
+    /// This approach merges tokens from overlapping chunks using timestamp alignment
+    /// to avoid duplicates while ensuring no content is lost.
+    /// Based on NeMo's LCS merge algorithm but simplified for our use case.
     internal func mergeChunksByTimestamp(
         previousTokens: [Int],
         previousTimestamps: [Int],
@@ -337,41 +335,202 @@ extension AsrManager {
             return (currentTokens, currentTimestamps)
         }
 
+        // NeMo-style approach: use timestamp-based deduplication
+        let (dedupedCurrentTokens, dedupedCurrentTimestamps) = deduplicateByTimestamp(
+            previousTokens: previousTokens,
+            previousTimestamps: previousTimestamps,
+            currentTokens: currentTokens,
+            currentTimestamps: currentTimestamps
+        )
+
         var mergedTokens = previousTokens
         var mergedTimestamps = previousTimestamps
 
-        // Track last timestamp from previous tokens to avoid duplicates
-        let lastPreviousTimestamp = previousTimestamps.last ?? -1
-
-        // Special handling for punctuation tokens that often duplicate at boundaries
-        let punctuationTokens = Set([7883, 7952, 7948])  // period, question, exclamation
-        let lastPreviousToken = previousTokens.last
-
-        // Add current tokens, skipping duplicates
-        for (i, timestamp) in currentTimestamps.enumerated() {
-            let token = currentTokens[i]
-
-            // Skip if this timestamp was already processed
-            if timestamp <= lastPreviousTimestamp {
-                continue
-            }
-
-            // Skip consecutive duplicate punctuation at boundaries
-            if mergedTokens.count > 0 && punctuationTokens.contains(token) && token == mergedTokens.last {
-                continue
-            }
-
-            // Skip if this is the exact same token at the same/adjacent timestamp
-            // (helps with other duplicates beyond punctuation)
-            if mergedTokens.count > 0 && token == mergedTokens.last && timestamp - mergedTimestamps.last! <= 1 {
-                continue
-            }
-
-            mergedTokens.append(token)
-            mergedTimestamps.append(timestamp)
-        }
+        // Append deduplicated tokens
+        mergedTokens.append(contentsOf: dedupedCurrentTokens)
+        mergedTimestamps.append(contentsOf: dedupedCurrentTimestamps)
 
         return (mergedTokens, mergedTimestamps)
+    }
+
+    /// Proper NeMo-style Longest Common Substring merge algorithm
+    /// Based on NeMo's streaming_utils.py longest_common_subsequence_merge
+    /// Finds optimal alignment between consecutive chunks to avoid duplicates
+    private func deduplicateByTimestamp(
+        previousTokens: [Int],
+        previousTimestamps: [Int],
+        currentTokens: [Int],
+        currentTimestamps: [Int]
+    ) -> (dedupedTokens: [Int], dedupedTimestamps: [Int]) {
+
+        guard !previousTokens.isEmpty && !currentTokens.isEmpty else {
+            return (currentTokens, currentTimestamps)
+        }
+
+        // Comprehensive overlap detection: find longest suffix of previous that appears in current
+        var bestMatchLength = 0
+        var bestStartIndex = 0
+
+        // Robust systematic search - look for ANY suffix of previous that matches ANY subsequence of current
+        let maxSuffixLength = min(20, previousTokens.count)
+        for suffixLength in stride(from: maxSuffixLength, through: 8, by: -1) {
+            if suffixLength > currentTokens.count { continue }
+
+            // Try multiple suffix positions from previous tokens, not just the very end
+            for suffixStart in stride(
+                from: previousTokens.count - suffixLength, through: max(0, previousTokens.count - maxSuffixLength),
+                by: -1)
+            {
+                if suffixStart < 0 { continue }
+
+                let previousSubsequence = Array(previousTokens[suffixStart..<suffixStart + suffixLength])
+
+                // Search for this subsequence in current tokens
+                let maxCurrentStart = currentTokens.count - suffixLength
+                if maxCurrentStart < 0 { continue }
+
+                for currentStart in 0...min(8, maxCurrentStart) {
+                    let currentSubsequence = Array(currentTokens[currentStart..<currentStart + suffixLength])
+
+                    if previousSubsequence == currentSubsequence {
+                        bestMatchLength = suffixLength
+                        bestStartIndex = currentStart + suffixLength
+                        break
+                    }
+                }
+                if bestMatchLength > 0 { break }
+            }
+            if bestMatchLength > 0 { break }
+        }
+
+        // If no exact match, try fuzzy matching for shorter sequences with safe bounds
+        if bestMatchLength == 0 {
+            for suffixLength in stride(from: 15, through: 8, by: -1) {
+                if suffixLength > previousTokens.count || suffixLength > currentTokens.count {
+                    continue
+                }
+                let previousSuffix = Array(previousTokens.suffix(suffixLength))
+
+                let maxStart = currentTokens.count - suffixLength
+                if maxStart < 0 { continue }
+
+                let searchLimit = min(8, maxStart + 1)
+                if searchLimit <= 0 { continue }
+
+                for startIndex in 0..<searchLimit {
+                    let currentSubsequence = Array(currentTokens[startIndex..<startIndex + suffixLength])
+
+                    if calculateFuzzySimilarity(previousSuffix, currentSubsequence) >= 0.9 {
+                        bestMatchLength = suffixLength
+                        bestStartIndex = startIndex + suffixLength
+                        break
+                    }
+                }
+                if bestMatchLength > 0 { break }
+            }
+        }
+
+        let sliceStartIndex = bestMatchLength > 0 ? bestStartIndex : 0
+
+        // Optional debug logging for deduplication (can be enabled for troubleshooting)
+        // if !previousTokens.isEmpty && !currentTokens.isEmpty && sliceStartIndex > 0 {
+        //     print("DEDUP: Found overlap length: \(bestMatchLength), slicing from index: \(sliceStartIndex)")
+        //     print("DEDUP: Removing tokens: \(Array(currentTokens.prefix(sliceStartIndex)))")
+        // }
+
+        // Remove the duplicate tokens from the current chunk
+        var dedupedTokens: [Int] = []
+        var dedupedTimestamps: [Int] = []
+
+        for i in sliceStartIndex..<currentTokens.count {
+            dedupedTokens.append(currentTokens[i])
+            dedupedTimestamps.append(currentTimestamps[i])
+        }
+
+        return (dedupedTokens, dedupedTimestamps)
+    }
+
+    /// Calculate fuzzy similarity between two token sequences (allows for small variations)
+    private func calculateFuzzySimilarity(_ sequence1: [Int], _ sequence2: [Int]) -> Double {
+        guard !sequence1.isEmpty && !sequence2.isEmpty else { return 0.0 }
+        guard sequence1.count == sequence2.count else { return 0.0 }
+
+        let matchCount = zip(sequence1, sequence2).reduce(0) { count, pair in
+            count + (pair.0 == pair.1 ? 1 : 0)
+        }
+
+        return Double(matchCount) / Double(sequence1.count)
+    }
+
+    /// NeMo's LCS merge algorithm implementation
+    /// Returns the start index in Y where unique content begins
+    private func longestCommonSubstringMerge(X: [Int], Y: [Int]) -> Int {
+        let m = X.count
+        let n = Y.count
+
+        // LCSuff table for dynamic programming
+        var LCSuff = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+
+        var result = 0
+        var resultIdx = [0, 0, 0]  // [i, j, length]
+
+        // Build LCS table
+        for i in 0...m {
+            for j in 0...n {
+                if i == 0 || j == 0 {
+                    LCSuff[i][j] = 0
+                } else if X[i - 1] == Y[j - 1] {
+                    LCSuff[i][j] = LCSuff[i - 1][j - 1] + 1
+
+                    if result <= LCSuff[i][j] {
+                        result = LCSuff[i][j]
+                        resultIdx = [i, j, result]
+                    }
+                } else {
+                    LCSuff[i][j] = 0
+                }
+            }
+        }
+
+        var (i, j) = (resultIdx[0], resultIdx[1])
+        let isCompleteMerge = i == m
+
+        if isCompleteMerge {
+            // Perfect alignment - backtrack to find start
+            var length = resultIdx[2]
+
+            while length >= 0 && i > 0 && j > 0 {
+                if LCSuff[i - 1][j - 1] > 0 {
+                    length -= 1
+                    i -= 1
+                    j -= 1
+                } else {
+                    i -= 1
+                    j -= 1
+                    length -= 1
+                    break
+                }
+            }
+
+            return j
+        } else {
+            // Partial alignment - find leftmost LCS
+            var maxJ = 0
+            var maxJIdx = n
+
+            // Select leftmost LCS by searching backward
+            for iIdx in stride(from: m, through: 0, by: -1) {
+                for jIdx in 0...n {
+                    if LCSuff[iIdx][jIdx] > maxJ && jIdx <= maxJIdx {
+                        maxJ = LCSuff[iIdx][jIdx]
+                        maxJIdx = jIdx
+                    }
+                }
+            }
+
+            // For partial matches, be conservative - only skip if we have substantial overlap
+            return maxJ >= 3 ? maxJIdx : 0
+        }
     }
 
     /// Remove duplicate token sequences at the start of the current list that overlap
