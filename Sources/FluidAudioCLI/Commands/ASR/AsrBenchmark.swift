@@ -214,7 +214,6 @@ public class ASRBenchmark {
 
         // Process the full audio file but track metrics as if streaming
         while processedSamples < audioSamples.count {
-            let chunkStartTime = Date()
             let chunkNumber = chunkProcessingTimes.count + 1
 
             // Calculate how many samples we've "streamed" so far
