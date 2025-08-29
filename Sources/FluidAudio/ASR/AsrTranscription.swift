@@ -331,50 +331,46 @@ extension AsrManager {
         isFirstChunk: Bool = false,
         globalFrameOffset: Int = 0
     ) -> (mergedTokens: [Int], mergedTimestamps: [Int]) {
-        
+
         // For first chunk, just return the current tokens
         if isFirstChunk {
             return (currentTokens, currentTimestamps)
         }
-        
+
         var mergedTokens = previousTokens
         var mergedTimestamps = previousTimestamps
-        
+
         // Track last timestamp from previous tokens to avoid duplicates
         let lastPreviousTimestamp = previousTimestamps.last ?? -1
-        
+
         // Special handling for punctuation tokens that often duplicate at boundaries
         let punctuationTokens = Set([7883, 7952, 7948])  // period, question, exclamation
         let lastPreviousToken = previousTokens.last
-        
+
         // Add current tokens, skipping duplicates
         for (i, timestamp) in currentTimestamps.enumerated() {
             let token = currentTokens[i]
-            
+
             // Skip if this timestamp was already processed
             if timestamp <= lastPreviousTimestamp {
                 continue
             }
-            
+
             // Skip consecutive duplicate punctuation at boundaries
-            if mergedTokens.count > 0 && 
-            punctuationTokens.contains(token) && 
-            token == mergedTokens.last {
+            if mergedTokens.count > 0 && punctuationTokens.contains(token) && token == mergedTokens.last {
                 continue
             }
-            
+
             // Skip if this is the exact same token at the same/adjacent timestamp
             // (helps with other duplicates beyond punctuation)
-            if mergedTokens.count > 0 && 
-            token == mergedTokens.last && 
-            timestamp - mergedTimestamps.last! <= 1 {
+            if mergedTokens.count > 0 && token == mergedTokens.last && timestamp - mergedTimestamps.last! <= 1 {
                 continue
             }
-            
+
             mergedTokens.append(token)
             mergedTimestamps.append(timestamp)
         }
-        
+
         return (mergedTokens, mergedTimestamps)
     }
 

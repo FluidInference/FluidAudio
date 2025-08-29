@@ -296,6 +296,10 @@ public final class AsrManager {
     }
 
     public func transcribe(_ audioSamples: [Float], source: AudioSource) async throws -> ASRResult {
+
+        // Make sure state is reset
+        try await self.resetDecoderState()
+        
         var result: ASRResult
         switch source {
         case .microphone:

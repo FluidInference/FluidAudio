@@ -284,14 +284,9 @@ internal struct TdtDecoder {
                 score = innerTokenLogits[label]
                 let innerDurationBinIndex = argmaxSIMD(innerDurationLogits)
                 duration = config.tdtConfig.durationBins[innerDurationBinIndex]
-                
-                duration = min(duration, 2)  // Cap at 2 frames max
 
 
                 blankMask = (label == blankId)
-                if innerLoopIterations == 1 || duration > 2 {
-                    print("Inner loop: frame \(timeIndices) -> \(timeIndices + duration), token=\(label), blank=\(blankMask), duration=\(duration)")
-                }
                 // Same duration=0 fix for inner loop
                 if blankMask && duration == 0 {
                     duration = 1
@@ -371,7 +366,7 @@ internal struct TdtDecoder {
         if isLastChunk {
             var additionalSteps = 0
             var consecutiveBlanks = 0
-            let maxConsecutiveBlanks = 2  // Exit after 2 blanks in a row
+            let maxConsecutiveBlanks = 8  // Exit after 2 blanks in a row
             var lastToken = hypothesis.lastToken ?? config.tdtConfig.blankId
 
             // Last chunk finalization - continue processing even after encoder frames are exhausted
