@@ -830,7 +830,7 @@ extension FLEURSBenchmark {
 
             // Print summary
             print("\n" + String(repeating: "=", count: 80))
-            print("📊 BENCHMARK SUMMARY")
+            print("FLEURS BENCHMARK SUMMARY")
             print(String(repeating: "=", count: 80))
 
             // Check if we have results to display
