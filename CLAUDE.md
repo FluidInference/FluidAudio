@@ -71,7 +71,7 @@ DiarizerConfig(
 ### 2. Voice Activity Detection (VAD)
 - **Status**: Merged in PR #9, 98% accuracy on MUSAN dataset
 - **Models**: Custom CoreML pipeline with enhanced fallback
-- **Config**: Optimal threshold of 0.445
+- **Config**: Optimal threshold of 0.5
 
 ### 3. Auto-Recovery Mechanism
 - Automatic detection and recovery from CoreML compilation failures
@@ -126,7 +126,7 @@ swift run fluidaudio asr-benchmark --subset test-other --output asr_results.json
 swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 
 # VAD benchmark
-swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.445
+swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.5
 ```
 
 #### Audio Processing
@@ -174,7 +174,7 @@ swift run fluidaudio download --dataset librispeech-test-other
 ### VADConfig Parameters
 ```swift
 VADConfig(
-    threshold: 0.445,             // 98% accuracy
+    threshold: 0.5,             // 98% accuracy
     chunkSize: 512,
     sampleRate: 16000,
     adaptiveThreshold: true,

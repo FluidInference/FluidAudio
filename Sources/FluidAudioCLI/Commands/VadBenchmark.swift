@@ -69,7 +69,6 @@ struct VadBenchmark {
                 debugMode: false
             ))
 
-        print("🔧 Using trained VAD model with SE modules")
         print("VAD system initialized")
 
         // Download test files

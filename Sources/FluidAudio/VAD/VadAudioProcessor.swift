@@ -26,10 +26,8 @@ internal class VadAudioProcessor {
         var enhancedProbability = rawProbability
 
         // Always calculate basic audio features for better accuracy
-        // Calculate spectral features
         spectralFeatures = calculateSpectralFeatures(audioChunk)
 
-        // Calculate SNR
         snrValue = calculateSNR(audioChunk)
 
         // Apply SNR-based filtering
@@ -39,7 +37,6 @@ internal class VadAudioProcessor {
             spectralFeatures: spectralFeatures
         )
 
-        // No temporal smoothing - return enhanced probability directly
         return (enhancedProbability, snrValue, spectralFeatures)
     }
 

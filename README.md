@@ -220,11 +220,11 @@ Task {
 import FluidAudio
 
 // Use the default configuration (already optimized for best results)
-let vadConfig = VadConfig()  // Threshold: 0.445, optimized settings
+let vadConfig = VadConfig()  // Threshold: 0.5, optimized settings
 
 // Or customize the configuration
 let customVadConfig = VadConfig(
-    threshold: 0.445,            // Recommended threshold (98% accuracy)
+    threshold: 0.5,            // Recommended threshold (98% accuracy)
     chunkSize: 512,              // 32ms at 16kHz
     sampleRate: 16000,
     adaptiveThreshold: true,     // Adapts to noise levels

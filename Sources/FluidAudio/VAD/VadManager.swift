@@ -3,8 +3,14 @@ import Foundation
 import OSLog
 
 /// VAD Manager using the trained Silero VAD model
+///
+/// **Beta Status**: This VAD implementation is currently in beta.
+/// While it performs well in testing environments,
+/// it has not been extensively tested in production environments.
+/// Use with caution in production applications.
+///
 @available(macOS 13.0, iOS 16.0, *)
-public class VadManager: @unchecked Sendable {
+public actor VadManager {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "VadManager")
     public let config: VadConfig
@@ -13,9 +19,6 @@ public class VadManager: @unchecked Sendable {
     public static let requiredModelNames: Set<String> = ["silero_vad.mlmodelc"]
     private var vadModel: MLModel?
     private let audioProcessor: VadAudioProcessor
-
-    private let modelProcessingQueue = DispatchQueue(
-        label: "com.fluidinfluence.vad.unified.processing", qos: .userInitiated)
 
     public var isAvailable: Bool {
         return vadModel != nil
@@ -44,8 +47,9 @@ public class VadManager: @unchecked Sendable {
     }
 
     /// Initialize from directory
-    public convenience init(config: VadConfig = .default, modelDirectory: URL) async throws {
-        try await self.init(config: config)
+    public init(config: VadConfig = .default, modelDirectory: URL) async throws {
+        self.config = config
+        self.audioProcessor = VadAudioProcessor(config: config)
 
         let startTime = Date()
         try await loadUnifiedModel(from: modelDirectory)
@@ -82,7 +86,6 @@ public class VadManager: @unchecked Sendable {
         return appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
     }
 
-    /// Process audio chunk and return VAD result
     public func processChunk(_ audioChunk: [Float]) async throws -> VadResult {
         guard let vadModel = vadModel else {
             throw VadError.notInitialized
@@ -154,46 +157,37 @@ public class VadManager: @unchecked Sendable {
     }
 
     private func processUnifiedModel(_ audioChunk: [Float], model: MLModel) async throws -> Float {
-        return try await withCheckedThrowingContinuation { continuation in
-            modelProcessingQueue.async { [weak self] in
-                guard let self = self else {
-                    continuation.resume(throwing: VadError.notInitialized)
-                    return
-                }
+        // Actor already provides thread safety, can run directly
+        do {
+            // Create input array
+            let audioArray = try MLMultiArray(
+                shape: [1, 512],
+                dataType: .float32
+            )
 
-                do {
-                    // Create input array
-                    let audioArray = try MLMultiArray(
-                        shape: [1, 512],
-                        dataType: .float32
-                    )
-
-                    for i in 0..<audioChunk.count {
-                        audioArray[i] = NSNumber(value: audioChunk[i])
-                    }
-
-                    // Create input provider
-                    let input = try MLDictionaryFeatureProvider(dictionary: ["audio_chunk": audioArray])
-
-                    // Run prediction
-                    let output = try model.prediction(from: input)
-
-                    // Get probability output
-                    guard let vadProbability = output.featureValue(for: "vad_probability")?.multiArrayValue else {
-                        self.logger.error("No vad_probability output found")
-                        continuation.resume(throwing: VadError.modelProcessingFailed("No VAD probability output"))
-                        return
-                    }
-
-                    // Extract probability value
-                    let probability = Float(truncating: vadProbability[0])
-                    continuation.resume(returning: probability)
-
-                } catch {
-                    self.logger.error("Model processing failed: \(error)")
-                    continuation.resume(throwing: VadError.modelProcessingFailed(error.localizedDescription))
-                }
+            for i in 0..<audioChunk.count {
+                audioArray[i] = NSNumber(value: audioChunk[i])
             }
+
+            // Create input provider
+            let input = try MLDictionaryFeatureProvider(dictionary: ["audio_chunk": audioArray])
+
+            // Run prediction
+            let output = try model.prediction(from: input)
+
+            // Get probability output
+            guard let vadProbability = output.featureValue(for: "vad_probability")?.multiArrayValue else {
+                logger.error("No vad_probability output found")
+                throw VadError.modelProcessingFailed("No VAD probability output")
+            }
+
+            // Extract probability value
+            let probability = Float(truncating: vadProbability[0])
+            return probability
+
+        } catch {
+            logger.error("Model processing failed: \(error)")
+            throw VadError.modelProcessingFailed(error.localizedDescription)
         }
     }
 
