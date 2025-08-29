@@ -713,13 +713,13 @@ public class FLEURSBenchmark {
                 ]
             },
             "summary": [
-                "averageWER": results.reduce(0.0) { $0 + $1.wer } / Double(results.count),
-                "averageCER": results.reduce(0.0) { $0 + $1.cer } / Double(results.count),
-                "averageRTFx": results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count),
+                "averageWER": sanitizeDouble(results.reduce(0.0) { $0 + $1.wer } / Double(results.count)),
+                "averageCER": sanitizeDouble(results.reduce(0.0) { $0 + $1.cer } / Double(results.count)),
+                "averageRTFx": sanitizeDouble(results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count)),
                 "totalSamples": results.reduce(0) { $0 + $1.samplesProcessed },
                 "totalSkipped": results.reduce(0) { $0 + $1.samplesSkipped },
-                "totalDuration": results.reduce(0.0) { $0 + $1.totalDuration },
-                "totalProcessingTime": results.reduce(0.0) { $0 + $1.processingTime },
+                "totalDuration": sanitizeDouble(results.reduce(0.0) { $0 + $1.totalDuration }),
+                "totalProcessingTime": sanitizeDouble(results.reduce(0.0) { $0 + $1.processingTime }),
             ],
         ]
 
@@ -846,9 +846,10 @@ extension FLEURSBenchmark {
                     + "WER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                     + "CER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                     + "RTFx".padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                    + "Duration".padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
                     + "Processed".padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
                     + "Skipped".padding(toLength: 7, withPad: " ", startingAt: 0))
-            print(String(repeating: "-", count: 80))
+            print(String(repeating: "-", count: 89))
 
             for result in results {
                 let langName = benchmark.supportedLanguages[result.language] ?? result.language
@@ -856,6 +857,7 @@ extension FLEURSBenchmark {
                 let werStr = String(format: "%.1f", result.wer * 100)
                 let cerStr = String(format: "%.1f", result.cer * 100)
                 let rtfxStr = String(format: "%.1f", result.rtfx)
+                let durationStr = String(format: "%.1fs", result.totalDuration)
                 let processedStr = String(result.samplesProcessed)
                 let skippedStr = result.samplesSkipped > 0 ? String(result.samplesSkipped) : "-"
 
@@ -864,6 +866,7 @@ extension FLEURSBenchmark {
                         + werStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                         + cerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                         + rtfxStr.padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                        + durationStr.padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
                         + processedStr.padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
                         + skippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
             }
@@ -871,13 +874,15 @@ extension FLEURSBenchmark {
             let avgWER = results.reduce(0.0) { $0 + $1.wer } / Double(results.count)
             let avgCER = results.reduce(0.0) { $0 + $1.cer } / Double(results.count)
             let avgRTFx = results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count)
+            let totalDuration = results.reduce(0.0) { $0 + $1.totalDuration }
             let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
             let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
 
-            print(String(repeating: "-", count: 80))
+            print(String(repeating: "-", count: 89))
             let avgWerStr = String(format: "%.1f", avgWER * 100)
             let avgCerStr = String(format: "%.1f", avgCER * 100)
             let avgRtfxStr = String(format: "%.1f", avgRTFx)
+            let totalDurationStr = String(format: "%.1fs", totalDuration)
             let totalProcessedStr = String(totalProcessed)
             let totalSkippedStr = totalSkipped > 0 ? String(totalSkipped) : "-"
 
@@ -886,6 +891,7 @@ extension FLEURSBenchmark {
                     + avgWerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                     + avgCerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                     + avgRtfxStr.padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                    + totalDurationStr.padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
                     + totalProcessedStr.padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
                     + totalSkippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
 
