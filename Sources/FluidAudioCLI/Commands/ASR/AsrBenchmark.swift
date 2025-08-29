@@ -170,7 +170,7 @@ public class ASRBenchmark {
             asrManager: asrManager, audioSamples: audioSamples)
         let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
-        let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
+        let metrics = await calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
 
         return ASRBenchmarkResult(
             fileName: file.fileName,
@@ -262,7 +262,7 @@ public class ASRBenchmark {
 
         // Use the final accumulated text
         let finalText = accumulatedText
-        let metrics = calculateASRMetrics(hypothesis: finalText, reference: file.transcript)
+        let metrics = await calculateASRMetrics(hypothesis: finalText, reference: file.transcript)
 
         // Use sum of inference times for accurate RTFx calculation
         let totalInferenceTime = chunkProcessingTimes.reduce(0, +)
@@ -315,32 +315,99 @@ public class ASRBenchmark {
     }
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization
-    public func calculateASRMetrics(hypothesis: String, reference: String) -> ASRMetrics {
-        let normalizedHypothesis = TextNormalizer.normalize(hypothesis)
-        let normalizedReference = TextNormalizer.normalize(reference)
+    public func calculateASRMetrics(hypothesis: String, reference: String) async -> ASRMetrics {
+        return await withTaskGroup(of: CalculationTask.self) { group in
+            // Normalize texts concurrently
+            group.addTask {
+                .normalizedHypothesis(TextNormalizer.normalize(hypothesis))
+            }
+            group.addTask {
+                .normalizedReference(TextNormalizer.normalize(reference))
+            }
 
-        let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
-            !$0.isEmpty
+            var normalizedHypothesis = ""
+            var normalizedReference = ""
+
+            for await task in group {
+                switch task {
+                case .normalizedHypothesis(let text):
+                    normalizedHypothesis = text
+                case .normalizedReference(let text):
+                    normalizedReference = text
+                }
+            }
+
+            // Process word and character tokenization concurrently
+            return await withTaskGroup(of: TokenizationTask.self) { tokenGroup in
+                tokenGroup.addTask {
+                    let words = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter {
+                        !$0.isEmpty
+                    }
+                    return .hypWords(words)
+                }
+                tokenGroup.addTask {
+                    let words = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
+                        !$0.isEmpty
+                    }
+                    return .refWords(words)
+                }
+                tokenGroup.addTask {
+                    let chars = Array(normalizedHypothesis.replacingOccurrences(of: " ", with: ""))
+                    return .hypChars(chars.map(String.init))
+                }
+                tokenGroup.addTask {
+                    let chars = Array(normalizedReference.replacingOccurrences(of: " ", with: ""))
+                    return .refChars(chars.map(String.init))
+                }
+
+                var hypWords: [String] = []
+                var refWords: [String] = []
+                var hypChars: [String] = []
+                var refChars: [String] = []
+
+                for await tokenTask in tokenGroup {
+                    switch tokenTask {
+                    case .hypWords(let words): hypWords = words
+                    case .refWords(let words): refWords = words
+                    case .hypChars(let chars): hypChars = chars
+                    case .refChars(let chars): refChars = chars
+                    }
+                }
+
+                // Calculate edit distances concurrently
+                return await withTaskGroup(of: EditDistanceTask.self) { editGroup in
+                    editGroup.addTask {
+                        .wordDistance(editDistance(hypWords, refWords))
+                    }
+                    editGroup.addTask {
+                        .charDistance(editDistance(hypChars, refChars))
+                    }
+
+                    var wordEditDistance = EditDistanceResult(total: 0, insertions: 0, deletions: 0, substitutions: 0)
+                    var charEditDistance = EditDistanceResult(total: 0, insertions: 0, deletions: 0, substitutions: 0)
+
+                    for await editTask in editGroup {
+                        switch editTask {
+                        case .wordDistance(let result): wordEditDistance = result
+                        case .charDistance(let result): charEditDistance = result
+                        }
+                    }
+
+                    let wer = refWords.isEmpty ? 0.0 : Double(wordEditDistance.total) / Double(refWords.count)
+                    let cer = refChars.isEmpty ? 0.0 : Double(charEditDistance.total) / Double(refChars.count)
+
+                    return ASRMetrics(
+                        wer: wer,
+                        cer: cer,
+                        insertions: wordEditDistance.insertions,
+                        deletions: wordEditDistance.deletions,
+                        substitutions: wordEditDistance.substitutions,
+                        totalWords: refWords.count,
+                        totalCharacters: refChars.count
+                    )
+                }
+            }
         }
-
-        let wordEditDistance = editDistance(hypWords, refWords)
-        let wer = refWords.isEmpty ? 0.0 : Double(wordEditDistance.total) / Double(refWords.count)
-
-        let hypChars = Array(normalizedHypothesis.replacingOccurrences(of: " ", with: ""))
-        let refChars = Array(normalizedReference.replacingOccurrences(of: " ", with: ""))
-        let charEditDistance = editDistance(hypChars.map(String.init), refChars.map(String.init))
-        let cer = refChars.isEmpty ? 0.0 : Double(charEditDistance.total) / Double(refChars.count)
-
-        return ASRMetrics(
-            wer: wer,
-            cer: cer,
-            insertions: wordEditDistance.insertions,
-            deletions: wordEditDistance.deletions,
-            substitutions: wordEditDistance.substitutions,
-            totalWords: refWords.count,
-            totalCharacters: refChars.count
-        )
     }
 
     // MARK: - Private Helper Methods
@@ -462,6 +529,55 @@ public class ASRBenchmark {
     }
 }
 
+// MARK: - Concurrent Task Types
+
+private enum CalculationTask {
+    case normalizedHypothesis(String)
+    case normalizedReference(String)
+}
+
+private enum TokenizationTask {
+    case hypWords([String])
+    case refWords([String])
+    case hypChars([String])
+    case refChars([String])
+}
+
+private enum EditDistanceTask {
+    case wordDistance(EditDistanceResult)
+    case charDistance(EditDistanceResult)
+}
+
+private enum DiffTask {
+    case dpTable([[Int]])
+    case colorSupport(Bool)
+}
+
+private enum BacktrackTask {
+    case diffWords(([(String, Bool)], [(String, Bool)]))
+
+    var diffWords: ([(String, Bool)], [(String, Bool)]) {
+        switch self {
+        case .diffWords(let result): return result
+        }
+    }
+}
+
+private enum StringBuildTask {
+    case refString(String)
+    case hypString(String)
+}
+
+private enum TextProcessingTask {
+    case normalizedReference(String)
+    case normalizedHypothesis(String)
+}
+
+private enum WordTokenizationTask {
+    case refWords([String])
+    case hypWords([String])
+}
+
 // MARK: - Edit Distance Algorithm
 
 private struct EditDistanceResult {
@@ -557,7 +673,7 @@ private struct WordDifference {
 
 extension ASRBenchmark {
     /// Print detailed analysis for files with WER > threshold
-    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.10) {
+    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.10) async {
         let highWERResults = results.filter { $0.metrics.wer > threshold }
 
         guard !highWERResults.isEmpty else {
@@ -569,27 +685,62 @@ extension ASRBenchmark {
         print(String(repeating: "=", count: 80))
 
         for result in highWERResults.sorted(by: { $0.metrics.wer > $1.metrics.wer }) {
-            printSingleFileWERAnalysis(result)
+            await printSingleFileWERAnalysis(result)
         }
     }
 
     /// Print detailed analysis for a single file
-    private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) {
+    private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) async {
         let werPercent = result.metrics.wer * 100
         print(
             "\nFile: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
         )
         print(String(repeating: "-", count: 60))
 
-        // Normalize the texts for comparison
-        let normalizedReference = TextNormalizer.normalize(result.reference)
-        let normalizedHypothesis = TextNormalizer.normalize(result.hypothesis)
+        // Process text normalization and tokenization concurrently
+        let (_, _, refWords, hypWords) = await withTaskGroup(of: TextProcessingTask.self) { group in
+            group.addTask {
+                .normalizedReference(TextNormalizer.normalize(result.reference))
+            }
+            group.addTask {
+                .normalizedHypothesis(TextNormalizer.normalize(result.hypothesis))
+            }
 
-        let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+            var normalizedRef = ""
+            var normalizedHyp = ""
+
+            for await task in group {
+                switch task {
+                case .normalizedReference(let text): normalizedRef = text
+                case .normalizedHypothesis(let text): normalizedHyp = text
+                }
+            }
+
+            // Tokenize words concurrently
+            return await withTaskGroup(of: WordTokenizationTask.self) { wordGroup in
+                wordGroup.addTask {
+                    .refWords(normalizedRef.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+                }
+                wordGroup.addTask {
+                    .hypWords(normalizedHyp.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+                }
+
+                var refWords: [String] = []
+                var hypWords: [String] = []
+
+                for await wordTask in wordGroup {
+                    switch wordTask {
+                    case .refWords(let words): refWords = words
+                    case .hypWords(let words): hypWords = words
+                    }
+                }
+
+                return (normalizedRef, normalizedHyp, refWords, hypWords)
+            }
+        }
 
         // Generate inline diff
-        let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
+        let (referenceDiff, hypothesisDiff) = await generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
         print("\nNormalized Reference:\t\(referenceDiff)")
         print("Normalized Hypothesis:\t\(hypothesisDiff)")
@@ -681,29 +832,88 @@ extension ASRBenchmark {
     }
 
     /// Generate inline diff with full lines and highlighted differences
-    private func generateInlineDiff(reference: [String], hypothesis: [String]) -> (String, String) {
-        let m = reference.count
-        let n = hypothesis.count
+    private func generateInlineDiff(reference: [String], hypothesis: [String]) async -> (String, String) {
+        return await withTaskGroup(of: DiffTask.self) { group in
+            let m = reference.count
+            let n = hypothesis.count
 
-        // Handle empty hypothesis or reference
-        if n == 0 {
-            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-            let redColor = supportsColor ? "\u{001B}[31m" : "["
-            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
-            let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
-            let hypString = ""
-            return (refString, hypString)
-        }
-        if m == 0 {
-            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-            let greenColor = supportsColor ? "\u{001B}[32m" : "["
-            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
-            let refString = ""
-            let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
-            return (refString, hypString)
-        }
+            // Handle empty cases early
+            if n == 0 {
+                let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+                let redColor = supportsColor ? "\u{001B}[31m" : "["
+                let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+                let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
+                return (refString, "")
+            }
+            if m == 0 {
+                let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+                let greenColor = supportsColor ? "\u{001B}[32m" : "["
+                let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+                let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
+                return ("", hypString)
+            }
 
-        // Create DP table for edit distance with backtracking
+            // Create DP table concurrently
+            group.addTask {
+                .dpTable(self.buildDPTable(reference: reference, hypothesis: hypothesis, m: m, n: n))
+            }
+
+            // Check color support concurrently
+            group.addTask {
+                .colorSupport(ProcessInfo.processInfo.environment["TERM"] != nil)
+            }
+
+            var dp: [[Int]] = []
+            var supportsColor = false
+
+            for await task in group {
+                switch task {
+                case .dpTable(let table): dp = table
+                case .colorSupport(let supports): supportsColor = supports
+                }
+            }
+
+            // Backtrack and build strings concurrently
+            return await withTaskGroup(of: BacktrackTask.self) { backtrackGroup in
+                backtrackGroup.addTask {
+                    .diffWords(
+                        self.backtrackDifferences(reference: reference, hypothesis: hypothesis, dp: dp, m: m, n: n))
+                }
+
+                let (refDiffWords, hypDiffWords) = await backtrackGroup.next()!.diffWords
+
+                // Build formatted strings concurrently
+                return await withTaskGroup(of: StringBuildTask.self) { stringGroup in
+                    let redColor = supportsColor ? "\u{001B}[31m" : "["
+                    let greenColor = supportsColor ? "\u{001B}[32m" : "["
+                    let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+
+                    stringGroup.addTask {
+                        .refString(
+                            self.buildFormattedString(words: refDiffWords, color: redColor, resetColor: resetColor))
+                    }
+                    stringGroup.addTask {
+                        .hypString(
+                            self.buildFormattedString(words: hypDiffWords, color: greenColor, resetColor: resetColor))
+                    }
+
+                    var refString = ""
+                    var hypString = ""
+
+                    for await stringTask in stringGroup {
+                        switch stringTask {
+                        case .refString(let string): refString = string
+                        case .hypString(let string): hypString = string
+                        }
+                    }
+
+                    return (refString, hypString)
+                }
+            }
+        }
+    }
+
+    private func buildDPTable(reference: [String], hypothesis: [String], m: Int, n: Int) -> [[Int]] {
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
 
         // Initialize base cases
@@ -727,13 +937,12 @@ extension ASRBenchmark {
             }
         }
 
-        // Check if terminal supports colors
-        let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-        let redColor = supportsColor ? "\u{001B}[31m" : "["
-        let greenColor = supportsColor ? "\u{001B}[32m" : "["
-        let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+        return dp
+    }
 
-        // Backtrack to identify differences
+    private func backtrackDifferences(
+        reference: [String], hypothesis: [String], dp: [[Int]], m: Int, n: Int
+    ) -> ([(String, Bool)], [(String, Bool)]) {
         var i = m
         var j = n
         var refDiffWords: [(String, Bool)] = []  // (word, isDifferent)
@@ -765,29 +974,22 @@ extension ASRBenchmark {
             }
         }
 
-        // Build the formatted strings
-        var refString = ""
-        var hypString = ""
+        return (refDiffWords, hypDiffWords)
+    }
 
-        for (word, isDifferent) in refDiffWords {
-            if !refString.isEmpty { refString += " " }
+    private func buildFormattedString(words: [(String, Bool)], color: String, resetColor: String) -> String {
+        var result = ""
+
+        for (word, isDifferent) in words {
+            if !result.isEmpty { result += " " }
             if isDifferent {
-                refString += "\(redColor)\(word)\(resetColor)"
+                result += "\(color)\(word)\(resetColor)"
             } else {
-                refString += word
+                result += word
             }
         }
 
-        for (word, isDifferent) in hypDiffWords {
-            if !hypString.isEmpty { hypString += " " }
-            if isDifferent {
-                hypString += "\(greenColor)\(word)\(resetColor)"
-            } else {
-                hypString += word
-            }
-        }
-
-        return (refString, hypString)
+        return result
     }
 }
 
@@ -1086,7 +1288,7 @@ extension ASRBenchmark {
             try jsonData.write(to: URL(fileURLWithPath: outputFile))
 
             // Print detailed analysis for files with high WER
-            benchmark.printDetailedWERAnalysis(results)
+            await benchmark.printDetailedWERAnalysis(results)
 
             print(
                 "\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)"

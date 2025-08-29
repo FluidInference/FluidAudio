@@ -435,7 +435,7 @@ public class FLEURSBenchmark {
 
                 // Calculate metrics if reference transcription is available
                 if !sample.transcription.isEmpty {
-                    let metrics = calculateMetrics(
+                    let metrics = await calculateMetrics(
                         hypothesis: result.text,
                         reference: sample.transcription
                     )
@@ -444,8 +444,28 @@ public class FLEURSBenchmark {
 
                     // Track cases with WER > 8% for analysis
                     if metrics.wer > 0.08 {
-                        let normalizedRef = TextNormalizer.normalize(sample.transcription)
-                        let normalizedHyp = TextNormalizer.normalize(result.text)
+                        let (normalizedRef, normalizedHyp) = await withTaskGroup(of: FleursNormalizationTask.self) {
+                            group in
+                            group.addTask {
+                                .reference(TextNormalizer.normalize(sample.transcription))
+                            }
+                            group.addTask {
+                                .hypothesis(TextNormalizer.normalize(result.text))
+                            }
+
+                            var ref = ""
+                            var hyp = ""
+
+                            for await task in group {
+                                switch task {
+                                case .reference(let text): ref = text
+                                case .hypothesis(let text): hyp = text
+                                }
+                            }
+
+                            return (ref, hyp)
+                        }
+
                         highWERCases.append(
                             (
                                 sampleId: sample.sampleId,
@@ -493,19 +513,35 @@ public class FLEURSBenchmark {
                 print("Path: \(sample.audioPath)")
                 print(String(repeating: "-", count: 60))
 
-                // Normalize the texts for comparison
-                let normalizedReference = sample.normalizedRef
-                let normalizedHypothesis = sample.normalizedHyp
+                // Process text tokenization concurrently
+                let (refWords, hypWords) = await withTaskGroup(of: FleursWordTokenTask.self) { group in
+                    group.addTask {
+                        .refWords(
+                            sample.normalizedRef.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                        )
+                    }
+                    group.addTask {
+                        .hypWords(
+                            sample.normalizedHyp.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                        )
+                    }
 
-                let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
-                    !$0.isEmpty
-                }
-                let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter {
-                    !$0.isEmpty
+                    var refWords: [String] = []
+                    var hypWords: [String] = []
+
+                    for await task in group {
+                        switch task {
+                        case .refWords(let words): refWords = words
+                        case .hypWords(let words): hypWords = words
+                        }
+                    }
+
+                    return (refWords, hypWords)
                 }
 
                 // Generate inline diff
-                let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
+                let (referenceDiff, hypothesisDiff) = await generateInlineDiff(
+                    reference: refWords, hypothesis: hypWords)
 
                 print("\nNormalized Reference:\t\(referenceDiff)")
                 print("Normalized Hypothesis:\t\(hypothesisDiff)")
@@ -527,23 +563,81 @@ public class FLEURSBenchmark {
     }
 
     /// Calculate WER and CER metrics
-    private func calculateMetrics(hypothesis: String, reference: String) -> (wer: Double, cer: Double) {
-        let normalizedHyp = TextNormalizer.normalize(hypothesis)
-        let normalizedRef = TextNormalizer.normalize(reference)
+    private func calculateMetrics(hypothesis: String, reference: String) async -> (wer: Double, cer: Double) {
+        return await withTaskGroup(of: FleursCalculationTask.self) { group in
+            // Normalize texts concurrently
+            group.addTask {
+                .normalizedHypothesis(TextNormalizer.normalize(hypothesis))
+            }
+            group.addTask {
+                .normalizedReference(TextNormalizer.normalize(reference))
+            }
 
-        // Word-level
-        let hypWords = normalizedHyp.split(separator: " ").map(String.init)
-        let refWords = normalizedRef.split(separator: " ").map(String.init)
-        let wordDistance = levenshteinDistance(hypWords, refWords)
-        let wer = refWords.isEmpty ? 0.0 : Double(wordDistance) / Double(refWords.count)
+            var normalizedHyp = ""
+            var normalizedRef = ""
 
-        // Character-level
-        let hypChars = Array(normalizedHyp.replacingOccurrences(of: " ", with: ""))
-        let refChars = Array(normalizedRef.replacingOccurrences(of: " ", with: ""))
-        let charDistance = levenshteinDistance(hypChars.map(String.init), refChars.map(String.init))
-        let cer = refChars.isEmpty ? 0.0 : Double(charDistance) / Double(refChars.count)
+            for await task in group {
+                switch task {
+                case .normalizedHypothesis(let text): normalizedHyp = text
+                case .normalizedReference(let text): normalizedRef = text
+                }
+            }
 
-        return (wer, cer)
+            // Process tokenization concurrently
+            return await withTaskGroup(of: FleursTokenizationTask.self) { tokenGroup in
+                tokenGroup.addTask {
+                    .hypWords(normalizedHyp.split(separator: " ").map(String.init))
+                }
+                tokenGroup.addTask {
+                    .refWords(normalizedRef.split(separator: " ").map(String.init))
+                }
+                tokenGroup.addTask {
+                    .hypChars(Array(normalizedHyp.replacingOccurrences(of: " ", with: "")).map(String.init))
+                }
+                tokenGroup.addTask {
+                    .refChars(Array(normalizedRef.replacingOccurrences(of: " ", with: "")).map(String.init))
+                }
+
+                var hypWords: [String] = []
+                var refWords: [String] = []
+                var hypChars: [String] = []
+                var refChars: [String] = []
+
+                for await tokenTask in tokenGroup {
+                    switch tokenTask {
+                    case .hypWords(let words): hypWords = words
+                    case .refWords(let words): refWords = words
+                    case .hypChars(let chars): hypChars = chars
+                    case .refChars(let chars): refChars = chars
+                    }
+                }
+
+                // Calculate distances concurrently
+                return await withTaskGroup(of: FleursDistanceTask.self) { distanceGroup in
+                    distanceGroup.addTask {
+                        .wordDistance(self.levenshteinDistance(hypWords, refWords))
+                    }
+                    distanceGroup.addTask {
+                        .charDistance(self.levenshteinDistance(hypChars, refChars))
+                    }
+
+                    var wordDistance = 0
+                    var charDistance = 0
+
+                    for await distanceTask in distanceGroup {
+                        switch distanceTask {
+                        case .wordDistance(let distance): wordDistance = distance
+                        case .charDistance(let distance): charDistance = distance
+                        }
+                    }
+
+                    let wer = refWords.isEmpty ? 0.0 : Double(wordDistance) / Double(refWords.count)
+                    let cer = refChars.isEmpty ? 0.0 : Double(charDistance) / Double(refChars.count)
+
+                    return (wer, cer)
+                }
+            }
+        }
     }
 
     /// Simple Levenshtein distance calculation
@@ -574,29 +668,91 @@ public class FLEURSBenchmark {
     }
 
     /// Generate inline diff with full lines and highlighted differences
-    private func generateInlineDiff(reference: [String], hypothesis: [String]) -> (String, String) {
-        let m = reference.count
-        let n = hypothesis.count
+    private func generateInlineDiff(reference: [String], hypothesis: [String]) async -> (String, String) {
+        return await withTaskGroup(of: FleursDiffTask.self) { group in
+            let m = reference.count
+            let n = hypothesis.count
 
-        // Handle empty hypothesis or reference
-        if n == 0 {
-            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-            let redColor = supportsColor ? "\u{001B}[31m" : "["
-            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
-            let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
-            let hypString = ""
-            return (refString, hypString)
-        }
-        if m == 0 {
-            let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-            let greenColor = supportsColor ? "\u{001B}[32m" : "["
-            let resetColor = supportsColor ? "\u{001B}[0m" : "]"
-            let refString = ""
-            let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
-            return (refString, hypString)
-        }
+            // Handle empty cases early
+            if n == 0 {
+                let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+                let redColor = supportsColor ? "\u{001B}[31m" : "["
+                let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+                let refString = reference.map { "\(redColor)\($0)\(resetColor)" }.joined(separator: " ")
+                return (refString, "")
+            }
+            if m == 0 {
+                let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
+                let greenColor = supportsColor ? "\u{001B}[32m" : "["
+                let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+                let hypString = hypothesis.map { "\(greenColor)\($0)\(resetColor)" }.joined(separator: " ")
+                return ("", hypString)
+            }
 
-        // Create DP table for edit distance with backtracking
+            // Create DP table concurrently
+            group.addTask {
+                .dpTable(self.buildFleursDPTable(reference: reference, hypothesis: hypothesis, m: m, n: n))
+            }
+
+            // Check color support concurrently
+            group.addTask {
+                .colorSupport(ProcessInfo.processInfo.environment["TERM"] != nil)
+            }
+
+            var dp: [[Int]] = []
+            var supportsColor = false
+
+            for await task in group {
+                switch task {
+                case .dpTable(let table): dp = table
+                case .colorSupport(let supports): supportsColor = supports
+                }
+            }
+
+            // Backtrack and build strings concurrently
+            return await withTaskGroup(of: FleursBacktrackTask.self) { backtrackGroup in
+                backtrackGroup.addTask {
+                    .diffWords(
+                        self.backtrackFleursDifferences(
+                            reference: reference, hypothesis: hypothesis, dp: dp, m: m, n: n))
+                }
+
+                let (refDiffWords, hypDiffWords) = await backtrackGroup.next()!.diffWords
+
+                // Build formatted strings concurrently
+                return await withTaskGroup(of: FleursStringBuildTask.self) { stringGroup in
+                    let redColor = supportsColor ? "\u{001B}[31m" : "["
+                    let greenColor = supportsColor ? "\u{001B}[32m" : "["
+                    let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+
+                    stringGroup.addTask {
+                        .refString(
+                            self.buildFleursFormattedString(
+                                words: refDiffWords, color: redColor, resetColor: resetColor))
+                    }
+                    stringGroup.addTask {
+                        .hypString(
+                            self.buildFleursFormattedString(
+                                words: hypDiffWords, color: greenColor, resetColor: resetColor))
+                    }
+
+                    var refString = ""
+                    var hypString = ""
+
+                    for await stringTask in stringGroup {
+                        switch stringTask {
+                        case .refString(let string): refString = string
+                        case .hypString(let string): hypString = string
+                        }
+                    }
+
+                    return (refString, hypString)
+                }
+            }
+        }
+    }
+
+    private func buildFleursDPTable(reference: [String], hypothesis: [String], m: Int, n: Int) -> [[Int]] {
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
 
         // Initialize base cases
@@ -620,13 +776,12 @@ public class FLEURSBenchmark {
             }
         }
 
-        // Check if terminal supports colors
-        let supportsColor = ProcessInfo.processInfo.environment["TERM"] != nil
-        let redColor = supportsColor ? "\u{001B}[31m" : "["
-        let greenColor = supportsColor ? "\u{001B}[32m" : "["
-        let resetColor = supportsColor ? "\u{001B}[0m" : "]"
+        return dp
+    }
 
-        // Backtrack to identify differences
+    private func backtrackFleursDifferences(
+        reference: [String], hypothesis: [String], dp: [[Int]], m: Int, n: Int
+    ) -> ([(String, Bool)], [(String, Bool)]) {
         var i = m
         var j = n
         var refDiffWords: [(String, Bool)] = []  // (word, isDifferent)
@@ -658,29 +813,22 @@ public class FLEURSBenchmark {
             }
         }
 
-        // Build the formatted strings
-        var refString = ""
-        var hypString = ""
+        return (refDiffWords, hypDiffWords)
+    }
 
-        for (word, isDifferent) in refDiffWords {
-            if !refString.isEmpty { refString += " " }
+    private func buildFleursFormattedString(words: [(String, Bool)], color: String, resetColor: String) -> String {
+        var result = ""
+
+        for (word, isDifferent) in words {
+            if !result.isEmpty { result += " " }
             if isDifferent {
-                refString += "\(redColor)\(word)\(resetColor)"
+                result += "\(color)\(word)\(resetColor)"
             } else {
-                refString += word
+                result += word
             }
         }
 
-        for (word, isDifferent) in hypDiffWords {
-            if !hypString.isEmpty { hypString += " " }
-            if isDifferent {
-                hypString += "\(greenColor)\(word)\(resetColor)"
-            } else {
-                hypString += word
-            }
-        }
-
-        return (refString, hypString)
+        return result
     }
 
     /// Save results to JSON
@@ -952,6 +1100,55 @@ extension FLEURSBenchmark {
             """
         )
     }
+}
+
+// MARK: - Concurrent Task Types for FLEURS
+
+private enum FleursCalculationTask {
+    case normalizedHypothesis(String)
+    case normalizedReference(String)
+}
+
+private enum FleursTokenizationTask {
+    case hypWords([String])
+    case refWords([String])
+    case hypChars([String])
+    case refChars([String])
+}
+
+private enum FleursDistanceTask {
+    case wordDistance(Int)
+    case charDistance(Int)
+}
+
+private enum FleursNormalizationTask {
+    case reference(String)
+    case hypothesis(String)
+}
+
+private enum FleursDiffTask {
+    case dpTable([[Int]])
+    case colorSupport(Bool)
+}
+
+private enum FleursBacktrackTask {
+    case diffWords(([(String, Bool)], [(String, Bool)]))
+
+    var diffWords: ([(String, Bool)], [(String, Bool)]) {
+        switch self {
+        case .diffWords(let result): return result
+        }
+    }
+}
+
+private enum FleursStringBuildTask {
+    case refString(String)
+    case hypString(String)
+}
+
+private enum FleursWordTokenTask {
+    case refWords([String])
+    case hypWords([String])
 }
 
 // Helper extension for String repetition
