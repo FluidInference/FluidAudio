@@ -942,7 +942,7 @@ enum StreamDiarizationBenchmark {
         guard !results.isEmpty else { return }
 
         print("\n" + String(repeating: "=", count: 80))
-        print("📊 FINAL BENCHMARK SUMMARY")
+        print("DIARIZATION BENCHMARK SUMMARY")
         print(String(repeating: "=", count: 80))
 
         // Print detailed results table sorted by DER
