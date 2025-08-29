@@ -318,14 +318,15 @@ struct TextNormalizer {
         }
 
         let numberWords = [
+            // English numbers
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-            "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+            "five": "5", "seven": "7", "eight": "8", "nine": "9",
             "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
             "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
             "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
             "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70",
             "eighty": "80", "ninety": "90", "hundred": "100", "thousand": "1000",
-            "million": "1000000", "billion": "1000000000",
+            "billion": "1000000000",
             "first": "1st", "second": "2nd", "third": "3rd", "fourth": "4th",
             "fifth": "5th", "sixth": "6th", "seventh": "7th", "eighth": "8th",
             "ninth": "9th", "tenth": "10th", "eleventh": "11th", "twelfth": "12th",
@@ -335,6 +336,40 @@ struct TextNormalizer {
             "fortieth": "40th", "fiftieth": "50th", "sixtieth": "60th",
             "seventieth": "70th", "eightieth": "80th", "ninetieth": "90th",
             "hundredth": "100th", "thousandth": "1000th",
+
+            // Italian numbers
+            "uno": "1", "due": "2", "tre": "3", "quattro": "4", "cinque": "5",
+            "sei": "6", "sette": "7", "otto": "8", "nove": "9", "dieci": "10",
+            "undici": "11", "dodici": "12", "tredici": "13", "quattordici": "14",
+            "quindici": "15", "sedici": "16", "diciassette": "17", "diciotto": "18",
+            "diciannove": "19", "venti": "20", "trenta": "30", "quaranta": "40",
+            "cinquanta": "50", "sessanta": "60", "settanta": "70", "ottanta": "80",
+            "novanta": "90", "cento": "100", "mila": "1000", "milione": "1000000",
+            "milioni": "1000000", "miliardo": "1000000000", "miliardi": "1000000000",
+
+            // Italian ordinals
+            "primo": "1st", "secondo": "2nd", "terzo": "3rd", "quarto": "4th",
+            "quinto": "5th", "sesto": "6th", "settimo": "7th", "ottavo": "8th",
+            "nono": "9th", "decimo": "10th", "undicesimo": "11th", "dodicesimo": "12th",
+            "tredicesimo": "13th", "quattordicesimo": "14th", "quindicesimo": "15th",
+            "ventesimo": "20th", "trentesimo": "30th", "centesimo": "100th",
+
+            // French numbers
+            "zéro": "0", "un": "1", "deux": "2", "trois": "3", "quatre": "4",
+            "cinq": "5", "six": "6", "sept": "7", "huit": "8", "neuf": "9",
+            "dix": "10", "onze": "11", "douze": "12", "treize": "13", "quatorze": "14",
+            "quinze": "15", "seize": "16", "dix-sept": "17", "dix-huit": "18",
+            "dix-neuf": "19", "vingt": "20", "trente": "30", "quarante": "40",
+            "cinquante": "50", "soixante": "60", "soixante-dix": "70", "quatre-vingts": "80",
+            "quatre-vingt-dix": "90", "cent": "100", "mille": "1000", "million": "1000000",
+            "millions": "1000000", "milliard": "1000000000", "milliards": "1000000000",
+
+            // French ordinals
+            "premier": "1st", "première": "1st", "deuxième": "2nd", "troisième": "3rd",
+            "quatrième": "4th", "cinquième": "5th", "sixième": "6th", "septième": "7th",
+            "huitième": "8th", "neuvième": "9th", "dixième": "10th", "onzième": "11th",
+            "douzième": "12th", "treizième": "13th", "quatorzième": "14th", "quinzième": "15th",
+            "seizième": "16th", "vingtième": "20th", "trentième": "30th", "centième": "100th",
         ]
 
         for (word, digit) in numberWords {
