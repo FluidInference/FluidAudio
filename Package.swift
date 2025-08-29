@@ -29,10 +29,7 @@ let package = Package(
             name: "FluidAudioCLI",
             dependencies: ["FluidAudio"],
             path: "Sources/FluidAudioCLI",
-            exclude: ["README.md"],
-            resources: [
-                .process("Utils/english.json")
-            ]
+            exclude: ["README.md"]
         ),
         .testTarget(
             name: "FluidAudioTests",
