@@ -415,8 +415,7 @@ public class FLEURSBenchmark {
             }
 
             do {
-                // Load and process audio
-                let startTime = Date()
+                // Load audio first
                 let audioSamples: [Float]
 
                 do {
@@ -429,9 +428,10 @@ public class FLEURSBenchmark {
 
                 let audioDuration = Double(audioSamples.count) / 16000.0
 
-                // Transcribe
+                // Measure only inference time for accurate RTFx calculation
+                let inferenceStartTime = Date()
                 let result = try await asrManager.transcribe(audioSamples)
-                let processingTime = Date().timeIntervalSince(startTime)
+                let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
                 // Calculate metrics if reference transcription is available
                 if !sample.transcription.isEmpty {
