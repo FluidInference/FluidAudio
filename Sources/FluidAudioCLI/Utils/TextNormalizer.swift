@@ -147,10 +147,10 @@ struct TextNormalizer {
 
         // Standardize spaces before apostrophes
         normalized = normalized.replacingOccurrences(of: " '", with: "'")
-        
-        // Handle "and a half" → "point five" 
+
+        // Handle "and a half" → "point five"
         normalized = normalized.replacingOccurrences(of: " and a half", with: " point five")
-        
+
         // Add spaces at number/letter boundaries
         let numberLetterPattern1 = try! NSRegularExpression(pattern: "([a-z])([0-9])", options: [])
         normalized = numberLetterPattern1.stringByReplacingMatches(
@@ -159,7 +159,7 @@ struct TextNormalizer {
             range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1 $2"
         )
-        
+
         let numberLetterPattern2 = try! NSRegularExpression(pattern: "([0-9])([a-z])", options: [])
         normalized = numberLetterPattern2.stringByReplacingMatches(
             in: normalized,
@@ -167,7 +167,7 @@ struct TextNormalizer {
             range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1 $2"
         )
-        
+
         // Remove spaces before suffixes
         let suffixPattern = try! NSRegularExpression(pattern: "([0-9])\\s+(st|nd|rd|th|s)\\b", options: [])
         normalized = suffixPattern.stringByReplacingMatches(
@@ -382,6 +382,23 @@ struct TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "©", with: " copyright ")
         normalized = normalized.replacingOccurrences(of: "®", with: " registered ")
         normalized = normalized.replacingOccurrences(of: "™", with: " trademark ")
+
+        // Remove symbols not preceded/followed by numbers
+        let symbolCleanup1 = try! NSRegularExpression(pattern: "[.$¢€£]([^0-9])", options: [])
+        normalized = symbolCleanup1.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: " $1"
+        )
+
+        let symbolCleanup2 = try! NSRegularExpression(pattern: "([^0-9])%", options: [])
+        normalized = symbolCleanup2.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: "$1 "
+        )
 
         let finalCleanPattern = try! NSRegularExpression(pattern: "[^\\w\\s]", options: [])
         normalized = finalCleanPattern.stringByReplacingMatches(
