@@ -60,7 +60,7 @@ jobs:
           swift run fluidaudio vad-benchmark \
             --dataset mini50 \
             --all-files \
-            --threshold 0.445 \
+            --threshold 0.5 \
             --output musan_vad_results.json
 
       - name: Run VOiCES VAD Benchmark
@@ -70,7 +70,7 @@ jobs:
           swift run fluidaudio vad-benchmark \
             --dataset voices-subset \
             --all-files \
-            --threshold 0.445 \
+            --threshold 0.5 \
             --output voices_vad_results.json
 
       - name: Upload results
