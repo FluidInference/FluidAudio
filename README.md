@@ -212,53 +212,6 @@ Task {
 
 **Speaker Enrollment (NEW)**: The `Speaker` class now includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), you can update the speaker's name from the default "Speaker_1" to their actual name, enabling personalized speaker identification throughout the session.
 
-## Voice Activity Detection Usage
-
-**VAD Library API**:
-
-```swift
-import FluidAudio
-
-// Use the default configuration (already optimized for best results)
-let vadConfig = VadConfig()  // Threshold: 0.445, optimized settings
-
-// Or customize the configuration
-let customVadConfig = VadConfig(
-    threshold: 0.445,            // Recommended threshold (98% accuracy)
-    chunkSize: 512,              // 32ms at 16kHz
-    sampleRate: 16000,
-    adaptiveThreshold: true,     // Adapts to noise levels
-    minThreshold: 0.1,
-    maxThreshold: 0.7,
-    enableSNRFiltering: true,    // Enhanced noise robustness
-    minSNRThreshold: 6.0,        // Aggressive noise filtering
-    computeUnits: .cpuAndNeuralEngine  // Use Neural Engine on Apple Silicon
-)
-
-// Process audio for voice activity detection
-Task {
-    let vadManager = VadManager(config: vadConfig)
-    try await vadManager.initialize()
-
-    // Process a single audio chunk (512 samples = 32ms at 16kHz)
-    let audioChunk: [Float] = // your 16kHz audio chunk
-    let vadResult = try await vadManager.processChunk(audioChunk)
-
-    print("Speech probability: \(vadResult.probability)")
-    print("Voice active: \(vadResult.isVoiceActive)")
-    print("Processing time: \(vadResult.processingTime)s")
-
-    // Or process an entire audio file
-    let audioData: [Float] = // your complete 16kHz audio data
-    let results = try await vadManager.processAudioFile(audioData)
-
-    // Find segments with voice activity
-    let voiceSegments = results.enumerated().compactMap { index, result in
-        result.isVoiceActive ? index : nil
-    }
-    print("Voice detected in \(voiceSegments.count) chunks")
-}
-```
 
 ## CLI Usage
 
@@ -357,3 +310,5 @@ Pyannote: https://github.com/pyannote/pyannote-audio
 Wewpeaker: https://github.com/wenet-e2e/wespeaker
 
 Parakeet-mlx: https://github.com/senstella/parakeet-mlx
+
+silero-vad: https://github.com/snakers4/silero-vad
