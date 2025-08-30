@@ -22,6 +22,7 @@ struct VadBenchmark {
         var vadThreshold: Float = 0.3
         var outputFile: String?
         var dataset = "mini50"  // Default to mini50 dataset
+        var debugMode = false  // Default to no debug output
         print("   📝 Parsing arguments...")
 
         // Parse arguments
@@ -52,6 +53,8 @@ struct VadBenchmark {
                     outputFile = arguments[i + 1]
                     i += 1
                 }
+            case "--debug":
+                debugMode = true
             default:
                 print("⚠️ Unknown option: \(arguments[i])")
             }
@@ -61,12 +64,13 @@ struct VadBenchmark {
         print("🚀 Starting VAD Benchmark")
         print("   Test files: \(numFiles)")
         print("   VAD threshold: \(vadThreshold)")
+        print("   Debug mode: \(debugMode)")
 
         // Use VadManager with the trained model
         let vadManager = try await VadManager(
             config: VadConfig(
                 threshold: vadThreshold,
-                debugMode: false
+                debugMode: debugMode
             ))
 
         print("VAD system initialized")

@@ -68,12 +68,7 @@ DiarizerConfig(
 - **Models**: CoreML-based speaker segmentation and embedding
 - **Auto-recovery**: Handles corrupted model downloads automatically
 
-### 2. Voice Activity Detection (VAD)
-- **Status**: Merged in PR #9, 98% accuracy on MUSAN dataset
-- **Models**: Custom CoreML pipeline with enhanced fallback
-- **Config**: Optimal threshold of 0.5
-
-### 3. Auto-Recovery Mechanism
+### 2. Auto-Recovery Mechanism
 - Automatic detection and recovery from CoreML compilation failures
 - Re-downloads corrupted models from Hugging Face
 - Up to 3 retry attempts with comprehensive logging
@@ -171,31 +166,6 @@ swift run fluidaudio download --dataset librispeech-test-other
    - Default: 10.0
    - Affects missed speech detection
 
-### VADConfig Parameters
-```swift
-VADConfig(
-    threshold: 0.5,             // 98% accuracy
-    chunkSize: 512,
-    sampleRate: 16000,
-    adaptiveThreshold: true,
-    minThreshold: 0.1,
-    maxThreshold: 0.7,
-    enableSNRFiltering: true,
-    minSNRThreshold: 6.0,
-    useGPU: true
-)
-```
-
-## Optimization Results Summary
-
-| Configuration | DER | Notes |
-|--------------|-----|-------|
-| threshold=0.1 | 75.8% | Over-clustering (153+ speakers) |
-| threshold=0.5 | 20.6% | Better but still too many speakers |
-| **threshold=0.7** | **17.7%** | **OPTIMAL - Production config** |
-| threshold=0.8 | 18.0% | Very close to optimal |
-| threshold=0.9 | 40.2% | Under-clustering |
-
 ## High-Level Architecture
 
 ### Project Structure
@@ -230,9 +200,7 @@ FluidAudio/
 
 #### 3. Voice Activity Detection
 - **VadManager**: Voice activity detection with CoreML models
-- **VadAudioProcessor**: Advanced processing with SNR filtering
-- **Adaptive Thresholding**: Dynamic adjustment to noise levels
-- **Performance**: 98% accuracy on MUSAN dataset
+- **VadAudioProcessor**: additional filtering process 
 
 #### 4. Shared Infrastructure
 - **ANEMemoryOptimizer**: Apple Neural Engine memory management
@@ -309,9 +277,8 @@ The project uses GitHub Actions with the following workflows:
 ## Next Steps
 
 1. **Multi-file validation**: Test optimal config on all AMI files
-2. **CLI integration**: Complete VAD command exposure
-3. **Real-world testing**: Validate on non-AMI audio
-4. **Documentation**: Update API documentation
+2. **Real-world testing**: Validate on non-AMI audio
+3. **Documentation**: Update API documentation
 
 ## Testing Strategy
 
