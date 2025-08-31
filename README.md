@@ -87,7 +87,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 ## Voice Activity Detection (VAD)
 
-**Note:** While VAD is functional and no longer in beta, the current APIs require careful tuning for production use. The interface complexity makes it challenging to integrate without customization. VAD remains our lowest maintenance priority - if you need production-grade support, please file an issue or consider contributing improvements.
+The current VAD APIs are more complicated than they should be and require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
 
 Our goal is to eventually provide a streamlined API similar to Apple's upcoming SpeechDetector in OS26: https://developer.apple.com/documentation/speech/speechdetector
 
