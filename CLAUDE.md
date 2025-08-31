@@ -68,12 +68,7 @@ DiarizerConfig(
 - **Models**: CoreML-based speaker segmentation and embedding
 - **Auto-recovery**: Handles corrupted model downloads automatically
 
-### 2. Voice Activity Detection (VAD)
-- **Status**: Merged in PR #9, 98% accuracy on MUSAN dataset
-- **Models**: Custom CoreML pipeline with enhanced fallback
-- **Config**: Optimal threshold of 0.445
-
-### 3. Auto-Recovery Mechanism
+### 2. Auto-Recovery Mechanism
 - Automatic detection and recovery from CoreML compilation failures
 - Re-downloads corrupted models from Hugging Face
 - Up to 3 retry attempts with comprehensive logging
@@ -126,7 +121,7 @@ swift run fluidaudio asr-benchmark --subset test-other --output asr_results.json
 swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 
 # VAD benchmark
-swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.445
+swift run fluidaudio vad-benchmark --num-files 40 --threshold 0.5
 ```
 
 #### Audio Processing
@@ -171,31 +166,6 @@ swift run fluidaudio download --dataset librispeech-test-other
    - Default: 10.0
    - Affects missed speech detection
 
-### VADConfig Parameters
-```swift
-VADConfig(
-    threshold: 0.445,             // 98% accuracy
-    chunkSize: 512,
-    sampleRate: 16000,
-    adaptiveThreshold: true,
-    minThreshold: 0.1,
-    maxThreshold: 0.7,
-    enableSNRFiltering: true,
-    minSNRThreshold: 6.0,
-    useGPU: true
-)
-```
-
-## Optimization Results Summary
-
-| Configuration | DER | Notes |
-|--------------|-----|-------|
-| threshold=0.1 | 75.8% | Over-clustering (153+ speakers) |
-| threshold=0.5 | 20.6% | Better but still too many speakers |
-| **threshold=0.7** | **17.7%** | **OPTIMAL - Production config** |
-| threshold=0.8 | 18.0% | Very close to optimal |
-| threshold=0.9 | 40.2% | Under-clustering |
-
 ## High-Level Architecture
 
 ### Project Structure
@@ -230,9 +200,7 @@ FluidAudio/
 
 #### 3. Voice Activity Detection
 - **VadManager**: Voice activity detection with CoreML models
-- **VadAudioProcessor**: Advanced processing with SNR filtering
-- **Adaptive Thresholding**: Dynamic adjustment to noise levels
-- **Performance**: 98% accuracy on MUSAN dataset
+- **VadAudioProcessor**: additional filtering process 
 
 #### 4. Shared Infrastructure
 - **ANEMemoryOptimizer**: Apple Neural Engine memory management
@@ -303,14 +271,14 @@ The project uses GitHub Actions with the following workflows:
 5. **Thread Safety**: Never use `@unchecked Sendable` - implement proper synchronization
 6. **Follow Instructions**: When the user asks to implement something specific, DO IT FIRST before explaining why it might not be optimal. Implementation first, explanation second.
 7. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested. Keep the codebase clean by only supporting current versions.
+8. **Git Operations**: NEVER run `git push` unless explicitly requested by the user. Only commit when asked.
 8. **Code Formatting**: All code must pass swift-format checks before merge
 
 ## Next Steps
 
 1. **Multi-file validation**: Test optimal config on all AMI files
-2. **CLI integration**: Complete VAD command exposure
-3. **Real-world testing**: Validate on non-AMI audio
-4. **Documentation**: Update API documentation
+2. **Real-world testing**: Validate on non-AMI audio
+3. **Documentation**: Update API documentation
 
 ## Testing Strategy
 

@@ -14,7 +14,7 @@ internal struct VadModelProcessor {
 
     func processSTFT(_ audioChunk: [Float], stftModel: MLModel) throws -> MLMultiArray {
         let audioArray = try MLMultiArray(
-            shape: [1, NSNumber(value: config.chunkSize)], dataType: .float32)
+            shape: [1, 512], dataType: .float32)  // Fixed chunk size
 
         for i in 0..<audioChunk.count {
             audioArray[i] = NSNumber(value: audioChunk[i])

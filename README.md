@@ -85,11 +85,11 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - Pipeline impact: Minimal - diarization won't be the bottleneck
 ```
 
-## Voice Activity Detection (VAD) (beta)
+## Voice Activity Detection (VAD)
 
-The APIs here are too complicated for production usage; please use with caution and tune them as needed. To be transparent, VAD is the lowest priority in terms of maintenance for us at this point. If you need support here, please file an issue or contribute back!
+The current VAD APIs are more complicated than they should be and require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
 
-Our goal is to offer a similar API to what Apple will introudce in OS26: https://developer.apple.com/documentation/speech/speechdetector
+Our goal is to eventually provide a streamlined API similar to Apple's upcoming SpeechDetector in OS26: https://developer.apple.com/documentation/speech/speechdetector
 
 ## Automatic Speech Recognition (ASR)
 
@@ -212,53 +212,6 @@ Task {
 
 **Speaker Enrollment (NEW)**: The `Speaker` class now includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), you can update the speaker's name from the default "Speaker_1" to their actual name, enabling personalized speaker identification throughout the session.
 
-## Voice Activity Detection Usage
-
-**VAD Library API**:
-
-```swift
-import FluidAudio
-
-// Use the default configuration (already optimized for best results)
-let vadConfig = VadConfig()  // Threshold: 0.445, optimized settings
-
-// Or customize the configuration
-let customVadConfig = VadConfig(
-    threshold: 0.445,            // Recommended threshold (98% accuracy)
-    chunkSize: 512,              // 32ms at 16kHz
-    sampleRate: 16000,
-    adaptiveThreshold: true,     // Adapts to noise levels
-    minThreshold: 0.1,
-    maxThreshold: 0.7,
-    enableSNRFiltering: true,    // Enhanced noise robustness
-    minSNRThreshold: 6.0,        // Aggressive noise filtering
-    computeUnits: .cpuAndNeuralEngine  // Use Neural Engine on Apple Silicon
-)
-
-// Process audio for voice activity detection
-Task {
-    let vadManager = VadManager(config: vadConfig)
-    try await vadManager.initialize()
-
-    // Process a single audio chunk (512 samples = 32ms at 16kHz)
-    let audioChunk: [Float] = // your 16kHz audio chunk
-    let vadResult = try await vadManager.processChunk(audioChunk)
-
-    print("Speech probability: \(vadResult.probability)")
-    print("Voice active: \(vadResult.isVoiceActive)")
-    print("Processing time: \(vadResult.processingTime)s")
-
-    // Or process an entire audio file
-    let audioData: [Float] = // your complete 16kHz audio data
-    let results = try await vadManager.processAudioFile(audioData)
-
-    // Find segments with voice activity
-    let voiceSegments = results.enumerated().compactMap { index, result in
-        result.isVoiceActive ? index : nil
-    }
-    print("Voice detected in \(voiceSegments.count) chunks")
-}
-```
 
 ## CLI Usage
 
@@ -357,3 +310,5 @@ Pyannote: https://github.com/pyannote/pyannote-audio
 Wewpeaker: https://github.com/wenet-e2e/wespeaker
 
 Parakeet-mlx: https://github.com/senstella/parakeet-mlx
+
+silero-vad: https://github.com/snakers4/silero-vad
