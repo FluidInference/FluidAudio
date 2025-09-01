@@ -297,6 +297,9 @@ swift run fluidaudio download --dataset librispeech-test-other
 - **`AudioProcessor.loadAudioFile(path:)`**: Load and convert audio files to required format
 - **`AudioSource`**: Enum for microphone vs system audio separation
 
+We're also working on a Windows alternative here :
+https://github.com/FluidInference/fluid-server
+
 ## License
 
 Apache 2.0 - see [LICENSE](LICENSE) for details.
