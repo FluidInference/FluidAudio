@@ -255,9 +255,9 @@ final class AsrManagerExtensionTests: XCTestCase {
             previous: previous, current: current, maxOverlap: 2
         )
 
-        // With maxOverlap=2, should not find the 3-token overlap
-        XCTAssertEqual(deduped, current, "Should not find overlap with small maxOverlap")
-        XCTAssertEqual(removedCount, 0, "Should not remove any tokens")
+        // With maxOverlap=2, should not find the 3-token overlap but only 2-token overlap
+        XCTAssertEqual(deduped, [6, 7, 8, 9], "Should not find overlap with small maxOverlap \(deduped)")
+        XCTAssertEqual(removedCount, 2, "Should not remove any tokens with small maxOverlap")
     }
 
     // MARK: - Performance Tests

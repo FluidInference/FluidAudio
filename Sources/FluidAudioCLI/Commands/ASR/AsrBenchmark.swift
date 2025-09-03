@@ -155,20 +155,20 @@ public class ASRBenchmark {
     ) async throws
         -> ASRBenchmarkResult
     {
-        let startTime = Date()
-
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
         print(
             "Transcribing \(file.fileName) with \(audioSamples.count) samples (\(String(format: "%.2f", audioLength))s)"
         )
+
+        // Measure only inference time for accurate RTFx calculation
+        let inferenceStartTime = Date()
         let asrResult = try await transcribeAudio(
             asrManager: asrManager, audioSamples: audioSamples)
+        let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
         let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
-
-        let processingTime = Date().timeIntervalSince(startTime)
 
         return ASRBenchmarkResult(
             fileName: file.fileName,
@@ -186,13 +186,13 @@ public class ASRBenchmark {
     ) async throws
         -> ASRBenchmarkResult
     {
-        let startTime = Date()
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
         // Streaming metrics tracking
         var chunkProcessingTimes: [TimeInterval] = []
         var firstTokenTime: Date?
+        let overallStartTime = Date()
 
         // Calculate chunk size in samples (minimum 1 second to ensure reasonable context)
         let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
@@ -212,7 +212,6 @@ public class ASRBenchmark {
 
         // Process the full audio file but track metrics as if streaming
         while processedSamples < audioSamples.count {
-            let chunkStartTime = Date()
             let chunkNumber = chunkProcessingTimes.count + 1
 
             // Calculate how many samples we've "streamed" so far
@@ -227,7 +226,11 @@ public class ASRBenchmark {
 
             // Process all audio up to this point (simulating accumulated streaming)
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
+
+            // Measure only inference time for this chunk
+            let chunkInferenceStartTime = Date()
             let result = try await asrManager.transcribe(audioToProcess, source: .microphone)
+            let chunkInferenceTime = Date().timeIntervalSince(chunkInferenceStartTime)
 
             // Track first token time
             if firstTokenTime == nil && !result.text.isEmpty {
@@ -238,12 +241,12 @@ public class ASRBenchmark {
             let previousText = accumulatedText
             accumulatedText = result.text
 
-            let chunkProcessingTime = Date().timeIntervalSince(chunkStartTime)
-            chunkProcessingTimes.append(chunkProcessingTime)
+            // Use inference time for RTFx calculations, but keep total chunk time for debugging
+            chunkProcessingTimes.append(chunkInferenceTime)
 
             let chunkDuration = Double(chunkSamples) / 16000.0
             print(
-                "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkProcessingTime))s"
+                "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkInferenceTime))s (inference only)"
             )
 
             if isLastChunk {
@@ -259,14 +262,15 @@ public class ASRBenchmark {
         let finalText = accumulatedText
         let metrics = calculateASRMetrics(hypothesis: finalText, reference: file.transcript)
 
-        let totalProcessingTime = Date().timeIntervalSince(startTime)
-        let firstTokenLatency = firstTokenTime.map { $0.timeIntervalSince(startTime) }
+        // Use sum of inference times for accurate RTFx calculation
+        let totalInferenceTime = chunkProcessingTimes.reduce(0, +)
+        let firstTokenLatency = firstTokenTime.map { $0.timeIntervalSince(overallStartTime) }
 
         // Calculate streaming metrics
         let avgChunkTime = chunkProcessingTimes.reduce(0, +) / Double(chunkProcessingTimes.count)
         let maxChunkTime = chunkProcessingTimes.max() ?? 0
         let minChunkTime = chunkProcessingTimes.min() ?? 0
-        let streamingRTFx = audioLength / totalProcessingTime
+        let streamingRTFx = audioLength / totalInferenceTime
 
         let streamingMetrics = StreamingMetrics(
             avgChunkProcessingTime: avgChunkTime,
@@ -283,7 +287,7 @@ public class ASRBenchmark {
             hypothesis: finalText,
             reference: file.transcript,
             metrics: metrics,
-            processingTime: totalProcessingTime,
+            processingTime: totalInferenceTime,
             audioLength: audioLength,
             streamingMetrics: streamingMetrics
         )
@@ -551,7 +555,7 @@ private struct WordDifference {
 
 extension ASRBenchmark {
     /// Print detailed analysis for files with WER > threshold
-    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.05) {
+    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.10) {
         let highWERResults = results.filter { $0.metrics.wer > threshold }
 
         guard !highWERResults.isEmpty else {

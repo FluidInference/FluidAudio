@@ -110,7 +110,7 @@ Benchmark VAD performance on test datasets.
 swift run fluidaudio vad-benchmark --num-files 40
 
 # With custom threshold
-swift run fluidaudio vad-benchmark --threshold 0.445
+swift run fluidaudio vad-benchmark --threshold 0.5
 
 # Test on specific dataset
 swift run fluidaudio vad-benchmark --dataset musan_mini_speech
@@ -118,7 +118,7 @@ swift run fluidaudio vad-benchmark --dataset musan_mini_speech
 
 **Options:**
 - `--num-files <n>`: Number of files to test
-- `--threshold <value>`: VAD threshold (default: 0.445)
+- `--threshold <value>`: VAD threshold (default: 0.5)
 - `--dataset <name>`: Dataset to use
 
 ### 6. `asr-benchmark` - ASR Benchmark

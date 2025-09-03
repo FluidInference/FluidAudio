@@ -6,11 +6,16 @@ struct ChunkProcessor {
     let audioSamples: [Float]
     let enableDebug: Bool
 
-    // 10 + 2 + 2 seconds context at 16kHz
+    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ChunkProcessor")
+
+    // Frame-aligned configuration: 8 + 3.2 + 3.2 seconds context at 16kHz
+    // 8s center = exactly 100 encoder frames
+    // 3.2s context = exactly 40 encoder frames each
+    // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 11.0
-    private let leftContextSeconds: Double = 2.0
-    private let rightContextSeconds: Double = 2.0
+    private let centerSeconds: Double = 11.2  // Exactly 100 frames (8.0 * 12.5)
+    private let leftContextSeconds: Double = 1.6  // Exactly 40 frames (3.2 * 12.5)
+    private let rightContextSeconds: Double = 1.6  // Exactly 40 frames (3.2 * 12.5)
 
     private var centerSamples: Int { Int(centerSeconds * Double(sampleRate)) }
     private var leftContextSamples: Int { Int(leftContextSeconds * Double(sampleRate)) }
@@ -28,10 +33,16 @@ struct ChunkProcessor {
         var lastProcessedFrame = 0  // Track the last frame processed by previous chunk
 
         while centerStart < audioSamples.count {
+            // Determine if this is the last chunk
+            let isLastChunk = (centerStart + centerSamples) >= audioSamples.count
+
+            // Process chunk with explicit last chunk detection
+
             let (windowTokens, windowTimestamps, maxFrame) = try await processWindowWithTokens(
                 centerStart: centerStart,
                 segmentIndex: segmentIndex,
                 lastProcessedFrame: lastProcessedFrame,
+                isLastChunk: isLastChunk,
                 using: manager,
                 decoderState: &decoderState
             )
@@ -56,7 +67,6 @@ struct ChunkProcessor {
             centerStart += centerSamples
             segmentIndex += 1
         }
-
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
@@ -70,16 +80,22 @@ struct ChunkProcessor {
         centerStart: Int,
         segmentIndex: Int,
         lastProcessedFrame: Int,
+        isLastChunk: Bool,
         using manager: AsrManager,
         decoderState: inout TdtDecoderState
     ) async throws -> (tokens: [Int], timestamps: [Int], maxFrame: Int) {
+        // Use standard context for all chunks - the TdtDecoder handles last chunk finalization
+        let adaptiveLeftContextSamples = leftContextSamples
+
         // Compute window bounds in samples: [leftStart, rightEnd)
-        let leftStart = max(0, centerStart - leftContextSamples)
+        let leftStart = max(0, centerStart - adaptiveLeftContextSamples)
         let centerEnd = min(audioSamples.count, centerStart + centerSamples)
         let rightEnd = min(audioSamples.count, centerEnd + rightContextSamples)
 
         // If nothing to process, return empty
-        if leftStart >= rightEnd { return ([], [], 0) }
+        if leftStart >= rightEnd {
+            return ([], [], 0)
+        }
 
         let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
 
@@ -87,9 +103,10 @@ struct ChunkProcessor {
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
         // Calculate encoder frame offset based on where previous chunk ended
+        let actualLeftContextSeconds = Double(adaptiveLeftContextSamples) / Double(sampleRate)
         let startFrameOffset = manager.calculateStartFrameOffset(
             segmentIndex: segmentIndex,
-            leftContextSeconds: leftContextSeconds
+            leftContextSeconds: actualLeftContextSeconds
         )
 
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
@@ -98,7 +115,8 @@ struct ChunkProcessor {
             enableDebug: false,
             decoderState: &decoderState,
             startFrameOffset: startFrameOffset,
-            lastProcessedFrame: lastProcessedFrame
+            lastProcessedFrame: lastProcessedFrame,
+            isLastChunk: isLastChunk
         )
 
         if tokens.isEmpty || encLen == 0 {

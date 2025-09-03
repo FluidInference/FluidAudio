@@ -342,7 +342,7 @@ public class FLEURSBenchmark {
     /// Run multilingual benchmark
     public func runMultilingualBenchmark(asrManager: AsrManager) async throws -> [LanguageResults] {
         print("\n Starting FLEURS Multilingual ASR Benchmark")
-        print("=" * 50)
+        print(String(repeating: "=", count: 50))
 
         var results: [LanguageResults] = []
 
@@ -415,22 +415,12 @@ public class FLEURSBenchmark {
             }
 
             do {
-                // Load and process audio
-                let startTime = Date()
+                // Load audio first
                 let audioSamples: [Float]
 
                 do {
                     audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
                 } catch {
-                    // Provide more detailed error information for audio loading failures
-                    if error.localizedDescription.contains("1954115647") {
-                        print("  ⚠️ CoreAudio error for \(sample.sampleId): Unsupported audio format or corrupted file")
-                        print("    File will be skipped. Supported formats: WAV, MP3, M4A, AIFF")
-                    } else {
-                        print("  ⚠️ Audio loading failed for \(sample.sampleId): \(error.localizedDescription)")
-                        print("    File will be skipped.")
-                    }
-
                     // Continue to next sample instead of failing the entire benchmark
                     skippedCount += 1
                     continue
@@ -438,9 +428,10 @@ public class FLEURSBenchmark {
 
                 let audioDuration = Double(audioSamples.count) / 16000.0
 
-                // Transcribe
+                // Measure only inference time for accurate RTFx calculation
+                let inferenceStartTime = Date()
                 let result = try await asrManager.transcribe(audioSamples)
-                let processingTime = Date().timeIntervalSince(startTime)
+                let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
                 // Calculate metrics if reference transcription is available
                 if !sample.transcription.isEmpty {
@@ -493,7 +484,7 @@ public class FLEURSBenchmark {
         // Print high WER cases for analysis
         if !highWERCases.isEmpty {
             print("\n🔍 High WER Cases (>8%) for \(supportedLanguages[language] ?? language):")
-            print("=" * 80)
+            print(String(repeating: "=", count: 80))
             for sample in highWERCases.sorted(by: { $0.wer > $1.wer }) {
                 let werPercent = sample.wer * 100
                 print(
@@ -722,13 +713,13 @@ public class FLEURSBenchmark {
                 ]
             },
             "summary": [
-                "averageWER": results.reduce(0.0) { $0 + $1.wer } / Double(results.count),
-                "averageCER": results.reduce(0.0) { $0 + $1.cer } / Double(results.count),
-                "averageRTFx": results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count),
+                "averageWER": sanitizeDouble(results.reduce(0.0) { $0 + $1.wer } / Double(results.count)),
+                "averageCER": sanitizeDouble(results.reduce(0.0) { $0 + $1.cer } / Double(results.count)),
+                "averageRTFx": sanitizeDouble(results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count)),
                 "totalSamples": results.reduce(0) { $0 + $1.samplesProcessed },
                 "totalSkipped": results.reduce(0) { $0 + $1.samplesSkipped },
-                "totalDuration": results.reduce(0.0) { $0 + $1.totalDuration },
-                "totalProcessingTime": results.reduce(0.0) { $0 + $1.processingTime },
+                "totalDuration": sanitizeDouble(results.reduce(0.0) { $0 + $1.totalDuration }),
+                "totalProcessingTime": sanitizeDouble(results.reduce(0.0) { $0 + $1.processingTime }),
             ],
         ]
 
@@ -798,7 +789,7 @@ extension FLEURSBenchmark {
         let finalLanguages = languages ?? Array(tempBenchmark.supportedLanguages.keys).sorted()
 
         print("\n FLEURS Multilingual ASR Benchmark")
-        print("=" * 50)
+        print(String(repeating: "=", count: 50))
         print(
             "Languages: \(finalLanguages.count == tempBenchmark.supportedLanguages.count ? "all (\(finalLanguages.count) languages)" : finalLanguages.joined(separator: ", "))"
         )
@@ -838,34 +829,74 @@ extension FLEURSBenchmark {
             try benchmark.saveResults(results, to: outputFile)
 
             // Print summary
-            print("\n" + "=" * 50)
-            print("📊 BENCHMARK SUMMARY")
-            print("=" * 50)
+            print("\n" + String(repeating: "=", count: 80))
+            print("FLEURS BENCHMARK SUMMARY")
+            print(String(repeating: "=", count: 80))
+
+            // Check if we have results to display
+            guard !results.isEmpty else {
+                print("\n⚠️ No results to display - benchmark produced no valid results")
+                return
+            }
+
+            // Print table header
+            print()
+            print(
+                "Language".padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
+                    + "WER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + "CER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + "RTFx".padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                    + "Duration".padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
+                    + "Processed".padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
+                    + "Skipped".padding(toLength: 7, withPad: " ", startingAt: 0))
+            print(String(repeating: "-", count: 89))
 
             for result in results {
                 let langName = benchmark.supportedLanguages[result.language] ?? result.language
-                print("\n\(langName):")
-                print("  WER: \(String(format: "%.1f", result.wer * 100))%")
-                print("  CER: \(String(format: "%.1f", result.cer * 100))%")
-                print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
+                let truncatedName = String(langName.prefix(24))
+                let werStr = String(format: "%.1f", result.wer * 100)
+                let cerStr = String(format: "%.1f", result.cer * 100)
+                let rtfxStr = String(format: "%.1f", result.rtfx)
+                let durationStr = String(format: "%.1fs", result.totalDuration)
+                let processedStr = String(result.samplesProcessed)
+                let skippedStr = result.samplesSkipped > 0 ? String(result.samplesSkipped) : "-"
+
                 print(
-                    "  Samples: \(result.samplesProcessed) processed\(result.samplesSkipped > 0 ? ", \(result.samplesSkipped) skipped" : "")"
-                )
+                    truncatedName.padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
+                        + werStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                        + cerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                        + rtfxStr.padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                        + durationStr.padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
+                        + processedStr.padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
+                        + skippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
             }
 
             let avgWER = results.reduce(0.0) { $0 + $1.wer } / Double(results.count)
             let avgCER = results.reduce(0.0) { $0 + $1.cer } / Double(results.count)
             let avgRTFx = results.reduce(0.0) { $0 + $1.rtfx } / Double(results.count)
+            let totalDuration = results.reduce(0.0) { $0 + $1.totalDuration }
             let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
             let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
 
-            print("\n📈 Overall Performance:")
-            print("  Average WER: \(String(format: "%.1f", avgWER * 100))%")
-            print("  Average CER: \(String(format: "%.1f", avgCER * 100))%")
-            print("  Average RTFx: \(String(format: "%.1f", avgRTFx))x")
-            print("  Total Processed: \(totalProcessed) samples")
+            print(String(repeating: "-", count: 89))
+            let avgWerStr = String(format: "%.1f", avgWER * 100)
+            let avgCerStr = String(format: "%.1f", avgCER * 100)
+            let avgRtfxStr = String(format: "%.1f", avgRTFx)
+            let totalDurationStr = String(format: "%.1fs", totalDuration)
+            let totalProcessedStr = String(totalProcessed)
+            let totalSkippedStr = totalSkipped > 0 ? String(totalSkipped) : "-"
+
+            print(
+                "AVERAGE".padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
+                    + avgWerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + avgCerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
+                    + avgRtfxStr.padding(toLength: 7, withPad: " ", startingAt: 0) + " | "
+                    + totalDurationStr.padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
+                    + totalProcessedStr.padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
+                    + totalSkippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
+
             if totalSkipped > 0 {
-                print("  ⚠️ Total Skipped: \(totalSkipped) samples due to audio loading errors")
+                print("\n⚠️ Note: \(totalSkipped) samples were skipped due to audio loading errors")
             }
 
             print("\n✓ Results saved to: \(outputFile)")

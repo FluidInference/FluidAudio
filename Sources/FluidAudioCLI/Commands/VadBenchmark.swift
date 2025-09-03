@@ -22,6 +22,7 @@ struct VadBenchmark {
         var vadThreshold: Float = 0.3
         var outputFile: String?
         var dataset = "mini50"  // Default to mini50 dataset
+        var debugMode = false  // Default to no debug output
         print("   📝 Parsing arguments...")
 
         // Parse arguments
@@ -52,6 +53,8 @@ struct VadBenchmark {
                     outputFile = arguments[i + 1]
                     i += 1
                 }
+            case "--debug":
+                debugMode = true
             default:
                 print("⚠️ Unknown option: \(arguments[i])")
             }
@@ -61,30 +64,16 @@ struct VadBenchmark {
         print("🚀 Starting VAD Benchmark")
         print("   Test files: \(numFiles)")
         print("   VAD threshold: \(vadThreshold)")
+        print("   Debug mode: \(debugMode)")
 
-        let vadManager = VadManager(
+        // Use VadManager with the trained model
+        let vadManager = try await VadManager(
             config: VadConfig(
                 threshold: vadThreshold,
-                chunkSize: 512,
-                debugMode: true
+                debugMode: debugMode
             ))
 
-        // VAD models will be automatically downloaded from Hugging Face if needed
-        print("🔄 VAD models will be auto-downloaded from Hugging Face if needed")
-
-        do {
-            print("🔧 Initializing VAD manager...")
-            try await vadManager.initialize()
-            print("VAD system initialized")
-        } catch {
-            print("Failed to initialize VAD: \(error)")
-            print("   Error type: \(type(of: error))")
-            if let vadError = error as? VadError {
-                print("   VAD Error: \(vadError.localizedDescription)")
-            }
-            print("   Make sure VAD models are available in vadCoreml/ or cached directory")
-            throw error
-        }
+        print("VAD system initialized")
 
         // Download test files
         let testFiles = try await downloadVadTestFiles(
