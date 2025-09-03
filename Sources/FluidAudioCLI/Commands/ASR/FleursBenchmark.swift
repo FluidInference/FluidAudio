@@ -851,7 +851,11 @@ extension FLEURSBenchmark {
                     + "Skipped".padding(toLength: 7, withPad: " ", startingAt: 0))
             print(String(repeating: "-", count: 89))
 
-            for result in results {
+            for result in results.sorted(by: { lhs, rhs in
+                let lhsName = benchmark.supportedLanguages[lhs.language] ?? lhs.language
+                let rhsName = benchmark.supportedLanguages[rhs.language] ?? rhs.language
+                return lhsName < rhsName
+            }) {
                 let langName = benchmark.supportedLanguages[result.language] ?? result.language
                 let truncatedName = String(langName.prefix(24))
                 let werStr = String(format: "%.1f", result.wer * 100)
