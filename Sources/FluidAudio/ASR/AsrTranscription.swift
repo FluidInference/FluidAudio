@@ -106,25 +106,12 @@ extension AsrManager {
             from: encoderOutput, key: "encoder_output_length",
             errorMessage: "Invalid encoder output length")
 
-        print(
-            "Encoder output shape: \(rawEncoderOutput.shape) dataType: \(rawEncoderOutput.dataType) count: \(rawEncoderOutput.count)"
-        )
-
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
         // Calculate actual audio frames if not provided using shared constants
         let actualFrames =
             actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
-
-        print("Encoder sequence length: \(encoderSequenceLength)")
-        print("Actual audio frames: \(actualFrames)")
-
-        if encoderSequenceLength > actualFrames {
-            print(
-                "⚠️  PADDING DETECTED: Encoder reports \(encoderSequenceLength) frames but actual audio only has \(actualFrames) frames"
-            )
-        }
 
         let (tokens, timestamps) = try await tdtDecodeWithTimings(
             encoderOutput: encoderHiddenStates,

@@ -64,7 +64,16 @@ struct ChunkProcessor {
                 allTokens.append(contentsOf: windowTokens)
                 allTimestamps.append(contentsOf: windowTimestamps)
             }
+
+            print("[Segment \(segmentIndex)] Processed \(windowTokens.count) tokens, maxFrame = \(maxFrame)")
+            print("[Segment \(segmentIndex)] Total tokens so far: \(allTokens.count)")
+            print("[Segment \(segmentIndex)] lastProcessedFrame = \(lastProcessedFrame) frames")
+            print("[Segment \(segmentIndex)] Center Processed = \(centerStart) with \(centerSamples) processed")
+            print("\t[Segment \(segmentIndex)] Window Tokens: \(windowTokens)")
+            print("\t[Segment \(segmentIndex)] Window Timestamps: \(windowTimestamps)")
+
             centerStart += centerSamples
+
             segmentIndex += 1
         }
         return manager.processTranscriptionResult(

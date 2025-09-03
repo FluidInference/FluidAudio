@@ -403,15 +403,11 @@ public class FLEURSBenchmark {
                 wer: Double, duration: Double, audioPath: String
             )] = []
 
-        for (index, sample) in samples.enumerated() {
+        for (_, sample) in samples.enumerated() {
             // Skip if audio file doesn't exist
             guard FileManager.default.fileExists(atPath: sample.audioPath) else {
                 print("  ⚠️ Audio file not found: \(sample.audioPath)")
                 continue
-            }
-
-            if config.debugMode {
-                print("  Processing \(index + 1)/\(samples.count): \(sample.sampleId)")
             }
 
             do {
@@ -427,7 +423,9 @@ public class FLEURSBenchmark {
                 }
 
                 let audioDuration = Double(audioSamples.count) / 16000.0
-
+                print(
+                    "\t Processing \(sample.audioPath) Duration: \(String(format: "%.2f", audioDuration))s with samples: \(audioSamples.count)"
+                )
                 // Measure only inference time for accurate RTFx calculation
                 let inferenceStartTime = Date()
                 let result = try await asrManager.transcribe(audioSamples)
