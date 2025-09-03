@@ -113,8 +113,9 @@ extension AsrManager {
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
-        // Calculate actual audio frames if not provided
-        let actualFrames = actualAudioFrames ?? Int((Double(originalLength ?? paddedAudio.count) / 1280.0).rounded())
+        // Calculate actual audio frames if not provided using shared constants
+        let actualFrames =
+            actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
 
         print("Encoder sequence length: \(encoderSequenceLength)")
         print("Actual audio frames: \(actualFrames)")

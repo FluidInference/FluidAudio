@@ -484,7 +484,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                     // Calculate frame offset for already-processed content
                     if adaptiveLeftContext > leftContextSamples {
                         let extraContextSamples = adaptiveLeftContext - leftContextSamples
-                        frameOffset = extraContextSamples / 1280  // Encoder frame size
+                        frameOffset = ASRConstants.calculateEncoderFrames(from: extraContextSamples)
                     } else {
                         frameOffset = 0
                     }
@@ -650,7 +650,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             let rightEnd = min(audioSamples, centerEnd + rightContextSamples)
 
             let chunkSamples = rightEnd - leftStart
-            let actualFramesToProcess = chunkSamples / 1280  // Convert to encoder frames
+            let actualFramesToProcess = ASRConstants.calculateEncoderFrames(from: chunkSamples)
             let framesToSkip = frameOffset
             let effectiveFramesProcessed = actualFramesToProcess - framesToSkip
 
@@ -673,7 +673,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 )
 
                 // The effective processing should handle the remaining content
-                let remainingFrames = remainingSamples / 1280
+                let remainingFrames = ASRConstants.calculateEncoderFrames(from: remainingSamples)
                 XCTAssertGreaterThanOrEqual(
                     effectiveFramesProcessed, remainingFrames,
                     "Should process at least the remaining frames"

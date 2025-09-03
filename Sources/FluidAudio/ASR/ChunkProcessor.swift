@@ -107,7 +107,7 @@ struct ChunkProcessor {
                 // Extra context beyond standard = frames to adjust timeJump by
                 let extraContextSamples = adaptiveLeftContextSamples - leftContextSamples
                 // Convert samples to encoder frames (1 frame = 0.08s = 1280 samples at 16kHz)
-                contextFrameAdjustment = extraContextSamples / 1280  // Encoder frame size
+                contextFrameAdjustment = extraContextSamples / ASRConstants.samplesPerEncoderFrame
             } else {
                 contextFrameAdjustment = 0
             }
@@ -118,7 +118,7 @@ struct ChunkProcessor {
                     Last chunk adaptive context:
                     - Remaining: \(remainingSamples) samples (\(String(format: "%.2f", Double(remainingSamples)/16000.0))s)
                     - Adaptive left context: \(adaptiveLeftContextSamples) samples (\(String(format: "%.2f", Double(adaptiveLeftContextSamples)/16000.0))s)
-                    - Context frame adjustment: \(contextFrameAdjustment) frames (adjusting timeJump for \(contextFrameAdjustment * 1280) samples)
+                    - Context frame adjustment: \(contextFrameAdjustment) frames (adjusting timeJump for \(contextFrameAdjustment * ASRConstants.samplesPerEncoderFrame) samples)
                     - Total chunk: \(adaptiveLeftContextSamples + remainingSamples) samples
                     """)
             }
@@ -143,9 +143,8 @@ struct ChunkProcessor {
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
-        // Calculate actual encoder frames from unpadded chunk samples
-        // Each encoder frame represents ~80ms of audio (1280 samples at 16kHz)
-        let actualFrameCount = Int((Double(chunkSamples.count) / 1280.0).rounded())
+        // Calculate actual encoder frames from unpadded chunk samples using shared constants
+        let actualFrameCount = ASRConstants.calculateEncoderFrames(from: chunkSamples.count)
 
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
