@@ -143,9 +143,14 @@ struct ChunkProcessor {
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
+        // Calculate actual encoder frames from unpadded chunk samples
+        // Each encoder frame represents ~80ms of audio (1280 samples at 16kHz)
+        let actualFrameCount = chunkSamples.count / 1280
+
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
+            actualAudioFrames: actualFrameCount,
             enableDebug: enableDebug,
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,

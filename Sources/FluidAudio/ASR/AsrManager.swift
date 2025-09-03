@@ -270,6 +270,7 @@ public final class AsrManager {
     internal func tdtDecodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
+        actualAudioFrames: Int,
         originalAudioSamples: [Float],
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
@@ -279,6 +280,7 @@ public final class AsrManager {
         return try await decoder.decodeWithTimings(
             encoderOutput: encoderOutput,
             encoderSequenceLength: encoderSequenceLength,
+            actualAudioFrames: actualAudioFrames,
             decoderModel: decoderModel!,
             jointModel: jointModel!,
             decoderState: &decoderState,

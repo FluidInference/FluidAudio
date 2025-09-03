@@ -34,6 +34,7 @@ extension AsrManager {
             let (tokens, timestamps, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
                 originalLength: originalLength,
+                actualAudioFrames: nil,  // Will be calculated from originalLength
                 enableDebug: config.enableDebug,
                 decoderState: &decoderState
             )
@@ -69,6 +70,7 @@ extension AsrManager {
     internal func executeMLInferenceWithTimings(
         _ paddedAudio: [Float],
         originalLength: Int? = nil,
+        actualAudioFrames: Int? = nil,
         enableDebug: Bool = false,
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
@@ -104,12 +106,29 @@ extension AsrManager {
             from: encoderOutput, key: "encoder_output_length",
             errorMessage: "Invalid encoder output length")
 
+        print(
+            "Encoder output shape: \(rawEncoderOutput.shape) dataType: \(rawEncoderOutput.dataType) count: \(rawEncoderOutput.count)"
+        )
+
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
+
+        // Calculate actual audio frames if not provided
+        let actualFrames = actualAudioFrames ?? ((originalLength ?? paddedAudio.count) / 1280)
+
+        print("Encoder sequence length: \(encoderSequenceLength)")
+        print("Actual audio frames: \(actualFrames)")
+
+        if encoderSequenceLength > actualFrames {
+            print(
+                "⚠️  PADDING DETECTED: Encoder reports \(encoderSequenceLength) frames but actual audio only has \(actualFrames) frames"
+            )
+        }
 
         let (tokens, timestamps) = try await tdtDecodeWithTimings(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
+            actualAudioFrames: actualFrames,
             originalAudioSamples: paddedAudio,
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,
@@ -135,6 +154,7 @@ extension AsrManager {
         let (tokens, timestamps, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: originalLength,
+            actualAudioFrames: nil,  // Will be calculated from originalLength
             enableDebug: enableDebug,
             decoderState: &state,
             contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context

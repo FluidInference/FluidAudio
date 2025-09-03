@@ -68,6 +68,7 @@ internal struct TdtDecoder {
     func decodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
+        actualAudioFrames: Int,
         decoderModel: MLModel,
         jointModel: MLModel,
         decoderState: inout TdtDecoderState,
@@ -108,14 +109,23 @@ internal struct TdtDecoder {
                 print("🆕 FIRST CHUNK: timeIndices=\(timeIndices) from contextAdjustment=\(contextFrameAdjustment)")
             }
         }
+        // Use the minimum of encoder sequence length and actual audio frames to avoid processing padding
+        let effectiveSequenceLength = min(encoderSequenceLength, actualAudioFrames)
+
+        if config.enableDebug {
+            print(
+                "🔍 FRAME BOUNDS: encoderSeqLen=\(encoderSequenceLength), actualFrames=\(actualAudioFrames), effective=\(effectiveSequenceLength)"
+            )
+        }
+
         // Key variables for frame navigation:
-        var safeTimeIndices = min(timeIndices, encoderSequenceLength - 1)  // Bounds-checked index
+        var safeTimeIndices = min(timeIndices, effectiveSequenceLength - 1)  // Bounds-checked index
         var timeIndicesCurrentLabels = timeIndices  // Frame where current token was emitted
-        var activeMask = timeIndices < encoderSequenceLength  // Start processing only if we haven't exceeded bounds
-        let lastTimestep = encoderSequenceLength - 1  // Maximum valid frame index
+        var activeMask = timeIndices < effectiveSequenceLength  // Start processing only if we haven't exceeded bounds
+        let lastTimestep = effectiveSequenceLength - 1  // Maximum valid frame index
 
         // If timeJump puts us beyond the available frames, return empty
-        if timeIndices >= encoderSequenceLength {
+        if timeIndices >= effectiveSequenceLength {
             return ([], [])
         }
 
@@ -223,7 +233,7 @@ internal struct TdtDecoder {
             timeIndices += duration  // Jump forward by predicted duration
             safeTimeIndices = min(timeIndices, lastTimestep)  // Bounds check
 
-            activeMask = timeIndices < encoderSequenceLength  // Continue if more frames
+            activeMask = timeIndices < effectiveSequenceLength  // Continue if more frames
             var advanceMask = activeMask && blankMask  // Enter inner loop for blank tokens
 
             // ===== INNER LOOP: OPTIMIZED BLANK PROCESSING =====
@@ -275,7 +285,7 @@ internal struct TdtDecoder {
                 // Advance and check if we should continue the inner loop
                 timeIndices += duration
                 safeTimeIndices = min(timeIndices, lastTimestep)
-                activeMask = timeIndices < encoderSequenceLength
+                activeMask = timeIndices < effectiveSequenceLength
                 advanceMask = activeMask && blankMask  // Exit loop if non-blank found
             }
             // ===== END INNER LOOP =====
@@ -330,7 +340,7 @@ internal struct TdtDecoder {
             }
 
             // Update activeMask for next iteration
-            let newActiveMask = timeIndices < encoderSequenceLength
+            let newActiveMask = timeIndices < effectiveSequenceLength
             if activeMask && !newActiveMask {
             }
             activeMask = newActiveMask
@@ -395,8 +405,8 @@ internal struct TdtDecoder {
                     // Emit final tokens
                     hypothesis.ySequence.append(token)
                     hypothesis.score += score
-                    // Use clamped timestamp to avoid going beyond encoder bounds
-                    hypothesis.timestamps.append(min(timeIndices, encoderSequenceLength - 1))
+                    // Use clamped timestamp to avoid going beyond effective bounds
+                    hypothesis.timestamps.append(min(timeIndices, effectiveSequenceLength - 1))
                     hypothesis.lastToken = token
 
                     // Update decoder state
@@ -440,13 +450,13 @@ internal struct TdtDecoder {
 
         // Always store time jump for streaming: how far beyond this chunk we've processed
         // Used to align timestamps when processing next chunk
-        // Formula: timeJump = finalPosition - availableFrames
-        let finalTimeJump = timeIndices - encoderSequenceLength
+        // Formula: timeJump = finalPosition - effectiveFrames
+        let finalTimeJump = timeIndices - effectiveSequenceLength
         decoderState.timeJump = finalTimeJump
 
         if config.enableDebug {
             print(
-                "⏭️  TIME JUMP CALC: finalTimeIndices=\(timeIndices) - encoderSeqLen=\(encoderSequenceLength) = timeJump=\(finalTimeJump)"
+                "⏭️  TIME JUMP CALC: finalTimeIndices=\(timeIndices) - effectiveSeqLen=\(effectiveSequenceLength) = timeJump=\(finalTimeJump)"
             )
             print(
                 "📊 CHUNK SUMMARY: emitted \(hypothesis.ySequence.count) tokens, timeJump=\(finalTimeJump), isLastChunk=\(isLastChunk)"
