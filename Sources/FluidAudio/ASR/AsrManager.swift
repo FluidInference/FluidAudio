@@ -272,8 +272,7 @@ public final class AsrManager {
         encoderSequenceLength: Int,
         originalAudioSamples: [Float],
         decoderState: inout TdtDecoderState,
-        startFrameOffset: Int = 0,
-        lastProcessedFrame: Int = 0,
+        contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false
     ) async throws -> (tokens: [Int], timestamps: [Int]) {
         let decoder = TdtDecoder(config: config)
@@ -283,8 +282,7 @@ public final class AsrManager {
             decoderModel: decoderModel!,
             jointModel: jointModel!,
             decoderState: &decoderState,
-            startFrameOffset: startFrameOffset,
-            lastProcessedFrame: lastProcessedFrame,
+            contextFrameAdjustment: contextFrameAdjustment,
             isLastChunk: isLastChunk
         )
     }

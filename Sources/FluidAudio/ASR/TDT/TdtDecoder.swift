@@ -71,8 +71,7 @@ internal struct TdtDecoder {
         decoderModel: MLModel,
         jointModel: MLModel,
         decoderState: inout TdtDecoderState,
-        startFrameOffset: Int = 0,
-        lastProcessedFrame: Int = 0,
+        contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false
     ) async throws -> (tokens: [Int], timestamps: [Int]) {
         // Early exit for very short audio (< 160ms)
@@ -91,23 +90,31 @@ internal struct TdtDecoder {
         // Initialize time tracking for frame navigation
         // timeIndices: Current position in encoder frames (advances by duration)
         // timeJump: Tracks overflow when we process beyond current chunk (for streaming)
+        // contextFrameAdjustment: Adjusts for adaptive context overlap
         var timeIndices: Int
         if let prevTimeJump = decoderState.timeJump {
-            // Streaming continuation: adjust for previous chunk's time jump
-            // This ensures smooth transitions between audio chunks
-            timeIndices = max(0, prevTimeJump + startFrameOffset)
+            // Streaming continuation: use decoder's internal position tracking
+            // Add context adjustment to account for adaptive context overlap
+            timeIndices = max(0, prevTimeJump + contextFrameAdjustment)
+            if config.enableDebug {
+                print(
+                    "🔄 CHUNK CONTINUATION: timeIndices=\(timeIndices) from prevTimeJump=\(prevTimeJump) + contextAdjustment=\(contextFrameAdjustment)"
+                )
+            }
         } else {
-            // First chunk or non-streaming: start from frame offset
-            timeIndices = startFrameOffset
+            // First chunk: start from context adjustment (usually 0)
+            timeIndices = contextFrameAdjustment
+            if config.enableDebug {
+                print("🆕 FIRST CHUNK: timeIndices=\(timeIndices) from contextAdjustment=\(contextFrameAdjustment)")
+            }
         }
         // Key variables for frame navigation:
-        // IMPORTANT: When startFrameOffset > 0, we need to actually skip those frames to avoid duplicates
         var safeTimeIndices = min(timeIndices, encoderSequenceLength - 1)  // Bounds-checked index
         var timeIndicesCurrentLabels = timeIndices  // Frame where current token was emitted
         var activeMask = timeIndices < encoderSequenceLength  // Start processing only if we haven't exceeded bounds
         let lastTimestep = encoderSequenceLength - 1  // Maximum valid frame index
 
-        // If startFrameOffset puts us beyond the available frames, return empty
+        // If timeJump puts us beyond the available frames, return empty
         if timeIndices >= encoderSequenceLength {
             return ([], [])
         }
@@ -274,16 +281,17 @@ internal struct TdtDecoder {
             // ===== END INNER LOOP =====
 
             // Process non-blank token: emit it and update decoder state
-            // IMPORTANT: Only emit tokens if they're beyond the already-processed region
             if activeMask && label != blankId {
-                let shouldEmit = timeIndicesCurrentLabels >= startFrameOffset
+                // Add token to output sequence
+                hypothesis.ySequence.append(label)
+                hypothesis.score += score
+                hypothesis.timestamps.append(timeIndicesCurrentLabels)
+                hypothesis.lastToken = label  // Remember for next iteration
 
-                if shouldEmit {
-                    // Add token to output sequence
-                    hypothesis.ySequence.append(label)
-                    hypothesis.score += score
-                    hypothesis.timestamps.append(timeIndicesCurrentLabels)
-                    hypothesis.lastToken = label  // Remember for next iteration
+                if config.enableDebug {
+                    print(
+                        "✅ EMITTED: token \(label) at frame \(timeIndicesCurrentLabels), total tokens: \(hypothesis.ySequence.count)"
+                    )
                 }
 
                 // CRITICAL: Update decoder LSTM with the new token
@@ -430,12 +438,27 @@ internal struct TdtDecoder {
             }
         }
 
-        // Store time jump for streaming: how far beyond this chunk we've processed
+        // Always store time jump for streaming: how far beyond this chunk we've processed
         // Used to align timestamps when processing next chunk
-        // For the last chunk, we don't set time jump since there are no more chunks
-        if !isLastChunk {
-            let finalTimeJump = timeIndices - encoderSequenceLength
-            decoderState.timeJump = finalTimeJump
+        // Formula: timeJump = finalPosition - availableFrames
+        let finalTimeJump = timeIndices - encoderSequenceLength
+        decoderState.timeJump = finalTimeJump
+
+        if config.enableDebug {
+            print(
+                "⏭️  TIME JUMP CALC: finalTimeIndices=\(timeIndices) - encoderSeqLen=\(encoderSequenceLength) = timeJump=\(finalTimeJump)"
+            )
+            print(
+                "📊 CHUNK SUMMARY: emitted \(hypothesis.ySequence.count) tokens, timeJump=\(finalTimeJump), isLastChunk=\(isLastChunk)"
+            )
+        }
+
+        // For the last chunk, clear timeJump since there are no more chunks
+        if isLastChunk {
+            decoderState.timeJump = nil
+            if config.enableDebug {
+                print("🏁 LAST CHUNK: cleared timeJump")
+            }
         }
 
         // No filtering at decoder level - let post-processing handle deduplication

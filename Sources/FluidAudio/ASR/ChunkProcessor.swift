@@ -84,8 +84,49 @@ struct ChunkProcessor {
         using manager: AsrManager,
         decoderState: inout TdtDecoderState
     ) async throws -> (tokens: [Int], timestamps: [Int], maxFrame: Int) {
-        // Use standard context for all chunks - the TdtDecoder handles last chunk finalization
-        let adaptiveLeftContextSamples = leftContextSamples
+        let remainingSamples = audioSamples.count - centerStart
+
+        // Calculate adaptive context and frame adjustment for last chunk
+        let adaptiveLeftContextSamples: Int
+        let contextFrameAdjustment: Int
+
+        if isLastChunk && remainingSamples < centerSamples {
+            // Last chunk can't fill center - maximize context usage
+            // Try to use full model capacity (15s) if available
+            let desiredTotalSamples = min(maxModelSamples, audioSamples.count)
+            let maxLeftContext = centerStart  // Can't go before start
+
+            // Calculate how much left context we need
+            let neededLeftContext = desiredTotalSamples - remainingSamples
+            adaptiveLeftContextSamples = min(neededLeftContext, maxLeftContext)
+
+            // CRITICAL: Calculate frame adjustment for timeJump
+            // If we're pulling in more left context than usual, we need to adjust timeJump
+            // to account for the extra frames that were already processed
+            if adaptiveLeftContextSamples > leftContextSamples {
+                // Extra context beyond standard = frames to adjust timeJump by
+                let extraContextSamples = adaptiveLeftContextSamples - leftContextSamples
+                // Convert samples to encoder frames (1 frame = 0.08s = 1280 samples at 16kHz)
+                contextFrameAdjustment = extraContextSamples / 1280  // Encoder frame size
+            } else {
+                contextFrameAdjustment = 0
+            }
+
+            if enableDebug {
+                logger.debug(
+                    """
+                    Last chunk adaptive context:
+                    - Remaining: \(remainingSamples) samples (\(String(format: "%.2f", Double(remainingSamples)/16000.0))s)
+                    - Adaptive left context: \(adaptiveLeftContextSamples) samples (\(String(format: "%.2f", Double(adaptiveLeftContextSamples)/16000.0))s)
+                    - Context frame adjustment: \(contextFrameAdjustment) frames (adjusting timeJump for \(contextFrameAdjustment * 1280) samples)
+                    - Total chunk: \(adaptiveLeftContextSamples + remainingSamples) samples
+                    """)
+            }
+        } else {
+            // Standard context for non-last chunks
+            adaptiveLeftContextSamples = leftContextSamples
+            contextFrameAdjustment = 0
+        }
 
         // Compute window bounds in samples: [leftStart, rightEnd)
         let leftStart = max(0, centerStart - adaptiveLeftContextSamples)
@@ -102,20 +143,12 @@ struct ChunkProcessor {
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
 
-        // Calculate encoder frame offset based on where previous chunk ended
-        let actualLeftContextSeconds = Double(adaptiveLeftContextSamples) / Double(sampleRate)
-        let startFrameOffset = manager.calculateStartFrameOffset(
-            segmentIndex: segmentIndex,
-            leftContextSeconds: actualLeftContextSeconds
-        )
-
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
-            enableDebug: false,
+            enableDebug: enableDebug,
             decoderState: &decoderState,
-            startFrameOffset: startFrameOffset,
-            lastProcessedFrame: lastProcessedFrame,
+            contextFrameAdjustment: contextFrameAdjustment,
             isLastChunk: isLastChunk
         )
 

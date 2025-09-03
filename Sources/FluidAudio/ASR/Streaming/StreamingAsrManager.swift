@@ -305,18 +305,12 @@ public actor StreamingAsrManager {
         do {
             let chunkStartTime = Date()
 
-            // Calculate start frame offset
-            let startOffset = asrManager.calculateStartFrameOffset(
-                segmentIndex: segmentIndex,
-                leftContextSeconds: actualLeftSeconds
-            )
+            // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
             let (tokens, timestamps, _) = try await asrManager.transcribeStreamingChunk(
                 windowSamples,
                 source: audioSource,
-                startFrameOffset: startOffset,
-                lastProcessedFrame: lastProcessedFrame,
                 previousTokens: accumulatedTokens,
                 enableDebug: config.enableDebug
             )
