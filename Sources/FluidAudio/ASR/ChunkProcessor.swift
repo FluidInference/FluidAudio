@@ -68,10 +68,6 @@ struct ChunkProcessor {
 
             segmentIndex += 1
         }
-        // Validation: Ensure all audio frames were accounted for
-        let expectedTotalFrames = ASRConstants.calculateEncoderFrames(from: audioSamples.count)
-        let processedCenterFrames =
-            segmentIndex * Int(centerSeconds * Double(sampleRate)) / ASRConstants.samplesPerEncoderFrame
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
