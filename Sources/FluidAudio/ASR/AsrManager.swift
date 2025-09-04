@@ -339,7 +339,6 @@ public final class AsrManager {
         if config.enableDebug {
             for tokenId in tokenIds {
                 if let token = vocabulary[tokenId] {
-                    print("  Token \(tokenId) -> '\(token)'")
                 }
             }
         }
