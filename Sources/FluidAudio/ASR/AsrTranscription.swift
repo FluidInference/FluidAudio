@@ -74,7 +74,8 @@ extension AsrManager {
         enableDebug: Bool = false,
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
-        isLastChunk: Bool = false
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
@@ -120,7 +121,8 @@ extension AsrManager {
             originalAudioSamples: paddedAudio,
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,
-            isLastChunk: isLastChunk
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
         )
 
         return (tokens, timestamps, encoderSequenceLength)

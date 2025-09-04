@@ -155,6 +155,18 @@ struct ChunkProcessor {
         // Calculate actual encoder frames from unpadded chunk samples using shared constants
         let actualFrameCount = ASRConstants.calculateEncoderFrames(from: chunkSamples.count)
 
+        // Calculate global frame offset for this chunk
+        let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
+
+        if enableDebug {
+            print("🔢 CHUNK FRAME CALC [Segment \(segmentIndex)]:")
+            print("  - centerStart: \(centerStart) samples")
+            print("  - leftStart: \(leftStart) samples")
+            print("  - chunkSamples.count: \(chunkSamples.count) samples")
+            print("  - actualFrameCount: \(actualFrameCount) frames")
+            print("  - globalFrameOffset: \(globalFrameOffset) frames")
+        }
+
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
@@ -162,7 +174,8 @@ struct ChunkProcessor {
             enableDebug: enableDebug,
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,
-            isLastChunk: isLastChunk
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
         )
 
         if tokens.isEmpty || encLen == 0 {

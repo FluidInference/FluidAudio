@@ -73,7 +73,8 @@ internal struct TdtDecoder {
         jointModel: MLModel,
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
-        isLastChunk: Bool = false
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int]) {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
@@ -112,11 +113,17 @@ internal struct TdtDecoder {
         // Use the minimum of encoder sequence length and actual audio frames to avoid processing padding
         let effectiveSequenceLength = min(encoderSequenceLength, actualAudioFrames)
 
-        if config.enableDebug {
-            print(
-                "🔍 FRAME BOUNDS: encoderSeqLen=\(encoderSequenceLength), actualFrames=\(actualAudioFrames), effective=\(effectiveSequenceLength)"
-            )
-        }
+        print(
+            "🔍 FRAME BOUNDS: encoderSeqLen=\(encoderSequenceLength), actualFrames=\(actualAudioFrames), effective=\(effectiveSequenceLength)"
+        )
+        print(
+            "🎯 DEBUG CHUNK \(isLastChunk ? "LAST" : "CONT"):"
+        )
+        print("  - prevTimeJump: \(decoderState.timeJump?.description ?? "nil")")
+        print("  - contextFrameAdjustment: \(contextFrameAdjustment)")
+        print("  - timeIndices start: \(timeIndices)")
+        print("  - globalFrameOffset: \(globalFrameOffset)")
+        print("  - effectiveSequenceLength: \(effectiveSequenceLength)")
 
         // Key variables for frame navigation:
         var safeTimeIndices = min(timeIndices, effectiveSequenceLength - 1)  // Bounds-checked index
@@ -295,15 +302,12 @@ internal struct TdtDecoder {
                 // Add token to output sequence
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
-                hypothesis.timestamps.append(timeIndicesCurrentLabels)
+                hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
                 hypothesis.lastToken = label  // Remember for next iteration
 
-                if config.enableDebug {
-                    print(
-                        "✅ EMITTED: token \(label) at frame \(timeIndicesCurrentLabels), total tokens: \(hypothesis.ySequence.count)"
-                    )
-                }
-
+                print(
+                    "✅ EMITTED: token \(label) at local frame \(timeIndicesCurrentLabels), global frame \(timeIndicesCurrentLabels + globalFrameOffset), total tokens: \(hypothesis.ySequence.count)"
+                )
                 // CRITICAL: Update decoder LSTM with the new token
                 // This updates the language model context for better predictions
                 // Only non-blank tokens update the decoder - this is key!
@@ -406,7 +410,7 @@ internal struct TdtDecoder {
                     hypothesis.ySequence.append(token)
                     hypothesis.score += score
                     // Use clamped timestamp to avoid going beyond effective bounds
-                    hypothesis.timestamps.append(min(timeIndices, effectiveSequenceLength - 1))
+                    hypothesis.timestamps.append(min(timeIndices, effectiveSequenceLength - 1) + globalFrameOffset)
                     hypothesis.lastToken = token
 
                     // Update decoder state
