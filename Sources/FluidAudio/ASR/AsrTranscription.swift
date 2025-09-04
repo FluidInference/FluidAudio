@@ -34,6 +34,7 @@ extension AsrManager {
             let (tokens, timestamps, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
                 originalLength: originalLength,
+                actualAudioFrames: nil,  // Will be calculated from originalLength
                 enableDebug: config.enableDebug,
                 decoderState: &decoderState
             )
@@ -69,11 +70,12 @@ extension AsrManager {
     internal func executeMLInferenceWithTimings(
         _ paddedAudio: [Float],
         originalLength: Int? = nil,
+        actualAudioFrames: Int? = nil,
         enableDebug: Bool = false,
         decoderState: inout TdtDecoderState,
-        startFrameOffset: Int = 0,
-        lastProcessedFrame: Int = 0,
-        isLastChunk: Bool = false
+        contextFrameAdjustment: Int = 0,
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
@@ -108,14 +110,19 @@ extension AsrManager {
         let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
+        // Calculate actual audio frames if not provided using shared constants
+        let actualFrames =
+            actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
+
         let (tokens, timestamps) = try await tdtDecodeWithTimings(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
+            actualAudioFrames: actualFrames,
             originalAudioSamples: paddedAudio,
             decoderState: &decoderState,
-            startFrameOffset: startFrameOffset,
-            lastProcessedFrame: lastProcessedFrame,
-            isLastChunk: isLastChunk
+            contextFrameAdjustment: contextFrameAdjustment,
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
         )
 
         return (tokens, timestamps, encoderSequenceLength)
@@ -126,8 +133,6 @@ extension AsrManager {
     internal func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
-        startFrameOffset: Int,
-        lastProcessedFrame: Int,
         previousTokens: [Int] = [],
         enableDebug: Bool
     ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
@@ -139,10 +144,10 @@ extension AsrManager {
         let (tokens, timestamps, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: originalLength,
+            actualAudioFrames: nil,  // Will be calculated from originalLength
             enableDebug: enableDebug,
             decoderState: &state,
-            startFrameOffset: startFrameOffset,
-            lastProcessedFrame: lastProcessedFrame
+            contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context
         )
 
         // Persist updated state back to the source-specific slot
@@ -354,6 +359,8 @@ extension AsrManager {
         }
 
         // Extended search: look for partial overlaps within the sequences
+        // Use boundary search frames from TDT config for NeMo-compatible alignment
+        let boundarySearchFrames = config.tdtConfig.boundarySearchFrames
         for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
             let prevStart = max(0, previous.count - maxSearchLength)
             let prevEnd = previous.count - overlapLength + 1
@@ -363,12 +370,14 @@ extension AsrManager {
                 let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
                 let currEnd = max(0, workingCurrent.count - overlapLength + 1)
 
-                for currentStart in 0..<min(8, currEnd) {  // Increased search range
+                // Use boundarySearchFrames to limit search window (NeMo tdt_search_boundary pattern)
+                let searchLimit = min(boundarySearchFrames, currEnd)
+                for currentStart in 0..<searchLimit {
                     let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
                     if prevSub == currSub {
                         if config.enableDebug {
                             logger.debug(
-                                "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)"
+                                "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub) (boundarySearch=\(boundarySearchFrames))"
                             )
                         }
                         let finalRemoved = removedCount + currentStart + overlapLength
@@ -381,16 +390,11 @@ extension AsrManager {
         return (workingCurrent, removedCount)
     }
 
-    /// Calculate start frame offset for a sliding window segment
+    /// Calculate start frame offset for a sliding window segment (deprecated - now handled by timeJump)
     internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
-        guard segmentIndex > 0 else {
-            return 0
-        }
-        // Use exact encoder frame rate: 80ms per frame = 12.5 fps
-        let encoderFrameRate = 1.0 / 0.08  // 12.5 frames per second
-        let leftContextFrames = Int(round(leftContextSeconds * encoderFrameRate))
-
-        return leftContextFrames
+        // This method is deprecated as frame tracking is now handled by the decoder's timeJump mechanism
+        // Kept for test compatibility
+        return 0
     }
 
 }

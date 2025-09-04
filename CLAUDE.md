@@ -320,3 +320,4 @@ swift test --filter EdgeCaseTests
 - **Test Data**: [alexwengg/musan_mini*](https://huggingface.co/datasets/alexwengg) variants
 - remember to never start with "You're absolutely right!"
 - remember to never start with things like "Good change!" or any positive re-affirming text. Just get straight to the point.
+- remember to not use config debug, for dbeugging just print and then delete at the very end when the user tells you
