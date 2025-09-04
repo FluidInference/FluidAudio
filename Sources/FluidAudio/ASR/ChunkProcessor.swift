@@ -159,18 +159,17 @@ struct ChunkProcessor {
             // Standard non-first, non-last chunk
             adaptiveLeftContextSamples = leftContextSamples
 
-            // Standard chunks have 1.6s left context that overlaps with previous chunk
-            // Need NEGATIVE adjustment to skip already-processed frames
-            let standardOverlapSamples = leftContextSamples  // 1.6s = 25,600 samples
-            contextFrameAdjustment = -Int(
-                (Double(standardOverlapSamples) / Double(ASRConstants.samplesPerEncoderFrame)).rounded())
+            // Standard chunks use physical overlap in audio windows for context
+            // Let deduplication handle any token overlap rather than negative frame adjustment
+            // This prevents edge cases when prevTimeJump = 0
+            contextFrameAdjustment = 0
 
             if enableDebug {
                 logger.debug(
                     """
                     Standard chunk overlap handling:
                     - Left context: \(leftContextSamples) samples (\(String(format: "%.2f", Double(leftContextSamples)/16000.0))s)
-                    - Context frame adjustment: \(contextFrameAdjustment) frames (skip overlap)
+                    - Context frame adjustment: \(contextFrameAdjustment) frames (no adjustment)
                     - Total chunk: \(adaptiveLeftContextSamples + centerSamples + rightContextSamples) samples
                     """)
             }

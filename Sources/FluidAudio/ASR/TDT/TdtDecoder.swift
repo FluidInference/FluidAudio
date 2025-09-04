@@ -104,7 +104,16 @@ internal struct TdtDecoder {
             // If contextFrameAdjustment < 0: decoder should skip frames (overlap with previous chunk)
             // If contextFrameAdjustment > 0: decoder should start later (adaptive context)
             // Net position = prevTimeJump + contextFrameAdjustment (add adjustment to decoder position)
-            timeIndices = max(0, prevTimeJump + contextFrameAdjustment)
+
+            // SPECIAL CASE: When prevTimeJump = 0 and contextFrameAdjustment = 0,
+            // decoder finished exactly at boundary but chunk has physical overlap
+            // Need to skip the overlap frames to avoid re-processing
+            if prevTimeJump == 0 && contextFrameAdjustment == 0 {
+                // Skip standard overlap (1.6s = 20 frames)
+                timeIndices = 20
+            } else {
+                timeIndices = max(0, prevTimeJump + contextFrameAdjustment)
+            }
 
             if config.enableDebug {
                 print(

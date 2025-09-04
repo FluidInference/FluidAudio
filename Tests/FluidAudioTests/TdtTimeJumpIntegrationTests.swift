@@ -237,10 +237,8 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         _ = TdtDecoder(config: config)
 
         // Simulate chunk processing scenarios
-        print("\n--- Testing Time Jump Calculation Logic ---")
 
         // Scenario 1: First chunk processes 100 frames, has 80 available
-        print("\n📋 Scenario 1: First chunk overshooting")
         var decoderState1 = try TdtDecoderState()
 
         // Simulate the calculation that happens at end of TdtDecoder
@@ -249,19 +247,10 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         let calculatedTimeJump1 = timeIndices1 - encoderSeqLength1  // Should be 20
 
         decoderState1.timeJump = calculatedTimeJump1
-        print(
-            "First chunk: timeIndices=\(timeIndices1), encoderSeqLen=\(encoderSeqLength1), timeJump=\(calculatedTimeJump1)"
-        )
 
         // Scenario 2: Second chunk should start from timeJump
-        print("\n📋 Scenario 2: Second chunk continuation")
-        let startFrameOffset2 = 0  // ChunkProcessor always passes 0 now
         let prevTimeJump2 = decoderState1.timeJump ?? 0
         let expectedStartFrame2 = max(0, prevTimeJump2)  // Should be 20
-
-        print(
-            "Second chunk: startFrameOffset=\(startFrameOffset2), prevTimeJump=\(prevTimeJump2), actualStart=\(expectedStartFrame2)"
-        )
 
         // This is the key test: the second chunk should start at frame 20, not 0
         XCTAssertEqual(expectedStartFrame2, 20, "Second chunk should start at frame 20 (from timeJump)")
@@ -272,12 +261,9 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         // Now we only use timeJump, eliminating the redundancy
         let consolidatedCalculation = max(0, prevTimeJump2)  // Single source of truth
 
-        print("Consolidated calculation (timeJump only): max(0, \(prevTimeJump2)) = \(consolidatedCalculation)")
-
         XCTAssertEqual(consolidatedCalculation, 20, "Consolidated mechanism should give correct frame position")
 
         // Scenario 4: Test edge cases
-        print("\n📋 Scenario 3: Edge cases")
 
         // Negative timeJump (decoder didn't process all frames)
         var decoderState3 = try TdtDecoderState()
@@ -291,11 +277,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         let edgeCase2 = max(0, decoderState4.timeJump ?? 0)  // Should be 0
         XCTAssertEqual(edgeCase2, 0, "Zero timeJump should remain 0")
 
-        print("✅ Time jump calculation logic tests passed")
-
-        // This test proves our fix should work - let's see if it does in practice
-        print("\n💡 Key insight: If this logic is correct, but duplicates still occur,")
-        print("   the issue might be elsewhere (e.g., token emission logic, chunk boundaries)")
     }
 
     /// Test audio length near chunk size boundary that may drop frames
