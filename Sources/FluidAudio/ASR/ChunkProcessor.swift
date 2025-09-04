@@ -8,14 +8,14 @@ struct ChunkProcessor {
 
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ChunkProcessor")
 
-    // Frame-aligned configuration: 8 + 3.2 + 3.2 seconds context at 16kHz
-    // 8s center = exactly 100 encoder frames
-    // 3.2s context = exactly 40 encoder frames each
+    // Frame-aligned configuration: 11.2 + 1.6 + 1.6 seconds context at 16kHz
+    // 11.2s center = exactly 140 encoder frames
+    // 1.6s context = exactly 20 encoder frames each
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 11.2  // Exactly 100 frames (8.0 * 12.5)
-    private let leftContextSeconds: Double = 1.6  // Exactly 40 frames (3.2 * 12.5)
-    private let rightContextSeconds: Double = 1.6  // Exactly 40 frames (3.2 * 12.5)
+    private let centerSeconds: Double = 11.2  // Exactly 140 frames (11.2 * 12.5)
+    private let leftContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
+    private let rightContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
 
     private var centerSamples: Int { Int(centerSeconds * Double(sampleRate)) }
     private var leftContextSamples: Int { Int(leftContextSeconds * Double(sampleRate)) }
@@ -76,6 +76,21 @@ struct ChunkProcessor {
 
             segmentIndex += 1
         }
+        // Validation: Ensure all audio frames were accounted for
+        let expectedTotalFrames = ASRConstants.calculateEncoderFrames(from: audioSamples.count)
+        let processedCenterFrames =
+            segmentIndex * Int(centerSeconds * Double(sampleRate)) / ASRConstants.samplesPerEncoderFrame
+
+        if enableDebug {
+            print("📊 FINAL VALIDATION:")
+            print("  - Total audio samples: \(audioSamples.count)")
+            print("  - Expected total frames: \(expectedTotalFrames)")
+            print("  - Processed center frames: \(processedCenterFrames)")
+            print("  - Total segments: \(segmentIndex)")
+            print("  - Final tokens count: \(allTokens.count)")
+            print("  - Final timestamps count: \(allTimestamps.count)")
+        }
+
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
@@ -115,8 +130,10 @@ struct ChunkProcessor {
             if adaptiveLeftContextSamples > leftContextSamples {
                 // Extra context beyond standard = frames to adjust timeJump by
                 let extraContextSamples = adaptiveLeftContextSamples - leftContextSamples
-                // Convert samples to encoder frames (1 frame = 0.08s = 1280 samples at 16kHz)
-                contextFrameAdjustment = extraContextSamples / ASRConstants.samplesPerEncoderFrame
+                // Convert samples to encoder frames with proper rounding (1 frame = 0.08s = 1280 samples at 16kHz)
+                // Use floating-point division and rounding to avoid losing partial frames
+                contextFrameAdjustment = Int(
+                    (Double(extraContextSamples) / Double(ASRConstants.samplesPerEncoderFrame)).rounded())
             } else {
                 contextFrameAdjustment = 0
             }

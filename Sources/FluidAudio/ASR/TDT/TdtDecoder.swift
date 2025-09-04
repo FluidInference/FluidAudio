@@ -133,6 +133,11 @@ internal struct TdtDecoder {
 
         // If timeJump puts us beyond the available frames, return empty
         if timeIndices >= effectiveSequenceLength {
+            if config.enableDebug {
+                print(
+                    "⚠️  Early exit: timeIndices (\(timeIndices)) >= effectiveSequenceLength (\(effectiveSequenceLength))"
+                )
+            }
             return ([], [])
         }
 
@@ -345,7 +350,10 @@ internal struct TdtDecoder {
 
             // Update activeMask for next iteration
             let newActiveMask = timeIndices < effectiveSequenceLength
-            if activeMask && !newActiveMask {
+            if activeMask && !newActiveMask && config.enableDebug {
+                print(
+                    "🔚 Main loop ending: timeIndices (\(timeIndices)) reached effectiveSequenceLength (\(effectiveSequenceLength))"
+                )
             }
             activeMask = newActiveMask
         }
@@ -354,12 +362,15 @@ internal struct TdtDecoder {
         // For the last chunk, ensure we force emission of any pending tokens
         // Continue processing even after encoder frames are exhausted
         if isLastChunk {
+            if config.enableDebug {
+                print("🏁 LAST CHUNK FINALIZATION: Processing additional tokens beyond effectiveSequenceLength")
+            }
+
             var additionalSteps = 0
             var consecutiveBlanks = 0
-            let maxConsecutiveBlanks = 2  // Exit after 2 blanks in a row
+            let maxConsecutiveBlanks = 3  // Increased for better coverage
             var lastToken = hypothesis.lastToken ?? config.tdtConfig.blankId
-
-            // Last chunk finalization - continue processing even after encoder frames are exhausted
+            var finalProcessingTimeIndices = timeIndices
 
             // Continue until we get consecutive blanks or hit max steps
             while additionalSteps < maxSymbolsPerStep && consecutiveBlanks < maxConsecutiveBlanks {
@@ -382,8 +393,14 @@ internal struct TdtDecoder {
                     )
                 }
 
-                // Use last valid encoder frame if beyond bounds
-                let frameIndex = min(timeIndices, encoderFrames.count - 1)
+                // Use sliding window approach: try different frames near the boundary
+                // to capture tokens that might be emitted at frame boundaries
+                let frameVariations = [
+                    min(finalProcessingTimeIndices, encoderFrames.count - 1),
+                    min(effectiveSequenceLength - 1, encoderFrames.count - 1),
+                    min(max(0, effectiveSequenceLength - 2), encoderFrames.count - 1),
+                ]
+                let frameIndex = frameVariations[additionalSteps % frameVariations.count]
                 let encoderStep = encoderFrames[frameIndex]
 
                 let logits = try runJoint(
@@ -392,26 +409,38 @@ internal struct TdtDecoder {
                     model: jointModel
                 )
 
-                let (tokenLogits, _) = try splitLogits(
+                let (tokenLogits, durationLogits) = try splitLogits(
                     logits, durationElements: config.tdtConfig.durationBins.count)
 
                 let token = argmaxSIMD(tokenLogits)
                 let score = tokenLogits[token]
 
+                // Also get duration for proper timestamp calculation
+                let durationBinIndex = argmaxSIMD(durationLogits)
+                let duration = config.tdtConfig.durationBins[durationBinIndex]
+
                 if token == config.tdtConfig.blankId {
                     consecutiveBlanks += 1
-                    // Blank token - increment consecutive blank counter
+                    if config.enableDebug {
+                        print(
+                            "🔇 Final blank token (\(consecutiveBlanks)/\(maxConsecutiveBlanks)) at step \(additionalSteps)"
+                        )
+                    }
                 } else {
                     consecutiveBlanks = 0  // Reset on non-blank
 
                     // Non-blank token found - emit it
-
-                    // Emit final tokens
                     hypothesis.ySequence.append(token)
                     hypothesis.score += score
-                    // Use clamped timestamp to avoid going beyond effective bounds
-                    hypothesis.timestamps.append(min(timeIndices, effectiveSequenceLength - 1) + globalFrameOffset)
+                    // Use the current processing position for timestamp, ensuring it doesn't exceed bounds
+                    let finalTimestamp =
+                        min(finalProcessingTimeIndices, effectiveSequenceLength - 1) + globalFrameOffset
+                    hypothesis.timestamps.append(finalTimestamp)
                     hypothesis.lastToken = token
+
+                    if config.enableDebug {
+                        print("🎯 FINAL TOKEN: \(token) at frame \(finalTimestamp), step \(additionalSteps)")
+                    }
 
                     // Update decoder state
                     let step = try runDecoder(
@@ -427,11 +456,16 @@ internal struct TdtDecoder {
                     lastToken = token
                 }
 
-                // Always increment steps (don't advance timeIndices beyond bounds)
+                // Advance processing position by predicted duration, but clamp to bounds
+                finalProcessingTimeIndices = min(finalProcessingTimeIndices + max(1, duration), effectiveSequenceLength)
                 additionalSteps += 1
             }
 
-            // Last chunk finalization completed
+            if config.enableDebug {
+                print(
+                    "🏁 Last chunk finalization completed: \(additionalSteps) additional steps, final consecutive blanks: \(consecutiveBlanks)"
+                )
+            }
 
             // Finalize decoder state
             decoderState.finalizeLastChunk()
@@ -465,6 +499,23 @@ internal struct TdtDecoder {
             print(
                 "📊 CHUNK SUMMARY: emitted \(hypothesis.ySequence.count) tokens, timeJump=\(finalTimeJump), isLastChunk=\(isLastChunk)"
             )
+
+            // Additional validation for frame processing
+            print("🔍 FRAME PROCESSING VALIDATION:")
+            print("  - Initial timeIndices: \(contextFrameAdjustment)")
+            print("  - Final timeIndices: \(timeIndices)")
+            print("  - Frames processed in main loop: \(timeIndices - contextFrameAdjustment)")
+            print("  - EffectiveSequenceLength: \(effectiveSequenceLength)")
+            print("  - ActualAudioFrames: \(actualAudioFrames)")
+            print("  - EncoderSequenceLength: \(encoderSequenceLength)")
+
+            // Validate timestamps are within expected bounds
+            if let maxTimestamp = hypothesis.timestamps.max() {
+                let expectedMaxFrame = globalFrameOffset + actualAudioFrames - 1
+                if maxTimestamp > expectedMaxFrame {
+                    print("⚠️  WARNING: Max timestamp (\(maxTimestamp)) exceeds expected range (\(expectedMaxFrame))")
+                }
+            }
         }
 
         // For the last chunk, clear timeJump since there are no more chunks
