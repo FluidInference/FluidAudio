@@ -359,6 +359,8 @@ extension AsrManager {
         }
 
         // Extended search: look for partial overlaps within the sequences
+        // Use boundary search frames from TDT config for NeMo-compatible alignment
+        let boundarySearchFrames = config.tdtConfig.boundarySearchFrames
         for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
             let prevStart = max(0, previous.count - maxSearchLength)
             let prevEnd = previous.count - overlapLength + 1
@@ -368,12 +370,14 @@ extension AsrManager {
                 let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
                 let currEnd = max(0, workingCurrent.count - overlapLength + 1)
 
-                for currentStart in 0..<min(8, currEnd) {  // Increased search range
+                // Use boundarySearchFrames to limit search window (NeMo tdt_search_boundary pattern)
+                let searchLimit = min(boundarySearchFrames, currEnd)
+                for currentStart in 0..<searchLimit {
                     let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
                     if prevSub == currSub {
                         if config.enableDebug {
                             logger.debug(
-                                "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub)"
+                                "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub) (boundarySearch=\(boundarySearchFrames))"
                             )
                         }
                         let finalRemoved = removedCount + currentStart + overlapLength

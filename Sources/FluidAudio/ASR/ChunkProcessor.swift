@@ -110,11 +110,15 @@ struct ChunkProcessor {
     ) async throws -> (tokens: [Int], timestamps: [Int], maxFrame: Int) {
         let remainingSamples = audioSamples.count - centerStart
 
-        // Calculate adaptive context and frame adjustment for last chunk
+        // Calculate context and frame adjustment for all chunks
         let adaptiveLeftContextSamples: Int
         let contextFrameAdjustment: Int
 
-        if isLastChunk && remainingSamples < centerSamples {
+        if segmentIndex == 0 {
+            // First chunk: no overlap, standard context
+            adaptiveLeftContextSamples = leftContextSamples
+            contextFrameAdjustment = 0
+        } else if isLastChunk && remainingSamples < centerSamples {
             // Last chunk can't fill center - maximize context usage
             // Try to use full model capacity (15s) if available
             let desiredTotalSamples = min(maxModelSamples, audioSamples.count)
@@ -135,7 +139,10 @@ struct ChunkProcessor {
                 contextFrameAdjustment = Int(
                     (Double(extraContextSamples) / Double(ASRConstants.samplesPerEncoderFrame)).rounded())
             } else {
-                contextFrameAdjustment = 0
+                // Standard left context for last chunk - need to skip overlap
+                let standardOverlapSamples = leftContextSamples  // 1.6s
+                contextFrameAdjustment = -Int(
+                    (Double(standardOverlapSamples) / Double(ASRConstants.samplesPerEncoderFrame)).rounded())
             }
 
             if enableDebug {
@@ -149,9 +156,24 @@ struct ChunkProcessor {
                     """)
             }
         } else {
-            // Standard context for non-last chunks
+            // Standard non-first, non-last chunk
             adaptiveLeftContextSamples = leftContextSamples
-            contextFrameAdjustment = 0
+
+            // Standard chunks have 1.6s left context that overlaps with previous chunk
+            // Need NEGATIVE adjustment to skip already-processed frames
+            let standardOverlapSamples = leftContextSamples  // 1.6s = 25,600 samples
+            contextFrameAdjustment = -Int(
+                (Double(standardOverlapSamples) / Double(ASRConstants.samplesPerEncoderFrame)).rounded())
+
+            if enableDebug {
+                logger.debug(
+                    """
+                    Standard chunk overlap handling:
+                    - Left context: \(leftContextSamples) samples (\(String(format: "%.2f", Double(leftContextSamples)/16000.0))s)
+                    - Context frame adjustment: \(contextFrameAdjustment) frames (skip overlap)
+                    - Total chunk: \(adaptiveLeftContextSamples + centerSamples + rightContextSamples) samples
+                    """)
+            }
         }
 
         // Compute window bounds in samples: [leftStart, rightEnd)

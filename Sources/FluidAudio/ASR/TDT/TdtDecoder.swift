@@ -95,16 +95,24 @@ internal struct TdtDecoder {
         // contextFrameAdjustment: Adjusts for adaptive context overlap
         var timeIndices: Int
         if let prevTimeJump = decoderState.timeJump {
-            // Streaming continuation: use decoder's internal position tracking
-            // Add context adjustment to account for adaptive context overlap
+            // Streaming continuation: timeJump represents decoder position beyond previous chunk
+            // For the new chunk, we need to account for:
+            // 1. How far the decoder advanced past the previous chunk (prevTimeJump)
+            // 2. The overlap/context between chunks (contextFrameAdjustment)
+            //
+            // If prevTimeJump > 0: decoder went past previous chunk's frames
+            // If contextFrameAdjustment < 0: decoder should skip frames (overlap with previous chunk)
+            // If contextFrameAdjustment > 0: decoder should start later (adaptive context)
+            // Net position = prevTimeJump + contextFrameAdjustment (add adjustment to decoder position)
             timeIndices = max(0, prevTimeJump + contextFrameAdjustment)
+
             if config.enableDebug {
                 print(
-                    "🔄 CHUNK CONTINUATION: timeIndices=\(timeIndices) from prevTimeJump=\(prevTimeJump) + contextAdjustment=\(contextFrameAdjustment)"
+                    "🔄 CHUNK CONTINUATION: prevTimeJump=\(prevTimeJump) + contextAdjustment=\(contextFrameAdjustment) -> timeIndices=\(timeIndices)"
                 )
             }
         } else {
-            // First chunk: start from context adjustment (usually 0)
+            // First chunk: start from beginning, accounting for any context frames that were already processed
             timeIndices = contextFrameAdjustment
             if config.enableDebug {
                 print("🆕 FIRST CHUNK: timeIndices=\(timeIndices) from contextAdjustment=\(contextFrameAdjustment)")
@@ -177,6 +185,7 @@ internal struct TdtDecoder {
         var lastEmissionTimestamp = -1
         var emissionsAtThisTimestamp = 0
         let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep  // Usually 5-10
+        var tokensProcessedThisChunk = 0  // Track tokens per chunk to prevent runaway decoding
 
         // ===== MAIN DECODING LOOP =====
         // Process each encoder frame until we've consumed all audio
@@ -304,15 +313,23 @@ internal struct TdtDecoder {
 
             // Process non-blank token: emit it and update decoder state
             if activeMask && label != blankId {
+                // Check per-chunk token limit to prevent runaway decoding
+                tokensProcessedThisChunk += 1
+                if tokensProcessedThisChunk > config.tdtConfig.maxTokensPerChunk {
+                    if config.enableDebug {
+                        print(
+                            "⚠️  CHUNK TOKEN LIMIT: Stopping after \(tokensProcessedThisChunk) tokens (limit=\(config.tdtConfig.maxTokensPerChunk))"
+                        )
+                    }
+                    break
+                }
+
                 // Add token to output sequence
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
                 hypothesis.lastToken = label  // Remember for next iteration
 
-                print(
-                    "✅ EMITTED: token \(label) at local frame \(timeIndicesCurrentLabels), global frame \(timeIndicesCurrentLabels + globalFrameOffset), total tokens: \(hypothesis.ySequence.count)"
-                )
                 // CRITICAL: Update decoder LSTM with the new token
                 // This updates the language model context for better predictions
                 // Only non-blank tokens update the decoder - this is key!
@@ -368,7 +385,7 @@ internal struct TdtDecoder {
 
             var additionalSteps = 0
             var consecutiveBlanks = 0
-            let maxConsecutiveBlanks = 3  // Increased for better coverage
+            let maxConsecutiveBlanks = config.tdtConfig.consecutiveBlankLimit
             var lastToken = hypothesis.lastToken ?? config.tdtConfig.blankId
             var finalProcessingTimeIndices = timeIndices
 
@@ -509,11 +526,25 @@ internal struct TdtDecoder {
             print("  - ActualAudioFrames: \(actualAudioFrames)")
             print("  - EncoderSequenceLength: \(encoderSequenceLength)")
 
-            // Validate timestamps are within expected bounds
-            if let maxTimestamp = hypothesis.timestamps.max() {
+            // Validate timestamps are within expected bounds and frame offset consistency
+            if let maxTimestamp = hypothesis.timestamps.max(), let minTimestamp = hypothesis.timestamps.min() {
                 let expectedMaxFrame = globalFrameOffset + actualAudioFrames - 1
+                let expectedMinFrame = globalFrameOffset + contextFrameAdjustment
+
                 if maxTimestamp > expectedMaxFrame {
                     print("⚠️  WARNING: Max timestamp (\(maxTimestamp)) exceeds expected range (\(expectedMaxFrame))")
+                }
+
+                if minTimestamp < expectedMinFrame {
+                    print("⚠️  WARNING: Min timestamp (\(minTimestamp)) below expected minimum (\(expectedMinFrame))")
+                }
+
+                // Verify timeJump calculation consistency
+                if let prevTimeJump = decoderState.timeJump {
+                    let expectedTimeJump = timeIndices - effectiveSequenceLength
+                    if prevTimeJump != expectedTimeJump {
+                        print("🔍 TIME JUMP CONSISTENCY: calculated=\(expectedTimeJump), stored=\(prevTimeJump)")
+                    }
                 }
             }
         }
