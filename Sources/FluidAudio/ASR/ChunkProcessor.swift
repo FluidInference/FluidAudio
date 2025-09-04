@@ -55,7 +55,7 @@ struct ChunkProcessor {
             // For chunks after the first, check for and remove duplicated token sequences
             if segmentIndex > 0 && !allTokens.isEmpty && !windowTokens.isEmpty {
                 let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
-                    previous: allTokens, current: windowTokens)
+                    previous: allTokens, current: windowTokens, maxOverlap: 30)
                 let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
 
                 allTokens.append(contentsOf: deduped)
@@ -128,29 +128,42 @@ struct ChunkProcessor {
             let neededLeftContext = desiredTotalSamples - remainingSamples
             adaptiveLeftContextSamples = min(neededLeftContext, maxLeftContext)
 
-            // CRITICAL: Calculate frame adjustment for timeJump
-            // If we're pulling in more left context than usual, we need to adjust timeJump
-            // to account for the extra frames that were already processed
-            if adaptiveLeftContextSamples > leftContextSamples {
-                // Extra context beyond standard = frames to adjust timeJump by
-                let extraContextSamples = adaptiveLeftContextSamples - leftContextSamples
-                // Convert samples to encoder frames with proper rounding (1 frame = 0.08s = 1280 samples at 16kHz)
-                // Use floating-point division and rounding to avoid losing partial frames
-                contextFrameAdjustment = Int(
-                    (Double(extraContextSamples) / Double(ASRConstants.samplesPerEncoderFrame)).rounded())
+            // CRITICAL: For last chunks, handle overlap carefully based on where previous chunk ended
+            // The goal is to continue from where we left off while allowing deduplication to work
+
+            if segmentIndex > 0 && lastProcessedFrame > 0 {
+                // Calculate where this chunk starts in global frame space
+                let chunkLeftStart = max(0, centerStart - adaptiveLeftContextSamples)
+                let chunkStartFrame = chunkLeftStart / ASRConstants.samplesPerEncoderFrame
+
+                // Calculate the theoretical overlap
+                let theoreticalOverlap = lastProcessedFrame - chunkStartFrame
+
+                if theoreticalOverlap > 0 {
+                    // Use the actual overlap but with a buffer for decoder to process new content
+                    // 25-frame buffer balances avoiding duplication with capturing remaining content
+                    contextFrameAdjustment = max(0, theoreticalOverlap - 25)
+                } else {
+                    // No overlap or gap - use minimal overlap for continuity
+                    contextFrameAdjustment = 5  // 0.4s minimal overlap
+                }
             } else {
-                // Standard left context for last chunk - need to skip overlap
-                let standardOverlapSamples = leftContextSamples  // 1.6s
-                contextFrameAdjustment = -Int(
-                    (Double(standardOverlapSamples) / Double(ASRConstants.samplesPerEncoderFrame)).rounded())
+                // First chunk - no adjustment needed
+                contextFrameAdjustment = 0
             }
 
             if enableDebug {
+                let chunkLeftStart = max(0, centerStart - adaptiveLeftContextSamples)
+                let chunkStartFrame = chunkLeftStart / ASRConstants.samplesPerEncoderFrame
+                let theoreticalOverlap = lastProcessedFrame - chunkStartFrame
+
                 logger.debug(
                     """
                     Last chunk adaptive context:
                     - Remaining: \(remainingSamples) samples (\(String(format: "%.2f", Double(remainingSamples)/16000.0))s)
                     - Adaptive left context: \(adaptiveLeftContextSamples) samples (\(String(format: "%.2f", Double(adaptiveLeftContextSamples)/16000.0))s)
+                    - Chunk start frame: \(chunkStartFrame), Last processed: \(lastProcessedFrame)
+                    - Theoretical overlap: \(theoreticalOverlap) frames
                     - Context frame adjustment: \(contextFrameAdjustment) frames (adjusting timeJump for \(contextFrameAdjustment * ASRConstants.samplesPerEncoderFrame) samples)
                     - Total chunk: \(adaptiveLeftContextSamples + remainingSamples) samples
                     """)
