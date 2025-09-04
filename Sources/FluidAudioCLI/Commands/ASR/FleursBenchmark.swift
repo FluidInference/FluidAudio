@@ -73,6 +73,18 @@ public class FLEURSBenchmark {
         let processingTime: Double
     }
 
+    public struct HighWERCase {
+        let language: String
+        let sampleId: String
+        let reference: String
+        let hypothesis: String
+        let normalizedRef: String
+        let normalizedHyp: String
+        let wer: Double
+        let duration: Double
+        let audioPath: String
+    }
+
     private let config: FLEURSConfig
 
     public init(config: FLEURSConfig) {
@@ -340,11 +352,14 @@ public class FLEURSBenchmark {
     }
 
     /// Run multilingual benchmark
-    public func runMultilingualBenchmark(asrManager: AsrManager) async throws -> [LanguageResults] {
+    public func runMultilingualBenchmark(
+        asrManager: AsrManager
+    ) async throws -> (results: [LanguageResults], allHighWERCases: [HighWERCase]) {
         print("\n Starting FLEURS Multilingual ASR Benchmark")
         print(String(repeating: "=", count: 50))
 
         var results: [LanguageResults] = []
+        var allHighWERCases: [HighWERCase] = []
 
         // Download datasets if needed
         try await downloadFLEURS(languages: config.languages)
@@ -354,7 +369,7 @@ public class FLEURSBenchmark {
 
         if samples.isEmpty {
             print("⚠️ No samples found. Please ensure FLEURS data is available.")
-            return []
+            return ([], [])
         }
 
         print("\n📊 Processing \(samples.count) samples across \(config.languages.count) languages")
@@ -365,13 +380,14 @@ public class FLEURSBenchmark {
         for (language, languageSamples) in languageGroups {
             print("\n🔤 Processing \(supportedLanguages[language] ?? language)...")
 
-            let languageResult = try await processLanguageSamples(
+            let (languageResult, highWERCases) = try await processLanguageSamples(
                 samples: languageSamples,
                 language: language,
                 asrManager: asrManager
             )
 
             results.append(languageResult)
+            allHighWERCases.append(contentsOf: highWERCases)
 
             // Print language summary
             let skippedInfo = languageResult.samplesSkipped > 0 ? ", \(languageResult.samplesSkipped) skipped" : ""
@@ -380,7 +396,7 @@ public class FLEURSBenchmark {
             )
         }
 
-        return results
+        return (results, allHighWERCases)
     }
 
     /// Process samples for a specific language
@@ -388,7 +404,7 @@ public class FLEURSBenchmark {
         samples: [FLEURSSample],
         language: String,
         asrManager: AsrManager
-    ) async throws -> LanguageResults {
+    ) async throws -> (LanguageResults, [HighWERCase]) {
         var totalWER = 0.0
         var totalCER = 0.0
         var totalDuration = 0.0
@@ -397,11 +413,7 @@ public class FLEURSBenchmark {
         var skippedCount = 0
 
         // Track high WER cases for analysis
-        var highWERCases:
-            [(
-                sampleId: String, reference: String, hypothesis: String, normalizedRef: String, normalizedHyp: String,
-                wer: Double, duration: Double, audioPath: String
-            )] = []
+        var highWERCases: [HighWERCase] = []
 
         for (_, sample) in samples.enumerated() {
             // Skip if audio file doesn't exist
@@ -445,7 +457,8 @@ public class FLEURSBenchmark {
                         let normalizedRef = TextNormalizer.normalize(sample.transcription)
                         let normalizedHyp = TextNormalizer.normalize(result.text)
                         highWERCases.append(
-                            (
+                            HighWERCase(
+                                language: language,
                                 sampleId: sample.sampleId,
                                 reference: sample.transcription,
                                 hypothesis: result.text,
@@ -479,48 +492,17 @@ public class FLEURSBenchmark {
         let avgCER = processedCount > 0 ? totalCER / Double(processedCount) : 0.0
         let rtfx = totalProcessingTime > 0 ? totalDuration / totalProcessingTime : 0.0
 
-        // Print high WER cases for analysis
-        if !highWERCases.isEmpty {
-            print("\n🔍 High WER Cases (>8%) for \(supportedLanguages[language] ?? language):")
-            print(String(repeating: "=", count: 80))
-            for sample in highWERCases.sorted(by: { $0.wer > $1.wer }) {
-                let werPercent = sample.wer * 100
-                print(
-                    "\nFile: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
-                )
-                print("Path: \(sample.audioPath)")
-                print(String(repeating: "-", count: 60))
-
-                // Normalize the texts for comparison
-                let normalizedReference = sample.normalizedRef
-                let normalizedHypothesis = sample.normalizedHyp
-
-                let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
-                    !$0.isEmpty
-                }
-                let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter {
-                    !$0.isEmpty
-                }
-
-                // Generate inline diff
-                let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
-
-                print("\nNormalized Reference:\t\(referenceDiff)")
-                print("Normalized Hypothesis:\t\(hypothesisDiff)")
-                print("Original Hypothesis:\t\(sample.hypothesis)")
-                print(String(repeating: "-", count: 60))
-            }
-        }
-
-        return LanguageResults(
-            language: language,
-            wer: avgWER,
-            cer: avgCER,
-            rtfx: rtfx,
-            samplesProcessed: processedCount,
-            samplesSkipped: skippedCount,
-            totalDuration: totalDuration,
-            processingTime: totalProcessingTime
+        return (
+            LanguageResults(
+                language: language,
+                wer: avgWER,
+                cer: avgCER,
+                rtfx: rtfx,
+                samplesProcessed: processedCount,
+                samplesSkipped: skippedCount,
+                totalDuration: totalDuration,
+                processingTime: totalProcessingTime
+            ), highWERCases
         )
     }
 
@@ -681,6 +663,53 @@ public class FLEURSBenchmark {
         return (refString, hypString)
     }
 
+    /// Print all high WER cases collected across all languages
+    public func printAllHighWERCases(_ allHighWERCases: [HighWERCase]) {
+        if !allHighWERCases.isEmpty {
+            print("\n🔍 All High WER Cases (>8%) Across Languages:")
+            print(String(repeating: "=", count: 80))
+
+            // Group by language and sort
+            let groupedCases = Dictionary(grouping: allHighWERCases, by: { $0.language })
+
+            for language in groupedCases.keys.sorted() {
+                let cases = groupedCases[language]!.sorted(by: { $0.wer > $1.wer })
+
+                print("\n🔤 \(supportedLanguages[language] ?? language) (\(cases.count) high WER cases):")
+                print(String(repeating: "-", count: 60))
+
+                for sample in cases {
+                    let werPercent = sample.wer * 100
+                    print(
+                        "\nFile: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
+                    )
+                    print("Path: \(sample.audioPath)")
+                    print(String(repeating: "-", count: 40))
+
+                    // Normalize the texts for comparison
+                    let normalizedReference = sample.normalizedRef
+                    let normalizedHypothesis = sample.normalizedHyp
+
+                    let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
+                        !$0.isEmpty
+                    }
+                    let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter {
+                        !$0.isEmpty
+                    }
+
+                    // Generate inline diff
+                    let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
+
+                    print("\nNormalized Reference:\t\(referenceDiff)")
+                    print("Normalized Hypothesis:\t\(hypothesisDiff)")
+                    print("Original Hypothesis:\t\(sample.hypothesis)")
+                    print(String(repeating: "-", count: 40))
+                }
+            }
+            print(String(repeating: "=", count: 80))
+        }
+    }
+
     /// Save results to JSON
     public func saveResults(_ results: [LanguageResults], to outputPath: String) throws {
         // Helper function to sanitize NaN and Infinity values
@@ -821,7 +850,7 @@ extension FLEURSBenchmark {
             print("✓ ASR system initialized")
 
             // Run benchmark
-            let results = try await benchmark.runMultilingualBenchmark(asrManager: asrManager)
+            let (results, allHighWERCases) = try await benchmark.runMultilingualBenchmark(asrManager: asrManager)
 
             // Save results
             try benchmark.saveResults(results, to: outputFile)
@@ -900,6 +929,9 @@ extension FLEURSBenchmark {
             if totalSkipped > 0 {
                 print("\n⚠️ Note: \(totalSkipped) samples were skipped due to audio loading errors")
             }
+
+            // Print all high WER cases at the end
+            benchmark.printAllHighWERCases(allHighWERCases)
 
             print("\n✓ Results saved to: \(outputFile)")
 
