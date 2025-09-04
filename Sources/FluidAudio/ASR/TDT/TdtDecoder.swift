@@ -122,7 +122,6 @@ internal struct TdtDecoder {
         // Use the minimum of encoder sequence length and actual audio frames to avoid processing padding
         let effectiveSequenceLength = min(encoderSequenceLength, actualAudioFrames)
 
-
         // Key variables for frame navigation:
         var safeTimeIndices = min(timeIndices, effectiveSequenceLength - 1)  // Bounds-checked index
         var timeIndicesCurrentLabels = timeIndices  // Frame where current token was emitted
@@ -421,7 +420,6 @@ internal struct TdtDecoder {
                     hypothesis.timestamps.append(finalTimestamp)
                     hypothesis.lastToken = token
 
-
                     // Update decoder state
                     let step = try runDecoder(
                         token: token,
@@ -440,7 +438,6 @@ internal struct TdtDecoder {
                 finalProcessingTimeIndices = min(finalProcessingTimeIndices + max(1, duration), effectiveSequenceLength)
                 additionalSteps += 1
             }
-
 
             // Finalize decoder state
             decoderState.finalizeLastChunk()
@@ -466,7 +463,6 @@ internal struct TdtDecoder {
         // Formula: timeJump = finalPosition - effectiveFrames
         let finalTimeJump = timeIndices - effectiveSequenceLength
         decoderState.timeJump = finalTimeJump
-
 
         // For the last chunk, clear timeJump since there are no more chunks
         if isLastChunk {

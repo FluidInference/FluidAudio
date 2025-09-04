@@ -64,7 +64,6 @@ struct ChunkProcessor {
                 allTimestamps.append(contentsOf: windowTimestamps)
             }
 
-
             centerStart += centerSamples
 
             segmentIndex += 1
@@ -73,7 +72,6 @@ struct ChunkProcessor {
         let expectedTotalFrames = ASRConstants.calculateEncoderFrames(from: audioSamples.count)
         let processedCenterFrames =
             segmentIndex * Int(centerSeconds * Double(sampleRate)) / ASRConstants.samplesPerEncoderFrame
-
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
@@ -192,7 +190,6 @@ struct ChunkProcessor {
 
         // Calculate global frame offset for this chunk
         let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
-
 
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
