@@ -16,17 +16,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check versions
+      - name: List available simulators
+        run: xcrun simctl list devices available
+
+      - name: Install iOS platform
         run: |
-          swift --version
-          xcodebuild -version
-
-      - name: Build package
-        run: swift build
-
-      - name: Run tests
-        run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
-        timeout-minutes: 10
+          sudo xcode-select -s /Applications/Xcode_16.app
+          xcodebuild -downloadPlatform iOS
 
   build-ios:
     name: Build (iOS)

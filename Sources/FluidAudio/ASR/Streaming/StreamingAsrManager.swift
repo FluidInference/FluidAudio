@@ -1,9 +1,25 @@
 import AVFoundation
+import CoreMedia
 import Foundation
 import OSLog
 
-/// A high-level streaming ASR manager that provides a simple API for real-time transcription
-/// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
+/// High-level streaming ASR manager for real-time transcription
+///
+/// Provides a simple API similar to Apple's SpeechAnalyzer, handling audio conversion
+/// and buffering automatically. Supports both volatile (real-time) and final (corrected)
+/// transcription updates for responsive user interfaces.
+///
+/// **Basic Usage:**
+/// ```swift
+/// let streamingAsr = StreamingAsrManager()
+/// try await streamingAsr.start()
+///
+/// // Listen for transcription updates
+/// for await snapshot in streamingAsr.snapshots {
+///     updateUI(finalized: snapshot.finalized, volatile: snapshot.volatile)
+/// }
+/// ```
+///
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "StreamingASR")
@@ -15,7 +31,8 @@ public actor StreamingAsrManager {
     private let inputBuilder: AsyncStream<AVAudioPCMBuffer>.Continuation
 
     // Transcription output stream
-    private var updateContinuation: AsyncStream<StreamingTranscriptionUpdate>.Continuation?
+    private var snapshotsContinuation: AsyncStream<StreamingTranscriptSnapshot>.Continuation?
+    private var snapshotsStream: AsyncStream<StreamingTranscriptSnapshot>?
 
     // ASR components
     private var asrManager: AsrManager?
@@ -26,24 +43,51 @@ public actor StreamingAsrManager {
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
     private var accumulatedTokens: [Int] = []
+    private let maxAccumulatedTokens = 5000  // Limit to prevent memory growth
+
+    // Segment tracking to prevent duplicates
+    private var finalizedSegments: Set<UUID> = []
+    private var segmentFinalTexts: [(UUID, String)] = []  // Track final text per segment in order
+    private var timestampedSegments: [TimestampedSegment] = []
+    private let maxSegmentTexts = 100  // Circular buffer limit
+    private var cachedFinalizedTranscript: String = ""  // Cache to avoid rebuilding
+    private var lastFinalizedText: String = ""
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
     private var bufferStartIndex: Int = 0  // absolute index of sampleBuffer[0]
-    private var nextWindowCenterStart: Int = 0  // absolute index where next chunk (center) begins
+
+    // Simplified segment processing
+    private struct CurrentSegment {
+        var id: UUID
+        var centerStartAbs: Int
+        var chunkSamples: Int
+        var revision: Int
+        var emittedFinal: Bool
+        var lastInterimUpdate: Int  // Last sample position where we emitted an interim result
+    }
+    private var currentSegment: CurrentSegment = .init(
+        id: UUID(), centerStartAbs: 0, chunkSamples: 0, revision: 0, emittedFinal: false, lastInterimUpdate: 0
+    )
 
     // Two-tier transcription state (like Apple's Speech API)
     public private(set) var volatileTranscript: String = ""
-    public private(set) var confirmedTranscript: String = ""
+    public private(set) var finalizedTranscript: String = "" {
+        didSet {
+            cachedFinalizedTranscript = finalizedTranscript
+        }
+    }
 
     /// The audio source this stream is configured for
     public var source: AudioSource {
         return audioSource
     }
 
-    // Metrics
+    // Metrics and performance monitoring
     private var startTime: Date?
     private var processedChunks: Int = 0
+    private var lastMemoryCleanup: Date = Date()
+    private let memoryCleanupInterval: TimeInterval = 30.0  // Cleanup every 30 seconds
 
     /// Initialize the streaming ASR manager
     /// - Parameter config: Configuration for streaming behavior
@@ -55,8 +99,13 @@ public actor StreamingAsrManager {
         self.inputSequence = stream
         self.inputBuilder = continuation
 
+        // Initialize snapshots stream eagerly to avoid race conditions
+        let (snapshotStream, snapshotContinuation) = AsyncStream<StreamingTranscriptSnapshot>.makeStream()
+        self.snapshotsStream = snapshotStream
+        self.snapshotsContinuation = snapshotContinuation
+
         logger.info(
-            "Initialized StreamingAsrManager with config: chunk=\(config.chunkSeconds)s left=\(config.leftContextSeconds)s right=\(config.rightContextSeconds)s"
+            "Initialized StreamingAsrManager with mode: \(String(describing: config.mode)), chunk=\(config.chunkSeconds)s"
         )
     }
 
@@ -94,7 +143,20 @@ public actor StreamingAsrManager {
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
 
+        // Reset transcript tracking
+        finalizedSegments.removeAll()
+        segmentFinalTexts.removeAll()
+        timestampedSegments.removeAll()
+        finalizedTranscript = ""
+        volatileTranscript = ""
+
         startTime = Date()
+
+        // Initialize first segment
+        currentSegment = CurrentSegment(
+            id: UUID(), centerStartAbs: 0, chunkSamples: config.chunkSamples, revision: 0,
+            emittedFinal: false, lastInterimUpdate: 0
+        )
 
         // Start background recognition task
         recognizerTask = Task {
@@ -115,7 +177,7 @@ public actor StreamingAsrManager {
                 }
             }
 
-            // Stream ended: flush remaining audio (without requiring full right context)
+            // Stream ended: flush remaining audio and finalize any active range
             await self.flushRemaining()
 
             logger.info("Recognition task completed")
@@ -130,17 +192,16 @@ public actor StreamingAsrManager {
         inputBuilder.yield(buffer)
     }
 
-    /// Get an async stream of transcription updates
-    public var transcriptionUpdates: AsyncStream<StreamingTranscriptionUpdate> {
-        AsyncStream { continuation in
-            self.updateContinuation = continuation
-
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in
-                    await self?.clearUpdateContinuation()
-                }
+    /// Snapshot stream: the concatenated finalized + current volatile transcript
+    public var snapshots: AsyncStream<StreamingTranscriptSnapshot> {
+        guard let stream = snapshotsStream else {
+            // Fallback - should not happen with eager initialization
+            logger.warning("Snapshots stream was not initialized, creating fallback")
+            return AsyncStream { continuation in
+                continuation.finish()
             }
         }
+        return stream
     }
 
     /// Finish streaming and get the final transcription
@@ -159,9 +220,14 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text (proper way to avoid duplicates)
-        let finalText: String
-        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
+        // Force process any remaining segments
+        await processSegmentsIfPossible(forceFinalize: true)
+
+        // Use the cleaned finalized transcript (now properly deduplicated)
+        let finalText = finalizedTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Fallback to accumulated tokens only if finalized transcript is empty
+        if finalText.isEmpty && !accumulatedTokens.isEmpty, let asrManager = asrManager {
             let finalResult = asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
@@ -169,44 +235,36 @@ public actor StreamingAsrManager {
                 audioSamples: [],  // Not needed for final text conversion
                 processingTime: 0
             )
-            finalText = finalResult.text
-        } else {
-            // Fallback to text concatenation if no tokens available
-            finalText = confirmedTranscript + volatileTranscript
+            return finalResult.text
         }
+
+        // Reset decoder state and clean up resources
+        if let asrManager = asrManager {
+            try await asrManager.resetDecoderState(for: audioSource)
+            logger.debug("Reset decoder state after finishing")
+        }
+
+        // Clean up continuations safely
+        snapshotsContinuation?.finish()
+        snapshotsContinuation = nil
+        snapshotsStream = nil
+
+        // Clean up audio converter state
+        await audioConverter.cleanup()
 
         logger.info("Final transcription: \(finalText.count) characters")
         return finalText
-    }
-
-    /// Reset the transcriber for a new session
-    public func reset() async throws {
-        volatileTranscript = ""
-        confirmedTranscript = ""
-        processedChunks = 0
-        startTime = Date()
-        sampleBuffer.removeAll(keepingCapacity: false)
-        bufferStartIndex = 0
-        nextWindowCenterStart = 0
-
-        // Reset decoder state for the current audio source
-        if let asrManager = asrManager {
-            try await asrManager.resetDecoderState(for: audioSource)
-        }
-
-        // Reset sliding window state
-        segmentIndex = 0
-        lastProcessedFrame = 0
-        accumulatedTokens.removeAll()
-
-        logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
 
     /// Cancel streaming without getting results
     public func cancel() async {
         inputBuilder.finish()
         recognizerTask?.cancel()
-        updateContinuation?.finish()
+
+        // Clean up continuations safely
+        snapshotsContinuation?.finish()
+        snapshotsContinuation = nil
+        snapshotsStream = nil
 
         // Cleanup audio converter state
         await audioConverter.cleanup()
@@ -214,92 +272,39 @@ public actor StreamingAsrManager {
         logger.info("StreamingAsrManager cancelled")
     }
 
-    /// Clear the update continuation
-    private func clearUpdateContinuation() {
-        updateContinuation = nil
+    /// Clear continuations
+    private func clearSnapshotsContinuation() {
+        snapshotsContinuation = nil
+        snapshotsStream = nil
     }
 
     // MARK: - Private Methods
 
-    /// Append new samples and process as many windows as available
+    /// Append new samples and process the current segment when thresholds are met
     private func appendSamplesAndProcess(_ samples: [Float]) async {
         // Append samples to buffer
         sampleBuffer.append(contentsOf: samples)
 
-        // Process while we have at least chunk + right ahead of the current center start
-        let chunk = config.chunkSamples
-        let right = config.rightContextSamples
-        let left = config.leftContextSamples
-        let sampleRate = config.asrConfig.sampleRate
-
-        var currentAbsEnd = bufferStartIndex + sampleBuffer.count
-        while currentAbsEnd >= (nextWindowCenterStart + chunk + right) {
-            let leftStartAbs = max(0, nextWindowCenterStart - left)
-            let rightEndAbs = nextWindowCenterStart + chunk + right
-            let startIdx = max(leftStartAbs - bufferStartIndex, 0)
-            let endIdx = rightEndAbs - bufferStartIndex
-            if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx {
-                break
-            }
-
-            let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
-
-            // Advance by chunk size
-            nextWindowCenterStart += chunk
-
-            // Trim buffer to keep only what's needed for left context
-            let trimToAbs = max(0, nextWindowCenterStart - left)
-            let dropCount = max(0, trimToAbs - bufferStartIndex)
-            if dropCount > 0 && dropCount <= sampleBuffer.count {
-                sampleBuffer.removeFirst(dropCount)
-                bufferStartIndex += dropCount
-            }
-
-            currentAbsEnd = bufferStartIndex + sampleBuffer.count
-        }
+        await processSegmentsIfPossible()
     }
 
     /// Flush any remaining audio at end of stream (no right-context requirement)
     private func flushRemaining() async {
-        let chunk = config.chunkSamples
-        let left = config.leftContextSamples
-        let sampleRate = config.asrConfig.sampleRate
-
-        var currentAbsEnd = bufferStartIndex + sampleBuffer.count
-        while currentAbsEnd > nextWindowCenterStart {  // process until we exhaust
-            // If we have less than a chunk ahead, process the final partial chunk
-            let availableAhead = currentAbsEnd - nextWindowCenterStart
-            if availableAhead <= 0 { break }
-            let effectiveChunk = min(chunk, availableAhead)
-
-            let leftStartAbs = max(0, nextWindowCenterStart - left)
-            let rightEndAbs = nextWindowCenterStart + effectiveChunk
-            let startIdx = max(leftStartAbs - bufferStartIndex, 0)
-            let endIdx = max(rightEndAbs - bufferStartIndex, startIdx)
-            if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
-
-            let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
-
-            nextWindowCenterStart += effectiveChunk
-
-            // Trim
-            let trimToAbs = max(0, nextWindowCenterStart - left)
-            let dropCount = max(0, trimToAbs - bufferStartIndex)
-            if dropCount > 0 && dropCount <= sampleBuffer.count {
-                sampleBuffer.removeFirst(dropCount)
-                bufferStartIndex += dropCount
-            }
-
-            currentAbsEnd = bufferStartIndex + sampleBuffer.count
-        }
+        // Finalize the current segment with whatever right-context is available,
+        // then advance and attempt to process any remaining partial segments until exhausted.
+        await processSegmentsIfPossible(forceFinalize: true)
     }
 
     /// Process a single assembled window: [left, chunk, right]
-    private func processWindow(_ windowSamples: [Float], actualLeftSeconds: Double) async {
+    private func processWindow(
+        _ windowSamples: [Float],
+        actualLeftSeconds: Double,
+        segmentID: UUID,
+        centerStartAbs: Int,
+        chunkSamples: Int,
+        revision: Int,
+        isFinal: Bool
+    ) async {
         guard let asrManager = asrManager else { return }
 
         do {
@@ -315,13 +320,29 @@ public actor StreamingAsrManager {
                 enableDebug: config.enableDebug
             )
 
-            // Update state
+            // Update state with token window management
             accumulatedTokens.append(contentsOf: tokens)
+
+            // Keep only recent tokens to prevent unbounded growth
+            if accumulatedTokens.count > maxAccumulatedTokens {
+                let removeCount = accumulatedTokens.count - maxAccumulatedTokens
+                accumulatedTokens.removeFirst(removeCount)
+                logger.debug("Trimmed \(removeCount) old tokens, keeping \(self.maxAccumulatedTokens) recent tokens")
+            }
+
             lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? 0)
             segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1
+
+            // Periodic memory cleanup for long-running streams
+            let now = Date()
+            if now.timeIntervalSince(lastMemoryCleanup) > memoryCleanupInterval {
+                lastMemoryCleanup = now
+                logger.debug("Performing periodic memory cleanup after \(self.processedChunks) chunks")
+                cleanupOldSegments()
+            }
 
             // Convert only the current chunk tokens to text for clean incremental updates
             // The final result will use all accumulated tokens for proper deduplication
@@ -333,27 +354,37 @@ public actor StreamingAsrManager {
                 processingTime: processingTime
             )
 
-            logger.debug(
-                "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
+            // Skip empty text and garbage artifacts to reduce noise
+            let trimmed = interim.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || isGarbageText(trimmed) {
+                return
+            }
+
+            // Calculate timing information for this segment
+            let sampleRate = Double(config.asrConfig.sampleRate)
+            let startTimeSeconds = Double(centerStartAbs) / sampleRate
+            let endTimeSeconds = Double(centerStartAbs + chunkSamples) / sampleRate
+
+            // Update transcript builder (volatile or final)
+            await updateTranscriptBuilder(
+                text: trimmed,
+                isFinal: isFinal,
+                segmentID: segmentID,
+                startTime: startTimeSeconds,
+                endTime: endTimeSeconds
             )
 
-            // Apply confidence-based confirmation logic (uses configured threshold)
-            await updateTranscriptionState(with: interim)
-
-            // Emit update based on progressive confidence model
-            let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
-            let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
-            let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
-            let shouldConfirm = isHighConfidence && hasMinimumContext
-
-            let update = StreamingTranscriptionUpdate(
-                text: interim.text,
-                isConfirmed: shouldConfirm,
-                confidence: interim.confidence,
-                timestamp: Date()
+            // Emit snapshot
+            let snapshot = StreamingTranscriptSnapshot(
+                finalized: AttributedString(finalizedTranscript),
+                volatile: volatileTranscript.isEmpty ? nil : AttributedString(volatileTranscript),
+                lastUpdated: Date(),
+                timestampedSegments: timestampedSegments
             )
-
-            updateContinuation?.yield(update)
+            // Safe continuation access
+            if let continuation = snapshotsContinuation {
+                continuation.yield(snapshot)
+            }
 
         } catch {
             let streamingError = StreamingAsrError.modelProcessingFailed(error)
@@ -364,38 +395,249 @@ public actor StreamingAsrManager {
         }
     }
 
-    /// Update transcription state based on confidence and context duration
-    private func updateTranscriptionState(with result: ASRResult) async {
-        let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
-        let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
-        let isHighConfidence = Double(result.confidence) >= config.confirmationThreshold
-
-        // Progressive confidence model:
-        // 1. Always show text immediately as volatile for responsiveness
-        // 2. Only confirm text when we have both high confidence AND sufficient context
-        let shouldConfirm = isHighConfidence && hasMinimumContext
-
-        if shouldConfirm {
-            // Move volatile text to confirmed and set new text as volatile
-            if !volatileTranscript.isEmpty {
-                var components: [String] = []
-                if !confirmedTranscript.isEmpty {
-                    components.append(confirmedTranscript)
-                }
-                components.append(volatileTranscript)
-                confirmedTranscript = components.joined(separator: " ")
+    /// Update transcript strings for snapshotting
+    private func updateTranscriptBuilder(
+        text: String, isFinal: Bool, segmentID: UUID, startTime: TimeInterval = 0, endTime: TimeInterval = 0
+    ) async {
+        if isFinal {
+            // Only process each segment once
+            guard !finalizedSegments.contains(segmentID) else {
+                return
             }
-            volatileTranscript = result.text
+
+            finalizedSegments.insert(segmentID)
+
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedText.isEmpty && !isGarbageText(trimmedText) {
+                // Store the final text for this specific segment in chronological order
+                segmentFinalTexts.append((segmentID, trimmedText))
+
+                // Store the timestamped segment with timing information
+                let timestampedSegment = TimestampedSegment(
+                    id: segmentID,
+                    text: trimmedText,
+                    startTime: startTime,
+                    endTime: endTime,
+                    confidence: 1.0  // TODO: Pass actual confidence from processing
+                )
+                timestampedSegments.append(timestampedSegment)
+
+                // Clean up old segments to prevent unbounded memory growth
+                cleanupOldSegments()
+
+                // Rebuild the complete finalized transcript from segment texts only
+                rebuildFinalizedTranscript()
+
+                lastFinalizedText = trimmedText
+            }
+
+            // Clear volatile transcript only after finalizing
+            volatileTranscript = ""
+        } else {
+            // For volatile updates, replace the entire volatile transcript
+            let trimmedVolatile = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            volatileTranscript = isGarbageText(trimmedVolatile) ? "" : trimmedVolatile
+        }
+    }
+
+    /// Efficiently rebuild the finalized transcript from stored segment texts
+    private func rebuildFinalizedTranscript() {
+        guard !segmentFinalTexts.isEmpty else {
+            finalizedTranscript = ""
+            return
+        }
+
+        // Use more efficient concatenation for large transcripts
+        if segmentFinalTexts.count > 10 {
+            var result = ""
+            result.reserveCapacity(segmentFinalTexts.reduce(0) { $0 + $1.1.count } + segmentFinalTexts.count)
+            for (index, segment) in segmentFinalTexts.enumerated() {
+                if index > 0 { result += " " }
+                result += segment.1
+            }
+            finalizedTranscript = result
+        } else {
+            finalizedTranscript = segmentFinalTexts.map { $0.1 }.joined(separator: " ")
+        }
+    }
+
+    /// Clean up old segments to prevent unbounded memory growth
+    /// Maintains only the most recent segments as a circular buffer
+    private func cleanupOldSegments() {
+        guard segmentFinalTexts.count > maxSegmentTexts else { return }
+
+        // Remove oldest segments but keep the finalized transcript intact
+        let excessCount = segmentFinalTexts.count - maxSegmentTexts
+
+        // Get UUIDs of segments we're about to remove
+        let removedSegmentIDs = Set(segmentFinalTexts.prefix(excessCount).map { $0.0 })
+
+        // Remove from all three collections
+        segmentFinalTexts.removeFirst(excessCount)
+        timestampedSegments.removeFirst(excessCount)  // Keep in sync with segmentFinalTexts
+        finalizedSegments.subtract(removedSegmentIDs)
+
+        logger.debug("Cleaned up \(excessCount) old segments, keeping \(self.segmentFinalTexts.count) recent segments")
+    }
+
+    /// Process a final segment with extended left context for consistent window size
+    private func processFinalSegment(center: Int, chunk: Int, currentAbsEnd: Int, forceFinalize: Bool) async -> Bool {
+        let sampleRate = config.asrConfig.sampleRate
+        let left = config.leftContextSamples
+        let rightFinal = config.rightContextSamples
+
+        let canEmitFinal = currentAbsEnd >= (center + chunk + rightFinal) || forceFinalize
+        guard canEmitFinal else { return false }
+
+        let availableAhead = max(0, currentAbsEnd - center)
+        let effectiveChunk = min(chunk, availableAhead)
+
+        // Calculate extended left context to maintain consistent window size
+        let actualLeftContext: Int
+        if forceFinalize {
+            // For final segments, extend left context so that left + chunk = expected chunk size
+            // This ensures the model gets a consistent context window
+            let missingChunk = chunk - effectiveChunk  // How much shorter the final chunk is
+            let extendedLeft = left + missingChunk  // Compensate with more left context
+
+            // Ensure we don't exceed available audio (can't go before start)
+            let maxAvailableLeft = center
+            actualLeftContext = min(extendedLeft, maxAvailableLeft)
+
             logger.debug(
-                "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(result.text)'"
+                "Final segment: extending left context from \(left) to \(actualLeftContext) samples (chunk: \(effectiveChunk)/\(chunk), missing: \(missingChunk))"
             )
         } else {
-            // Only update volatile text (hypothesis)
-            volatileTranscript = result.text
-            let reason =
-                !hasMinimumContext
-                ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
-            logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
+            actualLeftContext = left
+        }
+
+        let leftStartAbs = max(0, center - actualLeftContext)
+        let rightEndAbs = center + effectiveChunk + (forceFinalize ? 0 : rightFinal)
+        let startIdx = max(leftStartAbs - bufferStartIndex, 0)
+        let endIdx = max(rightEndAbs - bufferStartIndex, startIdx)
+
+        guard startIdx >= 0, endIdx <= sampleBuffer.count, startIdx < endIdx else { return false }
+
+        let window = Array(sampleBuffer[startIdx..<endIdx])
+        let segID = currentSegment.id
+        let rev = currentSegment.revision + 1
+
+        currentSegment.emittedFinal = true
+        currentSegment.revision = rev
+
+        // Log window size for debugging
+        let windowDuration = Double(window.count) / Double(sampleRate)
+        let leftDuration = Double(center - leftStartAbs) / Double(sampleRate)
+        logger.debug(
+            "Processing final segment: window=\(String(format: "%.1f", windowDuration))s, left=\(String(format: "%.1f", leftDuration))s, chunk=\(String(format: "%.1f", Double(effectiveChunk) / Double(sampleRate)))s"
+        )
+
+        await self.processWindow(
+            window,
+            actualLeftSeconds: Double(center - leftStartAbs) / Double(sampleRate),
+            segmentID: segID,
+            centerStartAbs: center,
+            chunkSamples: effectiveChunk,
+            revision: rev,
+            isFinal: true
+        )
+
+        return true
+    }
+
+    /// Process an interim segment with limited context
+    private func processInterimSegment(center: Int, currentAbsEnd: Int) async -> Bool {
+        let sampleRate = config.asrConfig.sampleRate
+        let left = config.leftContextSamples
+        let interimRightContext = config.interimRightContextSamples
+        let interimStep = config.interimUpdateSamples
+
+        let nextInterimPos = currentSegment.lastInterimUpdate + interimStep
+        let canEmitInterim =
+            !currentSegment.emittedFinal
+            && nextInterimPos <= (currentAbsEnd - center)
+            && currentAbsEnd >= (center + nextInterimPos + interimRightContext)
+
+        guard canEmitInterim else { return false }
+
+        let leftStartAbs = max(0, center - left)
+        let rightEndAbs = center + nextInterimPos + interimRightContext
+        let startIdx = max(leftStartAbs - bufferStartIndex, 0)
+        let endIdx = min(rightEndAbs - bufferStartIndex, sampleBuffer.count)
+
+        guard startIdx >= 0, endIdx <= sampleBuffer.count, startIdx < endIdx else { return false }
+
+        let window = Array(sampleBuffer[startIdx..<endIdx])
+        let rev = currentSegment.revision + 1
+        currentSegment.revision = rev
+        currentSegment.lastInterimUpdate = nextInterimPos
+
+        await self.processWindow(
+            window,
+            actualLeftSeconds: Double(center - leftStartAbs) / Double(sampleRate),
+            segmentID: currentSegment.id,
+            centerStartAbs: center,
+            chunkSamples: nextInterimPos,
+            revision: rev,
+            isFinal: false
+        )
+
+        return true
+    }
+
+    /// Advance to the next segment and trim buffer
+    private func advanceToNextSegment() {
+        let left = config.leftContextSamples
+        let center = currentSegment.centerStartAbs
+        let chunk = currentSegment.chunkSamples
+
+        // Advance to next segment
+        currentSegment = CurrentSegment(
+            id: UUID(),
+            centerStartAbs: center + chunk,
+            chunkSamples: config.chunkSamples,
+            revision: 0,
+            emittedFinal: false,
+            lastInterimUpdate: 0
+        )
+
+        // Trim buffer to keep only what's needed for left context
+        let trimToAbs = max(0, currentSegment.centerStartAbs - left)
+        let dropCount = max(0, trimToAbs - bufferStartIndex)
+        if dropCount > 0 && dropCount <= sampleBuffer.count {
+            sampleBuffer.removeFirst(dropCount)
+            bufferStartIndex += dropCount
+        }
+    }
+
+    /// Simplified segment processing with regular interim updates
+    private func processSegmentsIfPossible(forceFinalize: Bool = false) async {
+        var currentAbsEnd = bufferStartIndex + sampleBuffer.count
+
+        while true {
+            let center = currentSegment.centerStartAbs
+            let chunk = currentSegment.chunkSamples
+
+            // If no audio ahead of center, break
+            if currentAbsEnd <= center { break }
+
+            // Try to emit a final result first
+            if await processFinalSegment(
+                center: center, chunk: chunk, currentAbsEnd: currentAbsEnd, forceFinalize: forceFinalize)
+            {
+                advanceToNextSegment()
+                currentAbsEnd = bufferStartIndex + sampleBuffer.count
+                continue
+            }
+
+            // Try to emit an interim result
+            if await processInterimSegment(center: center, currentAbsEnd: currentAbsEnd) {
+                currentAbsEnd = bufferStartIndex + sampleBuffer.count
+                continue
+            }
+
+            // Nothing to emit yet
+            break
         }
     }
 
@@ -458,149 +700,33 @@ public actor StreamingAsrManager {
             }
         }
     }
-}
 
-/// Configuration for StreamingAsrManager
-@available(macOS 13.0, iOS 16.0, *)
-public struct StreamingAsrConfig: Sendable {
-    /// Main chunk size for stable transcription (seconds). Should be 10-11s for best quality
-    public let chunkSeconds: TimeInterval
-    /// Quick hypothesis chunk size for immediate feedback (seconds). Typical: 1.0s
-    public let hypothesisChunkSeconds: TimeInterval
-    /// Left context appended to each window (seconds). Typical: 10.0s
-    public let leftContextSeconds: TimeInterval
-    /// Right context lookahead (seconds). Typical: 2.0s (adds latency)
-    public let rightContextSeconds: TimeInterval
-    /// Minimum audio duration before confirming text (seconds). Should be ~10s
-    public let minContextForConfirmation: TimeInterval
+    /// Check if text is garbage/artifacts that should be filtered out
+    private func isGarbageText(_ text: String) -> Bool {
+        // Filter out common ASR artifacts
+        let cleaned = text.replacingOccurrences(of: " ", with: "")
 
-    /// Enable debug logging
-    public let enableDebug: Bool
-    /// Confidence threshold for promoting volatile text to confirmed (0.0...1.0)
-    public let confirmationThreshold: Double
+        // Check if it's only periods (any number of them)
+        if cleaned.allSatisfy({ $0 == "." }) && !cleaned.isEmpty {
+            return true
+        }
 
-    /// Default configuration aligned with previous API expectations
-    public static let `default` = StreamingAsrConfig(
-        chunkSeconds: 15.0,
-        hypothesisChunkSeconds: 2.0,
-        leftContextSeconds: 10.0,
-        rightContextSeconds: 2.0,
-        minContextForConfirmation: 10.0,
-        enableDebug: false,
-        confirmationThreshold: 0.85
-    )
+        // Check if it's only common punctuation artifacts
+        let commonArtifacts: Set<Character> = [".", ",", "?", "!", ";", ":", "-"]
+        if cleaned.allSatisfy({ commonArtifacts.contains($0) }) && !cleaned.isEmpty {
+            return true
+        }
 
-    /// Optimized streaming configuration: Dual-track processing for best experience
-    /// Uses ChunkProcessor's proven 11-2-2 approach for stable transcription
-    /// Plus quick hypothesis updates for immediate feedback
-    public static let streaming = StreamingAsrConfig(
-        chunkSeconds: 11.0,  // Match ChunkProcessor for stable transcription
-        hypothesisChunkSeconds: 1.0,  // Quick hypothesis updates
-        leftContextSeconds: 2.0,  // Match ChunkProcessor left context
-        rightContextSeconds: 2.0,  // Match ChunkProcessor right context
-        minContextForConfirmation: 10.0,  // Need sufficient context before confirming
-        enableDebug: false,
-        confirmationThreshold: 0.80  // Higher threshold for more stable confirmations
-    )
-
-    public init(
-        chunkSeconds: TimeInterval = 10.0,
-        hypothesisChunkSeconds: TimeInterval = 1.0,
-        leftContextSeconds: TimeInterval = 2.0,
-        rightContextSeconds: TimeInterval = 2.0,
-        minContextForConfirmation: TimeInterval = 10.0,
-        enableDebug: Bool = false,
-        confirmationThreshold: Double = 0.85
-    ) {
-        self.chunkSeconds = chunkSeconds
-        self.hypothesisChunkSeconds = hypothesisChunkSeconds
-        self.leftContextSeconds = leftContextSeconds
-        self.rightContextSeconds = rightContextSeconds
-        self.minContextForConfirmation = minContextForConfirmation
-        self.enableDebug = enableDebug
-        self.confirmationThreshold = confirmationThreshold
+        return false
     }
 
-    /// Backward-compatible convenience initializer used by tests (chunkDuration label)
-    public init(
-        confirmationThreshold: Double = 0.85,
-        chunkDuration: TimeInterval,
-        enableDebug: Bool = false
-    ) {
-        self.init(
-            chunkSeconds: chunkDuration,
-            hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
-            leftContextSeconds: 10.0,
-            rightContextSeconds: 2.0,
-            minContextForConfirmation: 10.0,
-            enableDebug: enableDebug,
-            confirmationThreshold: confirmationThreshold
+    /// Get current memory usage statistics for monitoring
+    public var memoryStats: (sampleBufferSize: Int, accumulatedTokens: Int, segmentTexts: Int, processedChunks: Int) {
+        return (
+            sampleBufferSize: sampleBuffer.count,
+            accumulatedTokens: accumulatedTokens.count,
+            segmentTexts: segmentFinalTexts.count,
+            processedChunks: processedChunks
         )
-    }
-
-    /// Custom configuration factory expected by tests
-    public static func custom(
-        chunkDuration: TimeInterval,
-        confirmationThreshold: Double,
-        enableDebug: Bool
-    ) -> StreamingAsrConfig {
-        StreamingAsrConfig(
-            chunkSeconds: chunkDuration,
-            hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
-            leftContextSeconds: 10.0,
-            rightContextSeconds: 2.0,
-            minContextForConfirmation: 10.0,
-            enableDebug: enableDebug,
-            confirmationThreshold: confirmationThreshold
-        )
-    }
-
-    // Internal ASR configuration
-    var asrConfig: ASRConfig {
-        ASRConfig(
-            sampleRate: 16000,
-            enableDebug: enableDebug,
-            tdtConfig: TdtConfig()
-        )
-    }
-
-    // Sample counts at 16 kHz
-    var chunkSamples: Int { Int(chunkSeconds * 16000) }
-    var hypothesisChunkSamples: Int { Int(hypothesisChunkSeconds * 16000) }
-    var leftContextSamples: Int { Int(leftContextSeconds * 16000) }
-    var rightContextSamples: Int { Int(rightContextSeconds * 16000) }
-    var minContextForConfirmationSamples: Int { Int(minContextForConfirmation * 16000) }
-
-    // Backward-compat convenience for existing call-sites/tests
-    var chunkDuration: TimeInterval { chunkSeconds }
-    var bufferCapacity: Int { Int(15.0 * 16000) }
-    var chunkSizeInSamples: Int { chunkSamples }
-}
-
-/// Transcription update from streaming ASR
-@available(macOS 13.0, iOS 16.0, *)
-public struct StreamingTranscriptionUpdate: Sendable {
-    /// The transcribed text
-    public let text: String
-
-    /// Whether this text is confirmed (high confidence) or volatile (may change)
-    public let isConfirmed: Bool
-
-    /// Confidence score (0.0 - 1.0)
-    public let confidence: Float
-
-    /// Timestamp of this update
-    public let timestamp: Date
-
-    public init(
-        text: String,
-        isConfirmed: Bool,
-        confidence: Float,
-        timestamp: Date
-    ) {
-        self.text = text
-        self.isConfirmed = isConfirmed
-        self.confidence = confidence
-        self.timestamp = timestamp
     }
 }
