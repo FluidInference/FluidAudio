@@ -452,8 +452,8 @@ public class FLEURSBenchmark {
                     totalWER += metrics.wer
                     totalCER += metrics.cer
 
-                    // Track cases with WER > 8% for analysis
-                    if metrics.wer > 0.08 {
+                    // Track cases with high WER for analysis
+                    if metrics.wer > ASRConstants.highWERThreshold {
                         let normalizedRef = TextNormalizer.normalize(sample.transcription)
                         let normalizedHyp = TextNormalizer.normalize(result.text)
                         highWERCases.append(
@@ -663,51 +663,55 @@ public class FLEURSBenchmark {
         return (refString, hypString)
     }
 
-    /// Print all high WER cases collected across all languages
+    /// Print all high WER cases collected across all languages, sorted by WER descending
     public func printAllHighWERCases(_ allHighWERCases: [HighWERCase]) {
-        if !allHighWERCases.isEmpty {
-            print("\n🔍 All High WER Cases (>8%) Across Languages:")
-            print(String(repeating: "=", count: 80))
-
-            // Group by language and sort
-            let groupedCases = Dictionary(grouping: allHighWERCases, by: { $0.language })
-
-            for language in groupedCases.keys.sorted() {
-                let cases = groupedCases[language]!.sorted(by: { $0.wer > $1.wer })
-
-                print("\n🔤 \(supportedLanguages[language] ?? language) (\(cases.count) high WER cases):")
-                print(String(repeating: "-", count: 60))
-
-                for sample in cases {
-                    let werPercent = sample.wer * 100
-                    print(
-                        "\nFile: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
-                    )
-                    print("Path: \(sample.audioPath)")
-                    print(String(repeating: "-", count: 40))
-
-                    // Normalize the texts for comparison
-                    let normalizedReference = sample.normalizedRef
-                    let normalizedHypothesis = sample.normalizedHyp
-
-                    let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
-                        !$0.isEmpty
-                    }
-                    let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter {
-                        !$0.isEmpty
-                    }
-
-                    // Generate inline diff
-                    let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
-
-                    print("\nNormalized Reference:\t\(referenceDiff)")
-                    print("Normalized Hypothesis:\t\(hypothesisDiff)")
-                    print("Original Hypothesis:\t\(sample.hypothesis)")
-                    print(String(repeating: "-", count: 40))
-                }
-            }
-            print(String(repeating: "=", count: 80))
+        guard !allHighWERCases.isEmpty else {
+            print("\n✅ No high WER cases (> \(Int(ASRConstants.highWERThreshold * 100))%) detected.")
+            return
         }
+
+        print(
+            "\n🔍 All High WER Cases (>\(Int(ASRConstants.highWERThreshold * 100))%) Across Languages (sorted by WER):")
+        print(String(repeating: "=", count: 80))
+
+        // Sort all cases by WER descending, then by language
+        let sortedCases = allHighWERCases.sorted {
+            if $0.wer != $1.wer {
+                return $0.wer > $1.wer
+            } else {
+                return $0.language < $1.language
+            }
+        }
+
+        for sample in sortedCases {
+            let langName = supportedLanguages[sample.language] ?? sample.language
+            let werPercent = sample.wer * 100
+            print(
+                "\nLanguage: \(langName) | File: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
+            )
+            print("Path: \(sample.audioPath)")
+            print(String(repeating: "-", count: 40))
+
+            // Normalize the texts for comparison
+            let normalizedReference = sample.normalizedRef
+            let normalizedHypothesis = sample.normalizedHyp
+
+            let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
+                !$0.isEmpty
+            }
+            let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter {
+                !$0.isEmpty
+            }
+
+            // Generate inline diff
+            let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
+
+            print("\nNormalized Reference:\t\(referenceDiff)")
+            print("Normalized Hypothesis:\t\(hypothesisDiff)")
+            print("Original Hypothesis:\t\(sample.hypothesis)")
+            print(String(repeating: "-", count: 40))
+        }
+        print(String(repeating: "=", count: 80))
     }
 
     /// Save results to JSON
@@ -855,6 +859,8 @@ extension FLEURSBenchmark {
             // Save results
             try benchmark.saveResults(results, to: outputFile)
 
+            benchmark.printAllHighWERCases(allHighWERCases)
+            print("✓ Results saved to \(outputFile)")
             // Print summary
             print("\n" + String(repeating: "=", count: 80))
             print("FLEURS BENCHMARK SUMMARY")
@@ -929,11 +935,6 @@ extension FLEURSBenchmark {
             if totalSkipped > 0 {
                 print("\n⚠️ Note: \(totalSkipped) samples were skipped due to audio loading errors")
             }
-
-            // Print all high WER cases at the end
-            benchmark.printAllHighWERCases(allHighWERCases)
-
-            print("\n✓ Results saved to: \(outputFile)")
 
         } catch {
             print("\n❌ Benchmark failed: \(error)")

@@ -557,7 +557,9 @@ private struct WordDifference {
 
 extension ASRBenchmark {
     /// Print detailed analysis for files with WER > threshold
-    private func printDetailedWERAnalysis(_ results: [ASRBenchmarkResult], threshold: Double = 0.10) {
+    private func printDetailedWERAnalysis(
+        _ results: [ASRBenchmarkResult], threshold: Double = ASRConstants.highWERThreshold
+    ) {
         let highWERResults = results.filter { $0.metrics.wer > threshold }
 
         guard !highWERResults.isEmpty else {
@@ -1151,7 +1153,7 @@ extension ASRBenchmark {
 
                 # Benchmark with 100 files from test-other subset
                 fluidaudio asr-benchmark --subset test-other --max-files 100
-                
+
                 # Process a single specific file
                 fluidaudio asr-benchmark --single-file 1089-134686-0011 --debug
 
