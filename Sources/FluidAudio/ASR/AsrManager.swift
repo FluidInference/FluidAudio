@@ -202,9 +202,6 @@ public final class AsrManager {
 
         decoderState.update(from: initDecoderOutput)
 
-        if config.enableDebug {
-            logger.info("Decoder state initialized cleanly")
-        }
     }
 
     private func loadModel(
@@ -334,14 +331,6 @@ public final class AsrManager {
         text: String, timings: [TokenTiming]
     ) {
         guard !tokenIds.isEmpty else { return ("", []) }
-
-        // Debug: print token mappings
-        if config.enableDebug {
-            for tokenId in tokenIds {
-                if let token = vocabulary[tokenId] {
-                }
-            }
-        }
 
         // SentencePiece-compatible decoding algorithm:
         // 1. Convert token IDs to token strings
