@@ -31,7 +31,6 @@ struct ChunkProcessor {
         var centerStart = 0
         var segmentIndex = 0
         var lastProcessedFrame = 0  // Track the last frame processed by previous chunk
-
         while centerStart < audioSamples.count {
             // Determine if this is the last chunk
             let isLastChunk = (centerStart + centerSamples) >= audioSamples.count
@@ -65,12 +64,6 @@ struct ChunkProcessor {
                 allTimestamps.append(contentsOf: windowTimestamps)
             }
 
-            print("[Segment \(segmentIndex)] Processed \(windowTokens.count) tokens, maxFrame = \(maxFrame)")
-            print("[Segment \(segmentIndex)] Total tokens so far: \(allTokens.count)")
-            print("[Segment \(segmentIndex)] lastProcessedFrame = \(lastProcessedFrame) frames")
-            print("[Segment \(segmentIndex)] Center Processed = \(centerStart) with \(centerSamples) processed")
-            print("\t[Segment \(segmentIndex)] Window Tokens: \(windowTokens)")
-            print("\t[Segment \(segmentIndex)] Window Timestamps: \(windowTimestamps)")
 
             centerStart += centerSamples
 
@@ -81,15 +74,6 @@ struct ChunkProcessor {
         let processedCenterFrames =
             segmentIndex * Int(centerSeconds * Double(sampleRate)) / ASRConstants.samplesPerEncoderFrame
 
-        if enableDebug {
-            print("📊 FINAL VALIDATION:")
-            print("  - Total audio samples: \(audioSamples.count)")
-            print("  - Expected total frames: \(expectedTotalFrames)")
-            print("  - Processed center frames: \(processedCenterFrames)")
-            print("  - Total segments: \(segmentIndex)")
-            print("  - Final tokens count: \(allTokens.count)")
-            print("  - Final timestamps count: \(allTimestamps.count)")
-        }
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
@@ -112,7 +96,7 @@ struct ChunkProcessor {
 
         // Calculate context and frame adjustment for all chunks
         let adaptiveLeftContextSamples: Int
-        let contextFrameAdjustment: Int
+        var contextFrameAdjustment: Int
 
         if segmentIndex == 0 {
             // First chunk: no overlap, standard context
@@ -140,9 +124,9 @@ struct ChunkProcessor {
                 let theoreticalOverlap = lastProcessedFrame - chunkStartFrame
 
                 if theoreticalOverlap > 0 {
-                    // Use the actual overlap but with a buffer for decoder to process new content
-                    // 25-frame buffer balances avoiding duplication with capturing remaining content
-                    contextFrameAdjustment = max(0, theoreticalOverlap - 25)
+                    // For last chunk, be more conservative with overlap to avoid missing content
+                    // Use smaller buffer (15 frames instead of 25) to ensure we don't skip too much
+                    contextFrameAdjustment = max(0, theoreticalOverlap - 15)
                 } else {
                     // No overlap or gap - use minimal overlap for continuity
                     contextFrameAdjustment = 5  // 0.4s minimal overlap
@@ -209,14 +193,6 @@ struct ChunkProcessor {
         // Calculate global frame offset for this chunk
         let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
 
-        if enableDebug {
-            print("🔢 CHUNK FRAME CALC [Segment \(segmentIndex)]:")
-            print("  - centerStart: \(centerStart) samples")
-            print("  - leftStart: \(leftStart) samples")
-            print("  - chunkSamples.count: \(chunkSamples.count) samples")
-            print("  - actualFrameCount: \(actualFrameCount) frames")
-            print("  - globalFrameOffset: \(globalFrameOffset) frames")
-        }
 
         let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,

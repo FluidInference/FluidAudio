@@ -96,7 +96,7 @@ final class AsrManagerExtensionTests: XCTestCase {
     func testCalculateStartFrameOffsetFirstSegment() {
         let offset = manager.calculateStartFrameOffset(segmentIndex: 0, leftContextSeconds: 2.0)
 
-        // First segment should have no offset
+        // Method is deprecated - now always returns 0 (frame tracking handled by timeJump mechanism)
         XCTAssertEqual(offset, 0)
     }
 
@@ -104,26 +104,26 @@ final class AsrManagerExtensionTests: XCTestCase {
         let leftContext = 2.0
         let offset = manager.calculateStartFrameOffset(segmentIndex: 1, leftContextSeconds: leftContext)
 
-        // 2 seconds at 12.5 fps = 25 frames
-        XCTAssertEqual(offset, 25)
+        // Method is deprecated - now always returns 0 (frame tracking handled by timeJump mechanism)
+        XCTAssertEqual(offset, 0)
     }
 
     func testCalculateStartFrameOffsetThirdSegment() {
         let leftContext = 1.5
         let offset = manager.calculateStartFrameOffset(segmentIndex: 2, leftContextSeconds: leftContext)
 
-        // 1.5 seconds at 12.5 fps = 18.75, rounded to 19 frames
-        XCTAssertEqual(offset, 19)
+        // Method is deprecated - now always returns 0 (frame tracking handled by timeJump mechanism)
+        XCTAssertEqual(offset, 0)
     }
 
     func testCalculateStartFrameOffsetVariousContexts() {
-        // Test different left context durations
+        // Method is deprecated - now always returns 0 (frame tracking handled by timeJump mechanism)
         let testCases: [(leftContext: Double, expected: Int)] = [
             (0.0, 0),  // No context
-            (0.08, 1),  // One frame (80ms)
-            (0.16, 2),  // Two frames
-            (1.0, 13),  // 1 second = 12.5 frames, rounded to 13
-            (3.2, 40),  // 3.2 seconds = 40 frames
+            (0.08, 0),  // Method always returns 0
+            (0.16, 0),  // Method always returns 0
+            (1.0, 0),  // Method always returns 0
+            (3.2, 0),  // Method always returns 0
         ]
 
         for (leftContext, expected) in testCases {
@@ -135,7 +135,7 @@ final class AsrManagerExtensionTests: XCTestCase {
     func testCalculateStartFrameOffsetNegativeSegment() {
         let offset = manager.calculateStartFrameOffset(segmentIndex: -1, leftContextSeconds: 2.0)
 
-        // Negative segment should still return 0
+        // Method is deprecated - now always returns 0 (frame tracking handled by timeJump mechanism)
         XCTAssertEqual(offset, 0)
     }
 
