@@ -130,22 +130,6 @@ struct ChunkProcessor {
                 contextFrameAdjustment = 0
             }
 
-            if enableDebug {
-                let chunkLeftStart = max(0, centerStart - adaptiveLeftContextSamples)
-                let chunkStartFrame = chunkLeftStart / ASRConstants.samplesPerEncoderFrame
-                let theoreticalOverlap = lastProcessedFrame - chunkStartFrame
-
-                logger.debug(
-                    """
-                    Last chunk adaptive context:
-                    - Remaining: \(remainingSamples) samples (\(String(format: "%.2f", Double(remainingSamples)/16000.0))s)
-                    - Adaptive left context: \(adaptiveLeftContextSamples) samples (\(String(format: "%.2f", Double(adaptiveLeftContextSamples)/16000.0))s)
-                    - Chunk start frame: \(chunkStartFrame), Last processed: \(lastProcessedFrame)
-                    - Theoretical overlap: \(theoreticalOverlap) frames
-                    - Context frame adjustment: \(contextFrameAdjustment) frames (adjusting timeJump for \(contextFrameAdjustment * ASRConstants.samplesPerEncoderFrame) samples)
-                    - Total chunk: \(adaptiveLeftContextSamples + remainingSamples) samples
-                    """)
-            }
         } else {
             // Standard non-first, non-last chunk
             adaptiveLeftContextSamples = leftContextSamples
@@ -154,16 +138,6 @@ struct ChunkProcessor {
             // Let deduplication handle any token overlap rather than negative frame adjustment
             // This prevents edge cases when prevTimeJump = 0
             contextFrameAdjustment = 0
-
-            if enableDebug {
-                logger.debug(
-                    """
-                    Standard chunk overlap handling:
-                    - Left context: \(leftContextSamples) samples (\(String(format: "%.2f", Double(leftContextSamples)/16000.0))s)
-                    - Context frame adjustment: \(contextFrameAdjustment) frames (no adjustment)
-                    - Total chunk: \(adaptiveLeftContextSamples + centerSamples + rightContextSamples) samples
-                    """)
-            }
         }
 
         // Compute window bounds in samples: [leftStart, rightEnd)
