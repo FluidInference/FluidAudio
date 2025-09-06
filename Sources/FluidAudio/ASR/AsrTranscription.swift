@@ -259,7 +259,16 @@ extension AsrManager {
 
             // Convert encoder frame index to time (approximate: 80ms per frame)
             let startTime = TimeInterval(frameIndex) * 0.08
-            let endTime = startTime + 0.08  // Approximate token duration
+
+            // Calculate end time based on next token's start time
+            let endTime: TimeInterval
+            if i < tokenIds.count - 1 {
+                // Use next token's start time as this token's end time
+                endTime = TimeInterval(timestamps[i + 1]) * 0.08
+            } else {
+                // For the last token, use a default duration
+                endTime = startTime + 0.08
+            }
 
             // Get token text from vocabulary if available
             let tokenText = vocabulary[tokenId] ?? "token_\(tokenId)"
