@@ -119,7 +119,7 @@ extension AsrModels {
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
             logger.warning(
-                "Vocabulary file not found at \(vocabPath.path). Please ensure parakeet_vocab.json is downloaded with the models."
+                "Vocabulary file not found at \(vocabPath.path). Please ensure the vocab file is downloaded with the models."
             )
             throw AsrModelsError.modelNotFound(Names.vocabulary, vocabPath)
         }

@@ -10,10 +10,18 @@ swift test --filter CITests.testPackageImports # Run single test method
 swift format --in-place --recursive --configuration .swift-format Sources/ Tests/
 ```
 
+## Architecture
+- **FluidAudio/**: Main library (ASR/, Diarizer/, VAD/, Shared/ modules)
+- **FluidAudioCLI/**: CLI tool with benchmarking and processing commands
+- **Tests/FluidAudioTests/**: Comprehensive test suite
+- **Models**: Auto-downloaded from HuggingFace with CoreML compilation
+- **Processing Pipeline**: Audio → VAD → Diarization → ASR → Timestamped transcripts
+
 ## Critical Rules
 - **NEVER** use `@unchecked Sendable` - implement proper thread safety with actors/MainActor
 - **NEVER** create dummy/mock models or synthetic audio data - use real models only
 - **NEVER** create simplified versions - implement full solutions or consult first
+- **NEVER** run `git push` unless explicitly requested by user
 
 ## Code Style (swift-format config)
 - Line length: 120 chars, 4-space indentation

@@ -202,9 +202,6 @@ public final class AsrManager {
 
         decoderState.update(from: initDecoderOutput)
 
-        if config.enableDebug {
-            logger.info("Decoder state initialized cleanly")
-        }
     }
 
     private func loadModel(
@@ -270,22 +267,24 @@ public final class AsrManager {
     internal func tdtDecodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
+        actualAudioFrames: Int,
         originalAudioSamples: [Float],
         decoderState: inout TdtDecoderState,
-        startFrameOffset: Int = 0,
-        lastProcessedFrame: Int = 0,
-        isLastChunk: Bool = false
+        contextFrameAdjustment: Int = 0,
+        isLastChunk: Bool = false,
+        globalFrameOffset: Int = 0
     ) async throws -> (tokens: [Int], timestamps: [Int]) {
         let decoder = TdtDecoder(config: config)
         return try await decoder.decodeWithTimings(
             encoderOutput: encoderOutput,
             encoderSequenceLength: encoderSequenceLength,
+            actualAudioFrames: actualAudioFrames,
             decoderModel: decoderModel!,
             jointModel: jointModel!,
             decoderState: &decoderState,
-            startFrameOffset: startFrameOffset,
-            lastProcessedFrame: lastProcessedFrame,
-            isLastChunk: isLastChunk
+            contextFrameAdjustment: contextFrameAdjustment,
+            isLastChunk: isLastChunk,
+            globalFrameOffset: globalFrameOffset
         )
     }
 
@@ -332,15 +331,6 @@ public final class AsrManager {
         text: String, timings: [TokenTiming]
     ) {
         guard !tokenIds.isEmpty else { return ("", []) }
-
-        // Debug: print token mappings
-        if config.enableDebug {
-            for tokenId in tokenIds {
-                if let token = vocabulary[tokenId] {
-                    print("  Token \(tokenId) -> '\(token)'")
-                }
-            }
-        }
 
         // SentencePiece-compatible decoding algorithm:
         // 1. Convert token IDs to token strings
