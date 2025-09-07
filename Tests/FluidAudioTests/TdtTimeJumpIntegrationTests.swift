@@ -718,7 +718,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             let isLastChunk = (chunkIndex == numChunks - 1)
             let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: 240_000)
 
-            let (tokens, timestamps, _) = try await manager.executeMLInferenceWithTimings(
+            let (tokens, timestamps, _, _) = try await manager.executeMLInferenceWithTimings(
                 paddedChunk,
                 originalLength: chunkSamples.count,
                 enableDebug: true,

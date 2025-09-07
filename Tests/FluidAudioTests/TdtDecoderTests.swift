@@ -176,8 +176,8 @@ final class TdtDecoderTests: XCTestCase {
 
     func testUpdateHypothesis() throws {
 
-        var hypothesis = TdtHypothesis()
         let newState = try TdtDecoderState()
+        var hypothesis = TdtHypothesis(decState: newState)
 
         decoder.updateHypothesis(
             &hypothesis,

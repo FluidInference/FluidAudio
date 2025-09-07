@@ -115,7 +115,7 @@ extension AsrManager {
         let actualFrames =
             actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
 
-        let (tokens, timestamps, confidences) = try await tdtDecodeWithTimings(
+        let hypothesis = try await tdtDecodeWithTimings(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
             actualAudioFrames: actualFrames,
@@ -126,7 +126,7 @@ extension AsrManager {
             globalFrameOffset: globalFrameOffset
         )
 
-        return (tokens, timestamps, confidences, encoderSequenceLength)
+        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, encoderSequenceLength)
     }
 
     /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.

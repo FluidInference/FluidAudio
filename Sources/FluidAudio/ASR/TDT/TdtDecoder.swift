@@ -75,10 +75,10 @@ internal struct TdtDecoder {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0
-    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float]) {
+    ) async throws -> TdtHypothesis {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
-            return ([], [], [])
+            return TdtHypothesis(decState: decoderState)
         }
 
         // Pre-process encoder output for faster access
@@ -130,7 +130,7 @@ internal struct TdtDecoder {
 
         // If timeJump puts us beyond the available frames, return empty
         if timeIndices >= effectiveSequenceLength {
-            return ([], [], [])
+            return TdtHypothesis(decState: decoderState)
         }
 
         let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
@@ -475,7 +475,7 @@ internal struct TdtDecoder {
         }
 
         // No filtering at decoder level - let post-processing handle deduplication
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences)
+        return hypothesis
     }
 
     /// Pre-process encoder output into contiguous memory for faster access
