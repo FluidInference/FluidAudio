@@ -225,8 +225,9 @@ extension AsrManager {
         return audioSamples + Array(repeating: 0, count: targetLength - audioSamples.count)
     }
 
-    /// Calculate confidence score based on actual model token confidence scores
-    /// Returns a value between 0.0 and 1.0
+    /// Calculate confidence score based purely on TDT model token confidence scores
+    /// Returns the average of token-level softmax probabilities from the decoder
+    /// Range: 0.1 (empty transcription) to 1.0 (perfect confidence)
     private func calculateConfidence(
         duration: Double, tokenCount: Int, isEmpty: Bool, tokenConfidences: [Float]
     ) -> Float {
@@ -241,18 +242,11 @@ extension AsrManager {
             return 0.5  // Default middle confidence if something went wrong
         }
 
-        // Average the token confidences for overall confidence
+        // Return pure model confidence: average of token-level softmax probabilities
         let meanConfidence = tokenConfidences.reduce(0.0, +) / Float(tokenConfidences.count)
 
-        // Apply slight adjustments based on context
-        var adjustedConfidence = meanConfidence
-
-        // Boost confidence slightly for longer utterances (up to 10% boost)
-        let durationBoost = min(Float(duration) / 10.0, 1.0) * 0.1
-        adjustedConfidence += durationBoost
-
-        // Ensure confidence is in valid range
-        return max(0.1, min(1.0, adjustedConfidence))
+        // Ensure confidence is in valid range (clamp to avoid edge cases)
+        return max(0.1, min(1.0, meanConfidence))
     }
 
     /// Convert frame timestamps to TokenTiming objects
