@@ -31,7 +31,7 @@ extension AsrManager {
         if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
             let paddedAudio: [Float] = padAudioIfNeeded(audioSamples, targetLength: 240_000)
-            let (tokens, timestamps, encoderSequenceLength) = try await executeMLInferenceWithTimings(
+            let (tokens, timestamps, confidences, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
                 originalLength: originalLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
@@ -42,6 +42,7 @@ extension AsrManager {
             let result = processTranscriptionResult(
                 tokenIds: tokens,
                 timestamps: timestamps,
+                confidences: confidences,
                 encoderSequenceLength: encoderSequenceLength,
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
@@ -76,7 +77,7 @@ extension AsrManager {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0
-    ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
+    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
             paddedAudio, actualLength: originalLength)
@@ -114,7 +115,7 @@ extension AsrManager {
         let actualFrames =
             actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
 
-        let (tokens, timestamps) = try await tdtDecodeWithTimings(
+        let (tokens, timestamps, confidences) = try await tdtDecodeWithTimings(
             encoderOutput: encoderHiddenStates,
             encoderSequenceLength: encoderSequenceLength,
             actualAudioFrames: actualFrames,
@@ -125,7 +126,7 @@ extension AsrManager {
             globalFrameOffset: globalFrameOffset
         )
 
-        return (tokens, timestamps, encoderSequenceLength)
+        return (tokens, timestamps, confidences, encoderSequenceLength)
     }
 
     /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
@@ -135,13 +136,13 @@ extension AsrManager {
         source: AudioSource,
         previousTokens: [Int] = [],
         enableDebug: Bool
-    ) async throws -> (tokens: [Int], timestamps: [Int], encoderSequenceLength: Int) {
+    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
 
         let originalLength = chunkSamples.count
         let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
-        let (tokens, timestamps, encLen) = try await executeMLInferenceWithTimings(
+        let (tokens, timestamps, confidences, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: originalLength,
             actualAudioFrames: nil,  // Will be calculated from originalLength
@@ -166,15 +167,16 @@ extension AsrManager {
                 logger.debug("Streaming chunk: removed \(removedCount) duplicate tokens")
             }
 
-            return (deduped, adjustedTimestamps, encLen)
+            return (deduped, adjustedTimestamps, confidences, encLen)
         }
 
-        return (tokens, timestamps, encLen)
+        return (tokens, timestamps, confidences, encLen)
     }
 
     internal func processTranscriptionResult(
         tokenIds: [Int],
         timestamps: [Int] = [],
+        confidences: [Float] = [],
         encoderSequenceLength: Int,
         audioSamples: [Float],
         processingTime: TimeInterval,
@@ -185,7 +187,7 @@ extension AsrManager {
         let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
 
         // Convert timestamps to TokenTiming objects if provided
-        let timingsFromTimestamps = createTokenTimings(from: tokenIds, timestamps: timestamps)
+        let timingsFromTimestamps = createTokenTimings(from: tokenIds, timestamps: timestamps, confidences: confidences)
 
         // Use existing timings if provided, otherwise use timings from timestamps
         let resultTimings = tokenTimings.isEmpty ? timingsFromTimestamps : finalTimings
@@ -196,11 +198,12 @@ extension AsrManager {
             )
         }
 
-        // Calculate confidence based on audio duration and token density
+        // Calculate confidence based on actual model confidence scores from TDT decoder
         let confidence = calculateConfidence(
             duration: duration,
             tokenCount: tokenIds.count,
-            isEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            isEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            tokenConfidences: confidences
         )
 
         return ASRResult(
@@ -217,37 +220,42 @@ extension AsrManager {
         return audioSamples + Array(repeating: 0, count: targetLength - audioSamples.count)
     }
 
-    /// Calculate confidence score based on transcription characteristics
+    /// Calculate confidence score based on actual model token confidence scores
     /// Returns a value between 0.0 and 1.0
-    private func calculateConfidence(duration: Double, tokenCount: Int, isEmpty: Bool) -> Float {
+    private func calculateConfidence(
+        duration: Double, tokenCount: Int, isEmpty: Bool, tokenConfidences: [Float]
+    ) -> Float {
         // Empty transcription gets low confidence
         if isEmpty {
             return 0.1
         }
 
-        // Base confidence starts at 0.3
-        var confidence: Float = 0.3
-
-        // Duration factor: longer audio generally means more confident transcription
-        // Confidence increases with duration up to ~10 seconds, then plateaus
-        let durationFactor = min(duration / 10.0, 1.0)
-        confidence += Float(durationFactor) * 0.4  // Add up to 0.4
-
-        // Token density factor: more tokens per second indicates richer content
-        if duration > 0 {
-            let tokensPerSecond = Double(tokenCount) / duration
-            // Typical speech is 2-4 tokens per second
-            let densityFactor = min(tokensPerSecond / 3.0, 1.0)
-            confidence += Float(densityFactor) * 0.3  // Add up to 0.3
+        // We should always have token confidence scores from the TDT decoder
+        guard !tokenConfidences.isEmpty && tokenConfidences.count == tokenCount else {
+            logger.warning("Expected token confidences but got none - this should not happen")
+            return 0.5  // Default middle confidence if something went wrong
         }
 
-        // Clamp between 0.1 and 1.0
-        return max(0.1, min(1.0, confidence))
+        // Average the token confidences for overall confidence
+        let meanConfidence = tokenConfidences.reduce(0.0, +) / Float(tokenConfidences.count)
+
+        // Apply slight adjustments based on context
+        var adjustedConfidence = meanConfidence
+
+        // Boost confidence slightly for longer utterances (up to 10% boost)
+        let durationBoost = min(Float(duration) / 10.0, 1.0) * 0.1
+        adjustedConfidence += durationBoost
+
+        // Ensure confidence is in valid range
+        return max(0.1, min(1.0, adjustedConfidence))
     }
 
     /// Convert frame timestamps to TokenTiming objects
-    private func createTokenTimings(from tokenIds: [Int], timestamps: [Int]) -> [TokenTiming] {
-        guard !tokenIds.isEmpty && !timestamps.isEmpty && tokenIds.count == timestamps.count else {
+    private func createTokenTimings(from tokenIds: [Int], timestamps: [Int], confidences: [Float]) -> [TokenTiming] {
+        guard
+            !tokenIds.isEmpty && !timestamps.isEmpty && tokenIds.count == timestamps.count
+                && confidences.count == tokenIds.count
+        else {
             return []
         }
 
@@ -273,9 +281,8 @@ extension AsrManager {
             // Get token text from vocabulary if available
             let tokenText = vocabulary[tokenId] ?? "token_\(tokenId)"
 
-            // Token confidence based on duration (longer tokens = higher confidence)
-            let tokenDuration = endTime - startTime
-            let tokenConfidence = Float(min(max(tokenDuration / 0.5, 0.5), 1.0))  // 0.5 to 1.0 based on duration
+            // Use actual confidence score from TDT decoder
+            let tokenConfidence = confidences[i]
 
             let timing = TokenTiming(
                 token: tokenText,

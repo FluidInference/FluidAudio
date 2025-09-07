@@ -165,6 +165,7 @@ public actor StreamingAsrManager {
             let finalResult = asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
+                confidences: [],  // No per-token confidences needed for final text
                 encoderSequenceLength: 0,
                 audioSamples: [],  // Not needed for final text conversion
                 processingTime: 0
@@ -308,7 +309,7 @@ public actor StreamingAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
-            let (tokens, timestamps, _) = try await asrManager.transcribeStreamingChunk(
+            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
                 windowSamples,
                 source: audioSource,
                 previousTokens: accumulatedTokens,
@@ -328,6 +329,7 @@ public actor StreamingAsrManager {
             let interim = asrManager.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
                 timestamps: timestamps,
+                confidences: confidences,
                 encoderSequenceLength: 0,
                 audioSamples: windowSamples,
                 processingTime: processingTime
