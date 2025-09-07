@@ -177,7 +177,7 @@ struct ChunkProcessor {
             globalFrameOffset: globalFrameOffset
         )
 
-        if hypothesis.ySequence.isEmpty || encLen == 0 {
+        if hypothesis.isEmpty || encLen == 0 {
             return ([], [], [], 0)
         }
 
@@ -185,7 +185,7 @@ struct ChunkProcessor {
         let filteredTokens = hypothesis.ySequence
         let filteredTimestamps = hypothesis.timestamps
         let filteredConfidences = hypothesis.tokenConfidences
-        let maxFrame = hypothesis.timestamps.max() ?? 0
+        let maxFrame = hypothesis.maxTimestamp
 
         return (filteredTokens, filteredTimestamps, filteredConfidences, maxFrame)
     }

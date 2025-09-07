@@ -727,7 +727,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 isLastChunk: isLastChunk
             )
 
-            print("Chunk \(chunkIndex): \(hypothesis.ySequence.count) tokens, timeJump: \(decoderState.timeJump ?? 0)")
+            print("Chunk \(chunkIndex): \(hypothesis.tokenCount) tokens, timeJump: \(decoderState.timeJump ?? 0)")
 
             allTokens.append(contentsOf: hypothesis.ySequence)
             allTimestamps.append(contentsOf: hypothesis.timestamps)
@@ -742,9 +742,9 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             }
 
             // Verify lastToken is maintained for linguistic continuity
-            if !hypothesis.ySequence.isEmpty {
+            if hypothesis.hasTokens {
                 XCTAssertEqual(
-                    decoderState.lastToken, hypothesis.ySequence.last,
+                    decoderState.lastToken, hypothesis.computedLastToken,
                     "Decoder state should maintain last token for chunk \(chunkIndex)"
                 )
             }

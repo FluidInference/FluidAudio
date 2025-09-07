@@ -159,7 +159,7 @@ extension AsrManager {
         }
 
         // Apply token deduplication if previous tokens are provided
-        if !previousTokens.isEmpty && !hypothesis.ySequence.isEmpty {
+        if !previousTokens.isEmpty && hypothesis.hasTokens {
             let (deduped, removedCount) = removeDuplicateTokenSequence(
                 previous: previousTokens, current: hypothesis.ySequence)
             let adjustedTimestamps =

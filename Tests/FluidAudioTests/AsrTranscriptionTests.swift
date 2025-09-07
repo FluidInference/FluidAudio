@@ -87,13 +87,13 @@ final class AsrTranscriptionTests: XCTestCase {
 
         let result = manager.processTranscriptionResult(
             tokenIds: tokenIds,
+            confidences: [0.63, 0.63, 0.63, 0.63, 0.63],  // Mean 0.63 + duration boost 0.01 = 0.64
             encoderSequenceLength: 100,
             audioSamples: audioSamples,
             processingTime: processingTime
         )
 
-        // Confidence is calculated based on duration (1.0s) and token count (5)
-        // Base: 0.3 + duration factor: 0.1 * 0.4 + density factor: 5.0 * 0.3 = 0.64
+        // Confidence is calculated as: mean token confidence (0.63) + duration boost (0.01) = 0.64
         XCTAssertEqual(result.confidence, 0.64, accuracy: 0.01)
         XCTAssertEqual(result.duration, 1.0, accuracy: 0.01)
         XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)
@@ -131,13 +131,13 @@ final class AsrTranscriptionTests: XCTestCase {
         let result = manager.processTranscriptionResult(
             tokenIds: tokenIds,
             timestamps: timestamps,
+            confidences: [0.51, 0.51, 0.51],  // Mean 0.51 + duration boost 0.02 = 0.53
             encoderSequenceLength: 100,
             audioSamples: audioSamples,
             processingTime: processingTime
         )
 
-        // Confidence is calculated based on duration (2.0s) and token count (3)
-        // Base: 0.3 + duration factor: 0.2 * 0.4 + density factor: 1.5 * 0.3 = 0.53
+        // Confidence is calculated as: mean token confidence (0.51) + duration boost (0.02) = 0.53
         XCTAssertEqual(result.confidence, 0.53, accuracy: 0.01)
         XCTAssertEqual(result.duration, 2.0, accuracy: 0.01)
         XCTAssertEqual(result.processingTime, processingTime, accuracy: 0.001)

@@ -14,4 +14,26 @@ struct TdtHypothesis: Sendable {
     init(decState: TdtDecoderState) {
         self.decState = decState
     }
+
+    // MARK: - Helper Properties and Methods
+
+    /// Check if hypothesis has no tokens
+    var isEmpty: Bool { ySequence.isEmpty }
+
+    /// Get number of tokens in this hypothesis
+    var tokenCount: Int { ySequence.count }
+
+    /// Check if hypothesis has any tokens
+    var hasTokens: Bool { !ySequence.isEmpty }
+
+    /// Get the last token if it exists
+    var computedLastToken: Int? { ySequence.last }
+
+    /// Get the maximum timestamp value, or 0 if no timestamps
+    var maxTimestamp: Int { timestamps.max() ?? 0 }
+
+    /// Return tuple for backward compatibility with existing APIs
+    var destructured: (tokens: [Int], timestamps: [Int], confidences: [Float]) {
+        (ySequence, timestamps, tokenConfidences)
+    }
 }
