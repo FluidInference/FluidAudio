@@ -31,7 +31,7 @@ extension AsrManager {
         if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
             let paddedAudio: [Float] = padAudioIfNeeded(audioSamples, targetLength: 240_000)
-            let (tokens, timestamps, confidences, encoderSequenceLength) = try await executeMLInferenceWithTimings(
+            let (hypothesis, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
                 originalLength: originalLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
@@ -40,9 +40,9 @@ extension AsrManager {
             )
 
             let result = processTranscriptionResult(
-                tokenIds: tokens,
-                timestamps: timestamps,
-                confidences: confidences,
+                tokenIds: hypothesis.ySequence,
+                timestamps: hypothesis.timestamps,
+                confidences: hypothesis.tokenConfidences,
                 encoderSequenceLength: encoderSequenceLength,
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
@@ -77,7 +77,7 @@ extension AsrManager {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0
-    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
+    ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
 
         let melspectrogramInput = try await prepareMelSpectrogramInput(
             paddedAudio, actualLength: originalLength)
@@ -126,7 +126,7 @@ extension AsrManager {
             globalFrameOffset: globalFrameOffset
         )
 
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, encoderSequenceLength)
+        return (hypothesis, encoderSequenceLength)
     }
 
     /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
@@ -142,7 +142,7 @@ extension AsrManager {
 
         let originalLength = chunkSamples.count
         let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
-        let (tokens, timestamps, confidences, encLen) = try await executeMLInferenceWithTimings(
+        let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: originalLength,
             actualAudioFrames: nil,  // Will be calculated from originalLength
@@ -159,18 +159,20 @@ extension AsrManager {
         }
 
         // Apply token deduplication if previous tokens are provided
-        if !previousTokens.isEmpty && !tokens.isEmpty {
-            let (deduped, removedCount) = removeDuplicateTokenSequence(previous: previousTokens, current: tokens)
-            let adjustedTimestamps = removedCount > 0 ? Array(timestamps.dropFirst(removedCount)) : timestamps
+        if !previousTokens.isEmpty && !hypothesis.ySequence.isEmpty {
+            let (deduped, removedCount) = removeDuplicateTokenSequence(
+                previous: previousTokens, current: hypothesis.ySequence)
+            let adjustedTimestamps =
+                removedCount > 0 ? Array(hypothesis.timestamps.dropFirst(removedCount)) : hypothesis.timestamps
 
             if enableDebug && removedCount > 0 {
                 logger.debug("Streaming chunk: removed \(removedCount) duplicate tokens")
             }
 
-            return (deduped, adjustedTimestamps, confidences, encLen)
+            return (deduped, adjustedTimestamps, hypothesis.tokenConfidences, encLen)
         }
 
-        return (tokens, timestamps, confidences, encLen)
+        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, encLen)
     }
 
     internal func processTranscriptionResult(

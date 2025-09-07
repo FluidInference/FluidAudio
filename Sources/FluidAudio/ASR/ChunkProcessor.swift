@@ -166,7 +166,7 @@ struct ChunkProcessor {
         // Calculate global frame offset for this chunk
         let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
 
-        let (tokens, timestamps, confidences, encLen) = try await manager.executeMLInferenceWithTimings(
+        let (hypothesis, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
             actualAudioFrames: actualFrameCount,
@@ -177,15 +177,15 @@ struct ChunkProcessor {
             globalFrameOffset: globalFrameOffset
         )
 
-        if tokens.isEmpty || encLen == 0 {
+        if hypothesis.ySequence.isEmpty || encLen == 0 {
             return ([], [], [], 0)
         }
 
         // Take all tokens from decoder (it already processed only the relevant frames)
-        let filteredTokens = tokens
-        let filteredTimestamps = timestamps
-        let filteredConfidences = confidences
-        let maxFrame = timestamps.max() ?? 0
+        let filteredTokens = hypothesis.ySequence
+        let filteredTimestamps = hypothesis.timestamps
+        let filteredConfidences = hypothesis.tokenConfidences
+        let maxFrame = hypothesis.timestamps.max() ?? 0
 
         return (filteredTokens, filteredTimestamps, filteredConfidences, maxFrame)
     }
