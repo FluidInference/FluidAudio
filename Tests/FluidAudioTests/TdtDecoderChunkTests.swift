@@ -76,16 +76,11 @@ final class TdtDecoderChunkTests: XCTestCase {
     // MARK: - Context Frame Adjustment Tests
 
     func testFirstChunkContextFrameAdjustment() throws {
-        let encoderOutput = try createMockEncoderOutput(timeFrames: 140)  // 11.2s
-        var decoderState = try createMockDecoderState()  // Fresh state, no timeJump
-
         // Mock models aren't available in unit tests, so we test the logic indirectly
         // by checking the frame calculation parameters
 
         let actualAudioFrames = 140
         let contextFrameAdjustment = 0  // First chunk
-        let isLastChunk = true  // Single chunk
-        let globalFrameOffset = 0
 
         // Test the frame bounds calculation that would happen in decodeWithTimings
         let encoderSequenceLength = 140
