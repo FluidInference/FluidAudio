@@ -75,10 +75,10 @@ internal struct TdtDecoder {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0
-    ) async throws -> (tokens: [Int], timestamps: [Int]) {
+    ) async throws -> TdtHypothesis {
         // Early exit for very short audio (< 160ms)
         guard encoderSequenceLength > 1 else {
-            return ([], [])
+            return TdtHypothesis(decState: decoderState)
         }
 
         // Pre-process encoder output for faster access
@@ -130,7 +130,7 @@ internal struct TdtDecoder {
 
         // If timeJump puts us beyond the available frames, return empty
         if timeIndices >= effectiveSequenceLength {
-            return ([], [])
+            return TdtHypothesis(decState: decoderState)
         }
 
         let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
@@ -216,7 +216,8 @@ internal struct TdtDecoder {
 
             // Predict token (what to emit) and duration (how many frames to skip)
             label = argmaxSIMD(tokenLogits)  // Get highest scoring token
-            var score = tokenLogits[label]  // Confidence score for this token
+            let tokenProbabilities = softmax(tokenLogits)
+            var score = tokenProbabilities[label]  // Confidence score (probability) for this token
 
             // Map duration bin to actual frame count
             // durationBins typically = [0,1,2,3,4] meaning skip 0-4 frames
@@ -276,7 +277,8 @@ internal struct TdtDecoder {
                 let (innerTokenLogits, innerDurationLogits) = try splitLogits(
                     innerLogits, durationElements: config.tdtConfig.durationBins.count)
                 label = argmaxSIMD(innerTokenLogits)
-                score = innerTokenLogits[label]
+                let innerTokenProbabilities = softmax(innerTokenLogits)
+                score = innerTokenProbabilities[label]
                 let innerDurationBinIndex = argmaxSIMD(innerDurationLogits)
                 duration = config.tdtConfig.durationBins[innerDurationBinIndex]
 
@@ -307,6 +309,7 @@ internal struct TdtDecoder {
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
+                hypothesis.tokenConfidences.append(score)
                 hypothesis.lastToken = label  // Remember for next iteration
 
                 // CRITICAL: Update decoder LSTM with the new token
@@ -400,7 +403,8 @@ internal struct TdtDecoder {
                     logits, durationElements: config.tdtConfig.durationBins.count)
 
                 let token = argmaxSIMD(tokenLogits)
-                let score = tokenLogits[token]
+                let finalTokenProbabilities = softmax(tokenLogits)
+                let score = finalTokenProbabilities[token]
 
                 // Also get duration for proper timestamp calculation
                 let durationBinIndex = argmaxSIMD(durationLogits)
@@ -418,6 +422,7 @@ internal struct TdtDecoder {
                     let finalTimestamp =
                         min(finalProcessingTimeIndices, effectiveSequenceLength - 1) + globalFrameOffset
                     hypothesis.timestamps.append(finalTimestamp)
+                    hypothesis.tokenConfidences.append(score)
                     hypothesis.lastToken = token
 
                     // Update decoder state
@@ -470,7 +475,7 @@ internal struct TdtDecoder {
         }
 
         // No filtering at decoder level - let post-processing handle deduplication
-        return (hypothesis.ySequence, hypothesis.timestamps)
+        return hypothesis
     }
 
     /// Pre-process encoder output into contiguous memory for faster access
@@ -631,6 +636,7 @@ internal struct TdtDecoder {
         hypothesis.ySequence.append(token)
         hypothesis.score += score
         hypothesis.timestamps.append(timeIdx)
+        hypothesis.tokenConfidences.append(score)
         hypothesis.decState = decoderState
         hypothesis.lastToken = token
 
@@ -688,6 +694,37 @@ internal struct TdtDecoder {
     /// Non-SIMD argmax for compatibility
     private func argmax(_ values: [Float]) -> Int {
         return argmaxSIMD(values)
+    }
+
+    /// Apply softmax to convert logits to probabilities using Accelerate framework
+    internal func softmax(_ logits: [Float]) -> [Float] {
+        guard !logits.isEmpty else { return [] }
+
+        var probabilities = [Float](repeating: 0.0, count: logits.count)
+
+        logits.withUnsafeBufferPointer { logitsPtr in
+            probabilities.withUnsafeMutableBufferPointer { probsPtr in
+                // Find max value to prevent overflow
+                var maxValue: Float = 0
+                var maxIndex: vDSP_Length = 0
+                vDSP_maxvi(logitsPtr.baseAddress!, 1, &maxValue, &maxIndex, vDSP_Length(logits.count))
+
+                // Subtract max from all values (for numerical stability)
+                vDSP_vsadd(logitsPtr.baseAddress!, 1, [-maxValue], probsPtr.baseAddress!, 1, vDSP_Length(logits.count))
+
+                // Apply exponential
+                vvexpf(probsPtr.baseAddress!, probsPtr.baseAddress!, [Int32(logits.count)])
+
+                // Calculate sum
+                var sum: Float = 0
+                vDSP_sve(probsPtr.baseAddress!, 1, &sum, vDSP_Length(logits.count))
+
+                // Normalize by sum
+                vDSP_vsdiv(probsPtr.baseAddress!, 1, [sum], probsPtr.baseAddress!, 1, vDSP_Length(logits.count))
+            }
+        }
+
+        return probabilities
     }
 
     /// Process duration logits to get duration value

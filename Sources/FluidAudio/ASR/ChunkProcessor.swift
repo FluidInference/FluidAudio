@@ -27,6 +27,7 @@ struct ChunkProcessor {
     ) async throws -> ASRResult {
         var allTokens: [Int] = []
         var allTimestamps: [Int] = []
+        var allConfidences: [Float] = []
 
         var centerStart = 0
         var segmentIndex = 0
@@ -37,7 +38,7 @@ struct ChunkProcessor {
 
             // Process chunk with explicit last chunk detection
 
-            let (windowTokens, windowTimestamps, maxFrame) = try await processWindowWithTokens(
+            let (windowTokens, windowTimestamps, windowConfidences, maxFrame) = try await processWindowWithTokens(
                 centerStart: centerStart,
                 segmentIndex: segmentIndex,
                 lastProcessedFrame: lastProcessedFrame,
@@ -56,12 +57,15 @@ struct ChunkProcessor {
                 let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
                     previous: allTokens, current: windowTokens, maxOverlap: 30)
                 let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
+                let adjustedConfidences = Array(windowConfidences.dropFirst(removedCount))
 
                 allTokens.append(contentsOf: deduped)
                 allTimestamps.append(contentsOf: adjustedTimestamps)
+                allConfidences.append(contentsOf: adjustedConfidences)
             } else {
                 allTokens.append(contentsOf: windowTokens)
                 allTimestamps.append(contentsOf: windowTimestamps)
+                allConfidences.append(contentsOf: windowConfidences)
             }
 
             centerStart += centerSamples
@@ -72,6 +76,7 @@ struct ChunkProcessor {
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
+            confidences: allConfidences,
             encoderSequenceLength: 0,  // Not relevant for chunk processing
             audioSamples: audioSamples,
             processingTime: Date().timeIntervalSince(startTime)
@@ -85,7 +90,7 @@ struct ChunkProcessor {
         isLastChunk: Bool,
         using manager: AsrManager,
         decoderState: inout TdtDecoderState
-    ) async throws -> (tokens: [Int], timestamps: [Int], maxFrame: Int) {
+    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], maxFrame: Int) {
         let remainingSamples = audioSamples.count - centerStart
 
         // Calculate context and frame adjustment for all chunks
@@ -147,7 +152,7 @@ struct ChunkProcessor {
 
         // If nothing to process, return empty
         if leftStart >= rightEnd {
-            return ([], [], 0)
+            return ([], [], [], 0)
         }
 
         let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
@@ -161,7 +166,7 @@ struct ChunkProcessor {
         // Calculate global frame offset for this chunk
         let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
 
-        let (tokens, timestamps, encLen) = try await manager.executeMLInferenceWithTimings(
+        let (hypothesis, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
             actualAudioFrames: actualFrameCount,
@@ -172,15 +177,16 @@ struct ChunkProcessor {
             globalFrameOffset: globalFrameOffset
         )
 
-        if tokens.isEmpty || encLen == 0 {
-            return ([], [], 0)
+        if hypothesis.isEmpty || encLen == 0 {
+            return ([], [], [], 0)
         }
 
         // Take all tokens from decoder (it already processed only the relevant frames)
-        let filteredTokens = tokens
-        let filteredTimestamps = timestamps
-        let maxFrame = timestamps.max() ?? 0
+        let filteredTokens = hypothesis.ySequence
+        let filteredTimestamps = hypothesis.timestamps
+        let filteredConfidences = hypothesis.tokenConfidences
+        let maxFrame = hypothesis.maxTimestamp
 
-        return (filteredTokens, filteredTimestamps, maxFrame)
+        return (filteredTokens, filteredTimestamps, filteredConfidences, maxFrame)
     }
 }

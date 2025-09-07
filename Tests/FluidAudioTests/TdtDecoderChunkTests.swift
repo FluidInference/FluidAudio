@@ -57,7 +57,7 @@ final class TdtDecoderChunkTests: XCTestCase {
                 throw ASRError.processingFailed("Mock model ran out of predictions")
             }
 
-            let (expectedType, result) = predictions[predictionIndex]
+            let (_, result) = predictions[predictionIndex]
             predictionIndex += 1
 
             return result
@@ -73,19 +73,58 @@ final class TdtDecoderChunkTests: XCTestCase {
         }
     }
 
+    // MARK: - Global Frame Offset Tests
+
+    func testGlobalFrameOffsetCalculations() throws {
+        // Test global frame offset calculation for multi-chunk processing
+        let samplesPerEncoderFrame = ASRConstants.samplesPerEncoderFrame  // 1280 samples per frame
+        let centerSamples = Int(11.2 * 16000.0)  // 179,200 samples per chunk center
+        let leftContextSamples = Int(1.6 * 16000.0)  // 25,600 samples left context
+
+        // First chunk: starts at sample 0
+        let chunk1LeftStart = max(0, 0 - leftContextSamples)  // max(0, -25600) = 0
+        let chunk1GlobalFrameOffset = chunk1LeftStart / samplesPerEncoderFrame
+        XCTAssertEqual(chunk1GlobalFrameOffset, 0, "First chunk should have global frame offset 0")
+
+        // Second chunk: starts at sample 179,200 (11.2s)
+        let chunk2CenterStart = centerSamples  // 179,200
+        let chunk2LeftStart = max(0, chunk2CenterStart - leftContextSamples)  // max(0, 153600) = 153,600
+        let chunk2GlobalFrameOffset = chunk2LeftStart / samplesPerEncoderFrame  // 153600 / 1280 = 120
+        XCTAssertEqual(chunk2GlobalFrameOffset, 120, "Second chunk should have global frame offset 120")
+
+        // Third chunk: starts at sample 358,400 (22.4s)
+        let chunk3CenterStart = centerSamples * 2  // 358,400
+        let chunk3LeftStart = max(0, chunk3CenterStart - leftContextSamples)  // 332,800
+        let chunk3GlobalFrameOffset = chunk3LeftStart / samplesPerEncoderFrame  // 332800 / 1280 = 260
+        XCTAssertEqual(chunk3GlobalFrameOffset, 260, "Third chunk should have global frame offset 260")
+
+        // Test timestamp calculation: token at local frame 50 in each chunk
+        let localFrame = 50
+        let chunk1GlobalTimestamp = localFrame + chunk1GlobalFrameOffset  // 50 + 0 = 50
+        let chunk2GlobalTimestamp = localFrame + chunk2GlobalFrameOffset  // 50 + 120 = 170
+        let chunk3GlobalTimestamp = localFrame + chunk3GlobalFrameOffset  // 50 + 260 = 310
+
+        XCTAssertEqual(chunk1GlobalTimestamp, 50, "Chunk 1 token should have global timestamp 50")
+        XCTAssertEqual(chunk2GlobalTimestamp, 170, "Chunk 2 token should have global timestamp 170")
+        XCTAssertEqual(chunk3GlobalTimestamp, 310, "Chunk 3 token should have global timestamp 310")
+
+        // Convert to time for verification (frame * 0.08 seconds per frame)
+        let chunk1Time = Double(chunk1GlobalTimestamp) * 0.08  // 50 * 0.08 = 4.0s
+        let chunk2Time = Double(chunk2GlobalTimestamp) * 0.08  // 170 * 0.08 = 13.6s
+        let chunk3Time = Double(chunk3GlobalTimestamp) * 0.08  // 310 * 0.08 = 24.8s
+
+        XCTAssertEqual(chunk1Time, 4.0, accuracy: 0.01, "Chunk 1 token should be at 4.0s")
+        XCTAssertEqual(chunk2Time, 13.6, accuracy: 0.01, "Chunk 2 token should be at 13.6s")
+        XCTAssertEqual(chunk3Time, 24.8, accuracy: 0.01, "Chunk 3 token should be at 24.8s")
+    }
+
     // MARK: - Context Frame Adjustment Tests
 
     func testFirstChunkContextFrameAdjustment() throws {
-        let encoderOutput = try createMockEncoderOutput(timeFrames: 140)  // 11.2s
-        var decoderState = try createMockDecoderState()  // Fresh state, no timeJump
-
-        // Mock models aren't available in unit tests, so we test the logic indirectly
-        // by checking the frame calculation parameters
-
+        // Test first chunk global frame calculations
         let actualAudioFrames = 140
         let contextFrameAdjustment = 0  // First chunk
-        let isLastChunk = true  // Single chunk
-        let globalFrameOffset = 0
+        let globalFrameOffset = 0  // First chunk starts at global frame 0
 
         // Test the frame bounds calculation that would happen in decodeWithTimings
         let encoderSequenceLength = 140
@@ -95,29 +134,42 @@ final class TdtDecoderChunkTests: XCTestCase {
         let timeIndices = contextFrameAdjustment  // Should be 0
         let activeMask = timeIndices < effectiveSequenceLength
 
+        // Test global timestamp calculation for a token emitted at frame 50
+        let localFrameIndex = 50
+        let globalTimestamp = localFrameIndex + globalFrameOffset
+
         XCTAssertEqual(timeIndices, 0, "First chunk should start at frame 0")
         XCTAssertTrue(activeMask, "First chunk should be active")
         XCTAssertEqual(effectiveSequenceLength, 140, "Effective sequence length should match encoder frames")
+        XCTAssertEqual(globalTimestamp, 50, "Global timestamp should equal local frame for first chunk")
+        XCTAssertEqual(globalFrameOffset, 0, "First chunk should have no global offset")
     }
 
     func testSecondChunkContextFrameAdjustmentWithTimeJump() throws {
-        let encoderOutput = try createMockEncoderOutput(timeFrames: 140)
         var decoderState = try createMockDecoderState(timeJump: 3)  // Decoder was 3 frames ahead of previous chunk
 
-        let actualAudioFrames = 140
         let contextFrameAdjustment = -20  // Standard overlap (1.6s = 20 frames)
-        let globalFrameOffset = 140  // Second chunk starts at frame 140
+        let globalFrameOffset = 140  // Second chunk starts at global frame 140
 
         // Test timeIndices calculation for chunk continuation
         let prevTimeJump = decoderState.timeJump!
         let timeIndices = max(0, prevTimeJump + contextFrameAdjustment)  // 3 + (-20) = -17, max(0, -17) = 0
 
+        // Test global timestamp calculation for a token emitted at local frame 30
+        let localFrameIndex = 30
+        let globalTimestamp = localFrameIndex + globalFrameOffset
+
         XCTAssertEqual(timeIndices, 0, "Second chunk with large negative adjustment should clamp to 0")
+        XCTAssertEqual(globalTimestamp, 170, "Global timestamp should be local frame + global offset (30 + 140)")
+        XCTAssertEqual(globalFrameOffset, 140, "Second chunk should start at frame 140 globally")
 
         // Test with different timeJump values
         decoderState.timeJump = 25  // Decoder was well ahead
         let timeIndices2 = max(0, 25 + contextFrameAdjustment)  // 25 + (-20) = 5
+        let globalTimestamp2 = timeIndices2 + globalFrameOffset  // 5 + 140 = 145
+
         XCTAssertEqual(timeIndices2, 5, "Second chunk should skip appropriate frames based on timeJump")
+        XCTAssertEqual(globalTimestamp2, 145, "Global timestamp should account for skipped frames")
     }
 
     func testLastChunkAdaptiveContextFrameAdjustment() throws {
@@ -214,7 +266,7 @@ final class TdtDecoderChunkTests: XCTestCase {
 
         // Calculate final timestamp ensuring it doesn't exceed bounds
         let finalTimestamp = min(finalProcessingTimeIndices, effectiveSequenceLength - 1) + globalFrameOffset
-        let expectedTimestamp = min(145, 139) + 280  // 139 + 280 = 419
+        // expectedTimestamp = min(145, 139) + 280 = 139 + 280 = 419
 
         XCTAssertEqual(finalTimestamp, 419, "Final timestamp should be clamped and offset correctly")
     }
@@ -346,7 +398,7 @@ final class TdtDecoderChunkTests: XCTestCase {
     func testForceBlankMechanismParameters() throws {
         let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep
         var emissionsAtThisTimestamp = maxSymbolsPerStep - 1
-        var lastEmissionTimestamp = 100
+        let lastEmissionTimestamp = 100
         let timeIndicesCurrentLabels = 100  // Same timestamp
 
         // Simulate multiple emissions at same timestamp

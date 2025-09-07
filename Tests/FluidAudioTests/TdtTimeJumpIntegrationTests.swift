@@ -718,7 +718,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             let isLastChunk = (chunkIndex == numChunks - 1)
             let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: 240_000)
 
-            let (tokens, timestamps, _) = try await manager.executeMLInferenceWithTimings(
+            let (hypothesis, _) = try await manager.executeMLInferenceWithTimings(
                 paddedChunk,
                 originalLength: chunkSamples.count,
                 enableDebug: true,
@@ -727,10 +727,10 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 isLastChunk: isLastChunk
             )
 
-            print("Chunk \(chunkIndex): \(tokens.count) tokens, timeJump: \(decoderState.timeJump ?? 0)")
+            print("Chunk \(chunkIndex): \(hypothesis.tokenCount) tokens, timeJump: \(decoderState.timeJump ?? 0)")
 
-            allTokens.append(contentsOf: tokens)
-            allTimestamps.append(contentsOf: timestamps)
+            allTokens.append(contentsOf: hypothesis.ySequence)
+            allTimestamps.append(contentsOf: hypothesis.timestamps)
 
             // Verify timeJump is being set (except for last chunk)
             if !isLastChunk {
@@ -742,9 +742,9 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             }
 
             // Verify lastToken is maintained for linguistic continuity
-            if !tokens.isEmpty {
+            if hypothesis.hasTokens {
                 XCTAssertEqual(
-                    decoderState.lastToken, tokens.last,
+                    decoderState.lastToken, hypothesis.computedLastToken,
                     "Decoder state should maintain last token for chunk \(chunkIndex)"
                 )
             }
