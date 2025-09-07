@@ -697,7 +697,7 @@ internal struct TdtDecoder {
     }
 
     /// Apply softmax to convert logits to probabilities using Accelerate framework
-    private func softmax(_ logits: [Float]) -> [Float] {
+    internal func softmax(_ logits: [Float]) -> [Float] {
         guard !logits.isEmpty else { return [] }
 
         var probabilities = [Float](repeating: 0.0, count: logits.count)

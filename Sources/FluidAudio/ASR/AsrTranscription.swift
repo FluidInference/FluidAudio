@@ -43,6 +43,7 @@ extension AsrManager {
                 tokenIds: hypothesis.ySequence,
                 timestamps: hypothesis.timestamps,
                 confidences: hypothesis.tokenConfidences,
+                tokenDurations: hypothesis.tokenDurations,
                 encoderSequenceLength: encoderSequenceLength,
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
@@ -179,6 +180,7 @@ extension AsrManager {
         tokenIds: [Int],
         timestamps: [Int] = [],
         confidences: [Float] = [],
+        tokenDurations: [Int] = [],
         encoderSequenceLength: Int,
         audioSamples: [Float],
         processingTime: TimeInterval,
@@ -189,7 +191,8 @@ extension AsrManager {
         let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
 
         // Convert timestamps to TokenTiming objects if provided
-        let timingsFromTimestamps = createTokenTimings(from: tokenIds, timestamps: timestamps, confidences: confidences)
+        let timingsFromTimestamps = createTokenTimings(
+            from: tokenIds, timestamps: timestamps, confidences: confidences, tokenDurations: tokenDurations)
 
         // Use existing timings if provided, otherwise use timings from timestamps
         let resultTimings = tokenTimings.isEmpty ? timingsFromTimestamps : finalTimings
@@ -253,7 +256,9 @@ extension AsrManager {
     }
 
     /// Convert frame timestamps to TokenTiming objects
-    private func createTokenTimings(from tokenIds: [Int], timestamps: [Int], confidences: [Float]) -> [TokenTiming] {
+    private func createTokenTimings(
+        from tokenIds: [Int], timestamps: [Int], confidences: [Float], tokenDurations: [Int] = []
+    ) -> [TokenTiming] {
         guard
             !tokenIds.isEmpty && !timestamps.isEmpty && tokenIds.count == timestamps.count
                 && confidences.count == tokenIds.count
@@ -270,10 +275,14 @@ extension AsrManager {
             // Convert encoder frame index to time (approximate: 80ms per frame)
             let startTime = TimeInterval(frameIndex) * 0.08
 
-            // Calculate end time based on next token's start time
+            // Calculate end time using actual token duration if available
             let endTime: TimeInterval
-            if i < tokenIds.count - 1 {
-                // Use next token's start time as this token's end time
+            if !tokenDurations.isEmpty && tokenDurations.count == tokenIds.count {
+                // Use actual token duration (convert frames to time: duration * 0.08)
+                let durationInSeconds = TimeInterval(tokenDurations[i]) * 0.08
+                endTime = startTime + max(durationInSeconds, 0.08)  // Minimum 80ms duration
+            } else if i < tokenIds.count - 1 {
+                // Fallback: Use next token's start time as this token's end time
                 endTime = TimeInterval(timestamps[i + 1]) * 0.08
             } else {
                 // For the last token, use a default duration
