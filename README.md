@@ -1,6 +1,6 @@
 ![banner.png](banner.png)
 
-# FluidAudio - Swift SDK for Speaker Diarization and Transcription with CoreML
+# FluidAudio - Swift SDK for Speaker Diarization, VAD and Transcription with CoreML
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
@@ -15,7 +15,7 @@ For custom use cases, feedback, more model support, and other platform requests,
 
 ## Features
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) with Token Duration Transducer; supports 25 European languages
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) with Token Duration Transducer; supports all 25 European languages
 - **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
