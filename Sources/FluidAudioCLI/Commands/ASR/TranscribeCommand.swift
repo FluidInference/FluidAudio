@@ -215,7 +215,6 @@ enum TranscribeCommand {
 
             // Feed using Apple's typical audio engine default buffer size (frames)
             // On Apple platforms, the default I/O buffer is commonly 1024 frames.
-            // Using this for file-streaming keeps behavior aligned with live engine taps.
             let samplesPerFeedChunk = 1024
 
             while position < Int(buffer.frameLength) {

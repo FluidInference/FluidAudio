@@ -41,10 +41,14 @@ public actor StreamingAsrManager {
     private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
+    // Snapshot of decoder state at the start of the current segment.
+    // Used to re-decode the entire segment on finalization so early tokens get confirmed.
+    private var segmentStartDecoderState: TdtDecoderState?
 
     // Sliding window state
     private var accumulatedTokens: [Int] = []
     private let maxAccumulatedTokens = 5000  // Limit to prevent memory growth
+    private var lastProcessedFrame: Int = 0  // Global encoder-frame position for streaming alignment
 
     // No internal accumulation; clients combine final transcript externally
 
@@ -60,6 +64,7 @@ public actor StreamingAsrManager {
         var isFinalized: Bool
         var lastInterimUpdate: Int  // Last sample position where we emitted an interim result
     }
+    
     private var currentSegment: CurrentSegment = .init(
         id: UUID(), centerStartAbs: 0, chunkSamples: 0, isFinalized: false, lastInterimUpdate: 0
     )
@@ -137,6 +142,12 @@ public actor StreamingAsrManager {
             id: UUID(), centerStartAbs: 0, chunkSamples: config.chunkSamples,
             isFinalized: false, lastInterimUpdate: 0
         )
+
+        // Capture decoder state snapshot at the start of the first segment
+        if let asrManager = asrManager {
+            let base = (source == .microphone) ? asrManager.microphoneDecoderState : asrManager.systemDecoderState
+            segmentStartDecoderState = try? TdtDecoderState(from: base)
+        }
 
         // Start background recognition task
         recognizerTask = Task {
@@ -252,31 +263,92 @@ public actor StreamingAsrManager {
     /// Process a single assembled window: [left, chunk, right]
     private func processWindow(
         _ windowSamples: [Float],
+        leftStartAbs: Int,
         segmentID: UUID,
         centerStartAbs: Int,
         chunkSamples: Int,
-        isFinal: Bool
+        isFinal: Bool,
+        isStreamEnding: Bool
     ) async {
         guard let asrManager = asrManager else { return }
 
         do {
             let chunkStartTime = Date()
 
-            // Start frame offset is now handled by decoder's timeJump mechanism
+            // Calculate encoder-frame metadata for streaming (NeMo-style)
+            let samplesPerFrame = ASRConstants.samplesPerEncoderFrame
+            let leftContextLen = max(0, centerStartAbs - leftStartAbs)
+            let leftContextFrames = ASRConstants.calculateEncoderFrames(from: leftContextLen)
+            let actualFramesForChunk = ASRConstants.calculateEncoderFrames(from: leftContextLen + chunkSamples)
+            let globalFrameOffset = leftStartAbs / samplesPerFrame
 
-            // Call AsrManager directly with deduplication
-            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
-                windowSamples,
-                source: audioSource,
-                previousTokens: accumulatedTokens,
-                enableDebug: config.enableDebug
+            // Always skip the left-context frames inside this window.
+            // Tells the decoder to start decoding at the beginning of the new chunk region.
+            // Any inter-chunk alignment is handled internally by timeJump.
+            var contextFrameAdjustment = leftContextFrames
+
+            // Select decoder state for source and run frame-accurate inference
+            // For finalization, re-decode the entire segment from the snapshot taken
+            // at the segment start so early tokens are included in the final.
+            var state: TdtDecoderState
+            if isFinal, let snap = segmentStartDecoderState {
+                state = snap
+            } else {
+                state = (audioSource == .microphone) ? asrManager.microphoneDecoderState : asrManager.systemDecoderState
+            }
+            // Pad to model capacity (15s) to satisfy CoreML input constraints
+            let paddedWindow = asrManager.padAudioIfNeeded(windowSamples, targetLength: 240_000)
+            let (hyp, encLen) = try await asrManager.executeMLInferenceWithTimings(
+                paddedWindow,
+                originalLength: windowSamples.count,
+                actualAudioFrames: actualFramesForChunk,  // decode only left+chunk frames
+                enableDebug: config.enableDebug,
+                decoderState: &state,
+                contextFrameAdjustment: contextFrameAdjustment,
+                isLastChunk: isStreamEnding,
+                globalFrameOffset: globalFrameOffset
             )
+
+            // Persist updated decoder state back to manager
+            if audioSource == .microphone {
+                asrManager.microphoneDecoderState = state
+            } else {
+                asrManager.systemDecoderState = state
+            }
+
+            // Update global processed frame tracker
+            if hyp.maxTimestamp > 0 { lastProcessedFrame = hyp.maxTimestamp }
+
+            // Filter out tokens that fall within the left context region of this window
+            // Use absolute frame cutoff: start-of-chunk in frames
+            let startFrameCutoff = globalFrameOffset + leftContextFrames
+            var filteredTokens: [Int] = []
+            var filteredTimestamps: [Int] = []
+            var filteredConfidences: [Float] = []
+
+            for i in 0..<hyp.ySequence.count {
+                let ts = hyp.timestamps.indices.contains(i) ? hyp.timestamps[i] : 0
+                if ts >= startFrameCutoff {
+                    filteredTokens.append(hyp.ySequence[i])
+                    filteredTimestamps.append(ts)
+                    if hyp.tokenConfidences.indices.contains(i) {
+                        filteredConfidences.append(hyp.tokenConfidences[i])
+                    }
+                }
+            }
+
+            // Deduplicate against accumulated tokens across finalized segments
+            let (dedupedTokens, removedCount) = asrManager.removeDuplicateTokenSequence(
+                previous: accumulatedTokens, current: filteredTokens, maxOverlap: 30
+            )
+            let adjustedTimestamps = removedCount > 0 ? Array(filteredTimestamps.dropFirst(removedCount)) : filteredTimestamps
+            let adjustedConfidences = removedCount > 0 ? Array(filteredConfidences.dropFirst(removedCount)) : filteredConfidences
 
             // For streaming, don't accumulate tokens blindly since they're deduplicated
             // by transcribeStreamingChunk. Only update accumulated tokens if this is final.
             if isFinal {
                 // Only add truly new tokens after deduplication
-                accumulatedTokens.append(contentsOf: tokens)
+                accumulatedTokens.append(contentsOf: dedupedTokens)
 
                 // Keep only recent tokens to prevent unbounded growth
                 if accumulatedTokens.count > maxAccumulatedTokens {
@@ -300,10 +372,10 @@ public actor StreamingAsrManager {
             // Convert only the current chunk tokens to text for clean incremental updates
             // The final result will use all accumulated tokens for proper deduplication
             let interim = asrManager.processTranscriptionResult(
-                tokenIds: tokens,  // Only current chunk tokens for progress updates
-                timestamps: timestamps,
-                confidences: confidences,
-                encoderSequenceLength: 0,
+                tokenIds: dedupedTokens,  // emit only new tokens
+                timestamps: adjustedTimestamps,
+                confidences: adjustedConfidences,
+                encoderSequenceLength: encLen,
                 audioSamples: windowSamples,
                 processingTime: processingTime
             )
@@ -366,6 +438,9 @@ public actor StreamingAsrManager {
                 confidence: confidence,
                 tokenTimings: tokenTimings
             )
+            if config.enableDebug {
+                print("[StreamingASR] FINAL seg=\(segmentID) text=\(trimmedText)")
+            }
             segmentUpdatesContinuation?.yield(segmentUpdate)
 
             // Clear volatile transcript only after finalizing
@@ -385,6 +460,9 @@ public actor StreamingAsrManager {
                 confidence: confidence,
                 tokenTimings: tokenTimings
             )
+            if config.enableDebug {
+                print("[StreamingASR] VOLATILE seg=\(segmentID) text=\(trimmedText)")
+            }
             segmentUpdatesContinuation?.yield(segmentUpdate)
         }
     }
@@ -443,10 +521,12 @@ public actor StreamingAsrManager {
 
         await self.processWindow(
             window,
+            leftStartAbs: leftStartAbs,
             segmentID: segID,
             centerStartAbs: center,
             chunkSamples: effectiveChunk,
-            isFinal: true
+            isFinal: true,
+            isStreamEnding: forceFinalize
         )
 
         return true
@@ -478,10 +558,12 @@ public actor StreamingAsrManager {
 
         await self.processWindow(
             window,
+            leftStartAbs: leftStartAbs,
             segmentID: currentSegment.id,
             centerStartAbs: center,
             chunkSamples: nextInterimPos,
-            isFinal: false
+            isFinal: false,
+            isStreamEnding: false
         )
 
         return true
@@ -508,6 +590,12 @@ public actor StreamingAsrManager {
         if dropCount > 0 && dropCount <= sampleBuffer.count {
             sampleBuffer.removeFirst(dropCount)
             bufferStartIndex += dropCount
+        }
+
+        // Update decoder state snapshot for the new segment start
+        if let asrManager = asrManager {
+            let base = (audioSource == .microphone) ? asrManager.microphoneDecoderState : asrManager.systemDecoderState
+            segmentStartDecoderState = try? TdtDecoderState(from: base)
         }
     }
 
