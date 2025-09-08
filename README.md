@@ -8,7 +8,6 @@
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
 
-
 Fluid Audio is a Swift framework for fully local, low-latency audio processing on Apple devices. It provides state-of-the-art speaker diarization, ASR, and voice activity detection through open-source models (MIT/Apache 2.0 licensed) that we've converted to Core ML.
 
 Our models are optimized for background processing on CPU, avoiding GPU/MPS/Shaders to ensure reliable performance. While we've tested CPU/GPU-based alternatives, they proved too slow or resource-intensive for our near real-time requirements.
@@ -31,9 +30,9 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
 - **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
-- **Open-Source Models**: All models are [publicly available on HuggingFace](https://huggingface.co/FluidInference) - converted and optimized by our team. Permissive licenses.
+- **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses
 - **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
-- **Cross-platform**: Support for macOS 14.0+ and iOS 17.0+ and Apple Sillicon device
+- **Cross-platform**: Support for macOS 14.0+ and iOS 17.0+ and Apple Silicon devices
 - **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 
 ## Installation
@@ -46,17 +45,15 @@ dependencies: [
 ],
 ```
 
-**Important**: When adding FluidAudio as a package dependency, **only add the library to your target** (not the executable). Select "FluidAudio" library in the package products dialog and add it to your app target.
+Important: When adding FluidAudio as a package dependency, only add the library to your target (not the executable). Select `FluidAudio` library in the package products dialog and add it to your app target.
 
 ## Documentation
 
-**DeepWiki** generates documentation for the repo automatically. [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio)
-  
+- **DeepWiki**: Auto-generated docs for this repo — https://deepwiki.com/FluidInference/FluidAudio
+
 ### MCP
 
-The repo is indexed by [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) - the MCP server gives your coding tool access to the docs already.
-
-For most clients:
+The repo is indexed by DeepWiki MCP server, so your coding tool can access the docs:
 
 ```json
 {
@@ -74,72 +71,334 @@ For claude code:
 claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 ```
 
-## Speaker Diarization
+### Audio Conversion (16 kHz mono)
 
-**AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
+Most features expect 16 kHz mono Float32 samples. Use `AudioConverter` to load and convert from any `AVAudioFile` format:
 
-- **DER: 17.7%** - Competitive with Powerset BCE 2023 (18.5%)
-- **JER: 28.0%** - Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
-- **RTF: 0.02x** - Real-time processing with 50x speedup
+```swift
+import AVFoundation
+import FluidAudio
 
-```text
-  RTF = Processing Time / Audio Duration
-
-  With RTF = 0.02x:
-  - 1 minute of audio takes 0.02 × 60 = 1.2 seconds to process
-  - 10 minutes of audio takes 0.02 × 600 = 12 seconds to process
-
-  For real-time speech-to-text:
-  - Latency: ~1.2 seconds per minute of audio
-  - Throughput: Can process 50x faster than real-time
-  - Pipeline impact: Minimal - diarization won't be the bottleneck
+func loadSamples16kMono(path: String) async throws -> [Float] {
+    let url = URL(fileURLWithPath: path)
+    let file = try AVAudioFile(forReading: url)
+    let capacity = AVAudioFrameCount(file.length)
+    guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: capacity) else {
+        return []
+    }
+    try file.read(into: buf)
+    let converter = AudioConverter()
+    return try await converter.convertToAsrFormat(buf)
+}
 ```
 
 ## Automatic Speech Recognition (ASR) / Transcription
 
-- **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
-- **Languages**: All European languages (25)
+- **Model**: `FluidInference/parakeet-tdt-0.6b-v3-coreml`
+- **Languages**: All European languages (25) - see Huggingface models for exact list
 - **Processing Mode**: Batch transcription for complete audio files
-- **Real-time Factor**: ~110x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
-- **Streaming Support**: Coming soon - batch processing is recommended for production use
+- **Real-time Factor**: ~120x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
+- **Streaming Support**: Coming soon — batch processing is recommended for production use
 - **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
-### CLI Transcription
+### Quick Start (Code)
 
-```bash
-# Transcribe an audio file using batch processing
-swift run fluidaudio transcribe audio.wav
+```swift
+import FluidAudio
 
-# Show help and usage options
-swift run fluidaudio transcribe --help
+// Batch transcription from an audio file
+Task {
+    // 1) Initialize ASR manager and load models
+    let models = try await AsrModels.downloadAndLoad()
+    let asrManager = AsrManager(config: .default)
+    try await asrManager.initialize(models: models)
+
+    // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
+    let samples = try await loadSamples16kMono(path: "path/to/audio.wav")
+
+    // 3) Transcribe the audio
+    let result = try await asrManager.transcribe(samples, source: .system)
+    print("Transcription: \(result.text)")
+    print("Confidence: \(result.confidence)")
+}
 ```
 
-### Benchmark Performance
+### CLI
 
 ```bash
-swift run fluidaudio asr-benchmark --subset test-clean --max-files 25
+# Transcribe an audio file (batch)
+swift run fluidaudio transcribe audio.wav
+
+# Transcribe multiple files in parallel
+swift run fluidaudio multi-stream audio1.wav audio2.wav
+
+# Benchmark ASR on LibriSpeech
+swift run fluidaudio asr-benchmark --subset test-clean --num-files 50
+
+# Multilingual ASR (FLEURS) benchmark
+swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+# Download LibriSpeech test sets
+swift run fluidaudio download --dataset librispeech-test-clean
+swift run fluidaudio download --dataset librispeech-test-other
+```
+
+## Speaker Diarization
+
+**AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
+
+- **DER: 17.7%** — Competitive with Powerset BCE 2023 (18.5%)
+- **JER: 28.0%** — Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
+- **RTF: 0.02x** — Real-time processing with 50x speedup
+
+```text
+RTF = Processing Time / Audio Duration
+
+With RTF = 0.02x:
+- 1 minute of audio takes 0.02 × 60 = 1.2 seconds to process
+- 10 minutes of audio takes 0.02 × 600 = 12 seconds to process
+
+For real-time speech-to-text:
+- Latency: ~1.2 seconds per minute of audio
+- Throughput: Can process 50x faster than real-time
+- Pipeline impact: Minimal — diarization won't be the bottleneck
+```
+
+### Quick Start (Code)
+
+```swift
+import FluidAudio
+
+// Diarize an audio file
+Task {
+    let models = try await DiarizerModels.downloadIfNeeded()
+    let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
+    diarizer.initialize(models: models)
+
+    // Prepare 16 kHz mono samples (see: Audio Conversion)
+    let samples = try await loadSamples16kMono(path: "path/to/meeting.wav")
+
+    // Run diarization
+    let result = try diarizer.performCompleteDiarization(samples)
+    for segment in result.segments {
+        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
+    }
+}
+```
+
+### Streaming Diarization
+
+Stream meeting audio in chunks while maintaining consistent speaker IDs across the session. Keep a single `DiarizerManager` alive, process fixed-size chunks, and rebase segment timestamps by the chunk’s start offset. Overlap helps reduce boundary errors and enables overlap speech handling.
+
+```swift
+import FluidAudio
+
+Task {
+    // 1) Initialize diarizer once (models are reused across chunks)
+    let models = try await DiarizerModels.downloadIfNeeded()
+    let config = DiarizerConfig(
+        clusteringThreshold: 0.7,
+        minSpeechDuration: 1.0,
+        minSilenceGap: 0.5,
+        minActiveFramesCount: 10.0,
+        chunkDuration: 10.0,   // model window; also used for chunk sizing below
+        chunkOverlap: 5.0,     // optional overlap
+        debugMode: false
+    )
+    let diarizer = DiarizerManager(config: config)
+    diarizer.initialize(models: models)
+
+    // Optional: tune streaming behavior (assignment/update thresholds)
+    diarizer.speakerManager.speakerThreshold = 0.84   // assign to existing speakers
+    diarizer.speakerManager.embeddingThreshold = 0.56  // update embeddings over time
+
+    // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
+    let samples = try await loadSamples16kMono(path: "path/to/meeting.wav")
+
+    // 3) Chunked streaming loop with timestamp rebasing
+    let sr = 16000.0
+    let chunkSeconds = 10.0
+    let overlapSeconds = 5.0
+    let chunkSize = Int(chunkSeconds * sr)
+    let hop = Int(max(1.0, chunkSeconds - overlapSeconds) * sr)
+
+    var position = 0
+    var segments: [TimedSpeakerSegment] = []
+
+    while position < samples.count {
+        let end = min(position + chunkSize, samples.count)
+        var chunk = Array(samples[position..<end])
+        if chunk.count < chunkSize {
+            // Pad final chunk to model’s expected window
+            chunk += [Float](repeating: 0, count: chunkSize - chunk.count)
+        }
+
+        // Run diarization on this chunk
+        let result = try diarizer.performCompleteDiarization(chunk)
+
+        // Rebase chunk-relative times to stream time
+        let offsetSec = Float(position) / Float(sr)
+        for seg in result.segments {
+            segments.append(
+                TimedSpeakerSegment(
+                    speakerId: seg.speakerId,
+                    embedding: seg.embedding,
+                    startTimeSeconds: seg.startTimeSeconds + offsetSec,
+                    endTimeSeconds: seg.endTimeSeconds + offsetSec,
+                    qualityScore: seg.qualityScore
+                )
+            )
+        }
+
+        position += hop
+    }
+
+    // Optional: merge or deduplicate segments across overlaps/boundaries.
+    // diarizer.speakerManager preserves consistent IDs across all chunks.
+}
+```
+
+CLI equivalents:
+```bash
+# Real-time-ish streaming benchmark (~3s chunks with 2s overlap)
+swift run fluidaudio diarization-benchmark --single-file ES2004a \
+  --chunk-seconds 3 --overlap-seconds 2
+
+# Balanced throughput/quality (~10s chunks with 5s overlap)
+swift run fluidaudio diarization-benchmark --dataset ami-sdm \
+  --chunk-seconds 10 --overlap-seconds 5
+```
+
+Notes:
+- Keep one `DiarizerManager` instance per stream so `SpeakerManager` maintains ID consistency.
+- Always rebase per-chunk timestamps by `(chunkStartSample / sampleRate)`.
+- Provide 16 kHz mono Float32 samples; pad final chunk to the model window.
+- Tune `speakerThreshold` and `embeddingThreshold` to trade off ID stability vs. sensitivity.
+
+**Speaker Enrollment:** The `Speaker` class includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), update the speaker's name from the default (e.g. "Speaker_1") to enable personalized identification.
+
+### CLI
+
+```bash
+# Run AMI benchmark (auto-download dataset)
+swift run fluidaudio diarization-benchmark --auto-download
+
+# Tune threshold and save results
+swift run fluidaudio diarization-benchmark --threshold 0.7 --output results.json
+
+# Quick test on a single AMI file
+swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.8
+
+# Process an individual file and save JSON
+swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
+
+# Download AMI dataset
+swift run fluidaudio download --dataset ami-sdm
 ```
 
 ## Voice Activity Detection (VAD)
 
-The current VAD APIs are more complicated than they should be and require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
+The current VAD APIs require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
 
-Our goal is to eventually provide a streamlined API similar to Apple's upcoming SpeechDetector in [OS26](https://developer.apple.com/documentation/speech/speechdetector)
+Our goal is to provide a streamlined API similar to Apple's upcoming SpeechDetector in [OS26](https://developer.apple.com/documentation/speech/speechdetector).
 
-## Showcase
+### Quick Start (Code)
 
-FluidAudio powers local AI apps like:
+```swift
+import FluidAudio
 
-- **[Slipbox](https://slipbox.ai/)**: Privacy-first meeting assistant for real-time conversation intelligence. Uses FluidAudio Parakeet for iOS transcription and speaker diarization across all platforms.
-- **[Whisper Mate](https://whisper.marksdo.com)**: Transcribes movies and audio to text locally. Records and transcribes in real time from speakers or system apps. Uses FluidAudio for speaker diarization.
-- **[Voice Ink](https://tryvoiceink.com/)**: Uses local AI models to instantly transcribe speech with near-perfect accuracy and complete privacy. Utilizes FluidAudio for Parakeet ASR.
-- **[Spokenly](https://spokenly.app/)**: Mac dictation app that provides fast, accurate voice-to-text conversion anywhere on your system with Parakeet ASR powered by FluidAudio. Supports real-time dictation, file transcription, and speaker diarization.
+// Programmatic VAD over an audio file
+Task {
+    // 1) Initialize VAD (async load of Silero model)
+    let vad = try await VadManager(config: VadConfig(threshold: 0.3))
+
+    // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
+    let samples = try await loadSamples16kMono(path: "path/to/audio.wav")
+
+    // 3) Run VAD and print speech segments (512-sample frames)
+    let results = try await vad.processAudioFile(samples)
+    let sampleRate = 16000.0
+    let frame = 512.0
+
+    var startIndex: Int? = nil
+    for (i, r) in results.enumerated() {
+        if r.isVoiceActive {
+            if startIndex == nil { startIndex = i }
+        } else if let s = startIndex {
+            let startSec = (Double(s) * frame) / sampleRate
+            let endSec = (Double(i + 1) * frame) / sampleRate
+            print(String(format: "Speech: %.2f–%.2fs", startSec, endSec))
+            startIndex = nil
+        }
+    }
+}
+```
+
+### CLI
+
+```bash
+# Run VAD benchmark (mini50 dataset by default)
+swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
+
+# Save results and enable debug output
+swift run fluidaudio vad-benchmark --all-files --output vad_results.json --debug
+
+# Download VAD dataset if needed
+swift run fluidaudio download --dataset vad
+```
+
+## Showcase 
 
 Make a PR if you want to add your app!
 
-## Contributing
+| App | Description |
+| --- | --- |
+| **[Voice Ink](https://tryvoiceink.com/)** | Local AI for instant, private transcription with near-perfect accuracy. Uses Parakeet ASR. |
+| **[Spokenly](https://spokenly.app/)** | Mac dictation app for fast, accurate voice-to-text; supports real-time dictation and file transcription. Uses Parakeet ASR and speaker diarization. |
+| **[Slipbox](https://slipbox.ai/)** | Privacy-first meeting assistant for real-time conversation intelligence. Uses Parakeet ASR (iOS) and speaker diarization across platforms. |
+| **[Whisper Mate](https://whisper.marksdo.com)** | Transcribes movies and audio locally; records and transcribes in real time from speakers or system apps. Uses speaker diarization. |
 
-### Code Style
+
+## API Reference
+
+**Diarization:**
+
+- `DiarizerManager`: Main diarization class
+- `performCompleteDiarization(_:sampleRate:)`: Process audio and return speaker segments
+  - Accepts any `RandomAccessCollection<Float>` (Array, ArraySlice, ContiguousArray, etc.)
+- `compareSpeakers(audio1:audio2:)`: Compare similarity between two audio samples
+- `validateAudio(_:)`: Validate audio quality and characteristics
+
+**Voice Activity Detection:**
+
+- `VadManager`: Voice activity detection with CoreML models
+- `VadConfig`: Configuration for VAD processing with adaptive thresholding
+- `processChunk(_:)`: Process a single audio chunk and detect voice activity
+- `processAudioFile(_:)`: Process complete audio file in chunks
+- `VadAudioProcessor`: Advanced audio processing with SNR filtering
+
+**Automatic Speech Recognition:**
+
+- `AsrManager`: Main ASR class with TDT decoding for batch processing
+- `AsrModels`: Model loading and management with automatic downloads
+- `ASRConfig`: Configuration for ASR processing
+- `transcribe(_:source:)`: Process complete audio and return transcription results
+- `AudioProcessor.loadAudioFile(path:)`: Load and convert audio files to required format
+- `AudioSource`: Enum for microphone vs system audio separation
+  
+## Everything Else
+
+### Platform & Networking Notes
+
+- CLI is available on macOS only. For iOS, use the library programmatically.
+- Models auto-download on first use. If your network restricts Hugging Face access, set an HTTPS proxy: `export https_proxy=http://127.0.0.1:7890`.
+- Windows alternative in development: [fluid-server](https://github.com/FluidInference/fluid-server)
+
+### License
+
+Apache 2.0 — see `LICENSE` for details.
+
+### Contributing
 
 This project uses `swift-format` to maintain consistent code style. All pull requests are automatically checked for formatting compliance.
 
@@ -163,171 +422,9 @@ swift format lint --recursive --configuration .swift-format Sources/ Tests/ Exam
 - GitHub Actions runs formatting checks on all Swift file changes
 - See `.swift-format` for style configuration
 
-## Batch ASR Usage
+### Acknowledgments
 
-### CLI Command (Recommended)
-
-```bash
-# Simple transcription
-swift run fluidaudio transcribe audio.wav
-
-# This will output:
-# - Audio format information (sample rate, channels, duration)
-# - Final transcription text
-# - Performance metrics (processing time, RTFx, confidence)
-```
-
-### Programmatic API
-
-```swift
-import AVFoundation
-import FluidAudio
-
-// Batch transcription from an audio source
-Task {
-    // 1) Initialize ASR manager and load models
-    let models = try await AsrModels.downloadAndLoad()
-    let asrManager = AsrManager(config: .default)
-    try await asrManager.initialize(models: models)
-
-    // 2) Load and convert audio to 16kHz mono Float32 samples
-    let samples = try await AudioProcessor.loadAudioFile(path: "path/to/audio.wav")
-
-    // 3) Transcribe the audio
-    let result = try await asrManager.transcribe(samples, source: .system)
-    print("Transcription: \(result.text)")
-    print("Confidence: \(result.confidence)")
-}
-```
-
-### Speaker Diarization
-
-```swift
-import FluidAudio
-
-// Initialize and process audio
-Task {
-    let models = try await DiarizerModels.downloadIfNeeded()
-    let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
-    diarizer.initialize(models: models)
-
-    let audioSamples: audioSamples[1000..<5000]  // your 16kHz audio data, No memory copy!
-    let result = try diarizer.performCompleteDiarization(audioSamples)
-
-    for segment in result.segments {
-        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
-    }
-}
-```
-
-**Speaker Enrollment (NEW)**: The `Speaker` class now includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), you can update the speaker's name from the default "Speaker_1" to their actual name, enabling personalized speaker identification throughout the session.
-
-
-## CLI Usage
-
-FluidAudio includes a powerful command-line interface for benchmarking and audio processing:
-
-**Note**: The CLI is available on macOS only. For iOS applications, use the FluidAudio library programmatically as shown in the usage examples above.
-**Note**: FluidAudio automatically downloads required models during audio processing. If you encounter network restrictions when accessing Hugging Face, you can configure an HTTPS proxy by setting the environment variable. For example: `export https_proxy=http://127.0.0.1:7890`
-
-## Showcase 
-
-| App | Description |
-| --- | --- |
-| **[Voice Ink](https://tryvoiceink.com/)** | Local AI for instant, private transcription with near-perfect accuracy. Uses Parakeet ASR. |
-| **[Spokenly](https://spokenly.app/)** | Mac dictation app for fast, accurate voice-to-text; supports real-time dictation and file transcription. Uses Parakeet ASR and speaker diarization. |
-| **[Slipbox](https://slipbox.ai/)** | Privacy-first meeting assistant for real-time conversation intelligence. Uses Parakeet ASR (iOS) and speaker diarization across platforms. |
-| **[Whisper Mate](https://whisper.marksdo.com)** | Transcribes movies and audio locally; records and transcribes in real time from speakers or system apps. Uses speaker diarization. |
-
-Make a PR if you want to add your app!
-
-### Diarization Benchmark
-
-```bash
-# Run AMI benchmark with automatic dataset download
-swift run fluidaudio diarization-benchmark --auto-download
-
-# Test with specific parameters
-swift run fluidaudio diarization-benchmark --threshold 0.7 --output results.json
-
-# Test a single file for quick parameter tuning
-swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.8
-```
-
-### ASR Commands
-
-```bash
-# Transcribe an audio file (batch processing)
-swift run fluidaudio transcribe audio.wav
-
-# Run LibriSpeech ASR benchmark
-swift run fluidaudio asr-benchmark --subset test-clean --num-files 50
-
-# Benchmark with specific configuration  
-swift run fluidaudio asr-benchmark --subset test-other --output asr_results.json
-
-# Test with automatic download
-swift run fluidaudio asr-benchmark --auto-download --subset test-clean
-```
-
-### Process Individual Files
-
-```bash
-# Process a single audio file for diarization
-swift run fluidaudio process meeting.wav
-
-# Save results to JSON
-swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
-```
-
-### Download Datasets
-
-```bash
-# Download AMI dataset for diarization benchmarking
-swift run fluidaudio download --dataset ami-sdm
-
-# Download LibriSpeech for ASR benchmarking
-swift run fluidaudio download --dataset librispeech-test-clean
-swift run fluidaudio download --dataset librispeech-test-other
-```
-
-## API Reference
-
-**Diarization:**
-
-- **`DiarizerManager`**: Main diarization class
-- **`performCompleteDiarization(_:sampleRate:)`**: Process audio and return speaker segments
-  - Accepts any `RandomAccessCollection<Float>` (Array, ArraySlice, ContiguousArray, etc.)
-- **`compareSpeakers(audio1:audio2:)`**: Compare similarity between two audio samples
-- **`validateAudio(_:)`**: Validate audio quality and characteristics
-
-**Voice Activity Detection:**
-
-- **`VadManager`**: Voice activity detection with CoreML models
-- **`VadConfig`**: Configuration for VAD processing with adaptive thresholding
-- **`processChunk(_:)`**: Process a single audio chunk and detect voice activity
-- **`processAudioFile(_:)`**: Process complete audio file in chunks
-- **`VadAudioProcessor`**: Advanced audio processing with SNR filtering
-
-**Automatic Speech Recognition:**
-
-- **`AsrManager`**: Main ASR class with TDT decoding for batch processing
-- **`AsrModels`**: Model loading and management with automatic downloads
-- **`ASRConfig`**: Configuration for ASR processing
-- **`transcribe(_:source:)`**: Process complete audio and return transcription results
-- **`AudioProcessor.loadAudioFile(path:)`**: Load and convert audio files to required format
-- **`AudioSource`**: Enum for microphone vs system audio separation
-
-We're also working on a Windows alternative here :
-https://github.com/FluidInference/fluid-server
-
-## License
-
-Apache 2.0 - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques. We extend our gratitude to the sherpa-onnx contributors for their foundational work in on-device speech processing.
+This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques.
 
 Pyannote: https://github.com/pyannote/pyannote-audio
 
