@@ -18,13 +18,13 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     func testInitializationWithDefaultConfig() async throws {
         let manager = StreamingAsrManager()
-        let volatileTranscript = await manager.volatileTranscript
-        let finalizedTranscript = await manager.finalizedTranscript
         let source = await manager.source
+        let stats = await manager.memoryStats
 
-        XCTAssertEqual(volatileTranscript, "")
-        XCTAssertEqual(finalizedTranscript, "")
         XCTAssertEqual(source, .microphone)
+        XCTAssertEqual(stats.sampleBufferSize, 0)
+        XCTAssertEqual(stats.accumulatedTokens, 0)
+        XCTAssertEqual(stats.processedChunks, 0)
     }
 
     func testInitializationWithCustomConfig() async throws {
@@ -34,20 +34,19 @@ final class StreamingAsrManagerTests: XCTestCase {
             chunkDuration: 10.0
         )
         let manager = StreamingAsrManager(config: config)
-        let volatileTranscript = await manager.volatileTranscript
-        let finalizedTranscript = await manager.finalizedTranscript
-
-        XCTAssertEqual(volatileTranscript, "")
-        XCTAssertEqual(finalizedTranscript, "")
+        let stats = await manager.memoryStats
+        XCTAssertEqual(stats.sampleBufferSize, 0)
+        XCTAssertEqual(stats.accumulatedTokens, 0)
+        XCTAssertEqual(stats.processedChunks, 0)
     }
 
     // MARK: - Configuration Tests
 
     func testConfigPresets() {
-        // Test default config
+        // Test default config (frame-aligned mode)
         let defaultConfig = StreamingAsrConfig.default
-        XCTAssertEqual(defaultConfig.mode, .balanced)
-        XCTAssertEqual(defaultConfig.chunkSeconds, 10.0)
+        XCTAssertEqual(defaultConfig.mode, .frameAligned)
+        XCTAssertEqual(defaultConfig.chunkSeconds, 1.6, accuracy: 0.001)
         XCTAssertFalse(defaultConfig.enableDebug)
     }
 
@@ -160,22 +159,21 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     // MARK: - New Streaming API Tests
 
-    func testSnapshotsStreamCreation() async throws {
+    func testSegmentUpdatesStreamCreation() async throws {
         let manager = StreamingAsrManager()
 
-        // Test that snapshots stream can be created
-        let snapshotsStream = await manager.snapshots
-        XCTAssertNotNil(snapshotsStream)
+        // Test that segmentUpdates stream can be created
+        let updatesStream = await manager.segmentUpdates
+        // Simply ensure we have a stream object
+        _ = updatesStream
     }
 
-    func testVolatileAndFinalizedTranscriptInitialState() async throws {
+    func testInitialState() async throws {
         let manager = StreamingAsrManager()
-
-        let volatileTranscript = await manager.volatileTranscript
-        let finalizedTranscript = await manager.finalizedTranscript
-
-        XCTAssertEqual(volatileTranscript, "")
-        XCTAssertEqual(finalizedTranscript, "")
+        let stats = await manager.memoryStats
+        XCTAssertEqual(stats.sampleBufferSize, 0)
+        XCTAssertEqual(stats.accumulatedTokens, 0)
+        XCTAssertEqual(stats.processedChunks, 0)
     }
 
     func testConfigurationPropertyMapping() {
@@ -200,18 +198,14 @@ final class StreamingAsrManagerTests: XCTestCase {
         let manager = StreamingAsrManager()
 
         // Verify initial state
-        let initialVolatile = await manager.volatileTranscript
-        let initialFinalized = await manager.finalizedTranscript
-        XCTAssertEqual(initialVolatile, "")
-        XCTAssertEqual(initialFinalized, "")
+        let initialStats = await manager.memoryStats
+        XCTAssertEqual(initialStats.accumulatedTokens, 0)
 
-        _ = try await manager.finish()
+        try await manager.stop()
 
         // State should remain empty after reset
-        let afterResetVolatile = await manager.volatileTranscript
-        let afterResetFinalized = await manager.finalizedTranscript
-        XCTAssertEqual(afterResetVolatile, "")
-        XCTAssertEqual(afterResetFinalized, "")
+        let afterResetStats = await manager.memoryStats
+        XCTAssertEqual(afterResetStats.accumulatedTokens, 0)
     }
 
     // MARK: - Memory Management Tests
@@ -220,41 +214,12 @@ final class StreamingAsrManagerTests: XCTestCase {
         // Test that collections don't grow unbounded by simulating segment finalization
         let manager = StreamingAsrManager()
 
-        // Simulate many segments being finalized through public API
-        // This indirectly tests the cleanup mechanism without requiring internal access
-
-        let segmentTexts = [
-            "This is segment one",
-            "This is segment two",
-            "This is segment three",
-            "This is segment four",
-            "This is segment five",
-        ]
-
-        // Test that multiple resets don't accumulate memory
+        // Simulate resets and verify memory remains bounded
         for _ in 0..<10 {
-            // Reset should clear all internal collections
-            _ = try await manager.finish()
-
-            // Verify transcripts are empty after reset
-            let volatileAfterReset = await manager.volatileTranscript
-            let finalizedAfterReset = await manager.finalizedTranscript
-            XCTAssertEqual(volatileAfterReset, "")
-            XCTAssertEqual(finalizedAfterReset, "")
-
-            // Simulate some activity (this would normally trigger segment processing)
-            for _ in segmentTexts {
-                // Access properties to trigger internal state changes
-                _ = await manager.volatileTranscript
-                _ = await manager.finalizedTranscript
-            }
+            try await manager.stop()
+            let stats = await manager.memoryStats
+            XCTAssertEqual(stats.accumulatedTokens, 0)
         }
-
-        // Final verification - memory should be clean
-        let finalVolatile = await manager.volatileTranscript
-        let finalFinalized = await manager.finalizedTranscript
-        XCTAssertEqual(finalVolatile, "")
-        XCTAssertEqual(finalFinalized, "")
     }
 
     func testSegmentMemoryAccumulationDetection() async throws {
@@ -271,9 +236,7 @@ final class StreamingAsrManagerTests: XCTestCase {
                 // Force some internal state changes
                 Task {
                     for tempManager in tempManagers {
-                        _ = await tempManager.volatileTranscript
-                        _ = await tempManager.finalizedTranscript
-                        _ = try await tempManager.finish()
+                        try? await tempManager.stop()
                     }
                 }
 
@@ -314,29 +277,26 @@ final class StreamingAsrManagerTests: XCTestCase {
         let manager = StreamingAsrManager()
 
         // Reset should clear all internal state
-        _ = try await manager.finish()
+        try await manager.stop()
 
-        // Verify transcripts are empty after reset
-        let volatileAfterReset = await manager.volatileTranscript
-        let finalizedAfterReset = await manager.finalizedTranscript
-
-        XCTAssertEqual(volatileAfterReset, "")
-        XCTAssertEqual(finalizedAfterReset, "")
+        // Verify memory stats are empty after reset
+        let stats = await manager.memoryStats
+        XCTAssertEqual(stats.accumulatedTokens, 0)
     }
 
     func testConcurrentStreamAccess() async throws {
         let manager = StreamingAsrManager()
 
-        // Test concurrent access to snapshots stream
+        // Test concurrent access to segmentUpdates stream
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
-                let _ = await manager.snapshots
+                let _ = await manager.segmentUpdates
             }
             group.addTask {
-                let _ = await manager.volatileTranscript
+                let _ = await manager.memoryStats
             }
             group.addTask {
-                let _ = await manager.finalizedTranscript
+                let _ = await manager.source
             }
         }
 
@@ -368,7 +328,6 @@ final class StreamingAsrManagerTests: XCTestCase {
         let stats = await manager.memoryStats
         XCTAssertEqual(stats.sampleBufferSize, 0)
         XCTAssertEqual(stats.accumulatedTokens, 0)
-        XCTAssertEqual(stats.segmentTexts, 0)
         XCTAssertEqual(stats.processedChunks, 0)
     }
 
@@ -381,9 +340,9 @@ final class StreamingAsrManagerTests: XCTestCase {
         let initialStats = await manager.memoryStats
         XCTAssertEqual(initialStats.accumulatedTokens, 0)
 
-        // Multiple finish() calls should not cause unbounded growth
+        // Multiple stop() calls should not cause unbounded growth
         for _ in 0..<5 {
-            _ = try await manager.finish()
+            try await manager.stop()
             let stats = await manager.memoryStats
             XCTAssertEqual(stats.accumulatedTokens, 0)
         }
@@ -412,25 +371,24 @@ final class StreamingAsrManagerTests: XCTestCase {
         // Test that cancel works without issues
         await manager.cancel()
 
-        // Test that finish works after cancel
-        _ = try await manager.finish()
+        // Test that stop works after cancel
+        try await manager.stop()
 
         // State should be clean
         let stats = await manager.memoryStats
         XCTAssertEqual(stats.accumulatedTokens, 0)
-        XCTAssertEqual(stats.segmentTexts, 0)
     }
 
     func testStreamingContinuationSafety() async throws {
         let manager = StreamingAsrManager()
 
         // Create multiple streams simultaneously
-        let snapshots1 = await manager.snapshots
-        let snapshots2 = await manager.snapshots
+        let updates1 = await manager.segmentUpdates
+        let updates2 = await manager.segmentUpdates
 
         // All should be valid stream references
-        XCTAssertNotNil(snapshots1)
-        XCTAssertNotNil(snapshots2)
+        _ = updates1
+        _ = updates2
 
         // Cancel should clean up safely
         await manager.cancel()
@@ -593,14 +551,13 @@ final class StreamingAsrManagerTests: XCTestCase {
         )
         let manager = StreamingAsrManager(config: config)
 
-        // Track snapshots to monitor finalization
-        var snapshots: [StreamingTranscriptSnapshot] = []
+        // Track segment updates to monitor finalization
+        var updates: [StreamingSegmentUpdate] = []
         let snapshotTask = Task {
-            let stream = await manager.snapshots
-            for await snapshot in stream {
-                snapshots.append(snapshot)
-                print(
-                    "Snapshot: finalized='\(snapshot.finalized)' volatile='\(snapshot.volatile?.description ?? "nil")'")
+            let stream = await manager.segmentUpdates
+            for await update in stream {
+                updates.append(update)
+                print("Update: volatile=\(update.isVolatile) text='\(update.text)'")
             }
         }
 
@@ -610,7 +567,7 @@ final class StreamingAsrManagerTests: XCTestCase {
 
             print("Testing final pending segment processing with synthetic audio...")
 
-            var snapshotCountBefore = 0
+            var updateCountBefore = 0
 
             // Stream 15 seconds worth (should trigger finalization around 10s mark)
             print("Streaming first 15 seconds...")
@@ -618,17 +575,16 @@ final class StreamingAsrManagerTests: XCTestCase {
                 let chunk = try createTestAudioBuffer(durationSeconds: 1.0, frequency: 440.0)
                 await manager.streamAudio(chunk)
 
-                // Track snapshots as they come in
-                if snapshots.count > snapshotCountBefore {
-                    snapshotCountBefore = snapshots.count
-                    if let lastSnapshot = snapshots.last {
-                        let finalizedLength = String(lastSnapshot.finalized.characters).count
-                        print("New snapshot at t=\(i+1)s: finalized length=\(finalizedLength) chars")
+                // Track updates as they come in
+                if updates.count > updateCountBefore {
+                    updateCountBefore = updates.count
+                    if let lastUpdate = updates.last {
+                        print("New update at t=\(i+1)s: volatile=\(lastUpdate.isVolatile) text='\(lastUpdate.text)'")
                     }
                 }
             }
 
-            print("After 15s: \(snapshots.count) snapshots")
+            print("After 15s: \(updates.count) updates")
 
             // Add the "pending" 7 seconds that should be processed in finish()
             print("Streaming final 7 seconds (pending segment)...")
@@ -637,39 +593,23 @@ final class StreamingAsrManagerTests: XCTestCase {
                 await manager.streamAudio(chunk)
             }
 
-            print("After 22s (before finish): \(snapshots.count) snapshots")
-            let snapshotsBeforeFinish = snapshots.count
+            print("After 22s (before stop): \(updates.count) updates")
+            let updatesBeforeStop = updates.count
 
-            if let lastSnapshot = snapshots.last {
-                let finalizedText = String(lastSnapshot.finalized.characters)
-                let volatileText = lastSnapshot.volatile.map { String($0.characters) } ?? "nil"
-                print("Last snapshot before finish: finalized='\(finalizedText)' volatile='\(volatileText)'")
-            }
+            // This is the key test: does stop() process the final 7 seconds?
+            print("Calling stop() - should process pending 7 seconds...")
+            try await manager.stop()
 
-            // This is the key test: does finish() process the final 7 seconds?
-            print("Calling finish() - should process pending 7 seconds...")
-            let finalTranscript = try await manager.finish()
+            let updatesAfterStop = updates.count
+            print("Total updates: before stop=\(updatesBeforeStop), after stop=\(updatesAfterStop)")
 
-            let snapshotsAfterFinish = snapshots.count
-
-            print("Final transcript: '\(finalTranscript)'")
-            print("Total snapshots: before finish=\(snapshotsBeforeFinish), after finish=\(snapshotsAfterFinish)")
-
-            // The key insight: if finish() properly processes pending segments,
-            // we should see additional snapshots OR a non-empty final transcript
-            // Even with synthetic audio, the system should at least attempt processing
-            if snapshotsAfterFinish > snapshotsBeforeFinish {
-                print(
-                    "✓ SUCCESS: finish() generated \(snapshotsAfterFinish - snapshotsBeforeFinish) additional snapshots"
-                )
-            } else if !finalTranscript.isEmpty {
-                print("✓ SUCCESS: finish() produced a final transcript")
+            if updatesAfterStop > updatesBeforeStop {
+                print("✓ SUCCESS: stop() generated \(updatesAfterStop - updatesBeforeStop) additional updates")
             } else {
-                print(
-                    "❌ ISSUE CONFIRMED: finish() did not process pending segments (no new snapshots, empty transcript)")
+                print("❌ ISSUE CONFIRMED: stop() did not produce additional updates")
             }
 
-            print("✓ Test completed - buffering and finish() behavior verified")
+            print("✓ Test completed - buffering and stop() behavior verified")
 
         } catch {
             print("Test failed with error: \(error)")
@@ -692,33 +632,32 @@ final class StreamingAsrManagerTests: XCTestCase {
         )
         let manager = StreamingAsrManager(config: config)
 
-        // Detailed snapshot tracking
-        var snapshots: [StreamingTranscriptSnapshot] = []
+        // Detailed update tracking
+        var updates: [StreamingSegmentUpdate] = []
         var volatileHistory: [(time: Date, content: String)] = []
         var finalizedHistory: [(time: Date, content: String)] = []
 
         let snapshotTask = Task {
-            let stream = await manager.snapshots
-            for await snapshot in stream {
-                snapshots.append(snapshot)
+            let stream = await manager.segmentUpdates
+            for await update in stream {
+                updates.append(update)
 
                 let timestamp = Date()
-                let finalizedText = String(snapshot.finalized.characters)
-                let volatileText = snapshot.volatile.map { String($0.characters) } ?? ""
+                let text = update.text
 
-                // Track changes in volatile content
-                if !volatileText.isEmpty && (volatileHistory.last?.content != volatileText) {
-                    volatileHistory.append((time: timestamp, content: volatileText))
-                    print("📝 VOLATILE UPDATE #\(volatileHistory.count): '\(volatileText)'")
+                if update.isVolatile {
+                    if !text.isEmpty && (volatileHistory.last?.content != text) {
+                        volatileHistory.append((time: timestamp, content: text))
+                        print("📝 VOLATILE UPDATE #\(volatileHistory.count): '\(text)'")
+                    }
+                } else {
+                    if !text.isEmpty && (finalizedHistory.last?.content != text) {
+                        finalizedHistory.append((time: timestamp, content: text))
+                        print("✅ FINALIZED UPDATE #\(finalizedHistory.count): '\(text)'")
+                    }
                 }
 
-                // Track changes in finalized content
-                if !finalizedText.isEmpty && (finalizedHistory.last?.content != finalizedText) {
-                    finalizedHistory.append((time: timestamp, content: finalizedText))
-                    print("✅ FINALIZED UPDATE #\(finalizedHistory.count): '\(finalizedText)'")
-                }
-
-                print("📊 Snapshot #\(snapshots.count): F='\(finalizedText)' V='\(volatileText)'")
+                print("📊 Update #\(updates.count): volatile=\(update.isVolatile) text='\(text)'")
             }
         }
 
@@ -726,7 +665,7 @@ final class StreamingAsrManagerTests: XCTestCase {
             try await manager.start(source: .system)
 
             print("🔍 Testing volatile-to-finalized transition with detailed tracking...")
-            print("📋 Streaming pattern: 15s (expect finalization) + 7s (pending) + finish()")
+            print("📋 Streaming pattern: 15s (expect finalization) + 7s (pending) + stop()")
 
             // Stream in smaller chunks for better visibility into state changes
             let chunkDuration = 0.5  // 500ms chunks for detailed tracking
@@ -743,12 +682,12 @@ final class StreamingAsrManagerTests: XCTestCase {
                 // Log every 2 seconds
                 if chunkIndex % 4 == 3 {
                     print(
-                        "⏱️  t=\(totalTime)s: \(snapshots.count) snapshots, V-history=\(volatileHistory.count), F-history=\(finalizedHistory.count)"
+                        "⏱️  t=\(totalTime)s: \(updates.count) updates, V-history=\(volatileHistory.count), F-history=\(finalizedHistory.count)"
                     )
                 }
             }
 
-            print("\n📈 After 15s: \(snapshots.count) total snapshots")
+            print("\n📈 After 15s: \(updates.count) total updates")
             print("   Volatile updates: \(volatileHistory.count)")
             print("   Finalized updates: \(finalizedHistory.count)")
 
@@ -766,48 +705,36 @@ final class StreamingAsrManagerTests: XCTestCase {
             let volatileCountAfter = volatileHistory.count
             let finalizedCountAfter = finalizedHistory.count
 
-            print("\n📈 After 22s (before finish):")
-            print("   Total snapshots: \(snapshots.count)")
+            print("\n📈 After 22s (before stop):")
+            print("   Total updates: \(updates.count)")
             print("   New volatile updates during 7s: \(volatileCountAfter - volatileCountBefore)")
             print("   New finalized updates during 7s: \(finalizedCountAfter - finalizedCountBefore)")
 
-            // Check current state before finish()
-            if let lastSnapshot = snapshots.last {
-                let currentFinalized = String(lastSnapshot.finalized.characters)
-                let currentVolatile = lastSnapshot.volatile.map { String($0.characters) } ?? ""
-                print("   Current state: F='\(currentFinalized)' V='\(currentVolatile)'")
-            }
-
-            // Phase 3: Call finish() and track what happens
-            print("\n🏁 Phase 3: Calling finish() - tracking volatile-to-finalized transition...")
+            // Phase 3: Call stop() and track what happens
+            print("\n🏁 Phase 3: Calling stop() - tracking volatile-to-finalized transition...")
             let volatileBeforeFinish = volatileHistory.count
             let finalizedBeforeFinish = finalizedHistory.count
-            let snapshotsBeforeFinish = snapshots.count
+            let updatesBeforeStop = updates.count
 
-            let finalTranscript = try await manager.finish()
+            try await manager.stop()
 
             // Analysis
             let volatileAfterFinish = volatileHistory.count
             let finalizedAfterFinish = finalizedHistory.count
-            let snapshotsAfterFinish = snapshots.count
+            let updatesAfterStop = updates.count
 
             print("\n📊 ANALYSIS:")
-            print("   Final transcript: '\(finalTranscript)'")
-            print("   New snapshots during finish(): \(snapshotsAfterFinish - snapshotsBeforeFinish)")
-            print("   New volatile updates during finish(): \(volatileAfterFinish - volatileBeforeFinish)")
-            print("   New finalized updates during finish(): \(finalizedAfterFinish - finalizedBeforeFinish)")
+            print("   New updates during stop(): \(updatesAfterStop - updatesBeforeStop)")
+            print("   New volatile updates during stop(): \(volatileAfterFinish - volatileBeforeFinish)")
+            print("   New finalized updates during stop(): \(finalizedAfterFinish - finalizedBeforeFinish)")
 
             // Key test: Did volatile content become finalized?
             if volatileAfterFinish > volatileBeforeFinish {
-                print("✅ finish() generated NEW volatile content")
+                print("✅ stop() generated NEW volatile content")
             }
 
             if finalizedAfterFinish > finalizedBeforeFinish {
-                print("✅ finish() generated NEW finalized content")
-            }
-
-            if !finalTranscript.isEmpty {
-                print("✅ finish() produced non-empty final transcript")
+                print("✅ stop() generated NEW finalized content")
             }
 
             // Show complete history for debugging
@@ -841,11 +768,11 @@ final class StreamingAsrManagerTests: XCTestCase {
         let config = StreamingAsrConfig(mode: .balanced, enableDebug: true)  // Enable debug for logs
         let manager = StreamingAsrManager(config: config)
 
-        var snapshots: [StreamingTranscriptSnapshot] = []
+        var updates: [StreamingSegmentUpdate] = []
         let snapshotTask = Task {
-            let stream = await manager.snapshots
-            for await snapshot in stream {
-                snapshots.append(snapshot)
+            let stream = await manager.segmentUpdates
+            for await update in stream {
+                updates.append(update)
             }
         }
 
@@ -860,7 +787,7 @@ final class StreamingAsrManagerTests: XCTestCase {
                 await manager.streamAudio(chunk)
             }
 
-            print("After 15s: \(snapshots.count) snapshots")
+            print("After 15s: \(updates.count) updates")
 
             // Stream the critical 7 seconds that should be processed with extended left context
             for _ in 0..<7 {
@@ -868,26 +795,24 @@ final class StreamingAsrManagerTests: XCTestCase {
                 await manager.streamAudio(chunk)
             }
 
-            let snapshotsBeforeFinish = snapshots.count
-            print("After 22s (before finish): \(snapshotsBeforeFinish) snapshots")
+            let updatesBeforeStop = updates.count
+            print("After 22s (before stop): \(updatesBeforeStop) updates")
 
-            // This is where our extended left context fix should help
-            let finalTranscript = try await manager.finish()
+            // This is where our extended left context behavior should help
+            try await manager.stop()
 
-            let snapshotsAfterFinish = snapshots.count
+            let updatesAfterStop = updates.count
 
             print("🎯 RESULTS:")
-            print("   Final transcript: '\(finalTranscript)'")
-            print("   Snapshots before finish: \(snapshotsBeforeFinish)")
-            print("   Snapshots after finish: \(snapshotsAfterFinish)")
-            print("   New snapshots from finish(): \(snapshotsAfterFinish - snapshotsBeforeFinish)")
+            print("   Updates before stop: \(updatesBeforeStop)")
+            print("   Updates after stop: \(updatesAfterStop)")
+            print("   New updates from stop(): \(updatesAfterStop - updatesBeforeStop)")
 
-            // Verify that finish() processed the final segment
+            // Verify that stop() processed the final segment
             XCTAssertGreaterThan(
-                snapshotsAfterFinish, snapshotsBeforeFinish, "finish() should generate additional snapshots")
-            XCTAssertFalse(finalTranscript.isEmpty, "finish() should produce a non-empty final transcript")
+                updatesAfterStop, updatesBeforeStop, "stop() should generate additional updates")
 
-            print("✅ Extended left context fix verified")
+            print("✅ Extended left context behavior verified")
 
         } catch {
             print("Test failed: \(error)")
@@ -916,13 +841,9 @@ final class StreamingAsrManagerTests: XCTestCase {
 
             await manager.streamAudio(audioBuffer)
 
-            let finalTranscript = try await manager.finish()
+            try await manager.stop()
 
-            print("Duration: \(duration)s, Transcript: '\(finalTranscript)'")
-
-            // In a real test with models, we'd verify the transcript contains expected content
-            // For now, just ensure it doesn't crash
-            XCTAssertNotNil(finalTranscript, "Final transcript should not be nil for \(duration)s segment")
+            print("Duration: \(duration)s processed without crash")
         }
     }
 
@@ -930,10 +851,12 @@ final class StreamingAsrManagerTests: XCTestCase {
     func testEmptyBufferFinish() async throws {
         let manager = StreamingAsrManager()
 
-        // Call finish without streaming any audio
-        let finalTranscript = try await manager.finish()
+        // Call stop without streaming any audio
+        try await manager.stop()
 
-        XCTAssertEqual(finalTranscript, "", "Empty buffer should produce empty transcript")
+        // Ensure no crash and state remains empty
+        let stats = await manager.memoryStats
+        XCTAssertEqual(stats.accumulatedTokens, 0)
     }
 
     /// Test timing of final segment processing
@@ -943,14 +866,13 @@ final class StreamingAsrManagerTests: XCTestCase {
         let config = StreamingAsrConfig(mode: .lowLatency, enableDebug: true)  // 5s chunks for faster testing
         let manager = StreamingAsrManager(config: config)
 
-        var snapshots: [StreamingTranscriptSnapshot] = []
+        var updates: [StreamingSegmentUpdate] = []
         let snapshotTask = Task {
-            let stream = await manager.snapshots
-            for await snapshot in stream {
-                snapshots.append(snapshot)
-                let finalizedCount = String(snapshot.finalized.characters).count
-                let volatileCount = snapshot.volatile.map { String($0.characters).count } ?? 0
-                print("Snapshot \(snapshots.count): finalized=\(finalizedCount) chars, volatile=\(volatileCount) chars")
+            let stream = await manager.segmentUpdates
+            for await update in stream {
+                updates.append(update)
+                let len = update.text.count
+                print("Update \(updates.count): volatile=\(update.isVolatile) textLen=\(len) chars")
             }
         }
 
@@ -965,13 +887,9 @@ final class StreamingAsrManagerTests: XCTestCase {
             await manager.streamAudio(secondChunk)
             try await Task.sleep(nanoseconds: 100_000_000)  // 0.1s delay
 
-            let finalTranscript = try await manager.finish()
+            try await manager.stop()
 
-            print("Final transcript after 5.5s: '\(finalTranscript)'")
-            print("Total snapshots: \(snapshots.count)")
-
-            // The final 0.5s should be processed in finish()
-            XCTAssertFalse(finalTranscript.isEmpty, "Should have transcript from 5.5s of audio")
+            print("Stopped after 5.5s, total updates: \(updates.count)")
 
         } catch {
             print("Timing test failed: \(error)")

@@ -46,18 +46,11 @@ final class StreamingIntegrationTests: XCTestCase {
         let initialStats = await manager.memoryStats
         XCTAssertEqual(initialStats.processedChunks, 0)
 
-        // Create streams to test continuation setup
-        let _ = await manager.snapshots
-
-        // Test transcripts
-        let volatile = await manager.volatileTranscript
-        let finalized = await manager.finalizedTranscript
-        XCTAssertEqual(volatile, "")
-        XCTAssertEqual(finalized, "")
+        // Create stream to test continuation setup
+        let _ = await manager.segmentUpdates
 
         // Test finish
-        let result = try await manager.finish()
-        XCTAssertEqual(result, "")
+        try await manager.stop()
 
         // Test cancel
         await manager.cancel()
@@ -100,15 +93,15 @@ final class StreamingIntegrationTests: XCTestCase {
         // Perform multiple lifecycle operations
         for iteration in 0..<5 {
             // Create streams
-            let _ = await manager.snapshots
+            let _ = await manager.segmentUpdates
 
             // Simulate some work
             let stats = await manager.memoryStats
-            memorySnapshots.append(stats.accumulatedTokens + stats.segmentTexts)
+            memorySnapshots.append(stats.accumulatedTokens)
 
             // Reset
-            if iteration < 4 {  // Don't finish on last iteration
-                _ = try await manager.finish()
+            if iteration < 4 {  // Don't stop on last iteration
+                try await manager.stop()
             }
         }
 
@@ -118,7 +111,6 @@ final class StreamingIntegrationTests: XCTestCase {
         // Memory usage should not grow unbounded
         let finalStats = await manager.memoryStats
         XCTAssertEqual(finalStats.accumulatedTokens, 0)
-        XCTAssertEqual(finalStats.segmentTexts, 0)
     }
 
     // MARK: - Concurrent Access Integration Tests
@@ -129,19 +121,18 @@ final class StreamingIntegrationTests: XCTestCase {
         // Test that multiple concurrent accesses don't cause issues
         await withTaskGroup(of: Void.self) { group in
 
-            // Multiple snapshot stream accesses
+            // Multiple stream accesses
             for _ in 0..<10 {
                 group.addTask {
-                    let _ = await manager.snapshots
+                    let _ = await manager.segmentUpdates
                 }
             }
 
             // Multiple state accesses
             for _ in 0..<10 {
                 group.addTask {
-                    let _ = await manager.volatileTranscript
-                    let _ = await manager.finalizedTranscript
-                    let _ = await manager.memoryStats
+                    let stats = await manager.memoryStats
+                    _ = statsDummyUse(stats: stats)
                 }
             }
         }
@@ -159,18 +150,14 @@ final class StreamingIntegrationTests: XCTestCase {
 
         // 1. Cancel then restart
         await manager.cancel()
-        let _ = await manager.snapshots  // Should work after cancel
+        let _ = await manager.segmentUpdates  // Should work after cancel
 
-        // 2. Finish then access
-        _ = try await manager.finish()
-        let volatile = await manager.volatileTranscript
-        XCTAssertEqual(volatile, "")
+        // 2. Stop then access
+        try await manager.stop()
 
-        // 3. Multiple finishes
-        _ = try await manager.finish()
-        _ = try await manager.finish()
-        let finalized = await manager.finalizedTranscript
-        XCTAssertEqual(finalized, "")
+        // 3. Multiple stops
+        try await manager.stop()
+        try await manager.stop()
 
         // 4. Final cleanup
         await manager.cancel()
@@ -246,4 +233,10 @@ final class StreamingIntegrationTests: XCTestCase {
 
     // MARK: - Streaming Result Structure Integration Tests
 
+}
+
+// Helper to avoid unused variable warning in concurrent access test
+@available(macOS 13.0, iOS 16.0, *)
+private func statsDummyUse(stats: (sampleBufferSize: Int, accumulatedTokens: Int, processedChunks: Int)) -> Int {
+    return stats.sampleBufferSize + stats.accumulatedTokens + stats.processedChunks
 }

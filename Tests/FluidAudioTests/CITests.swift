@@ -194,7 +194,6 @@ final class CITests: XCTestCase {
 
         XCTAssertEqual(stats.sampleBufferSize, 0)
         XCTAssertEqual(stats.accumulatedTokens, 0)
-        XCTAssertEqual(stats.segmentTexts, 0)
         XCTAssertEqual(stats.processedChunks, 0)
 
         await manager.cancel()
@@ -203,12 +202,13 @@ final class CITests: XCTestCase {
     func testStreamingConfigurationCI() {
         // Test that streaming configurations are valid in CI
         let defaultConfig = StreamingAsrConfig.default
+        XCTAssertEqual(defaultConfig.mode, .frameAligned)
         XCTAssertGreaterThan(defaultConfig.chunkSamples, 0)
         XCTAssertGreaterThan(defaultConfig.leftContextSamples, 0)
         XCTAssertGreaterThan(defaultConfig.rightContextSamples, 0)
 
         let lowLatencyConfig = StreamingAsrConfig(mode: .lowLatency)
-        XCTAssertLessThan(lowLatencyConfig.chunkSeconds, defaultConfig.chunkSeconds)
+        XCTAssertGreaterThan(lowLatencyConfig.chunkSeconds, defaultConfig.chunkSeconds)
 
         let highAccuracyConfig = StreamingAsrConfig(mode: .highAccuracy)
         XCTAssertGreaterThan(highAccuracyConfig.chunkSeconds, defaultConfig.chunkSeconds)
@@ -221,8 +221,8 @@ final class CITests: XCTestCase {
 
         // Multiple lifecycle operations
         for _ in 0..<3 {
-            let _ = await manager.snapshots
-            _ = try await manager.finish()
+            let _ = await manager.segmentUpdates
+            try await manager.stop()
 
             let stats = await manager.memoryStats
             XCTAssertEqual(stats.accumulatedTokens, 0)
