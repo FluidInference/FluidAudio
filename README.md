@@ -18,9 +18,9 @@ For custom use cases, feedback, additional model support, or platform requests, 
 Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
 
 <p align="left">
-  <a href="https://github.com/Beingpax/VoiceInk/"><img src="Documentation/assets/voiceink.png" height="40" alt="Voice Ink"></a>
-  <a href="https://spokenly.app/"><img src="Documentation/assets/spokenly.png" height="40" alt="Spokenly"></a>
-  <a href="https://slipbox.ai/"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
+  <a href="https://github.com/Beingpax/VoiceInk/" target="_blank"><img src="Documentation/assets/voiceink.png" height="40" alt="Voice Ink"></a>
+  <a href="https://spokenly.app/" target="_blank"><img src="Documentation/assets/spokenly.png" height="40" alt="Spokenly"></a>
+  <a href="https://slipbox.ai/" target="_blank"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
   <!-- Add your app: submit logo via PR -->
 </p>
 
