@@ -230,12 +230,6 @@ extension AsrManager {
             return 0.1
         }
 
-        // We should always have token confidence scores from the TDT decoder
-        guard !tokenConfidences.isEmpty && tokenConfidences.count == tokenCount else {
-            logger.warning("Expected token confidences but got none - this should not happen")
-            return 0.5  // Default middle confidence if something went wrong
-        }
-
         // Return pure model confidence: average of token-level softmax probabilities
         let meanConfidence = tokenConfidences.reduce(0.0, +) / Float(tokenConfidences.count)
 

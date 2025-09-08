@@ -82,7 +82,7 @@ public struct StreamingAsrConfig: Sendable {
     var chunkSeconds: TimeInterval { chunkDuration ?? mode.chunkSeconds }
     var leftContextSeconds: TimeInterval { mode.leftContextSeconds }
     var rightContextSeconds: TimeInterval { mode.rightContextSeconds }
-    var interimUpdateFrequency: TimeInterval { updateFrequency ?? mode.updateFrequency }
+    public var interimUpdateFrequency: TimeInterval { updateFrequency ?? mode.updateFrequency }
 
     // Sample counts at 16 kHz
     var chunkSamples: Int { Int(chunkSeconds * 16000) }

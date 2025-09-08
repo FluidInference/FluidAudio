@@ -7,6 +7,8 @@ import Foundation
 /// Command to transcribe audio files using batch or streaming mode
 @available(macOS 13.0, *)
 enum TranscribeCommand {
+    /// Minimal ANSI color helper (avoid TerminalUI dependency)
+    private static func green(_ s: String) -> String { "\u{001B}[32m\(s)\u{001B}[0m" }
 
     static func run(arguments: [String]) async {
         // Parse arguments - microphone mode doesn't require file
@@ -154,9 +156,7 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(audioFile: String, showMetadata: Bool) async {
-        // Use optimized streaming configuration
-
-        // Create StreamingAsrManager
+        // Simple, debuggable streaming output (no box UI)
         print("Preparing streaming transcription...")
         let streamingAsr = StreamingAsrManager()
 
@@ -178,50 +178,56 @@ enum TranscribeCommand {
 
             try audioFileHandle.read(into: buffer)
 
-            // Calculate streaming parameters - align with StreamingAsrConfig chunk size
-            let chunkDuration = StreamingAsrConfig.default.mode.chunkSeconds  // Use same chunk size as streaming config
-            let samplesPerChunk = Int(chunkDuration * format.sampleRate)
-            let totalFrames = Int(buffer.frameLength)
-            _ = Int(ceil(Double(totalFrames) / Double(samplesPerChunk)))
-            _ = Double(audioFileHandle.length) / format.sampleRate
-
-            // Simple timestamped output - no complex UI
+            // Set up timestamped logging with accumulation
             let timeFormatter = DateFormatter()
             timeFormatter.dateFormat = "HH:mm:ss.SSS"
 
-            // Listen for segment updates in real-time
+            // Accumulate finalized text; show a single evolving hypothesis
             let updateTask: Task<String, Never> = Task {
-                var allFinalizedText = ""
-                for await segmentUpdate: StreamingSegmentUpdate in await streamingAsr.segmentUpdates {
-                    let timestamp = timeFormatter.string(from: segmentUpdate.timestamp)
-                    let text = segmentUpdate.text
-                    var volatileText = ""
+                var finalized = ""
+                for await segmentUpdate in await streamingAsr.segmentUpdates {
+                    let ts = timeFormatter.string(from: segmentUpdate.timestamp)
+                    let text = segmentUpdate.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if text.isEmpty { continue }
+
                     if segmentUpdate.isVolatile {
-                        // Show volatile text in green
-                        volatileText = text
+                        // Show consolidated line: finalized + current hypothesis (green)
+                        if finalized.isEmpty {
+                            print("[\(ts)] \(Self.green(text))")
+                        } else {
+                            print("[\(ts)] \(finalized) \(Self.green(text))")
+                        }
                     } else {
-                        allFinalizedText += text + " "
+                        // Append to finalized and print current accumulation
+                        if finalized.isEmpty {
+                            finalized = text
+                        } else {
+                            finalized += " " + text
+                        }
+                        print("[\(ts)] \(finalized)")
                     }
-                    print("[\(timestamp)] \(text) \(volatileText.green)")
                 }
-                return allFinalizedText
+                return finalized
             }
 
+            // Stream audio in real-time-like chunks
             var position = 0
-            _ = Date()
+
+            // Feed using Apple's typical audio engine default buffer size (frames)
+            // On Apple platforms, the default I/O buffer is commonly 1024 frames.
+            // Using this for file-streaming keeps behavior aligned with live engine taps.
+            let samplesPerFeedChunk = 1024
 
             while position < Int(buffer.frameLength) {
                 let remainingSamples = Int(buffer.frameLength) - position
-                let chunkSize = min(samplesPerChunk, remainingSamples)
+                let chunkSize = min(samplesPerFeedChunk, remainingSamples)
 
                 guard
                     let chunkBuffer: AVAudioPCMBuffer = AVAudioPCMBuffer(
                         pcmFormat: format,
                         frameCapacity: AVAudioFrameCount(chunkSize)
                     )
-                else {
-                    break
-                }
+                else { break }
 
                 // Copy samples to chunk
                 for channel in 0..<Int(format.channelCount) {
@@ -235,24 +241,16 @@ enum TranscribeCommand {
                 }
                 chunkBuffer.frameLength = AVAudioFrameCount(chunkSize)
 
-                // Stream the chunk immediately - no waiting
                 await streamingAsr.streamAudio(chunkBuffer)
 
                 position += chunkSize
-
-                // Small yield to allow UI updates to show
-                try await Task.sleep(nanoseconds: 100_000_000)  // 100ms yield
-                await Task.yield()
-
             }
 
-            // Finalize transcription
-            let finalText = try await streamingAsr.finish()
+            // Stop streaming and wait for updates stream to close
+            try await streamingAsr.stop()
+            let finalText = await updateTask.value
 
-            // Cancel background tasks
-            updateTask.cancel()
-
-            // Show final results
+            // Print final transcript summary
             print("\n" + String(repeating: "=", count: 50))
             print(String(repeating: "=", count: 50))
             print("Final transcription:")
@@ -278,26 +276,36 @@ enum TranscribeCommand {
             // Start the ASR engine with microphone source
             try await streamingAsr.start(source: .microphone)
 
-            // Simple timestamped output - no complex UI
+            // Simple timestamped output with accumulation
             let timeFormatter = DateFormatter()
             timeFormatter.dateFormat = "HH:mm:ss.SSS"
 
             print("🎙️ Real-time microphone transcription - Press Enter to stop\n")
 
-            // Listen for segment updates in real-time
-            let updateTask = Task {
+            // Listen for segment updates; show finalized prefix + evolving hypothesis
+            let updateTask: Task<String, Never> = Task {
+                var finalized = ""
                 for await segmentUpdate in await streamingAsr.segmentUpdates {
-                    let timestamp = timeFormatter.string(from: segmentUpdate.timestamp)
-                    let text = segmentUpdate.text
+                    let ts = timeFormatter.string(from: segmentUpdate.timestamp)
+                    let text = segmentUpdate.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if text.isEmpty { continue }
 
                     if segmentUpdate.isVolatile {
-                        // Show volatile text in green
-                        print("[\(timestamp)] \(text.green)")
+                        if finalized.isEmpty {
+                            print("[\(ts)] \(Self.green(text))")
+                        } else {
+                            print("[\(ts)] \(finalized) \(Self.green(text))")
+                        }
                     } else {
-                        // Show finalized text normally
-                        print("[\(timestamp)] \(text)")
+                        if finalized.isEmpty {
+                            finalized = text
+                        } else {
+                            finalized += " " + text
+                        }
+                        print("[\(ts)] \(finalized)")
                     }
                 }
+                return finalized
             }
 
             // Install tap on the input node to capture microphone audio
@@ -354,16 +362,11 @@ enum TranscribeCommand {
             // Allow brief time for final processing
             try await Task.sleep(nanoseconds: 1000_000_000)  // 1 second delay
 
-            // Finalize transcription
-            let finalText = try await streamingAsr.finish()
+            // Stop streaming and wait for updates stream to close
+            try await streamingAsr.stop()
+            let finalText = await updateTask.value
 
-            // Allow brief time for any final segment updates to be processed
-            try await Task.sleep(nanoseconds: 500_000_000)  // 500ms delay
-
-            // Cancel background tasks
-            updateTask.cancel()
-
-            // Show final results
+            // Show final results accumulated from updates
             print("\n" + String(repeating: "=", count: 50))
             print(String(repeating: "=", count: 50))
             print("Final transcription:")

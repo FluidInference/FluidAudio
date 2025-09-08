@@ -40,6 +40,39 @@ public struct TimestampedSegment: Sendable {
     }
 }
 
+/// A single segment update (either volatile or final)
+@available(macOS 13.0, iOS 16.0, *)
+public struct StreamingSegmentUpdate: Sendable {
+    public let segmentId: UUID
+    public let text: String
+    public let timestamp: Date
+    public let isVolatile: Bool
+    public let startTime: TimeInterval?
+    public let endTime: TimeInterval?
+    public let confidence: Float
+    public let tokenTimings: [TokenTiming]?
+
+    public init(
+        segmentId: UUID,
+        text: String,
+        timestamp: Date,
+        isVolatile: Bool,
+        startTime: TimeInterval? = nil,
+        endTime: TimeInterval? = nil,
+        confidence: Float = 1.0,
+        tokenTimings: [TokenTiming]? = nil
+    ) {
+        self.segmentId = segmentId
+        self.text = text
+        self.timestamp = timestamp
+        self.isVolatile = isVolatile
+        self.startTime = startTime
+        self.endTime = endTime
+        self.confidence = confidence
+        self.tokenTimings = tokenTimings
+    }
+}
+
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingTranscriptSnapshot: Sendable {
     public let finalized: AttributedString

@@ -125,21 +125,31 @@ enum MultiStreamCommand {
             )
             print("Created system audio stream\n")
 
-            // Listen for snapshot updates from both streams
-            let micTask = Task {
-                for await snapshot in await micStream.snapshots {
-                    let fin = String(snapshot.finalized.characters)
-                    let vol = snapshot.volatile.map { String($0.characters) } ?? ""
-                    print("[SOURCE 1] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
+            // Listen for segment updates from both streams and accumulate results
+            let micTask: Task<String, Never> = Task {
+                var micFinalized = ""
+                for await update in await micStream.segmentUpdates {
+                    if update.isVolatile {
+                        print("[SOURCE 1] Volatile: \(update.text)")
+                    } else {
+                        print("[SOURCE 1] Finalized: \(update.text)")
+                        micFinalized += update.text + " "
+                    }
                 }
+                return micFinalized
             }
 
-            let systemTask = Task {
-                for await snapshot in await systemStream.snapshots {
-                    let fin = String(snapshot.finalized.characters)
-                    let vol = snapshot.volatile.map { String($0.characters) } ?? ""
-                    print("[SOURCE 2] Finalized: \(fin)\(vol.isEmpty ? "" : " | Volatile: \(vol)")")
+            let systemTask: Task<String, Never> = Task {
+                var sysFinalized = ""
+                for await update in await systemStream.segmentUpdates {
+                    if update.isVolatile {
+                        print("[SOURCE 2] Volatile: \(update.text)")
+                    } else {
+                        print("[SOURCE 2] Finalized: \(update.text)")
+                        sysFinalized += update.text + " "
+                    }
                 }
+                return sysFinalized
             }
 
             print("Streaming audio files in parallel...")
@@ -170,13 +180,11 @@ enum MultiStreamCommand {
 
             print("Finalizing transcriptions...")
 
-            // Get final results
-            let micFinal = try await micStream.finish()
-            let systemFinal = try await systemStream.finish()
-
-            // Cancel update tasks
-            micTask.cancel()
-            systemTask.cancel()
+            // Stop both streams and wait for their accumulated results
+            try await micStream.stop()
+            try await systemStream.stop()
+            let micFinal = await micTask.value
+            let systemFinal = await systemTask.value
 
             // Print results
             print("\n" + String(repeating: "=", count: 60) + "\n")

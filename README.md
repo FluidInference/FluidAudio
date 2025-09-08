@@ -152,10 +152,12 @@ func runStreaming() async throws {
 
     // 3) Subscribe to incremental updates
     Task {
-        for await snapshot in await streaming.snapshots {
-            let final = String(snapshot.finalized.characters)
-            let volatile = snapshot.volatile.map { String($0.characters) } ?? ""
-            // Update your UI with final + volatile
+        for await update in await streaming.segmentUpdates {
+            if update.isVolatile {
+                // Update UI with realtime text (volatile)
+            } else {
+                // Append finalized text with timing (update.startTime/endTime)
+            }
         }
     }
 
@@ -169,8 +171,14 @@ func runStreaming() async throws {
     try engine.start()
 
     // ... later, when done recording
-    let finalText = try await streaming.finish()
-    print(finalText)
+    // Accumulate via segmentUpdates in a Task
+    let aggregator = Task { () -> String in
+        var out = ""
+        for await u in await streaming.segmentUpdates { if !u.isVolatile { out += u.text + " " } }
+        return out
+    }
+    try await streaming.stop()
+    print(await aggregator.value)
 }
 ```
 
@@ -185,13 +193,18 @@ func runMultiStream() async throws {
     let mic = try await session.createStream(source: .microphone, config: .default)
     let sys = try await session.createStream(source: .system, config: .default)
 
-    Task { for await s in await mic.snapshots { /* update UI */ } }
-    Task { for await s in await sys.snapshots { /* update UI */ } }
+    Task { for await u in await mic.segmentUpdates { /* update UI */ } }
+    Task { for await u in await sys.segmentUpdates { /* update UI */ } }
 
     // Feed your buffers: await mic.streamAudio(buffer) / await sys.streamAudio(buffer)
 
-    let micFinal = try await mic.finish()
-    let sysFinal = try await sys.finish()
+    // Accumulate via updates if you need final text
+    let micAgg = Task { () -> String in var s=""; for await u in await mic.segmentUpdates { if !u.isVolatile { s += u.text + " " } } ; return s }
+    let sysAgg = Task { () -> String in var s=""; for await u in await sys.segmentUpdates { if !u.isVolatile { s += u.text + " " } } ; return s }
+    try await mic.stop()
+    try await sys.stop()
+    let micFinal = await micAgg.value
+    let sysFinal = await sysAgg.value
 }
 ```
 
@@ -212,12 +225,12 @@ Configuration differences and impact:
     - `minContextForFinalization` (default 10.0): guard so finals occur with sufficient context.
     - `finalizationThreshold` (default 0.85): confidence gate for finalizing segments.
   - Usage: pass into `StreamingAsrManager(config:)` or `StreamingAsrSession.createStream(config:)`.
-  - Behavior: maintains per-`AudioSource` decoder state; call `reset()` to start a fresh session, or `finish()`/`cancel()`.
+  - Behavior: maintains per-`AudioSource` decoder state; call `reset()` to start a fresh session, or `stop()`/`cancel()`.
 
 Notes:
 
 - Audio conversion is automatic in streaming via an internal `AudioConverter` actor (any `AVAudioPCMBuffer` format is OK).
-- For iOS/macOS apps, prefer streaming and consume `snapshots` for simple UI, or `results` for granular segment/timing.
+- For iOS/macOS apps, prefer streaming and consume `segmentUpdates` for granular segment/timing and realtime text.
 - For file processing and benchmarks, prefer batch (`AsrManager`), which maximizes throughput and simplicity.
 
 
