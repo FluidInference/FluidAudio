@@ -384,7 +384,7 @@ public final class AsrManager {
         for id in tokenIds {
             let raw = tokenString(id)
             if raw.isEmpty { continue }
-            var (text, hasSpaceMarker) = core(raw)
+            let (text, hasSpaceMarker) = core(raw)
             if text.isEmpty { continue }
 
             if isPunctuationToken(id) {
