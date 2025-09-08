@@ -1,21 +1,32 @@
 ![banner.png](banner.png)
 
-# FluidAudio - Swift SDK for Speaker Diarization, VAD and Transcription with CoreML
+# FluidAudio - Speaker Diarization, VAD and Transcription with CoreML
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
+
 
 Fluid Audio is a Swift framework for fully local, low-latency audio processing on Apple devices. It provides state-of-the-art speaker diarization, ASR, and voice activity detection through open-source models (MIT/Apache 2.0 licensed) that we've converted to Core ML.
 
 Our models are optimized for background processing on CPU, avoiding GPU/MPS/Shaders to ensure reliable performance. While we've tested CPU/GPU-based alternatives, they proved too slow or resource-intensive for our near real-time requirements.
 
-For custom use cases, feedback, more model support, and other platform requests, join our Discord. We’re also working on porting video, language, and TTS models to run on device, and will share updates there.
+For custom use cases, feedback, additional model support, or platform requests, join our [Discord]. We’re also bringing visual, language, and TTS models to device and will share updates there.
 
-## Features
+Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
 
-- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) with Token Duration Transducer; supports all 25 European languages
+<p align="left">
+  <a href="https://github.com/Beingpax/VoiceInk/"><img src="Documentation/assets/voiceink.png" height="40" alt="Voice Ink"></a>
+  <a href="https://spokenly.app/"><img src="Documentation/assets/spokenly.png" height="40" alt="Spokenly"></a>
+  <a href="https://slipbox.ai/"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
+  <!-- Add your app: submit logo via PR -->
+</p>
+
+## Highlights
+
+- **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for transcription; supports all 25 European languages
 - **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -31,7 +42,7 @@ Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.4.0"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.4.1"),
 ],
 ```
 
@@ -39,10 +50,9 @@ dependencies: [
 
 ## Documentation
 
-- **DeepWiki**: [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio) - Primary documentation
-- **Local Docs**: [Documentation/](Documentation/) - Additional guides and API references
-
-## MCP
+**DeepWiki** generates documentation for the repo automatically. [https://deepwiki.com/FluidInference/FluidAudio](https://deepwiki.com/FluidInference/FluidAudio)
+  
+### MCP
 
 The repo is indexed by [DeepWiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) - the MCP server gives your coding tool access to the docs already.
 
@@ -85,13 +95,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - Pipeline impact: Minimal - diarization won't be the bottleneck
 ```
 
-## Voice Activity Detection (VAD)
-
-The current VAD APIs are more complicated than they should be and require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
-
-Our goal is to eventually provide a streamlined API similar to Apple's upcoming SpeechDetector in OS26: https://developer.apple.com/documentation/speech/speechdetector
-
-## Automatic Speech Recognition (ASR)
+## Automatic Speech Recognition (ASR) / Transcription
 
 - **Model**: [`FluidInference/parakeet-tdt-0.6b-v3-coreml`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Languages**: All European languages (25)
@@ -115,6 +119,12 @@ swift run fluidaudio transcribe --help
 ```bash
 swift run fluidaudio asr-benchmark --subset test-clean --max-files 25
 ```
+
+## Voice Activity Detection (VAD)
+
+The current VAD APIs are more complicated than they should be and require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
+
+Our goal is to eventually provide a streamlined API similar to Apple's upcoming SpeechDetector in [OS26](https://developer.apple.com/documentation/speech/speechdetector)
 
 ## Showcase
 
@@ -219,6 +229,17 @@ FluidAudio includes a powerful command-line interface for benchmarking and audio
 
 **Note**: The CLI is available on macOS only. For iOS applications, use the FluidAudio library programmatically as shown in the usage examples above.
 **Note**: FluidAudio automatically downloads required models during audio processing. If you encounter network restrictions when accessing Hugging Face, you can configure an HTTPS proxy by setting the environment variable. For example: `export https_proxy=http://127.0.0.1:7890`
+
+## Showcase 
+
+| App | Description |
+| --- | --- |
+| **[Voice Ink](https://tryvoiceink.com/)** | Local AI for instant, private transcription with near-perfect accuracy. Uses Parakeet ASR. |
+| **[Spokenly](https://spokenly.app/)** | Mac dictation app for fast, accurate voice-to-text; supports real-time dictation and file transcription. Uses Parakeet ASR and speaker diarization. |
+| **[Slipbox](https://slipbox.ai/)** | Privacy-first meeting assistant for real-time conversation intelligence. Uses Parakeet ASR (iOS) and speaker diarization across platforms. |
+| **[Whisper Mate](https://whisper.marksdo.com)** | Transcribes movies and audio locally; records and transcribes in real time from speakers or system apps. Uses speaker diarization. |
+
+Make a PR if you want to add your app!
 
 ### Diarization Benchmark
 
