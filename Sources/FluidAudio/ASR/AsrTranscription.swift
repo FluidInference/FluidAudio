@@ -331,30 +331,27 @@ extension AsrManager {
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
 
-        // Handle single punctuation token duplicates first
-        let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
         var workingCurrent = current
         var removedCount = 0
 
-        if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
-            && punctuationTokens.contains(workingCurrent.first!)
-        {
-            // Remove the duplicate punctuation token from the beginning of current
-            workingCurrent = Array(workingCurrent.dropFirst())
-            removedCount += 1
+        // 0) Boundary punctuation handling: if previous ends with punctuation,
+        // drop leading punctuation from current to avoid sequences like ".," or "!?".
+        if let lastPrev = previous.last, isPunctuationToken(lastPrev) {
+            while let first = workingCurrent.first, isPunctuationToken(first) {
+                workingCurrent.removeFirst()
+                removedCount += 1
+            }
         }
 
-        // Check for suffix-prefix overlap: end of previous matches beginning of current
+        // 1) Exact suffix-prefix overlap removal
         let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
-        let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first 12 tokens of current
+        let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first tokens of current to search
 
-        guard maxSearchLength >= 2 && maxMatchLength >= 2 else {
+        if maxSearchLength < 2 || maxMatchLength < 2 {
             return (workingCurrent, removedCount)
         }
 
-        // Search for overlapping sequences from longest to shortest
         for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
-            // Check if the last `overlapLength` tokens of previous match the first `overlapLength` tokens of current
             let prevSuffix = Array(previous.suffix(overlapLength))
             let currPrefix = Array(workingCurrent.prefix(overlapLength))
 
@@ -367,8 +364,7 @@ extension AsrManager {
             }
         }
 
-        // Extended search: look for partial overlaps within the sequences
-        // Use boundary search frames from TDT config for NeMo-compatible alignment
+        // 2) Partial overlap search within boundary window (NeMo-style boundary alignment)
         let boundarySearchFrames = config.tdtConfig.boundarySearchFrames
         for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
             let prevStart = max(0, previous.count - maxSearchLength)
@@ -379,7 +375,6 @@ extension AsrManager {
                 let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
                 let currEnd = max(0, workingCurrent.count - overlapLength + 1)
 
-                // Use boundarySearchFrames to limit search window (NeMo tdt_search_boundary pattern)
                 let searchLimit = min(boundarySearchFrames, currEnd)
                 for currentStart in 0..<searchLimit {
                     let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
@@ -397,6 +392,60 @@ extension AsrManager {
         }
 
         return (workingCurrent, removedCount)
+    }
+
+    /// Remove undesirable punctuation sequences within a single token list.
+    /// Collapses cases like ".," or "!?" by keeping the stronger punctuation.
+    /// Returns cleaned tokens and an index map of removed positions for caller to drop timestamps/confidences.
+    internal func cleanPunctuationSequenceTokens(_ tokens: [Int]) -> (cleaned: [Int], removedIndices: Set<Int>) {
+        guard !tokens.isEmpty else { return (tokens, []) }
+
+        var result: [Int] = []
+        result.reserveCapacity(tokens.count)
+        var removed: Set<Int> = []
+
+        for (i, tok) in tokens.enumerated() {
+            if let prev = result.last, let prevIdxInOriginal = tokens[..<i].lastIndex(of: prev),
+               isPunctuationToken(prev) && isPunctuationToken(tok) {
+                // Both are punctuation; keep the stronger one
+                let prevStrength = punctuationStrength(of: prev)
+                let currStrength = punctuationStrength(of: tok)
+                if currStrength > prevStrength {
+                    // Replace previous with current; mark previous original index as removed
+                    result.removeLast()
+                    result.append(tok)
+                    removed.insert(prevIdxInOriginal)
+                } else {
+                    // Drop current weaker/equal punctuation
+                    removed.insert(i)
+                    continue
+                }
+            } else {
+                result.append(tok)
+            }
+        }
+
+        return (result, removed)
+    }
+
+    // MARK: - Token helpers
+
+    internal func tokenText(_ id: Int) -> String {
+        return vocabulary[id] ?? ""
+    }
+
+    internal func isPunctuationToken(_ id: Int) -> Bool {
+        let s = tokenText(id).replacingOccurrences(of: "▁", with: "")
+        guard s.count == 1, let ch = s.first else { return false }
+        return Set(".,!?;:").contains(ch)
+    }
+
+    internal func punctuationStrength(of id: Int) -> Int {
+        let s = tokenText(id).replacingOccurrences(of: "▁", with: "")
+        guard let ch = s.first else { return 0 }
+        if ".!?".contains(ch) { return 2 }
+        if ",;:".contains(ch) { return 1 }
+        return 0
     }
 
     /// Calculate start frame offset for a sliding window segment (deprecated - now handled by timeJump)

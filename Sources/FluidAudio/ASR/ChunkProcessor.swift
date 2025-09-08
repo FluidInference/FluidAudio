@@ -182,9 +182,25 @@ struct ChunkProcessor {
         }
 
         // Take all tokens from decoder (it already processed only the relevant frames)
-        let filteredTokens = hypothesis.ySequence
-        let filteredTimestamps = hypothesis.timestamps
-        let filteredConfidences = hypothesis.tokenConfidences
+        // Then clean intra-chunk punctuation sequences to avoid artifacts like ".,"
+        let filteredTokensRaw = hypothesis.ySequence
+        let filteredTimestampsRaw = hypothesis.timestamps
+        let filteredConfidencesRaw = hypothesis.tokenConfidences
+
+        let (cleanedTokens, removedIdxSet) = manager.cleanPunctuationSequenceTokens(filteredTokensRaw)
+        let (filteredTokens, filteredTimestamps, filteredConfidences): ([Int],[Int],[Float]) = {
+            if removedIdxSet.isEmpty { return (filteredTokensRaw, filteredTimestampsRaw, filteredConfidencesRaw) }
+            var tks: [Int] = []
+            var ts: [Int] = []
+            var conf: [Float] = []
+            for i in 0..<filteredTokensRaw.count {
+                if removedIdxSet.contains(i) { continue }
+                tks.append(filteredTokensRaw[i])
+                ts.append(filteredTimestampsRaw.indices.contains(i) ? filteredTimestampsRaw[i] : 0)
+                if filteredConfidencesRaw.indices.contains(i) { conf.append(filteredConfidencesRaw[i]) }
+            }
+            return (tks, ts, conf)
+        }()
         let maxFrame = hypothesis.maxTimestamp
 
         return (filteredTokens, filteredTimestamps, filteredConfidences, maxFrame)

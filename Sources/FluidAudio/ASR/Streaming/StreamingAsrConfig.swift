@@ -9,12 +9,15 @@ public enum StreamingMode: Sendable {
     case balanced
     /// Best quality with higher latency - 15s chunks, 2s updates
     case highAccuracy
+    /// Frame-aligned streaming: 1.6s increments with 1.6s left/right context
+    case frameAligned
 
     public var chunkSeconds: TimeInterval {
         switch self {
         case .lowLatency: return 5.0
         case .balanced: return 10.0
         case .highAccuracy: return 15.0
+        case .frameAligned: return 1.6
         }
     }
 
@@ -23,6 +26,7 @@ public enum StreamingMode: Sendable {
         case .lowLatency: return 1.0
         case .balanced: return 2.0
         case .highAccuracy: return 3.0
+        case .frameAligned: return 1.6
         }
     }
 
@@ -31,6 +35,7 @@ public enum StreamingMode: Sendable {
         case .lowLatency: return 1.0
         case .balanced: return 2.0
         case .highAccuracy: return 2.5
+        case .frameAligned: return 1.6
         }
     }
 
@@ -39,6 +44,7 @@ public enum StreamingMode: Sendable {
         case .lowLatency: return 0.5
         case .balanced: return 1.0
         case .highAccuracy: return 2.0
+        case .frameAligned: return 0.8  // half-step interim updates
         }
     }
 }
@@ -54,8 +60,8 @@ public struct StreamingAsrConfig: Sendable {
     /// Override UI update frequency (optional - uses mode default if nil)
     public let updateFrequency: TimeInterval?
 
-    /// Default balanced configuration
-    public static let `default`: StreamingAsrConfig = StreamingAsrConfig(mode: .balanced)
+    /// Default configuration: frame-aligned (1.6s increments)
+    public static let `default`: StreamingAsrConfig = StreamingAsrConfig(mode: .frameAligned)
 
     public init(
         mode: StreamingMode = .balanced,

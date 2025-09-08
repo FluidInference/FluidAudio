@@ -293,56 +293,86 @@ public actor StreamingAsrManager {
             var state: TdtDecoderState
             if isFinal, let snap = segmentStartDecoderState {
                 state = snap
+                // Clear streaming-specific alignment when re-decoding a finalized segment
+                state.timeJump = nil
             } else {
                 state = (audioSource == .microphone) ? asrManager.microphoneDecoderState : asrManager.systemDecoderState
             }
             // Pad to model capacity (15s) to satisfy CoreML input constraints
             let paddedWindow = asrManager.padAudioIfNeeded(windowSamples, targetLength: 240_000)
+            // For finals, let the decoder see the full window (start from left) and rely on dedup
+            // For interims, skip left-context frames inside this window
+            let effectiveContextAdjustment = isFinal ? 0 : contextFrameAdjustment
+
             let (hyp, encLen) = try await asrManager.executeMLInferenceWithTimings(
                 paddedWindow,
                 originalLength: windowSamples.count,
                 actualAudioFrames: actualFramesForChunk,  // decode only left+chunk frames
                 enableDebug: config.enableDebug,
                 decoderState: &state,
-                contextFrameAdjustment: contextFrameAdjustment,
+                contextFrameAdjustment: effectiveContextAdjustment,
                 isLastChunk: isStreamEnding,
                 globalFrameOffset: globalFrameOffset
             )
 
-            // Persist updated decoder state back to manager
-            if audioSource == .microphone {
-                asrManager.microphoneDecoderState = state
-            } else {
-                asrManager.systemDecoderState = state
+            // Persist decoder state only on final updates to avoid hypothesis drift from volatile passes
+            if isFinal {
+                if audioSource == .microphone {
+                    asrManager.microphoneDecoderState = state
+                } else {
+                    asrManager.systemDecoderState = state
+                }
             }
 
             // Update global processed frame tracker
             if hyp.maxTimestamp > 0 { lastProcessedFrame = hyp.maxTimestamp }
 
-            // Filter out tokens that fall within the left context region of this window
-            // Use absolute frame cutoff: start-of-chunk in frames
-            let startFrameCutoff = globalFrameOffset + leftContextFrames
+            // Token filtering: for interims, drop left-context tokens strictly.
+            // For finals, keep everything and rely on dedup (prevents losing early-chunk tokens).
             var filteredTokens: [Int] = []
             var filteredTimestamps: [Int] = []
             var filteredConfidences: [Float] = []
 
-            for i in 0..<hyp.ySequence.count {
-                let ts = hyp.timestamps.indices.contains(i) ? hyp.timestamps[i] : 0
-                if ts >= startFrameCutoff {
-                    filteredTokens.append(hyp.ySequence[i])
-                    filteredTimestamps.append(ts)
-                    if hyp.tokenConfidences.indices.contains(i) {
-                        filteredConfidences.append(hyp.tokenConfidences[i])
+            if !isFinal {
+                let startFrameCutoff = globalFrameOffset + leftContextFrames
+                for i in 0..<hyp.ySequence.count {
+                    let ts = hyp.timestamps.indices.contains(i) ? hyp.timestamps[i] : 0
+                    if ts >= startFrameCutoff {
+                        filteredTokens.append(hyp.ySequence[i])
+                        filteredTimestamps.append(ts)
+                        if hyp.tokenConfidences.indices.contains(i) {
+                            filteredConfidences.append(hyp.tokenConfidences[i])
+                        }
                     }
                 }
+            } else {
+                filteredTokens = hyp.ySequence
+                filteredTimestamps = hyp.timestamps
+                filteredConfidences = hyp.tokenConfidences
             }
+
+            // Clean intra-chunk punctuation sequences before cross-boundary dedup
+            let (punctCleaned, removedIdxSet) = asrManager.cleanPunctuationSequenceTokens(filteredTokens)
+            let adjustedByPunct: ([Int], [Int], [Float]) = {
+                if removedIdxSet.isEmpty { return (filteredTokens, filteredTimestamps, filteredConfidences) }
+                var tks: [Int] = []
+                var ts: [Int] = []
+                var conf: [Float] = []
+                for (i, tok) in filteredTokens.enumerated() {
+                    if removedIdxSet.contains(i) { continue }
+                    tks.append(tok)
+                    ts.append(filteredTimestamps.indices.contains(i) ? filteredTimestamps[i] : 0)
+                    if filteredConfidences.indices.contains(i) { conf.append(filteredConfidences[i]) }
+                }
+                return (tks, ts, conf)
+            }()
 
             // Deduplicate against accumulated tokens across finalized segments
             let (dedupedTokens, removedCount) = asrManager.removeDuplicateTokenSequence(
-                previous: accumulatedTokens, current: filteredTokens, maxOverlap: 30
+                previous: accumulatedTokens, current: adjustedByPunct.0, maxOverlap: 30
             )
-            let adjustedTimestamps = removedCount > 0 ? Array(filteredTimestamps.dropFirst(removedCount)) : filteredTimestamps
-            let adjustedConfidences = removedCount > 0 ? Array(filteredConfidences.dropFirst(removedCount)) : filteredConfidences
+            let adjustedTimestamps = removedCount > 0 ? Array(adjustedByPunct.1.dropFirst(removedCount)) : adjustedByPunct.1
+            let adjustedConfidences = removedCount > 0 ? Array(adjustedByPunct.2.dropFirst(removedCount)) : adjustedByPunct.2
 
             // For streaming, don't accumulate tokens blindly since they're deduplicated
             // by transcribeStreamingChunk. Only update accumulated tokens if this is final.
