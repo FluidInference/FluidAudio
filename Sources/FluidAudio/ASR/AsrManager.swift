@@ -273,7 +273,7 @@ public final class AsrManager {
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0
-    ) async throws -> (tokens: [Int], timestamps: [Int]) {
+    ) async throws -> TdtHypothesis {
         let decoder = TdtDecoder(config: config)
         return try await decoder.decodeWithTimings(
             encoderOutput: encoderOutput,

@@ -130,6 +130,7 @@ enum TranscribeCommand {
         var audioFile: String? = nil
         var streamingMode = false
         var microphoneMode = false
+        var showMetadata = false
 
         // Parse options
         var i = 0
@@ -142,6 +143,8 @@ enum TranscribeCommand {
                 streamingMode = true
             case "--microphone":
                 microphoneMode = true
+            case "--metadata":
+                showMetadata = true
             default:
                 // If not a flag, treat as audio file
                 if !arguments[i].hasPrefix("--") {
@@ -185,7 +188,7 @@ enum TranscribeCommand {
     }
 
     /// Test batch transcription using AsrManager directly
-    private static func testBatchTranscription(audioFile: String) async {
+    private static func testBatchTranscription(audioFile: String, showMetadata: Bool) async {
         print("Testing Batch Transcription")
         print("------------------------------")
 
@@ -229,13 +232,37 @@ enum TranscribeCommand {
             print("\nFinal transcription:")
             print(result.text)
 
+            if showMetadata {
+                print("\nMetadata:")
+                print("  Confidence: \(String(format: "%.3f", result.confidence))")
+                print("  Duration: \(String(format: "%.3f", result.duration))s")
+                if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
+                    let startTime = tokenTimings.first?.startTime ?? 0.0
+                    let endTime = tokenTimings.last?.endTime ?? result.duration
+                    print("  Start time: \(String(format: "%.3f", startTime))s")
+                    print("  End time: \(String(format: "%.3f", endTime))s")
+                    print("\nToken Timings:")
+                    for (index, timing) in tokenTimings.enumerated() {
+                        print(
+                            "    [\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(String(format: "%.3f", timing.startTime))s, end: \(String(format: "%.3f", timing.endTime))s, conf: \(String(format: "%.3f", timing.confidence)))"
+                        )
+                    }
+                } else {
+                    print("  Start time: 0.000s")
+                    print("  End time: \(String(format: "%.3f", result.duration))s")
+                    print("  Token timings: Not available")
+                }
+            }
+
             let rtfx = duration / processingTime
 
             print("\nPerformance:")
             print("  Audio duration: \(String(format: "%.2f", duration))s")
             print("  Processing time: \(String(format: "%.2f", processingTime))s")
             print("  RTFx: \(String(format: "%.2f", rtfx))x")
-            print("  Confidence: \(String(format: "%.3f", result.confidence))")
+            if !showMetadata {
+                print("  Confidence: \(String(format: "%.3f", result.confidence))")
+            }
 
         } catch {
             print("Batch transcription failed: \\(error)")
@@ -243,7 +270,8 @@ enum TranscribeCommand {
     }
 
     /// Test streaming transcription
-    private static func testStreamingTranscription(audioFile: String) async {
+    private static func testStreamingTranscription(audioFile: String, showMetadata: Bool) async {
+        // Use optimized streaming configuration
 
         // Create StreamingAsrManager
         print("Preparing streaming transcription...")
@@ -552,11 +580,14 @@ enum TranscribeCommand {
                 --help, -h         Show this help message
                 --streaming        Use streaming mode with chunk simulation
                 --microphone       Real-time microphone transcription
+                --metadata         Show confidence, start time, and end time in results
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)
                 fluidaudio transcribe audio.wav --streaming        # Streaming mode
                 fluidaudio transcribe --microphone                 # Real-time microphone
+                fluidaudio transcribe audio.wav --metadata         # Batch mode with metadata
+                fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results
@@ -572,6 +603,12 @@ enum TranscribeCommand {
             - Shows live volatile and finalized text updates
             - Uses StreamingAsrManager with AVAudioEngine
             - Press Enter to stop and get final results
+            
+            Metadata option:
+            - Shows confidence score for transcription accuracy
+            - Batch mode: Shows duration and token-based start/end times (if available)
+            - Streaming mode: Shows timestamps for each transcription update
+            - Works with both batch and streaming modes
             """
         )
     }
