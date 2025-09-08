@@ -345,12 +345,8 @@ public final class AsrManager {
             }
         }
 
-        // 2. Concatenate all tokens (this is how SentencePiece works)
-        let concatenated = tokens.joined()
-
-        // 3. Replace ▁ with space (SentencePiece standard)
-        let text = concatenated.replacingOccurrences(of: "▁", with: " ")
-            .trimmingCharacters(in: .whitespaces)
+        // 2-3. SentencePiece-aware detokenization with token-level spacing rules
+        let text = detokenize(tokenIds)
 
         // 4. For now, return original timings as-is
         // Note: Proper timing alignment would require tracking character positions
@@ -368,6 +364,55 @@ public final class AsrManager {
         }
 
         return (text, adjustedTimings)
+    }
+
+    /// SentencePiece-aware detokenization using token-level rules (no regex post-processing).
+    /// - Ignores space marker before punctuation (. , ! ? ; :)
+    /// - Joins apostrophes to neighbors (e.g., c' est -> c'est)
+    /// - Inserts spaces only when indicated by space marker and not suppressed by context
+    internal func detokenize(_ tokenIds: [Int]) -> String {
+        var result = ""
+        var suppressNextSpace = false  // after apostrophe
+
+        func tokenString(_ id: Int) -> String { vocabulary[id] ?? "" }
+        func core(_ tok: String) -> (String, Bool) {
+            if tok.hasPrefix("▁") { return (String(tok.dropFirst()), true) }
+            return (tok, false)
+        }
+        func isApostrophe(_ s: String) -> Bool { s == "'" || s == "’" }
+
+        for id in tokenIds {
+            let raw = tokenString(id)
+            if raw.isEmpty { continue }
+            var (text, hasSpaceMarker) = core(raw)
+            if text.isEmpty { continue }
+
+            if isPunctuationToken(id) {
+                // Remove any trailing space before appending punctuation
+                if result.last == " " { result.removeLast() }
+                result.append(text)
+                suppressNextSpace = false
+                continue
+            }
+
+            if isApostrophe(text) {
+                // Join apostrophe without surrounding spaces
+                if result.last == " " { result.removeLast() }
+                result.append(text)
+                suppressNextSpace = true
+                continue
+            }
+
+            // Regular token
+            if !result.isEmpty && hasSpaceMarker && !suppressNextSpace {
+                result.append(" ")
+            }
+            // If at start, ignore initial space marker
+            result.append(text)
+            suppressNextSpace = false
+        }
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     internal func extractFeatureValue(

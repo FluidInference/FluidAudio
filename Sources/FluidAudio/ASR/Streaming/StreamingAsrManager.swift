@@ -285,7 +285,7 @@ public actor StreamingAsrManager {
             // Always skip the left-context frames inside this window.
             // Tells the decoder to start decoding at the beginning of the new chunk region.
             // Any inter-chunk alignment is handled internally by timeJump.
-            var contextFrameAdjustment = leftContextFrames
+            let contextFrameAdjustment = leftContextFrames
 
             // Select decoder state for source and run frame-accurate inference
             // For finalization, re-decode the entire segment from the snapshot taken
@@ -352,7 +352,7 @@ public actor StreamingAsrManager {
             }
 
             // Clean intra-chunk punctuation sequences before cross-boundary dedup
-            let (punctCleaned, removedIdxSet) = asrManager.cleanPunctuationSequenceTokens(filteredTokens)
+            let (_, removedIdxSet) = asrManager.cleanPunctuationSequenceTokens(filteredTokens)
             let adjustedByPunct: ([Int], [Int], [Float]) = {
                 if removedIdxSet.isEmpty { return (filteredTokens, filteredTimestamps, filteredConfidences) }
                 var tks: [Int] = []

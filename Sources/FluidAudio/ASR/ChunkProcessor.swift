@@ -187,7 +187,7 @@ struct ChunkProcessor {
         let filteredTimestampsRaw = hypothesis.timestamps
         let filteredConfidencesRaw = hypothesis.tokenConfidences
 
-        let (cleanedTokens, removedIdxSet) = manager.cleanPunctuationSequenceTokens(filteredTokensRaw)
+        let (_, removedIdxSet) = manager.cleanPunctuationSequenceTokens(filteredTokensRaw)
         let (filteredTokens, filteredTimestamps, filteredConfidences): ([Int],[Int],[Float]) = {
             if removedIdxSet.isEmpty { return (filteredTokensRaw, filteredTimestampsRaw, filteredConfidencesRaw) }
             var tks: [Int] = []
