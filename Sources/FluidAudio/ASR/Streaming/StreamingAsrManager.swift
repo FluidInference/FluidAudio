@@ -64,7 +64,7 @@ public actor StreamingAsrManager {
         var isFinalized: Bool
         var lastInterimUpdate: Int  // Last sample position where we emitted an interim result
     }
-    
+
     private var currentSegment: CurrentSegment = .init(
         id: UUID(), centerStartAbs: 0, chunkSamples: 0, isFinalized: false, lastInterimUpdate: 0
     )
@@ -371,8 +371,10 @@ public actor StreamingAsrManager {
             let (dedupedTokens, removedCount) = asrManager.removeDuplicateTokenSequence(
                 previous: accumulatedTokens, current: adjustedByPunct.0, maxOverlap: 30
             )
-            let adjustedTimestamps = removedCount > 0 ? Array(adjustedByPunct.1.dropFirst(removedCount)) : adjustedByPunct.1
-            let adjustedConfidences = removedCount > 0 ? Array(adjustedByPunct.2.dropFirst(removedCount)) : adjustedByPunct.2
+            let adjustedTimestamps =
+                removedCount > 0 ? Array(adjustedByPunct.1.dropFirst(removedCount)) : adjustedByPunct.1
+            let adjustedConfidences =
+                removedCount > 0 ? Array(adjustedByPunct.2.dropFirst(removedCount)) : adjustedByPunct.2
 
             // For streaming, don't accumulate tokens blindly since they're deduplicated
             // by transcribeStreamingChunk. Only update accumulated tokens if this is final.
@@ -445,10 +447,10 @@ public actor StreamingAsrManager {
 
     /// Update transcript strings for snapshotting and emit segment updates
     private func updateTranscriptBuilder(
-        text: String, 
-        isFinal: Bool, 
-        segmentID: UUID, 
-        startTime: TimeInterval = 0, 
+        text: String,
+        isFinal: Bool,
+        segmentID: UUID,
+        startTime: TimeInterval = 0,
         endTime: TimeInterval = 0,
         confidence: Float = 1.0,
         tokenTimings: [TokenTiming]? = nil

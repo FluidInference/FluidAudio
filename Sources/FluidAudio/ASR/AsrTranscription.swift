@@ -406,7 +406,8 @@ extension AsrManager {
 
         for (i, tok) in tokens.enumerated() {
             if let prev = result.last, let prevIdxInOriginal = tokens[..<i].lastIndex(of: prev),
-               isPunctuationToken(prev) && isPunctuationToken(tok) {
+                isPunctuationToken(prev) && isPunctuationToken(tok)
+            {
                 // Both are punctuation; keep the stronger one
                 let prevStrength = punctuationStrength(of: prev)
                 let currStrength = punctuationStrength(of: tok)
