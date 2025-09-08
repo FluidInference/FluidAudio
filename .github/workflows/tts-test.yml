@@ -1,0 +1,102 @@
+name: TTS Test
+
+on:
+  push:
+    branches: [ main, kokoro ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-tts:
+    runs-on: macos-14
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Test Auto-Download Feature
+      run: |
+        # The TTS command should auto-download all required files
+        echo "🔄 Testing auto-download feature (no pre-downloaded files)"
+        ls -la | grep -E "(kokoro|vocab|word|heart)" || echo "No TTS files present - good!"
+    
+    - name: Build FluidAudio
+      run: |
+        swift build -c release
+    
+    - name: Test Basic TTS
+      run: |
+        echo "🎤 Testing basic TTS synthesis..."
+        swift run --configuration release fluidaudio tts "Hello world" --output test_hello.wav
+        
+        # Verify output file exists and has reasonable size
+        if [ -f test_hello.wav ]; then
+          SIZE=$(ls -l test_hello.wav | awk '{print $5}')
+          if [ $SIZE -gt 100000 ]; then
+            echo "✅ TTS successful: test_hello.wav ($SIZE bytes)"
+          else
+            echo "❌ Output file too small: $SIZE bytes"
+            exit 1
+          fi
+        else
+          echo "❌ Output file not created"
+          exit 1
+        fi
+    
+    - name: Test Long Text TTS
+      run: |
+        echo "📝 Testing long text synthesis..."
+        TEXT="I can't believe we finally made it to the summit after climbing for twelve exhausting hours through wind and rain, but wow, this view of the endless mountain ranges stretching to the horizon makes every single difficult step completely worth the journey."
+        
+        swift run --configuration release fluidaudio tts "$TEXT" --output test_long.wav
+        
+        # Verify output
+        if [ -f test_long.wav ]; then
+          SIZE=$(ls -l test_long.wav | awk '{print $5}')
+          echo "✅ Long text TTS successful: test_long.wav ($SIZE bytes)"
+        else
+          echo "❌ Long text output file not created"
+          exit 1
+        fi
+    
+    - name: Test Different Voices
+      run: |
+        echo "🗣️ Testing different voices..."
+        
+        # The TTS command will auto-download the am_adam voice
+        swift run --configuration release fluidaudio tts "Testing male voice" --voice am_adam --output test_adam.wav
+        
+        if [ -f test_adam.wav ]; then
+          echo "✅ Male voice TTS successful"
+        else
+          echo "❌ Male voice TTS failed"
+          exit 1
+        fi
+    
+    - name: Performance Check
+      run: |
+        echo "⚡ Testing TTS performance..."
+        
+        # Time the TTS generation
+        START_TIME=$(date +%s)
+        swift run --configuration release fluidaudio tts "Performance test text for measuring synthesis speed" --output test_perf.wav
+        END_TIME=$(date +%s)
+        
+        DURATION=$((END_TIME - START_TIME))
+        echo "⏱️ TTS completed in $DURATION seconds"
+        
+        # Check if it's reasonably fast (under 30 seconds)
+        if [ $DURATION -lt 30 ]; then
+          echo "✅ Performance acceptable"
+        else
+          echo "⚠️ TTS took longer than expected: $DURATION seconds"
+        fi
+    
+    - name: Upload Test Outputs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: tts-test-outputs
+        path: |
+          test_*.wav
+        retention-days: 7

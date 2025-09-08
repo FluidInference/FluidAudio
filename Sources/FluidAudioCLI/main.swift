@@ -92,7 +92,7 @@ Task {
         }
     case "tts":
         if #available(macOS 13.0, *) {
-            await TTSCommand.run(arguments: Array(arguments.dropFirst(2)))
+            await TTS.run(arguments: Array(arguments.dropFirst(2)))
         } else {
             print("TTS requires macOS 13.0 or later")
             exit(1)
