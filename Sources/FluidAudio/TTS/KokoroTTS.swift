@@ -41,8 +41,8 @@ public struct KokoroTTS {
 
     /// Download file from URL if needed
     private static func downloadFileIfNeeded(filename: String, urlPath: String) async throws {
-        let localURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(filename)
+        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let localURL = cacheDir.appendingPathComponent(filename)
 
         guard !FileManager.default.fileExists(atPath: localURL.path) else {
             logger.info("File already exists: \(filename)")
@@ -66,8 +66,8 @@ public struct KokoroTTS {
 
     /// Download model files if needed
     private static func downloadModelsIfNeeded() async throws {
-        // Models go directly in the current directory, not in kokorov2
-        let modelDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        // Use the proper cache directory from TTSModels
+        let modelDir = try TTSModels.cacheDirectoryURL()
 
         // Download each model's files
         for modelName in modelNames {
@@ -98,24 +98,27 @@ public struct KokoroTTS {
 
                 // Special handling for kokoro_frontend which has different files
                 if modelName == "kokoro_frontend" {
-                    // Download coremldata.bin (only for frontend)
-                    let coremlDataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/coremldata.bin")!
-                    logger.info("Downloading \(modelName) coremldata.bin")
-                    let (coremlData, _) = try await URLSession.shared.data(from: coremlDataURL)
-                    try coremlData.write(to: modelPath.appendingPathComponent("coremldata.bin"))
-                    logger.info("Saved coremldata.bin (\(coremlData.count) bytes)")
+                    // Create a proper Manifest.json for frontend without escaped slashes
+                    let manifestString = """
+                        {
+                          "fileFormatVersion": "1.0.0",
+                          "itemInfoEntries": {
+                            "model.mil": {
+                              "author": "com.apple.CoreML",
+                              "description": "CoreML Model Specification"
+                            },
+                            "weights/weight.bin": {
+                              "author": "com.apple.CoreML",
+                              "description": "CoreML Model Weights"
+                            }
+                          },
+                          "rootModelIdentifier": "model.mil"
+                        }
+                        """
 
-                    // Download metadata.json and save as Manifest.json
-                    let metadataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/metadata.json")!
-                    logger.info("Downloading \(modelName) metadata.json")
-                    let (metadataData, _) = try await URLSession.shared.data(from: metadataURL)
-                    // Save as Manifest.json since CoreML expects that
-                    try metadataData.write(to: modelPath.appendingPathComponent("Manifest.json"))
-                    logger.info("Saved metadata.json as Manifest.json (\(metadataData.count) bytes)")
-                    
-                    // Create analytics directory (only for frontend)
-                    let analyticsDir = modelPath.appendingPathComponent("analytics")
-                    try FileManager.default.createDirectory(at: analyticsDir, withIntermediateDirectories: true)
+                    let manifestData = manifestString.data(using: .utf8)!
+                    try manifestData.write(to: modelPath.appendingPathComponent("Manifest.json"))
+                    logger.info("Created proper Manifest.json for kokoro_frontend")
                 } else {
                     // For other models, download Manifest.json directly
                     let manifestURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/Manifest.json")!
@@ -163,8 +166,8 @@ public struct KokoroTTS {
     public static func loadModels() throws {
         guard !isModelsLoaded else { return }
 
-        // Models are in the current directory, not in kokorov2
-        let modelDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        // Use the proper cache directory from TTSModels
+        let modelDir = try TTSModels.cacheDirectoryURL()
 
         logger.info("Loading Kokoro models from \(modelDir.path)")
 
