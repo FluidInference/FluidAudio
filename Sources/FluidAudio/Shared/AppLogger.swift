@@ -84,7 +84,8 @@ actor LogConsole {
     private var enabled: Bool = {
         // Allow environment variable to toggle without code changes
         if let env = ProcessInfo.processInfo.environment["FLUIDAUDIO_LOG_TO_CONSOLE"],
-           env == "1" || env.lowercased() == "true" {
+            env == "1" || env.lowercased() == "true"
+        {
             return true
         }
         return false

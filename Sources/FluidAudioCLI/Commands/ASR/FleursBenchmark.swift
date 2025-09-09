@@ -142,14 +142,14 @@ public class FLEURSBenchmark {
             do {
                 let contents = try String(contentsOf: transFile)
                 let lines = contents.components(separatedBy: .newlines).filter { !$0.isEmpty }
-                    if lines.count > 10 {
-                        logger.info("    ✓ Found existing data with \(lines.count) samples")
-                        return
-                    }
-                } catch {
-                    // File exists but can't read, re-download
+                if lines.count > 10 {
+                    logger.info("    ✓ Found existing data with \(lines.count) samples")
+                    return
                 }
+            } catch {
+                // File exists but can't read, re-download
             }
+        }
 
         // Download from Hugging Face dataset: FluidInference/fleurs
         logger.info("    📥 Downloading from HuggingFace: FluidInference/fleurs/\(language)...")
@@ -481,7 +481,8 @@ public class FLEURSBenchmark {
 
                 let audioDuration = Double(audioSamples.count) / 16000.0
                 logger.debug(
-                    "\t Processing \(sample.audioPath) Duration: \(String(format: "%.2f", audioDuration))s with samples: \(audioSamples.count)")
+                    "\t Processing \(sample.audioPath) Duration: \(String(format: "%.2f", audioDuration))s with samples: \(audioSamples.count)"
+                )
                 // Measure only inference time for accurate RTFx calculation
                 let inferenceStartTime = Date()
                 let result = try await asrManager.transcribe(audioSamples)
@@ -731,7 +732,8 @@ public class FLEURSBenchmark {
             let langName = supportedLanguages[sample.language] ?? sample.language
             let werPercent = sample.wer * 100
             logger.info(
-                "\nLanguage: \(langName) | File: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)")
+                "\nLanguage: \(langName) | File: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
+            )
             logger.info("Path: \(sample.audioPath)")
             logger.info(String(repeating: "-", count: 40))
 

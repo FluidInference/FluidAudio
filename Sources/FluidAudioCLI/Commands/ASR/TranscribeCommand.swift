@@ -262,7 +262,8 @@ enum TranscribeCommand {
                             "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
                         )
                     } else {
-                        logger.info("[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
+                        logger.info(
+                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
                     }
 
                     if update.isConfirmed {

@@ -282,12 +282,30 @@ enum StreamDiarizationBenchmark {
                     logger.info("  Stage               Time (s)    %     Description")
                     logger.info("  " + String(repeating: "-", count: 60))
                     let totalTime = result.processingTime
-                    logger.info(String(format: "  Model Download      %.3f      %.1f   Fetching diarization models", result.modelDownloadTime, result.modelDownloadTime / totalTime * 100))
-                    logger.info(String(format: "  Model Compile       %.3f      %.1f   CoreML compilation", result.modelCompileTime, result.modelCompileTime / totalTime * 100))
-                    logger.info(String(format: "  Audio Load          %.3f      %.1f   Loading audio file", result.audioLoadTime, result.audioLoadTime / totalTime * 100))
-                    logger.info(String(format: "  Segmentation        %.3f      %.1f   Detecting speech regions", result.segmentationTime, result.segmentationTime / totalTime * 100))
-                    logger.info(String(format: "  Embedding           %.3f      %.1f   Extracting speaker voices", result.embeddingTime, result.embeddingTime / totalTime * 100))
-                    logger.info(String(format: "  Clustering          %.3f      %.1f   Grouping same speakers", result.clusteringTime, result.clusteringTime / totalTime * 100))
+                    logger.info(
+                        String(
+                            format: "  Model Download      %.3f      %.1f   Fetching diarization models",
+                            result.modelDownloadTime, result.modelDownloadTime / totalTime * 100))
+                    logger.info(
+                        String(
+                            format: "  Model Compile       %.3f      %.1f   CoreML compilation",
+                            result.modelCompileTime, result.modelCompileTime / totalTime * 100))
+                    logger.info(
+                        String(
+                            format: "  Audio Load          %.3f      %.1f   Loading audio file", result.audioLoadTime,
+                            result.audioLoadTime / totalTime * 100))
+                    logger.info(
+                        String(
+                            format: "  Segmentation        %.3f      %.1f   Detecting speech regions",
+                            result.segmentationTime, result.segmentationTime / totalTime * 100))
+                    logger.info(
+                        String(
+                            format: "  Embedding           %.3f      %.1f   Extracting speaker voices",
+                            result.embeddingTime, result.embeddingTime / totalTime * 100))
+                    logger.info(
+                        String(
+                            format: "  Clustering          %.3f      %.1f   Grouping same speakers",
+                            result.clusteringTime, result.clusteringTime / totalTime * 100))
                     logger.info("  " + String(repeating: "-", count: 60))
                     logger.info(String(format: "  Total               %.3f    100.0   Full pipeline", totalTime))
                 }
@@ -300,8 +318,12 @@ enum StreamDiarizationBenchmark {
 
                 if iterations > 1 {
                     logger.info("\n📊 Average over \(iterations) iterations:")
-                    logger.info("  DER: \(String(format: "%.1f", avgResult.der))% ± \(String(format: "%.1f", standardDeviation(iterationResults.map { $0.der })))%")
-                    logger.info("  RTFx: \(String(format: "%.1f", avgResult.rtfx))x ± \(String(format: "%.1f", standardDeviation(iterationResults.map { $0.rtfx })))x")
+                    logger.info(
+                        "  DER: \(String(format: "%.1f", avgResult.der))% ± \(String(format: "%.1f", standardDeviation(iterationResults.map { $0.der })))%"
+                    )
+                    logger.info(
+                        "  RTFx: \(String(format: "%.1f", avgResult.rtfx))x ± \(String(format: "%.1f", standardDeviation(iterationResults.map { $0.rtfx })))x"
+                    )
                 }
             }
         }
@@ -610,7 +632,7 @@ enum StreamDiarizationBenchmark {
                 falseAlarmFrames += 1  // System speaking when should be silent
             case (_, nil):
                 missedFrames += 1  // System silent when should be speaking
-            case let (gt?, pred?):
+            case (let gt?, let pred?):
                 // Use streaming mapping if available, otherwise treat as error
                 let mappedPred = firstOccurrenceMap[pred]
                 if mappedPred != gt {

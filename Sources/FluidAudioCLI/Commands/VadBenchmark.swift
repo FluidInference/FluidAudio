@@ -102,7 +102,8 @@ struct VadBenchmark {
             logger.info("   RTFx: N/A")
         }
         logger.info("   Files Processed: \(result.totalFiles)")
-        logger.info("   Avg Time per File: \(String(format: "%.3f", result.processingTime / Double(result.totalFiles)))s")
+        logger.info(
+            "   Avg Time per File: \(String(format: "%.3f", result.processingTime / Double(result.totalFiles)))s")
 
         // Save results with RTFx
         if let outputFile = outputFile {
@@ -168,7 +169,9 @@ struct VadBenchmark {
         }
 
         // No fallback to mock data - fail cleanly
-        logger.error("Failed to load VAD dataset from all sources:\n   • Local dataset not found\n   • Hugging Face cache empty\n   • Hugging Face download failed\n💡 Try: swift run fluidaudio download --dataset vad")
+        logger.error(
+            "Failed to load VAD dataset from all sources:\n   • Local dataset not found\n   • Hugging Face cache empty\n   • Hugging Face download failed\n💡 Try: swift run fluidaudio download --dataset vad"
+        )
         throw NSError(
             domain: "VadError", code: 404,
             userInfo: [
@@ -453,7 +456,8 @@ struct VadBenchmark {
                     }
 
                 logger.info(
-                    "      Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)")
+                    "      Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)"
+                )
 
             } catch {
                 logger.warning("      Error: \(error)")

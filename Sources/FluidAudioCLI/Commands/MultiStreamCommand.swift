@@ -44,7 +44,8 @@ enum MultiStreamCommand {
         logger.info("🎤 Multi-Stream ASR Test\n========================\n")
 
         if audioFile2 != nil {
-            logger.info("📁 Processing two different files:\n  Microphone: \(micAudioFile)\n  System: \(systemAudioFile)\n")
+            logger.info(
+                "📁 Processing two different files:\n  Microphone: \(micAudioFile)\n  System: \(systemAudioFile)\n")
         } else {
             logger.info("📁 Processing single file on both streams: \(audioFile1)\n")
         }
@@ -169,7 +170,9 @@ enum MultiStreamCommand {
             systemTask.cancel()
 
             // Print results
-            logger.info("\n" + String(repeating: "=", count: 60) + "\nTRANSCRIPTION RESULTS\n" + String(repeating: "=", count: 60) + "\n")
+            logger.info(
+                "\n" + String(repeating: "=", count: 60) + "\nTRANSCRIPTION RESULTS\n"
+                    + String(repeating: "=", count: 60) + "\n")
             logger.info("\nMICROPHONE STREAM:\n\(micFinal)")
             logger.info("\nSYSTEM AUDIO STREAM:\n\(systemFinal)")
             logger.info("\nSession info:")

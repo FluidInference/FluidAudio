@@ -157,7 +157,8 @@ public class ASRBenchmark {
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
         logger.info(
-            "Transcribing \(file.fileName) with \(audioSamples.count) samples (\(String(format: "%.2f", audioLength))s)")
+            "Transcribing \(file.fileName) with \(audioSamples.count) samples (\(String(format: "%.2f", audioLength))s)"
+        )
 
         // Measure only inference time for accurate RTFx calculation
         let inferenceStartTime = Date()
@@ -218,7 +219,8 @@ public class ASRBenchmark {
             let isLastChunk = nextChunkEnd >= audioSamples.count
 
             logger.debug(
-                "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))")
+                "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
+            )
 
             // Process all audio up to this point (simulating accumulated streaming)
             let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
@@ -242,8 +244,9 @@ public class ASRBenchmark {
 
             let chunkDuration = Double(chunkSamples) / 16000.0
             logger.debug(
-                "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkInferenceTime))s (inference only)")
-            
+                "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkInferenceTime))s (inference only)"
+            )
+
             if isLastChunk {
                 logger.debug(
                     "🔍   FINAL CHUNK \(chunkNumber): text change: '\(previousText)' -> '\(accumulatedText)'")
@@ -1096,7 +1099,8 @@ extension ASRBenchmark {
             logger.info("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
             logger.info("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
             logger.info(
-                "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)")
+                "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
+            )
 
             logger.info("\nResults saved to: \(outputFile)")
             logger.info("ASR benchmark completed successfully")

@@ -272,11 +272,11 @@ struct DatasetDownloader {
                             return false
                         }
                     }
-                    } else {
-                        logger.warning("     ⚠️ HTTP error: \(httpResponse.statusCode)")
-                        return false
-                    }
+                } else {
+                    logger.warning("     ⚠️ HTTP error: \(httpResponse.statusCode)")
+                    return false
                 }
+            }
         } catch {
             logger.warning("     ⚠️ Download error: \(error.localizedDescription)")
             return false
