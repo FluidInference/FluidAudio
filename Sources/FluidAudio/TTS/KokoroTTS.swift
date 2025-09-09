@@ -182,6 +182,9 @@ public struct KokoroTTS {
             for filename in requiredFiles {
                 try await downloadFileIfNeeded(filename: filename, urlPath: filename)
             }
+
+            // Download voice embedding if needed
+            try await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: "af_heart")
             return
         }
 
@@ -208,6 +211,9 @@ public struct KokoroTTS {
 
         // Download models
         try await downloadModelsIfNeeded()
+
+        // Download default voice embedding
+        try await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: "af_heart")
     }
 
     /// Load all Kokoro models
@@ -566,40 +572,67 @@ public struct KokoroTTS {
 
     /// Load voice embedding
     public static func loadVoiceEmbedding(voice: String = "af_heart") throws -> MLMultiArray {
-        let currentDir = FileManager.default.currentDirectoryPath
-        let voiceFile = "\(voice).json"
-        let voiceURL = URL(fileURLWithPath: currentDir).appendingPathComponent(voiceFile)
+        // Use Models/kokoro/voices subdirectory in cache
+        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
+
+        // Create voices directory if needed
+        try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)
 
         // For multi-model architecture, we use 128-dimensional embeddings
         let embedding = try MLMultiArray(shape: [1, 128] as [NSNumber], dataType: .float32)
 
-        if FileManager.default.fileExists(atPath: voiceURL.path) {
-            // Load from JSON if available
-            let data = try Data(contentsOf: voiceURL)
+        // Try JSON file first (we can't parse .pt files directly in Swift)
+        let jsonFile = "\(voice).json"
+        let jsonURL = voicesDir.appendingPathComponent(jsonFile)
+
+        // Download voice embedding if missing
+        if !FileManager.default.fileExists(atPath: jsonURL.path) {
+            print("Downloading voice embedding: \(voice)")
+
+            // First check if JSON exists locally in current directory
+            let localURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
+                jsonFile)
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                // Copy local file to cache
+                try FileManager.default.copyItem(at: localURL, to: jsonURL)
+                print("Voice embedding cached: \(voice)")
+            } else {
+                // Note: .pt files from HuggingFace need to be converted to JSON format
+                // The conversion requires Python torch library
+                print("Note: Voice embedding \(voice).pt needs to be converted to JSON format")
+                print("Run: python3 extract_voice_embeddings.py to convert .pt files")
+                // HuggingFace URL for reference: https://huggingface.co/FluidInference/kokoro-82m-coreml/blob/main/voices/\(voice).pt
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: jsonURL.path) {
+            // Load from cached JSON
+            let data = try Data(contentsOf: jsonURL)
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 // Try different formats - Python might save as Double array
                 if let values = json[voice] as? [Double] {
                     for (i, val) in values.enumerated() where i < 128 {
                         embedding[i] = NSNumber(value: Float(val))
                     }
-                    logger.info("Loaded voice embedding from \(voiceFile)")
+                    print("Loaded voice embedding: \(voice) from cache")
                     return embedding
                 } else if let values = json[voice] as? [Float] {
                     for (i, val) in values.enumerated() where i < 128 {
                         embedding[i] = NSNumber(value: val)
                     }
-                    logger.info("Loaded voice embedding from \(voiceFile)")
+                    print("Loaded voice embedding: \(voice) from cache")
                     return embedding
                 }
             }
-            logger.warning("Could not parse voice embedding from \(voiceFile)")
+            logger.warning("Could not parse voice embedding from \(jsonFile)")
         }
 
         // Use default embedding if file not found or parsing failed
-        if !FileManager.default.fileExists(atPath: voiceURL.path) {
-            logger.warning("Voice file not found, using default embedding")
+        if !FileManager.default.fileExists(atPath: jsonURL.path) {
+            print("Voice embedding not found in cache, using default")
         } else {
-            logger.warning("Using default embedding (failed to parse JSON)")
+            print("Using default embedding (failed to parse JSON)")
         }
 
         // Fill with small random values like main2.py
