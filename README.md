@@ -394,6 +394,8 @@ Make a PR if you want to add your app!
 - Models auto-download on first use. If your network restricts Hugging Face access, set an HTTPS proxy: `export https_proxy=http://127.0.0.1:7890`.
 - Windows alternative in development: [fluid-server](https://github.com/FluidInference/fluid-server)
 
+If you're looking to get the system audio on a Mac, take a look at this repo for reference [AudioCap](https://github.com/insidegui/AudioCap/tree/main)
+
 ### License
 
 Apache 2.0 — see `LICENSE` for details.
@@ -403,6 +405,7 @@ Apache 2.0 — see `LICENSE` for details.
 This project uses `swift-format` to maintain consistent code style. All pull requests are automatically checked for formatting compliance.
 
 **Local Development:**
+
 ```bash
 # Format all code (requires Swift 6+ for contributors only)
 # Users of the library don't need Swift 6
@@ -418,6 +421,7 @@ swift format lint --recursive --configuration .swift-format Sources/ Tests/ Exam
 ```
 
 **Automatic Checks:**
+
 - PRs will fail if code is not properly formatted
 - GitHub Actions runs formatting checks on all Swift file changes
 - See `.swift-format` for style configuration
