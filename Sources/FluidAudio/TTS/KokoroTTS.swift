@@ -69,8 +69,8 @@ public struct KokoroTTS {
         // Models go directly in the current directory, not in kokorov2
         let modelDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 
-        // Download each model's files (skip kokoro_frontend as it's special)
-        for modelName in modelNames where modelName != "kokoro_frontend" {
+        // Download each model's files
+        for modelName in modelNames {
             let modelPath = modelDir.appendingPathComponent("\(modelName).mlmodelc")
 
             if !FileManager.default.fileExists(atPath: modelPath.path) {
