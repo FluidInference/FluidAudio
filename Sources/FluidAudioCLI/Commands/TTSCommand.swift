@@ -42,21 +42,21 @@ public struct TTS {
             // Download models if requested (not counted in processing time)
             if autoDownload {
                 print("Downloading required models...")
-                try await Kokoro.ensureRequiredFiles()
+                try await KokoroModel.ensureRequiredFiles()
                 print("Models ready")
                 print()
             }
 
             // Measure model loading time separately
             let modelLoadStart = Date()
-            try await Kokoro.loadModels()
+            try await KokoroModel.loadModels()
             modelLoadTime = Date().timeIntervalSince(modelLoadStart)
 
             // Start timing only for actual synthesis (excluding model loading)
             let inferenceStart = Date()
 
             // Synthesize using Kokoro TTS (multi-model architecture)
-            let audioData = try await Kokoro.synthesize(text: text, voice: voice)
+            let audioData = try await KokoroModel.synthesize(text: text, voice: voice)
 
             // End inference timing
             let inferenceTime = Date().timeIntervalSince(inferenceStart)
