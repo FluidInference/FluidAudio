@@ -79,80 +79,77 @@ public struct KokoroTTS {
                 // Create model directory
                 try FileManager.default.createDirectory(at: modelPath, withIntermediateDirectories: true)
 
-                // Download model.mil
-                let milURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/model.mil")!
-                logger.info("Downloading \(modelName) model.mil from \(milURL)")
-                let (milData, _) = try await URLSession.shared.data(from: milURL)
-                try milData.write(to: modelPath.appendingPathComponent("model.mil"))
-                logger.info("Saved model.mil (\(milData.count) bytes)")
+                // Download the compiled mlmodelc files
+                let filesToDownload = [
+                    "coremldata.bin",
+                    "model.mil",
+                    "weights/weight.bin",
+                    "analytics/coremldata.bin",
+                ]
 
-                // Download weights
-                let weightsDir = modelPath.appendingPathComponent("weights")
-                try FileManager.default.createDirectory(at: weightsDir, withIntermediateDirectories: true)
+                // Create subdirectories
+                try FileManager.default.createDirectory(
+                    at: modelPath.appendingPathComponent("weights"),
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.createDirectory(
+                    at: modelPath.appendingPathComponent("analytics"),
+                    withIntermediateDirectories: true
+                )
 
-                let weightURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/weights/weight.bin")!
-                logger.info("Downloading \(modelName) weight.bin from \(weightURL)")
-                let (weightData, _) = try await URLSession.shared.data(from: weightURL)
-                try weightData.write(to: weightsDir.appendingPathComponent("weight.bin"))
-                logger.info("Saved weight.bin (\(weightData.count) bytes)")
+                for file in filesToDownload {
+                    let fileURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/\(file)")!
+                    let destPath: URL
 
-                // Special handling for kokoro_frontend which has different files
-                if modelName == "kokoro_frontend" {
-                    // Create a proper Manifest.json for frontend without escaped slashes
-                    let manifestString = """
+                    if file == "weights/weight.bin" {
+                        destPath = modelPath.appendingPathComponent("weights").appendingPathComponent("weight.bin")
+                    } else if file == "analytics/coremldata.bin" {
+                        destPath = modelPath.appendingPathComponent("analytics").appendingPathComponent(
+                            "coremldata.bin")
+                    } else {
+                        destPath = modelPath.appendingPathComponent(file)
+                    }
+
+                    do {
+                        logger.info("  Downloading \(file)...")
+                        let (data, response) = try await URLSession.shared.data(from: fileURL)
+
+                        if let httpResponse = response as? HTTPURLResponse,
+                            httpResponse.statusCode == 200
                         {
-                          "fileFormatVersion": "1.0.0",
-                          "itemInfoEntries": {
-                            "model.mil": {
-                              "author": "com.apple.CoreML",
-                              "description": "CoreML Model Specification"
-                            },
-                            "weights/weight.bin": {
-                              "author": "com.apple.CoreML",
-                              "description": "CoreML Model Weights"
-                            }
-                          },
-                          "rootModelIdentifier": "model.mil"
+                            try data.write(to: destPath)
+                            logger.info("  ✓ Downloaded \(file) (\(data.count) bytes)")
+                        } else {
+                            logger.warning(
+                                "  File \(file) returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)")
                         }
-                        """
-
-                    let manifestData = manifestString.data(using: .utf8)!
-                    try manifestData.write(to: modelPath.appendingPathComponent("Manifest.json"))
-                    logger.info("Created proper Manifest.json for kokoro_frontend")
-                } else {
-                    // For other models, download Manifest.json directly
-                    let manifestURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/Manifest.json")!
-                    logger.info("Downloading \(modelName) Manifest.json")
-                    let (manifestData, _) = try await URLSession.shared.data(from: manifestURL)
-                    try manifestData.write(to: modelPath.appendingPathComponent("Manifest.json"))
-                    logger.info("Saved Manifest.json (\(manifestData.count) bytes)")
-                }
-
-                logger.info("Downloaded \(modelName) model to \(modelPath.path)")
-
-                // Verify the model can be loaded
-                do {
-                    _ = try MLModel(contentsOf: modelPath)
-                    logger.info("Verified \(modelName) model loads correctly")
-                } catch {
-                    logger.error("Model verification failed for \(modelName): \(error)")
-                    // Try to compile it explicitly
-                    logger.info("Attempting to compile \(modelName) model...")
-                    let compiledURL = try await MLModel.compileModel(at: modelPath)
-                    logger.info("Compiled \(modelName) to \(compiledURL.path)")
-                    // Move compiled model to expected location
-                    if compiledURL.path != modelPath.path {
-                        try FileManager.default.removeItem(at: modelPath)
-                        try FileManager.default.moveItem(at: compiledURL, to: modelPath)
-                        logger.info("Moved compiled model to \(modelPath.path)")
+                    } catch {
+                        logger.warning("  Could not download \(file): \(error.localizedDescription)")
                     }
                 }
+
+                logger.info("✓ Downloaded \(modelName).mlmodelc")
+                // Skip verification - compiled mlmodelc files will be loaded later
             }
         }
     }
 
     /// Ensure all required files are downloaded
     public static func ensureRequiredFiles() async throws {
+        // Skip download if we're using mlpackage models
+        let modelDir = try TTSModels.cacheDirectoryURL()
+        let frontendPackageURL = modelDir.appendingPathComponent("kokoro_frontend.mlpackage")
+
+        if FileManager.default.fileExists(atPath: frontendPackageURL.path) {
+            logger.info("Using existing mlpackage models, skipping download")
+
+            // Still download data files if needed
+            for filename in requiredFiles {
+                try await downloadFileIfNeeded(filename: filename, urlPath: filename)
+            }
+            return
+        }
+
         // Download data files
         for filename in requiredFiles {
             try await downloadFileIfNeeded(filename: filename, urlPath: filename)
@@ -163,7 +160,7 @@ public struct KokoroTTS {
     }
 
     /// Load all Kokoro models
-    public static func loadModels() throws {
+    public static func loadModels() async throws {
         guard !isModelsLoaded else { return }
 
         // Use the proper cache directory from TTSModels
@@ -171,34 +168,59 @@ public struct KokoroTTS {
 
         logger.info("Loading Kokoro models from \(modelDir.path)")
 
-        // Check if models exist, if not they need to be downloaded
-        let frontendURL = modelDir.appendingPathComponent("kokoro_frontend.mlmodelc")
-        guard FileManager.default.fileExists(atPath: frontendURL.path) else {
+        // Check if models exist - try mlpackage first
+        let frontendPackageURL = modelDir.appendingPathComponent("kokoro_frontend.mlpackage")
+        let frontendCompiledURL = modelDir.appendingPathComponent("kokoro_frontend.mlmodelc")
+
+        // Determine which format to use
+        let useMlpackage = FileManager.default.fileExists(atPath: frontendPackageURL.path)
+
+        if !useMlpackage && !FileManager.default.fileExists(atPath: frontendCompiledURL.path) {
             logger.error("Models not found at \(modelDir.path). Please ensure models are downloaded first.")
             throw TTSError.modelNotFound("Kokoro models not found. Run with auto-download or download manually.")
         }
 
         // Load frontend (BERT encoder)
-        frontend = try MLModel(contentsOf: frontendURL)
-        logger.info("Loaded frontend model")
+        if useMlpackage {
+            logger.info("Loading frontend from mlpackage...")
+            let compiledURL = try await MLModel.compileModel(at: frontendPackageURL)
+            frontend = try MLModel(contentsOf: compiledURL)
+            logger.info("Loaded frontend model from mlpackage")
+        } else {
+            frontend = try MLModel(contentsOf: frontendCompiledURL)
+            logger.info("Loaded frontend model from mlmodelc")
+        }
+
+        // Helper to load a model from mlpackage or mlmodelc
+        func loadModel(name: String) async throws -> MLModel {
+            let packageURL = modelDir.appendingPathComponent("\(name).mlpackage")
+            let compiledURL = modelDir.appendingPathComponent("\(name).mlmodelc")
+
+            if FileManager.default.fileExists(atPath: packageURL.path) {
+                logger.info("Loading \(name) from mlpackage...")
+                let compiled = try await MLModel.compileModel(at: packageURL)
+                return try MLModel(contentsOf: compiled)
+            } else if FileManager.default.fileExists(atPath: compiledURL.path) {
+                return try MLModel(contentsOf: compiledURL)
+            } else {
+                throw TTSError.modelNotFound("\(name) model not found")
+            }
+        }
 
         // Load pregenerator
-        let pregeneratorURL = modelDir.appendingPathComponent("pregenerator.mlmodelc")
-        pregenerator = try MLModel(contentsOf: pregeneratorURL)
+        pregenerator = try await loadModel(name: "pregenerator")
         logger.info("Loaded pregenerator model")
 
         // Load decoder blocks
         decoderBlocks = []
         for i in 0..<4 {
-            let decoderURL = modelDir.appendingPathComponent("decoder_block_\(i).mlmodelc")
-            let decoder = try MLModel(contentsOf: decoderURL)
+            let decoder = try await loadModel(name: "decoder_block_\(i)")
             decoderBlocks.append(decoder)
             logger.info("Loaded decoder block \(i)")
         }
 
         // Load generator
-        let generatorURL = modelDir.appendingPathComponent("generator.mlmodelc")
-        generator = try MLModel(contentsOf: generatorURL)
+        generator = try await loadModel(name: "generator")
         logger.info("Loaded generator model")
 
         isModelsLoaded = true
@@ -208,8 +230,15 @@ public struct KokoroTTS {
     public static func loadPhonemeDictionary() throws {
         guard !isDictionaryLoaded else { return }
 
-        let currentDir = FileManager.default.currentDirectoryPath
-        let dictURL = URL(fileURLWithPath: currentDir).appendingPathComponent("word_phonemes.json")
+        // First try cache directory
+        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let dictURL = cacheDir.appendingPathComponent("word_phonemes.json")
+
+        // Download if missing
+        if !FileManager.default.fileExists(atPath: dictURL.path) {
+            logger.info("Phoneme dictionary not found in cache, downloading...")
+            try downloadDictionaryFiles()
+        }
 
         guard FileManager.default.fileExists(atPath: dictURL.path) else {
             throw TTSError.modelNotFound("Phoneme dictionary not found at \(dictURL.path)")
@@ -222,6 +251,24 @@ public struct KokoroTTS {
             phonemeDictionary = wordToPhonemes
             isDictionaryLoaded = true
             logger.info("Loaded \(phonemeDictionary.count) words from phoneme dictionary")
+        }
+    }
+
+    /// Download dictionary files if missing
+    private static func downloadDictionaryFiles() throws {
+        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let baseURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main"
+        let files = ["word_phonemes.json", "vocab_index.json"]
+
+        for file in files {
+            let localPath = cacheDir.appendingPathComponent(file)
+            if !FileManager.default.fileExists(atPath: localPath.path) {
+                let remoteURL = URL(string: "\(baseURL)/\(file)")!
+                logger.info("Downloading \(file)...")
+                let data = try Data(contentsOf: remoteURL)
+                try data.write(to: localPath)
+                logger.info("Downloaded \(file) to cache")
+            }
         }
     }
 
@@ -436,7 +483,7 @@ public struct KokoroTTS {
         // Load models if needed
         do {
             logger.info("Loading models...")
-            try loadModels()
+            try await loadModels()
             logger.info("Models loaded successfully")
         } catch {
             logger.error("Failed to load models: \(error)")

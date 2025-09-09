@@ -12,8 +12,27 @@ public struct KokoroVocabulary {
     public static func loadVocabulary() {
         guard !isLoaded else { return }
 
-        let currentDir = FileManager.default.currentDirectoryPath
-        let vocabURL = URL(fileURLWithPath: currentDir).appendingPathComponent("vocab_index.json")
+        // First try cache directory
+        let cacheDir: URL
+        do {
+            cacheDir = try TTSModels.cacheDirectoryURL()
+        } catch {
+            logger.error("Failed to get cache directory: \(error)")
+            fatalError("Failed to get cache directory: \(error)")
+        }
+
+        let vocabURL = cacheDir.appendingPathComponent("vocab_index.json")
+
+        // Download if missing
+        if !FileManager.default.fileExists(atPath: vocabURL.path) {
+            logger.info("Vocabulary file not found in cache, downloading...")
+            do {
+                try downloadVocabularyFile(to: cacheDir)
+            } catch {
+                logger.error("Failed to download vocabulary: \(error)")
+                fatalError("Failed to download vocabulary: \(error)")
+            }
+        }
 
         do {
             let data = try Data(contentsOf: vocabURL)
@@ -51,6 +70,21 @@ public struct KokoroVocabulary {
     public static func getVocabulary() -> [String: Int32] {
         loadVocabulary()
         return vocabulary
+    }
+
+    /// Download vocabulary file if missing
+    private static func downloadVocabularyFile(to cacheDir: URL) throws {
+        let baseURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main"
+        let fileName = "vocab_index.json"
+        let localPath = cacheDir.appendingPathComponent(fileName)
+
+        if !FileManager.default.fileExists(atPath: localPath.path) {
+            let remoteURL = URL(string: "\(baseURL)/\(fileName)")!
+            logger.info("Downloading \(fileName)...")
+            let data = try Data(contentsOf: remoteURL)
+            try data.write(to: localPath)
+            logger.info("Downloaded \(fileName) to cache")
+        }
     }
 
 }

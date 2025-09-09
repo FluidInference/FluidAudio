@@ -125,6 +125,10 @@ public struct TTSModels {
         return cacheDirectory
     }
 
+    public static func cacheDirectoryURL() throws -> URL {
+        return try getCacheDirectory()
+    }
+
     public static func optimizedPredictionOptions() -> MLPredictionOptions {
         let options = MLPredictionOptions()
         options.usesCPUOnly = false
