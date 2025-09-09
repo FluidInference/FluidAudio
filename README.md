@@ -437,3 +437,5 @@ Wewpeaker: https://github.com/wenet-e2e/wespeaker
 Parakeet-mlx: https://github.com/senstella/parakeet-mlx
 
 silero-vad: https://github.com/snakers4/silero-vad
+
+Kokoro-82M: https://huggingface.co/hexgrad/Kokoro-82M
