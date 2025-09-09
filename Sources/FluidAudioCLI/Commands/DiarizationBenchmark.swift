@@ -634,7 +634,7 @@ enum StreamDiarizationBenchmark {
                 falseAlarmFrames += 1  // System speaking when should be silent
             case (_, nil):
                 missedFrames += 1  // System silent when should be speaking
-            case let (gt?, pred?):
+            case (let gt?, let pred?):
                 // Use streaming mapping if available, otherwise treat as error
                 let mappedPred = firstOccurrenceMap[pred]
                 if mappedPred != gt {
