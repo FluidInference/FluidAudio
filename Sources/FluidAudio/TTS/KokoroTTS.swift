@@ -134,7 +134,25 @@ public struct KokoroTTS {
                 let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted)
                 try manifestData.write(to: modelPath.appendingPathComponent("Manifest.json"))
 
-                logger.info("Downloaded \(modelName) model")
+                logger.info("Downloaded \(modelName) model to \(modelPath.path)")
+                
+                // Verify the model can be loaded
+                do {
+                    let testModel = try MLModel(contentsOf: modelPath)
+                    logger.info("Verified \(modelName) model loads correctly")
+                } catch {
+                    logger.error("Model verification failed for \(modelName): \(error)")
+                    // Try to compile it explicitly
+                    logger.info("Attempting to compile \(modelName) model...")
+                    let compiledURL = try MLModel.compileModel(at: modelPath)
+                    logger.info("Compiled \(modelName) to \(compiledURL.path)")
+                    // Move compiled model to expected location
+                    if compiledURL.path != modelPath.path {
+                        try FileManager.default.removeItem(at: modelPath)
+                        try FileManager.default.moveItem(at: compiledURL, to: modelPath)
+                        logger.info("Moved compiled model to \(modelPath.path)")
+                    }
+                }
             }
         }
     }
