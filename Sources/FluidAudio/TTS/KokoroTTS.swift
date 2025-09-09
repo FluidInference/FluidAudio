@@ -82,18 +82,9 @@ public struct KokoroTTS {
                 // Download model.mil
                 let milURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/model.mil")!
                 logger.info("Downloading \(modelName) model.mil from \(milURL)")
-
-                do {
-                    let (milData, milResponse) = try await URLSession.shared.data(from: milURL)
-                    if let httpResponse = milResponse as? HTTPURLResponse {
-                        logger.info("model.mil response: \(httpResponse.statusCode)")
-                    }
-                    try milData.write(to: modelPath.appendingPathComponent("model.mil"))
-                    logger.info("Saved model.mil (\(milData.count) bytes)")
-                } catch {
-                    logger.error("Failed to download model.mil: \(error)")
-                    throw error
-                }
+                let (milData, _) = try await URLSession.shared.data(from: milURL)
+                try milData.write(to: modelPath.appendingPathComponent("model.mil"))
+                logger.info("Saved model.mil (\(milData.count) bytes)")
 
                 // Download weights
                 let weightsDir = modelPath.appendingPathComponent("weights")
@@ -101,38 +92,27 @@ public struct KokoroTTS {
 
                 let weightURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/weights/weight.bin")!
                 logger.info("Downloading \(modelName) weight.bin from \(weightURL)")
+                let (weightData, _) = try await URLSession.shared.data(from: weightURL)
+                try weightData.write(to: weightsDir.appendingPathComponent("weight.bin"))
+                logger.info("Saved weight.bin (\(weightData.count) bytes)")
 
-                do {
-                    let (weightData, weightResponse) = try await URLSession.shared.data(from: weightURL)
-                    if let httpResponse = weightResponse as? HTTPURLResponse {
-                        logger.info("weight.bin response: \(httpResponse.statusCode)")
-                    }
-                    try weightData.write(to: weightsDir.appendingPathComponent("weight.bin"))
-                    logger.info("Saved weight.bin (\(weightData.count) bytes)")
-                } catch {
-                    logger.error("Failed to download weight.bin: \(error)")
-                    throw error
-                }
+                // Download coremldata.bin
+                let coremlDataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/coremldata.bin")!
+                logger.info("Downloading \(modelName) coremldata.bin")
+                let (coremlData, _) = try await URLSession.shared.data(from: coremlDataURL)
+                try coremlData.write(to: modelPath.appendingPathComponent("coremldata.bin"))
+                logger.info("Saved coremldata.bin (\(coremlData.count) bytes)")
 
-                // Create Manifest.json
-                let manifest =
-                    [
-                        "fileFormatVersion": "1.0.0",
-                        "itemInfoEntries": [
-                            "model.mil": [
-                                "author": "com.apple.CoreML",
-                                "description": "CoreML Model Specification",
-                            ],
-                            "weights/weight.bin": [
-                                "author": "com.apple.CoreML",
-                                "description": "CoreML Model Weights",
-                            ],
-                        ],
-                        "rootModelIdentifier": "model.mil",
-                    ] as [String: Any]
-
-                let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted)
-                try manifestData.write(to: modelPath.appendingPathComponent("Manifest.json"))
+                // Download metadata.json
+                let metadataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/metadata.json")!
+                logger.info("Downloading \(modelName) metadata.json")
+                let (metadataData, _) = try await URLSession.shared.data(from: metadataURL)
+                try metadataData.write(to: modelPath.appendingPathComponent("metadata.json"))
+                logger.info("Saved metadata.json (\(metadataData.count) bytes)")
+                
+                // Create analytics directory (even if empty)
+                let analyticsDir = modelPath.appendingPathComponent("analytics")
+                try FileManager.default.createDirectory(at: analyticsDir, withIntermediateDirectories: true)
 
                 logger.info("Downloaded \(modelName) model to \(modelPath.path)")
 
