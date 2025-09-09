@@ -15,7 +15,7 @@ public struct KokoroVocabulary {
         // Use Models/kokoro subdirectory
         let cacheDir: URL
         do {
-            cacheDir = try TTSModels.cacheDirectoryURL()
+            cacheDir = try TtsModels.cacheDirectoryURL()
         } catch {
             logger.error("Failed to get cache directory: \(error)")
             fatalError("Failed to get cache directory: \(error)")

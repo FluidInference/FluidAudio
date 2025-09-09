@@ -42,7 +42,7 @@ public struct Kokoro {
 
     /// Download file from URL if needed
     private static func downloadFileIfNeeded(filename: String, urlPath: String) async throws {
-        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TtsModels.cacheDirectoryURL()
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
 
         // Create directory if needed
@@ -74,7 +74,7 @@ public struct Kokoro {
     /// Download model files if needed
     private static func downloadModelsIfNeeded() async throws {
         // Use Models/kokoro subdirectory in cache
-        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TtsModels.cacheDirectoryURL()
         let modelDir = cacheDir.appendingPathComponent("Models/kokoro")
 
         // Create Models/kokoro directory if needed
@@ -171,7 +171,7 @@ public struct Kokoro {
     /// Ensure all required files are downloaded
     public static func ensureRequiredFiles() async throws {
         // Skip download if we're using mlpackage models
-        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TtsModels.cacheDirectoryURL()
         let modelDir = cacheDir.appendingPathComponent("Models/kokoro")
         let frontendPackageURL = modelDir.appendingPathComponent("kokoro_frontend.mlpackage")
 
@@ -221,7 +221,7 @@ public struct Kokoro {
         guard !isModelsLoaded else { return }
 
         // Use Models/kokoro subdirectory in cache
-        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TtsModels.cacheDirectoryURL()
         let modelDir = cacheDir.appendingPathComponent("Models/kokoro")
 
         // Create directory if needed
@@ -466,7 +466,7 @@ public struct Kokoro {
         guard !isDictionaryLoaded else { return }
 
         // Use Models/kokoro subdirectory
-        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TtsModels.cacheDirectoryURL()
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
         let dictURL = kokoroDir.appendingPathComponent("word_phonemes.json")
 
@@ -492,7 +492,7 @@ public struct Kokoro {
 
     /// Download dictionary files if missing
     private static func downloadDictionaryFiles() throws {
-        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TtsModels.cacheDirectoryURL()
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
 
         // Create directory if needed
@@ -573,7 +573,7 @@ public struct Kokoro {
     /// Load voice embedding
     public static func loadVoiceEmbedding(voice: String = "af_heart") throws -> MLMultiArray {
         // Use Models/kokoro/voices subdirectory in cache
-        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TtsModels.cacheDirectoryURL()
         let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
 
         // Create voices directory if needed

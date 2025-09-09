@@ -281,4 +281,4 @@ public struct KokoroDirectTTS {
     }
 }
 
-// TTSError is already defined in TTSModels.swift
+// TTSError is already defined in TtsModels.swift

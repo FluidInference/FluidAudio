@@ -3,10 +3,10 @@ import Foundation
 import OSLog
 
 @available(macOS 13.0, *)
-public struct TTSModels {
+public struct TtsModels {
     public let kokoro: MLModel
 
-    private static let logger = Logger(subsystem: "com.fluidaudio.tts", category: "TTSModels")
+    private static let logger = Logger(subsystem: "com.fluidaudio.tts", category: "TtsModels")
 
     public init(kokoro: MLModel) {
         self.kokoro = kokoro
@@ -15,7 +15,7 @@ public struct TTSModels {
     public static func download(
         from repo: String = "FluidInference/coreml-kokoro",
         progressHandler: DownloadUtils.ProgressHandler? = nil
-    ) async throws -> TTSModels {
+    ) async throws -> TtsModels {
         let modelName = "kokoro.mlmodelc"
         let modelURL = try await downloadModel(
             from: repo,
@@ -25,7 +25,7 @@ public struct TTSModels {
 
         let kokoro = try await loadCompiledModel(at: modelURL, modelName: modelName)
 
-        return TTSModels(kokoro: kokoro)
+        return TtsModels(kokoro: kokoro)
     }
 
     private static func downloadModel(

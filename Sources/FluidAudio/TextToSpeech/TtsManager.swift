@@ -4,15 +4,15 @@ import Foundation
 import OSLog
 
 @available(macOS 13.0, *)
-public final class TTSManager {
+public final class TtSManager {
 
-    private let logger = Logger(subsystem: "com.fluidaudio.tts", category: "TTSManager")
+    private let logger = Logger(subsystem: "com.fluidaudio.tts", category: "TtSManager")
 
     private var kokoroModel: MLModel?
-    private var ttsModels: TTSModels?
+    private var ttsModels: TtsModels?
 
     private lazy var predictionOptions: MLPredictionOptions = {
-        TTSModels.optimizedPredictionOptions()
+        TtsModels.optimizedPredictionOptions()
     }()
 
     public init() {}
@@ -21,19 +21,19 @@ public final class TTSManager {
         kokoroModel != nil
     }
 
-    public func initialize(models: TTSModels) async throws {
-        logger.info("Initializing TTSManager with provided models")
+    public func initialize(models: TtsModels) async throws {
+        logger.info("Initializing TtSManager with provided models")
 
         self.ttsModels = models
         self.kokoroModel = models.kokoro
 
-        logger.info("TTSManager initialized successfully")
+        logger.info("TtSManager initialized successfully")
     }
 
     public func initialize() async throws {
-        logger.info("Initializing TTSManager with downloaded models")
+        logger.info("Initializing TtSManager with downloaded models")
 
-        let models = try await TTSModels.download()
+        let models = try await TtsModels.download()
         try await initialize(models: models)
     }
 
@@ -205,6 +205,6 @@ public final class TTSManager {
     public func cleanup() {
         kokoroModel = nil
         ttsModels = nil
-        logger.info("TTSManager cleaned up")
+        logger.info("TtSManager cleaned up")
     }
 }

@@ -3,13 +3,13 @@ import XCTest
 @testable import FluidAudio
 
 @available(macOS 13.0, *)
-final class TTSManagerTests: XCTestCase {
+final class TtSManagerTests: XCTestCase {
 
-    var manager: TTSManager!
+    var manager: TtSManager!
 
     override func setUp() {
         super.setUp()
-        manager = TTSManager()
+        manager = TtSManager()
     }
 
     override func tearDown() {
