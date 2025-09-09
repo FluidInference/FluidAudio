@@ -24,7 +24,7 @@ jobs:
         TEXT="I can't believe we finally made it to the summit after climbing for twelve exhausting hours through wind and rain, but wow, this view of the endless mountain ranges stretching to the horizon makes every single difficult step completely worth the journey."
         
         # This will auto-download model and generate audio
-        swift run --configuration release fluidaudio tts "$TEXT" --output kokoro_output.wav
+        swift run --configuration release fluidaudio tts "$TEXT" --output kokoro_output.wav --auto-download
         
         # Verify output
         if [ -f kokoro_output.wav ]; then
