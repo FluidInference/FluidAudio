@@ -5,7 +5,7 @@ import Foundation
 
 /// VAD benchmark implementation
 struct VadBenchmark {
-    private static let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "VAD")
+    private static let logger = AppLogger(category: "VAD")
 
     static func runVadBenchmark(arguments: [String]) async {
         do {

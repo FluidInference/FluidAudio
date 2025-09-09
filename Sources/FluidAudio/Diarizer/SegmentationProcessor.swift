@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public struct SegmentationProcessor {
 
-    private let logger = AppLogger(subsystem: "com.fluidinference.diarizer", category: "Segmentation")
+    private let logger = AppLogger(category: "Segmentation")
     private let memoryOptimizer = ANEMemoryOptimizer.shared
 
     public init() {}

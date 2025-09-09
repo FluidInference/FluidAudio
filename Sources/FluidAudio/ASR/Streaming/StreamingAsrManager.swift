@@ -6,7 +6,7 @@ import OSLog
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
-    private let logger = AppLogger(subsystem: "com.fluidinference.asr", category: "StreamingASR")
+    private let logger = AppLogger(category: "StreamingASR")
     private let audioConverter = AudioConverter()
     private let config: StreamingAsrConfig
 

@@ -4,6 +4,9 @@ import OSLog
 /// Lightweight logger that writes to Unified Logging and, optionally, to console.
 /// Use this instead of `OSLog.Logger` so CLI runs can surface logs without `print`.
 public struct AppLogger {
+    /// Default subsystem for all loggers in FluidAudio.
+    /// Keep this consistent; categories should vary per component.
+    public static var defaultSubsystem: String = "com.fluidinference"
 
     public enum Level: Int {
         case debug = 0
@@ -18,10 +21,16 @@ public struct AppLogger {
     private let subsystem: String
     private let category: String
 
+    /// Designated initializer allowing a custom subsystem if needed.
     public init(subsystem: String, category: String) {
         self.osLogger = Logger(subsystem: subsystem, category: category)
         self.subsystem = subsystem
         self.category = category
+    }
+
+    /// Convenience initializer that uses the shared default subsystem.
+    public init(category: String) {
+        self.init(subsystem: AppLogger.defaultSubsystem, category: category)
     }
 
     // MARK: - Public API
@@ -113,4 +122,3 @@ actor LogConsole {
         }
     }
 }
-

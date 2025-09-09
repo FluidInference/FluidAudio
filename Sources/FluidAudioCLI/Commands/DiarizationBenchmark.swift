@@ -7,7 +7,7 @@ import Foundation
 /// Uses first-occurrence speaker mapping for true streaming evaluation
 @available(macOS 13.0, *)
 enum StreamDiarizationBenchmark {
-    private static let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "DiarizationBench")
+    private static let logger = AppLogger(category: "DiarizationBench")
 
     struct BenchmarkResult {
         let meetingName: String

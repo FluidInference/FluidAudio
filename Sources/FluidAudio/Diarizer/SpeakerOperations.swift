@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public enum SpeakerUtilities {
 
-    private static let logger = AppLogger(subsystem: "com.fluidinference.diarizer", category: "SpeakerUtilities")
+    private static let logger = AppLogger(category: "SpeakerUtilities")
 
     // MARK: - Configuration
 

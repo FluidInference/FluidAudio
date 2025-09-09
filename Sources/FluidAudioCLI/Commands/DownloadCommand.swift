@@ -4,7 +4,7 @@ import Foundation
 
 /// Handler for the 'download' command - downloads benchmark datasets
 enum DownloadCommand {
-    private static let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "Download")
+    private static let logger = AppLogger(category: "Download")
     static func run(arguments: [String]) async {
         var dataset = "all"
         var forceDownload = false

@@ -5,7 +5,7 @@ import OSLog
 /// HuggingFace model downloader based on swift-transformers implementation
 public class DownloadUtils {
 
-    private static let logger = AppLogger(subsystem: "com.fluidinference", category: "DownloadUtils")
+    private static let logger = AppLogger(category: "DownloadUtils")
 
     public static let sharedSession: URLSession = {
         let configuration = URLSessionConfiguration.default

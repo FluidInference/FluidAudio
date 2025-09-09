@@ -15,7 +15,7 @@ public struct AsrModels: Sendable {
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
 
-    private static let logger = AppLogger(subsystem: "com.fluidinference.asr", category: "AsrModels")
+    private static let logger = AppLogger(category: "AsrModels")
 
     public init(
         melspectrogram: MLModel,

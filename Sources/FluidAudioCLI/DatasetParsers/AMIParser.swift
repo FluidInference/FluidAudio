@@ -4,7 +4,7 @@ import Foundation
 
 /// AMI annotation parser and ground truth handling
 struct AMIParser {
-    private static let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "AMIParser")
+    private static let logger = AppLogger(category: "AMIParser")
 
     /// Get ground truth speaker count from AMI meetings.xml
     static func getGroundTruthSpeakerCount(for meetingId: String) -> Int {

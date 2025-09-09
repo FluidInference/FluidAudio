@@ -47,7 +47,7 @@ actor TranscriptionTracker {
 /// Command to transcribe audio files using batch or streaming mode
 @available(macOS 13.0, *)
 enum TranscribeCommand {
-    private static let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "Transcribe")
+    private static let logger = AppLogger(category: "Transcribe")
 
     static func run(arguments: [String]) async {
         // Parse arguments
@@ -349,7 +349,7 @@ enum TranscribeCommand {
     }
 
     private static func printUsage() {
-        let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "Transcribe")
+        let logger = AppLogger(category: "Transcribe")
         logger.info(
             """
 

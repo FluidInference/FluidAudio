@@ -6,7 +6,7 @@ import Foundation
 /// Command to demonstrate multi-stream ASR with shared model loading
 @available(macOS 13.0, *)
 enum MultiStreamCommand {
-    private static let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "MultiStream")
+    private static let logger = AppLogger(category: "MultiStream")
 
     static func run(arguments: [String]) async {
         // Parse arguments

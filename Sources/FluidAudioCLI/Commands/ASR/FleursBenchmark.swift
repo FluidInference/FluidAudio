@@ -8,7 +8,7 @@ import OSLog
 @available(macOS 13.0, *)
 public class FLEURSBenchmark {
 
-    private let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "FLEURSBenchmark")
+    private let logger = AppLogger(category: "FLEURSBenchmark")
 
     // Language codes mapped to Parakeet TDT v3 supported languages
     // Based on the model's training data with reported WER performance
@@ -860,7 +860,7 @@ extension FLEURSBenchmark {
                 printUsage()
                 exit(0)
             default:
-                let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "FLEURSBenchmark")
+                let logger = AppLogger(category: "FLEURSBenchmark")
                 logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
@@ -881,7 +881,7 @@ extension FLEURSBenchmark {
         // If no languages specified, use all supported languages
         let finalLanguages = languages ?? Array(tempBenchmark.supportedLanguages.keys).sorted()
 
-        let cliLogger = AppLogger(subsystem: "com.fluidinference.cli", category: "FLEURSBenchmark")
+        let cliLogger = AppLogger(category: "FLEURSBenchmark")
         cliLogger.info("\n🌏 FLEURS Multilingual ASR Benchmark")
         cliLogger.info(String(repeating: "=", count: 50))
         cliLogger.info(
@@ -1012,7 +1012,7 @@ extension FLEURSBenchmark {
         debugMode: Bool,
         supportedLanguages: [String: String]
     ) async {
-        let cliLogger = AppLogger(subsystem: "com.fluidinference.cli", category: "FLEURSBenchmark")
+        let cliLogger = AppLogger(category: "FLEURSBenchmark")
         cliLogger.info("\n🎯 FLEURS Single File ASR Test")
         cliLogger.info(String(repeating: "=", count: 50))
         cliLogger.info("File: \(fileName)")
@@ -1155,7 +1155,7 @@ extension FLEURSBenchmark {
         debugMode: Bool
     ) async throws -> (LanguageResults, HighWERCase?) {
         // Local logger for static context
-        let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "FLEURSBenchmark")
+        let logger = AppLogger(category: "FLEURSBenchmark")
         // Load audio
         let audioSamples: [Float]
         do {
@@ -1290,7 +1290,7 @@ extension FLEURSBenchmark {
         let langsJoined = langs.joined(separator: ", ")
         let count = langs.count
 
-        let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "FLEURSBenchmark")
+        let logger = AppLogger(category: "FLEURSBenchmark")
         logger.info(
             """
 

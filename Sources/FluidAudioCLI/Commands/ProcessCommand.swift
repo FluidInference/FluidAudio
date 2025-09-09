@@ -4,7 +4,7 @@ import FluidAudio
 
 /// Handler for the 'process' command - processes a single audio file
 enum ProcessCommand {
-    private static let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "Process")
+    private static let logger = AppLogger(category: "Process")
     static func run(arguments: [String]) async {
         guard !arguments.isEmpty else {
             logger.error("No audio file specified")

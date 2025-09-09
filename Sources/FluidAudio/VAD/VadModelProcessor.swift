@@ -5,7 +5,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 internal struct VadModelProcessor {
 
-    private let logger = AppLogger(subsystem: "com.fluidinference.vad", category: "ModelProcessor")
+    private let logger = AppLogger(category: "ModelProcessor")
     private let config: VadConfig
 
     init(config: VadConfig) {

@@ -12,7 +12,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public actor VadManager {
 
-    private let logger = AppLogger(subsystem: "com.fluidinference.vad", category: "VadManager")
+    private let logger = AppLogger(category: "VadManager")
     public let config: VadConfig
 
     /// Required model names for VAD

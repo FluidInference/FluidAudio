@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, *)
 public class ASRBenchmark {
 
-    private let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "Benchmark")
+    private let logger = AppLogger(category: "Benchmark")
     private let config: ASRBenchmarkConfig
 
     public init(config: ASRBenchmarkConfig = ASRBenchmarkConfig()) {
@@ -801,7 +801,7 @@ extension ASRBenchmark {
 extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
         // Create a local logger for the static CLI entrypoint
-        let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "Benchmark")
+        let logger = AppLogger(category: "Benchmark")
         var subset = "test-clean"
         var maxFiles: Int?
         var singleFile: String?
@@ -1108,7 +1108,7 @@ extension ASRBenchmark {
     }
 
     private static func printUsage() {
-        let logger = AppLogger(subsystem: "com.fluidinference.cli", category: "Benchmark")
+        let logger = AppLogger(category: "Benchmark")
         logger.info(
             """
             ASR Benchmark Command Usage:

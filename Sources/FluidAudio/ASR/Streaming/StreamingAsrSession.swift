@@ -5,7 +5,7 @@ import OSLog
 /// This ensures models are loaded only once and shared across all streams
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrSession {
-    private let logger = AppLogger(subsystem: "com.fluidinference.asr", category: "StreamingSession")
+    private let logger = AppLogger(category: "StreamingSession")
     private var loadedModels: AsrModels?
     private var streams: [AudioSource: StreamingAsrManager] = [:]
 

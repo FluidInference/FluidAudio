@@ -3,7 +3,7 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-let cliLogger = AppLogger(subsystem: "com.fluidinference.cli", category: "Main")
+let cliLogger = AppLogger(category: "Main")
 
 func printUsage() {
     cliLogger.info(
