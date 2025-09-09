@@ -8,9 +8,9 @@
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
 
-Fluid Audio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE).
+Fluid Audio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE), resulting in less memory and generally faster inference.
 
-It includes state-of-the-art speaker diarization, transcription, and voice activity detection via open-source models (MIT/Apache 2.0) that can be integrated with just a few lines of code. Models are optimized for background processing, ambient computing and always on workloads by running inference on the ANE, minimizing CPU usage and avoiding GPU/MPS entirely.
+The SDK includes state-of-the-art speaker diarization, transcription, and voice activity detection via open-source models (MIT/Apache 2.0) that can be integrated with just a few lines of code. Models are optimized for background processing, ambient computing and always on workloads by running inference on the ANE, minimizing CPU usage and avoiding GPU/MPS entirely. 
 
 For custom use cases, feedback, additional model support, or platform requests, join our [Discord]. We’re also bringing visual, language, and TTS models to device and will share updates there.
 
@@ -394,6 +394,8 @@ Make a PR if you want to add your app!
 - Models auto-download on first use. If your network restricts Hugging Face access, set an HTTPS proxy: `export https_proxy=http://127.0.0.1:7890`.
 - Windows alternative in development: [fluid-server](https://github.com/FluidInference/fluid-server)
 
+If you're looking to get the system audio on a Mac, take a look at this repo for reference [AudioCap](https://github.com/insidegui/AudioCap/tree/main)
+
 ### License
 
 Apache 2.0 — see `LICENSE` for details.
@@ -403,6 +405,7 @@ Apache 2.0 — see `LICENSE` for details.
 This project uses `swift-format` to maintain consistent code style. All pull requests are automatically checked for formatting compliance.
 
 **Local Development:**
+
 ```bash
 # Format all code (requires Swift 6+ for contributors only)
 # Users of the library don't need Swift 6
@@ -418,6 +421,7 @@ swift format lint --recursive --configuration .swift-format Sources/ Tests/ Exam
 ```
 
 **Automatic Checks:**
+
 - PRs will fail if code is not properly formatted
 - GitHub Actions runs formatting checks on all Swift file changes
 - See `.swift-format` for style configuration
