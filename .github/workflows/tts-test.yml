@@ -1,8 +1,6 @@
 name: TTS Test
 
 on:
-  push:
-    branches: [ main, kokoro ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:

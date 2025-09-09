@@ -46,7 +46,7 @@ public struct TTS {
                 print("✓ Models ready")
                 print()
             }
-            
+
             // Synthesize using Kokoro TTS (multi-model architecture)
             let audioData = try await KokoroTTS.synthesize(text: text, voice: voice)
 

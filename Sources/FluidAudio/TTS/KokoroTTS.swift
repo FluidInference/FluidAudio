@@ -135,7 +135,7 @@ public struct KokoroTTS {
                 try manifestData.write(to: modelPath.appendingPathComponent("Manifest.json"))
 
                 logger.info("Downloaded \(modelName) model to \(modelPath.path)")
-                
+
                 // Verify the model can be loaded
                 do {
                     let testModel = try MLModel(contentsOf: modelPath)
