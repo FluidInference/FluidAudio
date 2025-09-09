@@ -70,9 +70,10 @@ public struct AppLogger {
     }
 
     // MARK: - Console Mirroring
-
     private func logToConsole(_ level: Level, _ message: String) {
-        Task { await LogConsole.shared.write(level: level, category: category, message: message) }
+        Task.detached(priority: .utility) {
+            await LogConsole.shared.write(level: level, category: category, message: message)
+        }
     }
 }
 
