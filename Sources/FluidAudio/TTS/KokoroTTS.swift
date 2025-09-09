@@ -770,21 +770,14 @@ public struct KokoroTTS {
         }
         logStep("File verification", start: downloadStart)
 
-        // Load models if needed
-        let loadStart = Date()
-        do {
-            if !isModelsLoaded {
-                logger.info("🔄 Loading models for first time...")
-            } else {
-                logger.info("✅ Models already loaded")
-            }
+        // Verify models are loaded (should be done externally now)
+        if !isModelsLoaded {
+            logger.warning("Models not loaded - calling loadModels() from synthesize is deprecated")
+            let loadStart = Date()
             try await loadModels()
-            logger.info("✅ Models ready for inference")
-        } catch {
-            logger.error("❌ Failed to load models: \(error)")
-            throw error
+        } else {
+            logger.info("Models already loaded")
         }
-        logStep("Model loading", start: loadStart)
 
         // Step 1: Text to phonemes
         let phonemeStart = Date()
