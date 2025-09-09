@@ -131,7 +131,6 @@ public struct TTSModels {
 
     public static func optimizedPredictionOptions() -> MLPredictionOptions {
         let options = MLPredictionOptions()
-        options.usesCPUOnly = false
         return options
     }
 }
