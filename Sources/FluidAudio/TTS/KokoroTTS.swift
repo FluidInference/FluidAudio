@@ -96,23 +96,34 @@ public struct KokoroTTS {
                 try weightData.write(to: weightsDir.appendingPathComponent("weight.bin"))
                 logger.info("Saved weight.bin (\(weightData.count) bytes)")
 
-                // Download coremldata.bin
-                let coremlDataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/coremldata.bin")!
-                logger.info("Downloading \(modelName) coremldata.bin")
-                let (coremlData, _) = try await URLSession.shared.data(from: coremlDataURL)
-                try coremlData.write(to: modelPath.appendingPathComponent("coremldata.bin"))
-                logger.info("Saved coremldata.bin (\(coremlData.count) bytes)")
+                // Special handling for kokoro_frontend which has different files
+                if modelName == "kokoro_frontend" {
+                    // Download coremldata.bin (only for frontend)
+                    let coremlDataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/coremldata.bin")!
+                    logger.info("Downloading \(modelName) coremldata.bin")
+                    let (coremlData, _) = try await URLSession.shared.data(from: coremlDataURL)
+                    try coremlData.write(to: modelPath.appendingPathComponent("coremldata.bin"))
+                    logger.info("Saved coremldata.bin (\(coremlData.count) bytes)")
 
-                // Download metadata.json
-                let metadataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/metadata.json")!
-                logger.info("Downloading \(modelName) metadata.json")
-                let (metadataData, _) = try await URLSession.shared.data(from: metadataURL)
-                try metadataData.write(to: modelPath.appendingPathComponent("metadata.json"))
-                logger.info("Saved metadata.json (\(metadataData.count) bytes)")
-                
-                // Create analytics directory (even if empty)
-                let analyticsDir = modelPath.appendingPathComponent("analytics")
-                try FileManager.default.createDirectory(at: analyticsDir, withIntermediateDirectories: true)
+                    // Download metadata.json and save as Manifest.json
+                    let metadataURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/metadata.json")!
+                    logger.info("Downloading \(modelName) metadata.json")
+                    let (metadataData, _) = try await URLSession.shared.data(from: metadataURL)
+                    // Save as Manifest.json since CoreML expects that
+                    try metadataData.write(to: modelPath.appendingPathComponent("Manifest.json"))
+                    logger.info("Saved metadata.json as Manifest.json (\(metadataData.count) bytes)")
+                    
+                    // Create analytics directory (only for frontend)
+                    let analyticsDir = modelPath.appendingPathComponent("analytics")
+                    try FileManager.default.createDirectory(at: analyticsDir, withIntermediateDirectories: true)
+                } else {
+                    // For other models, download Manifest.json directly
+                    let manifestURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/Manifest.json")!
+                    logger.info("Downloading \(modelName) Manifest.json")
+                    let (manifestData, _) = try await URLSession.shared.data(from: manifestURL)
+                    try manifestData.write(to: modelPath.appendingPathComponent("Manifest.json"))
+                    logger.info("Saved Manifest.json (\(manifestData.count) bytes)")
+                }
 
                 logger.info("Downloaded \(modelName) model to \(modelPath.path)")
 
