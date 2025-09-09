@@ -107,8 +107,6 @@ public enum ANEMemoryUtils {
             return 8
         case .int32:
             return 4
-        case .int8:
-            return 1
         @unknown default:
             return 4
         }

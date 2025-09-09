@@ -91,8 +91,6 @@ public class ANEMemoryOptimizer {
             elementSize = 8
         case .int32:
             elementSize = 4
-        case .int8:
-            elementSize = 1
         case .double:
             elementSize = 8
         @unknown default:
