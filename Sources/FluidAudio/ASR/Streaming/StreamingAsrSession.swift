@@ -9,10 +9,7 @@ public actor StreamingAsrSession {
     private var loadedModels: AsrModels?
     private var streams: [AudioSource: StreamingAsrManager] = [:]
 
-    /// Initialize a new streaming session
-    public init() {
-        logger.info("Created new StreamingAsrSession")
-    }
+    public init() {}
 
     /// Load ASR models for the session (called automatically if needed)
     /// Models are cached and shared across all streams in this session

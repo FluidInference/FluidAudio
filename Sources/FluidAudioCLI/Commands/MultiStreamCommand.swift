@@ -4,6 +4,9 @@ import FluidAudio
 import Foundation
 
 /// Command to demonstrate multi-stream ASR with shared model loading
+/// Example for those that are looking to stream multiple audio sources
+/// (e.g. microphone + system audio) in parallel with shared resources.
+///
 @available(macOS 13.0, *)
 enum MultiStreamCommand {
 
@@ -40,15 +43,15 @@ enum MultiStreamCommand {
         let micAudioFile = audioFile1
         let systemAudioFile = audioFile2 ?? audioFile1
 
-        print("🎤 Multi-Stream ASR Test")
+        print("Multi-Stream ASR Test")
         print("========================\n")
 
         if audioFile2 != nil {
-            print("📁 Processing two different files:")
+            print("Processing two different files:")
             print("  Microphone: \(micAudioFile)")
             print("  System: \(systemAudioFile)\n")
         } else {
-            print("📁 Processing single file on both streams: \(audioFile1)\n")
+            print("Processing single file on both streams: \(audioFile1)\n")
         }
 
         do {
@@ -82,8 +85,8 @@ enum MultiStreamCommand {
             }
             try systemFileHandle.read(into: systemBuffer)
 
-            print("📊 Audio file info:")
-            print("🎙️ Microphone file:")
+            print("Audio file info:")
+            print("Microphone file:")
             print("  Sample rate: \(micFormat.sampleRate) Hz")
             print("  Channels: \(micFormat.channelCount)")
             print(
@@ -99,7 +102,7 @@ enum MultiStreamCommand {
 
             // Create a streaming session
             print("Creating streaming session...")
-            let session = StreamingAsrSession()
+            let session: StreamingAsrSession = StreamingAsrSession()
 
             // Initialize models once
             print("Loading ASR models (shared across streams)...")
@@ -122,17 +125,31 @@ enum MultiStreamCommand {
             )
             print("Created system audio stream\n")
 
-            // Listen for updates from both streams (only if debug enabled)
-            let micTask = Task {
-                for await update in await micStream.transcriptionUpdates {
-                    print("[MIC] \(update.isConfirmed ? "✓" : "~") \(update.text)")
+            // Listen for segment updates from both streams and accumulate results
+            let micTask: Task<String, Never> = Task {
+                var micFinalized = ""
+                for await update in await micStream.segmentUpdates {
+                    if update.isVolatile {
+                        print("[SOURCE 1] Volatile: \(update.text)")
+                    } else {
+                        print("[SOURCE 1] Finalized: \(update.text)")
+                        micFinalized += update.text + " "
+                    }
                 }
+                return micFinalized
             }
 
-            let systemTask = Task {
-                for await update in await systemStream.transcriptionUpdates {
-                    print("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
+            let systemTask: Task<String, Never> = Task {
+                var sysFinalized = ""
+                for await update in await systemStream.segmentUpdates {
+                    if update.isVolatile {
+                        print("[SOURCE 2] Volatile: \(update.text)")
+                    } else {
+                        print("[SOURCE 2] Finalized: \(update.text)")
+                        sysFinalized += update.text + " "
+                    }
                 }
+                return sysFinalized
             }
 
             print("Streaming audio files in parallel...")
@@ -163,13 +180,11 @@ enum MultiStreamCommand {
 
             print("Finalizing transcriptions...")
 
-            // Get final results
-            let micFinal = try await micStream.finish()
-            let systemFinal = try await systemStream.finish()
-
-            // Cancel update tasks
-            micTask.cancel()
-            systemTask.cancel()
+            // Stop both streams and wait for their accumulated results
+            try await micStream.stop()
+            try await systemStream.stop()
+            let micFinal = await micTask.value
+            let systemFinal = await systemTask.value
 
             // Print results
             print("\n" + String(repeating: "=", count: 60) + "\n")
