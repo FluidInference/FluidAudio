@@ -189,14 +189,14 @@ public struct KokoroTTS {
         print("Checking JSON data files...")
         var jsonToDownload: [String] = []
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
-        
+
         for filename in requiredFiles {
             let filePath = kokoroDir.appendingPathComponent(filename)
             if !FileManager.default.fileExists(atPath: filePath.path) {
                 jsonToDownload.append(filename)
             }
         }
-        
+
         if !jsonToDownload.isEmpty {
             print("Need to download \(jsonToDownload.count) JSON files: \(jsonToDownload.joined(separator: ", "))")
             for filename in jsonToDownload {
@@ -348,7 +348,8 @@ public struct KokoroTTS {
                 logger.warning(
                     "⚠️ Slow warm-up detected (\(String(format: "%.1f", warmupTime))s) - first synthesis may be delayed")
                 print(
-                    "WARNING: Slow warm-up detected (\(String(format: "%.1f", warmupTime))s) - first synthesis may be delayed")
+                    "WARNING: Slow warm-up detected (\(String(format: "%.1f", warmupTime))s) - first synthesis may be delayed"
+                )
             }
         } catch {
             logger.warning("⚠️ Warm-up inference failed (non-critical): \(error)")
@@ -892,7 +893,7 @@ public struct KokoroTTS {
 
     /// Convert MLMultiArray to WAV data
     private static func convertToWAV(_ audioArray: MLMultiArray) throws -> Data {
-        let sampleRate: Double = 22050  // Match Python reference
+        let sampleRate: Double = 24000  // 24 kHz sample rate
         let count = audioArray.count
 
         // Extract float samples

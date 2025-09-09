@@ -47,13 +47,13 @@ public struct TTS {
 
             // Start timing only for actual synthesis
             let inferenceStart = Date()
-            
+
             // Synthesize using Kokoro TTS (multi-model architecture)
             let audioData = try await KokoroTTS.synthesize(text: text, voice: voice)
 
             // End inference timing
             let inferenceTime = Date().timeIntervalSince(inferenceStart)
-            
+
             // Save to file (not counted in processing time)
             let outputURL = URL(fileURLWithPath: output)
             try audioData.write(to: outputURL)
@@ -62,9 +62,10 @@ public struct TTS {
             let fileSize = Double(audioData.count) / 1024.0
 
             // Calculate audio duration from WAV header
-            // WAV format: 22050Hz, 16-bit mono = 44100 bytes per second
+            // WAV format: 24000Hz, 16-bit mono (2 bytes per sample)
+            // 24000 samples/sec * 2 bytes/sample = 48000 bytes per second
             // Skip 44-byte WAV header
-            let audioDuration = Double(audioData.count - 44) / 44100.0
+            let audioDuration = Double(audioData.count - 44) / 48000.0
             let rtfx = audioDuration / elapsed
 
             print()
