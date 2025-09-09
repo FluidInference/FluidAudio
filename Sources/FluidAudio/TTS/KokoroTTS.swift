@@ -223,7 +223,62 @@ public struct KokoroTTS {
         generator = try await loadModel(name: "generator")
         logger.info("Loaded generator model")
 
+        // Verify all models are properly loaded
+        try verifyModelsLoaded()
+
         isModelsLoaded = true
+        logger.info("✅ All Kokoro models successfully loaded and verified")
+    }
+
+    /// Verify all models are properly loaded and can perform inference
+    private static func verifyModelsLoaded() throws {
+        logger.info("Verifying model initialization...")
+
+        // Check each model is not nil
+        guard let _ = frontend else {
+            throw TTSError.modelNotFound("Frontend model failed to load")
+        }
+        guard let _ = pregenerator else {
+            throw TTSError.modelNotFound("Pregenerator model failed to load")
+        }
+        guard let _ = generator else {
+            throw TTSError.modelNotFound("Generator model failed to load")
+        }
+        guard decoderBlocks.count == 4 else {
+            throw TTSError.modelNotFound("Not all decoder blocks loaded (expected 4, got \(decoderBlocks.count))")
+        }
+
+        // Verify model descriptions (ensures they're fully initialized)
+        logger.info(
+            "Frontend input: \(frontend?.modelDescription.inputDescriptionsByName.keys.joined(separator: ", ") ?? "none")"
+        )
+        logger.info(
+            "Frontend output: \(frontend?.modelDescription.outputDescriptionsByName.keys.joined(separator: ", ") ?? "none")"
+        )
+
+        logger.info(
+            "Pregenerator input: \(pregenerator?.modelDescription.inputDescriptionsByName.keys.joined(separator: ", ") ?? "none")"
+        )
+        logger.info(
+            "Pregenerator output: \(pregenerator?.modelDescription.outputDescriptionsByName.keys.joined(separator: ", ") ?? "none")"
+        )
+
+        for (i, decoder) in decoderBlocks.enumerated() {
+            logger.info(
+                "Decoder \(i) input: \(decoder.modelDescription.inputDescriptionsByName.keys.joined(separator: ", "))")
+            logger.info(
+                "Decoder \(i) output: \(decoder.modelDescription.outputDescriptionsByName.keys.joined(separator: ", "))"
+            )
+        }
+
+        logger.info(
+            "Generator input: \(generator?.modelDescription.inputDescriptionsByName.keys.joined(separator: ", ") ?? "none")"
+        )
+        logger.info(
+            "Generator output: \(generator?.modelDescription.outputDescriptionsByName.keys.joined(separator: ", ") ?? "none")"
+        )
+
+        logger.info("✓ All models verified and ready for inference")
     }
 
     /// Load phoneme dictionary
@@ -468,44 +523,74 @@ public struct KokoroTTS {
 
     /// Main synthesis function using multi-model pipeline
     public static func synthesize(text: String, voice: String = "af_heart") async throws -> Data {
-        logger.info("Synthesizing: '\(text)'")
+        let synthesisStart = Date()
+        var stepTimings: [(String, TimeInterval)] = []
+
+        func logStep(_ name: String, start: Date) {
+            let elapsed = Date().timeIntervalSince(start)
+            stepTimings.append((name, elapsed))
+            logger.info("⏱️ \(name): \(String(format: "%.3f", elapsed))s")
+        }
+
+        logger.info("\("=".repeated(50))")
+        logger.info("🎤 Starting synthesis: '\(text)')")
+        logger.info("\("=".repeated(50))")
 
         // Ensure required files are downloaded
+        let downloadStart = Date()
         do {
-            logger.info("Checking and downloading required files...")
+            logger.info("📥 Checking and downloading required files...")
             try await ensureRequiredFiles()
-            logger.info("Required files ready")
+            logger.info("✅ Required files ready")
         } catch {
-            logger.error("Failed to download required files: \(error)")
+            logger.error("❌ Failed to download required files: \(error)")
             throw error
         }
+        logStep("File verification", start: downloadStart)
 
         // Load models if needed
+        let loadStart = Date()
         do {
-            logger.info("Loading models...")
+            if !isModelsLoaded {
+                logger.info("🔄 Loading models for first time...")
+            } else {
+                logger.info("✅ Models already loaded")
+            }
             try await loadModels()
-            logger.info("Models loaded successfully")
+            logger.info("✅ Models ready for inference")
         } catch {
-            logger.error("Failed to load models: \(error)")
+            logger.error("❌ Failed to load models: \(error)")
             throw error
         }
+        logStep("Model loading", start: loadStart)
 
         // Step 1: Text to phonemes
+        let phonemeStart = Date()
         let phonemes = try textToPhonemes(text)
-        logger.info("Generated \(phonemes.count) phonemes: \(phonemes.prefix(20))")
+        logger.info("🔤 Generated \(phonemes.count) phonemes: \(phonemes.prefix(20))")
+        logStep("Text to phonemes", start: phonemeStart)
 
         // Step 2: Phonemes to input IDs
+        let idStart = Date()
         let inputIds = phonemesToInputIds(phonemes)
-        logger.info("Generated \(inputIds.count) input IDs: \(inputIds.prefix(20))")
+        logger.info("🆔 Generated \(inputIds.count) input IDs: \(inputIds.prefix(20))")
+        logStep("Phonemes to IDs", start: idStart)
 
         // Step 3: Get voice embedding
+        let voiceStart = Date()
         let refStyle = try loadVoiceEmbedding(voice: voice)
+        logger.info("🎤 Loaded voice embedding: \(voice)")
+        logStep("Voice loading", start: voiceStart)
 
         // Step 4: Create ASR features using frontend BERT encoder
+        let frontendStart = Date()
+        logger.info("🤖 Running frontend BERT encoder...")
         let (asr, f0Pred, nPred, _) = try createASRFeatures(inputIds: inputIds, refStyle: refStyle)
+        logStep("Frontend (BERT)", start: frontendStart)
 
         // Step 5: Run pregenerator
-        logger.info("Running pregenerator...")
+        let pregenStart = Date()
+        logger.info("🎯 Running pregenerator...")
         let pregenInput = try MLDictionaryFeatureProvider(dictionary: [
             "asr": asr,
             "F0_pred": f0Pred,
@@ -526,13 +611,16 @@ public struct KokoroTTS {
         let nProcessed = pregenOutput.featureValue(for: "N")?.multiArrayValue ?? nPred
         let asrRes = pregenOutput.featureValue(for: "var_157")?.multiArrayValue ?? asr
         var xCurrent = pregenOutput.featureValue(for: "var_141")?.multiArrayValue ?? asr
+        logStep("Pregenerator", start: pregenStart)
 
         // Step 6: Run decoder blocks with proper residual logic
-        logger.info("Running decoder blocks...")
+        let decoderStart = Date()
+        logger.info("🔄 Running decoder blocks...")
         var useResidual = true  // Start with residual connections
 
         for (i, decoder) in decoderBlocks.enumerated() {
-            logger.info("Decoder block \(i): \(useResidual ? "with" : "without") residual")
+            let blockStart = Date()
+            logger.info("📦 Decoder block \(i): \(useResidual ? "with" : "without") residual")
 
             // Save current shape for upsampling detection
             let previousShape = xCurrent.shape
@@ -558,7 +646,9 @@ public struct KokoroTTS {
                 }
                 xCurrent = outputArray
             }
+            logStep("  Decoder block \(i)", start: blockStart)
         }
+        logStep("All decoder blocks", start: decoderStart)
 
         // Step 7: Generate random phases
         let randomPhases = try MLMultiArray(shape: [1, 9] as [NSNumber], dataType: .float32)
@@ -567,7 +657,8 @@ public struct KokoroTTS {
         }
 
         // Step 8: Run generator
-        logger.info("Running generator...")
+        let generatorStart = Date()
+        logger.info("🎧 Running final generator...")
         let generatorInput = try MLDictionaryFeatureProvider(dictionary: [
             "x_final": xCurrent,
             "ref_s": refStyle,
@@ -586,11 +677,27 @@ public struct KokoroTTS {
         else {
             throw TTSError.processingFailed("Failed to extract audio from generator")
         }
+        logStep("Generator", start: generatorStart)
 
         // Convert to audio data
+        let conversionStart = Date()
         let audioData = try convertToWAV(audioArray)
+        logStep("WAV conversion", start: conversionStart)
 
-        logger.info("Generated audio: \(audioData.count) bytes")
+        // Log summary
+        let totalTime = Date().timeIntervalSince(synthesisStart)
+        logger.info("\("=".repeated(50))")
+        logger.info("✅ Synthesis complete!")
+        logger.info("📊 Total time: \(String(format: "%.3f", totalTime))s")
+        logger.info("📀 Audio size: \(audioData.count) bytes")
+
+        // Log timing breakdown
+        logger.info("📈 Timing breakdown:")
+        for (step, time) in stepTimings {
+            let percentage = (time / totalTime) * 100
+            logger.info("  \(step): \(String(format: "%.3f", time))s (\(String(format: "%.1f", percentage))%)")
+        }
+        logger.info("\("=".repeated(50))")
 
         return audioData
     }
@@ -644,5 +751,12 @@ public struct KokoroTTS {
         wavData.append(pcmData)
 
         return wavData
+    }
+}
+
+// MARK: - Helper Extensions
+extension String {
+    func repeated(_ count: Int) -> String {
+        return String(repeating: self, count: count)
     }
 }

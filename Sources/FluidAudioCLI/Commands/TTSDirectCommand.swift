@@ -57,9 +57,17 @@ public struct TTS {
             let elapsed = Date().timeIntervalSince(startTime)
             let fileSize = Double(audioData.count) / 1024.0
 
+            // Calculate audio duration from WAV header
+            // WAV format: 16kHz, 16-bit mono = 32000 bytes per second
+            // Skip 44-byte WAV header
+            let audioDuration = Double(audioData.count - 44) / 32000.0
+            let rtfx = audioDuration / elapsed
+
             print()
             print("✅ Success!")
             print("📊 Processing time: \(String(format: "%.2f", elapsed)) seconds")
+            print("🎵 Audio duration: \(String(format: "%.2f", audioDuration)) seconds")
+            print("⚡ RTFx: \(String(format: "%.1f", rtfx))x (realtime factor)")
             print("💾 File size: \(String(format: "%.1f", fileSize)) KB")
 
         } catch {
