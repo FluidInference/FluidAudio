@@ -5,7 +5,7 @@ import OSLog
 /// Converts audio buffers to the format required by ASR (16kHz, mono, Float32)
 @available(macOS 13.0, iOS 16.0, *)
 public actor AudioConverter {
-    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "AudioConverter")
+    private let logger = AppLogger(subsystem: "com.fluidinference.asr", category: "AudioConverter")
     private var converter: AVAudioConverter?
 
     /// Target format for ASR: 16kHz, mono, Float32
