@@ -66,13 +66,8 @@ public struct KokoroTTS {
 
     /// Download model files if needed
     private static func downloadModelsIfNeeded() async throws {
+        // Models go directly in the current directory, not in kokorov2
         let modelDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("kokorov2")
-
-        // Create kokorov2 directory if needed
-        if !FileManager.default.fileExists(atPath: modelDir.path) {
-            try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
-        }
 
         // Download each model's files (skip kokoro_frontend as it's special)
         for modelName in modelNames where modelName != "kokoro_frontend" {
@@ -86,16 +81,38 @@ public struct KokoroTTS {
 
                 // Download model.mil
                 let milURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/model.mil")!
-                let (milData, _) = try await URLSession.shared.data(from: milURL)
-                try milData.write(to: modelPath.appendingPathComponent("model.mil"))
+                logger.info("Downloading \(modelName) model.mil from \(milURL)")
+
+                do {
+                    let (milData, milResponse) = try await URLSession.shared.data(from: milURL)
+                    if let httpResponse = milResponse as? HTTPURLResponse {
+                        logger.info("model.mil response: \(httpResponse.statusCode)")
+                    }
+                    try milData.write(to: modelPath.appendingPathComponent("model.mil"))
+                    logger.info("Saved model.mil (\(milData.count) bytes)")
+                } catch {
+                    logger.error("Failed to download model.mil: \(error)")
+                    throw error
+                }
 
                 // Download weights
                 let weightsDir = modelPath.appendingPathComponent("weights")
                 try FileManager.default.createDirectory(at: weightsDir, withIntermediateDirectories: true)
 
                 let weightURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/weights/weight.bin")!
-                let (weightData, _) = try await URLSession.shared.data(from: weightURL)
-                try weightData.write(to: weightsDir.appendingPathComponent("weight.bin"))
+                logger.info("Downloading \(modelName) weight.bin from \(weightURL)")
+
+                do {
+                    let (weightData, weightResponse) = try await URLSession.shared.data(from: weightURL)
+                    if let httpResponse = weightResponse as? HTTPURLResponse {
+                        logger.info("weight.bin response: \(httpResponse.statusCode)")
+                    }
+                    try weightData.write(to: weightsDir.appendingPathComponent("weight.bin"))
+                    logger.info("Saved weight.bin (\(weightData.count) bytes)")
+                } catch {
+                    logger.error("Failed to download weight.bin: \(error)")
+                    throw error
+                }
 
                 // Create Manifest.json
                 let manifest =
@@ -137,13 +154,19 @@ public struct KokoroTTS {
     public static func loadModels() throws {
         guard !isModelsLoaded else { return }
 
+        // Models are in the current directory, not in kokorov2
         let modelDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("kokorov2")
 
         logger.info("Loading Kokoro models from \(modelDir.path)")
 
-        // Load frontend (BERT encoder)
+        // Check if models exist, if not they need to be downloaded
         let frontendURL = modelDir.appendingPathComponent("kokoro_frontend.mlmodelc")
+        guard FileManager.default.fileExists(atPath: frontendURL.path) else {
+            logger.error("Models not found at \(modelDir.path). Please ensure models are downloaded first.")
+            throw TTSError.modelNotFound("Kokoro models not found. Run with auto-download or download manually.")
+        }
+
+        // Load frontend (BERT encoder)
         frontend = try MLModel(contentsOf: frontendURL)
         logger.info("Loaded frontend model")
 
@@ -389,10 +412,24 @@ public struct KokoroTTS {
         logger.info("Synthesizing: '\(text)'")
 
         // Ensure required files are downloaded
-        try await ensureRequiredFiles()
+        do {
+            logger.info("Checking and downloading required files...")
+            try await ensureRequiredFiles()
+            logger.info("Required files ready")
+        } catch {
+            logger.error("Failed to download required files: \(error)")
+            throw error
+        }
 
         // Load models if needed
-        try loadModels()
+        do {
+            logger.info("Loading models...")
+            try loadModels()
+            logger.info("Models loaded successfully")
+        } catch {
+            logger.error("Failed to load models: \(error)")
+            throw error
+        }
 
         // Step 1: Text to phonemes
         let phonemes = try textToPhonemes(text)
