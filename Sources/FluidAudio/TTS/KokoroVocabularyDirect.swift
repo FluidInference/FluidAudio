@@ -17,12 +17,29 @@ public struct KokoroVocabulary {
 
         do {
             let data = try Data(contentsOf: vocabURL)
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let vocab = json["vocab"] as? [String: Int]
-            {
-                vocabulary = vocab.mapValues { Int32($0) }
-                isLoaded = true
-                logger.info("Loaded \(vocabulary.count) vocabulary entries")
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                // The vocab can be either a dict or other structure
+                if let vocab = json["vocab"] as? [String: Int] {
+                    // Dict format: phoneme -> id
+                    vocabulary = vocab.mapValues { Int32($0) }
+                    isLoaded = true
+                    logger.info("Loaded \(vocabulary.count) vocabulary entries from dict")
+                } else if let vocab = json["vocab"] as? [String: Any] {
+                    // Try to parse as String->Any then convert
+                    var parsedVocab: [String: Int32] = [:]
+                    for (key, value) in vocab {
+                        if let intValue = value as? Int {
+                            parsedVocab[key] = Int32(intValue)
+                        } else if let doubleValue = value as? Double {
+                            parsedVocab[key] = Int32(doubleValue)
+                        }
+                    }
+                    vocabulary = parsedVocab
+                    isLoaded = true
+                    logger.info("Loaded \(vocabulary.count) vocabulary entries from Any dict")
+                } else {
+                    logger.error("Unexpected vocab format in vocab_index.json")
+                }
             }
         } catch {
             logger.error("Failed to load vocabulary: \(error)")

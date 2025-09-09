@@ -9,25 +9,31 @@ public struct KokoroModelDownloader {
     private static let modelFiles = [
         (
             "kokoro.mlmodelc/model.mil",
-            "https://huggingface.co/FluidInference/coreml-kokoro/resolve/main/kokoro.mlmodelc/model.mil"
+            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/model.mil"
         ),
         (
             "kokoro.mlmodelc/coremldata.bin",
-            "https://huggingface.co/FluidInference/coreml-kokoro/resolve/main/kokoro.mlmodelc/coremldata.bin"
+            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/coremldata.bin"
         ),
         (
             "kokoro.mlmodelc/weights/weight.bin",
-            "https://huggingface.co/FluidInference/coreml-kokoro/resolve/main/kokoro.mlmodelc/weights/weight.bin"
+            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/weights/weight.bin"
         ),
         (
             "kokoro.mlmodelc/analytics/coremldata.bin",
-            "https://huggingface.co/FluidInference/coreml-kokoro/resolve/main/kokoro.mlmodelc/analytics/coremldata.bin"
+            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/analytics/coremldata.bin"
         ),
     ]
 
     private static let dataFiles = [
-        ("vocab_index.json", "https://huggingface.co/FluidInference/coreml-kokoro/resolve/main/vocab_index.json"),
-        ("word_phonemes.json", "https://huggingface.co/FluidInference/coreml-kokoro/resolve/main/word_phonemes.json"),
+        (
+            "vocab_index.json",
+            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/vocab_index.json"
+        ),
+        (
+            "word_phonemes.json",
+            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/word_phonemes.json"
+        ),
     ]
 
     /// Check if all required files exist
@@ -64,7 +70,7 @@ public struct KokoroModelDownloader {
             return
         }
 
-        let voiceURL = "https://huggingface.co/FluidInference/coreml-kokoro/resolve/main/voices/\(voice).pt"
+        let voiceURL = "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/voices/\(voice).pt"
         logger.info("Downloading voice: \(voice) from \(voiceURL)")
 
         try await downloadFile(from: voiceURL, to: voiceFile)

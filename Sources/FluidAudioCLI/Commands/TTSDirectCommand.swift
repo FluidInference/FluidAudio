@@ -7,14 +7,13 @@ public struct TTS {
     public static func run(arguments: [String]) async {
         // Parse arguments
         guard arguments.count >= 1 else {
-            print("Usage: fluidaudio tts \"text\" [--output file.wav] [--voice af_heart] [--auto-download]")
+            print("Usage: fluidaudio tts \"text\" [--output file.wav] [--voice af_heart]")
             return
         }
 
         let text = arguments[0]
         var output = "output.wav"
         var voice = "af_heart"
-        var autoDownload = true  // Default to auto-download
 
         // Parse optional arguments
         for i in 0..<arguments.count {
@@ -23,9 +22,6 @@ public struct TTS {
             }
             if arguments[i] == "--voice" || arguments[i] == "-v", i + 1 < arguments.count {
                 voice = arguments[i + 1]
-            }
-            if arguments[i] == "--no-auto-download" {
-                autoDownload = false
             }
         }
 
@@ -39,19 +35,8 @@ public struct TTS {
         let startTime = Date()
 
         do {
-            // Auto-download files if needed
-            if autoDownload && !KokoroModelDownloader.checkRequiredFiles() {
-                print("📥 Downloading required model and data files...")
-                try await KokoroModelDownloader.downloadRequiredFilesIfNeeded()
-            }
-
-            // Download voice file if needed
-            if autoDownload {
-                try await KokoroModelDownloader.downloadVoiceIfNeeded(voice: voice)
-            }
-
-            // Synthesize using direct approach
-            let audioData = try KokoroDirectTTS.synthesize(text: text, voice: voice)
+            // Synthesize using Kokoro TTS (multi-model architecture)
+            let audioData = try await KokoroTTS.synthesize(text: text, voice: voice)
 
             // Save to file
             let outputURL = URL(fileURLWithPath: output)
