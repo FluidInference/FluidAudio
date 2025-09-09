@@ -138,13 +138,13 @@ public struct KokoroTTS {
 
                 // Verify the model can be loaded
                 do {
-                    let testModel = try MLModel(contentsOf: modelPath)
+                    _ = try MLModel(contentsOf: modelPath)
                     logger.info("Verified \(modelName) model loads correctly")
                 } catch {
                     logger.error("Model verification failed for \(modelName): \(error)")
                     // Try to compile it explicitly
                     logger.info("Attempting to compile \(modelName) model...")
-                    let compiledURL = try MLModel.compileModel(at: modelPath)
+                    let compiledURL = try await MLModel.compileModel(at: modelPath)
                     logger.info("Compiled \(modelName) to \(compiledURL.path)")
                     // Move compiled model to expected location
                     if compiledURL.path != modelPath.path {
