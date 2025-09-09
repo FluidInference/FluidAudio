@@ -4,6 +4,7 @@ import Foundation
 
 /// Handler for the 'download' command - downloads benchmark datasets
 enum DownloadCommand {
+    private static let logger = AppLogger(category: "Download")
     static func run(arguments: [String]) async {
         var dataset = "all"
         var forceDownload = false
@@ -20,14 +21,14 @@ enum DownloadCommand {
             case "--force":
                 forceDownload = true
             default:
-                print("⚠️ Unknown option: \(arguments[i])")
+                logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        print("📥 Starting dataset download")
-        print("   Dataset: \(dataset)")
-        print("   Force download: \(forceDownload ? "enabled" : "disabled")")
+        logger.info("📥 Starting dataset download")
+        logger.info("   Dataset: \(dataset)")
+        logger.info("   Force download: \(forceDownload ? "enabled" : "disabled")")
 
         switch dataset.lowercased() {
         case "ami-sdm":
@@ -52,7 +53,7 @@ enum DownloadCommand {
                 try await benchmark.downloadLibriSpeech(
                     subset: "test-clean", forceDownload: forceDownload)
             } catch {
-                print("Failed to download LibriSpeech test-clean: \(error)")
+                logger.error("Failed to download LibriSpeech test-clean: \(error)")
                 exit(1)
             }
         case "librispeech-test-other":
@@ -61,7 +62,7 @@ enum DownloadCommand {
                 try await benchmark.downloadLibriSpeech(
                     subset: "test-other", forceDownload: forceDownload)
             } catch {
-                print("Failed to download LibriSpeech test-other: \(error)")
+                logger.error("Failed to download LibriSpeech test-other: \(error)")
                 exit(1)
             }
         case "parakeet-models":
@@ -80,9 +81,9 @@ enum DownloadCommand {
                     directory: modelsDir,
                     computeUnits: .cpuAndNeuralEngine
                 )
-                print("Parakeet models downloaded successfully")
+                logger.info("Parakeet models downloaded successfully")
             } catch {
-                print("Failed to download Parakeet models: \(error)")
+                logger.error("Failed to download Parakeet models: \(error)")
                 exit(1)
             }
         case "all":
@@ -90,14 +91,14 @@ enum DownloadCommand {
             await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: forceDownload)
             await DatasetDownloader.downloadVadDataset(force: forceDownload, dataset: "mini100")
         default:
-            print("Unsupported dataset: \(dataset)")
+            logger.error("Unsupported dataset: \(dataset)")
             printUsage()
             exit(1)
         }
     }
 
     private static func printUsage() {
-        print(
+        logger.info(
             """
 
             Download Command Usage:

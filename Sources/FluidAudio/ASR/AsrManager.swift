@@ -10,7 +10,7 @@ public enum AudioSource: Sendable {
 @available(macOS 13.0, *)
 public final class AsrManager {
 
-    internal let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ASR")
+    internal let logger = AppLogger(category: "ASR")
     internal let config: ASRConfig
 
     internal var melspectrogramModel: MLModel?

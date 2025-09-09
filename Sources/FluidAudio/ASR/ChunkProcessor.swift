@@ -6,7 +6,7 @@ struct ChunkProcessor {
     let audioSamples: [Float]
     let enableDebug: Bool
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "ChunkProcessor")
+    private let logger = AppLogger(category: "ChunkProcessor")
 
     // Frame-aligned configuration: 11.2 + 1.6 + 1.6 seconds context at 16kHz
     // 11.2s center = exactly 140 encoder frames

@@ -37,7 +37,7 @@ private typealias EncoderFrameArray = [[Float]]
 @available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoder {
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "TDT")
+    private let logger = AppLogger(category: "TDT")
     private let config: ASRConfig
     private let predictionOptions = AsrModels.optimizedPredictionOptions()
     // Parakeet‑TDT‑v3: duration head has 5 bins mapping directly to frame advances

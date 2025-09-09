@@ -3,8 +3,10 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+let cliLogger = AppLogger(category: "Main")
+
 func printUsage() {
-    print(
+    cliLogger.info(
         """
         FluidAudio CLI
 
@@ -49,6 +51,9 @@ guard arguments.count > 1 else {
     exit(1)
 }
 
+// Mirror OSLog messages to console when running CLI
+AppLogger.enableConsoleOutput(true)
+
 let command = arguments[1]
 let semaphore = DispatchSemaphore(value: 0)
 
@@ -58,40 +63,40 @@ Task {
     case "vad-benchmark":
         await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
     case "asr-benchmark":
-        print("DEBUG: asr-benchmark command received")
+        cliLogger.debug("asr-benchmark command received")
         if #available(macOS 13.0, *) {
-            print("DEBUG: macOS version check passed")
+            cliLogger.debug("macOS version check passed")
             await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
         } else {
-            print("ASR benchmark requires macOS 13.0 or later")
+            cliLogger.error("ASR benchmark requires macOS 13.0 or later")
             exit(1)
         }
     case "fleurs-benchmark":
         if #available(macOS 13.0, *) {
             await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         } else {
-            print("FLEURS benchmark requires macOS 13.0 or later")
+            cliLogger.error("FLEURS benchmark requires macOS 13.0 or later")
             exit(1)
         }
     case "transcribe":
         if #available(macOS 13.0, *) {
             await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         } else {
-            print("Transcribe requires macOS 13.0 or later")
+            cliLogger.error("Transcribe requires macOS 13.0 or later")
             exit(1)
         }
     case "multi-stream":
         if #available(macOS 13.0, *) {
             await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
         } else {
-            print("Multi-stream requires macOS 13.0 or later")
+            cliLogger.error("Multi-stream requires macOS 13.0 or later")
             exit(1)
         }
     case "diarization-benchmark":
         if #available(macOS 13.0, *) {
             await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         } else {
-            print("Diarization benchmark requires macOS 13.0 or later")
+            cliLogger.error("Diarization benchmark requires macOS 13.0 or later")
             exit(1)
         }
     case "process":
@@ -102,7 +107,7 @@ Task {
         printUsage()
         exit(0)
     default:
-        print("Unknown command: \(command)")
+        cliLogger.error("Unknown command: \(command)")
         printUsage()
         exit(1)
     }
