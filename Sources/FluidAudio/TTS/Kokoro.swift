@@ -10,8 +10,8 @@ import FoundationNetworking
 /// Kokoro TTS implementation using multiple CoreML models
 /// Uses pregenerator, decoder blocks, and generator architecture
 @available(macOS 13.0, iOS 16.0, *)
-public struct KokoroTTS {
-    private static let logger = Logger(subsystem: "com.fluidaudio.tts", category: "KokoroTTS")
+public struct Kokoro {
+    private static let logger = Logger(subsystem: "com.fluidaudio.tts", category: "Kokoro")
 
     // Model references
     private static var frontend: MLModel?  // BERT encoder
