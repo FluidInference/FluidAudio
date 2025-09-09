@@ -1,4 +1,5 @@
 import CoreML
+import Darwin
 import Foundation
 import OSLog
 
@@ -42,7 +43,12 @@ public struct KokoroTTS {
     /// Download file from URL if needed
     private static func downloadFileIfNeeded(filename: String, urlPath: String) async throws {
         let cacheDir = try TTSModels.cacheDirectoryURL()
-        let localURL = cacheDir.appendingPathComponent(filename)
+        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+
+        // Create directory if needed
+        try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
+
+        let localURL = kokoroDir.appendingPathComponent(filename)
 
         guard !FileManager.default.fileExists(atPath: localURL.path) else {
             logger.info("File already exists: \(filename)")
@@ -50,6 +56,7 @@ public struct KokoroTTS {
         }
 
         logger.info("Downloading \(filename)...")
+        print("  Downloading \(filename)...")
         let downloadURL = URL(string: "\(baseURL)/\(urlPath)")!
 
         let (data, response) = try await URLSession.shared.data(from: downloadURL)
@@ -66,78 +73,106 @@ public struct KokoroTTS {
 
     /// Download model files if needed
     private static func downloadModelsIfNeeded() async throws {
-        // Use the proper cache directory from TTSModels
-        let modelDir = try TTSModels.cacheDirectoryURL()
+        // Use Models/kokoro subdirectory in cache
+        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let modelDir = cacheDir.appendingPathComponent("Models/kokoro")
 
-        // Download each model's files
+        // Create Models/kokoro directory if needed
+        try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
+
+        logger.info("Model directory: \(modelDir.path)")
+        print("Model directory: \(modelDir.path)")
+
+        var modelsToDownload: [String] = []
+
+        // Check which models need downloading
         for modelName in modelNames {
             let modelPath = modelDir.appendingPathComponent("\(modelName).mlmodelc")
-
             if !FileManager.default.fileExists(atPath: modelPath.path) {
-                logger.info("Downloading \(modelName) model files...")
-
-                // Create model directory
-                try FileManager.default.createDirectory(at: modelPath, withIntermediateDirectories: true)
-
-                // Download the compiled mlmodelc files
-                let filesToDownload = [
-                    "coremldata.bin",
-                    "model.mil",
-                    "weights/weight.bin",
-                    "analytics/coremldata.bin",
-                ]
-
-                // Create subdirectories
-                try FileManager.default.createDirectory(
-                    at: modelPath.appendingPathComponent("weights"),
-                    withIntermediateDirectories: true
-                )
-                try FileManager.default.createDirectory(
-                    at: modelPath.appendingPathComponent("analytics"),
-                    withIntermediateDirectories: true
-                )
-
-                for file in filesToDownload {
-                    let fileURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/\(file)")!
-                    let destPath: URL
-
-                    if file == "weights/weight.bin" {
-                        destPath = modelPath.appendingPathComponent("weights").appendingPathComponent("weight.bin")
-                    } else if file == "analytics/coremldata.bin" {
-                        destPath = modelPath.appendingPathComponent("analytics").appendingPathComponent(
-                            "coremldata.bin")
-                    } else {
-                        destPath = modelPath.appendingPathComponent(file)
-                    }
-
-                    do {
-                        logger.info("  Downloading \(file)...")
-                        let (data, response) = try await URLSession.shared.data(from: fileURL)
-
-                        if let httpResponse = response as? HTTPURLResponse,
-                            httpResponse.statusCode == 200
-                        {
-                            try data.write(to: destPath)
-                            logger.info("  ✓ Downloaded \(file) (\(data.count) bytes)")
-                        } else {
-                            logger.warning(
-                                "  File \(file) returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)")
-                        }
-                    } catch {
-                        logger.warning("  Could not download \(file): \(error.localizedDescription)")
-                    }
-                }
-
-                logger.info("✓ Downloaded \(modelName).mlmodelc")
-                // Skip verification - compiled mlmodelc files will be loaded later
+                modelsToDownload.append(modelName)
             }
         }
+
+        if modelsToDownload.isEmpty {
+            logger.info("All models already downloaded")
+            print("All models already downloaded")
+            return
+        }
+
+        logger.info("Need to download \(modelsToDownload.count) models: \(modelsToDownload.joined(separator: ", "))")
+        print("Need to download \(modelsToDownload.count) models: \(modelsToDownload.joined(separator: ", "))")
+
+        // Download each model's files
+        for (index, modelName) in modelsToDownload.enumerated() {
+            let modelPath = modelDir.appendingPathComponent("\(modelName).mlmodelc")
+
+            logger.info("[\(index + 1)/\(modelsToDownload.count)] Downloading \(modelName)...")
+            print("[\(index + 1)/\(modelsToDownload.count)] Downloading \(modelName)...")
+
+            // Create model directory
+            try FileManager.default.createDirectory(at: modelPath, withIntermediateDirectories: true)
+
+            // Download the compiled mlmodelc files
+            let filesToDownload = [
+                "coremldata.bin",
+                "model.mil",
+                "weights/weight.bin",
+                "analytics/coremldata.bin",
+            ]
+
+            // Create subdirectories
+            try FileManager.default.createDirectory(
+                at: modelPath.appendingPathComponent("weights"),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.createDirectory(
+                at: modelPath.appendingPathComponent("analytics"),
+                withIntermediateDirectories: true
+            )
+
+            for file in filesToDownload {
+                let fileURL = URL(string: "\(baseURL)/\(modelName).mlmodelc/\(file)")!
+                let destPath: URL
+
+                if file == "weights/weight.bin" {
+                    destPath = modelPath.appendingPathComponent("weights").appendingPathComponent("weight.bin")
+                } else if file == "analytics/coremldata.bin" {
+                    destPath = modelPath.appendingPathComponent("analytics").appendingPathComponent(
+                        "coremldata.bin")
+                } else {
+                    destPath = modelPath.appendingPathComponent(file)
+                }
+
+                do {
+                    logger.info("  Downloading \(file)...")
+                    let (data, response) = try await URLSession.shared.data(from: fileURL)
+
+                    if let httpResponse = response as? HTTPURLResponse,
+                        httpResponse.statusCode == 200
+                    {
+                        try data.write(to: destPath)
+                        logger.info("  ✓ Downloaded \(file) (\(data.count) bytes)")
+                    } else {
+                        logger.warning(
+                            "  File \(file) returned status \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+                    }
+                } catch {
+                    logger.warning("  Could not download \(file): \(error.localizedDescription)")
+                }
+            }
+
+            logger.info("✓ Downloaded \(modelName).mlmodelc")
+            // Skip verification - compiled mlmodelc files will be loaded later
+        }
+
+        logger.info("All models downloaded successfully")
     }
 
     /// Ensure all required files are downloaded
     public static func ensureRequiredFiles() async throws {
         // Skip download if we're using mlpackage models
-        let modelDir = try TTSModels.cacheDirectoryURL()
+        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let modelDir = cacheDir.appendingPathComponent("Models/kokoro")
         let frontendPackageURL = modelDir.appendingPathComponent("kokoro_frontend.mlpackage")
 
         if FileManager.default.fileExists(atPath: frontendPackageURL.path) {
@@ -150,9 +185,25 @@ public struct KokoroTTS {
             return
         }
 
-        // Download data files
+        // Check and download data files
+        print("Checking JSON data files...")
+        var jsonToDownload: [String] = []
+        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+        
         for filename in requiredFiles {
-            try await downloadFileIfNeeded(filename: filename, urlPath: filename)
+            let filePath = kokoroDir.appendingPathComponent(filename)
+            if !FileManager.default.fileExists(atPath: filePath.path) {
+                jsonToDownload.append(filename)
+            }
+        }
+        
+        if !jsonToDownload.isEmpty {
+            print("Need to download \(jsonToDownload.count) JSON files: \(jsonToDownload.joined(separator: ", "))")
+            for filename in jsonToDownload {
+                try await downloadFileIfNeeded(filename: filename, urlPath: filename)
+            }
+        } else {
+            print("JSON data files already present")
         }
 
         // Download models
@@ -163,12 +214,41 @@ public struct KokoroTTS {
     public static func loadModels() async throws {
         guard !isModelsLoaded else { return }
 
-        // Use the proper cache directory from TTSModels
-        let modelDir = try TTSModels.cacheDirectoryURL()
+        // Use Models/kokoro subdirectory in cache
+        let cacheDir = try TTSModels.cacheDirectoryURL()
+        let modelDir = cacheDir.appendingPathComponent("Models/kokoro")
+
+        // Create directory if needed
+        try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
 
         logger.info("Loading Kokoro models from \(modelDir.path)")
+        print("Loading Kokoro models from \(modelDir.path)")
 
-        // Check if models exist - try mlpackage first
+        // Check if any models are missing
+        var missingModels: [String] = []
+        for modelName in modelNames {
+            let compiledURL = modelDir.appendingPathComponent("\(modelName).mlmodelc")
+            let packageURL = modelDir.appendingPathComponent("\(modelName).mlpackage")
+
+            if !FileManager.default.fileExists(atPath: compiledURL.path)
+                && !FileManager.default.fileExists(atPath: packageURL.path)
+            {
+                missingModels.append(modelName)
+            }
+        }
+
+        // If models are missing, download them
+        if !missingModels.isEmpty {
+            logger.warning("Missing models: \(missingModels.joined(separator: ", "))")
+            print("Missing models: \(missingModels.joined(separator: ", "))")
+            logger.info("Downloading missing models...")
+            print("Downloading missing models...")
+            try await downloadModelsIfNeeded()
+            logger.info("Models downloaded successfully")
+            print("Models downloaded successfully")
+        }
+
+        // Check if models exist after download attempt
         let frontendPackageURL = modelDir.appendingPathComponent("kokoro_frontend.mlpackage")
         let frontendCompiledURL = modelDir.appendingPathComponent("kokoro_frontend.mlmodelc")
 
@@ -176,8 +256,8 @@ public struct KokoroTTS {
         let useMlpackage = FileManager.default.fileExists(atPath: frontendPackageURL.path)
 
         if !useMlpackage && !FileManager.default.fileExists(atPath: frontendCompiledURL.path) {
-            logger.error("Models not found at \(modelDir.path). Please ensure models are downloaded first.")
-            throw TTSError.modelNotFound("Kokoro models not found. Run with auto-download or download manually.")
+            logger.error("❌ Models still not found after download attempt at \(modelDir.path)")
+            throw TTSError.modelNotFound("Failed to download Kokoro models. Check network connection.")
         }
 
         // Load frontend (BERT encoder)
@@ -227,7 +307,100 @@ public struct KokoroTTS {
         try verifyModelsLoaded()
 
         isModelsLoaded = true
-        logger.info("✅ All Kokoro models successfully loaded and verified")
+        logger.info("All Kokoro models successfully loaded and verified")
+
+        // Perform warm-up inference to initialize models (especially important for M1)
+        await performWarmupInference()
+    }
+
+    /// Perform warm-up inference to initialize models
+    private static func performWarmupInference() async {
+        logger.info("Performing warm-up inference...")
+        print("Performing warm-up inference...")
+        let warmupStart = Date()
+
+        do {
+            // Create minimal dummy inputs for warm-up
+            let dummyInputIds = try MLMultiArray(shape: [1, 272] as [NSNumber], dataType: .int32)
+            let dummyRefS = try MLMultiArray(shape: [1, 256] as [NSNumber], dataType: .float32)
+
+            // Fill with minimal valid data
+            for i in 0..<272 {
+                dummyInputIds[i] = NSNumber(value: 0)
+            }
+            for i in 0..<256 {
+                dummyRefS[i] = NSNumber(value: 0.0)
+            }
+
+            // Run frontend warm-up
+            let frontendInput = try MLDictionaryFeatureProvider(dictionary: [
+                "input_ids": dummyInputIds,
+                "ref_s": dummyRefS,
+            ])
+
+            _ = try? frontend?.prediction(from: frontendInput)
+
+            let warmupTime = Date().timeIntervalSince(warmupStart)
+            logger.info("Warm-up completed in \(String(format: "%.3f", warmupTime))s")
+            print("Warm-up completed in \(String(format: "%.3f", warmupTime))s")
+
+            if warmupTime > 3.0 {
+                logger.warning(
+                    "⚠️ Slow warm-up detected (\(String(format: "%.1f", warmupTime))s) - first synthesis may be delayed")
+                print(
+                    "WARNING: Slow warm-up detected (\(String(format: "%.1f", warmupTime))s) - first synthesis may be delayed")
+            }
+        } catch {
+            logger.warning("⚠️ Warm-up inference failed (non-critical): \(error)")
+        }
+    }
+
+    /// Log system information for debugging
+    private static func logSystemInfo() {
+        #if arch(arm64)
+        logger.info("🖥️ Architecture: Apple Silicon (arm64)")
+
+        // Detect chip type
+        var size = 0
+        sysctlbyname("hw.model", nil, &size, nil, 0)
+        var model = [CChar](repeating: 0, count: size)
+        sysctlbyname("hw.model", &model, &size, nil, 0)
+        let modelString = String(cString: model)
+
+        if modelString.contains("Mac14") || modelString.contains("Mac15") {
+            logger.info("Chip: Apple M2 or newer (\(modelString))")
+            print("Chip: Apple M2 or newer (\(modelString))")
+        } else if modelString.contains("Mac13") || modelString.contains("MacBookAir10")
+            || modelString.contains("MacBookPro17") || modelString.contains("MacBookPro18")
+        {
+            logger.info("Chip: Apple M1 (\(modelString))")
+            print("Chip: Apple M1 (\(modelString))")
+            logger.warning("M1 chip detected - may experience compatibility issues")
+            print("WARNING: M1 chip detected - may experience compatibility issues")
+        } else {
+            logger.info("Chip: \(modelString)")
+            print("Chip: \(modelString)")
+        }
+
+        // Log memory
+        var memInfo = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &memInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+
+        if result == KERN_SUCCESS {
+            let pageSize = vm_kernel_page_size
+            let totalMemory =
+                Double(memInfo.free_count + memInfo.active_count + memInfo.inactive_count + memInfo.wire_count)
+                * Double(pageSize) / 1_073_741_824
+            logger.info("🧠 Memory: \(String(format: "%.1f", totalMemory)) GB")
+        }
+        #else
+        logger.info("🖥️ Architecture: Intel x86_64")
+        #endif
     }
 
     /// Verify all models are properly loaded and can perform inference
@@ -285,9 +458,10 @@ public struct KokoroTTS {
     public static func loadPhonemeDictionary() throws {
         guard !isDictionaryLoaded else { return }
 
-        // First try cache directory
+        // Use Models/kokoro subdirectory
         let cacheDir = try TTSModels.cacheDirectoryURL()
-        let dictURL = cacheDir.appendingPathComponent("word_phonemes.json")
+        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+        let dictURL = kokoroDir.appendingPathComponent("word_phonemes.json")
 
         // Download if missing
         if !FileManager.default.fileExists(atPath: dictURL.path) {
@@ -312,11 +486,16 @@ public struct KokoroTTS {
     /// Download dictionary files if missing
     private static func downloadDictionaryFiles() throws {
         let cacheDir = try TTSModels.cacheDirectoryURL()
+        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+
+        // Create directory if needed
+        try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
+
         let baseURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main"
         let files = ["word_phonemes.json", "vocab_index.json"]
 
         for file in files {
-            let localPath = cacheDir.appendingPathComponent(file)
+            let localPath = kokoroDir.appendingPathComponent(file)
             if !FileManager.default.fileExists(atPath: localPath.path) {
                 let remoteURL = URL(string: "\(baseURL)/\(file)")!
                 logger.info("Downloading \(file)...")
@@ -532,8 +711,17 @@ public struct KokoroTTS {
             logger.info("⏱️ \(name): \(String(format: "%.3f", elapsed))s")
         }
 
+        // Log system info
         logger.info("\("=".repeated(50))")
+        logSystemInfo()
         logger.info("🎤 Starting synthesis: '\(text)')")
+        logger.info("📏 Input length: \(text.count) characters, \(text.split(separator: " ").count) words")
+
+        // Warn about short inputs
+        if text.count < 10 {
+            logger.warning("⚠️ Very short input (\(text.count) chars) may produce poor quality audio")
+        }
+
         logger.info("\("=".repeated(50))")
 
         // Ensure required files are downloaded

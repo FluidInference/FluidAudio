@@ -12,7 +12,7 @@ public struct KokoroVocabulary {
     public static func loadVocabulary() {
         guard !isLoaded else { return }
 
-        // First try cache directory
+        // Use Models/kokoro subdirectory
         let cacheDir: URL
         do {
             cacheDir = try TTSModels.cacheDirectoryURL()
@@ -21,7 +21,8 @@ public struct KokoroVocabulary {
             fatalError("Failed to get cache directory: \(error)")
         }
 
-        let vocabURL = cacheDir.appendingPathComponent("vocab_index.json")
+        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+        let vocabURL = kokoroDir.appendingPathComponent("vocab_index.json")
 
         // Download if missing
         if !FileManager.default.fileExists(atPath: vocabURL.path) {
@@ -74,9 +75,14 @@ public struct KokoroVocabulary {
 
     /// Download vocabulary file if missing
     private static func downloadVocabularyFile(to cacheDir: URL) throws {
+        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+
+        // Create directory if needed
+        try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
+
         let baseURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main"
         let fileName = "vocab_index.json"
-        let localPath = cacheDir.appendingPathComponent(fileName)
+        let localPath = kokoroDir.appendingPathComponent(fileName)
 
         if !FileManager.default.fileExists(atPath: localPath.path) {
             let remoteURL = URL(string: "\(baseURL)/\(fileName)")!

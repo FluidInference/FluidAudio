@@ -29,49 +29,53 @@ public struct TTS {
             }
         }
 
-        print("🎤 Text-to-Speech Synthesis")
+        print("Text-to-Speech Synthesis")
         print("===========================\n")
-        print("📝 Text: \"\(text)\"")
-        print("🗣️  Voice: \(voice)")
-        print("📁 Output: \(output)")
+        print("Text: \"\(text)\"")
+        print("Voice: \(voice)")
+        print("Output: \(output)")
         print()
 
-        let startTime = Date()
-
         do {
-            // Download models if requested
+            // Download models if requested (not counted in processing time)
             if autoDownload {
-                print("📥 Downloading required models...")
+                print("Downloading required models...")
                 try await KokoroTTS.ensureRequiredFiles()
-                print("✓ Models ready")
+                print("Models ready")
                 print()
             }
 
+            // Start timing only for actual synthesis
+            let inferenceStart = Date()
+            
             // Synthesize using Kokoro TTS (multi-model architecture)
             let audioData = try await KokoroTTS.synthesize(text: text, voice: voice)
 
-            // Save to file
+            // End inference timing
+            let inferenceTime = Date().timeIntervalSince(inferenceStart)
+            
+            // Save to file (not counted in processing time)
             let outputURL = URL(fileURLWithPath: output)
             try audioData.write(to: outputURL)
 
-            let elapsed = Date().timeIntervalSince(startTime)
+            let elapsed = inferenceTime  // Use only inference time
             let fileSize = Double(audioData.count) / 1024.0
 
             // Calculate audio duration from WAV header
-            // WAV format: 16kHz, 16-bit mono = 32000 bytes per second
+            // WAV format: 22050Hz, 16-bit mono = 44100 bytes per second
             // Skip 44-byte WAV header
-            let audioDuration = Double(audioData.count - 44) / 32000.0
+            let audioDuration = Double(audioData.count - 44) / 44100.0
             let rtfx = audioDuration / elapsed
 
             print()
-            print("✅ Success!")
-            print("📊 Processing time: \(String(format: "%.2f", elapsed)) seconds")
-            print("🎵 Audio duration: \(String(format: "%.2f", audioDuration)) seconds")
-            print("⚡ RTFx: \(String(format: "%.1f", rtfx))x (realtime factor)")
-            print("💾 File size: \(String(format: "%.1f", fileSize)) KB")
+            print("Success!")
+            print("Inference time: \(String(format: "%.2f", elapsed)) seconds")
+            print("Audio duration: \(String(format: "%.2f", audioDuration)) seconds")
+            print("RTFx: \(String(format: "%.1f", rtfx))x (realtime factor)")
+            print("File size: \(String(format: "%.1f", fileSize)) KB")
 
         } catch {
-            print("❌ Error: \(error.localizedDescription)")
+            print("Error: \(error.localizedDescription)")
         }
     }
 }
