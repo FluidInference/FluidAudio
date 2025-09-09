@@ -7,7 +7,7 @@ import OSLog
 internal class VadAudioProcessor {
 
     private let config: VadConfig
-    private let logger = Logger(subsystem: "com.fluidinfluence.vad", category: "AudioProcessor")
+    private let logger = AppLogger(category: "AudioProcessor")
 
     init(config: VadConfig) {
         self.config = config

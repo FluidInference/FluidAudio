@@ -47,11 +47,12 @@ actor TranscriptionTracker {
 /// Command to transcribe audio files using batch or streaming mode
 @available(macOS 13.0, *)
 enum TranscribeCommand {
+    private static let logger = AppLogger(category: "Transcribe")
 
     static func run(arguments: [String]) async {
         // Parse arguments
         guard !arguments.isEmpty else {
-            print("No audio file specified")
+            logger.error("No audio file specified")
             printUsage()
             exit(1)
         }
@@ -72,32 +73,32 @@ enum TranscribeCommand {
             case "--metadata":
                 showMetadata = true
             default:
-                print("Warning: Unknown option: \(arguments[i])")
+                logger.warning("Warning: Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        print("Audio Transcription")
-        print("===================\n")
+        logger.info("Audio Transcription")
+        logger.info("===================\n")
 
         // Test loading audio at different sample rates
         await testAudioConversion(audioFile: audioFile)
 
         if streamingMode {
-            print(
+            logger.info(
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
             await testStreamingTranscription(audioFile: audioFile, showMetadata: showMetadata)
         } else {
-            print("Using batch mode with direct processing\n")
+            logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata)
         }
     }
 
     /// Test audio conversion capabilities
     private static func testAudioConversion(audioFile: String) async {
-        print("Testing Audio Conversion")
-        print("--------------------------")
+        logger.info("Testing Audio Conversion")
+        logger.info("--------------------------")
 
         do {
             // Load the audio file info
@@ -105,27 +106,27 @@ enum TranscribeCommand {
             let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
             let format = audioFileHandle.processingFormat
 
-            print("Original format:")
-            print("  Sample rate: \(format.sampleRate) Hz")
-            print("  Channels: \(format.channelCount)")
-            print("  Format: \(format.commonFormat.rawValue)")
-            print(
+            logger.info("Original format:")
+            logger.info("  Sample rate: \(format.sampleRate) Hz")
+            logger.info("  Channels: \(format.channelCount)")
+            logger.info("  Format: \(format.commonFormat.rawValue)")
+            logger.info(
                 "  Duration: \(String(format: "%.2f", Double(audioFileHandle.length) / format.sampleRate)) seconds"
             )
-            print()
+            logger.info("")
 
             // The StreamingAsrManager will handle conversion automatically
-            print("StreamingAsrManager will automatically convert to 16kHz mono\n")
+            logger.info("StreamingAsrManager will automatically convert to 16kHz mono\n")
 
         } catch {
-            print("Failed to load audio file info: \(error)")
+            logger.error("Failed to load audio file info: \(error)")
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(audioFile: String, showMetadata: Bool) async {
-        print("Testing Batch Transcription")
-        print("------------------------------")
+        logger.info("Testing Batch Transcription")
+        logger.info("------------------------------")
 
         do {
             // Initialize ASR models
@@ -133,7 +134,7 @@ enum TranscribeCommand {
             let asrManager = AsrManager(config: .default)
             try await asrManager.initialize(models: models)
 
-            print("ASR Manager initialized successfully")
+            logger.info("ASR Manager initialized successfully")
 
             // Load audio file
             let audioFileURL = URL(fileURLWithPath: audioFile)
@@ -143,7 +144,7 @@ enum TranscribeCommand {
 
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
             else {
-                print("Failed to create audio buffer")
+                logger.error("Failed to create audio buffer")
                 return
             }
 
@@ -153,7 +154,7 @@ enum TranscribeCommand {
             let samples = try await AudioProcessor.loadAudioFile(path: audioFile)
 
             let duration = Double(audioFileHandle.length) / format.sampleRate
-            print("Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
+            logger.info("Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
 
             // Process with ASR Manager
             let startTime = Date()
@@ -161,49 +162,49 @@ enum TranscribeCommand {
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Print results
-            print("\n" + String(repeating: "=", count: 50))
-            print("BATCH TRANSCRIPTION RESULTS")
-            print(String(repeating: "=", count: 50))
-            print("\nFinal transcription:")
-            print(result.text)
+            logger.info("\n" + String(repeating: "=", count: 50))
+            logger.info("BATCH TRANSCRIPTION RESULTS")
+            logger.info(String(repeating: "=", count: 50))
+            logger.info("\nFinal transcription:")
+            logger.info(result.text)
 
             if showMetadata {
-                print("\nMetadata:")
-                print("  Confidence: \(String(format: "%.3f", result.confidence))")
-                print("  Duration: \(String(format: "%.3f", result.duration))s")
+                logger.info("\nMetadata:")
+                logger.info("  Confidence: \(String(format: "%.3f", result.confidence))")
+                logger.info("  Duration: \(String(format: "%.3f", result.duration))s")
                 if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
                     let startTime = tokenTimings.first?.startTime ?? 0.0
                     let endTime = tokenTimings.last?.endTime ?? result.duration
-                    print("  Start time: \(String(format: "%.3f", startTime))s")
-                    print("  End time: \(String(format: "%.3f", endTime))s")
-                    print("\nToken Timings:")
+                    logger.info("  Start time: \(String(format: "%.3f", startTime))s")
+                    logger.info("  End time: \(String(format: "%.3f", endTime))s")
+                    logger.info("\nToken Timings:")
                     for (index, timing) in tokenTimings.enumerated() {
-                        print(
+                        logger.info(
                             "    [\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(String(format: "%.3f", timing.startTime))s, end: \(String(format: "%.3f", timing.endTime))s, conf: \(String(format: "%.3f", timing.confidence)))"
                         )
                     }
                 } else {
-                    print("  Start time: 0.000s")
-                    print("  End time: \(String(format: "%.3f", result.duration))s")
-                    print("  Token timings: Not available")
+                    logger.info("  Start time: 0.000s")
+                    logger.info("  End time: \(String(format: "%.3f", result.duration))s")
+                    logger.info("  Token timings: Not available")
                 }
             }
 
             let rtfx = duration / processingTime
 
-            print("\nPerformance:")
-            print("  Audio duration: \(String(format: "%.2f", duration))s")
-            print("  Processing time: \(String(format: "%.2f", processingTime))s")
-            print("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("\nPerformance:")
+            logger.info("  Audio duration: \(String(format: "%.2f", duration))s")
+            logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
             if !showMetadata {
-                print("  Confidence: \(String(format: "%.3f", result.confidence))")
+                logger.info("  Confidence: \(String(format: "%.3f", result.confidence))")
             }
 
             // Cleanup
             asrManager.cleanup()
 
         } catch {
-            print("Batch transcription failed: \\(error)")
+            logger.error("Batch transcription failed: \(error)")
         }
     }
 
@@ -227,7 +228,7 @@ enum TranscribeCommand {
 
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
             else {
-                print("Failed to create audio buffer")
+                logger.error("Failed to create audio buffer")
                 return
             }
 
@@ -257,11 +258,12 @@ enum TranscribeCommand {
                         let formatter = DateFormatter()
                         formatter.dateFormat = "HH:mm:ss.SSS"
                         let timestampString = formatter.string(from: update.timestamp)
-                        print(
+                        logger.info(
                             "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
                         )
                     } else {
-                        print("[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
+                        logger.info(
+                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
                     }
 
                     if update.isConfirmed {
@@ -278,11 +280,11 @@ enum TranscribeCommand {
             var position = 0
             let startTime = Date()
 
-            print("Streaming audio continuously (no artificial delays)...")
-            print(
+            logger.info("Streaming audio continuously (no artificial delays)...")
+            logger.info(
                 "Using \(String(format: "%.1f", chunkDuration))s chunks with \(String(format: "%.1f", config.leftContextSeconds))s left context, \(String(format: "%.1f", config.rightContextSeconds))s right context"
             )
-            print("Watch for real-time hypothesis updates being replaced by confirmed text\n")
+            logger.info("Watch for real-time hypothesis updates being replaced by confirmed text\n")
 
             while position < Int(buffer.frameLength) {
                 let remainingSamples = Int(buffer.frameLength) - position
@@ -343,12 +345,13 @@ enum TranscribeCommand {
             await streamingUI.finish()
 
         } catch {
-            print("Streaming transcription failed: \(error)")
+            logger.error("Streaming transcription failed: \(error)")
         }
     }
 
     private static func printUsage() {
-        print(
+        let logger = AppLogger(category: "Transcribe")
+        logger.info(
             """
 
             Transcribe Command Usage:

@@ -6,11 +6,12 @@ import Foundation
 /// Command to demonstrate multi-stream ASR with shared model loading
 @available(macOS 13.0, *)
 enum MultiStreamCommand {
+    private static let logger = AppLogger(category: "MultiStream")
 
     static func run(arguments: [String]) async {
         // Parse arguments
         guard !arguments.isEmpty else {
-            print("No audio files specified")
+            logger.error("No audio files specified")
             printUsage()
             exit(1)
         }
@@ -30,7 +31,7 @@ enum MultiStreamCommand {
                 if audioFile2 == nil && arguments[i].hasSuffix(".wav") {
                     audioFile2 = arguments[i]
                 } else {
-                    print("⚠️  Unknown option: \(arguments[i])")
+                    logger.warning("Unknown option: \(arguments[i])")
                 }
             }
             i += 1
@@ -40,15 +41,13 @@ enum MultiStreamCommand {
         let micAudioFile = audioFile1
         let systemAudioFile = audioFile2 ?? audioFile1
 
-        print("🎤 Multi-Stream ASR Test")
-        print("========================\n")
+        logger.info("🎤 Multi-Stream ASR Test\n========================\n")
 
         if audioFile2 != nil {
-            print("📁 Processing two different files:")
-            print("  Microphone: \(micAudioFile)")
-            print("  System: \(systemAudioFile)\n")
+            logger.info(
+                "📁 Processing two different files:\n  Microphone: \(micAudioFile)\n  System: \(systemAudioFile)\n")
         } else {
-            print("📁 Processing single file on both streams: \(audioFile1)\n")
+            logger.info("📁 Processing single file on both streams: \(audioFile1)\n")
         }
 
         do {
@@ -62,7 +61,7 @@ enum MultiStreamCommand {
                 let micBuffer = AVAudioPCMBuffer(
                     pcmFormat: micFormat, frameCapacity: micFrameCount)
             else {
-                print("Failed to create microphone audio buffer")
+                logger.error("Failed to create microphone audio buffer")
                 return
             }
             try micFileHandle.read(into: micBuffer)
@@ -77,66 +76,65 @@ enum MultiStreamCommand {
                 let systemBuffer = AVAudioPCMBuffer(
                     pcmFormat: systemFormat, frameCapacity: systemFrameCount)
             else {
-                print("Failed to create system audio buffer")
+                logger.error("Failed to create system audio buffer")
                 return
             }
             try systemFileHandle.read(into: systemBuffer)
 
-            print("📊 Audio file info:")
-            print("🎙️ Microphone file:")
-            print("  Sample rate: \(micFormat.sampleRate) Hz")
-            print("  Channels: \(micFormat.channelCount)")
-            print(
-                "  Duration: \(String(format: "%.2f", Double(micFileHandle.length) / micFormat.sampleRate)) seconds"
-            )
+            logger.info(
+                """
+                📊 Audio file info:
+                🎙️ Microphone file:
+                  Sample rate: \(micFormat.sampleRate) Hz
+                  Channels: \(micFormat.channelCount)
+                  Duration: \(String(format: "%.2f", Double(micFileHandle.length) / micFormat.sampleRate)) seconds
 
-            print("\nSystem audio file:")
-            print("  Sample rate: \(systemFormat.sampleRate) Hz")
-            print("  Channels: \(systemFormat.channelCount)")
-            print(
-                "  Duration: \(String(format: "%.2f", Double(systemFileHandle.length) / systemFormat.sampleRate)) seconds\n"
+                System audio file:
+                  Sample rate: \(systemFormat.sampleRate) Hz
+                  Channels: \(systemFormat.channelCount)
+                  Duration: \(String(format: "%.2f", Double(systemFileHandle.length) / systemFormat.sampleRate)) seconds
+                """
             )
 
             // Create a streaming session
-            print("Creating streaming session...")
+            logger.info("Creating streaming session...")
             let session = StreamingAsrSession()
 
             // Initialize models once
-            print("Loading ASR models (shared across streams)...")
+            logger.info("Loading ASR models (shared across streams)...")
             let startTime = Date()
             try await session.initialize()
             let loadTime = Date().timeIntervalSince(startTime)
-            print("Models loaded in \(String(format: "%.2f", loadTime))s\n")
+            logger.info("Models loaded in \(String(format: "%.2f", loadTime))s\n")
 
             // Create streams for different sources
-            print("Creating streams for different audio sources...")
+            logger.info("Creating streams for different audio sources...")
             let micStream = try await session.createStream(
                 source: .microphone,
                 config: .default
             )
-            print("Created microphone stream")
+            logger.info("Created microphone stream")
 
             let systemStream = try await session.createStream(
                 source: .system,
                 config: .default
             )
-            print("Created system audio stream\n")
+            logger.info("Created system audio stream\n")
 
             // Listen for updates from both streams (only if debug enabled)
             let micTask = Task {
                 for await update in await micStream.transcriptionUpdates {
-                    print("[MIC] \(update.isConfirmed ? "✓" : "~") \(update.text)")
+                    logger.info("[MIC] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                 }
             }
 
             let systemTask = Task {
                 for await update in await systemStream.transcriptionUpdates {
-                    print("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
+                    logger.info("[SYS] \(update.isConfirmed ? "✓" : "~") \(update.text)")
                 }
             }
 
-            print("Streaming audio files in parallel...")
-            print("  Both streams using default config (10.0s chunks)\n")
+            logger.info("Streaming audio files in parallel...\n  Both streams using default config (10.0s chunks)\n")
 
             // Process both files in parallel
             let micProcessingTask = Task {
@@ -161,7 +159,7 @@ enum MultiStreamCommand {
             await micProcessingTask.value
             await systemProcessingTask.value
 
-            print("Finalizing transcriptions...")
+            logger.info("Finalizing transcriptions...")
 
             // Get final results
             let micFinal = try await micStream.finish()
@@ -172,26 +170,21 @@ enum MultiStreamCommand {
             systemTask.cancel()
 
             // Print results
-            print("\n" + String(repeating: "=", count: 60) + "\n")
-            print("TRANSCRIPTION RESULTS\n")
-            print(String(repeating: "=", count: 60) + "\n")
-
-            print("\nMICROPHONE STREAM:")
-            print("\(micFinal)")
-
-            print("\nSYSTEM AUDIO STREAM:")
-            print("\(systemFinal)")
-
-            print("\nSession info:")
+            logger.info(
+                "\n" + String(repeating: "=", count: 60) + "\nTRANSCRIPTION RESULTS\n"
+                    + String(repeating: "=", count: 60) + "\n")
+            logger.info("\nMICROPHONE STREAM:\n\(micFinal)")
+            logger.info("\nSYSTEM AUDIO STREAM:\n\(systemFinal)")
+            logger.info("\nSession info:")
             let activeStreams = await session.activeStreams
-            print("Active streams: \(activeStreams.count)")
+            logger.info("Active streams: \(activeStreams.count)")
             for (source, stream) in activeStreams {
-                print("  - \(source): \(await stream.source)")
+                logger.info("  - \(source): \(await stream.source)")
             }
 
             await session.cleanup()
         } catch {
-            print("Error: \(error)")
+            logger.error("Error: \(error)")
         }
     }
 
@@ -236,11 +229,11 @@ enum MultiStreamCommand {
             position += chunkSize
         }
 
-        print("[\(label)] Streaming complete")
+        logger.info("[\(label)] Streaming complete")
     }
 
     private static func printUsage() {
-        print(
+        logger.info(
             """
 
             Multi-Stream Command Usage:

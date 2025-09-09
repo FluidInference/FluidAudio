@@ -30,9 +30,9 @@ public struct ASRPerformanceMetrics: Sendable {
 public actor PerformanceMonitor {
 
     public init() {}
-    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "Performance")
+    private let logger = AppLogger(category: "Performance")
     private var metrics: [ASRPerformanceMetrics] = []
-    private let signpostLogger = OSSignposter(subsystem: "com.fluidinfluence.asr", category: "Performance")
+    private let signpostLogger = OSSignposter(subsystem: AppLogger.defaultSubsystem, category: "Performance")
 
     /// Track performance for a processing session
     public func trackSession<T>(

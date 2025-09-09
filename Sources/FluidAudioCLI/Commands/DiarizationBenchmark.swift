@@ -7,6 +7,7 @@ import Foundation
 /// Uses first-occurrence speaker mapping for true streaming evaluation
 @available(macOS 13.0, *)
 enum StreamDiarizationBenchmark {
+    private static let logger = AppLogger(category: "DiarizationBench")
 
     struct BenchmarkResult {
         let meetingName: String
@@ -34,7 +35,7 @@ enum StreamDiarizationBenchmark {
     }
 
     static func printUsage() {
-        print(
+        logger.info(
             """
             Stream Diarization Benchmark Command
 
@@ -169,7 +170,7 @@ enum StreamDiarizationBenchmark {
                 return
             default:
                 if !arguments[i].starts(with: "--") {
-                    print("⚠️ Unknown argument: \(arguments[i])")
+                    logger.warning("Unknown argument: \(arguments[i])")
                 }
             }
             i += 1
@@ -179,14 +180,14 @@ enum StreamDiarizationBenchmark {
         let hopSize = max(chunkSeconds - overlapSeconds, 1.0)
         let overlapRatio = overlapSeconds / chunkSeconds
 
-        print("🚀 Starting Stream Diarization Benchmark")
-        print("   Dataset: \(dataset)")
-        print("   Chunk size: \(chunkSeconds)s")
-        print("   Overlap: \(overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
-        print("   Hop size: \(hopSize)s")
-        print("   Clustering threshold: \(threshold)")
-        print("   Assignment threshold: \(assignmentThreshold)")
-        print("   Update threshold: \(updateThreshold)")
+        logger.info("🚀 Starting Stream Diarization Benchmark")
+        logger.info("   Dataset: \(dataset)")
+        logger.info("   Chunk size: \(chunkSeconds)s")
+        logger.info("   Overlap: \(overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
+        logger.info("   Hop size: \(hopSize)s")
+        logger.info("   Clustering threshold: \(threshold)")
+        logger.info("   Assignment threshold: \(assignmentThreshold)")
+        logger.info("   Update threshold: \(updateThreshold)")
 
         // Determine streaming mode
         let mode: String
@@ -197,12 +198,11 @@ enum StreamDiarizationBenchmark {
         } else {
             mode = "Balanced"
         }
-        print("   Mode: \(mode)")
-        print("")
+        logger.info("   Mode: \(mode)\n")
 
         // Download dataset if needed
         if autoDownload {
-            print("📥 Downloading AMI dataset if needed...")
+            logger.info("📥 Downloading AMI dataset if needed...")
             // Download both audio and annotations
             await DatasetDownloader.downloadAMIDataset(
                 variant: dataset == "ami-ihm" ? .ihm : .sdm,
@@ -221,40 +221,38 @@ enum StreamDiarizationBenchmark {
         }
 
         if filesToProcess.isEmpty {
-            print("❌ No files found to process")
+            logger.error("❌ No files found to process")
             return
         }
 
-        print("📂 Processing \(filesToProcess.count) file(s)")
-        print("")
+        logger.info("📂 Processing \(filesToProcess.count) file(s)\n")
 
         // Initialize models once and track timing
-        print("🔧 Initializing models...")
+        logger.info("🔧 Initializing models...")
         let modelStartTime = Date()
         let models: DiarizerModels
         do {
             models = try await DiarizerModels.downloadIfNeeded()
         } catch {
-            print("❌ Failed to initialize models: \(error)")
+            logger.error("❌ Failed to initialize models: \(error)")
             return
         }
         let modelInitTime = Date().timeIntervalSince(modelStartTime)
-        print("✅ Models ready (took \(String(format: "%.2f", modelInitTime))s)")
-        print("")
+        logger.info("✅ Models ready (took \(String(format: "%.2f", modelInitTime))s)\n")
 
         // Process each file
         var allResults: [BenchmarkResult] = []
 
         for (fileIndex, meetingName) in filesToProcess.enumerated() {
-            print(String(repeating: "=", count: 60))
-            print("[\(fileIndex + 1)/\(filesToProcess.count)] Processing: \(meetingName)")
-            print(String(repeating: "=", count: 60))
+            logger.info(String(repeating: "=", count: 60))
+            logger.info("[\(fileIndex + 1)/\(filesToProcess.count)] Processing: \(meetingName)")
+            logger.info(String(repeating: "=", count: 60))
 
             var iterationResults: [BenchmarkResult] = []
 
             for iteration in 1...iterations {
                 if iterations > 1 {
-                    print("\n  Iteration \(iteration)/\(iterations)")
+                    logger.info("\n  Iteration \(iteration)/\(iterations)")
                 }
 
                 if let result = await processMeeting(
@@ -272,44 +270,44 @@ enum StreamDiarizationBenchmark {
                     iterationResults.append(result)
 
                     // Print summary for this iteration
-                    print("\n📊 Results for \(meetingName) (iteration \(iteration)):")
-                    print("  DER: \(String(format: "%.1f", result.der))%")
-                    print("  JER: \(String(format: "%.1f", result.jer))%")
-                    print("  RTFx: \(String(format: "%.1f", result.rtfx))x")
-                    print("  Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
+                    logger.info("\n📊 Results for \(meetingName) (iteration \(iteration)):")
+                    logger.info("  DER: \(String(format: "%.1f", result.der))%")
+                    logger.info("  JER: \(String(format: "%.1f", result.jer))%")
+                    logger.info("  RTFx: \(String(format: "%.1f", result.rtfx))x")
+                    logger.info("  Speakers: \(result.detectedSpeakers) detected / \(result.groundTruthSpeakers) truth")
 
                     // Print timing breakdown
-                    print("\n⏱️ Diarization Pipeline Timing Breakdown:")
-                    print("  Time spent in each stage of streaming diarization:\n")
-                    print("  Stage               Time (s)    %     Description")
-                    print("  " + String(repeating: "-", count: 60))
+                    logger.info("\n⏱️ Diarization Pipeline Timing Breakdown:")
+                    logger.info("  Time spent in each stage of streaming diarization:\n")
+                    logger.info("  Stage               Time (s)    %     Description")
+                    logger.info("  " + String(repeating: "-", count: 60))
                     let totalTime = result.processingTime
-                    print(
+                    logger.info(
                         String(
                             format: "  Model Download      %.3f      %.1f   Fetching diarization models",
                             result.modelDownloadTime, result.modelDownloadTime / totalTime * 100))
-                    print(
+                    logger.info(
                         String(
                             format: "  Model Compile       %.3f      %.1f   CoreML compilation",
                             result.modelCompileTime, result.modelCompileTime / totalTime * 100))
-                    print(
+                    logger.info(
                         String(
-                            format: "  Audio Load          %.3f      %.1f   Loading audio file",
-                            result.audioLoadTime, result.audioLoadTime / totalTime * 100))
-                    print(
+                            format: "  Audio Load          %.3f      %.1f   Loading audio file", result.audioLoadTime,
+                            result.audioLoadTime / totalTime * 100))
+                    logger.info(
                         String(
                             format: "  Segmentation        %.3f      %.1f   Detecting speech regions",
                             result.segmentationTime, result.segmentationTime / totalTime * 100))
-                    print(
+                    logger.info(
                         String(
                             format: "  Embedding           %.3f      %.1f   Extracting speaker voices",
                             result.embeddingTime, result.embeddingTime / totalTime * 100))
-                    print(
+                    logger.info(
                         String(
                             format: "  Clustering          %.3f      %.1f   Grouping same speakers",
                             result.clusteringTime, result.clusteringTime / totalTime * 100))
-                    print("  " + String(repeating: "-", count: 60))
-                    print(String(format: "  Total               %.3f    100.0   Full pipeline", totalTime))
+                    logger.info("  " + String(repeating: "-", count: 60))
+                    logger.info(String(format: "  Total               %.3f    100.0   Full pipeline", totalTime))
                 }
             }
 
@@ -319,11 +317,11 @@ enum StreamDiarizationBenchmark {
                 allResults.append(avgResult)
 
                 if iterations > 1 {
-                    print("\n📊 Average over \(iterations) iterations:")
-                    print(
+                    logger.info("\n📊 Average over \(iterations) iterations:")
+                    logger.info(
                         "  DER: \(String(format: "%.1f", avgResult.der))% ± \(String(format: "%.1f", standardDeviation(iterationResults.map { $0.der })))%"
                     )
-                    print(
+                    logger.info(
                         "  RTFx: \(String(format: "%.1f", avgResult.rtfx))x ± \(String(format: "%.1f", standardDeviation(iterationResults.map { $0.rtfx })))x"
                     )
                 }
@@ -359,7 +357,7 @@ enum StreamDiarizationBenchmark {
         // Load audio
         let audioPath = getAudioPath(for: meetingName)
         guard FileManager.default.fileExists(atPath: audioPath) else {
-            print("❌ Audio file not found: \(audioPath)")
+            logger.error("❌ Audio file not found: \(audioPath)")
             return nil
         }
 
@@ -371,8 +369,8 @@ enum StreamDiarizationBenchmark {
             let totalDuration = Double(audioData.count) / 16000.0
 
             if verbose {
-                print("  Audio duration: \(String(format: "%.1f", totalDuration))s")
-                print("  Audio load time: \(String(format: "%.3f", audioLoadTime))s")
+                logger.info("  Audio duration: \(String(format: "%.1f", totalDuration))s")
+                logger.info("  Audio load time: \(String(format: "%.3f", audioLoadTime))s")
             }
 
             // Initialize diarizer with streaming manager
@@ -466,7 +464,7 @@ enum StreamDiarizationBenchmark {
                     let processedDuration = Double(position) / 16000.0
                     let rtfx = processedDuration / elapsed
 
-                    print(
+                    logger.info(
                         String(
                             format: "    [Chunk %3d] %.1f%% | RTFx: %.1fx | Speakers: %d | Latency: %.3fs",
                             chunkIndex, progress, rtfx,
@@ -488,7 +486,7 @@ enum StreamDiarizationBenchmark {
             )
 
             guard !groundTruth.isEmpty else {
-                print("⚠️ No ground truth found for \(meetingName)")
+                logger.warning("⚠️ No ground truth found for \(meetingName)")
                 return nil
             }
 
@@ -541,7 +539,7 @@ enum StreamDiarizationBenchmark {
             )
 
         } catch {
-            print("❌ Error processing \(meetingName): \(error)")
+            logger.error("❌ Error processing \(meetingName): \(error)")
             return nil
         }
     }
@@ -600,7 +598,7 @@ enum StreamDiarizationBenchmark {
             }
         }
 
-        print("🔄 STREAMING MAPPING (first-occurrence): \(firstOccurrenceMap)")
+        logger.debug("🔄 STREAMING MAPPING (first-occurrence): \(firstOccurrenceMap)")
 
         // Calculate frame-based metrics
         var missedFrames = 0
@@ -634,7 +632,7 @@ enum StreamDiarizationBenchmark {
                 falseAlarmFrames += 1  // System speaking when should be silent
             case (_, nil):
                 missedFrames += 1  // System silent when should be speaking
-            case let (gt?, pred?):
+            case (let gt?, let pred?):
                 // Use streaming mapping if available, otherwise treat as error
                 let mappedPred = firstOccurrenceMap[pred]
                 if mappedPred != gt {
@@ -685,7 +683,7 @@ enum StreamDiarizationBenchmark {
 
         // Debug JER calculation
         if true {  // Enable debug output
-            print(
+            logger.debug(
                 "🔍 JER Debug: Active frames: \(activeFrames)/\(totalFrames), Avg Jaccard: \(String(format: "%.3f", averageJaccard))"
             )
 
@@ -723,16 +721,16 @@ enum StreamDiarizationBenchmark {
                 }
             }
 
-            print(
+            logger.debug(
                 "   Perfect match frames: \(perfectFrames) (\(String(format: "%.1f", Float(perfectFrames)/Float(totalFrames)*100))%)"
             )
-            print(
+            logger.debug(
                 "   Partial match frames: \(partialFrames) (\(String(format: "%.1f", Float(partialFrames)/Float(totalFrames)*100))%)"
             )
-            print(
+            logger.debug(
                 "   Missed speech frames: \(missedFrames) (\(String(format: "%.1f", Float(missedFrames)/Float(totalFrames)*100))%)"
             )
-            print(
+            logger.debug(
                 "   False alarm frames: \(falseAlarmFrames) (\(String(format: "%.1f", Float(falseAlarmFrames)/Float(totalFrames)*100))%)"
             )
         }
@@ -743,7 +741,7 @@ enum StreamDiarizationBenchmark {
         let speakerErrorRate = (Float(speakerErrorFrames) / Float(totalFrames)) * 100.0
         let der = missRate + falseAlarmRate + speakerErrorRate
 
-        print(
+        logger.info(
             "📊 STREAMING METRICS: DER=\(String(format: "%.1f", der))% (Miss=\(String(format: "%.1f", missRate))%, FA=\(String(format: "%.1f", falseAlarmRate))%, SE=\(String(format: "%.1f", speakerErrorRate))%)"
         )
 
@@ -941,23 +939,23 @@ enum StreamDiarizationBenchmark {
     private static func printFinalSummary(results: [BenchmarkResult]) {
         guard !results.isEmpty else { return }
 
-        print("\n" + String(repeating: "=", count: 80))
-        print("DIARIZATION BENCHMARK SUMMARY")
-        print(String(repeating: "=", count: 80))
+        logger.info("\n" + String(repeating: "=", count: 80))
+        logger.info("DIARIZATION BENCHMARK SUMMARY")
+        logger.info(String(repeating: "=", count: 80))
 
         // Print detailed results table sorted by DER
-        print("\n📋 Results Sorted by DER (Best → Worst):")
-        print(String(repeating: "-", count: 90))
+        logger.info("\n📋 Results Sorted by DER (Best → Worst):")
+        logger.info(String(repeating: "-", count: 90))
         // Simple header without String(format:)
-        print("Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx")
-        print(String(repeating: "-", count: 90))
+        logger.info("Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx")
+        logger.info(String(repeating: "-", count: 90))
 
         for result in results.sorted(by: { $0.der < $1.der }) {
             let speakerInfo = "\(result.detectedSpeakers)/\(result.groundTruthSpeakers)"
             // Format meeting name to fixed width
             let meetingCol = result.meetingName.padding(toLength: 12, withPad: " ", startingAt: 0)
             let speakerCol = speakerInfo.padding(toLength: 10, withPad: " ", startingAt: 0)
-            print(
+            logger.info(
                 String(
                     format: "%@ %8.1f %8.1f %8.1f %8.1f %8.1f %@ %8.1f",
                     meetingCol,
@@ -969,7 +967,7 @@ enum StreamDiarizationBenchmark {
                     speakerCol,
                     result.rtfx))
         }
-        print(String(repeating: "-", count: 90))
+        logger.info(String(repeating: "-", count: 90))
 
         // Calculate aggregates and add summary row
         let avgDER = results.map { $0.der }.reduce(0, +) / Float(results.count)
@@ -980,24 +978,24 @@ enum StreamDiarizationBenchmark {
         let avgRTFx = results.map { $0.rtfx }.reduce(0, +) / Float(results.count)
 
         // Print average row
-        print(
+        logger.info(
             String(
                 format: "AVERAGE      %8.1f %8.1f %8.1f %8.1f %8.1f         - %8.1f",
                 avgDER, avgJER, avgMiss, avgFA, avgSE, avgRTFx))
-        print(String(repeating: "=", count: 90))
+        logger.info(String(repeating: "=", count: 90))
 
         // Check against targets
-        print("\n✅ Target Check:")
+        logger.info("\n✅ Target Check:")
         if avgDER < 30 {
-            print("  ✅ DER < 30% (achieved: \(String(format: "%.1f", avgDER))%)")
+            logger.info("  ✅ DER < 30% (achieved: \(String(format: "%.1f", avgDER))%)")
         } else {
-            print("  ❌ DER < 30% (achieved: \(String(format: "%.1f", avgDER))%)")
+            logger.info("  ❌ DER < 30% (achieved: \(String(format: "%.1f", avgDER))%)")
         }
 
         if avgRTFx > 1 {
-            print("  ✅ RTFx > 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
+            logger.info("  ✅ RTFx > 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
         } else {
-            print("  ❌ RTFx > 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
+            logger.info("  ❌ RTFx > 1x (achieved: \(String(format: "%.1f", avgRTFx))x)")
         }
     }
 
@@ -1035,9 +1033,9 @@ enum StreamDiarizationBenchmark {
         do {
             let data = try JSONSerialization.data(withJSONObject: jsonData, options: .prettyPrinted)
             try data.write(to: URL(fileURLWithPath: path))
-            print("\n💾 JSON results saved to: \(path)")
+            logger.info("\n💾 JSON results saved to: \(path)")
         } catch {
-            print("❌ Failed to save JSON: \(error)")
+            logger.error("❌ Failed to save JSON: \(error)")
         }
     }
 
@@ -1083,9 +1081,9 @@ enum StreamDiarizationBenchmark {
 
         do {
             try csv.write(to: URL(fileURLWithPath: path), atomically: true, encoding: .utf8)
-            print("💾 CSV results saved to: \(path)")
+            logger.info("💾 CSV results saved to: \(path)")
         } catch {
-            print("❌ Failed to save CSV: \(error)")
+            logger.error("❌ Failed to save CSV: \(error)")
         }
     }
 }

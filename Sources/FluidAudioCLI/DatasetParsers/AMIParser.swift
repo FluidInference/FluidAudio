@@ -4,6 +4,7 @@ import Foundation
 
 /// AMI annotation parser and ground truth handling
 struct AMIParser {
+    private static let logger = AppLogger(category: "AMIParser")
 
     /// Get ground truth speaker count from AMI meetings.xml
     static func getGroundTruthSpeakerCount(for meetingId: String) -> Int {
@@ -88,8 +89,8 @@ struct AMIParser {
         ]
 
         // Add comprehensive debug logging for path resolution
-        print("🔍 DEBUG: Searching for AMI annotations in \(possiblePaths.count) locations:")
-        print("   Current working directory: \(FileManager.default.currentDirectoryPath)")
+        logger.debug("🔍 DEBUG: Searching for AMI annotations in \(possiblePaths.count) locations:")
+        logger.debug("   Current working directory: \(FileManager.default.currentDirectoryPath)")
 
         var amiDir: URL?
         for (index, path) in possiblePaths.enumerated() {
@@ -99,26 +100,26 @@ struct AMIParser {
             let segmentsExists = FileManager.default.fileExists(atPath: segmentsDir.path)
             let meetingsExists = FileManager.default.fileExists(atPath: meetingsFile.path)
 
-            print("   \(index + 1). \(path.path)")
-            print("      - segments/: \(segmentsExists ? "✅" : "❌") (\(segmentsDir.path))")
-            print("      - meetings.xml: \(meetingsExists ? "✅" : "❌") (\(meetingsFile.path))")
+            logger.debug("   \(index + 1). \(path.path)")
+            logger.debug("      - segments/: \(segmentsExists ? "✅" : "❌") (\(segmentsDir.path))")
+            logger.debug("      - meetings.xml: \(meetingsExists ? "✅" : "❌") (\(meetingsFile.path))")
 
             if segmentsExists && meetingsExists {
-                print("      - 🎯 SELECTED: This path will be used")
+                logger.info("      - 🎯 SELECTED: This path will be used")
                 amiDir = path
                 break
             }
         }
 
         guard let validAmiDir = amiDir else {
-            print("   AMI annotations not found in any expected location")
-            print(
+            logger.warning("   AMI annotations not found in any expected location")
+            logger.warning(
                 "      📁 Expected structure: [path]/segments/ AND [path]/corpusResources/meetings.xml"
             )
-            print(
+            logger.warning(
                 "      🔧 To download annotations: visit https://groups.inf.ed.ac.uk/ami/download/"
             )
-            print(
+            logger.warning(
                 "      📋 Using simplified placeholder ground truth (causes poor DER performance)"
             )
             return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
@@ -127,7 +128,7 @@ struct AMIParser {
         let segmentsDir = validAmiDir.appendingPathComponent("segments")
         let meetingsFile = validAmiDir.appendingPathComponent("corpusResources/meetings.xml")
 
-        print("   📖 Loading AMI annotations for meeting: \(meetingId)")
+        logger.info("   📖 Loading AMI annotations for meeting: \(meetingId)")
 
         do {
             let parser = AMIAnnotationParser()
@@ -137,13 +138,13 @@ struct AMIParser {
                 let speakerMapping = try parser.parseSpeakerMapping(
                     for: meetingId, from: meetingsFile)
             else {
-                print(
+                logger.warning(
                     "      ⚠️ No speaker mapping found for meeting: \(meetingId), using placeholder"
                 )
                 return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
             }
 
-            print(
+            logger.info(
                 "      Speaker mapping: A=\(speakerMapping.speakerA), B=\(speakerMapping.speakerB), C=\(speakerMapping.speakerC), D=\(speakerMapping.speakerD)"
             )
 
@@ -178,7 +179,7 @@ struct AMIParser {
                         allSegments.append(timedSegment)
                     }
 
-                    print(
+                    logger.info(
                         "      Loaded \(segments.count) segments for speaker \(speakerCode) (\(participantId))"
                     )
                 }
@@ -187,12 +188,12 @@ struct AMIParser {
             // Sort by start time
             allSegments.sort { $0.startTimeSeconds < $1.startTimeSeconds }
 
-            print("      Total segments loaded: \(allSegments.count)")
+            logger.info("      Total segments loaded: \(allSegments.count)")
             return allSegments
 
         } catch {
-            print("      Failed to parse AMI annotations: \(error)")
-            print("      Using simplified placeholder instead")
+            logger.warning("      Failed to parse AMI annotations: \(error)")
+            logger.warning("      Using simplified placeholder instead")
             return generateSimplifiedGroundTruth(duration: duration, speakerCount: 4)
         }
     }

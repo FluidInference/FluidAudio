@@ -44,7 +44,7 @@ extension DiarizerModels {
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil
     ) async throws -> DiarizerModels {
-        let logger = Logger(subsystem: "FluidAudio", category: "DiarizerModels")
+        let logger = AppLogger(category: "DiarizerModels")
         logger.info("Checking for diarizer models...")
 
         let startTime = Date()
@@ -134,7 +134,7 @@ extension DiarizerModels {
         configuration: MLModelConfiguration? = nil
     ) async throws -> DiarizerModels {
 
-        let logger = Logger(subsystem: "FluidAudio", category: "DiarizerModels")
+        let logger = AppLogger(category: "DiarizerModels")
         logger.info("Loading predownloaded models")
 
         let configuration = configuration ?? defaultConfiguration()

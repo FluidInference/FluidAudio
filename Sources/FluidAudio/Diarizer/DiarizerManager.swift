@@ -5,7 +5,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public final class DiarizerManager {
 
-    internal let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "Diarizer")
+    internal let logger = AppLogger(category: "Diarizer")
     internal let config: DiarizerConfig
     private var models: DiarizerModels?
 

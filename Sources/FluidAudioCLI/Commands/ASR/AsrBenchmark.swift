@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, *)
 public class ASRBenchmark {
 
-    private let logger = Logger(subsystem: "com.fluidinfluence.asr", category: "Benchmark")
+    private let logger = AppLogger(category: "Benchmark")
     private let config: ASRBenchmarkConfig
 
     public init(config: ASRBenchmarkConfig = ASRBenchmarkConfig()) {
@@ -39,13 +39,13 @@ public class ASRBenchmark {
             }
 
             if transcriptCount >= 5 {
-                print("LibriSpeech \(subset) already downloaded")
-                print("LibriSpeech \(subset) already available (dataset found)")
+                logger.info("LibriSpeech \(subset) already downloaded")
+                logger.info("LibriSpeech \(subset) already available (dataset found)")
                 return
             }
         }
 
-        print("Downloading LibriSpeech \(subset)...")
+        logger.info("Downloading LibriSpeech \(subset)...")
 
         let downloadURL: String
         switch subset {
@@ -67,7 +67,7 @@ public class ASRBenchmark {
             expectedSubpath: "LibriSpeech/\(subset)"
         )
 
-        print("LibriSpeech \(subset) downloaded successfully")
+        logger.info("LibriSpeech \(subset) downloaded successfully")
     }
 
     /// Run ASR benchmark on LibriSpeech
@@ -77,14 +77,12 @@ public class ASRBenchmark {
         async throws -> [ASRBenchmarkResult]
     {
         #if DEBUG
-        print("")
-        print("WARNING: Running in DEBUG mode!")
-        print("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
-        print("")
+        logger.warning("WARNING: Running in DEBUG mode!")
+        logger.warning("For accurate benchmarks, use: swift run -c release fluidaudio asr-benchmark")
         // Add a small delay so user sees the warning
         try? await Task.sleep(nanoseconds: 2_000_000_000)  // 2 seconds
         #else
-        print("Running in RELEASE mode - optimal performance")
+        logger.info("Running in RELEASE mode - optimal performance")
         #endif
 
         // Ensure dataset is downloaded
@@ -102,11 +100,11 @@ public class ASRBenchmark {
             if filteredFiles.isEmpty {
                 throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
             }
-            print("🔍 Processing single file: \(targetFileName)")
+            logger.info("🔍 Processing single file: \(targetFileName)")
         } else if config.longAudioOnly {
             filteredFiles = try await filterFilesByDuration(
                 audioFiles, minDuration: 4.0, maxDuration: 20.0)
-            print(
+            logger.info(
                 "Filtered to \(filteredFiles.count) files with duration 4-20 seconds (from \(audioFiles.count) total)"
             )
         }
@@ -114,23 +112,22 @@ public class ASRBenchmark {
         let maxFiles = singleFile != nil ? filteredFiles.count : (config.maxFiles ?? filteredFiles.count)
         let filesToProcess = Array(filteredFiles.prefix(maxFiles))
 
-        print(
+        logger.info(
             "📋 Processing \(filesToProcess.count) files (max files limit: \(config.maxFiles?.description ?? "unlimited"))"
         )
 
-        print(
+        logger.info(
             "Running ASR benchmark on \(filesToProcess.count) files from LibriSpeech \(subset)")
 
         var results: [ASRBenchmarkResult] = []
 
         for (index, audioFile) in filesToProcess.enumerated() {
             do {
-                print(
-                    "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)"
-                )
+                logger.info(
+                    "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)")
 
                 // Reset decoder state for each new file
-                print("Resetting decoder state for new file: \(audioFile.fileName)")
+                logger.debug("Resetting decoder state for new file: \(audioFile.fileName)")
 
                 let result: ASRBenchmarkResult
                 if config.testStreaming {
@@ -144,7 +141,6 @@ public class ASRBenchmark {
 
             } catch {
                 logger.error("Failed to process \(audioFile.fileName): \(error)")
-                print("ERROR: Failed to process \(audioFile.fileName): \(error)")
             }
         }
 
@@ -160,7 +156,7 @@ public class ASRBenchmark {
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
-        print(
+        logger.info(
             "Transcribing \(file.fileName) with \(audioSamples.count) samples (\(String(format: "%.2f", audioLength))s)"
         )
 
@@ -199,13 +195,13 @@ public class ASRBenchmark {
         // Calculate chunk size in samples (minimum 1 second to ensure reasonable context)
         let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
 
-        print("🔍 Starting streaming simulation for \(file.fileName)")
-        print("🔍   Audio length: \(audioLength)s")
-        print("🔍   Total samples: \(audioSamples.count)")
-        print("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
-        print("🔍   Samples per chunk: \(samplesPerChunk)")
+        logger.info("🔍 Starting streaming simulation for \(file.fileName)")
+        logger.info("🔍   Audio length: \(audioLength)s")
+        logger.info("🔍   Total samples: \(audioSamples.count)")
+        logger.info("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
+        logger.info("🔍   Samples per chunk: \(samplesPerChunk)")
         let totalChunks = (audioSamples.count + samplesPerChunk - 1) / samplesPerChunk
-        print("🔍   Expected total chunks: \(totalChunks)")
+        logger.info("🔍   Expected total chunks: \(totalChunks)")
 
         // For streaming, we'll use the full file but measure chunk-by-chunk processing
         // This simulates how streaming would work with continuous audio
@@ -222,7 +218,7 @@ public class ASRBenchmark {
             let chunkSamples = nextChunkEnd - processedSamples
             let isLastChunk = nextChunkEnd >= audioSamples.count
 
-            print(
+            logger.debug(
                 "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
             )
 
@@ -247,14 +243,14 @@ public class ASRBenchmark {
             chunkProcessingTimes.append(chunkInferenceTime)
 
             let chunkDuration = Double(chunkSamples) / 16000.0
-            print(
+            logger.debug(
                 "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkInferenceTime))s (inference only)"
             )
 
             if isLastChunk {
-                print(
+                logger.debug(
                     "🔍   FINAL CHUNK \(chunkNumber): text change: '\(previousText)' -> '\(accumulatedText)'")
-                print("🔍   FINAL CHUNK processing complete")
+                logger.debug("🔍   FINAL CHUNK processing complete")
             }
 
             processedSamples = nextChunkEnd
@@ -305,10 +301,10 @@ public class ASRBenchmark {
         let result = try await asrManager.transcribe(audioSamples)
 
         if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
-            print("⚠️ CI: Transcription returned empty text")
-            print("   Audio samples: \(audioSamples.count)")
-            print("   Audio duration: \(Float(audioSamples.count) / 16000.0)s")
-            print("   Result confidence: \(result.confidence)")
+            logger.warning("⚠️ CI: Transcription returned empty text")
+            logger.warning("   Audio samples: \(audioSamples.count)")
+            logger.warning("   Audio duration: \(Float(audioSamples.count) / 16000.0)s")
+            logger.warning("   Result confidence: \(result.confidence)")
         }
 
         return result
@@ -424,12 +420,12 @@ public class ASRBenchmark {
     {
         let downloadURL = URL(string: url)!
 
-        print("Downloading \(url)...")
+        logger.info("Downloading \(url)...")
         let (tempFile, _) = try await DownloadUtils.sharedSession.download(from: downloadURL)
 
         try FileManager.default.createDirectory(at: extractTo, withIntermediateDirectories: true)
 
-        print("Extracting archive...")
+        logger.info("Extracting archive...")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
@@ -458,7 +454,7 @@ public class ASRBenchmark {
             try? FileManager.default.removeItem(at: extractTo.appendingPathComponent("LibriSpeech"))
         }
 
-        print("Dataset extracted successfully")
+        logger.info("Dataset extracted successfully")
     }
 }
 
@@ -566,9 +562,9 @@ extension ASRBenchmark {
             return
         }
 
-        print("\n" + String(repeating: "=", count: 80))
-        print("📋 Detailed Analysis for Files with WER > \(Int(threshold * 100))%")
-        print(String(repeating: "=", count: 80))
+        logger.info("\n" + String(repeating: "=", count: 80))
+        logger.info("📋 Detailed Analysis for Files with WER > \(Int(threshold * 100))%")
+        logger.info(String(repeating: "=", count: 80))
 
         for result in highWERResults.sorted(by: { $0.metrics.wer > $1.metrics.wer }) {
             printSingleFileWERAnalysis(result)
@@ -578,10 +574,10 @@ extension ASRBenchmark {
     /// Print detailed analysis for a single file
     private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) {
         let werPercent = result.metrics.wer * 100
-        print(
+        logger.info(
             "\nFile: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
         )
-        print(String(repeating: "-", count: 60))
+        logger.info(String(repeating: "-", count: 60))
 
         // Normalize the texts for comparison
         let normalizedReference = TextNormalizer.normalize(result.reference)
@@ -593,9 +589,9 @@ extension ASRBenchmark {
         // Generate inline diff
         let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
-        print("\nNormalized Reference:\t\(referenceDiff)")
-        print("Normalized Hypothesis:\t\(hypothesisDiff)")
-        print("Original Hypothesis:\t\(result.hypothesis)")
+        logger.info("\nNormalized Reference:\t\(referenceDiff)")
+        logger.info("Normalized Hypothesis:\t\(hypothesisDiff)")
+        logger.info("Original Hypothesis:\t\(result.hypothesis)")
     }
 
     /// Generate word-level differences between reference and hypothesis
@@ -807,6 +803,8 @@ extension ASRBenchmark {
 @available(macOS 13.0, iOS 16.0, *)
 extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
+        // Create a local logger for the static CLI entrypoint
+        let logger = AppLogger(category: "Benchmark")
         var subset = "test-clean"
         var maxFiles: Int?
         var singleFile: String?
@@ -858,29 +856,29 @@ extension ASRBenchmark {
                     if let duration = Double(arguments[i + 1]), duration > 0 {
                         streamingChunkDuration = duration
                     } else {
-                        print("Invalid chunk duration: \(arguments[i + 1])")
+                        logger.error("Invalid chunk duration: \(arguments[i + 1])")
                         exit(1)
                     }
                     i += 1
                 }
             default:
-                print("Unknown option: \(arguments[i])")
+                logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        print("\nStarting ASR benchmark on LibriSpeech \(subset)")
+        logger.info("\nStarting ASR benchmark on LibriSpeech \(subset)")
         if singleFile != nil {
-            print("   Processing single file: \(singleFile!)")
+            logger.info("   Processing single file: \(singleFile!)")
         } else {
-            print("   Max files: \(maxFiles?.description ?? "all")")
+            logger.info("   Max files: \(maxFiles?.description ?? "all")")
         }
-        print("   Output file: \(outputFile)")
-        print("   Debug mode: \(debugMode ? "enabled" : "disabled")")
-        print("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
-        print("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
+        logger.info("   Output file: \(outputFile)")
+        logger.info("   Debug mode: \(debugMode ? "enabled" : "disabled")")
+        logger.info("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
+        logger.info("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
         if testStreaming {
-            print("   Chunk duration: \(streamingChunkDuration)s")
+            logger.info("   Chunk duration: \(streamingChunkDuration)s")
         }
 
         let config = ASRBenchmarkConfig(
@@ -906,25 +904,25 @@ extension ASRBenchmark {
         do {
             let startBenchmark = Date()
 
-            print("Initializing ASR system...")
+            logger.info("Initializing ASR system...")
             do {
                 let models = try await AsrModels.downloadAndLoad()
                 try await asrManager.initialize(models: models)
-                print("ASR system initialized successfully")
+                logger.info("ASR system initialized successfully")
 
             } catch {
-                print("Failed to initialize ASR system: \(error)")
-                print("   Error type: \(type(of: error))")
-                print("   Error details: \(error.localizedDescription)")
+                logger.error("Failed to initialize ASR system: \(error)")
+                logger.error("   Error type: \(type(of: error))")
+                logger.error("   Error details: \(error.localizedDescription)")
 
                 if ProcessInfo.processInfo.environment["CI"] != nil {
-                    print("🔍 CI Debug Information:")
+                    logger.debug("🔍 CI Debug Information:")
                     let modelsDir = FileManager.default.homeDirectoryForCurrentUser
                         .appendingPathComponent(
                             "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
                         )
-                    print("   Models directory: \(modelsDir.path)")
-                    print(
+                    logger.debug("   Models directory: \(modelsDir.path)")
+                    logger.debug(
                         "   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))"
                     )
 
@@ -932,9 +930,9 @@ extension ASRBenchmark {
                         do {
                             let contents = try FileManager.default.contentsOfDirectory(
                                 at: modelsDir, includingPropertiesForKeys: nil)
-                            print("   Directory contents: \(contents.map { $0.lastPathComponent })")
+                            logger.debug("   Directory contents: \(contents.map { $0.lastPathComponent })")
                         } catch {
-                            print("   Failed to list directory contents: \(error)")
+                            logger.debug("   Failed to list directory contents: \(error)")
                         }
                     }
                 }
@@ -974,7 +972,7 @@ extension ASRBenchmark {
 
             // Print streaming metrics if available
             if config.testStreaming {
-                print("\n--- Streaming Metrics ---")
+                logger.info("\n--- Streaming Metrics ---")
 
                 // Calculate aggregate streaming metrics
                 let streamingResults = results.compactMap { $0.streamingMetrics }
@@ -987,12 +985,12 @@ extension ASRBenchmark {
                         streamingResults.compactMap { $0.firstTokenLatency }.reduce(0, +)
                         / Double(streamingResults.compactMap { $0.firstTokenLatency }.count)
 
-                    print("   Chunk duration: \(config.streamingChunkDuration)s")
-                    print("   Total chunks processed: \(totalChunks)")
-                    print("   Avg chunk processing time: \(String(format: "%.3f", avgChunkTime))s")
-                    print("   Max chunk processing time: \(String(format: "%.3f", maxChunkTime))s")
+                    logger.info("   Chunk duration: \(config.streamingChunkDuration)s")
+                    logger.info("   Total chunks processed: \(totalChunks)")
+                    logger.info("   Avg chunk processing time: \(String(format: "%.3f", avgChunkTime))s")
+                    logger.info("   Max chunk processing time: \(String(format: "%.3f", maxChunkTime))s")
                     if streamingResults.compactMap({ $0.firstTokenLatency }).count > 0 {
-                        print("   Avg first token latency: \(String(format: "%.3f", avgFirstTokenLatency))s")
+                        logger.info("   Avg first token latency: \(String(format: "%.3f", avgFirstTokenLatency))s")
                     }
                 }
             }
@@ -1090,33 +1088,32 @@ extension ASRBenchmark {
             // Print detailed analysis for files with high WER
             benchmark.printDetailedWERAnalysis(results)
 
-            print(
-                "\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)"
-            )
+            logger.info("\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
 
-            print("--- Benchmark Results ---")
-            print("   Dataset: \(config.dataset) \(config.subset)")
-            print("   Files processed: \(results.count)")
+            logger.info("--- Benchmark Results ---")
+            logger.info("   Dataset: \(config.dataset) \(config.subset)")
+            logger.info("   Files processed: \(results.count)")
 
-            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
-            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
-            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
-            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            print(
+            logger.info("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
+            logger.info("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
+            logger.info("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            logger.info("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+            logger.info(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
 
-            print("\nResults saved to: \(outputFile)")
-            print("ASR benchmark completed successfully")
+            logger.info("\nResults saved to: \(outputFile)")
+            logger.info("ASR benchmark completed successfully")
 
         } catch {
-            print("\nERROR: ASR benchmark failed: \(error)")
+            logger.error("\nERROR: ASR benchmark failed: \(error)")
             exit(1)
         }
     }
 
     private static func printUsage() {
-        print(
+        let logger = AppLogger(category: "Benchmark")
+        logger.info(
             """
             ASR Benchmark Command Usage:
                 fluidaudio asr-benchmark [options]
