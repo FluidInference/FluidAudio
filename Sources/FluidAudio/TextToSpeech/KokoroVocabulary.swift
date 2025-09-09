@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-/// Minimal vocabulary loader for KokoroDirectTTS
+/// Minimal vocabulary loader for KokoroDirect
 @available(macOS 13.0, *)
 public struct KokoroVocabulary {
     private static let logger = Logger(subsystem: "com.fluidaudio.tts", category: "KokoroVocabulary")

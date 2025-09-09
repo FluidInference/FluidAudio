@@ -5,8 +5,8 @@ import OSLog
 /// Direct TTS implementation using pre-computed phoneme dictionary and MLPackage model
 /// This follows the main.py approach - no pipeline, just dictionary lookup + model inference
 @available(macOS 13.0, iOS 16.0, *)
-public struct KokoroDirectTTS {
-    private static let logger = Logger(subsystem: "com.fluidaudio.tts", category: "KokoroDirectTTS")
+public struct Kokoro {
+    private static let logger = Logger(subsystem: "com.fluidaudio.tts", category: "KokoroDirect")
 
     // Phoneme dictionary loaded from kokoro_word_phonemes_full.json
     private static var phonemeDictionary: [String: [String]] = [:]
