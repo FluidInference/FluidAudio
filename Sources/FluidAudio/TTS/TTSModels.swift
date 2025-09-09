@@ -85,7 +85,7 @@ public struct TTSModels {
     private static func loadCompiledModel(at url: URL, modelName: String) async throws -> MLModel {
         do {
             let configuration = MLModelConfiguration()
-            configuration.computeUnits = .all
+            configuration.computeUnits = .cpuAndNeuralEngine
             configuration.allowLowPrecisionAccumulationOnGPU = true
 
             return try MLModel(contentsOf: url, configuration: configuration)
