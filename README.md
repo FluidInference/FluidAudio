@@ -5,12 +5,12 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-7289da.svg)](https://discord.gg/WNsvaCtmDe)
-[![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
+[![All Models](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-blue)](https://huggingface.co/collections/FluidInference/coreml-models-6873d9e310e638c66d22fba9)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FluidInference/FluidAudio)
 
 Fluid Audio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE), resulting in less memory and generally faster inference.
 
-The SDK includes state-of-the-art speaker diarization, transcription, and voice activity detection via open-source models (MIT/Apache 2.0) that can be integrated with just a few lines of code. Models are optimized for background processing, ambient computing and always on workloads by running inference on the ANE, minimizing CPU usage and avoiding GPU/MPS entirely. 
+The SDK includes state-of-the-art speaker diarization, transcription, and voice activity detection via open-source models (MIT/Apache 2.0) that can be integrated with just a few lines of code. Models are optimized for background processing, ambient computing and always on workloads by running inference on the ANE, minimizing CPU usage and avoiding GPU/MPS entirely.
 
 For custom use cases, feedback, additional model support, or platform requests, join our [Discord]. We’re also bringing visual, language, and TTS models to device and will share updates there.
 
@@ -29,11 +29,9 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
 - **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
-- **CoreML Models**: Native Apple CoreML backend with custom-converted models optimized for Apple Silicon
-- **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses
 - **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
-- **Cross-platform**: Support for macOS 14.0+ and iOS 17.0+ and Apple Silicon devices
 - **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
+- **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses
 
 ## Installation
 
@@ -49,15 +47,42 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 
 ## Documentation
 
-- Docs Index: Documentation/README.md
-- ASR: Documentation/ASR/GettingStarted.md
-- Diarization: Documentation/SpeakerDiarization.md (Streaming: Documentation/SpeakerDiarization.md#streamingreal-time-processing)
-- VAD: Documentation/VAD/GettingStarted.md
-- Audio Conversion: Documentation/Guides/AudioConversion.md
-- CLI Commands: Documentation/CLI.md
-- API Reference: Documentation/API.md
-- Platform & Networking: Documentation/Guides/Platform.md
-- MCP Guide: Documentation/Guides/MCP.md
+**[DeepWiki](https://deepwiki.com/FluidInference/FluidAudio)** for auto-generated docs for this repo.
+
+### Documentation Index
+
+- Guides
+  - [MCP](Documentation/Guides/MCP.md)
+  - [Audio Conversion for Inference](Documentation/Guides/AudioConversion.md)
+- Modules
+  - ASR: [Getting Started](Documentation/ASR/GettingStarted.md)
+  - ASR: [Last Chunk Handling](Documentation/ASR/LastChunkHandling.md)
+  - Diarization: [Speaker Diarization Guide](Documentation/SpeakerDiarization.md)
+  - VAD: [Getting Started](Documentation/VAD/GettingStarted.md)
+- API
+  - [API Reference](Documentation/API.md)
+- CLI
+  - [Command Line Guide](Documentation/CLI.md)
+
+### MCP Server
+
+The repo is indexed by DeepWiki MCP server, so your coding tool can access the docs:
+
+```json
+{
+  "mcpServers": {
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/mcp"
+    }
+  }
+}
+```
+
+For claude code:
+
+```bash
+claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
+```
 
 ## Automatic Speech Recognition (ASR) / Transcription
 
@@ -68,7 +93,7 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 - **Streaming Support**: Coming soon — batch processing is recommended for production use
 - **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
-### Quick Start (Code)
+### ASR Quick Start
 
 ```swift
 import FluidAudio
@@ -90,8 +115,10 @@ Task {
 }
 ```
 
-### CLI
-See Documentation/CLI.md for complete commands and benchmarks.
+```bash
+# Transcribe an audio file (batch)
+swift run fluidaudio transcribe audio.wav
+```
 
 ## Speaker Diarization
 
@@ -101,20 +128,7 @@ See Documentation/CLI.md for complete commands and benchmarks.
 - **JER: 28.0%** — Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
 - **RTF: 0.02x** — Real-time processing with 50x speedup
 
-```text
-RTF = Processing Time / Audio Duration
-
-With RTF = 0.02x:
-- 1 minute of audio takes 0.02 × 60 = 1.2 seconds to process
-- 10 minutes of audio takes 0.02 × 600 = 12 seconds to process
-
-For real-time speech-to-text:
-- Latency: ~1.2 seconds per minute of audio
-- Throughput: Can process 50x faster than real-time
-- Pipeline impact: Minimal — diarization won't be the bottleneck
-```
-
-### Quick Start (Code)
+### Speaker Diarization Quick Start
 
 ```swift
 import FluidAudio
@@ -136,9 +150,19 @@ Task {
 }
 ```
 
-See Documentation/SpeakerDiarization.md for the full guide and streaming example. CLI commands are listed in Documentation/CLI.md.
+For diarization streaming see [Documentation/SpeakerDiarization.md](Documentation/SpeakerDiarization.md)
 
-See Documentation/CLI.md for complete diarization commands.
+```bash
+swift run fluidaudio diarization-benchmark --single-file ES2004a \
+  --chunk-seconds 3 --overlap-seconds 2
+```
+
+### CLI
+
+```bash
+# Process an individual file and save JSON
+swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
+```
 
 ## Voice Activity Detection (VAD)
 
@@ -146,7 +170,7 @@ The current VAD APIs require careful tuning for your specific use case. If you n
 
 Our goal is to provide a streamlined API similar to Apple's upcoming SpeechDetector in [OS26](https://developer.apple.com/documentation/speech/speechdetector).
 
-### Quick Start (Code)
+### VAD Quick Start
 
 ```swift
 import FluidAudio
@@ -178,9 +202,12 @@ Task {
 }
 ```
 
-See Documentation/CLI.md for VAD commands.
+```bash
+# Run VAD benchmark (mini50 dataset by default)
+swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
+```
 
-## Showcase 
+## Showcase
 
 Make a PR if you want to add your app!
 
@@ -191,19 +218,18 @@ Make a PR if you want to add your app!
 | **[Slipbox](https://slipbox.ai/)** | Privacy-first meeting assistant for real-time conversation intelligence. Uses Parakeet ASR (iOS) and speaker diarization across platforms. |
 | **[Whisper Mate](https://whisper.marksdo.com)** | Transcribes movies and audio locally; records and transcribes in real time from speakers or system apps. Uses speaker diarization. |
 
-
-## API Reference
-
-See Documentation/API.md for the full API overview across modules.
-  
 ## Everything Else
 
-See Documentation/Guides/Platform.md for platform and networking notes.
+### FAQs
+
+- CLI is available on macOS only. For iOS, use the library programmatically.
+- Models auto-download on first use. If your network restricts Hugging Face access, set an HTTPS proxy: `export https_proxy=http://127.0.0.1:7890`.
+- Windows alternative in development: [fluid-server](https://github.com/FluidInference/fluid-server)
+- If you're looking to get the system audio on a Mac, take a look at this repo for reference [AudioCap](https://github.com/insidegui/AudioCap/tree/main)
 
 ### License
 
 Apache 2.0 — see `LICENSE` for details.
-
 
 ### Acknowledgments
 
