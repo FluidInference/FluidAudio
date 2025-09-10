@@ -151,10 +151,6 @@ public class SpeakerManager {
                     segmentId: UUID(),
                     alpha: 0.9
                 )
-
-                logger.debug(
-                    "Updated embedding for \(speakerId), update count: \(speaker.updateCount), raw count: \(speaker.rawEmbeddings.count)"
-                )
             }
         } else {
             // Just update duration if not updating embedding
