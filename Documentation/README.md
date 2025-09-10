@@ -12,3 +12,6 @@
 
 - API
   - [API Reference](API.md)
+  
+- CLI
+  - [Command Line Guide](CLI.md)

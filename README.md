@@ -10,9 +10,9 @@
 
 Fluid Audio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE), resulting in less memory and generally faster inference.
 
-The SDK includes state-of-the-art speaker diarization, transcription, and voice activity detection via open-source models (MIT/Apache 2.0) that can be integrated with just a few lines of code. Models are optimized for background processing, ambient computing and always on workloads by running inference on the ANE, minimizing CPU usage and avoiding GPU/MPS entirely.
+The SDK includes state-of-the-art speaker diarization, transcription, and voice activity detection via open-source models (MIT/Apache 2.0) that can be integrated with just a few lines of code. Models are optimized for background processing, ambient computing and always on workloads by running inference on the ANE, minimizing CPU usage and avoiding GPU/MPS entirely. 
 
-For custom use cases, feedback, additional model support, or platform requests, join our [Discord](https://discord.gg/WNsvaCtmDe). We’re also bringing visual, language, and TTS models to device and will share updates there.
+For custom use cases, feedback, additional model support, or platform requests, join our [Discord]. We’re also bringing visual, language, and TTS models to device and will share updates there.
 
 Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
 
@@ -49,37 +49,24 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 
 ## Documentation
 
-- **DeepWiki**: Auto-generated docs for this repo — https://deepwiki.com/FluidInference/FluidAudio
-- **Modules & Guides**: See the links in the Table of Contents above.
-
-### MCP
-
-The repo is indexed by the DeepWiki MCP server, so your coding tool can access the docs.
-
-```json
-{
-  "mcpServers": {
-    "deepwiki": {
-      "url": "https://mcp.deepwiki.com/mcp"
-    }
-  }
-}
-```
-
-Claude Code (CLI):
-
-```bash
-claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
-```
+- Docs Index: Documentation/README.md
+- ASR: Documentation/ASR/GettingStarted.md
+- Diarization: Documentation/SpeakerDiarization.md (Streaming: Documentation/SpeakerDiarization.md#streamingreal-time-processing)
+- VAD: Documentation/VAD/GettingStarted.md
+- Audio Conversion: Documentation/Guides/AudioConversion.md
+- CLI Commands: Documentation/CLI.md
+- API Reference: Documentation/API.md
+- Platform & Networking: Documentation/Guides/Platform.md
+- MCP Guide: Documentation/Guides/MCP.md
 
 ## Automatic Speech Recognition (ASR) / Transcription
 
-- **Model**: `FluidInference/parakeet-tdt-0.6b-v3-coreml` - NVIDIA's SOTA 
-- **Languages**: 25 European languages (see HF model card)
-- **Mode**: Batch transcription for complete audio files (streaming coming soon)
-- **RTF**: ~120x on M4 Pro (1 min ≈ 0.5s)
-
-See full guide with code samples and CLI usage: [ASR Getting Started](Documentation/ASR/GettingStarted.md).
+- **Model**: `FluidInference/parakeet-tdt-0.6b-v3-coreml`
+- **Languages**: All European languages (25) - see Huggingface models for exact list
+- **Processing Mode**: Batch transcription for complete audio files
+- **Real-time Factor**: ~120x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
+- **Streaming Support**: Coming soon — batch processing is recommended for production use
+- **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
 ### Quick Start (Code)
 
@@ -88,15 +75,23 @@ import FluidAudio
 
 // Batch transcription from an audio file
 Task {
+    // 1) Initialize ASR manager and load models
     let models = try await AsrModels.downloadAndLoad()
     let asrManager = AsrManager(config: .default)
     try await asrManager.initialize(models: models)
 
+    // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
     let samples = try await loadSamples16kMono(path: "path/to/audio.wav")
+
+    // 3) Transcribe the audio
     let result = try await asrManager.transcribe(samples, source: .system)
-    print(result.text)
+    print("Transcription: \(result.text)")
+    print("Confidence: \(result.confidence)")
 }
 ```
+
+### CLI
+See Documentation/CLI.md for complete commands and benchmarks.
 
 ## Speaker Diarization
 
@@ -119,34 +114,37 @@ For real-time speech-to-text:
 - Pipeline impact: Minimal — diarization won't be the bottleneck
 ```
 
-See full documentation, streaming examples, and CLI usage: [Speaker Diarization Guide](Documentation/SpeakerDiarization.md).
-
 ### Quick Start (Code)
 
 ```swift
 import FluidAudio
 
+// Diarize an audio file
 Task {
     let models = try await DiarizerModels.downloadIfNeeded()
-    let diarizer = DiarizerManager()
+    let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
     diarizer.initialize(models: models)
 
+    // Prepare 16 kHz mono samples (see: Audio Conversion)
     let samples = try await loadSamples16kMono(path: "path/to/meeting.wav")
+
+    // Run diarization
     let result = try diarizer.performCompleteDiarization(samples)
-    for seg in result.segments {
-        print("Speaker \(seg.speakerId): \(seg.startTimeSeconds)-\(seg.endTimeSeconds)")
+    for segment in result.segments {
+        print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
     }
 }
 ```
 
+See Documentation/SpeakerDiarization.md for the full guide and streaming example. CLI commands are listed in Documentation/CLI.md.
+
+See Documentation/CLI.md for complete diarization commands.
+
 ## Voice Activity Detection (VAD)
 
-The VAD APIs are tunable for different environments and use cases.
+The current VAD APIs require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
 
-- **Model**: Silero VAD (CoreML)
-- **Frames**: 512-sample processing with adaptive thresholding
-
-See full guide with code samples and CLI usage: [VAD Getting Started](Documentation/VAD/GettingStarted.md).
+Our goal is to provide a streamlined API similar to Apple's upcoming SpeechDetector in [OS26](https://developer.apple.com/documentation/speech/speechdetector).
 
 ### Quick Start (Code)
 
@@ -163,33 +161,26 @@ Task {
 
     // 3) Run VAD and print speech segments (512-sample frames)
     let results = try await vad.processAudioFile(samples)
-    let sr = 16000.0
+    let sampleRate = 16000.0
     let frame = 512.0
 
-    var start: Int? = nil
+    var startIndex: Int? = nil
     for (i, r) in results.enumerated() {
         if r.isVoiceActive {
-            if start == nil { start = i }
-        } else if let s = start {
-            let startSec = (Double(s) * frame) / sr
-            let endSec = (Double(i + 1) * frame) / sr
+            if startIndex == nil { startIndex = i }
+        } else if let s = startIndex {
+            let startSec = (Double(s) * frame) / sampleRate
+            let endSec = (Double(i + 1) * frame) / sampleRate
             print(String(format: "Speech: %.2f–%.2fs", startSec, endSec))
-            start = nil
+            startIndex = nil
         }
     }
 }
 ```
 
-## Documentation
+See Documentation/CLI.md for VAD commands.
 
-- [Automatic Speech Recognition](Documentation/ASR/GettingStarted.md)
-- [Speaker Diarization](Documentation/SpeakerDiarization.md)
-- [Voice Activity Detection](Documentation/VAD/GettingStarted.md)
-- [Audio Conversion](Documentation/Guides/AudioConversion.md)
-- [Troubleshooting](Documentation/Guides/Platform.md)
-- [API Reference](Documentation/API.md)
-
-## Showcase
+## Showcase 
 
 Make a PR if you want to add your app!
 
@@ -203,17 +194,16 @@ Make a PR if you want to add your app!
 
 ## API Reference
 
-For a consolidated list of public types and methods across modules, see `Documentation/API.md`.
+See Documentation/API.md for the full API overview across modules.
   
 ## Everything Else
 
-### Platform & Networking Notes
-
-See [Platform & Networking Notes](Documentation/Guides/Platform.md).
+See Documentation/Guides/Platform.md for platform and networking notes.
 
 ### License
 
 Apache 2.0 — see `LICENSE` for details.
+
 
 ### Acknowledgments
 
