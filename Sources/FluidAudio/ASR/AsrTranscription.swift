@@ -165,12 +165,15 @@ extension AsrManager {
                 previous: previousTokens, current: hypothesis.ySequence)
             let adjustedTimestamps =
                 removedCount > 0 ? Array(hypothesis.timestamps.dropFirst(removedCount)) : hypothesis.timestamps
+            let adjustedConfidences =
+                removedCount > 0
+                ? Array(hypothesis.tokenConfidences.dropFirst(removedCount)) : hypothesis.tokenConfidences
 
             if enableDebug && removedCount > 0 {
                 logger.debug("Streaming chunk: removed \(removedCount) duplicate tokens")
             }
 
-            return (deduped, adjustedTimestamps, hypothesis.tokenConfidences, encLen)
+            return (deduped, adjustedTimestamps, adjustedConfidences, encLen)
         }
 
         return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, encLen)
