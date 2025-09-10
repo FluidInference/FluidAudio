@@ -4,9 +4,10 @@ import FluidAudio
 
 /// Handler for the 'process' command - processes a single audio file
 enum ProcessCommand {
+    private static let logger = AppLogger(category: "Process")
     static func run(arguments: [String]) async {
         guard !arguments.isEmpty else {
-            print("No audio file specified")
+            logger.error("No audio file specified")
             printUsage()
             exit(1)
         }
@@ -33,13 +34,13 @@ enum ProcessCommand {
                     i += 1
                 }
             default:
-                print("⚠️ Unknown option: \(arguments[i])")
+                logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        print("🎵 Processing audio file: \(audioFile)")
-        print("   Clustering threshold: \(threshold)")
+        logger.info("🎵 Processing audio file: \(audioFile)")
+        logger.info("   Clustering threshold: \(threshold)")
 
         let config = DiarizerConfig(
             clusteringThreshold: threshold,
@@ -51,16 +52,16 @@ enum ProcessCommand {
         do {
             let models = try await DiarizerModels.downloadIfNeeded()
             manager.initialize(models: models)
-            print("Models initialized")
+            logger.info("Models initialized")
         } catch {
-            print("Failed to initialize models: \(error)")
+            logger.error("Failed to initialize models: \(error)")
             exit(1)
         }
 
         // Load and process audio file
         do {
             let audioSamples = try await AudioProcessor.loadAudioFile(path: audioFile)
-            print("Loaded audio: \(audioSamples.count) samples")
+            logger.info("Loaded audio: \(audioSamples.count) samples")
 
             let startTime = Date()
             let result = try manager.performCompleteDiarization(
@@ -70,10 +71,10 @@ enum ProcessCommand {
             let duration = Float(audioSamples.count) / 16000.0
             let rtfx = duration / Float(processingTime)
 
-            print("Diarization completed in \(String(format: "%.1f", processingTime))s")
-            print("   Real-time factor (RTFx): \(String(format: "%.2f", rtfx))x")
-            print("   Found \(result.segments.count) segments")
-            print("   Detected \(result.speakerDatabase?.count ?? 0) speakers (total), mapped: TBD")
+            logger.info("Diarization completed in \(String(format: "%.1f", processingTime))s")
+            logger.info("   Real-time factor (RTFx): \(String(format: "%.2f", rtfx))x")
+            logger.info("   Found \(result.segments.count) segments")
+            logger.info("   Detected \(result.speakerDatabase?.count ?? 0) speakers (total), mapped: TBD")
 
             // Create output
             let output = ProcessingResult(
@@ -89,19 +90,19 @@ enum ProcessCommand {
             // Output results
             if let outputFile = outputFile {
                 try await ResultsFormatter.saveResults(output, to: outputFile)
-                print("💾 Results saved to: \(outputFile)")
+                logger.info("💾 Results saved to: \(outputFile)")
             } else {
                 await ResultsFormatter.printResults(output)
             }
 
         } catch {
-            print("Failed to process audio file: \(error)")
+            logger.error("Failed to process audio file: \(error)")
             exit(1)
         }
     }
 
     private static func printUsage() {
-        print(
+        logger.info(
             """
 
             Process Command Usage:

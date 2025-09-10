@@ -6,7 +6,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public class EmbeddingExtractor {
     private let wespeakerModel: MLModel
-    private let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "EmbeddingExtractor")
+    private let logger = AppLogger(category: "EmbeddingExtractor")
     private let memoryOptimizer = ANEMemoryOptimizer.shared
 
     // Pre-allocated ANE-aligned buffers

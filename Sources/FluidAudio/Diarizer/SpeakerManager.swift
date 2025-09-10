@@ -5,7 +5,7 @@ import OSLog
 /// Tracks speakers across chunks and maintains consistent IDs
 @available(macOS 13.0, iOS 16.0, *)
 public class SpeakerManager {
-    internal let logger = Logger(subsystem: "com.fluidinfluence.diarizer", category: "SpeakerManager")
+    internal let logger = AppLogger(category: "SpeakerManager")
 
     // Constants
     public static let embeddingSize = 256  // Standard embedding dimension for speaker models

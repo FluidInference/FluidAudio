@@ -5,6 +5,7 @@ import FluidAudio
 
 /// Dataset downloading functionality for AMI and VAD datasets
 struct DatasetDownloader {
+    private static let logger = AppLogger(category: "Dataset")
 
     enum AMIVariant: String, CaseIterable {
         case sdm = "sdm"  // Single Distant Microphone (Mix-Headset.wav)
@@ -40,12 +41,12 @@ struct DatasetDownloader {
             try FileManager.default.createDirectory(
                 at: variantDir, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create directory: \(error)")
+            logger.error("Failed to create directory: \(error)")
             return
         }
 
-        print("📥 Downloading AMI \(variant.displayName) dataset...")
-        print("   Target directory: \(variantDir.path)")
+        logger.info("📥 Downloading AMI \(variant.displayName) dataset...")
+        logger.info("   Target directory: \(variantDir.path)")
 
         // Download AMI annotations first (required for proper benchmarking)
         await downloadAMIAnnotations(force: force)
@@ -54,7 +55,7 @@ struct DatasetDownloader {
         let commonMeetings: [String]
         if let singleFile = singleFile {
             commonMeetings = [singleFile]
-            print("📋 Downloading single file: \(singleFile)")
+            logger.info("📋 Downloading single file: \(singleFile)")
         } else {
             commonMeetings = [
                 "ES2002a",
@@ -78,7 +79,7 @@ struct DatasetDownloader {
 
             // Skip if file exists and not forcing download
             if !force && FileManager.default.fileExists(atPath: filePath.path) {
-                print("   ⏭️ Skipping \(fileName) (already exists)")
+                logger.info("   ⏭️ Skipping \(fileName) (already exists)")
                 skippedFiles += 1
                 continue
             }
@@ -92,20 +93,20 @@ struct DatasetDownloader {
 
             if success {
                 downloadedFiles += 1
-                print("   Downloaded \(fileName)")
+                logger.info("   Downloaded \(fileName)")
             } else {
-                print("   Failed to download \(fileName)")
+                logger.warning("   Failed to download \(fileName)")
             }
         }
 
-        print("🎉 AMI \(variant.displayName) download completed")
-        print("   Downloaded: \(downloadedFiles) files")
-        print("   Skipped: \(skippedFiles) files")
-        print("   Total files: \(downloadedFiles + skippedFiles)/\(commonMeetings.count)")
+        logger.info("🎉 AMI \(variant.displayName) download completed")
+        logger.info("   Downloaded: \(downloadedFiles) files")
+        logger.info("   Skipped: \(skippedFiles) files")
+        logger.info("   Total files: \(downloadedFiles + skippedFiles)/\(commonMeetings.count)")
 
         if downloadedFiles == 0 && skippedFiles == 0 {
-            print("⚠️ No files were downloaded. You may need to download manually from:")
-            print("   https://groups.inf.ed.ac.uk/ami/download/")
+            logger.warning("⚠️ No files were downloaded. You may need to download manually from:")
+            logger.warning("   https://groups.inf.ed.ac.uk/ami/download/")
         }
     }
 
@@ -125,12 +126,12 @@ struct DatasetDownloader {
             let urlString = "\(baseURL)/\(meetingId)/audio/\(meetingId).\(variant.filePattern)"
 
             guard let url = URL(string: urlString) else {
-                print("     ⚠️ Invalid URL: \(urlString)")
+                logger.error("     ⚠️ Invalid URL: \(urlString)")
                 continue
             }
 
             do {
-                print("     📥 Downloading from: \(urlString)")
+                logger.info("     📥 Downloading from: \(urlString)")
                 let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
 
                 if let httpResponse = response as? HTTPURLResponse {
@@ -140,33 +141,29 @@ struct DatasetDownloader {
                         // Verify it's a valid audio file
                         if await isValidAudioFile(outputPath) {
                             let fileSizeMB = Double(data.count) / (1024 * 1024)
-                            print(
-                                "     Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
+                            logger.info("     Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
                             return true
                         } else {
-                            print("     ⚠️ Downloaded file is not valid audio")
+                            logger.warning("     ⚠️ Downloaded file is not valid audio")
                             try? FileManager.default.removeItem(at: outputPath)
                             // Try next URL
                             continue
                         }
                     } else if httpResponse.statusCode == 404 {
-                        print("     ⚠️ File not found (HTTP 404) - trying next URL...")
+                        logger.warning("     ⚠️ File not found (HTTP 404) - trying next URL...")
                         continue
                     } else {
-                        print(
-                            "     ⚠️ HTTP error: \(httpResponse.statusCode) - trying next URL..."
-                        )
+                        logger.warning("     ⚠️ HTTP error: \(httpResponse.statusCode) - trying next URL...")
                         continue
                     }
                 }
             } catch {
-                print(
-                    "     ⚠️ Download error: \(error.localizedDescription) - trying next URL...")
+                logger.warning("     ⚠️ Download error: \(error.localizedDescription) - trying next URL...")
                 continue
             }
         }
 
-        print("     Failed to download from all available URLs")
+        logger.error("     Failed to download from all available URLs")
         return false
     }
 
@@ -191,19 +188,19 @@ struct DatasetDownloader {
         if !force && FileManager.default.fileExists(atPath: segmentsDir.path)
             && FileManager.default.fileExists(atPath: meetingsFile.path)
         {
-            print("📂 AMI annotations already exist in \(annotationsDir.path)")
+            logger.info("📂 AMI annotations already exist in \(annotationsDir.path)")
             return
         }
 
-        print("📥 Downloading AMI annotations from Edinburgh University...")
-        print("   Target directory: \(annotationsDir.path)")
+        logger.info("📥 Downloading AMI annotations from Edinburgh University...")
+        logger.info("   Target directory: \(annotationsDir.path)")
 
         // Create required directories
         do {
             try FileManager.default.createDirectory(
                 at: annotationsDir, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create annotation directories: \(error)")
+            logger.error("Failed to create annotation directories: \(error)")
             return
         }
 
@@ -212,15 +209,15 @@ struct DatasetDownloader {
             "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
         let zipFile = annotationsDir.appendingPathComponent("ami_public_manual_1.6.2.zip")
 
-        print("📥 Downloading AMI manual annotations archive (22MB)...")
+        logger.info("📥 Downloading AMI manual annotations archive (22MB)...")
         let zipSuccess = await downloadAnnotationFile(from: zipURL, to: zipFile)
 
         if !zipSuccess {
-            print("Failed to download AMI annotations archive")
+            logger.error("Failed to download AMI annotations archive")
             return
         }
 
-        print("📦 Extracting AMI annotations archive...")
+        logger.info("📦 Extracting AMI annotations archive...")
 
         // Extract the ZIP file using the system unzip command
         let extractSuccess = await extractZipFile(zipFile, to: annotationsDir)
@@ -233,22 +230,22 @@ struct DatasetDownloader {
             if FileManager.default.fileExists(atPath: segmentsDir.path)
                 && FileManager.default.fileExists(atPath: meetingsFile.path)
             {
-                print("AMI annotations download and extraction completed")
-                print("💡 Benchmarks will now use real AMI ground truth data")
+                logger.info("AMI annotations download and extraction completed")
+                logger.info("💡 Benchmarks will now use real AMI ground truth data")
             } else {
-                print("⚠️ Extraction completed but expected files not found")
-                print("   Looking for: \(segmentsDir.path)")
-                print("   Looking for: \(meetingsFile.path)")
+                logger.warning("⚠️ Extraction completed but expected files not found")
+                logger.warning("   Looking for: \(segmentsDir.path)")
+                logger.warning("   Looking for: \(meetingsFile.path)")
             }
         } else {
-            print("Failed to extract AMI annotations archive")
+            logger.error("Failed to extract AMI annotations archive")
         }
     }
 
     /// Download a single annotation file from AMI corpus
     static func downloadAnnotationFile(from urlString: String, to outputPath: URL) async -> Bool {
         guard let url = URL(string: urlString) else {
-            print("     ⚠️ Invalid URL: \(urlString)")
+            logger.error("     ⚠️ Invalid URL: \(urlString)")
             return false
         }
 
@@ -270,18 +267,18 @@ struct DatasetDownloader {
                         {
                             return true
                         } else {
-                            print("     ⚠️ Downloaded file is not valid XML")
+                            logger.warning("     ⚠️ Downloaded file is not valid XML")
                             try? FileManager.default.removeItem(at: outputPath)
                             return false
                         }
                     }
                 } else {
-                    print("     ⚠️ HTTP error: \(httpResponse.statusCode)")
+                    logger.warning("     ⚠️ HTTP error: \(httpResponse.statusCode)")
                     return false
                 }
             }
         } catch {
-            print("     ⚠️ Download error: \(error.localizedDescription)")
+            logger.warning("     ⚠️ Download error: \(error.localizedDescription)")
             return false
         }
 
@@ -299,7 +296,7 @@ struct DatasetDownloader {
             process.waitUntilExit()
             return process.terminationStatus == 0
         } catch {
-            print("     ⚠️ Failed to extract ZIP file: \(error)")
+            logger.error("     ⚠️ Failed to extract ZIP file: \(error)")
             return false
         }
     }
@@ -308,8 +305,8 @@ struct DatasetDownloader {
     static func downloadVadDataset(force: Bool, dataset: String = "mini50") async {
         let cacheDir = getVadDatasetCacheDirectory()
 
-        print("📥 Downloading VAD dataset from Hugging Face...")
-        print("   Target directory: \(cacheDir.path)")
+        logger.info("📥 Downloading VAD dataset from Hugging Face...")
+        logger.info("   Target directory: \(cacheDir.path)")
 
         // Create cache directories
         let speechDir = cacheDir.appendingPathComponent("speech")
@@ -321,7 +318,7 @@ struct DatasetDownloader {
             try FileManager.default.createDirectory(
                 at: noiseDir, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create cache directories: \(error)")
+            logger.error("Failed to create cache directories: \(error)")
             return
         }
 
@@ -335,9 +332,9 @@ struct DatasetDownloader {
                     at: noiseDir, includingPropertiesForKeys: nil)) ?? []
 
             if !existingSpeechFiles.isEmpty && !existingNoiseFiles.isEmpty {
-                print("📂 VAD dataset already exists (use --force to re-download)")
-                print("   Speech files: \(existingSpeechFiles.count)")
-                print("   Noise files: \(existingNoiseFiles.count)")
+                logger.info("📂 VAD dataset already exists (use --force to re-download)")
+                logger.info("   Speech files: \(existingSpeechFiles.count)")
+                logger.info("   Noise files: \(existingNoiseFiles.count)")
                 return
             }
         } else {
@@ -358,7 +355,7 @@ struct DatasetDownloader {
         var failedFiles = 0
 
         // Download speech files
-        print("📢 Downloading speech samples...")
+        logger.info("📢 Downloading speech samples...")
         let speechCount = dataset == "mini100" ? 50 : 25
         do {
             let speechFiles = try await downloadVadFilesFromHF(
@@ -370,14 +367,14 @@ struct DatasetDownloader {
                 repoName: repoName
             )
             downloadedFiles += speechFiles.count
-            print("   Downloaded \(speechFiles.count) speech files")
+            logger.info("   Downloaded \(speechFiles.count) speech files")
         } catch {
-            print("   Failed to download speech files: \(error)")
+            logger.error("   Failed to download speech files: \(error)")
             failedFiles += 1
         }
 
         // Download noise files
-        print("🔇 Downloading noise samples...")
+        logger.info("🔇 Downloading noise samples...")
         let noiseCount = dataset == "mini100" ? 50 : 25
         do {
             let noiseFiles = try await downloadVadFilesFromHF(
@@ -389,22 +386,22 @@ struct DatasetDownloader {
                 repoName: repoName
             )
             downloadedFiles += noiseFiles.count
-            print("   Downloaded \(noiseFiles.count) noise files")
+            logger.info("   Downloaded \(noiseFiles.count) noise files")
         } catch {
-            print("   Failed to download noise files: \(error)")
+            logger.error("   Failed to download noise files: \(error)")
             failedFiles += 1
         }
 
-        print("\n📊 VAD Dataset Download Summary:")
-        print("   Downloaded: \(downloadedFiles) files")
-        print("   Failed: \(failedFiles) categories")
+        logger.info("\n📊 VAD Dataset Download Summary:")
+        logger.info("   Downloaded: \(downloadedFiles) files")
+        logger.info("   Failed: \(failedFiles) categories")
 
         if downloadedFiles > 0 {
-            print("VAD dataset download completed")
-            print("💡 You can now run VAD benchmarks with the downloaded dataset")
+            logger.info("VAD dataset download completed")
+            logger.info("💡 You can now run VAD benchmarks with the downloaded dataset")
         } else {
-            print("No files were downloaded successfully")
-            print("⚠️ VAD benchmarks will fall back to legacy URLs")
+            logger.warning("No files were downloaded successfully")
+            logger.warning("⚠️ VAD benchmarks will fall back to legacy URLs")
         }
     }
 
@@ -432,11 +429,11 @@ struct DatasetDownloader {
             }
             allFiles.append(contentsOf: audioFiles)
         } catch {
-            print("      ⚠️ Could not access \(filePrefix): \(error)")
+            logger.warning("      ⚠️ Could not access \(filePrefix): \(error)")
         }
 
-        print("      Found \(allFiles.count) audio files in \(filePrefix)/ directory")
-        print("      Debug: requesting \(count) files from \(allFiles.count) available")
+        logger.info("      Found \(allFiles.count) audio files in \(filePrefix)/ directory")
+        logger.debug("      Debug: requesting \(count) files from \(allFiles.count) available")
 
         if !allFiles.isEmpty {
             let filesToDownload = Array(allFiles.prefix(count))
@@ -456,20 +453,20 @@ struct DatasetDownloader {
                             url: downloadedFile
                         ))
                     downloadedCount += 1
-                    print("      Downloaded: \(fileName)")
+                    logger.info("      Downloaded: \(fileName)")
 
                 } catch {
-                    print("      ⚠️ Failed to download \(fileName): \(error)")
+                    logger.warning("      ⚠️ Failed to download \(fileName): \(error)")
                     continue
                 }
             }
         } else {
-            print("      No audio files found in subdirectories")
+            logger.warning("      No audio files found in subdirectories")
         }
 
         // If no files downloaded via API, try pattern-based download
         if testFiles.isEmpty {
-            print(
+            logger.warning(
                 "      ⚠️ API method failed or no files found, trying pattern-based download...")
 
             // Fallback to pattern-based download
@@ -510,7 +507,7 @@ struct DatasetDownloader {
                                     url: downloadedFile
                                 ))
                             downloadedCount += 1
-                            print("      Downloaded: \(fileName)")
+                            logger.info("      Downloaded: \(fileName)")
 
                         } catch {
                             // File doesn't exist, continue trying
@@ -602,16 +599,16 @@ struct DatasetDownloader {
         ).first!
         .appendingPathComponent("FluidAudio/musanFull", isDirectory: true)
 
-        print("📥 Downloading full MUSAN dataset from OpenSLR...")
-        print("   Target directory: \(cacheDir.path)")
-        print("   Expected size: ~600MB compressed, ~4.5GB uncompressed")
+        logger.info("📥 Downloading full MUSAN dataset from OpenSLR...")
+        logger.info("   Target directory: \(cacheDir.path)")
+        logger.info("   Expected size: ~600MB compressed, ~4.5GB uncompressed")
 
         // Create cache directory
         do {
             try FileManager.default.createDirectory(
                 at: cacheDir, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create cache directory: \(error)")
+            logger.error("Failed to create cache directory: \(error)")
             return
         }
 
@@ -630,8 +627,8 @@ struct DatasetDownloader {
             }
 
             if allExist {
-                print("📂 Full MUSAN dataset already exists (use --force to re-download)")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+                logger.info("📂 Full MUSAN dataset already exists (use --force to re-download)")
+                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
                 return
             }
         }
@@ -640,7 +637,7 @@ struct DatasetDownloader {
         let musanURL = "https://www.openslr.org/resources/17/musan.tar.gz"
         let downloadPath = cacheDir.appendingPathComponent("musan.tar.gz")
 
-        print("🌐 Downloading from: \(musanURL)")
+        logger.info("🌐 Downloading from: \(musanURL)")
 
         do {
             // Download the tar.gz file
@@ -649,16 +646,16 @@ struct DatasetDownloader {
 
             // Check response
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                print("Download failed with status code: \(httpResponse.statusCode)")
+                logger.error("Download failed with status code: \(httpResponse.statusCode)")
                 return
             }
 
             // Move downloaded file
             try FileManager.default.moveItem(at: downloadURL, to: downloadPath)
-            print("Download complete")
+            logger.info("Download complete")
 
             // Extract tar.gz
-            print("📦 Extracting archive...")
+            logger.info("📦 Extracting archive...")
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
             task.arguments = ["-xzf", downloadPath.path, "-C", cacheDir.path]
@@ -667,7 +664,7 @@ struct DatasetDownloader {
             task.waitUntilExit()
 
             if task.terminationStatus == 0 {
-                print("Extraction complete")
+                logger.info("Extraction complete")
 
                 // Clean up tar file
                 try? FileManager.default.removeItem(at: downloadPath)
@@ -677,20 +674,20 @@ struct DatasetDownloader {
                 let musicFiles = countFiles(in: musanDir.appendingPathComponent("music"))
                 let noiseFiles = countFiles(in: musanDir.appendingPathComponent("noise"))
 
-                print("\n📊 Full MUSAN Dataset Summary:")
-                print("   Speech files: \(speechFiles)")
-                print("   Music files: \(musicFiles)")
-                print("   Noise files: \(noiseFiles)")
-                print("   Total files: \(speechFiles + musicFiles + noiseFiles)")
-                print("\nFull MUSAN dataset ready for benchmarking")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
+                logger.info("\n📊 Full MUSAN Dataset Summary:")
+                logger.info("   Speech files: \(speechFiles)")
+                logger.info("   Music files: \(musicFiles)")
+                logger.info("   Noise files: \(noiseFiles)")
+                logger.info("   Total files: \(speechFiles + musicFiles + noiseFiles)")
+                logger.info("\nFull MUSAN dataset ready for benchmarking")
+                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
             } else {
-                print("Extraction failed")
+                logger.error("Extraction failed")
                 try? FileManager.default.removeItem(at: downloadPath)
             }
 
         } catch {
-            print("Download failed: \(error)")
+            logger.error("Download failed: \(error)")
             try? FileManager.default.removeItem(at: downloadPath)
         }
     }
@@ -719,15 +716,15 @@ struct DatasetDownloader {
         ).first!
         .appendingPathComponent("FluidAudio/voicesSubset", isDirectory: true)
 
-        print("📥 Downloading VOiCES subset from GitHub...")
-        print("   Target directory: \(cacheDir.path)")
+        logger.info("📥 Downloading VOiCES subset from GitHub...")
+        logger.info("   Target directory: \(cacheDir.path)")
 
         // Create cache directory
         do {
             try FileManager.default.createDirectory(
                 at: cacheDir, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create cache directory: \(error)")
+            logger.error("Failed to create cache directory: \(error)")
             return
         }
 
@@ -746,16 +743,16 @@ struct DatasetDownloader {
                     at: noisyDir, includingPropertiesForKeys: nil)) ?? []
 
             if !cleanFiles.isEmpty || !noisyFiles.isEmpty {
-                print("📂 VOiCES subset already exists (use --force to re-download)")
-                print("   Clean files: \(cleanFiles.count)")
-                print("   Noisy files: \(noisyFiles.count)")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+                logger.info("📂 VOiCES subset already exists (use --force to re-download)")
+                logger.info("   Clean files: \(cleanFiles.count)")
+                logger.info("   Noisy files: \(noisyFiles.count)")
+                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
                 return
             }
         }
 
         // Clone the repository
-        print("🌐 Cloning VOiCES-subset repository...")
+        logger.info("🌐 Cloning VOiCES-subset repository...")
         let cloneDir = cacheDir.appendingPathComponent("temp_clone")
 
         do {
@@ -774,7 +771,7 @@ struct DatasetDownloader {
             task.waitUntilExit()
 
             if task.terminationStatus == 0 {
-                print("Repository cloned successfully")
+                logger.info("Repository cloned successfully")
 
                 // Move the audio files to our cache structure
                 let sourceCleanDir = cloneDir.appendingPathComponent("clean")
@@ -795,7 +792,7 @@ struct DatasetDownloader {
                             file.lastPathComponent)
                         try FileManager.default.moveItem(at: file, to: destination)
                     }
-                    print(
+                    logger.info(
                         "   Moved \(cleanFiles.filter { $0.pathExtension == "wav" }.count) clean files"
                     )
                 }
@@ -809,7 +806,7 @@ struct DatasetDownloader {
                             file.lastPathComponent)
                         try FileManager.default.moveItem(at: file, to: destination)
                     }
-                    print(
+                    logger.info(
                         "   Moved \(noisyFiles.filter { $0.pathExtension == "wav" }.count) noisy files"
                     )
                 }
@@ -817,16 +814,16 @@ struct DatasetDownloader {
                 // Clean up clone directory
                 try? FileManager.default.removeItem(at: cloneDir)
 
-                print("\nVOiCES subset ready for benchmarking")
-                print("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
+                logger.info("\nVOiCES subset ready for benchmarking")
+                logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
 
             } else {
-                print("Git clone failed")
+                logger.error("Git clone failed")
                 try? FileManager.default.removeItem(at: cloneDir)
             }
 
         } catch {
-            print("Download failed: \(error)")
+            logger.error("Download failed: \(error)")
             try? FileManager.default.removeItem(at: cloneDir)
         }
     }
