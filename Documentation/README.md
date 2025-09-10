@@ -3,7 +3,6 @@
 - Guides
   - [MCP](Guides/MCP.md)
   - [Audio Conversion](Guides/AudioConversion.md)
-  - [Platform & Networking](Guides/Platform.md)
 
 - Modules
   - ASR: [Getting Started](ASR/GettingStarted.md)

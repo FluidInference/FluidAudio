@@ -7,10 +7,10 @@ This project uses `swift-format` to maintain consistent code style. All pull req
 ```bash
 # Format all code (requires Swift 6+ for contributors only)
 # Users of the library don't need Swift 6
-swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/
+swift format --in-place --recursive --configuration .swift-format Sources/ Tests/
 
 # Check formatting without modifying
-swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/
+swift format lint --recursive --configuration .swift-format Sources/ Tests/
 
 # For Swift <6, install swift-format separately:
 # git clone https://github.com/apple/swift-format

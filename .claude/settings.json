@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/"
+            "command": "swift format --in-place --recursive --configuration .swift-format Sources/ Tests/"
           }
         ]
       }
