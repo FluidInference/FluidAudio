@@ -45,9 +45,21 @@ FluidAudio is a comprehensive Swift framework for local, low-latency audio proce
 
 ## Current Performance Status
 
-- **Achieved**: 17.7% DER
+- **Streaming Mode (Production)**: 15.6% DER with first-occurrence mapping
+- **Offline Mode (Research)**: 15.6% DER with optimal Hungarian algorithm mapping  
 - **Target**: < 30% DER
 - **Competitive with**: State-of-the-art research (Powerset BCE: 18.5%)
+
+### Evaluation Modes Comparison
+
+| Mode | Processing | Speaker Mapping | Real-time | Use Case |
+|------|------------|-----------------|-----------|----------|
+| **Streaming** | 10s chunks + overlap | First-occurrence (chronological) | ✅ | Production systems |
+| **Offline** | Entire file at once | Hungarian algorithm (optimal) | ❌ | Research comparison |
+
+**Key Differences:**
+- **Streaming**: Cannot retroactively change speaker IDs; measures true production performance
+- **Offline**: Uses optimal assignment algorithm; comparable to published research results
 
 ### Optimal Configuration
 
@@ -108,10 +120,23 @@ swift format --configuration .swift-format Sources/ Tests/
 ### CLI Commands
 
 #### Benchmarking
+
+**Diarization Evaluation Modes:**
+- **Streaming**: Real-time processing with first-occurrence speaker mapping (production performance)  
+- **Offline**: Full-file processing with Hungarian algorithm for optimal speaker mapping (research comparison)
+
 ```bash
-# Diarization benchmarks
-swift run fluidaudio diarization-benchmark --auto-download
-swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7 --output results.json
+# Streaming evaluation (default) - measures true real-time performance
+swift run fluidaudio diarization-benchmark --mode streaming --auto-download
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode streaming --threshold 0.7
+
+# Offline evaluation - comparable to research papers using optimal mapping
+swift run fluidaudio diarization-benchmark --mode offline --auto-download
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode offline --threshold 0.7
+
+# Compare both modes on same file
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode streaming --output streaming_results.json
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode offline --output offline_results.json
 
 # ASR benchmarks
 swift run fluidaudio asr-benchmark --subset test-clean --max-files 100

@@ -20,22 +20,30 @@ swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 
 ## Diarization
 
+**Evaluation Modes:**
+- `--mode streaming`: Real-time processing with first-occurrence mapping (production performance)
+- `--mode offline`: Full-file processing with Hungarian algorithm (research comparison)
+
 ```bash
-# Run AMI benchmark (auto-download dataset)
-swift run fluidaudio diarization-benchmark --auto-download
+# Streaming evaluation (default) - production performance
+swift run fluidaudio diarization-benchmark --mode streaming --auto-download
 
-# Tune threshold and save results
-swift run fluidaudio diarization-benchmark --threshold 0.7 --output results.json
+# Offline evaluation - comparable to research papers  
+swift run fluidaudio diarization-benchmark --mode offline --auto-download
 
-# Quick test on a single AMI file
-swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.8
+# Compare both modes on same file
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode streaming --output streaming.json
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode offline --output offline.json
 
-# Real-time-ish streaming benchmark (~3s chunks with 2s overlap)
-swift run fluidaudio diarization-benchmark --single-file ES2004a \
+# Tune threshold and save results (streaming)
+swift run fluidaudio diarization-benchmark --mode streaming --threshold 0.7 --output results.json
+
+# Real-time streaming benchmark (~3s chunks with 2s overlap)
+swift run fluidaudio diarization-benchmark --mode streaming --single-file ES2004a \
   --chunk-seconds 3 --overlap-seconds 2
 
-# Balanced throughput/quality (~10s chunks with 5s overlap)
-swift run fluidaudio diarization-benchmark --dataset ami-sdm \
+# Balanced streaming throughput/quality (~10s chunks with 5s overlap)
+swift run fluidaudio diarization-benchmark --mode streaming --dataset ami-sdm \
   --chunk-seconds 10 --overlap-seconds 5
 ```
 

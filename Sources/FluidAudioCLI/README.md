@@ -77,29 +77,42 @@ swift run fluidaudio multi-stream audio1.wav audio2.wav --debug
 - `--help, -h`: Show help message
 
 ### 4. `diarization-benchmark` - Speaker Diarization Benchmark
-Run comprehensive benchmarks on evaluation datasets.
+Run comprehensive benchmarks on evaluation datasets with two evaluation modes.
+
+**Evaluation Modes:**
+- `--mode streaming`: Real-time processing with first-occurrence mapping (production performance)
+- `--mode offline`: Full-file processing with Hungarian algorithm (research comparison)
 
 ```bash
-# Run on AMI dataset with auto-download
-swift run fluidaudio diarization-benchmark --auto-download
+# Streaming evaluation (default) - production performance
+swift run fluidaudio diarization-benchmark --mode streaming --auto-download
 
-# Test single file
-swift run fluidaudio diarization-benchmark --single-file ES2004a --threshold 0.7
+# Offline evaluation - comparable to research papers
+swift run fluidaudio diarization-benchmark --mode offline --auto-download
 
-# Run on specific dataset
-swift run fluidaudio diarization-benchmark --dataset ami-sdm --max-files 10
+# Compare both modes on same file
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode streaming --output streaming.json
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode offline --output offline.json
 
-# Save results to file
-swift run fluidaudio diarization-benchmark --output benchmark_results.json
+# Streaming with custom chunk settings
+swift run fluidaudio diarization-benchmark --mode streaming --single-file ES2004a \
+  --chunk-seconds 3 --overlap-seconds 2
+
+# Full dataset benchmark
+swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --max-files 10
 ```
 
 **Options:**
+- `--mode <type>`: Evaluation mode: `streaming` (default) or `offline`
 - `--dataset <name>`: Dataset to use (ami-sdm, ami-mdm, voxconverse)
 - `--auto-download`: Automatically download required datasets
 - `--single-file <id>`: Test a single file (e.g., ES2004a)
 - `--threshold <value>`: Clustering threshold (default: 0.7)
+- `--chunk-seconds <sec>`: Chunk duration for streaming (default: 10.0, ignored in offline)
+- `--overlap-seconds <sec>`: Overlap between chunks (default: 0.0, ignored in offline)
 - `--max-files <n>`: Maximum files to process
 - `--output <file>`: Save results to JSON file
+- `--csv <file>`: Save results to CSV file
 - `--verbose`: Show detailed progress
 
 ### 5. `vad-benchmark` - Voice Activity Detection Benchmark

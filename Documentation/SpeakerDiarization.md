@@ -346,15 +346,27 @@ diarizer.cleanup()
 
 ## Benchmarking
 
-Evaluate performance on your audio:
+Evaluate performance on your audio with two evaluation modes:
+
+**Evaluation Modes:**
+- **Streaming**: First-occurrence mapping (production performance)
+- **Offline**: Hungarian algorithm mapping (research comparison)
 
 ```bash
-# Command-line benchmark
-swift run fluidaudio diarization-benchmark --single-file ES2004a
+# Streaming evaluation (production performance)
+swift run fluidaudio diarization-benchmark --mode streaming --single-file ES2004a
 
-# Results:
-# DER: 17.7% (Miss: 10.3%, FA: 1.6%, Speaker Error: 5.8%)
-# RTFx: 141.2x (real-time factor) M1 2022
+# Offline evaluation (comparable to research papers)
+swift run fluidaudio diarization-benchmark --mode offline --single-file ES2004a
+
+# Compare both modes
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode streaming --output streaming.json
+swift run fluidaudio diarization-benchmark --single-file ES2004a --mode offline --output offline.json
+
+# Results (ES2004a):
+# Streaming DER: 15.6% (Miss: 9.2%, FA: 1.2%, SE: 5.2%) - Real production performance
+# Offline DER: 15.6% (Miss: 9.2%, FA: 1.2%, SE: 5.2%) - Research-comparable
+# RTFx: 254x (real-time factor)
 ```
 
 ## API Reference

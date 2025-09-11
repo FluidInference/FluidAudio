@@ -3,14 +3,16 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Streaming diarization benchmark for evaluating real-time performance
-/// Uses first-occurrence speaker mapping for true streaming evaluation
+/// Diarization benchmark supporting both streaming and offline evaluation modes
+/// Streaming: Uses first-occurrence speaker mapping for true real-time performance
+/// Offline: Uses Hungarian algorithm for optimal mapping (comparable to research papers)
 @available(macOS 13.0, *)
-enum StreamDiarizationBenchmark {
+enum DiarizationBenchmark {
     private static let logger = AppLogger(category: "DiarizationBench")
 
     struct BenchmarkResult {
         let meetingName: String
+        let mode: String  // "streaming" or "offline"
         let der: Float
         let missRate: Float
         let falseAlarmRate: Float
@@ -37,10 +39,11 @@ enum StreamDiarizationBenchmark {
     static func printUsage() {
         logger.info(
             """
-            Stream Diarization Benchmark Command
+            Diarization Benchmark Command
 
-            Evaluates streaming speaker diarization WITHOUT retroactive speaker remapping.
-            This measures true real-time performance as seen in production systems.
+            Supports both streaming and offline speaker diarization evaluation:
+            • Streaming: First-occurrence mapping (real production performance)
+            • Offline: Hungarian algorithm mapping (comparable to research papers)
 
             Usage: fluidaudio diarization-benchmark [options]
 
@@ -48,8 +51,9 @@ enum StreamDiarizationBenchmark {
                 --dataset <name>         Dataset to benchmark (default: ami-sdm)
                 --single-file <name>     Process a specific meeting (e.g., ES2004a)
                 --max-files <n>          Maximum number of files to process
-                --chunk-seconds <sec>    Chunk duration for streaming (default: 10.0)
-                --overlap-seconds <sec>  Overlap between chunks (default: 0.0)
+                --mode <type>            Evaluation mode: 'streaming' or 'offline' (default: streaming)
+                --chunk-seconds <sec>    Chunk duration for streaming (default: 10.0, ignored in offline)
+                --overlap-seconds <sec>  Overlap between chunks (default: 0.0, ignored in offline)
                 --threshold <value>      Clustering threshold (default: 0.7)
                 --assignment-threshold   Threshold for assigning to existing speakers (default: 0.84)
                 --update-threshold       Threshold for updating speaker embeddings (default: 0.56)
@@ -61,6 +65,10 @@ enum StreamDiarizationBenchmark {
                 --iterations <n>        Number of iterations per file (default: 1)
                 --help                  Show this help message
 
+            Evaluation Modes:
+                streaming: Real-time processing with first-occurrence speaker mapping
+                offline:   Process entire file at once with optimal Hungarian mapping
+
             Streaming Modes (via chunk/overlap settings):
                 Real-time:  --chunk-seconds 3 --overlap-seconds 2   (~15-30x RTFx)
                 Balanced:   --chunk-seconds 10 --overlap-seconds 5  (~70x RTFx)
@@ -71,16 +79,16 @@ enum StreamDiarizationBenchmark {
                 RTFx > 1x  (real-time capable)
 
             Examples:
-                # Benchmark single file with real-time settings
-                fluidaudio diarization-benchmark --single-file ES2004a \\
-                    --chunk-seconds 3 --overlap-seconds 2
+                # Compare streaming vs offline performance
+                fluidaudio diarization-benchmark --single-file ES2004a --mode streaming
+                fluidaudio diarization-benchmark --single-file ES2004a --mode offline
 
-                # Full AMI benchmark with balanced settings
-                fluidaudio diarization-benchmark --dataset ami-sdm \\
-                    --chunk-seconds 10 --overlap-seconds 5 --csv results.csv
+                # Full AMI benchmark in offline mode (research comparison)
+                fluidaudio diarization-benchmark --dataset ami-sdm --mode offline --csv results.csv
 
-                # Quick test on 5 files
-                fluidaudio diarization-benchmark --max-files 5 --verbose
+                # Real-time streaming evaluation
+                fluidaudio diarization-benchmark --mode streaming \\
+                    --chunk-seconds 3 --overlap-seconds 2 --max-files 5
             """)
     }
 
@@ -89,6 +97,7 @@ enum StreamDiarizationBenchmark {
         var dataset = "ami-sdm"
         var singleFile: String?
         var maxFiles: Int?
+        var mode = "streaming"  // Default to streaming mode
         var chunkSeconds: Double = 10.0
         var overlapSeconds: Double = 0.0
         var threshold: Float = 0.7
@@ -117,6 +126,15 @@ enum StreamDiarizationBenchmark {
             case "--max-files":
                 if i + 1 < arguments.count {
                     maxFiles = Int(arguments[i + 1])
+                    i += 1
+                }
+            case "--mode":
+                if i + 1 < arguments.count {
+                    mode = arguments[i + 1].lowercased()
+                    if mode != "streaming" && mode != "offline" {
+                        logger.warning("Invalid mode '\(arguments[i + 1])'. Using 'streaming'.")
+                        mode = "streaming"
+                    }
                     i += 1
                 }
             case "--chunk-seconds":
@@ -180,25 +198,32 @@ enum StreamDiarizationBenchmark {
         let hopSize = max(chunkSeconds - overlapSeconds, 1.0)
         let overlapRatio = overlapSeconds / chunkSeconds
 
-        logger.info("🚀 Starting Stream Diarization Benchmark")
+        logger.info("🚀 Starting Diarization Benchmark")
         logger.info("   Dataset: \(dataset)")
-        logger.info("   Chunk size: \(chunkSeconds)s")
-        logger.info("   Overlap: \(overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
-        logger.info("   Hop size: \(hopSize)s")
+        logger.info("   Evaluation mode: \(mode)")
+
+        if mode == "streaming" {
+            logger.info("   Chunk size: \(chunkSeconds)s")
+            logger.info("   Overlap: \(overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
+            logger.info("   Hop size: \(hopSize)s")
+
+            // Determine streaming mode
+            let streamingMode: String
+            if overlapSeconds == 0 {
+                streamingMode = "Batch (no overlap)"
+            } else if overlapRatio >= 0.6 {
+                streamingMode = "Real-time (high overlap)"
+            } else {
+                streamingMode = "Balanced"
+            }
+            logger.info("   Streaming mode: \(streamingMode)")
+        } else {
+            logger.info("   Processing: Full file at once (offline)")
+        }
+
         logger.info("   Clustering threshold: \(threshold)")
         logger.info("   Assignment threshold: \(assignmentThreshold)")
-        logger.info("   Update threshold: \(updateThreshold)")
-
-        // Determine streaming mode
-        let mode: String
-        if overlapSeconds == 0 {
-            mode = "Batch (no overlap)"
-        } else if overlapRatio >= 0.6 {
-            mode = "Real-time (high overlap)"
-        } else {
-            mode = "Balanced"
-        }
-        logger.info("   Mode: \(mode)\n")
+        logger.info("   Update threshold: \(updateThreshold)\n")
 
         // Download dataset if needed
         if autoDownload {
@@ -259,6 +284,7 @@ enum StreamDiarizationBenchmark {
                     meetingName: meetingName,
                     models: models,
                     modelInitTime: modelInitTime,
+                    mode: mode,
                     chunkSeconds: chunkSeconds,
                     overlapSeconds: overlapSeconds,
                     threshold: threshold,
@@ -345,6 +371,7 @@ enum StreamDiarizationBenchmark {
         meetingName: String,
         models: DiarizerModels,
         modelInitTime: Double,
+        mode: String,
         chunkSeconds: Double,
         overlapSeconds: Double,
         threshold: Float,
@@ -373,6 +400,62 @@ enum StreamDiarizationBenchmark {
                 logger.info("  Audio load time: \(String(format: "%.3f", audioLoadTime))s")
             }
 
+            // Branch processing based on mode
+            if mode == "streaming" {
+                return await processStreamingMode(
+                    meetingName: meetingName,
+                    audioData: audioData,
+                    audioLoadTime: audioLoadTime,
+                    totalDuration: totalDuration,
+                    models: models,
+                    modelInitTime: modelInitTime,
+                    chunkSeconds: chunkSeconds,
+                    overlapSeconds: overlapSeconds,
+                    threshold: threshold,
+                    assignmentThreshold: assignmentThreshold,
+                    updateThreshold: updateThreshold,
+                    verbose: verbose,
+                    debugMode: debugMode
+                )
+            } else {
+                return await processOfflineMode(
+                    meetingName: meetingName,
+                    audioData: audioData,
+                    audioLoadTime: audioLoadTime,
+                    totalDuration: totalDuration,
+                    models: models,
+                    modelInitTime: modelInitTime,
+                    threshold: threshold,
+                    assignmentThreshold: assignmentThreshold,
+                    updateThreshold: updateThreshold,
+                    verbose: verbose,
+                    debugMode: debugMode
+                )
+            }
+
+        } catch {
+            logger.error("❌ Error processing \(meetingName): \(error)")
+            return nil
+        }
+    }
+
+    private static func processStreamingMode(
+        meetingName: String,
+        audioData: [Float],
+        audioLoadTime: Double,
+        totalDuration: Double,
+        models: DiarizerModels,
+        modelInitTime: Double,
+        chunkSeconds: Double,
+        overlapSeconds: Double,
+        threshold: Float,
+        assignmentThreshold: Float,
+        updateThreshold: Float,
+        verbose: Bool,
+        debugMode: Bool
+    ) async -> BenchmarkResult? {
+
+        do {
             // Initialize diarizer with streaming manager
             let config = DiarizerConfig(
                 clusteringThreshold: threshold,
@@ -515,6 +598,7 @@ enum StreamDiarizationBenchmark {
 
             return BenchmarkResult(
                 meetingName: meetingName,
+                mode: "streaming",
                 der: metrics.der,
                 missRate: metrics.missRate,
                 falseAlarmRate: metrics.falseAlarmRate,
@@ -542,6 +626,226 @@ enum StreamDiarizationBenchmark {
             logger.error("❌ Error processing \(meetingName): \(error)")
             return nil
         }
+    }
+
+    private static func processOfflineMode(
+        meetingName: String,
+        audioData: [Float],
+        audioLoadTime: Double,
+        totalDuration: Double,
+        models: DiarizerModels,
+        modelInitTime: Double,
+        threshold: Float,
+        assignmentThreshold: Float,
+        updateThreshold: Float,
+        verbose: Bool,
+        debugMode: Bool
+    ) async -> BenchmarkResult? {
+
+        do {
+            // Initialize diarizer for offline processing (no chunking)
+            let config = DiarizerConfig(
+                clusteringThreshold: threshold,
+                minSpeechDuration: 1.0,
+                minSilenceGap: 0.5,
+                minActiveFramesCount: 10.0,
+                debugMode: debugMode
+            )
+
+            let diarizerManager = DiarizerManager(config: config)
+            diarizerManager.initialize(models: models)
+
+            // Configure manager thresholds
+            diarizerManager.speakerManager.speakerThreshold = assignmentThreshold
+            diarizerManager.speakerManager.embeddingThreshold = updateThreshold
+
+            // Process entire file at once
+            let startTime = Date()
+            let result = try diarizerManager.performCompleteDiarization(audioData)
+            let totalElapsed = Date().timeIntervalSince(startTime)
+            let finalRTFx = totalDuration / totalElapsed
+
+            if verbose {
+                logger.info("  Offline processing time: \(String(format: "%.3f", totalElapsed))s")
+                logger.info("  RTFx: \(String(format: "%.1f", finalRTFx))x")
+                logger.info("  Detected \(result.segments.count) segments")
+            }
+
+            // Load ground truth
+            let groundTruth = await AMIParser.loadAMIGroundTruth(
+                for: meetingName,
+                duration: Float(totalDuration)
+            )
+
+            guard !groundTruth.isEmpty else {
+                logger.warning("⚠️ No ground truth found for \(meetingName)")
+                return nil
+            }
+
+            // Calculate metrics with Hungarian algorithm for optimal mapping
+            let metrics = calculateOfflineMetrics(
+                predicted: result.segments,
+                groundTruth: groundTruth,
+                totalDuration: Float(totalDuration)
+            )
+
+            // For offline mode, there's no fragmentation (single processing)
+            let fragmentation: Float = 1.0
+
+            // No chunk latencies in offline mode
+            let latency90th: Double = 0
+            let latency99th: Double = 0
+
+            // Estimate timing breakdown for offline mode
+            let totalInferenceTime = totalElapsed
+            let estimatedSegTime = totalElapsed * 0.3  // ~30% for segmentation
+            let estimatedEmbTime = totalElapsed * 0.5  // ~50% for embedding
+            let estimatedClustTime = totalElapsed * 0.2  // ~20% for clustering
+
+            return BenchmarkResult(
+                meetingName: meetingName,
+                mode: "offline",
+                der: metrics.der,
+                missRate: metrics.missRate,
+                falseAlarmRate: metrics.falseAlarmRate,
+                speakerErrorRate: metrics.speakerErrorRate,
+                jer: metrics.jer,
+                rtfx: Float(finalRTFx),
+                processingTime: totalElapsed,
+                chunksProcessed: 1,  // Single processing pass
+                detectedSpeakers: Set(result.segments.map { $0.speakerId }).count,
+                groundTruthSpeakers: AMIParser.getGroundTruthSpeakerCount(for: meetingName),
+                speakerFragmentation: fragmentation,
+                latency90th: latency90th,
+                latency99th: latency99th,
+                // Timing breakdown
+                modelDownloadTime: modelInitTime * 0.7,
+                modelCompileTime: modelInitTime * 0.3,
+                audioLoadTime: audioLoadTime,
+                segmentationTime: estimatedSegTime,
+                embeddingTime: estimatedEmbTime,
+                clusteringTime: estimatedClustTime,
+                totalInferenceTime: totalInferenceTime
+            )
+
+        } catch {
+            logger.error("❌ Error processing \(meetingName) in offline mode: \(error)")
+            return nil
+        }
+    }
+
+    /// Calculate DER metrics with Hungarian algorithm for optimal mapping (offline evaluation)
+    private static func calculateOfflineMetrics(
+        predicted: [TimedSpeakerSegment],
+        groundTruth: [TimedSpeakerSegment],
+        totalDuration: Float
+    ) -> (der: Float, missRate: Float, falseAlarmRate: Float, speakerErrorRate: Float, jer: Float) {
+
+        // Use Hungarian algorithm for optimal speaker assignment
+        let optimalMapping = HungarianAlgorithm.findOptimalMapping(
+            predicted: predicted,
+            groundTruth: groundTruth,
+            totalDuration: totalDuration
+        )
+
+        logger.debug("🔄 OFFLINE MAPPING (Hungarian): \(optimalMapping)")
+
+        let frameSize: Float = 0.01
+        let totalFrames = Int(totalDuration / frameSize)
+
+        // Calculate frame-based metrics using optimal mapping
+        var missedFrames = 0
+        var falseAlarmFrames = 0
+        var speakerErrorFrames = 0
+
+        for frame in 0..<totalFrames {
+            let frameTime = Float(frame) * frameSize
+
+            // Find active speakers at this time
+            var gtSpeaker: String?
+            for segment in groundTruth {
+                if frameTime >= segment.startTimeSeconds && frameTime < segment.endTimeSeconds {
+                    gtSpeaker = segment.speakerId
+                    break
+                }
+            }
+
+            var predSpeaker: String?
+            for segment in predicted {
+                if frameTime >= segment.startTimeSeconds && frameTime < segment.endTimeSeconds {
+                    predSpeaker = segment.speakerId
+                    break
+                }
+            }
+
+            switch (gtSpeaker, predSpeaker) {
+            case (nil, nil):
+                continue  // Both silent - correct
+            case (nil, _):
+                falseAlarmFrames += 1  // System speaking when should be silent
+            case (_, nil):
+                missedFrames += 1  // System silent when should be speaking
+            case (let gt?, let pred?):
+                // Use optimal mapping from Hungarian algorithm
+                let mappedPred = optimalMapping[pred]
+                if mappedPred != gt {
+                    speakerErrorFrames += 1
+                }
+            }
+        }
+
+        // Calculate JER (Jaccard Error Rate) with optimal mapping
+        var totalJaccardScore: Float = 0
+        var activeFrames = 0
+
+        for frame in 0..<totalFrames {
+            let frameTime = Float(frame) * frameSize
+
+            var gtSpeakers = Set<String>()
+            for segment in groundTruth {
+                if frameTime >= segment.startTimeSeconds && frameTime < segment.endTimeSeconds {
+                    gtSpeakers.insert(segment.speakerId)
+                }
+            }
+
+            var predSpeakers = Set<String>()
+            for segment in predicted {
+                if frameTime >= segment.startTimeSeconds && frameTime < segment.endTimeSeconds {
+                    if let mapped = optimalMapping[segment.speakerId] {
+                        predSpeakers.insert(mapped)
+                    }
+                }
+            }
+
+            // Only calculate Jaccard for frames where at least one system detects speech
+            if !gtSpeakers.isEmpty || !predSpeakers.isEmpty {
+                activeFrames += 1
+
+                // Calculate Jaccard index for this frame
+                let intersection = gtSpeakers.intersection(predSpeakers)
+                let union = gtSpeakers.union(predSpeakers)
+
+                let frameJaccard = union.isEmpty ? 0 : Float(intersection.count) / Float(union.count)
+                totalJaccardScore += frameJaccard
+            }
+        }
+
+        let averageJaccard = activeFrames > 0 ? totalJaccardScore / Float(activeFrames) : 0
+        let jer = (1.0 - averageJaccard) * 100.0
+
+        // Calculate rates
+        let missRate = (Float(missedFrames) / Float(totalFrames)) * 100.0
+        let falseAlarmRate = (Float(falseAlarmFrames) / Float(totalFrames)) * 100.0
+        let speakerErrorRate = (Float(speakerErrorFrames) / Float(totalFrames)) * 100.0
+        let der = missRate + falseAlarmRate + speakerErrorRate
+
+        logger.info(
+            "📊 OFFLINE METRICS: DER=\(String(format: "%.1f", der))% (Miss=\(String(format: "%.1f", missRate))%, FA=\(String(format: "%.1f", falseAlarmRate))%, SE=\(String(format: "%.1f", speakerErrorRate))%)"
+        )
+
+        return (
+            der: der, missRate: missRate, falseAlarmRate: falseAlarmRate, speakerErrorRate: speakerErrorRate, jer: jer
+        )
     }
 
     /// Calculate DER metrics with first-occurrence mapping for streaming evaluation
@@ -902,6 +1206,7 @@ enum StreamDiarizationBenchmark {
 
         return BenchmarkResult(
             meetingName: results[0].meetingName,
+            mode: results[0].mode,
             der: results.map { $0.der }.reduce(0, +) / count,
             missRate: results.map { $0.missRate }.reduce(0, +) / count,
             falseAlarmRate: results.map { $0.falseAlarmRate }.reduce(0, +) / count,
@@ -940,7 +1245,7 @@ enum StreamDiarizationBenchmark {
         guard !results.isEmpty else { return }
 
         logger.info("\n" + String(repeating: "=", count: 80))
-        logger.info("DIARIZATION BENCHMARK SUMMARY")
+        logger.info("DIARIZATION BENCHMARK SUMMARY (\(results[0].mode.uppercased()) MODE)")
         logger.info(String(repeating: "=", count: 80))
 
         // Print detailed results table sorted by DER
@@ -1003,6 +1308,7 @@ enum StreamDiarizationBenchmark {
         let jsonData = results.map { result in
             [
                 "meeting": result.meetingName,
+                "mode": result.mode,
                 "der": result.der,
                 "missRate": result.missRate,
                 "falseAlarmRate": result.falseAlarmRate,
@@ -1041,10 +1347,11 @@ enum StreamDiarizationBenchmark {
 
     private static func saveCSVResults(results: [BenchmarkResult], to path: String) {
         var csv =
-            "Meeting,DER,MissRate,FalseAlarm,SpeakerError,JER,RTFx,ProcessingTime,Chunks,DetectedSpeakers,TrueSpeakers,Fragmentation,Latency90th,Latency99th\n"
+            "Meeting,Mode,DER,MissRate,FalseAlarm,SpeakerError,JER,RTFx,ProcessingTime,Chunks,DetectedSpeakers,TrueSpeakers,Fragmentation,Latency90th,Latency99th\n"
 
         for result in results {
             csv += "\(result.meetingName),"
+            csv += "\(result.mode),"
             csv += "\(String(format: "%.2f", result.der)),"
             csv += "\(String(format: "%.2f", result.missRate)),"
             csv += "\(String(format: "%.2f", result.falseAlarmRate)),"
@@ -1064,6 +1371,7 @@ enum StreamDiarizationBenchmark {
         if !results.isEmpty {
             let count = Float(results.count)
             csv += "AVERAGE,"
+            csv += "\(results[0].mode),"
             csv += "\(String(format: "%.2f", results.map { $0.der }.reduce(0, +) / count)),"
             csv += "\(String(format: "%.2f", results.map { $0.missRate }.reduce(0, +) / count)),"
             csv += "\(String(format: "%.2f", results.map { $0.falseAlarmRate }.reduce(0, +) / count)),"

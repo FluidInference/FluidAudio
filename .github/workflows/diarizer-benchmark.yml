@@ -138,11 +138,11 @@ jobs:
             comment += `| **Total** | **${totalTime.toFixed(3)}** | **100** | **Full pipeline** |\n\n`;
 
             comment += '### Speaker Diarization Research Comparison\n';
-            comment += '_Research baselines typically achieve 18-30% DER on standard datasets_\n\n';
+            comment += '_Comparison with research baselines (offline mode uses Hungarian algorithm for fair comparison)_\n\n';
             comment += '| Method | DER | Notes |\n';
             comment += '|--------|-----|-------|\n';
-            comment += '| **FluidAudio** | **' + der.toFixed(1) + '%** | **On-device CoreML** |\n';
-            comment += '| Research baseline | 18-30% | Standard dataset performance |\n\n';
+            comment += '| **FluidAudio (Streaming)** | **' + der.toFixed(1) + '%** | **On-device CoreML, real-time** |\n';
+            comment += '| Research baseline | 18-30% | Offline with optimal mapping |\n\n';
 
             comment += '**Note**: RTFx shown above is from GitHub Actions runner. On Apple Silicon with ANE:\n';
             comment += '- **M2 MacBook Air (2022)**: Runs at **150 RTFx** real-time\n';

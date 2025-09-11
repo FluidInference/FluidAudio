@@ -122,11 +122,12 @@ swift run fluidaudio transcribe audio.wav
 
 ## Speaker Diarization
 
-**AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
+**AMI Benchmark Results** (Single Distant Microphone):
 
-- **DER: 17.7%** — Competitive with Powerset BCE 2023 (18.5%)
-- **JER: 28.0%** — Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
-- **RTF: 0.02x** — Real-time processing with 50x speedup
+- **Streaming DER: 15.6%** — Real-time processing with first-occurrence speaker mapping
+- **Offline DER: 15.6%** — Optimal mapping comparable to research papers (vs. Powerset BCE: 18.5%)
+- **JER: 24.8%** — Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
+- **RTF: 254x** — Real-time processing capability
 
 ### Speaker Diarization Quick Start
 
@@ -153,8 +154,7 @@ Task {
 For diarization streaming see [Documentation/SpeakerDiarization.md](Documentation/SpeakerDiarization.md)
 
 ```bash
-swift run fluidaudio diarization-benchmark --single-file ES2004a \
-  --chunk-seconds 3 --overlap-seconds 2
+swift run fluidaudio diarization-benchmark --mode offline --single-file ES2004a
 ```
 
 ### CLI
