@@ -89,20 +89,13 @@ struct AMIParser {
         ]
 
         // Add comprehensive debug logging for path resolution
-        logger.debug("🔍 DEBUG: Searching for AMI annotations in \(possiblePaths.count) locations:")
-        logger.debug("   Current working directory: \(FileManager.default.currentDirectoryPath)")
-
         var amiDir: URL?
-        for (index, path) in possiblePaths.enumerated() {
+        for (_, path) in possiblePaths.enumerated() {
             let segmentsDir = path.appendingPathComponent("segments")
             let meetingsFile = path.appendingPathComponent("corpusResources/meetings.xml")
 
             let segmentsExists = FileManager.default.fileExists(atPath: segmentsDir.path)
             let meetingsExists = FileManager.default.fileExists(atPath: meetingsFile.path)
-
-            logger.debug("   \(index + 1). \(path.path)")
-            logger.debug("      - segments/: \(segmentsExists ? "✅" : "❌") (\(segmentsDir.path))")
-            logger.debug("      - meetings.xml: \(meetingsExists ? "✅" : "❌") (\(meetingsFile.path))")
 
             if segmentsExists && meetingsExists {
                 logger.info("      - 🎯 SELECTED: This path will be used")

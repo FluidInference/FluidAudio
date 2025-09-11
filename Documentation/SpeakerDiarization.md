@@ -80,6 +80,15 @@ for audioSamples in audioStream {
 }
 ```
 
+Notes:
+
+- Keep one `DiarizerManager` instance per stream so `SpeakerManager` maintains ID consistency.
+- Always rebase per-chunk timestamps by `(chunkStartSample / sampleRate)`.
+- Provide 16 kHz mono Float32 samples; pad final chunk to the model window.
+- Tune `speakerThreshold` and `embeddingThreshold` to trade off ID stability vs. sensitivity.
+
+**Speaker Enrollment:** The `Speaker` class includes a `name` field for enrollment workflows. When users introduce themselves ("My name is Alice"), update the speaker's name from the default (e.g. "Speaker_1") to enable personalized identification.
+
 ### Chunk Size Considerations
 
 The `performCompleteDiarization` function accepts audio of any length, but accuracy varies:

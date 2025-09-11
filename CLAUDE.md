@@ -41,7 +41,7 @@ FluidAudio is a comprehensive Swift framework for local, low-latency audio proce
 - **Swift Format**: This project uses swift-format for consistent code style
 - **Configuration**: See `.swift-format` for style rules
 - **Auto-formatting**: PRs are automatically checked for formatting compliance
-- **Local formatting**: Run `swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/`
+- **Local formatting**: Run `swift format --in-place --recursive --configuration .swift-format Sources/ Tests/`
 
 ## Current Performance Status
 
@@ -96,13 +96,13 @@ swift package clean                   # Clean build cache
 ### Code Quality
 ```bash
 # Format code (requires Swift 6+ for development)
-swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/
+swift format --in-place --recursive --configuration .swift-format Sources/ Tests/
 
 # Check formatting without modifying
-swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/
+swift format lint --recursive --configuration .swift-format Sources/ Tests/
 
 # Verify formatting compliance (CI-style check)
-swift format --configuration .swift-format Sources/ Tests/ Examples/
+swift format --configuration .swift-format Sources/ Tests/
 ```
 
 ### CLI Commands
