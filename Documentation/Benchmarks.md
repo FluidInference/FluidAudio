@@ -36,11 +36,35 @@ AVERAGE                   | 5.6    | 2.3    | 142.6   | 6545.5s  | 607       | 2
    Overall RTFx: 109.6x (19452.5s / 177.5s)
 ```
 
+## Voice Activity Detection
 
-## Speaker Diarization
+![assets/vad-graph.png](assets/vad-graph.png)
 
-https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml 
+Dataset: https://github.com/Lab41/VOiCES-subset
 
 ```text
-
+swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.5
+...
+⏱️ Timing Statistics:
+[23:26:10.167] [INFO] [VAD]    Total processing time: 2.76s
+[23:26:10.167] [INFO] [VAD]    Total audio duration: 350.46s
+[23:26:10.167] [INFO] [VAD]    RTFx: 126.9x faster than real-time
+[23:26:10.167] [INFO] [VAD]    Audio loading time: 0.01s (0.2%)
+[23:26:10.167] [INFO] [VAD]    VAD inference time: 2.75s (99.7%)
+[23:26:10.167] [INFO] [VAD]    Average per file: 0.115s
+[23:26:10.167] [INFO] [VAD]    Min per file: 0.022s
+[23:26:10.167] [INFO] [VAD]    Max per file: 0.135s
+[23:26:10.167] [INFO] [VAD]
+📊 VAD Benchmark Results:
+[23:26:10.167] [INFO] [VAD]    Precision: 100.0%
+[23:26:10.167] [INFO] [VAD]    Accuracy: 100.0%
+[23:26:10.167] [INFO] [VAD]    Recall: 100.0%
+[23:26:10.167] [INFO] [VAD]    F1-Score: 100.0%
+[23:26:10.167] [INFO] [VAD]    Total Time: 2.76s
+[23:26:10.167] [INFO] [VAD]    RTFx: 126.9x faster than real-time
+[23:26:10.167] [INFO] [VAD]    Files Processed: 24
+[23:26:10.167] [INFO] [VAD]    Avg Time per File: 0.115s
 ```
+
+
+## Speaker Diarization
