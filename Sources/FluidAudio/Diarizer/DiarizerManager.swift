@@ -245,8 +245,6 @@ public final class DiarizerManager {
             throw DiarizerError.notInitialized
         }
 
-        logger.debug("Using EmbeddingExtractor for embedding extraction")
-
         var masks: [[Float]] = []
         let numSpeakers = slidingFeature.data[0][0].count
         let numFrames = slidingFeature.data[0].count
