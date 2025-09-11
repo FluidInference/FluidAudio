@@ -103,7 +103,7 @@ public actor StreamingAsrManager {
             for await pcmBuffer in self.inputSequence {
                 do {
                     // Convert to 16kHz mono
-                    let samples = try await audioConverter.convertToAsrFormat(pcmBuffer)
+                    let samples = try await audioConverter.convertToAsrFormat(pcmBuffer, streaming: true)
 
                     // Append to raw sample buffer and attempt windowed processing
                     await self.appendSamplesAndProcess(samples)

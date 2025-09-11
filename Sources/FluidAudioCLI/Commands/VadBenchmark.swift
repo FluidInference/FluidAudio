@@ -518,9 +518,6 @@ struct VadBenchmark {
         let format = audioFile.processingFormat
         let frameCount = AVAudioFrameCount(audioFile.length)
 
-        // Early exit if already 16kHz - avoid resampling overhead
-        let needsResampling = format.sampleRate != 16000
-
         // Use smaller buffer size for GitHub Actions memory constraints
         let bufferSize: AVAudioFrameCount = min(frameCount, 4096)
 
@@ -528,37 +525,32 @@ struct VadBenchmark {
             throw NSError(domain: "AudioError", code: 1, userInfo: nil)
         }
 
+        // Reuse a single converter across chunks in streaming mode for best continuity
+        let converter = AudioConverter()
         var allSamples: [Float] = []
-        allSamples.reserveCapacity(Int(frameCount))
+        allSamples.reserveCapacity(Int(Double(frameCount) * (16000.0 / max(format.sampleRate, 1))))
 
-        // Read file in chunks to reduce memory pressure
+        // Read file in chunks and convert each chunk in streaming mode
         var remainingFrames = frameCount
-
         while remainingFrames > 0 {
             let framesToRead = min(remainingFrames, bufferSize)
-            buffer.frameLength = 0  // Reset buffer
-
+            buffer.frameLength = 0
             try audioFile.read(into: buffer, frameCount: framesToRead)
-
-            guard let floatData = buffer.floatChannelData?[0] else {
-                throw NSError(domain: "AudioError", code: 2, userInfo: nil)
-            }
 
             let actualFrameCount = Int(buffer.frameLength)
             if actualFrameCount == 0 { break }
 
-            // Direct append without intermediate array creation
-            let bufferPointer = UnsafeBufferPointer(start: floatData, count: actualFrameCount)
-            allSamples.append(contentsOf: bufferPointer)
+            let chunkSamples = try await converter.convertToAsrFormat(buffer, streaming: true)
+            if !chunkSamples.isEmpty {
+                allSamples.append(contentsOf: chunkSamples)
+            }
 
             remainingFrames -= AVAudioFrameCount(actualFrameCount)
         }
 
-        // Resample to 16kHz if needed
-        if needsResampling {
-            allSamples = try await AudioProcessor.resampleAudio(
-                allSamples, from: format.sampleRate, to: 16000)
-        }
+        // Drain any remaining samples from the converter at end-of-stream
+        let tail = try await converter.finishStreamingConversion()
+        if !tail.isEmpty { allSamples.append(contentsOf: tail) }
 
         return allSamples
     }
