@@ -2,7 +2,12 @@ import AVFoundation
 import Foundation
 import OSLog
 
-/// Converts audio buffers to the format required by ASR (16kHz, mono, Float32)
+/// Converts audio buffers to the format required by ASR (16kHz, mono, Float32).
+///
+/// Implementation notes:
+/// - Uses `AVAudioConverter` for all sample-rate, sample-format, and channel-count conversions.
+/// - Avoids any manual resampling; only raw sample extraction occurs after conversion.
+/// - Supports streaming by retaining the converter between calls and deferring drain until finish.
 @available(macOS 13.0, iOS 16.0, *)
 public actor AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
@@ -176,8 +181,7 @@ public actor AudioConverter {
                 if drainStatus == .endOfStream { break }
                 // If converter reports inputRanDry or haveData unexpectedly, continue until endOfStream
             }
-        }
-        catch {
+        } catch {
             throw error
         }
 
