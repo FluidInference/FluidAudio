@@ -69,6 +69,12 @@ final public class AudioConverter {
     /// Convert a buffer to the target format.
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
         let inputFormat = buffer.format
+        
+        // For >2 channels, use manual linear resampling since AVAudioConverter has limitations
+        if inputFormat.channelCount > 2 {
+            return try linearResample(buffer, to: format)
+        }
+        
         guard let converter = AVAudioConverter(from: inputFormat, to: format) else {
             throw AudioConverterError.failedToCreateConverter
         }
@@ -134,6 +140,63 @@ final public class AudioConverter {
             && format.isInterleaved == targetFormat.isInterleaved
     }
 
+    /// Resample high channel count audio (>2 channels) using linear interpolation
+    /// AVAudioConverter has limitations with >2 channels, so we handle it via a linear resample. Accuracy may not be as good as AVAudioConverter.
+    /// But this is needed for applications like Safari on speaker mode, or for particular hardware devices.
+    private func linearResample(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
+        let inputFormat = buffer.format
+        guard let channelData = buffer.floatChannelData else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+        
+        let inputFrameCount = Int(buffer.frameLength)
+        let channelCount = Int(inputFormat.channelCount)
+        
+        // Step 1: Mix down to mono
+        var monoSamples = [Float](repeating: 0, count: inputFrameCount)
+        let channelWeight = 1.0 / Float(channelCount)
+        
+        for frame in 0..<inputFrameCount {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += channelData[channel][frame]
+            }
+            monoSamples[frame] = sum * channelWeight
+        }
+        
+        // Step 2: Resample if needed
+        let inputSampleRate = inputFormat.sampleRate
+        let targetSampleRate = format.sampleRate
+        
+        if inputSampleRate == targetSampleRate {
+            return monoSamples
+        }
+        
+        // Linear interpolation resampling
+        let resampleRatio = inputSampleRate / targetSampleRate
+        let outputFrameCount = Int(Double(inputFrameCount) / resampleRatio)
+        var outputSamples = [Float](repeating: 0, count: outputFrameCount)
+        
+        for i in 0..<outputFrameCount {
+            let sourceIndex = Double(i) * resampleRatio
+            let index = Int(sourceIndex)
+            let fraction = Float(sourceIndex - Double(index))
+            
+            if index < inputFrameCount - 1 {
+                // Linear interpolation between samples
+                outputSamples[i] = monoSamples[index] * (1.0 - fraction) + monoSamples[index + 1] * fraction
+            } else if index < inputFrameCount {
+                outputSamples[i] = monoSamples[index]
+            }
+        }
+        
+        logger.debug(
+            "Manual resampling: \(channelCount) channels → mono, \(inputSampleRate)Hz → \(targetSampleRate)Hz"
+        )
+        
+        return outputSamples
+    }
+    
     /// Extract Float array from PCM buffer
     private func extractFloatArray(from buffer: AVAudioPCMBuffer) -> [Float] {
         // This function assumes mono, non-interleaved Float32 buffers.

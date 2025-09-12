@@ -402,7 +402,7 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
             // Test that we can perform basic operations
             let testSamples = Array(repeating: Float(0.5), count: 16000)
 
-            try diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
+            let _ = try diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
 
             diarizer.cleanup()
         } catch {
