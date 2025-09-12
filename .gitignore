@@ -95,7 +95,7 @@ baseline*.json
 FluidAudioDatasets/
 
 *.wav
-
+*.mp3
 Resources/
 scripts/
 Documentation/parakeet-tdt/
