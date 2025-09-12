@@ -33,7 +33,7 @@ public final class AsrManager {
         vocabulary = vocab
     }
     #endif
-    
+
     // TODO:: the decoder state should be moved higher up in the API interface
     internal var microphoneDecoderState: TdtDecoderState
     internal var systemDecoderState: TdtDecoderState
@@ -291,11 +291,12 @@ public final class AsrManager {
         )
     }
 
-    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult {
-        let audioFloatArray = try audioConverter.resampleAudioBuffer(audioBuffer)
+    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
+    {
+        let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
 
         let result = try await transcribe(audioFloatArray, source: source)
-        
+
         // For batch processing, reset the converter state after each file
         audioConverter.reset()
 
@@ -306,15 +307,15 @@ public final class AsrManager {
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
 
         let result = try await transcribe(audioFloatArray, source: source)
-        
+
         // For batch processing, reset the converter state after each file
         audioConverter.reset()
 
         return result
-    } 
+    }
 
     public func transcribe(
-        _ audioSamples: [Float], 
+        _ audioSamples: [Float],
         source: AudioSource = .microphone
     ) async throws -> ASRResult {
         var result: ASRResult

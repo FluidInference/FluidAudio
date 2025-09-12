@@ -472,7 +472,7 @@ public class FLEURSBenchmark {
                 let audioSamples: [Float]
 
                 do {
-                    audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
+                    audioSamples = try AudioConverter().resampleAudioFile(path: sample.audioPath)
                 } catch {
                     // Continue to next sample instead of failing the entire benchmark
                     skippedCount += 1
@@ -1162,7 +1162,7 @@ extension FLEURSBenchmark {
         // Load audio
         let audioSamples: [Float]
         do {
-            audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
+            audioSamples = try AudioConverter().resampleAudioFile(path: sample.audioPath)
         } catch {
             throw NSError(
                 domain: "FLEURSBenchmark",

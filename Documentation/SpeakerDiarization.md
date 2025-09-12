@@ -141,7 +141,7 @@ class RealTimeDiarizer {
             guard let self = self else { return }
 
             // Convert to 16kHz mono Float array using AudioConverter (streaming)
-            if let samples = try? self.converter.resampleAudioBuffer(buffer, streaming: true) {
+            if let samples = try? self.converter.resampleChunk(buffer) {
                 self.processAudioSamples(samples)
             }
         }
@@ -183,7 +183,7 @@ class RealTimeDiarizer {
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, targetSampleRate: Double) -> [Float] {
         // Use FluidAudio.AudioConverter in streaming mode
         // Returns 16kHz mono Float array; swallow conversion errors in sample code
-        return (try? converter.resampleAudioBuffer(buffer, streaming: true)) ?? []
+        return (try? converter.resampleChunk(buffer)) ?? []
     }
 }
 ```

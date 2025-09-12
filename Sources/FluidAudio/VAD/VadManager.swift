@@ -45,7 +45,7 @@ public actor VadManager {
     /// - Parameter audioBuffer: Source buffer in any format
     /// - Returns: Array of per-chunk VAD results
     public func process(_ audioBuffer: AVAudioPCMBuffer) async throws -> [VadResult] {
-        let samples = try audioConverter.resampleAudioBuffer(audioBuffer, streaming: false)
+        let samples = try audioConverter.resampleBuffer(audioBuffer)
         let results = try await processAudioFile(samples)
         // Reset converter state between batch buffers
         audioConverter.reset()

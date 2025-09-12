@@ -150,7 +150,7 @@ public class ASRBenchmark {
     ) async throws
         -> ASRBenchmarkResult
     {
-        let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
+        let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
         // Measure only inference time for accurate RTFx calculation
@@ -177,7 +177,7 @@ public class ASRBenchmark {
     ) async throws
         -> ASRBenchmarkResult
     {
-        let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
+        let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
         // Streaming metrics tracking
@@ -323,7 +323,7 @@ public class ASRBenchmark {
 
         for file in files {
             do {
-                let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
+                let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
                 let duration = Double(audioSamples.count) / 16000.0
 
                 if duration >= minDuration && duration <= maxDuration {

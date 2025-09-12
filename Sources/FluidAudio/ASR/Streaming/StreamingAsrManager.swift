@@ -106,8 +106,8 @@ public actor StreamingAsrManager {
 
             for await pcmBuffer in self.inputSequence {
                 do {
-                    // Convert to 16kHz mono
-                    let samples = try audioConverter.resampleAudioBuffer(pcmBuffer, streaming: true)
+                    // Convert to 16kHz mono (streaming)
+                    let samples = try audioConverter.resampleChunk(pcmBuffer)
 
                     // Append to raw sample buffer and attempt windowed processing
                     await self.appendSamplesAndProcess(samples)
@@ -121,7 +121,7 @@ public actor StreamingAsrManager {
 
             // Stream ended: first flush any remaining samples buffered in the converter
             do {
-                let tail = try audioConverter.finishStreamingConversion()
+                let tail = try audioConverter.finish()
                 if !tail.isEmpty {
                     await self.appendSamplesAndProcess(tail)
                 }

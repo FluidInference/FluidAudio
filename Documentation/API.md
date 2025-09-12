@@ -72,8 +72,12 @@ Automatic speech recognition using Parakeet TDT v3 models.
 - **Audio Processing:**
 - `AudioConverter.resampleAudioFile(path:) throws -> [Float]`
   - Load and convert audio files to 16kHz mono Float32 (WAV, M4A, MP3, FLAC)
-- `AudioConverter.resampleAudioBuffer(_ buffer: AVAudioPCMBuffer, streaming: Bool) throws -> [Float]`
-  - Convert arbitrary buffers; set `streaming: true` for chunked real-time input, `false` for full-file conversion with end-of-stream flush
+- `AudioConverter.resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float]`
+  - Convert a standalone buffer to 16kHz mono (batch)
+- `AudioConverter.resampleChunk(_ buffer: AVAudioPCMBuffer) throws -> [Float]`
+  - Convert a streaming chunk to 16kHz mono (no drain)
+- `AudioConverter.finish() throws -> [Float]`
+  - Flush remaining streaming samples at end-of-stream
 - `AudioSource`: `.microphone` or `.system` for different processing paths
 
 **Performance:**

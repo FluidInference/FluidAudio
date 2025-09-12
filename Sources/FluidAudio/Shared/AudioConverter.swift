@@ -12,7 +12,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
-    private let targetFormat: AVAudioFormat;
+    private let targetFormat: AVAudioFormat
 
     private var converter: AVAudioConverter?
 
@@ -32,23 +32,16 @@ final public class AudioConverter {
         }
     }
 
-    /// Convert an AVAudioPCMBuffer to target Float array.
-    /// - Parameters:
-    ///   - buffer: Input audio buffer (any format)
-    ///   - streaming: Use `true` for live/streaming chunks (no flush), `false` for standalone buffers (flush to EOS)
+    /// Convert a standalone buffer to the target format (flush to end-of-stream).
+    /// Use for batch processing of a single `AVAudioPCMBuffer` (non-streaming).
+    /// - Parameter buffer: Input audio buffer (any format)
     /// - Returns: Float array at 16kHz mono
-    public func resampleAudioBuffer(_ buffer: AVAudioPCMBuffer, streaming: Bool = false) throws -> [Float] {
+    public func resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
         // Fast path: if already in target format, just extract samples
         if isTargetFormat(buffer.format) {
             return extractFloatArray(from: buffer)
         }
-
-        // Route to a clear, single-purpose path
-        if streaming {
-            return try convertStreamingChunk(buffer, to: targetFormat)
-        } else {
-            return try convertBatchBuffer(buffer, to: targetFormat)
-        }
+        return try convertBatchBuffer(buffer, to: targetFormat)
     }
 
     /// Convert an audio file to 16kHz mono Float32 samples
@@ -64,7 +57,7 @@ final public class AudioConverter {
         }
 
         try audioFile.read(into: buffer)
-        return try resampleAudioBuffer(buffer, streaming: false)
+        return try resampleBuffer(buffer)
     }
 
     /// Convert an audio file path to 16kHz mono Float32 samples
@@ -75,9 +68,21 @@ final public class AudioConverter {
         return try resampleAudioFile(url)
     }
 
+    /// Convert a streaming chunk to the target format (no drain).
+    /// Use for real-time streaming; pair with `finish()` at end of stream.
+    /// - Parameter buffer: Input audio buffer (any format)
+    /// - Returns: Float array at 16kHz mono for this chunk
+    public func resampleChunk(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
+        // Fast path: if already in target format, just extract samples
+        if isTargetFormat(buffer.format) {
+            return extractFloatArray(from: buffer)
+        }
+        return try convertStreamingChunk(buffer, to: targetFormat)
+    }
+
     /// Finish a streaming conversion sequence and flush any remaining samples.
     /// - Returns: Additional samples produced by draining the converter, if any
-    public func finishStreamingConversion() throws -> [Float] {
+    public func finish() throws -> [Float] {
         guard let converter = converter else { return [] }
 
         // For streaming we never re-prime; just drain remaining frames
