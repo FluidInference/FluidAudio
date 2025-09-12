@@ -15,7 +15,7 @@ final class AudioConverterTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        audioConverter.cleanup()
+        audioConverter.reset()
         audioConverter = nil
         try await super.tearDown()
     }

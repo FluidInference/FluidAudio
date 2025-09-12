@@ -228,7 +228,7 @@ public actor StreamingAsrManager {
         updateContinuation?.finish()
 
         // Cleanup audio converter state
-        audioConverter.cleanup()
+        audioConverter.reset()
 
         logger.info("StreamingAsrManager cancelled")
     }
