@@ -126,9 +126,6 @@ public class ASRBenchmark {
                 logger.info(
                     "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)")
 
-                // Reset decoder state for each new file
-                logger.debug("Resetting decoder state for new file: \(audioFile.fileName)")
-
                 let result: ASRBenchmarkResult
                 if config.testStreaming {
                     result = try await processLibriSpeechFileStreaming(
@@ -156,14 +153,10 @@ public class ASRBenchmark {
         let audioSamples = try await AudioProcessor.loadAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
 
-        logger.info(
-            "Transcribing \(file.fileName) with \(audioSamples.count) samples (\(String(format: "%.2f", audioLength))s)"
-        )
-
         // Measure only inference time for accurate RTFx calculation
+        let url = URL(fileURLWithPath: file.audioPath.path)
         let inferenceStartTime = Date()
-        let asrResult = try await transcribeAudio(
-            asrManager: asrManager, audioSamples: audioSamples)
+        let asrResult = try await asrManager.transcribe(url)
         let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
         let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
@@ -289,25 +282,6 @@ public class ASRBenchmark {
             audioLength: audioLength,
             streamingMetrics: streamingMetrics
         )
-    }
-
-    /// Transcribe audio - now supports long files through AsrManager chunking
-    internal func transcribeAudio(
-        asrManager: AsrManager, audioSamples: [Float]
-    ) async throws
-        -> ASRResult
-    {
-        // Use optimized transcription with Neural Engine optimizations
-        let result = try await asrManager.transcribe(audioSamples)
-
-        if ProcessInfo.processInfo.environment["CI"] != nil && result.text.isEmpty {
-            logger.warning("⚠️ CI: Transcription returned empty text")
-            logger.warning("   Audio samples: \(audioSamples.count)")
-            logger.warning("   Audio duration: \(Float(audioSamples.count) / 16000.0)s")
-            logger.warning("   Result confidence: \(result.confidence)")
-        }
-
-        return result
     }
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization
@@ -589,7 +563,7 @@ extension ASRBenchmark {
         // Generate inline diff
         let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
-        logger.info("\nNormalized Reference:\t\(referenceDiff)")
+        logger.info("Normalized Reference:\t\(referenceDiff)")
         logger.info("Normalized Hypothesis:\t\(hypothesisDiff)")
         logger.info("Original Hypothesis:\t\(result.hypothesis)")
     }

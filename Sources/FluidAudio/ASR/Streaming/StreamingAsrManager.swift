@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = AppLogger(category: "StreamingASR")
-    private let audioConverter = AudioConverter()
+    private let audioConverter: AudioConverter = AudioConverter()
     private let config: StreamingAsrConfig
 
     // Audio input stream
@@ -81,6 +81,10 @@ public actor StreamingAsrManager {
         )
 
         self.audioSource = source
+
+        // Ensure a fresh converter state per stream/source to avoid
+        // cross-stream residual state in streaming resampling.
+        audioConverter.reset()
 
         // Initialize ASR manager with provided models
         asrManager = AsrManager(config: config.asrConfig)
@@ -199,6 +203,10 @@ public actor StreamingAsrManager {
         sampleBuffer.removeAll(keepingCapacity: false)
         bufferStartIndex = 0
         nextWindowCenterStart = 0
+
+        // Reset audio converter to clear any streaming state before starting
+        // a new session on this manager (potentially with a different source).
+        audioConverter.reset()
 
         // Reset decoder state for the current audio source
         if let asrManager = asrManager {

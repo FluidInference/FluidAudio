@@ -252,13 +252,6 @@ final public class AudioConverter {
     /// Reset the converter (useful when switching audio formats)
     public func reset() {
         converter = nil
-        logger.debug("Audio converter reset")
-    }
-
-    /// Cleanup all resources
-    public func cleanup() {
-        converter = nil
-        logger.debug("Audio converter cleaned up")
     }
 }
 
