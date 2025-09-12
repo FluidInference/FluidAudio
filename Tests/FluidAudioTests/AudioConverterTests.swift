@@ -250,9 +250,10 @@ final class AudioConverterTests: XCTestCase {
 
         // Expect ~1.5s of 16kHz audio with a small tolerance for resampler boundaries
         let expected = Int(16_000 * chunkDurations.reduce(0, +))
-        let tolerance = Int(Double(expected) * 0.02) // 2%
-        XCTAssertTrue(abs(totalOut.count - expected) <= tolerance,
-                      "Streaming+drain sample count \(totalOut.count) should be close to \(expected)")
+        let tolerance = Int(Double(expected) * 0.02)  // 2%
+        XCTAssertTrue(
+            abs(totalOut.count - expected) <= tolerance,
+            "Streaming+drain sample count \(totalOut.count) should be close to \(expected)")
     }
 
     func testFinishReturnsEmptyInNonStreamingMode() async throws {
@@ -288,7 +289,7 @@ final class AudioConverterTests: XCTestCase {
         buffer.frameLength = frames
 
         // Fill interleaved: LRLR... with two different sines
-        if let ch = buffer.floatChannelData { // For interleaved, only index 0 is valid
+        if let ch = buffer.floatChannelData {  // For interleaved, only index 0 is valid
             let ptr = ch[0]
             let frameCount = Int(frames)
             for i in 0..<frameCount {
@@ -309,9 +310,60 @@ final class AudioConverterTests: XCTestCase {
         XCTAssertFalse(out.isEmpty)
     }
 
+    // Helper for generic interleaved buffers (N channels)
+    private func createInterleavedBuffer(
+        sampleRate: Double, channels: AVAudioChannelCount, duration: Double
+    ) throws -> AVAudioPCMBuffer {
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: channels,
+                interleaved: true
+            )
+        else { throw AudioConverterError.failedToCreateConverter }
+
+        let frames = AVAudioFrameCount(sampleRate * duration)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+        buffer.frameLength = frames
+
+        if let ch = buffer.floatChannelData {
+            let ptr = ch[0]
+            let frameCount = Int(frames)
+            let chanCount = Int(channels)
+            for i in 0..<frameCount {
+                let t = Double(i) / sampleRate
+                for c in 0..<chanCount {
+                    let baseFreq = 440.0 + Double(c) * 70.0
+                    let sample = Float(sin(2.0 * .pi * baseFreq * t) * 0.5)
+                    ptr[i * chanCount + c] = sample
+                }
+            }
+        }
+        return buffer
+    }
+
+    func testTriChannelInputNonInterleaved() async throws {
+        // 3-channel non-interleaved at 48kHz should downmix to 16kHz mono
+        let buffer = try createAudioBuffer(sampleRate: 48_000, channels: 3, duration: 1.0)
+        let out = try audioConverter.resampleBuffer(buffer)
+        XCTAssertEqual(out.count, 16_000, "Tri-channel non-interleaved should convert to 1s at 16kHz mono")
+        XCTAssertFalse(out.isEmpty)
+    }
+
+    func testTriChannelInputInterleaved() async throws {
+        // 3-channel interleaved at 44.1kHz should downmix to 16kHz mono
+        let interleaved = try createInterleavedBuffer(sampleRate: 44_100, channels: 3, duration: 1.0)
+        let out = try audioConverter.resampleBuffer(interleaved)
+        XCTAssertEqual(out.count, 16_000, "Tri-channel interleaved should convert to 1s at 16kHz mono")
+        XCTAssertFalse(out.isEmpty)
+    }
+
     func testStreamingWithSmallAndLargeChunks() async throws {
         // Mix tiny and larger chunks to exercise converter stability
-        let durations: [Double] = [0.05, 0.01, 0.2, 0.35, 0.01, 0.38] // totals ~1.0s
+        let durations: [Double] = [0.05, 0.01, 0.2, 0.35, 0.01, 0.38]  // totals ~1.0s
         var collected: [Float] = []
         let streamingConverter = AudioConverter(streaming: true)
 
@@ -321,10 +373,11 @@ final class AudioConverterTests: XCTestCase {
         }
         collected.append(contentsOf: try streamingConverter.finish())
 
-        let expected = 16_000 // ~1 second
-        let tolerance = Int(Double(expected) * 0.05) // 5%
-        XCTAssertTrue(abs(collected.count - expected) <= tolerance,
-                      "Total streaming samples (\(collected.count)) should be ~\(expected)")
+        let expected = 16_000  // ~1 second
+        let tolerance = Int(Double(expected) * 0.05)  // 5%
+        XCTAssertTrue(
+            abs(collected.count - expected) <= tolerance,
+            "Total streaming samples (\(collected.count)) should be ~\(expected)")
     }
 
     func testConvertVeryLongBuffer() async throws {

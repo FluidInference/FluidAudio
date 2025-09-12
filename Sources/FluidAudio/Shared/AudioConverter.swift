@@ -13,9 +13,9 @@ import OSLog
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
-    
+
     // AudioConverter is stateful, we need to handle streaming chunks vs batched differently
-    private let streaming: Bool 
+    private let streaming: Bool
     private var converter: AVAudioConverter?
 
     /// Public initializer so external modules (e.g. CLI) can construct the converter
