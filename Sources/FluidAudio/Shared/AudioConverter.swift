@@ -13,11 +13,14 @@ import OSLog
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
-
+    
+    // AudioConverter is stateful, we need to handle streaming chunks vs batched differently
+    private let streaming: Bool 
     private var converter: AVAudioConverter?
 
     /// Public initializer so external modules (e.g. CLI) can construct the converter
-    public init(targetFormat: AVAudioFormat? = nil) {
+    public init(targetFormat: AVAudioFormat? = nil, streaming: Bool = false) {
+        self.streaming = streaming
         if let format = targetFormat {
             self.targetFormat = format
         } else {
@@ -41,6 +44,11 @@ final public class AudioConverter {
         if isTargetFormat(buffer.format) {
             return extractFloatArray(from: buffer)
         }
+
+        if streaming {
+            return try convertStreamingChunk(buffer, to: targetFormat)
+        }
+
         return try convertBatchBuffer(buffer, to: targetFormat)
     }
 
@@ -66,18 +74,6 @@ final public class AudioConverter {
     public func resampleAudioFile(path: String) throws -> [Float] {
         let url = URL(fileURLWithPath: path)
         return try resampleAudioFile(url)
-    }
-
-    /// Convert a streaming chunk to the target format (no drain).
-    /// Use for real-time streaming; pair with `finish()` at end of stream.
-    /// - Parameter buffer: Input audio buffer (any format)
-    /// - Returns: Float array at 16kHz mono for this chunk
-    public func resampleChunk(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
-        // Fast path: if already in target format, just extract samples
-        if isTargetFormat(buffer.format) {
-            return extractFloatArray(from: buffer)
-        }
-        return try convertStreamingChunk(buffer, to: targetFormat)
     }
 
     /// Finish a streaming conversion sequence and flush any remaining samples.

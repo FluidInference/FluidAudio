@@ -200,6 +200,133 @@ final class AudioConverterTests: XCTestCase {
         XCTAssertGreaterThan(result.count, 0, "Should produce some output")
     }
 
+    // MARK: - File I/O API
+
+    func testResampleAudioFileFromWav44kStereo() async throws {
+        // Create a 1-second 44.1kHz stereo buffer and write to a temporary WAV file
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent(UUID().uuidString).appendingPathExtension("wav")
+
+        let srcBuffer = try createAudioBuffer(sampleRate: 44_100, channels: 2, duration: 1.0)
+
+        // Use the buffer's format settings to write a WAV file
+        let settings = srcBuffer.format.settings
+        let audioFile = try AVAudioFile(forWriting: fileURL, settings: settings)
+        try audioFile.write(from: srcBuffer)
+
+        // Read and resample using file-based API
+        let samples = try audioConverter.resampleAudioFile(fileURL)
+        XCTAssertEqual(samples.count, 16_000, "Expected 1s at 16kHz after resampling")
+
+        // Cleanup
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    func testResampleAudioFilePathBadPathThrows() async throws {
+        let bogusPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("does_not_exist_\(UUID().uuidString)")
+            .path
+
+        XCTAssertThrowsError(try audioConverter.resampleAudioFile(path: bogusPath))
+    }
+
+    // MARK: - Streaming API
+
+    func testStreamingChunksAndFinishDrain() async throws {
+        // Stream three chunks totaling ~1.5s of 44.1kHz stereo audio
+        let chunkDurations: [Double] = [0.5, 0.5, 0.5]
+        var totalOut: [Float] = []
+        let streamingConverter = AudioConverter(streaming: true)
+
+        for dur in chunkDurations {
+            let chunk = try createAudioBuffer(sampleRate: 44_100, channels: 2, duration: dur)
+            let out = try streamingConverter.resampleBuffer(chunk)
+            totalOut.append(contentsOf: out)
+        }
+
+        // Drain remaining samples at end of stream
+        let drained = try streamingConverter.finish()
+        totalOut.append(contentsOf: drained)
+
+        // Expect ~1.5s of 16kHz audio with a small tolerance for resampler boundaries
+        let expected = Int(16_000 * chunkDurations.reduce(0, +))
+        let tolerance = Int(Double(expected) * 0.02) // 2%
+        XCTAssertTrue(abs(totalOut.count - expected) <= tolerance,
+                      "Streaming+drain sample count \(totalOut.count) should be close to \(expected)")
+    }
+
+    func testFinishReturnsEmptyInNonStreamingMode() async throws {
+        // Non-streaming conversions should fully flush per call; finish() returns no extra samples
+        let nonStreaming = AudioConverter()
+        let buffer = try createAudioBuffer(sampleRate: 44_100, channels: 2, duration: 0.5)
+
+        let converted = try nonStreaming.resampleBuffer(buffer)
+        XCTAssertEqual(converted.count, 8_000, "0.5s at 16kHz expected in non-streaming mode")
+
+        let drained = try nonStreaming.finish()
+        XCTAssertEqual(drained.count, 0, "finish() should return empty for non-streaming usage")
+    }
+
+    // MARK: - Interleaved Inputs
+
+    private func createInterleavedStereoBuffer(sampleRate: Double, duration: Double) throws -> AVAudioPCMBuffer {
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: 2,
+                interleaved: true
+            )
+        else {
+            throw AudioConverterError.failedToCreateConverter
+        }
+
+        let frames = AVAudioFrameCount(sampleRate * duration)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+        buffer.frameLength = frames
+
+        // Fill interleaved: LRLR... with two different sines
+        if let ch = buffer.floatChannelData { // For interleaved, only index 0 is valid
+            let ptr = ch[0]
+            let frameCount = Int(frames)
+            for i in 0..<frameCount {
+                let t = Double(i) / sampleRate
+                let left = Float(sin(2.0 * .pi * 440.0 * t) * 0.5)
+                let right = Float(sin(2.0 * .pi * 550.0 * t) * 0.5)
+                ptr[i * 2 + 0] = left
+                ptr[i * 2 + 1] = right
+            }
+        }
+        return buffer
+    }
+
+    func testInterleavedStereoInput() async throws {
+        let interleaved = try createInterleavedStereoBuffer(sampleRate: 44_100, duration: 1.0)
+        let out = try audioConverter.resampleBuffer(interleaved)
+        XCTAssertEqual(out.count, 16_000, "Interleaved stereo should convert to 1s at 16kHz mono")
+        XCTAssertFalse(out.isEmpty)
+    }
+
+    func testStreamingWithSmallAndLargeChunks() async throws {
+        // Mix tiny and larger chunks to exercise converter stability
+        let durations: [Double] = [0.05, 0.01, 0.2, 0.35, 0.01, 0.38] // totals ~1.0s
+        var collected: [Float] = []
+        let streamingConverter = AudioConverter(streaming: true)
+
+        for d in durations {
+            let b = try createAudioBuffer(sampleRate: 48_000, channels: 2, duration: d)
+            collected.append(contentsOf: try streamingConverter.resampleBuffer(b))
+        }
+        collected.append(contentsOf: try streamingConverter.finish())
+
+        let expected = 16_000 // ~1 second
+        let tolerance = Int(Double(expected) * 0.05) // 5%
+        XCTAssertTrue(abs(collected.count - expected) <= tolerance,
+                      "Total streaming samples (\(collected.count)) should be ~\(expected)")
+    }
+
     func testConvertVeryLongBuffer() async throws {
         // 10 second buffer
         let buffer = try createAudioBuffer(

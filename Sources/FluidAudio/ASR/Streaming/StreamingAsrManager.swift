@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = AppLogger(category: "StreamingASR")
-    private let audioConverter: AudioConverter = AudioConverter()
+    private let audioConverter: AudioConverter = AudioConverter(streaming: true)
     private let config: StreamingAsrConfig
 
     // Audio input stream
@@ -107,7 +107,7 @@ public actor StreamingAsrManager {
             for await pcmBuffer in self.inputSequence {
                 do {
                     // Convert to 16kHz mono (streaming)
-                    let samples = try audioConverter.resampleChunk(pcmBuffer)
+                    let samples = try audioConverter.resampleBuffer(pcmBuffer)
 
                     // Append to raw sample buffer and attempt windowed processing
                     await self.appendSamplesAndProcess(samples)
