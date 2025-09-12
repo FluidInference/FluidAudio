@@ -14,7 +14,7 @@ struct ChunkProcessor {
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
     private let centerSeconds: Double = 10.0  // Reduced to allow for more overlap
-    private let leftContextSeconds: Double = 2.4  // Increased overlap to 30 frames to avoid missing speech  
+    private let leftContextSeconds: Double = 2.4  // Increased overlap to 30 frames to avoid missing speech
     private let rightContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
 
     private var centerSamples: Int { Int(centerSeconds * Double(sampleRate)) }
@@ -56,7 +56,7 @@ struct ChunkProcessor {
             if maxFrame > 0 {
                 lastProcessedFrame = maxFrame
             }
-            
+
             // Combine tokens, timestamps, and confidences into aligned tuples
             guard windowTokens.count == windowTimestamps.count && windowTokens.count == windowConfidences.count else {
                 throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
@@ -229,9 +229,11 @@ struct ChunkProcessor {
             }
             return ([], [], [], 0)
         }
-        
+
         if enableDebug && segmentIndex == 0 {
-            logger.debug("First chunk hypothesis: \(hypothesis.ySequence.count) tokens, max timestamp: \(hypothesis.maxTimestamp)")
+            logger.debug(
+                "First chunk hypothesis: \(hypothesis.ySequence.count) tokens, max timestamp: \(hypothesis.maxTimestamp)"
+            )
             if hypothesis.ySequence.count > 0 {
                 logger.debug("First chunk token IDs: \(hypothesis.ySequence.prefix(20))")
             }

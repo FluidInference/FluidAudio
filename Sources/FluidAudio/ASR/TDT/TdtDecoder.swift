@@ -120,9 +120,11 @@ internal struct TdtDecoder {
         }
         // Use the minimum of encoder sequence length and actual audio frames to avoid processing padding
         let effectiveSequenceLength = min(encoderSequenceLength, actualAudioFrames)
-        
+
         if config.enableDebug {
-            logger.debug("TDT Decoder: encoderSequenceLength=\(encoderSequenceLength), actualAudioFrames=\(actualAudioFrames), effectiveSequenceLength=\(effectiveSequenceLength), globalFrameOffset=\(globalFrameOffset)")
+            logger.debug(
+                "TDT Decoder: encoderSequenceLength=\(encoderSequenceLength), actualAudioFrames=\(actualAudioFrames), effectiveSequenceLength=\(effectiveSequenceLength), globalFrameOffset=\(globalFrameOffset)"
+            )
         }
 
         // Key variables for frame navigation:
@@ -173,7 +175,7 @@ internal struct TdtDecoder {
         var emissionsAtThisTimestamp = 0
         let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep  // Usually 5-10
         var tokensProcessedThisChunk = 0  // Track tokens per chunk to prevent runaway decoding
-        
+
         // Track blank processing for debugging
         var blankFramesProcessed = 0
 
@@ -239,13 +241,15 @@ internal struct TdtDecoder {
             if blankMask && duration == 0 {
                 duration = 1
             }
-            
+
             // Limit blank duration jumps to prevent skipping speech
             // When processing blanks, be more conservative to avoid missing speech
             if blankMask {
                 blankFramesProcessed += 1
                 if blankFramesProcessed <= 20 && globalFrameOffset == 0 {
-                    logger.debug("Blank \(blankFramesProcessed): frame \(timeIndices) -> \(timeIndices + duration) (duration=\(duration))")
+                    logger.debug(
+                        "Blank \(blankFramesProcessed): frame \(timeIndices) -> \(timeIndices + duration) (duration=\(duration))"
+                    )
                 }
                 // Allow model to use its predicted durations
                 // The model should know when speech is present
@@ -305,11 +309,13 @@ internal struct TdtDecoder {
                 if blankMask && duration == 0 {
                     duration = 1
                 }
-                
+
                 // Debug logging for inner loop blank processing
                 if blankMask && config.enableDebug && blankFramesProcessed <= 20 && globalFrameOffset == 0 {
                     blankFramesProcessed += 1
-                    logger.debug("Inner Blank \(blankFramesProcessed): frame \(timeIndices) -> \(timeIndices + duration) (duration=\(duration))")
+                    logger.debug(
+                        "Inner Blank \(blankFramesProcessed): frame \(timeIndices) -> \(timeIndices + duration) (duration=\(duration))"
+                    )
                 }
 
                 // Advance and check if we should continue the inner loop
@@ -331,11 +337,13 @@ internal struct TdtDecoder {
                 // Add token to output sequence
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
-                
+
                 // Log first few tokens to debug missing text
-                if  hypothesis.ySequence.count <= 5 {
+                if hypothesis.ySequence.count <= 5 {
                     let frameTime = Double(timeIndicesCurrentLabels + globalFrameOffset) * 0.08
-                    logger.debug("Token \(hypothesis.ySequence.count): id=\(label) at frame \(timeIndicesCurrentLabels + globalFrameOffset) (time=\(String(format: "%.2f", frameTime))s)")
+                    logger.debug(
+                        "Token \(hypothesis.ySequence.count): id=\(label) at frame \(timeIndicesCurrentLabels + globalFrameOffset) (time=\(String(format: "%.2f", frameTime))s)"
+                    )
                 }
                 hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
                 hypothesis.tokenConfidences.append(score)
@@ -376,15 +384,11 @@ internal struct TdtDecoder {
                 }
             }
 
-        // Update activeMask for next iteration
-        activeMask = timeIndices < effectiveSequenceLength
-    }
-    
-    if globalFrameOffset == 0 {
-        logger.debug("Main loop ended: timeIndices=\(timeIndices), effectiveSequenceLength=\(effectiveSequenceLength), tokens emitted=\(hypothesis.ySequence.count), globalFrameOffset=\(globalFrameOffset)")
-    }
+            // Update activeMask for next iteration
+            activeMask = timeIndices < effectiveSequenceLength
+        }
 
-    // ===== LAST CHUNK FINALIZATION =====
+        // ===== LAST CHUNK FINALIZATION =====
         // For the last chunk, ensure we force emission of any pending tokens
         // Continue processing even after encoder frames are exhausted
         if isLastChunk {
