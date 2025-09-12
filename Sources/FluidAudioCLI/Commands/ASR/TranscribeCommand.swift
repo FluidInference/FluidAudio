@@ -115,13 +115,13 @@ enum TranscribeCommand {
 
             // Convert audio to the format expected by ASR (16kHz mono Float array)
             let samples = try AudioConverter().resampleAudioFile(path: audioFile)
-
             let duration = Double(audioFileHandle.length) / format.sampleRate
             logger.info("Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
 
             // Process with ASR Manager
+            logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let result = try await asrManager.transcribe(samples, source: .system)
+            let result = try await asrManager.transcribe(audioFileURL)
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Print results
