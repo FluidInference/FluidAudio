@@ -17,7 +17,7 @@ final class SpeakerManagerTests: XCTestCase {
     }
 
     // MARK: - Basic Operations
-
+    
     func testInitialization() {
         let manager = SpeakerManager()
         XCTAssertEqual(manager.speakerCount, 0)
@@ -181,8 +181,6 @@ final class SpeakerManagerTests: XCTestCase {
             XCTAssertEqual(publicDuration, 5.0)
             XCTAssertNotNil(publicUpdatedAt)
             XCTAssertEqual(publicUpdateCount, 1)
-
-            print("✅ All SpeakerInfo members are publicly accessible")
         }
     }
 

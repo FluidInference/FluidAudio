@@ -48,10 +48,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             startTime: Date()
         )
 
-        print("Processed \(audioSamples.count) samples (\(duration)s) in chunks")
-        print("Result tokens: \(result.tokenTimings?.count ?? 0)")
-        print("Result text: '\(result.text)'")
-
         // The main assertion: we should get some result without crashes
         // More importantly, no duplicate phrases should appear
         XCTAssertNotNil(result, "Should get a result from chunk processing")
@@ -71,8 +67,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 )
             }
         }
-
-        print("✅ No duplicate phrases detected in chunked processing")
     }
 
     /// Test with Spanish-like audio pattern (simulated problematic case)
@@ -102,15 +96,8 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             audioSamples.append(sample)
         }
 
-        print("Testing Spanish-pattern audio: \(audioSamples.count) samples (\(duration)s)")
-
         // Process the audio with our fixed chunk processor
         let result = try await manager.transcribe(audioSamples)
-
-        print("Spanish-pattern transcription result:")
-        print("Text: '\(result.text)'")
-        print("Confidence: \(result.confidence)")
-        print("Duration: \(result.duration)s")
 
         // Check for any obvious duplicate patterns in the result
         let words = result.text.components(separatedBy: .whitespacesAndNewlines)
@@ -124,7 +111,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 let occurrences = result.text.components(separatedBy: phrase).count - 1
                 if occurrences > 1 {
                     duplicateCount += 1
-                    print("Duplicate phrase found: '\(phrase)' appears \(occurrences) times")
                 }
             }
         }
@@ -134,8 +120,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             duplicateCount, 0,
             "Found \(duplicateCount) duplicate phrase patterns - time jump fix may not be working"
         )
-
-        print("✅ Spanish-pattern audio processed without duplicates")
     }
 
     /// Test the problematic 15-30 second audio length range where duplication occurs
@@ -152,8 +136,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         let testDurations: [Double] = [16.0, 18.0, 22.0, 28.0]  // All force chunking but aren't too long
 
         for duration in testDurations {
-            print("\n--- Testing \(duration)s audio (problematic range) ---")
-
             // Create audio that will be processed in 2-3 chunks (the problematic case)
             let sampleRate = 16000
             let baseFreq: Float = 220.0  // Lower frequency like speech
@@ -171,13 +153,9 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 audioSamples.append(sample)
             }
 
-            print("Testing \(duration)s audio: \(audioSamples.count) samples")
 
             // Process the audio - this should trigger chunking
             let result = try await manager.transcribe(audioSamples)
-
-            print("Result text: '\(result.text)'")
-            print("Duration: \(result.duration)s, Confidence: \(result.confidence)")
 
             // Analyze for duplications by looking for repeated phrases
             let words = result.text.components(separatedBy: .whitespacesAndNewlines)
@@ -211,13 +189,10 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             }
 
             if duplicateCount > 0 {
-                print("❌ DUPLICATION DETECTED in \(duration)s audio:")
                 for pattern in duplicatePatterns {
                     print("  - \(pattern)")
                 }
-            } else {
-                print("✅ No duplicates in \(duration)s audio")
-            }
+            } 
 
             // Assert no duplicates for this duration
             XCTAssertEqual(
@@ -225,8 +200,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 "Found \(duplicateCount) duplicate patterns in \(duration)s audio - time jump issue not fully fixed"
             )
         }
-
-        print("\n✅ All problematic audio lengths processed without duplicates")
     }
 
     /// Test time jump calculation logic without requiring ML models
@@ -301,8 +274,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         ]
 
         for duration in problematicDurations {
-            print("\n--- Testing \(duration)s audio (near chunk boundary) ---")
-
             // Create audio with speech-like pattern that extends to the end
             let sampleRate = 16000
             let totalSamples = Int(duration * Double(sampleRate))
@@ -333,18 +304,9 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 audioSamples.append(sample)
             }
 
-            print("Created \(duration)s audio: \(audioSamples.count) samples")
-            print("Chunk size: 14.4s (\(Int(14.4 * 16000)) samples)")
-            print("Audio vs chunk: \(audioSamples.count < Int(14.4 * 16000) ? "SMALLER" : "LARGER")")
-
+            
             // Process the audio - this should reveal if end frames are dropped
             let result = try await manager.transcribe(audioSamples)
-
-            print("Transcription result:")
-            print("Text: '\(result.text)'")
-            print("Confidence: \(result.confidence)")
-            print("Duration: \(result.duration)s")
-            print("Token count: \(result.tokenTimings?.count ?? 0)")
 
             // Key assertions to detect frame dropping:
 
@@ -378,7 +340,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
 
             // 4. Specific check for the problematic duration (14.28s like your file)
             if abs(duration - 14.28) < 0.1 {
-                print("🔍 SPECIFIC CHECK for 14.28s case (like it_it_0027.wav)")
 
                 // This case had WER 22.7% due to missing end phrase
                 // If our fix works, we should get better coverage
@@ -395,19 +356,12 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                     )
                 }
             }
-
-            print("✅ \(duration)s audio processed - duration diff: \(durationDiff)s, tokens: \(actualTokens)")
         }
-
-        print("\n✅ All near-chunk-boundary durations tested for frame dropping")
     }
 
     /// Test chunk boundary calculation logic with different audio lengths
     func testChunkBoundaryCalculations() throws {
         // This test validates the chunk processing logic without requiring ML models
-
-        print("\n--- Testing Chunk Boundary Calculations ---")
-
         let sampleRate = 16000
         let centerSeconds = 11.2  // From ChunkProcessor
         let leftContextSeconds = 1.6
@@ -419,12 +373,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         let rightContextSamples = Int(rightContextSeconds * Double(sampleRate))  // 25,600 samples
         let totalChunkSamples = Int(totalChunkDuration * Double(sampleRate))  // 230,400 samples
 
-        print("Chunk configuration:")
-        print("  Center: \(centerSeconds)s = \(centerSamples) samples")
-        print("  Left context: \(leftContextSeconds)s = \(leftContextSamples) samples")
-        print("  Right context: \(rightContextSeconds)s = \(rightContextSamples) samples")
-        print("  Total chunk: \(totalChunkDuration)s = \(totalChunkSamples) samples")
-
         // Test cases with different audio lengths relative to chunk size
         let testCases: [(description: String, duration: Double)] = [
             ("Short audio", 10.0),  // Well under chunk size
@@ -435,10 +383,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         ]
 
         for (description, duration) in testCases {
-            print("\n📋 Testing: \(description) (\(duration)s)")
-
             let audioSamples = Int(duration * Double(sampleRate))
-            print("  Audio: \(audioSamples) samples")
 
             // Simulate ChunkProcessor logic with adaptive context fix
             var centerStart = 0
@@ -483,45 +428,22 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 let chunkLength = rightEnd - leftStart
                 let centerLength = centerEnd - centerStart
 
-                print(
-                    "    Chunk \(chunkIndex): centerStart=\(centerStart), bounds=[\(leftStart), \(rightEnd)), length=\(chunkLength), centerLength=\(centerLength), isLast=\(isLastChunk)"
-                )
-
-                // Show adaptive context details for last chunk
-                if isLastChunk && remainingSamples < centerSamples {
-                    print(
-                        "      🔧 ADAPTIVE CONTEXT: leftContext=\(adaptiveLeftContext) samples (\(String(format: "%.2f", Double(adaptiveLeftContext)/16000.0))s), frameOffset=\(frameOffset)"
-                    )
-                }
-
                 // Key checks for frame dropping:
 
                 // 1. For audio near chunk size, check if adaptive context fixes frame dropping
                 if abs(duration - 14.28) < 0.1 {  // The problematic case
                     let samplesFromEnd = audioSamples - rightEnd
-                    print("      🔍 Near-chunk-size case: \(samplesFromEnd) samples from end of audio")
 
                     if isLastChunk && remainingSamples < centerSamples {
                         // With adaptive context, we should now process much more audio
                         let totalChunkSamples = adaptiveLeftContext + remainingSamples
-                        print(
-                            "      ✅ ADAPTIVE CONTEXT FIX: chunk now processes \(totalChunkSamples) samples (\(String(format: "%.2f", Double(totalChunkSamples)/16000.0))s)"
-                        )
-                        print("      ✅ Frame offset \(frameOffset) skips already-processed content")
-
+                     
                         // The fix should ensure we process nearly all remaining audio
                         XCTAssertLessThanOrEqual(
                             samplesFromEnd, 1000,  // Should now be < 60ms unprocessed
                             "With adaptive context fix, should leave minimal samples unprocessed - found \(samplesFromEnd) samples (\(Double(samplesFromEnd)/16000.0)s)"
                         )
-                    } else {
-                        // First chunk - still shows the original issue
-                        if samplesFromEnd > 20000 {
-                            print(
-                                "      🚨 First chunk gap: \(Double(samplesFromEnd)/16000.0)s - will be fixed by adaptive context in last chunk"
-                            )
-                        }
-                    }
+                    } 
                 }
 
                 // 2. Center section should always be processed fully unless it's the last chunk
@@ -561,7 +483,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
 
             // Final verification
             let unprocessedSamples = audioSamples - processedSamples
-            print("  Final: processed \(processedSamples)/\(audioSamples) samples, \(unprocessedSamples) unprocessed")
 
             // For your specific case, we shouldn't leave too many samples unprocessed
             if abs(duration - 14.28) < 0.1 {
@@ -572,14 +493,11 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             }
         }
 
-        print("\n✅ Chunk boundary calculation tests completed")
     }
 
     /// Test adaptive context improvement for frame dropping (unit test)
     func testAdaptiveContextImprovement() throws {
         // This unit test demonstrates the improvement without requiring ML models
-
-        print("\n--- Testing Adaptive Context Improvement ---")
 
         let sampleRate = 16000
         let centerSamples = Int(11.2 * Double(sampleRate))  // 179,200
@@ -589,8 +507,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         // Test the specific problematic case: 14.28s audio
         let duration = 14.28
         let audioSamples = Int(duration * Double(sampleRate))  // 228,480 samples
-
-        print("Testing \(duration)s audio (\(audioSamples) samples)")
 
         // Simulate the two chunks
         var centerStart = 0
@@ -635,18 +551,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             let framesToSkip = frameOffset
             let effectiveFramesProcessed = actualFramesToProcess - framesToSkip
 
-            print("Chunk \(chunkIndex) (\(isLastChunk ? "LAST" : "normal")):")
-            print(
-                "  Audio window: [\(leftStart), \(rightEnd)) = \(chunkSamples) samples (\(String(format: "%.2f", Double(chunkSamples)/16000.0))s)"
-            )
-            print("  Frames: \(actualFramesToProcess) total, skip \(framesToSkip), process \(effectiveFramesProcessed)")
-
             if isLastChunk && remainingSamples < centerSamples {
-                print(
-                    "  🔧 ADAPTIVE: leftContext=\(adaptiveLeftContext) samples (\(String(format: "%.2f", Double(adaptiveLeftContext)/16000.0))s)"
-                )
-                print("  ✅ COVERS ALL REMAINING AUDIO: \(remainingSamples) samples processed")
-
                 // Key assertion: the last chunk now covers all remaining audio
                 XCTAssertEqual(
                     rightEnd, audioSamples,
@@ -666,18 +571,11 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             chunkIndex += 1
         }
 
-        print("\nResults:")
-        print("  Total audio: \(audioSamples) samples")
-        print("  Total processed: \(totalProcessedSamples) samples")
-        print("  Coverage: \(String(format: "%.1f", Double(totalProcessedSamples) * 100.0 / Double(audioSamples)))%")
-
         // With our fix, we should process all samples
         XCTAssertEqual(
             totalProcessedSamples, audioSamples,
             "Adaptive context fix should process all audio samples"
         )
-
-        print("✅ Adaptive context successfully eliminates frame dropping")
     }
 
     /// Test decoder state persistence across multiple short chunks
@@ -701,8 +599,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         var allTimestamps: [Int] = []
 
         for chunkIndex in 0..<numChunks {
-            print("Processing chunk \(chunkIndex + 1)/\(numChunks)")
-
             // Create audio chunk
             var chunkSamples: [Float] = []
             let startSample = chunkIndex * Int(chunkDuration * Double(sampleRate))
@@ -726,8 +622,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 contextFrameAdjustment: 0,  // Integration test doesn't use adaptive context
                 isLastChunk: isLastChunk
             )
-
-            print("Chunk \(chunkIndex): \(hypothesis.tokenCount) tokens, timeJump: \(decoderState.timeJump ?? 0)")
 
             allTokens.append(contentsOf: hypothesis.ySequence)
             allTimestamps.append(contentsOf: hypothesis.timestamps)
@@ -759,9 +653,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             processingTime: 0.0
         )
 
-        print("Multi-chunk result: '\(finalResult.text)'")
-        print("Total tokens processed: \(allTokens.count)")
-
         XCTAssertNotNil(finalResult, "Should get combined result from multiple chunks")
 
         // Check that timestamps are monotonically increasing (no time travel)
@@ -771,8 +662,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 "Timestamps should be monotonically increasing, but timestamp[\(i)] < timestamp[\(i-1)]"
             )
         }
-
-        print("✅ Decoder state properly maintained across \(numChunks) chunks")
     }
 
     /// Performance test to ensure our changes don't impact speed
@@ -804,14 +693,11 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             }
         }
 
-        print("✅ Chunk processing performance test completed")
     }
 
     /// Test adaptive context frame adjustment to prevent duplicate tokens
     func testAdaptiveContextFrameAdjustment() async throws {
         try skipIfCI()
-
-        print("\n--- Testing Adaptive Context Frame Adjustment ---")
 
         let config = ASRConfig(enableDebug: true)
         let manager = AsrManager(config: config)
@@ -838,19 +724,12 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             audioSamples.append(sample)
         }
 
-        print("Created audio: \(totalDuration)s (\(totalSamples) samples)")
-
         // Process using ChunkProcessor (which will use adaptive context for the last chunk)
         var decoderState = try TdtDecoderState()
         let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
 
         let startTime = Date()
         let result = try await processor.process(using: manager, decoderState: &decoderState, startTime: startTime)
-
-        print("Processing result:")
-        print("- Text: '\(result.text)'")
-        print("- Duration: \(result.duration)s")
-        print("- Token timings count: \(result.tokenTimings?.count ?? 0)")
 
         // Check for duplicate tokens at the same timestamp (the main issue we're fixing)
         var duplicateCount = 0
@@ -866,24 +745,11 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 } else {
                     timestampTokenCount[frameIndex]! += 1
                     duplicateCount += 1
-                    print(
-                        "⚠️  Duplicate found: token '\(timing.token)' (id:\(timing.tokenId)) at frame \(frameIndex) (time: \(timing.startTime)s)"
-                    )
                 }
             }
         }
 
-        print("Analysis:")
-        print("- Unique timestamps: \(timestampTokenCount.count)")
-        print("- Duplicate tokens: \(duplicateCount)")
-
         // With our fix, there should be no duplicate tokens at the same timestamp
         XCTAssertEqual(duplicateCount, 0, "Context frame adjustment should prevent duplicate tokens")
-
-        if duplicateCount == 0 {
-            print("✅ Adaptive context frame adjustment working correctly - no duplicates detected!")
-        } else {
-            print("❌ Frame adjustment failed - found \(duplicateCount) duplicates")
-        }
     }
 }
