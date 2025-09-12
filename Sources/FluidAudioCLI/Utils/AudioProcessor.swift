@@ -14,7 +14,7 @@ struct AudioProcessor {
 
     private static func loadAudioFileDirectly(url: URL) async throws -> [Float] {
         let converter = AudioConverter()
-        return try await converter.convertFileToAsrSamples(url)
+        return try converter.resampleAudioFile(url)
     }
 }
 

@@ -174,7 +174,7 @@ class RealTimeDiarizer {
 
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, targetSampleRate: Double) -> [Float] {
         // Use FluidAudio.AudioConverter in streaming mode
-        // e.g., in an async context: try await converter.convertToAsrFormat(buffer, streaming: true)
+        // e.g., in an async context: try converter.resampleAudioBuffer(buffer, streaming: true)
         // Returns 16kHz mono Float array
         return []
     }

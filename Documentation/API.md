@@ -70,9 +70,9 @@ Automatic speech recognition using Parakeet TDT v3 models.
 - `ASRConfig`: Beam size, temperature, language model weights
 
 - **Audio Processing:**
-- `AudioConverter.convertFileToAsrSamples(path:) throws -> [Float]`
+- `AudioConverter.resampleAudioFile(path:) throws -> [Float]`
   - Load and convert audio files to 16kHz mono Float32 (WAV, M4A, MP3, FLAC)
-- `AudioConverter.convertToAsrFormat(_ buffer: AVAudioPCMBuffer, streaming: Bool) throws -> [Float]`
+- `AudioConverter.resampleAudioBuffer(_ buffer: AVAudioPCMBuffer, streaming: Bool) throws -> [Float]`
   - Convert arbitrary buffers; set `streaming: true` for chunked real-time input, `false` for full-file conversion with end-of-stream flush
 - `AudioSource`: `.microphone` or `.system` for different processing paths
 

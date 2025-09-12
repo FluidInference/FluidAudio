@@ -15,7 +15,7 @@ final class AudioConverterTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        await audioConverter.cleanup()
+        audioConverter.cleanup()
         audioConverter = nil
         try await super.tearDown()
     }
@@ -71,7 +71,7 @@ final class AudioConverterTests: XCTestCase {
             format: .pcmFormatFloat32
         )
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         XCTAssertEqual(result.count, 16000, "Should have 16,000 samples for 1 second at 16kHz")
         XCTAssertFalse(result.isEmpty, "Result should not be empty")
@@ -91,7 +91,7 @@ final class AudioConverterTests: XCTestCase {
             duration: 1.0
         )
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         // Should be downsampled to 16kHz
         let expectedSampleCount = Int(16000 * 1.0)  // 1 second at 16kHz
@@ -107,7 +107,7 @@ final class AudioConverterTests: XCTestCase {
             duration: 0.5
         )
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         // Should be downsampled from 48kHz to 16kHz (0.5 seconds)
         let expectedSampleCount = Int(16000 * 0.5)
@@ -122,7 +122,7 @@ final class AudioConverterTests: XCTestCase {
             duration: 2.0
         )
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         // Should be upsampled from 8kHz to 16kHz (2 seconds)
         let expectedSampleCount = Int(16000 * 2.0)
@@ -155,7 +155,7 @@ final class AudioConverterTests: XCTestCase {
             }
         }
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         XCTAssertEqual(result.count, 1000, "Should preserve sample count for same sample rate")
 
@@ -194,7 +194,7 @@ final class AudioConverterTests: XCTestCase {
             }
         }
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         XCTAssertFalse(result.isEmpty, "Should handle short buffer")
         XCTAssertGreaterThan(result.count, 0, "Should produce some output")
@@ -208,7 +208,7 @@ final class AudioConverterTests: XCTestCase {
             duration: 10.0
         )
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         let expectedSamples = 16000 * 10  // 10 seconds at 16kHz
         XCTAssertEqual(result.count, expectedSamples, "Should handle long audio correctly")
@@ -239,7 +239,7 @@ final class AudioConverterTests: XCTestCase {
             }
         }
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         XCTAssertFalse(result.isEmpty, "Should convert Int16 to Float32")
         // Result should be downsampled from 44.1kHz to 16kHz
@@ -261,7 +261,7 @@ final class AudioConverterTests: XCTestCase {
         }
         buffer.frameLength = frameCount
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         XCTAssertEqual(result.count, 500, "Should maintain sample count for same sample rate")
     }
@@ -271,14 +271,14 @@ final class AudioConverterTests: XCTestCase {
     func testConverterReset() async throws {
         // Convert one format
         let buffer1 = try createAudioBuffer(sampleRate: 44100, channels: 2)
-        _ = try await audioConverter.convertToAsrFormat(buffer1)
+        _ = try audioConverter.resampleAudioBuffer(buffer1)
 
         // Reset converter
-        await audioConverter.reset()
+        audioConverter.reset()
 
         // Convert different format (should work fine)
         let buffer2 = try createAudioBuffer(sampleRate: 48000, channels: 1)
-        let result = try await audioConverter.convertToAsrFormat(buffer2)
+        let result = try audioConverter.resampleAudioBuffer(buffer2)
 
         XCTAssertFalse(result.isEmpty, "Should work after reset")
     }
@@ -288,8 +288,8 @@ final class AudioConverterTests: XCTestCase {
         let buffer1 = try createAudioBuffer(sampleRate: 44100, channels: 2, duration: 1.0)
         let buffer2 = try createAudioBuffer(sampleRate: 44100, channels: 2, duration: 0.5)
 
-        let result1 = try await audioConverter.convertToAsrFormat(buffer1)
-        let result2 = try await audioConverter.convertToAsrFormat(buffer2)
+        let result1 = try audioConverter.resampleAudioBuffer(buffer1)
+        let result2 = try audioConverter.resampleAudioBuffer(buffer2)
 
         XCTAssertEqual(result1.count, 16000, "First conversion should work")
         XCTAssertEqual(result2.count, 8000, "Second conversion should work")
@@ -298,11 +298,11 @@ final class AudioConverterTests: XCTestCase {
     func testConverterFormatSwitching() async throws {
         // Convert from one format
         let buffer1 = try createAudioBuffer(sampleRate: 44100, channels: 1)
-        let result1 = try await audioConverter.convertToAsrFormat(buffer1)
+        let result1 = try audioConverter.resampleAudioBuffer(buffer1)
 
         // Convert from different format (should create new converter)
         let buffer2 = try createAudioBuffer(sampleRate: 48000, channels: 2)
-        let result2 = try await audioConverter.convertToAsrFormat(buffer2)
+        let result2 = try audioConverter.resampleAudioBuffer(buffer2)
 
         XCTAssertFalse(result1.isEmpty, "First format should work")
         XCTAssertFalse(result2.isEmpty, "Second format should work")
@@ -322,7 +322,7 @@ final class AudioConverterTests: XCTestCase {
         let iterations = 10
 
         for _ in 0..<iterations {
-            _ = try await audioConverter.convertToAsrFormat(buffer)
+            _ = try audioConverter.resampleAudioBuffer(buffer)
         }
 
         let timeElapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -348,7 +348,7 @@ final class AudioConverterTests: XCTestCase {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         for buffer in buffers {
-            _ = try await audioConverter.convertToAsrFormat(buffer)
+            _ = try audioConverter.resampleAudioBuffer(buffer)
         }
 
         let timeElapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -382,7 +382,7 @@ final class AudioConverterTests: XCTestCase {
         // Test with 1 minute of audio
         let buffer = try createAudioBuffer(sampleRate: 44100, channels: 2, duration: 60.0)
 
-        let result = try await audioConverter.convertToAsrFormat(buffer)
+        let result = try audioConverter.resampleAudioBuffer(buffer)
 
         let expectedSamples = 16000 * 60  // 1 minute at 16kHz
         XCTAssertEqual(result.count, expectedSamples, "Should handle large buffer")
@@ -397,7 +397,7 @@ final class AudioConverterTests: XCTestCase {
                 duration: 0.1
             )
 
-            let result = try await audioConverter.convertToAsrFormat(buffer)
+            let result = try audioConverter.resampleAudioBuffer(buffer)
             XCTAssertFalse(result.isEmpty, "Conversion \(i) should succeed")
         }
     }

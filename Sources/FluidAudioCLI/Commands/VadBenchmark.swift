@@ -515,44 +515,10 @@ struct VadBenchmark {
     }
 
     static func loadVadAudioData(_ audioFile: AVAudioFile) async throws -> [Float] {
-        let format = audioFile.processingFormat
-        let frameCount = AVAudioFrameCount(audioFile.length)
-
-        // Use smaller buffer size for GitHub Actions memory constraints
-        let bufferSize: AVAudioFrameCount = min(frameCount, 4096)
-
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: bufferSize) else {
-            throw NSError(domain: "AudioError", code: 1, userInfo: nil)
-        }
-
-        // Reuse a single converter across chunks in streaming mode for best continuity
+        // Use the shared helper to convert whole files to 16kHz mono Float32
+        // Keeps logic centralized with AudioConverter and consistent across the app.
         let converter = AudioConverter()
-        var allSamples: [Float] = []
-        allSamples.reserveCapacity(Int(Double(frameCount) * (16000.0 / max(format.sampleRate, 1))))
-
-        // Read file in chunks and convert each chunk in streaming mode
-        var remainingFrames = frameCount
-        while remainingFrames > 0 {
-            let framesToRead = min(remainingFrames, bufferSize)
-            buffer.frameLength = 0
-            try audioFile.read(into: buffer, frameCount: framesToRead)
-
-            let actualFrameCount = Int(buffer.frameLength)
-            if actualFrameCount == 0 { break }
-
-            let chunkSamples = try await converter.convertToAsrFormat(buffer, streaming: true)
-            if !chunkSamples.isEmpty {
-                allSamples.append(contentsOf: chunkSamples)
-            }
-
-            remainingFrames -= AVAudioFrameCount(actualFrameCount)
-        }
-
-        // Drain any remaining samples from the converter at end-of-stream
-        let tail = try await converter.finishStreamingConversion()
-        if !tail.isEmpty { allSamples.append(contentsOf: tail) }
-
-        return allSamples
+        return try converter.resampleAudioFile(audioFile.url)
     }
 
     static func calculateVadMetrics(

@@ -103,7 +103,7 @@ public actor StreamingAsrManager {
             for await pcmBuffer in self.inputSequence {
                 do {
                     // Convert to 16kHz mono
-                    let samples = try await audioConverter.convertToAsrFormat(pcmBuffer, streaming: true)
+                    let samples = try audioConverter.resampleAudioBuffer(pcmBuffer, streaming: true)
 
                     // Append to raw sample buffer and attempt windowed processing
                     await self.appendSamplesAndProcess(samples)
@@ -115,7 +115,17 @@ public actor StreamingAsrManager {
                 }
             }
 
-            // Stream ended: flush remaining audio (without requiring full right context)
+            // Stream ended: first flush any remaining samples buffered in the converter
+            do {
+                let tail = try audioConverter.finishStreamingConversion()
+                if !tail.isEmpty {
+                    await self.appendSamplesAndProcess(tail)
+                }
+            } catch {
+                logger.warning("Failed to drain audio converter tail: \(error.localizedDescription)")
+            }
+
+            // Then flush remaining assembled audio (no right-context requirement)
             await self.flushRemaining()
 
             logger.info("Recognition task completed")
@@ -210,7 +220,7 @@ public actor StreamingAsrManager {
         updateContinuation?.finish()
 
         // Cleanup audio converter state
-        await audioConverter.cleanup()
+        audioConverter.cleanup()
 
         logger.info("StreamingAsrManager cancelled")
     }
@@ -416,11 +426,11 @@ public actor StreamingAsrManager {
 
             case .audioBufferProcessingFailed:
                 logger.info("Recovering from audio buffer error - resetting audio converter")
-                await audioConverter.reset()
+                audioConverter.reset()
 
             case .audioConversionFailed:
                 logger.info("Recovering from audio conversion error - resetting converter")
-                await audioConverter.reset()
+                audioConverter.reset()
 
             case .modelProcessingFailed:
                 logger.info("Recovering from model processing error - resetting decoder state")

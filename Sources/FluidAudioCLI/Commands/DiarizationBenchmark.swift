@@ -845,7 +845,7 @@ enum StreamDiarizationBenchmark {
 
     private static func loadAudioFile(at path: String) async throws -> [Float] {
         let converter = AudioConverter()
-        return try await converter.convertFileToAsrSamples(path: path)
+        return try converter.resampleAudioFile(path: path)
     }
 
     private static func averageResults(_ results: [BenchmarkResult]) -> BenchmarkResult {
