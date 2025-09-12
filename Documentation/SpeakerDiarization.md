@@ -125,8 +125,8 @@ class RealTimeDiarizer {
     private let sampleRate: Double = 16000
     private var chunkSamples: Int { Int(sampleRate * chunkDuration) }
     private var streamPosition: Double = 0
-    // Keep a converter for streaming (avoids re-priming per chunk)
-    private let converter = AudioConverter(streaming: true)
+    // Audio converter for format conversion
+    private let converter = AudioConverter()
     
     init() async throws {
         let models = try await DiarizerModels.downloadIfNeeded()

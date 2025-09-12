@@ -24,8 +24,7 @@ public func loadSamples16kMono(path: String) async throws -> [Float] {
 Notes:
 - Input can be any format readable by `AVAudioFile` (e.g., WAV, M4A, MP3, FLAC).
 - Output is 16 kHz mono Float32 samples suitable for ASR/VAD/Diarization.
-- For live/streaming audio, call, initialize the converter with streaming = true, `resampleBuffer(buffer)` per chunk and finish with
-  `finish()` to flush remaining samples.
+- Each conversion is stateless, so you can reuse the same converter instance for different audio formats.
 
 ## Streaming Example
 
@@ -33,7 +32,7 @@ Notes:
 import AVFoundation
 import FluidAudio
 
-let converter = AudioConverter(streaming: true)
+let converter = AudioConverter()
 
 // In your audio capture loop, per incoming chunk:
 func processChunk(_ pcmBuffer: AVAudioPCMBuffer) async throws {
@@ -41,7 +40,5 @@ func processChunk(_ pcmBuffer: AVAudioPCMBuffer) async throws {
     // feed `samples` to downstream ASR/VAD/etc.
 }
 
-// When the stream ends, flush any remaining samples:
-let tail = try converter.finish()
-// feed `tail` to downstream processing as needed
+// No need to flush - each conversion is complete and independent
 ```

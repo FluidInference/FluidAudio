@@ -225,45 +225,6 @@ final class AudioConverterTests: XCTestCase {
         XCTAssertThrowsError(try audioConverter.resampleAudioFile(path: bogusPath))
     }
 
-    // MARK: - Streaming API
-
-    func testStreamingChunksAndFinishDrain() async throws {
-        // Stream three chunks totaling ~1.5s of 44.1kHz stereo audio
-        let chunkDurations: [Double] = [0.5, 0.5, 0.5]
-        var totalOut: [Float] = []
-        let streamingConverter = AudioConverter(streaming: true)
-
-        for dur in chunkDurations {
-            let chunk = try createAudioBuffer(sampleRate: 44_100, channels: 2, duration: dur)
-            let out = try streamingConverter.resampleBuffer(chunk)
-            totalOut.append(contentsOf: out)
-        }
-
-        // Drain remaining samples at end of stream
-        let drained = try streamingConverter.finish()
-        totalOut.append(contentsOf: drained)
-
-        // Expect ~1.5s of 16kHz audio with a small tolerance for resampler boundaries
-        let expected = Int(16_000 * chunkDurations.reduce(0, +))
-        let tolerance = Int(Double(expected) * 0.02)  // 2%
-        XCTAssertTrue(
-            abs(totalOut.count - expected) <= tolerance,
-            "Streaming+drain sample count \(totalOut.count) should be close to \(expected)")
-    }
-
-    func testFinishReturnsEmptyInNonStreamingMode() async throws {
-        // Non-streaming conversions should fully flush per call; finish() returns no extra samples
-        let nonStreaming = AudioConverter()
-        let buffer = try createAudioBuffer(sampleRate: 44_100, channels: 2, duration: 0.5)
-
-        let converted = try nonStreaming.resampleBuffer(buffer)
-        assertApproximateCount(
-            converted.count, expected: 8_000, toleranceFraction: 0.01, "~0.5s at 16kHz expected in non-streaming mode")
-
-        let drained = try nonStreaming.finish()
-        XCTAssertEqual(drained.count, 0, "finish() should return empty for non-streaming usage")
-    }
-
     // MARK: - Interleaved Inputs
 
     private func createInterleavedStereoBuffer(sampleRate: Double, duration: Double) throws -> AVAudioPCMBuffer {
@@ -343,25 +304,6 @@ final class AudioConverterTests: XCTestCase {
         return buffer
     }
 
-    func testStreamingWithSmallAndLargeChunks() async throws {
-        // Mix tiny and larger chunks to exercise converter stability
-        let durations: [Double] = [0.05, 0.01, 0.2, 0.35, 0.01, 0.38]  // totals ~1.0s
-        var collected: [Float] = []
-        let streamingConverter = AudioConverter(streaming: true)
-
-        for d in durations {
-            let b = try createAudioBuffer(sampleRate: 48_000, channels: 2, duration: d)
-            collected.append(contentsOf: try streamingConverter.resampleBuffer(b))
-        }
-        collected.append(contentsOf: try streamingConverter.finish())
-
-        let expected = 16_000  // ~1 second
-        let tolerance = Int(Double(expected) * 0.05)  // 5%
-        XCTAssertTrue(
-            abs(collected.count - expected) <= tolerance,
-            "Total streaming samples (\(collected.count)) should be ~\(expected)")
-    }
-
     func testConvertVeryLongBuffer() async throws {
         // 10 second buffer
         let buffer = try createAudioBuffer(
@@ -429,17 +371,14 @@ final class AudioConverterTests: XCTestCase {
         XCTAssertEqual(result.count, 500, "Should maintain sample count for same sample rate")
     }
 
-    // MARK: - Converter State Management Tests
+    // MARK: - Multiple Format Conversion Tests
 
-    func testConverterReset() async throws {
+    func testMultipleFormatConversions() async throws {
         // Convert one format
         let buffer1 = try createAudioBuffer(sampleRate: 44100, channels: 2)
         _ = try audioConverter.resampleBuffer(buffer1)
 
-        // Reset converter
-        audioConverter.reset()
-
-        // Convert different format (should work fine)
+        // Convert different format (should work fine without reset since each conversion is stateless)
         let buffer2 = try createAudioBuffer(sampleRate: 48000, channels: 1)
         let result = try audioConverter.resampleBuffer(buffer2)
 

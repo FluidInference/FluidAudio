@@ -25,9 +25,8 @@ struct ChunkProcessor {
     func process(
         using manager: AsrManager, decoderState: inout TdtDecoderState, startTime: Date
     ) async throws -> ASRResult {
-        var allTokens: [Int] = []
-        var allTimestamps: [Int] = []
-        var allConfidences: [Float] = []
+        // Use a combined structure to keep tokens, timestamps, and confidences aligned
+        var allTokenData: [(token: Int, timestamp: Int, confidence: Float)] = []
 
         var centerStart = 0
         var segmentIndex = 0
@@ -47,31 +46,64 @@ struct ChunkProcessor {
                 decoderState: &decoderState
             )
 
+            if enableDebug {
+                logger.debug(
+                    "Chunk \(segmentIndex): got \(windowTokens.count) tokens, timestamps range: \(windowTimestamps.min() ?? -1) to \(windowTimestamps.max() ?? -1)"
+                )
+            }
+
             // Update last processed frame for next chunk
             if maxFrame > 0 {
                 lastProcessedFrame = maxFrame
             }
 
-            // For chunks after the first, check for and remove duplicated token sequences
-            if segmentIndex > 0 && !allTokens.isEmpty && !windowTokens.isEmpty {
-                let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
-                    previous: allTokens, current: windowTokens, maxOverlap: 30)
-                let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
-                let adjustedConfidences = Array(windowConfidences.dropFirst(removedCount))
+            // Combine tokens, timestamps, and confidences into aligned tuples
+            guard windowTokens.count == windowTimestamps.count && windowTokens.count == windowConfidences.count else {
+                throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
+            }
 
-                allTokens.append(contentsOf: deduped)
-                allTimestamps.append(contentsOf: adjustedTimestamps)
-                allConfidences.append(contentsOf: adjustedConfidences)
+            let windowData = zip(zip(windowTokens, windowTimestamps), windowConfidences).map {
+                (token: $0.0.0, timestamp: $0.0.1, confidence: $0.1)
+            }
+
+            // For chunks after the first, check for and remove duplicated token sequences
+            if segmentIndex > 0 && !allTokenData.isEmpty && !windowData.isEmpty {
+                let previousTokens = allTokenData.map { $0.token }
+                let currentTokens = windowData.map { $0.token }
+
+                let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
+                    previous: previousTokens, current: currentTokens, maxOverlap: 30)
+
+                if enableDebug && removedCount > 0 {
+                    logger.debug(
+                        "Chunk \(segmentIndex): removed \(removedCount) duplicate tokens, keeping \(deduped.count)")
+                }
+
+                // Only keep the non-duplicate portion of window data
+                let adjustedWindowData = Array(windowData.dropFirst(removedCount))
+                allTokenData.append(contentsOf: adjustedWindowData)
             } else {
-                allTokens.append(contentsOf: windowTokens)
-                allTimestamps.append(contentsOf: windowTimestamps)
-                allConfidences.append(contentsOf: windowConfidences)
+                allTokenData.append(contentsOf: windowData)
             }
 
             centerStart += centerSamples
 
             segmentIndex += 1
         }
+
+        // Sort by timestamp to ensure chronological order
+        allTokenData.sort { $0.timestamp < $1.timestamp }
+
+        if enableDebug {
+            logger.debug(
+                "Final processing: \(allTokenData.count) total tokens, timestamp range: \(allTokenData.first?.timestamp ?? -1) to \(allTokenData.last?.timestamp ?? -1)"
+            )
+        }
+
+        // Extract sorted arrays
+        let allTokens = allTokenData.map { $0.token }
+        let allTimestamps = allTokenData.map { $0.timestamp }
+        let allConfidences = allTokenData.map { $0.confidence }
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,

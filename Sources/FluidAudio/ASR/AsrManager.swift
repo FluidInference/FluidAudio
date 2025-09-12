@@ -297,9 +297,6 @@ public final class AsrManager {
 
         let result = try await transcribe(audioFloatArray, source: source)
 
-        // For batch processing, reset the converter state after each file
-        audioConverter.reset()
-
         return result
     }
 
@@ -307,9 +304,6 @@ public final class AsrManager {
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
 
         let result = try await transcribe(audioFloatArray, source: source)
-
-        // For batch processing, reset the converter state after each file
-        audioConverter.reset()
 
         return result
     }

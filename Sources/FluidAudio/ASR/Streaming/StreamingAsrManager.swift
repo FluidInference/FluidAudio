@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = AppLogger(category: "StreamingASR")
-    private let audioConverter: AudioConverter = AudioConverter(streaming: true)
+    private let audioConverter: AudioConverter = AudioConverter()
     private let config: StreamingAsrConfig
 
     // Audio input stream
@@ -82,10 +82,6 @@ public actor StreamingAsrManager {
 
         self.audioSource = source
 
-        // Ensure a fresh converter state per stream/source to avoid
-        // cross-stream residual state in streaming resampling.
-        audioConverter.reset()
-
         // Initialize ASR manager with provided models
         asrManager = AsrManager(config: config.asrConfig)
         try await asrManager?.initialize(models: models)
@@ -119,15 +115,7 @@ public actor StreamingAsrManager {
                 }
             }
 
-            // Stream ended: first flush any remaining samples buffered in the converter
-            do {
-                let tail = try audioConverter.finish()
-                if !tail.isEmpty {
-                    await self.appendSamplesAndProcess(tail)
-                }
-            } catch {
-                logger.warning("Failed to drain audio converter tail: \(error.localizedDescription)")
-            }
+            // Stream ended: no need to flush converter since each conversion is stateless
 
             // Then flush remaining assembled audio (no right-context requirement)
             await self.flushRemaining()
@@ -204,10 +192,6 @@ public actor StreamingAsrManager {
         bufferStartIndex = 0
         nextWindowCenterStart = 0
 
-        // Reset audio converter to clear any streaming state before starting
-        // a new session on this manager (potentially with a different source).
-        audioConverter.reset()
-
         // Reset decoder state for the current audio source
         if let asrManager = asrManager {
             try await asrManager.resetDecoderState(for: audioSource)
@@ -226,9 +210,6 @@ public actor StreamingAsrManager {
         inputBuilder.finish()
         recognizerTask?.cancel()
         updateContinuation?.finish()
-
-        // Cleanup audio converter state
-        audioConverter.reset()
 
         logger.info("StreamingAsrManager cancelled")
     }
@@ -433,12 +414,10 @@ public actor StreamingAsrManager {
                 logger.error("Stream already exists - cannot recover automatically")
 
             case .audioBufferProcessingFailed:
-                logger.info("Recovering from audio buffer error - resetting audio converter")
-                audioConverter.reset()
+                logger.info("Recovering from audio buffer error")
 
             case .audioConversionFailed:
-                logger.info("Recovering from audio conversion error - resetting converter")
-                audioConverter.reset()
+                logger.info("Recovering from audio conversion error")
 
             case .modelProcessingFailed:
                 logger.info("Recovering from model processing error - resetting decoder state")

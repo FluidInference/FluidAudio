@@ -35,8 +35,6 @@ public actor VadManager {
     public func process(_ url: URL) async throws -> [VadResult] {
         let samples = try audioConverter.resampleAudioFile(url)
         let results = try await processAudioFile(samples)
-        // Reset converter state between batch files
-        audioConverter.reset()
         return results
     }
 
@@ -47,8 +45,6 @@ public actor VadManager {
     public func process(_ audioBuffer: AVAudioPCMBuffer) async throws -> [VadResult] {
         let samples = try audioConverter.resampleBuffer(audioBuffer)
         let results = try await processAudioFile(samples)
-        // Reset converter state between batch buffers
-        audioConverter.reset()
         return results
     }
 

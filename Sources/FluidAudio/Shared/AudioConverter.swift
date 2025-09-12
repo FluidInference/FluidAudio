@@ -8,19 +8,14 @@ import OSLog
 /// Implementation notes:
 /// - Uses `AVAudioConverter` for all sample-rate, sample-format, and channel-count conversions.
 /// - Avoids any manual resampling; only raw sample extraction occurs after conversion.
-/// - Supports streaming by retaining the converter between calls and deferring drain until finish.
+/// - Creates a new converter for each operation (stateless).
 @available(macOS 13.0, iOS 16.0, *)
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
 
-    // AudioConverter is stateful, we need to handle streaming chunks vs batched differently
-    private let streaming: Bool
-    private var converter: AVAudioConverter?
-
     /// Public initializer so external modules (e.g. CLI) can construct the converter
-    public init(targetFormat: AVAudioFormat? = nil, streaming: Bool = false) {
-        self.streaming = streaming
+    public init(targetFormat: AVAudioFormat? = nil) {
         if let format = targetFormat {
             self.targetFormat = format
         } else {
@@ -35,8 +30,7 @@ final public class AudioConverter {
         }
     }
 
-    /// Convert a standalone buffer to the target format (flush to end-of-stream).
-    /// Use for batch processing of a single `AVAudioPCMBuffer` (non-streaming).
+    /// Convert a standalone buffer to the target format.
     /// - Parameter buffer: Input audio buffer (any format)
     /// - Returns: Float array at 16kHz mono
     public func resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
@@ -45,14 +39,7 @@ final public class AudioConverter {
             return extractFloatArray(from: buffer)
         }
 
-        if streaming {
-            // For streaming, convert chunk without draining
-            return try convertStreamingChunk(buffer, to: targetFormat)
-        }
-
-        let result = try convertBatchBuffer(buffer, to: targetFormat)
-        self.reset()  // Clear converter state after batch
-        return result
+        return try convertBuffer(buffer, to: targetFormat)
     }
 
     /// Convert an audio file to 16kHz mono Float32 samples
@@ -79,48 +66,12 @@ final public class AudioConverter {
         return try resampleAudioFile(url)
     }
 
-    /// Finish a streaming conversion sequence and flush any remaining samples.
-    /// - Returns: Additional samples produced by draining the converter, if any
-    public func finish() throws -> [Float] {
-        guard let converter = converter else { return [] }
-
-        // For streaming we never re-prime; just drain remaining frames
-        converter.primeMethod = .none
-
-        var drained: [Float] = []
-        var error: NSError?
-
-        func makeOutputBuffer(_ capacity: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
-            guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
-                throw AudioConverterError.failedToCreateBuffer
-            }
-            return out
-        }
-
-        while true {
-            let outBuf = try makeOutputBuffer(4096)
-            let status = converter.convert(to: outBuf, error: &error) { _, statusPointer in
-                statusPointer.pointee = .endOfStream
-                return nil
-            }
-            guard status != .error else { throw AudioConverterError.conversionFailed(error) }
-            if outBuf.frameLength > 0 {
-                drained.append(contentsOf: extractFloatArray(from: outBuf))
-            }
-            if status == .endOfStream { break }
-        }
-
-        return drained
-    }
-
-    /// Convert a standalone buffer to the target format (flush to end-of-stream).
-    private func convertBatchBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
+    /// Convert a buffer to the target format.
+    private func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
         let inputFormat = buffer.format
-        try ensureConverter(input: inputFormat, output: format)
-        guard let converter = converter else { throw AudioConverterError.failedToCreateConverter }
-
-        // Normal priming for full, standalone conversions
-        converter.primeMethod = .normal
+        guard let converter = AVAudioConverter(from: inputFormat, to: format) else {
+            throw AudioConverterError.failedToCreateConverter
+        }
 
         // Estimate first pass capacity and allocate
         let sampleRateRatio = format.sampleRate / inputFormat.sampleRate
@@ -150,6 +101,8 @@ final public class AudioConverter {
         }
 
         var error: NSError?
+        let inputSampleCount = Int(buffer.frameLength)
+
         // First pass: convert main data
         let firstOut = try makeOutputBuffer(estimatedOutputFrames)
         let firstStatus = converter.convert(to: firstOut, error: &error, withInputFrom: inputBlock)
@@ -165,57 +118,12 @@ final public class AudioConverter {
             if status == .endOfStream { break }
         }
 
+        let outputSampleCount = aggregated.count
+        logger.debug(
+            "Audio conversion: \(inputSampleCount) samples → \(outputSampleCount) samples, ratio: \(Double(outputSampleCount)/Double(inputSampleCount))"
+        )
+
         return aggregated
-    }
-
-    /// Convert a streaming chunk to the target format (no flush/drain).
-    private func convertStreamingChunk(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
-        let inputFormat = buffer.format
-        try ensureConverter(input: inputFormat, output: format)
-        guard let converter = converter else { throw AudioConverterError.failedToCreateConverter }
-
-        // For streaming, avoid priming and do a single pass without draining
-        converter.primeMethod = .none
-
-        // Estimate immediate output
-        let sampleRateRatio = format.sampleRate / inputFormat.sampleRate
-        let estimate = AVAudioFrameCount((Double(buffer.frameLength) * sampleRateRatio).rounded(.up))
-
-        func makeOutputBuffer(_ capacity: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
-            guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
-                throw AudioConverterError.failedToCreateBuffer
-            }
-            return out
-        }
-
-        var provided = false
-        let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
-                provided = true
-                status.pointee = .haveData
-                return buffer
-            } else {
-                status.pointee = .noDataNow
-                return nil
-            }
-        }
-
-        var error: NSError?
-        let out = try makeOutputBuffer(estimate)
-        let status = converter.convert(to: out, error: &error, withInputFrom: inputBlock)
-        guard status != .error else { throw AudioConverterError.conversionFailed(error) }
-        return out.frameLength > 0 ? extractFloatArray(from: out) : []
-    }
-
-    /// Ensure the internal converter matches the given formats.
-    private func ensureConverter(input: AVAudioFormat, output: AVAudioFormat) throws {
-        if converter == nil || converter?.inputFormat != input || converter?.outputFormat != output {
-            converter = AVAudioConverter(from: input, to: output)
-            logger.debug(
-                "Created audio converter: \(input.sampleRate)Hz \(input.channelCount)ch -> \(output.sampleRate)Hz \(output.channelCount)ch"
-            )
-        }
-        guard converter != nil else { throw AudioConverterError.failedToCreateConverter }
     }
 
     /// Check if a format already matches the target output format.
@@ -253,10 +161,6 @@ final public class AudioConverter {
         return out
     }
 
-    /// Reset the converter (useful when switching audio formats)
-    public func reset() {
-        converter = nil
-    }
 }
 
 /// Errors that can occur during audio conversion

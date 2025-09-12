@@ -265,42 +265,74 @@ extension AsrManager {
 
         var timings: [TokenTiming] = []
 
-        for i in 0..<tokenIds.count {
-            let tokenId = tokenIds[i]
-            let frameIndex = timestamps[i]
+        // Create combined data for sorting
+        let combinedData = zip(
+            zip(zip(tokenIds, timestamps), confidences),
+            tokenDurations.isEmpty ? Array(repeating: 0, count: tokenIds.count) : tokenDurations
+        ).map {
+            (tokenId: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
+        }
 
-            // Convert encoder frame index to time (approximate: 80ms per frame)
+        // Sort by timestamp to ensure chronological order
+        let sortedData = combinedData.sorted { $0.timestamp < $1.timestamp }
+
+        if config.enableDebug && combinedData.count != sortedData.count {
+            logger.debug("Token sorting: rearranged tokens to fix chronological order")
+        }
+
+        for i in 0..<sortedData.count {
+            let data = sortedData[i]
+            let tokenId = data.tokenId
+            let frameIndex = data.timestamp
+
+            // Convert encoder frame index to time (80ms per frame)
             let startTime = TimeInterval(frameIndex) * 0.08
 
             // Calculate end time using actual token duration if available
             let endTime: TimeInterval
-            if !tokenDurations.isEmpty && tokenDurations.count == tokenIds.count {
+            if !tokenDurations.isEmpty && data.duration > 0 {
                 // Use actual token duration (convert frames to time: duration * 0.08)
-                let durationInSeconds = TimeInterval(tokenDurations[i]) * 0.08
+                let durationInSeconds = TimeInterval(data.duration) * 0.08
                 endTime = startTime + max(durationInSeconds, 0.08)  // Minimum 80ms duration
-            } else if i < tokenIds.count - 1 {
+            } else if i < sortedData.count - 1 {
                 // Fallback: Use next token's start time as this token's end time
-                endTime = TimeInterval(timestamps[i + 1]) * 0.08
+                let nextStartTime = TimeInterval(sortedData[i + 1].timestamp) * 0.08
+                endTime = max(nextStartTime, startTime + 0.08)  // Ensure end > start
             } else {
                 // For the last token, use a default duration
                 endTime = startTime + 0.08
             }
 
+            // Validate that end time is after start time
+            let validatedEndTime = max(endTime, startTime + 0.001)  // Minimum 1ms gap
+
             // Get token text from vocabulary if available
             let tokenText = vocabulary[tokenId] ?? "token_\(tokenId)"
 
             // Use actual confidence score from TDT decoder
-            let tokenConfidence = confidences[i]
+            let tokenConfidence = data.confidence
 
             let timing = TokenTiming(
                 token: tokenText,
                 tokenId: tokenId,
                 startTime: startTime,
-                endTime: endTime,
+                endTime: validatedEndTime,
                 confidence: tokenConfidence
             )
 
             timings.append(timing)
+        }
+
+        // Validate final timing sequence
+        if config.enableDebug {
+            for i in 1..<timings.count {
+                if timings[i].startTime < timings[i - 1].startTime {
+                    logger.warning("Timestamp validation: token \(i) has earlier start time than token \(i-1)")
+                }
+                if timings[i].endTime <= timings[i].startTime {
+                    logger.warning("Timestamp validation: token \(i) has invalid end time <= start time")
+                }
+            }
         }
 
         return timings
