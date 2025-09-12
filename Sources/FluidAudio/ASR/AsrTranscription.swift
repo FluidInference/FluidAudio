@@ -276,10 +276,6 @@ extension AsrManager {
         // Sort by timestamp to ensure chronological order
         let sortedData = combinedData.sorted { $0.timestamp < $1.timestamp }
 
-        if config.enableDebug && combinedData.count != sortedData.count {
-            logger.debug("Token sorting: rearranged tokens to fix chronological order")
-        }
-
         for i in 0..<sortedData.count {
             let data = sortedData[i]
             let tokenId = data.tokenId

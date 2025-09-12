@@ -13,8 +13,8 @@ struct ChunkProcessor {
     // 1.6s context = exactly 20 encoder frames each
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 11.2  // Exactly 140 frames (11.2 * 12.5)
-    private let leftContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
+    private let centerSeconds: Double = 10.0  // Reduced to allow for more overlap
+    private let leftContextSeconds: Double = 2.4  // Increased overlap to 30 frames to avoid missing speech  
     private let rightContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
 
     private var centerSamples: Int { Int(centerSeconds * Double(sampleRate)) }
@@ -56,7 +56,7 @@ struct ChunkProcessor {
             if maxFrame > 0 {
                 lastProcessedFrame = maxFrame
             }
-
+            
             // Combine tokens, timestamps, and confidences into aligned tuples
             guard windowTokens.count == windowTimestamps.count && windowTokens.count == windowConfidences.count else {
                 throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
@@ -74,15 +74,21 @@ struct ChunkProcessor {
                 let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
                     previous: previousTokens, current: currentTokens, maxOverlap: 30)
 
-                if enableDebug && removedCount > 0 {
-                    logger.debug(
-                        "Chunk \(segmentIndex): removed \(removedCount) duplicate tokens, keeping \(deduped.count)")
-                }
+                logger.debug(
+                    "Chunk \(segmentIndex): removed \(removedCount) duplicate tokens, keeping \(deduped.count)")
 
                 // Only keep the non-duplicate portion of window data
                 let adjustedWindowData = Array(windowData.dropFirst(removedCount))
                 allTokenData.append(contentsOf: adjustedWindowData)
             } else {
+                if segmentIndex == 0 {
+                    logger.debug("First chunk: adding \(windowData.count) tokens to result")
+                    // Log first few tokens to understand what's being transcribed
+                    if windowData.count > 0 {
+                        let firstTokens = windowData.prefix(10).map { $0.token }
+                        logger.debug("First 10 token IDs: \(firstTokens)")
+                    }
+                }
                 allTokenData.append(contentsOf: windowData)
             }
 
@@ -133,6 +139,9 @@ struct ChunkProcessor {
             // First chunk: no overlap, standard context
             adaptiveLeftContextSamples = leftContextSamples
             contextFrameAdjustment = 0
+            if enableDebug {
+                logger.debug("First chunk: no overlap, contextFrameAdjustment = 0")
+            }
         } else if isLastChunk && remainingSamples < centerSamples {
             // Last chunk can't fill center - maximize context usage
             // Try to use full model capacity (15s) if available
@@ -172,8 +181,7 @@ struct ChunkProcessor {
             adaptiveLeftContextSamples = leftContextSamples
 
             // Standard chunks use physical overlap in audio windows for context
-            // Let deduplication handle any token overlap rather than negative frame adjustment
-            // This prevents edge cases when prevTimeJump = 0
+            // Don't skip frames - let the decoder handle continuity with its timeJump mechanism
             contextFrameAdjustment = 0
         }
 
@@ -198,6 +206,12 @@ struct ChunkProcessor {
         // Calculate global frame offset for this chunk
         let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
 
+        if enableDebug {
+            logger.debug(
+                "Chunk \(segmentIndex): leftStart=\(leftStart), rightEnd=\(rightEnd), chunkSamples=\(chunkSamples.count), actualFrames=\(actualFrameCount), contextFrameAdjustment=\(contextFrameAdjustment), globalFrameOffset=\(globalFrameOffset)"
+            )
+        }
+
         let (hypothesis, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
@@ -210,7 +224,17 @@ struct ChunkProcessor {
         )
 
         if hypothesis.isEmpty || encLen == 0 {
+            if enableDebug {
+                logger.debug("Chunk \(segmentIndex): empty hypothesis or no encoder output")
+            }
             return ([], [], [], 0)
+        }
+        
+        if enableDebug && segmentIndex == 0 {
+            logger.debug("First chunk hypothesis: \(hypothesis.ySequence.count) tokens, max timestamp: \(hypothesis.maxTimestamp)")
+            if hypothesis.ySequence.count > 0 {
+                logger.debug("First chunk token IDs: \(hypothesis.ySequence.prefix(20))")
+            }
         }
 
         // Take all tokens from decoder (it already processed only the relevant frames)
