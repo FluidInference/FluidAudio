@@ -1,9 +1,9 @@
 # Audio Conversion (16 kHz mono)
 
-Most FluidAudio features expect 16 kHz mono Float32 samples. Use the `AudioConverter` actor for both CLI and library
-paths to ensure identical, high‑quality results.
+Most FluidAudio features expect 16 kHz mono Float32 samples. Most of the commands should already be doing this implicitly when receiving input from the client but if needed, you can also convert manually.
 
 Implementation details:
+
 - System APIs: Under the hood, conversion uses `AVAudioConverter` for sample‑rate conversion, sample‑format conversion
   (e.g., Int16 → Float32), and channel mixing (stereo → mono).
 - No manual resampling: We do not implement custom resamplers (e.g., linear interpolation/decimation). Always go through
