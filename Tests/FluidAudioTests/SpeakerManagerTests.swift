@@ -17,7 +17,7 @@ final class SpeakerManagerTests: XCTestCase {
     }
 
     // MARK: - Basic Operations
-    
+
     func testInitialization() {
         let manager = SpeakerManager()
         XCTAssertEqual(manager.speakerCount, 0)

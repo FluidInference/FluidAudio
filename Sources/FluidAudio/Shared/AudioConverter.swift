@@ -46,10 +46,13 @@ final public class AudioConverter {
         }
 
         if streaming {
+            // For streaming, convert chunk without draining
             return try convertStreamingChunk(buffer, to: targetFormat)
         }
 
-        return try convertBatchBuffer(buffer, to: targetFormat)
+        let result = try convertBatchBuffer(buffer, to: targetFormat)
+        self.reset()  // Clear converter state after batch
+        return result
     }
 
     /// Convert an audio file to 16kHz mono Float32 samples

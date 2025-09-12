@@ -153,7 +153,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 audioSamples.append(sample)
             }
 
-
             // Process the audio - this should trigger chunking
             let result = try await manager.transcribe(audioSamples)
 
@@ -192,7 +191,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 for pattern in duplicatePatterns {
                     print("  - \(pattern)")
                 }
-            } 
+            }
 
             // Assert no duplicates for this duration
             XCTAssertEqual(
@@ -304,7 +303,6 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 audioSamples.append(sample)
             }
 
-            
             // Process the audio - this should reveal if end frames are dropped
             let result = try await manager.transcribe(audioSamples)
 
@@ -366,12 +364,10 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
         let centerSeconds = 11.2  // From ChunkProcessor
         let leftContextSeconds = 1.6
         let rightContextSeconds = 1.6
-        let totalChunkDuration = leftContextSeconds + centerSeconds + rightContextSeconds  // 14.4s
 
         let centerSamples = Int(centerSeconds * Double(sampleRate))  // 179,200 samples
         let leftContextSamples = Int(leftContextSeconds * Double(sampleRate))  // 25,600 samples
         let rightContextSamples = Int(rightContextSeconds * Double(sampleRate))  // 25,600 samples
-        let totalChunkSamples = Int(totalChunkDuration * Double(sampleRate))  // 230,400 samples
 
         // Test cases with different audio lengths relative to chunk size
         let testCases: [(description: String, duration: Double)] = [
@@ -382,7 +378,7 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
             ("Long audio", 25.0),  // Multiple chunks
         ]
 
-        for (description, duration) in testCases {
+        for (_, duration) in testCases {
             let audioSamples = Int(duration * Double(sampleRate))
 
             // Simulate ChunkProcessor logic with adaptive context fix
@@ -421,11 +417,9 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                 }
 
                 // Calculate window bounds with adaptive context
-                let leftStart = max(0, centerStart - adaptiveLeftContext)
                 let centerEnd = min(audioSamples, centerStart + centerSamples)
                 let rightEnd = min(audioSamples, centerEnd + rightContextSamples)
 
-                let chunkLength = rightEnd - leftStart
                 let centerLength = centerEnd - centerStart
 
                 // Key checks for frame dropping:
@@ -435,15 +429,12 @@ class TdtTimeJumpIntegrationTests: XCTestCase {
                     let samplesFromEnd = audioSamples - rightEnd
 
                     if isLastChunk && remainingSamples < centerSamples {
-                        // With adaptive context, we should now process much more audio
-                        let totalChunkSamples = adaptiveLeftContext + remainingSamples
-                     
                         // The fix should ensure we process nearly all remaining audio
                         XCTAssertLessThanOrEqual(
                             samplesFromEnd, 1000,  // Should now be < 60ms unprocessed
                             "With adaptive context fix, should leave minimal samples unprocessed - found \(samplesFromEnd) samples (\(Double(samplesFromEnd)/16000.0)s)"
                         )
-                    } 
+                    }
                 }
 
                 // 2. Center section should always be processed fully unless it's the last chunk

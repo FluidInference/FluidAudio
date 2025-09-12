@@ -402,8 +402,8 @@ final class CoreMLBackendIntegrationTests: XCTestCase {
             // Test that we can perform basic operations
             let testSamples = Array(repeating: Float(0.5), count: 16000)
 
-            let result = try diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
-           
+            try diarizer.performCompleteDiarization(testSamples, sampleRate: 16000)
+
             diarizer.cleanup()
         } catch {
             // This is expected in test environment - models might not download
