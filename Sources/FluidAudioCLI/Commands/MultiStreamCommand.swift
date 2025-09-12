@@ -110,12 +110,14 @@ enum MultiStreamCommand {
             // Create streams for different sources
             logger.info("Creating streams for different audio sources...")
             let micStream = try await session.createStream(
-                source: .microphone
+                source: .microphone,
+                config: .default
             )
             logger.info("Created microphone stream")
 
             let systemStream = try await session.createStream(
-                source: .system
+                source: .system,
+                config: .default
             )
             logger.info("Created system audio stream\n")
 
