@@ -72,5 +72,5 @@ public enum ModelNames {
             return ModelNames.Diarizer.requiredModels
         }
     }
- 
+
 }
