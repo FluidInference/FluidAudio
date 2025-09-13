@@ -217,86 +217,81 @@ public actor VadManager {
 
         let processingStartTime = Date()
 
-        // Process all chunks in a single batch prediction
-        let batchSize = audioChunks.count
-        var batchInputs: [MLFeatureProvider] = []
+        return try autoreleasepool {
+            // Process all chunks in a single batch prediction
+            let batchSize = audioChunks.count
+            var batchInputs: [MLFeatureProvider] = []
 
-        // Prepare batch inputs
-        for audioChunk in audioChunks {
-            // Pad/truncate each chunk
-            var processedChunk = audioChunk
-            if processedChunk.count != Self.chunkSize {
-                if processedChunk.count < Self.chunkSize {
-                    let paddingSize = Self.chunkSize - processedChunk.count
-                    let lastSample = processedChunk.last ?? 0.0
-                    processedChunk.append(contentsOf: Array(repeating: lastSample, count: paddingSize))
-                } else {
-                    processedChunk = Array(processedChunk.prefix(Self.chunkSize))
+            // Prepare batch inputs with optimized memory management
+            for audioChunk in audioChunks {
+                try autoreleasepool {
+                    // Pad/truncate each chunk
+                    var processedChunk = audioChunk
+                    if processedChunk.count != Self.chunkSize {
+                        if processedChunk.count < Self.chunkSize {
+                            let paddingSize = Self.chunkSize - processedChunk.count
+                            let lastSample = processedChunk.last ?? 0.0
+                            processedChunk.append(contentsOf: Array(repeating: lastSample, count: paddingSize))
+                        } else {
+                            processedChunk = Array(processedChunk.prefix(Self.chunkSize))
+                        }
+                    }
+
+                    // Use ANE-optimized array creation for better performance and memory efficiency
+                    let audioArray = try ANEMemoryOptimizer.shared.createAlignedArray(
+                        shape: [1, Self.chunkSize] as [NSNumber],
+                        dataType: .float32
+                    )
+
+                    // Use optimized copy operation
+                    ANEMemoryOptimizer.shared.optimizedCopy(
+                        from: processedChunk,
+                        to: audioArray,
+                        offset: 0
+                    )
+
+                    batchInputs.append(try MLDictionaryFeatureProvider(dictionary: ["audio_chunk": audioArray]))
                 }
             }
 
-            // Create MLMultiArray directly - cache overhead not worth it for batch processing
-            let audioArray = try MLMultiArray(
-                shape: [1, Self.chunkSize] as [NSNumber],
-                dataType: .float32
-            )
+            // Create batch provider and run prediction
+            let batchProvider = MLArrayBatchProvider(array: batchInputs)
+            let batchOutput = try vadModel.predictions(from: batchProvider, options: MLPredictionOptions())
 
-            processedChunk.withUnsafeBufferPointer { buffer in
-                let ptr = audioArray.dataPointer.bindMemory(to: Float.self, capacity: Self.chunkSize)
-                vDSP_mmov(
-                    buffer.baseAddress!,
-                    ptr,
-                    vDSP_Length(processedChunk.count),
-                    vDSP_Length(1),
-                    vDSP_Length(1),
-                    vDSP_Length(processedChunk.count)
+            // Process results
+            var results: [VadResult] = []
+
+            for i in 0..<batchSize {
+                let output = batchOutput.features(at: i)
+
+                guard let vadProbability = output.featureValue(for: "vad_probability")?.multiArrayValue else {
+                    logger.error("No vad_probability output found for batch index \(i)")
+                    throw VadError.modelProcessingFailed("No VAD probability output")
+                }
+
+                let rawProbability = Float(truncating: vadProbability[0])
+
+                // Apply audio processing (smoothing, SNR, etc.) per chunk
+                let (smoothedProbability, _, _) = audioProcessor.processRawProbability(
+                    rawProbability,
+                    audioChunk: audioChunks[i]
                 )
+
+                let isVoiceActive = smoothedProbability >= config.threshold
+
+                results.append(
+                    VadResult(
+                        probability: smoothedProbability,
+                        isVoiceActive: isVoiceActive,
+                        processingTime: Date().timeIntervalSince(processingStartTime) / Double(batchSize)
+                    ))
             }
 
-            batchInputs.append(try MLDictionaryFeatureProvider(dictionary: ["audio_chunk": audioArray]))
+            return results
         }
-
-        // Create batch provider
-        let batchProvider = MLArrayBatchProvider(array: batchInputs)
-
-        // Run batch prediction
-        let batchOutput = try vadModel.predictions(from: batchProvider, options: MLPredictionOptions())
-
-        // Process results
-        var results: [VadResult] = []
-
-        for i in 0..<batchSize {
-            let output = batchOutput.features(at: i)
-
-            guard let vadProbability = output.featureValue(for: "vad_probability")?.multiArrayValue else {
-                logger.error("No vad_probability output found for batch index \(i)")
-                throw VadError.modelProcessingFailed("No VAD probability output")
-            }
-
-            let rawProbability = Float(truncating: vadProbability[0])
-
-            // Apply audio processing (smoothing, SNR, etc.) per chunk
-            let (smoothedProbability, _, _) = audioProcessor.processRawProbability(
-                rawProbability,
-                audioChunk: audioChunks[i]
-            )
-
-            let isVoiceActive = smoothedProbability >= config.threshold
-
-            results.append(
-                VadResult(
-                    probability: smoothedProbability,
-                    isVoiceActive: isVoiceActive,
-                    processingTime: Date().timeIntervalSince(processingStartTime) / Double(batchSize)
-                ))
-        }
-
-        // Arrays will be automatically deallocated by ARC
-
-        return results
     }
 
-    /// Process an entire audio file using batch processing for optimal performance
+    /// Process an entire audio file using adaptive batch processing for optimal performance
     private func processAudioFile(_ audioData: [Float]) async throws -> [VadResult] {
         // Split audio into chunks
         var audioChunks: [[Float]] = []
@@ -306,8 +301,44 @@ public actor VadManager {
             audioChunks.append(chunk)
         }
 
-        // Process all chunks in batch for better performance
-        return try await processBatch(audioChunks)
+        // Use smaller batch sizes to prevent ANE memory exhaustion
+        // Process in batches of maximum 50 chunks to avoid memory issues
+        let maxBatchSize = 50
+        var allResults: [VadResult] = []
+
+        for batchStart in stride(from: 0, to: audioChunks.count, by: maxBatchSize) {
+            let batchEnd = min(batchStart + maxBatchSize, audioChunks.count)
+            let batchChunks = Array(audioChunks[batchStart..<batchEnd])
+
+            // Process batch with memory cleanup
+            let batchResults = try await processBatchWithCleanup(batchChunks)
+            allResults.append(contentsOf: batchResults)
+
+            // Force cleanup between batches to prevent ANE memory buildup
+            if batchEnd < audioChunks.count {
+                ANEMemoryOptimizer.shared.clearBufferPool()
+            }
+        }
+
+        return allResults
+    }
+
+    /// Process batch with automatic cleanup on failure
+    private func processBatchWithCleanup(_ audioChunks: [[Float]]) async throws -> [VadResult] {
+        do {
+            return try await processBatch(audioChunks)
+        } catch {
+            // If batch processing fails (likely due to memory), fall back to individual processing
+            logger.warning("Batch processing failed, falling back to individual chunk processing: \(error)")
+            ANEMemoryOptimizer.shared.clearBufferPool()
+
+            var results: [VadResult] = []
+            for chunk in audioChunks {
+                let result = try await processChunk(chunk)
+                results.append(result)
+            }
+            return results
+        }
     }
 
     /// Get current configuration

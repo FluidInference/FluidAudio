@@ -460,6 +460,11 @@ struct VadBenchmark {
                 groundTruth.append(testFile.expectedLabel)
                 fileDurations.append(Date().timeIntervalSince(fileStartTime))
             }
+
+            // Periodic buffer pool cleanup every 10 files to prevent ANE memory buildup
+            if (index + 1) % 10 == 0 {
+                ANEMemoryOptimizer.shared.clearBufferPool()
+            }
         }
 
         let processingTime = Date().timeIntervalSince(startTime)
