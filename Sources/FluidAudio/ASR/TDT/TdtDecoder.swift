@@ -105,10 +105,15 @@ internal struct TdtDecoder {
             // If contextFrameAdjustment > 0: decoder should start later (adaptive context)
             // Net position = prevTimeJump + contextFrameAdjustment (add adjustment to decoder position)
 
-            // Use prevTimeJump and contextFrameAdjustment to determine starting position
-            // prevTimeJump: how far decoder advanced beyond previous chunk
-            // contextFrameAdjustment: overlap/context adjustment for this chunk
-            timeIndices = max(0, prevTimeJump + contextFrameAdjustment)
+            // SPECIAL CASE: When prevTimeJump = 0 and contextFrameAdjustment = 0,
+            // decoder finished exactly at boundary but chunk has physical overlap
+            // Need to skip the overlap frames to avoid re-processing
+            if prevTimeJump == 0 && contextFrameAdjustment == 0 {
+                // Skip standard overlap (1.6s = 20 frames)
+                timeIndices = 20
+            } else {
+                timeIndices = max(0, prevTimeJump + contextFrameAdjustment)
+            }
 
         } else {
             // First chunk: start from beginning, accounting for any context frames that were already processed
@@ -116,10 +121,6 @@ internal struct TdtDecoder {
         }
         // Use the minimum of encoder sequence length and actual audio frames to avoid processing padding
         let effectiveSequenceLength = min(encoderSequenceLength, actualAudioFrames)
-
-        logger.debug(
-            "TDT Decoder: encoderSequenceLength=\(encoderSequenceLength), actualAudioFrames=\(actualAudioFrames), effectiveSequenceLength=\(effectiveSequenceLength), globalFrameOffset=\(globalFrameOffset)"
-        )
 
         // Key variables for frame navigation:
         var safeTimeIndices = min(timeIndices, effectiveSequenceLength - 1)  // Bounds-checked index
@@ -169,9 +170,6 @@ internal struct TdtDecoder {
         var emissionsAtThisTimestamp = 0
         let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep  // Usually 5-10
         var tokensProcessedThisChunk = 0  // Track tokens per chunk to prevent runaway decoding
-
-        // Track blank processing for debugging
-        var blankFramesProcessed = 0
 
         // ===== MAIN DECODING LOOP =====
         // Process each encoder frame until we've consumed all audio
@@ -236,19 +234,6 @@ internal struct TdtDecoder {
                 duration = 1
             }
 
-            // Limit blank duration jumps to prevent skipping speech
-            // When processing blanks, be more conservative to avoid missing speech
-            if blankMask {
-                blankFramesProcessed += 1
-                if blankFramesProcessed <= 20 && globalFrameOffset == 0 {
-                    logger.debug(
-                        "Blank \(blankFramesProcessed): frame \(timeIndices) -> \(timeIndices + duration) (duration=\(duration))"
-                    )
-                }
-                // Allow model to use its predicted durations
-                // The model should know when speech is present
-            }
-
             // Advance through audio frames based on predicted duration
             timeIndicesCurrentLabels = timeIndices  // Remember where this token was emitted
             timeIndices += duration  // Jump forward by predicted duration
@@ -304,14 +289,6 @@ internal struct TdtDecoder {
                     duration = 1
                 }
 
-                // Debug logging for inner loop blank processing
-                if blankMask && blankFramesProcessed <= 20 && globalFrameOffset == 0 {
-                    blankFramesProcessed += 1
-                    logger.debug(
-                        "Inner Blank \(blankFramesProcessed): frame \(timeIndices) -> \(timeIndices + duration) (duration=\(duration))"
-                    )
-                }
-
                 // Advance and check if we should continue the inner loop
                 timeIndices += duration
                 safeTimeIndices = min(timeIndices, lastTimestep)
@@ -331,14 +308,6 @@ internal struct TdtDecoder {
                 // Add token to output sequence
                 hypothesis.ySequence.append(label)
                 hypothesis.score += score
-
-                // Log first few tokens to debug missing text
-                if hypothesis.ySequence.count <= 5 {
-                    let frameTime = Double(timeIndicesCurrentLabels + globalFrameOffset) * 0.08
-                    logger.debug(
-                        "Token \(hypothesis.ySequence.count): id=\(label) at frame \(timeIndicesCurrentLabels + globalFrameOffset) (time=\(String(format: "%.2f", frameTime))s)"
-                    )
-                }
                 hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
                 hypothesis.tokenConfidences.append(score)
                 hypothesis.lastToken = label  // Remember for next iteration
