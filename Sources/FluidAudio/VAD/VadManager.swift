@@ -23,7 +23,6 @@ public actor VadManager {
     public static let sampleRate = 16000
 
     private var vadModel: MLModel?
-    private let audioProcessor: VadAudioProcessor
 
     // Reusable buffer to avoid allocations
     private var reuseBuffer: MLMultiArray?
@@ -63,7 +62,6 @@ public actor VadManager {
     /// Initialize with configuration
     public init(config: VadConfig = .default) async throws {
         self.config = config
-        self.audioProcessor = VadAudioProcessor(config: config)
 
         let startTime = Date()
 
@@ -77,7 +75,6 @@ public actor VadManager {
     /// Initialize with pre-loaded model
     public init(config: VadConfig = .default, vadModel: MLModel) {
         self.config = config
-        self.audioProcessor = VadAudioProcessor(config: config)
         self.vadModel = vadModel
         logger.info("VAD initialized with provided model")
     }
@@ -85,7 +82,6 @@ public actor VadManager {
     /// Initialize from directory
     public init(config: VadConfig = .default, modelDirectory: URL) async throws {
         self.config = config
-        self.audioProcessor = VadAudioProcessor(config: config)
 
         let startTime = Date()
         try await loadUnifiedModel(from: modelDirectory)
@@ -122,12 +118,28 @@ public actor VadManager {
         return appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
     }
 
+    /// Check if audio chunk is completely silent (all zeros or below threshold)
+    private func isSilentAudio(_ audioChunk: [Float]) -> Bool {
+        let silenceThreshold: Float = 1e-10
+        return audioChunk.allSatisfy { abs($0) <= silenceThreshold }
+    }
+
     public func processChunk(_ audioChunk: [Float]) async throws -> VadResult {
         guard let vadModel = vadModel else {
             throw VadError.notInitialized
         }
 
         let processingStartTime = Date()
+
+        // Check for completely silent audio first - no need to process through model
+        if isSilentAudio(audioChunk) {
+            let processingTime = Date().timeIntervalSince(processingStartTime)
+            return VadResult(
+                probability: 0.0,
+                isVoiceActive: false,
+                processingTime: processingTime
+            )
+        }
 
         // Ensure chunk is correct size
         var processedChunk = audioChunk
@@ -146,19 +158,11 @@ public actor VadManager {
 
         // Process through unified model
         let rawProbability = try await processUnifiedModel(processedChunk, model: vadModel)
-
-        // Apply audio processing (smoothing, SNR, etc.)
-        let (smoothedProbability, _, _) = audioProcessor.processRawProbability(
-            rawProbability,
-            audioChunk: processedChunk
-        )
-
-        let isVoiceActive = smoothedProbability >= config.threshold
         let processingTime = Date().timeIntervalSince(processingStartTime)
 
         return VadResult(
-            probability: smoothedProbability,
-            isVoiceActive: isVoiceActive,
+            probability: rawProbability,
+            isVoiceActive: rawProbability >= config.threshold,
             processingTime: processingTime
         )
     }
@@ -222,9 +226,25 @@ public actor VadManager {
             let batchSize = audioChunks.count
             var batchInputs: [MLFeatureProvider] = []
 
+            // Track silent chunks for optimization
+            var silentChunkIndices: Set<Int> = []
+
             // Prepare batch inputs with optimized memory management
-            for audioChunk in audioChunks {
+            for (index, audioChunk) in audioChunks.enumerated() {
                 try autoreleasepool {
+                    // Check for silent audio and track indices
+                    if isSilentAudio(audioChunk) {
+                        silentChunkIndices.insert(index)
+                        // Create zero-filled array for silent audio
+                        let audioArray = try ANEMemoryOptimizer.shared.createAlignedArray(
+                            shape: [1, Self.chunkSize] as [NSNumber],
+                            dataType: .float32
+                        )
+                        // Array is already initialized to zeros, no need to fill
+                        batchInputs.append(try MLDictionaryFeatureProvider(dictionary: ["audio_chunk": audioArray]))
+                        return
+                    }
+
                     // Pad/truncate each chunk
                     var processedChunk = audioChunk
                     if processedChunk.count != Self.chunkSize {
@@ -262,6 +282,17 @@ public actor VadManager {
             var results: [VadResult] = []
 
             for i in 0..<batchSize {
+                // For silent chunks, return immediate result without model inference
+                if silentChunkIndices.contains(i) {
+                    results.append(
+                        VadResult(
+                            probability: 0.0,
+                            isVoiceActive: false,
+                            processingTime: Date().timeIntervalSince(processingStartTime) / Double(batchSize)
+                        ))
+                    continue
+                }
+
                 let output = batchOutput.features(at: i)
 
                 guard let vadProbability = output.featureValue(for: "vad_probability")?.multiArrayValue else {
@@ -271,17 +302,11 @@ public actor VadManager {
 
                 let rawProbability = Float(truncating: vadProbability[0])
 
-                // Apply audio processing (smoothing, SNR, etc.) per chunk
-                let (smoothedProbability, _, _) = audioProcessor.processRawProbability(
-                    rawProbability,
-                    audioChunk: audioChunks[i]
-                )
-
-                let isVoiceActive = smoothedProbability >= config.threshold
+                let isVoiceActive = rawProbability >= config.threshold
 
                 results.append(
                     VadResult(
-                        probability: smoothedProbability,
+                        probability: rawProbability,
                         isVoiceActive: isVoiceActive,
                         processingTime: Date().timeIntervalSince(processingStartTime) / Double(batchSize)
                     ))
