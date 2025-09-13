@@ -45,10 +45,6 @@ struct ChunkProcessor {
                 decoderState: &decoderState
             )
 
-            logger.debug(
-                "Chunk \(segmentIndex): got \(windowTokens.count) tokens, timestamps range: \(windowTimestamps.min() ?? -1) to \(windowTimestamps.max() ?? -1)"
-            )
-
             // Update last processed frame for next chunk
             if maxFrame > 0 {
                 lastProcessedFrame = maxFrame
@@ -68,24 +64,12 @@ struct ChunkProcessor {
                 let previousTokens = allTokenData.map { $0.token }
                 let currentTokens = windowData.map { $0.token }
 
-                let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
+                let (_, removedCount) = manager.removeDuplicateTokenSequence(
                     previous: previousTokens, current: currentTokens, maxOverlap: 30)
-
-                logger.debug(
-                    "Chunk \(segmentIndex): removed \(removedCount) duplicate tokens, keeping \(deduped.count)")
-
                 // Only keep the non-duplicate portion of window data
                 let adjustedWindowData = Array(windowData.dropFirst(removedCount))
                 allTokenData.append(contentsOf: adjustedWindowData)
             } else {
-                if segmentIndex == 0 {
-                    logger.debug("First chunk: adding \(windowData.count) tokens to result")
-                    // Log first few tokens to understand what's being transcribed
-                    if windowData.count > 0 {
-                        let firstTokens = windowData.prefix(10).map { $0.token }
-                        logger.debug("First 10 token IDs: \(firstTokens)")
-                    }
-                }
                 allTokenData.append(contentsOf: windowData)
             }
 
@@ -97,9 +81,6 @@ struct ChunkProcessor {
         // Sort by timestamp to ensure chronological order
         allTokenData.sort { $0.timestamp < $1.timestamp }
 
-        logger.debug(
-            "Final processing: \(allTokenData.count) total tokens, timestamp range: \(allTokenData.first?.timestamp ?? -1) to \(allTokenData.last?.timestamp ?? -1)"
-        )
 
         // Extract sorted arrays
         let allTokens = allTokenData.map { $0.token }
@@ -198,10 +179,6 @@ struct ChunkProcessor {
         // Calculate global frame offset for this chunk
         let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
 
-        logger.debug(
-            "Chunk \(segmentIndex): leftStart=\(leftStart), rightEnd=\(rightEnd), chunkSamples=\(chunkSamples.count), actualFrames=\(actualFrameCount), contextFrameAdjustment=\(contextFrameAdjustment), globalFrameOffset=\(globalFrameOffset)"
-        )
-
         let (hypothesis, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
@@ -213,17 +190,7 @@ struct ChunkProcessor {
         )
 
         if hypothesis.isEmpty || encLen == 0 {
-            logger.debug("Chunk \(segmentIndex): empty hypothesis or no encoder output")
             return ([], [], [], 0)
-        }
-
-        if segmentIndex == 0 {
-            logger.debug(
-                "First chunk hypothesis: \(hypothesis.ySequence.count) tokens, max timestamp: \(hypothesis.maxTimestamp)"
-            )
-            if hypothesis.ySequence.count > 0 {
-                logger.debug("First chunk token IDs: \(hypothesis.ySequence.prefix(20))")
-            }
         }
 
         // Take all tokens from decoder (it already processed only the relevant frames)
