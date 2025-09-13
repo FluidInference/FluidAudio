@@ -364,7 +364,7 @@ enum StreamDiarizationBenchmark {
         do {
             // Track audio loading time
             let audioLoadStart = Date()
-            let audioData = try loadAudioFile(at: audioPath)
+            let audioData = try await loadAudioFile(at: audioPath)
             let audioLoadTime = Date().timeIntervalSince(audioLoadStart)
             let totalDuration = Double(audioData.count) / 16000.0
 
@@ -843,54 +843,9 @@ enum StreamDiarizationBenchmark {
         ).path
     }
 
-    private static func loadAudioFile(at path: String) throws -> [Float] {
-        let url = URL(fileURLWithPath: path)
-        let file = try AVAudioFile(forReading: url)
-
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 16000,
-            channels: 1,
-            interleaved: false
-        )!
-
-        let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: UInt32(file.length)
-        )!
-
-        // Convert to 16kHz if needed
-        if file.processingFormat.sampleRate != 16000 {
-            let converter = AVAudioConverter(from: file.processingFormat, to: format)!
-            let inputBuffer = AVAudioPCMBuffer(
-                pcmFormat: file.processingFormat,
-                frameCapacity: AVAudioFrameCount(file.length)
-            )!
-
-            try file.read(into: inputBuffer)
-
-            let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-                outStatus.pointee = .haveData
-                return inputBuffer
-            }
-
-            var error: NSError?
-            _ = converter.convert(to: buffer, error: &error, withInputFrom: inputBlock)
-            if let error = error {
-                throw error
-            }
-        } else {
-            try file.read(into: buffer)
-        }
-
-        let floatArray = Array(
-            UnsafeBufferPointer(
-                start: buffer.floatChannelData?[0],
-                count: Int(buffer.frameLength)
-            )
-        )
-
-        return floatArray
+    private static func loadAudioFile(at path: String) async throws -> [Float] {
+        let converter = AudioConverter()
+        return try converter.resampleAudioFile(path: path)
     }
 
     private static func averageResults(_ results: [BenchmarkResult]) -> BenchmarkResult {

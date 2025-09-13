@@ -18,14 +18,14 @@ final class ChunkProcessorTests: XCTestCase {
 
     func testChunkProcessorInitialization() {
         let audioSamples: [Float] = [0.1, 0.2, 0.3]
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         // We can't directly access private properties, but we can verify the processor was created
         XCTAssertNotNil(processor)
     }
 
     func testChunkProcessorWithEmptyAudio() {
-        let processor = ChunkProcessor(audioSamples: [], enableDebug: false)
+        let processor = ChunkProcessor(audioSamples: [])
         XCTAssertNotNil(processor)
     }
 
@@ -41,7 +41,7 @@ final class ChunkProcessorTests: XCTestCase {
         // - maxModelSamples: 240,000 (15s)
 
         let shortAudio = createMockAudioSamples(durationSeconds: 5.0)  // 80,000 samples
-        let processor = ChunkProcessor(audioSamples: shortAudio, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: shortAudio)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(shortAudio.count, 80_000, "5 second audio should have 80,000 samples")
@@ -50,7 +50,7 @@ final class ChunkProcessorTests: XCTestCase {
     func testLongAudioChunking() {
         // Create 30 second audio (480,000 samples)
         let longAudio = createMockAudioSamples(durationSeconds: 30.0)
-        let processor = ChunkProcessor(audioSamples: longAudio, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: longAudio)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(longAudio.count, 480_000, "30 second audio should have 480,000 samples")
@@ -61,7 +61,7 @@ final class ChunkProcessorTests: XCTestCase {
     func testVeryShortAudio() {
         // Audio shorter than context windows
         let shortAudio = createMockAudioSamples(durationSeconds: 0.5)  // 8,000 samples
-        let processor = ChunkProcessor(audioSamples: shortAudio, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: shortAudio)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(shortAudio.count, 8_000, "0.5 second audio should have 8,000 samples")
@@ -70,7 +70,7 @@ final class ChunkProcessorTests: XCTestCase {
     func testExactlyOneChunk() {
         // Audio that exactly fits one chunk (11 seconds center)
         let exactChunk = createMockAudioSamples(durationSeconds: 11.0)  // 176,000 samples
-        let processor = ChunkProcessor(audioSamples: exactChunk, enableDebug: false)
+        let processor = ChunkProcessor(audioSamples: exactChunk)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(exactChunk.count, 176_000, "11 second audio should have 176,000 samples")
@@ -79,7 +79,7 @@ final class ChunkProcessorTests: XCTestCase {
     func testMaxModelCapacity() {
         // Audio at max model capacity (15 seconds = 240,000 samples)
         let maxAudio = createMockAudioSamples(durationSeconds: 15.0)
-        let processor = ChunkProcessor(audioSamples: maxAudio, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: maxAudio)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(maxAudio.count, 240_000, "15 second audio should have 240,000 samples")
@@ -92,7 +92,7 @@ final class ChunkProcessorTests: XCTestCase {
 
         measure {
             for _ in 0..<100 {
-                _ = ChunkProcessor(audioSamples: longAudio, enableDebug: false)
+                _ = ChunkProcessor(audioSamples: longAudio)
             }
         }
     }
@@ -108,7 +108,7 @@ final class ChunkProcessorTests: XCTestCase {
     func testLargeAudioHandling() {
         // Test with 5 minutes of audio (4,800,000 samples)
         let largeAudio = createMockAudioSamples(durationSeconds: 300.0)
-        let processor = ChunkProcessor(audioSamples: largeAudio, enableDebug: false)
+        let processor = ChunkProcessor(audioSamples: largeAudio)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(largeAudio.count, 4_800_000, "5 minute audio should have 4,800,000 samples")
@@ -118,14 +118,14 @@ final class ChunkProcessorTests: XCTestCase {
 
     func testDebugModeEnabled() {
         let audio = createMockAudioSamples(durationSeconds: 1.0)
-        let processor = ChunkProcessor(audioSamples: audio, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audio)
 
         XCTAssertNotNil(processor)
     }
 
     func testDebugModeDisabled() {
         let audio = createMockAudioSamples(durationSeconds: 1.0)
-        let processor = ChunkProcessor(audioSamples: audio, enableDebug: false)
+        let processor = ChunkProcessor(audioSamples: audio)
 
         XCTAssertNotNil(processor)
     }
@@ -141,8 +141,8 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertEqual(oneSecondAudio44k.count, 44_100, "1 second at 44.1kHz should be 44,100 samples")
 
         // ChunkProcessor should handle both, but expects 16kHz internally
-        let processor16k = ChunkProcessor(audioSamples: oneSecondAudio16k, enableDebug: false)
-        let processor44k = ChunkProcessor(audioSamples: oneSecondAudio44k, enableDebug: false)
+        let processor16k = ChunkProcessor(audioSamples: oneSecondAudio16k)
+        let processor44k = ChunkProcessor(audioSamples: oneSecondAudio44k)
 
         XCTAssertNotNil(processor16k)
         XCTAssertNotNil(processor44k)
@@ -152,14 +152,14 @@ final class ChunkProcessorTests: XCTestCase {
 
     func testZeroDurationAudio() {
         let emptyAudio: [Float] = []
-        let processor = ChunkProcessor(audioSamples: emptyAudio, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: emptyAudio)
 
         XCTAssertNotNil(processor)
     }
 
     func testSingleSampleAudio() {
         let singleSample: [Float] = [0.5]
-        let processor = ChunkProcessor(audioSamples: singleSample, enableDebug: false)
+        let processor = ChunkProcessor(audioSamples: singleSample)
 
         XCTAssertNotNil(processor)
     }

@@ -4,7 +4,7 @@ This page summarizes the primary public APIs across modules. See inline doc comm
 
 ## Common Patterns
 
-**Audio Format:** All modules expect 16kHz mono Float32 audio samples. Use `AudioProcessor.loadAudioFile()` for conversion.
+**Audio Format:** All modules expect 16kHz mono Float32 audio samples. Use `FluidAudio.AudioConverter` to convert `AVAudioPCMBuffer` or files to 16kHz mono for both CLI and library paths.
 
 **Model Loading:** Models auto-download from HuggingFace on first use. Set `https_proxy` environment variable if behind corporate firewall.
 
@@ -69,14 +69,14 @@ Automatic speech recognition using Parakeet TDT v3 models.
   - Models cached locally after first download
 - `ASRConfig`: Beam size, temperature, language model weights
 
-**Audio Processing:**
-- `AudioProcessor.loadAudioFile(path:) throws -> [Float]`
-  - Load and convert audio to 16kHz mono Float32
-  - Supports: WAV, M4A, MP3, FLAC, and other common formats
+- **Audio Processing:**
+- `AudioConverter.resampleAudioFile(path:) throws -> [Float]`
+  - Load and convert audio files to 16kHz mono Float32 (WAV, M4A, MP3, FLAC)
+- `AudioConverter.resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float]`
+  - Convert a buffer to 16kHz mono (stateless conversion)
 - `AudioSource`: `.microphone` or `.system` for different processing paths
 
 **Performance:**
 - Real-time factor: ~120x on M4 Pro (processes 1min audio in 0.5s)
 - Languages: 25 European languages supported
 - Streaming: Available via `StreamingAsrManager` (beta)
-
