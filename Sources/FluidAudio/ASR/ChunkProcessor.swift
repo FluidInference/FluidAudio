@@ -12,8 +12,8 @@ struct ChunkProcessor {
     // 1.6s context = exactly 20 encoder frames each
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 10.0  // Reduced to allow for more overlap
-    private let leftContextSeconds: Double = 2.4  // Increased overlap to 30 frames to avoid missing speech
+    private let centerSeconds: Double = 11.2  // Reduced to allow for more overlap
+    private let leftContextSeconds: Double = 1.6  // Increased overlap to 30 frames to avoid missing speech
     private let rightContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
 
     private var centerSamples: Int { Int(centerSeconds * Double(sampleRate)) }

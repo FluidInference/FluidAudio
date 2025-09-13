@@ -22,7 +22,7 @@ public struct TdtConfig: Sendable {
         // Increased to 150 for 11.2s center chunks (~40 words * 2-3 tokens/word + buffer)
         maxTokensPerChunk: Int = 150,
         // Number of consecutive blanks to trigger early termination in last chunk
-        consecutiveBlankLimit: Int = 50
+        consecutiveBlankLimit: Int = 5
     ) {
         self.includeTokenDuration = includeTokenDuration
         self.maxSymbolsPerStep = maxSymbolsPerStep
