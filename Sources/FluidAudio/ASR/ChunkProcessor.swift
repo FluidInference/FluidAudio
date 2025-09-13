@@ -81,7 +81,6 @@ struct ChunkProcessor {
         // Sort by timestamp to ensure chronological order
         allTokenData.sort { $0.timestamp < $1.timestamp }
 
-
         // Extract sorted arrays
         let allTokens = allTokenData.map { $0.token }
         let allTimestamps = allTokenData.map { $0.timestamp }
