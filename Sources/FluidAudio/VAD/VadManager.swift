@@ -1,5 +1,6 @@
 import AVFoundation
-@preconcurrency import CoreML
+import Accelerate
+import CoreML
 import Foundation
 import OSLog
 
@@ -17,16 +18,21 @@ public actor VadManager {
     public let config: VadConfig
     private let audioConverter: AudioConverter = AudioConverter()
 
-    /// Required model names for VAD
-    public static let requiredModelNames: Set<String> = ["silero_vad.mlmodelc"]
+    /// Model expects exactly 512 samples (32ms at 16kHz)
+    public static let chunkSize = 512
+    public static let sampleRate = 16000
+
     private var vadModel: MLModel?
     private let audioProcessor: VadAudioProcessor
+
+    // Reusable buffer to avoid allocations
+    private var reuseBuffer: MLMultiArray?
 
     public var isAvailable: Bool {
         return vadModel != nil
     }
 
-    // MARK: - Convenience processing APIs (input normalization)
+    // MARK: - Main processing API
 
     /// Process an entire audio source from a file URL.
     /// Automatically converts the audio to 16kHz mono Float32 and processes in 512-sample chunks.
@@ -34,8 +40,7 @@ public actor VadManager {
     /// - Returns: Array of per-chunk VAD results
     public func process(_ url: URL) async throws -> [VadResult] {
         let samples = try audioConverter.resampleAudioFile(url)
-        let results = try await processAudioFile(samples)
-        return results
+        return try await processAudioFile(samples)
     }
 
     /// Process an entire in-memory audio buffer.
@@ -44,12 +49,12 @@ public actor VadManager {
     /// - Returns: Array of per-chunk VAD results
     public func process(_ audioBuffer: AVAudioPCMBuffer) async throws -> [VadResult] {
         let samples = try audioConverter.resampleBuffer(audioBuffer)
-        let results = try await processAudioFile(samples)
-        return results
+        return try await processAudioFile(samples)
     }
 
     /// Process raw 16kHz mono samples.
-    /// - Parameter samples: Audio samples (16kHz, mono)
+    /// Processes audio in 512-sample chunks (32ms at 16kHz).
+    /// - Parameter samples: Audio samples (must be 16kHz, mono)
     /// - Returns: Array of per-chunk VAD results
     public func process(_ samples: [Float]) async throws -> [VadResult] {
         return try await processAudioFile(samples)
@@ -95,13 +100,13 @@ public actor VadManager {
         // Use DownloadUtils to load the model (handles downloading if needed)
         let models = try await DownloadUtils.loadModels(
             .vad,
-            modelNames: ["silero_vad.mlmodelc"],
+            modelNames: Array(ModelNames.VAD.requiredModels),
             directory: baseDirectory.appendingPathComponent("Models"),
             computeUnits: config.computeUnits
         )
 
         // Get the VAD model
-        guard let vadModel = models["silero_vad.mlmodelc"] else {
+        guard let vadModel = models[ModelNames.VAD.sileroVadFile] else {
             logger.error("Failed to load VAD model from downloaded models")
             throw VadError.modelLoadingFailed
         }
@@ -126,59 +131,30 @@ public actor VadManager {
 
         // Ensure chunk is correct size
         var processedChunk = audioChunk
-        let chunkSize = 512  // Fixed chunk size
-        if processedChunk.count != chunkSize {
-            if processedChunk.count < chunkSize {
-                let paddingSize = chunkSize - processedChunk.count
-                if config.debugMode {
-                    logger.debug("Padding audio chunk with \(paddingSize) zeros")
-                }
-                processedChunk.append(contentsOf: Array(repeating: 0.0, count: paddingSize))
+        if processedChunk.count != Self.chunkSize {
+            if processedChunk.count < Self.chunkSize {
+                let paddingSize = Self.chunkSize - processedChunk.count
+                // Use repeat-last padding instead of zeros to avoid energy distortion
+                let lastSample = processedChunk.last ?? 0.0
+                processedChunk.append(contentsOf: Array(repeating: lastSample, count: paddingSize))
             } else {
-                if config.debugMode {
-                    logger.debug("Truncating audio chunk from \(processedChunk.count) to 512")
-                }
-                processedChunk = Array(processedChunk.prefix(512))
+                processedChunk = Array(processedChunk.prefix(Self.chunkSize))
             }
         }
 
-        // Normalize audio to [-1, 1] range (matching librosa.load behavior used in training)
-        // Find the maximum absolute value in the chunk
-        let maxAbsValue = processedChunk.map { abs($0) }.max() ?? 1.0
-
-        // Only normalize if there's actual audio content (not silence)
-        if maxAbsValue > 0.0001 {
-            // Scale to [-1, 1] range
-            processedChunk = processedChunk.map { $0 / maxAbsValue }
-
-            if config.debugMode {
-                logger.debug("Normalized audio chunk: max amplitude was \(maxAbsValue), scaled to [-1, 1]")
-            }
-        }
+        // No normalization - preserve original amplitude information for VAD
 
         // Process through unified model
         let rawProbability = try await processUnifiedModel(processedChunk, model: vadModel)
 
         // Apply audio processing (smoothing, SNR, etc.)
-        let (smoothedProbability, snrValue, _) = audioProcessor.processRawProbability(
+        let (smoothedProbability, _, _) = audioProcessor.processRawProbability(
             rawProbability,
             audioChunk: processedChunk
         )
 
         let isVoiceActive = smoothedProbability >= config.threshold
         let processingTime = Date().timeIntervalSince(processingStartTime)
-
-        if config.debugMode {
-            let snrString = snrValue.map { String(format: "%.1f", $0) } ?? "N/A"
-            let rawStr = String(format: "%.3f", rawProbability)
-            let smoothStr = String(format: "%.3f", smoothedProbability)
-            let threshStr = String(format: "%.3f", config.threshold)
-            let timeStr = String(format: "%.3f", processingTime)
-
-            logger.debug(
-                "VAD: raw=\(rawStr), smoothed=\(smoothStr), threshold=\(threshStr), SNR=\(snrString)dB, active=\(isVoiceActive), time=\(timeStr)s"
-            )
-        }
 
         return VadResult(
             probability: smoothedProbability,
@@ -190,14 +166,21 @@ public actor VadManager {
     private func processUnifiedModel(_ audioChunk: [Float], model: MLModel) async throws -> Float {
         // Actor already provides thread safety, can run directly
         do {
-            // Create input array
-            let audioArray = try MLMultiArray(
-                shape: [1, 512],
-                dataType: .float32
-            )
+            // Reuse buffer if available, create new one otherwise
+            let audioArray: MLMultiArray
+            if let buffer = reuseBuffer {
+                audioArray = buffer
+            } else {
+                audioArray = try MLMultiArray(
+                    shape: [1, Self.chunkSize] as [NSNumber],
+                    dataType: .float32
+                )
+                reuseBuffer = audioArray
+            }
 
-            for i in 0..<audioChunk.count {
-                audioArray[i] = NSNumber(value: audioChunk[i])
+            // Copy audio chunk to buffer
+            for i: Int in 0..<audioChunk.count {
+                audioArray[[0, i] as [NSNumber]] = NSNumber(value: audioChunk[i])
             }
 
             // Create input provider
@@ -222,37 +205,138 @@ public actor VadManager {
         }
     }
 
-    /// Process multiple chunks in batch
+    /// Process multiple chunks in batch for improved performance
     public func processBatch(_ audioChunks: [[Float]]) async throws -> [VadResult] {
+        guard let vadModel = vadModel else {
+            throw VadError.notInitialized
+        }
+
+        guard !audioChunks.isEmpty else {
+            return []
+        }
+
+        let processingStartTime = Date()
+
+        // Process all chunks in a single batch prediction
+        let batchSize = audioChunks.count
+        var batchInputs: [MLFeatureProvider] = []
+
+        // Prepare batch inputs
+        for audioChunk in audioChunks {
+            // Pad/truncate each chunk
+            var processedChunk = audioChunk
+            if processedChunk.count != Self.chunkSize {
+                if processedChunk.count < Self.chunkSize {
+                    let paddingSize = Self.chunkSize - processedChunk.count
+                    let lastSample = processedChunk.last ?? 0.0
+                    processedChunk.append(contentsOf: Array(repeating: lastSample, count: paddingSize))
+                } else {
+                    processedChunk = Array(processedChunk.prefix(Self.chunkSize))
+                }
+            }
+
+            // Create MLMultiArray directly - cache overhead not worth it for batch processing
+            let audioArray = try MLMultiArray(
+                shape: [1, Self.chunkSize] as [NSNumber],
+                dataType: .float32
+            )
+
+            processedChunk.withUnsafeBufferPointer { buffer in
+                let ptr = audioArray.dataPointer.bindMemory(to: Float.self, capacity: Self.chunkSize)
+                vDSP_mmov(
+                    buffer.baseAddress!,
+                    ptr,
+                    vDSP_Length(processedChunk.count),
+                    vDSP_Length(1),
+                    vDSP_Length(1),
+                    vDSP_Length(processedChunk.count)
+                )
+            }
+
+            batchInputs.append(try MLDictionaryFeatureProvider(dictionary: ["audio_chunk": audioArray]))
+        }
+
+        // Create batch provider
+        let batchProvider = MLArrayBatchProvider(array: batchInputs)
+
+        // Run batch prediction
+        let batchOutput = try vadModel.predictions(from: batchProvider, options: MLPredictionOptions())
+
+        // Process results
         var results: [VadResult] = []
 
-        for chunk in audioChunks {
-            let result = try await processChunk(chunk)
-            results.append(result)
+        for i in 0..<batchSize {
+            let output = batchOutput.features(at: i)
+
+            guard let vadProbability = output.featureValue(for: "vad_probability")?.multiArrayValue else {
+                logger.error("No vad_probability output found for batch index \(i)")
+                throw VadError.modelProcessingFailed("No VAD probability output")
+            }
+
+            let rawProbability = Float(truncating: vadProbability[0])
+
+            // Apply audio processing (smoothing, SNR, etc.) per chunk
+            let (smoothedProbability, _, _) = audioProcessor.processRawProbability(
+                rawProbability,
+                audioChunk: audioChunks[i]
+            )
+
+            let isVoiceActive = smoothedProbability >= config.threshold
+
+            results.append(
+                VadResult(
+                    probability: smoothedProbability,
+                    isVoiceActive: isVoiceActive,
+                    processingTime: Date().timeIntervalSince(processingStartTime) / Double(batchSize)
+                ))
         }
+
+        // Arrays will be automatically deallocated by ARC
 
         return results
     }
 
-    /// Process an entire audio file
-    public func processAudioFile(_ audioData: [Float]) async throws -> [VadResult] {
-        var results: [VadResult] = []
-        let chunkSize = 512
-
-        // Process in chunks
-        for i in stride(from: 0, to: audioData.count, by: chunkSize) {
-            let endIndex = min(i + chunkSize, audioData.count)
+    /// Process an entire audio file using batch processing for optimal performance
+    private func processAudioFile(_ audioData: [Float]) async throws -> [VadResult] {
+        // Split audio into chunks
+        var audioChunks: [[Float]] = []
+        for i in stride(from: 0, to: audioData.count, by: Self.chunkSize) {
+            let endIndex = min(i + Self.chunkSize, audioData.count)
             let chunk = Array(audioData[i..<endIndex])
-
-            let result = try await processChunk(chunk)
-            results.append(result)
+            audioChunks.append(chunk)
         }
 
-        return results
+        // Process all chunks in batch for better performance
+        return try await processBatch(audioChunks)
     }
 
     /// Get current configuration
     public var currentConfig: VadConfig {
         return config
+    }
+
+    // MARK: - Performance Benchmarking
+
+    /// Performance statistics for VAD processing
+    public struct VadPerformanceStats: Sendable {
+        public let totalProcessingTime: TimeInterval
+        public let averageChunkTime: TimeInterval
+        public let chunksProcessed: Int
+        public let realTimeFactorX: Double  // How many times faster than real-time
+        public let cacheStats: (hits: Int, misses: Int, hitRatio: Double)?
+
+        public init(
+            totalProcessingTime: TimeInterval,
+            averageChunkTime: TimeInterval,
+            chunksProcessed: Int,
+            realTimeFactorX: Double,
+            cacheStats: (hits: Int, misses: Int, hitRatio: Double)? = nil
+        ) {
+            self.totalProcessingTime = totalProcessingTime
+            self.averageChunkTime = averageChunkTime
+            self.chunksProcessed = chunksProcessed
+            self.realTimeFactorX = realTimeFactorX
+            self.cacheStats = cacheStats
+        }
     }
 }

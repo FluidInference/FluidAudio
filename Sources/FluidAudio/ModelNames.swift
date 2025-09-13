@@ -40,18 +40,12 @@ public enum ModelNames {
 
     /// VAD model names
     public enum VAD {
-        public static let stft = "silero_stft"
-        public static let encoder = "silero_encoder"
-        public static let rnnDecoder = "silero_rnn_decoder"
+        public static let sileroVad = "silero_vad_se_trained_4bit"
 
-        public static let stftFile = stft + ".mlmodelc"
-        public static let encoderFile = encoder + ".mlmodelc"
-        public static let rnnDecoderFile = rnnDecoder + ".mlmodelc"
+        public static let sileroVadFile = sileroVad + ".mlmodelc"
 
         public static let requiredModels: Set<String> = [
-            stftFile,
-            encoderFile,
-            rnnDecoderFile,
+            sileroVadFile
         ]
     }
 }

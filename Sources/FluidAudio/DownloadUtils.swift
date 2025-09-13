@@ -161,6 +161,7 @@ public class DownloadUtils {
         // Configure CoreML
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
+        config.allowLowPrecisionAccumulationOnGPU = true
 
         // Load each model
         var models: [String: MLModel] = [:]
