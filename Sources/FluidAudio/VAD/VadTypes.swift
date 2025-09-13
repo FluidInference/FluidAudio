@@ -9,7 +9,7 @@ public struct VadConfig: Sendable {
     public static let `default` = VadConfig()
 
     public init(
-        threshold: Float = 0.5,
+        threshold: Float = 0.85,
         debugMode: Bool = false,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) {
