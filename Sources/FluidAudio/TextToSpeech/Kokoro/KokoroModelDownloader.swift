@@ -8,31 +8,35 @@ public struct KokoroModelDownloader {
 
     private static let modelFiles = [
         (
-            "kokoro.mlmodelc/model.mil",
-            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/model.mil"
+            "kokoro_completev20.mlmodelc/model.mil",
+            "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/kokoro_completev20.mlmodelc/model.mil"
         ),
         (
-            "kokoro.mlmodelc/coremldata.bin",
-            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/coremldata.bin"
+            "kokoro_completev20.mlmodelc/coremldata.bin",
+            "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/kokoro_completev20.mlmodelc/coremldata.bin"
         ),
         (
-            "kokoro.mlmodelc/weights/weight.bin",
-            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/weights/weight.bin"
+            "kokoro_completev20.mlmodelc/weights/weight.bin",
+            "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/kokoro_completev20.mlmodelc/weights/weight.bin"
         ),
         (
-            "kokoro.mlmodelc/analytics/coremldata.bin",
-            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/kokoro.mlmodelc/analytics/coremldata.bin"
+            "kokoro_completev20.mlmodelc/metadata.json",
+            "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/kokoro_completev20.mlmodelc/metadata.json"
+        ),
+        (
+            "kokoro_completev20.mlmodelc/analytics/coremldata.bin",
+            "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/kokoro_completev20.mlmodelc/analytics/coremldata.bin"
         ),
     ]
 
     private static let dataFiles = [
         (
             "vocab_index.json",
-            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/vocab_index.json"
+            "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/vocab_index.json"
         ),
         (
             "word_phonemes.json",
-            "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/word_phonemes.json"
+            "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/word_phonemes.json"
         ),
     ]
 
@@ -42,7 +46,7 @@ public struct KokoroModelDownloader {
         let currentDir = fm.currentDirectoryPath
 
         // Check model directory
-        let modelPath = URL(fileURLWithPath: currentDir).appendingPathComponent("kokoro.mlmodelc").path
+        let modelPath = URL(fileURLWithPath: currentDir).appendingPathComponent("kokoro_completev20.mlmodelc").path
         if !fm.fileExists(atPath: modelPath) {
             return false
         }
@@ -70,7 +74,7 @@ public struct KokoroModelDownloader {
             return
         }
 
-        let voiceURL = "https://huggingface.co/FluidInference/fluid-kokoro-82m-coreml/resolve/main/voices/\(voice).pt"
+        let voiceURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/voices/\(voice).pt"
         logger.info("Downloading voice: \(voice) from \(voiceURL)")
 
         try await downloadFile(from: voiceURL, to: voiceFile)
@@ -82,7 +86,7 @@ public struct KokoroModelDownloader {
         let currentDir = fm.currentDirectoryPath
 
         // Create model directories
-        let modelDir = URL(fileURLWithPath: currentDir).appendingPathComponent("kokoro.mlmodelc")
+        let modelDir = URL(fileURLWithPath: currentDir).appendingPathComponent("kokoro_completev20.mlmodelc")
         let weightsDir = modelDir.appendingPathComponent("weights")
         let analyticsDir = modelDir.appendingPathComponent("analytics")
 

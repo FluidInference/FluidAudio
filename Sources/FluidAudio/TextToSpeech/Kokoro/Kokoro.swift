@@ -2,7 +2,7 @@ import CoreML
 import Foundation
 import OSLog
 
-/// Direct TTS implementation using pre-computed phoneme dictionary and MLPackage model
+/// Direct TTS implementation using pre-computed phoneme dictionary and unified CoreML model
 /// This follows the main.py approach - no pipeline, just dictionary lookup + model inference
 @available(macOS 13.0, iOS 16.0, *)
 public struct Kokoro {
@@ -185,14 +185,9 @@ public struct Kokoro {
         logger.debug("First 10 input_ids: \(inputIds.prefix(10))")
         logger.debug("First 5 ref_s values: \(voiceEmbedding.prefix(5))")
 
-        // Step 6: Load and run model - try compiled version first
-        let compiledModelURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
-            "kokoro.mlmodelc")
-        let packageModelURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(
-            "kokoro.mlpackage")
-
-        let modelURL =
-            FileManager.default.fileExists(atPath: compiledModelURL.path) ? compiledModelURL : packageModelURL
+        // Step 6: Load and run model - use unified compiled model only
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let modelURL = cwd.appendingPathComponent("kokoro_completev20.mlmodelc")
 
         guard FileManager.default.fileExists(atPath: modelURL.path) else {
             throw TTSError.modelNotFound("Model not found at \(modelURL.path)")

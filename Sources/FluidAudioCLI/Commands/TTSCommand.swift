@@ -49,7 +49,7 @@ public struct TTS {
 
             // Measure model loading time separately
             let modelLoadStart = Date()
-            try await KokoroModel.loadModels()
+            try await KokoroModel.loadModel()
             modelLoadTime = Date().timeIntervalSince(modelLoadStart)
 
             // Start timing only for actual synthesis (excluding model loading)

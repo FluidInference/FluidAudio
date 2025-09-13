@@ -19,6 +19,7 @@ func printUsage() {
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
+            tts-harness             Minimal CoreML harness (like main4.py)
             download                Download evaluation datasets
             help                    Show this help message
 
@@ -95,6 +96,13 @@ Task {
             await TTS.run(arguments: Array(arguments.dropFirst(2)))
         } else {
             print("TTS requires macOS 13.0 or later")
+            exit(1)
+        }
+    case "tts-harness":
+        if #available(macOS 13.0, *) {
+            await TTSHarness.run(arguments: Array(arguments.dropFirst(2)))
+        } else {
+            print("TTS harness requires macOS 13.0 or later")
             exit(1)
         }
     case "diarization-benchmark":

@@ -13,10 +13,11 @@ public struct TtsModels {
     }
 
     public static func download(
-        from repo: String = "FluidInference/coreml-kokoro",
+        from repo: String = "FluidInference/kokoro-82m-coreml",
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> TtsModels {
-        let modelName = "kokoro.mlmodelc"
+        // Unified Kokoro model that includes frontend + decoder
+        let modelName = "kokoro_completev20.mlmodelc"
         let modelURL = try await downloadModel(
             from: repo,
             modelName: modelName,
@@ -44,10 +45,14 @@ public struct TtsModels {
         logger.info("Downloading model: \(modelName) from \(repo)")
 
         let baseURL = "https://huggingface.co/\(repo)/resolve/main"
+        // Attempt to download the common mlmodelc contents. Some files may be absent depending on how the model was
+        // packaged; the minimum required are model.mil and coremldata.bin. We'll try optional ones when available.
         let files = [
             "coremldata.bin",
             "model.mil",
-            "weights/weight.bin",
+            "weights/weight.bin",          // optional
+            "metadata.json",               // optional
+            "analytics/coremldata.bin",    // optional
         ]
 
         try FileManager.default.createDirectory(at: modelPath, withIntermediateDirectories: true)
@@ -63,7 +68,16 @@ public struct TtsModels {
             let progress: Double = Double(index) / Double(files.count)
             progressHandler?(progress)
 
-            try await downloadFile(from: fileURL, to: destinationURL)
+            do {
+                try await downloadFile(from: fileURL, to: destinationURL)
+            } catch {
+                // Only tolerate missing optional files; rethrow if a required file is missing
+                if file == "coremldata.bin" || file == "model.mil" {
+                    throw error
+                } else {
+                    logger.info("Optional file not found: \(file). Continuing.")
+                }
+            }
         }
 
         progressHandler?(1.0)
