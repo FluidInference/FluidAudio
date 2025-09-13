@@ -516,7 +516,7 @@ public struct StreamingAsrConfig: Sendable {
     /// Backward-compatible convenience initializer used by tests (chunkDuration label)
     public init(
         confirmationThreshold: Double = 0.85,
-        chunkDuration: TimeInterval,
+        chunkDuration: TimeInterval
     ) {
         self.init(
             chunkSeconds: chunkDuration,
@@ -531,7 +531,7 @@ public struct StreamingAsrConfig: Sendable {
     /// Custom configuration factory expected by tests
     public static func custom(
         chunkDuration: TimeInterval,
-        confirmationThreshold: Double,
+        confirmationThreshold: Double
     ) -> StreamingAsrConfig {
         StreamingAsrConfig(
             chunkSeconds: chunkDuration,
