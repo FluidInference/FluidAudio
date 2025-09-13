@@ -20,6 +20,7 @@ func printUsage() {
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
+            tts                     Synthesize speech from text using Kokoro TTS
             download                Download evaluation datasets
             help                    Show this help message
 
@@ -37,6 +38,8 @@ func printUsage() {
             fluidaudio transcribe audio.wav --low-latency
 
             fluidaudio multi-stream audio1.wav audio2.wav
+            
+            fluidaudio tts "Hello world" --output hello.wav
 
             fluidaudio download --dataset ami-sdm
         """
@@ -92,6 +95,14 @@ Task {
             cliLogger.error("Multi-stream requires macOS 13.0 or later")
             exit(1)
         }
+    case "tts":
+        if #available(macOS 13.0, *) {
+            await TTS.run(arguments: Array(arguments.dropFirst(2)))
+        } else {
+            print("TTS requires macOS 13.0 or later")
+            exit(1)
+        }
+    
     case "diarization-benchmark":
         if #available(macOS 13.0, *) {
             await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
