@@ -1,5 +1,17 @@
 import Foundation
 
+/// Model repositories on HuggingFace
+public enum Repo: String, CaseIterable {
+    case vad = "FluidInference/silero-vad-coreml"
+    case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+    case diarizer = "FluidInference/speaker-diarization-coreml"
+
+    var folderName: String {
+        rawValue.split(separator: "/").last?.description ?? rawValue
+    }
+
+}
+
 /// Centralized model names for all FluidAudio components
 public enum ModelNames {
 
@@ -48,4 +60,17 @@ public enum ModelNames {
             sileroVadFile
         ]
     }
+
+    @available(macOS 13.0, iOS 16.0, *)
+    static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+        switch repo {
+        case .vad:
+            return ModelNames.VAD.requiredModels
+        case .parakeet:
+            return ModelNames.ASR.requiredModels
+        case .diarizer:
+            return ModelNames.Diarizer.requiredModels
+        }
+    }
+ 
 }

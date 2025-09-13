@@ -23,31 +23,21 @@ internal class VadAudioProcessor {
 
     // MARK: - Enhanced VAD Processing
 
-    /// Process raw ML probability with SNR filtering, spectral analysis, and temporal smoothing
+    /// Process raw ML probability - returns the model output directly for optimal performance
     func processRawProbability(
         _ rawProbability: Float,
         audioChunk: [Float]
     ) -> (smoothedProbability: Float, snrValue: Float?, spectralFeatures: SpectralFeatures?) {
 
-        var snrValue: Float?
-        var enhancedProbability = rawProbability
-
-        snrValue = calculateSNR(audioChunk)
-
-        // Apply SNR-based filtering
-        enhancedProbability = applyAudioQualityFiltering(
-            rawProbability: rawProbability,
-            snr: snrValue,
-            spectralFeatures: nil
-        )
-
-        return (enhancedProbability, snrValue, nil)
+        // Modern VAD models like Silero are trained end-to-end and output well-calibrated probabilities
+        // Post-processing can actually degrade performance, so we return the raw model output
+        return (rawProbability, nil, nil)
     }
 
-    // MARK: - SNR and Audio Quality Analysis
+    // MARK: - Audio Analysis Utilities (available for debugging/future enhancements)
 
     /// Calculate Signal-to-Noise Ratio for audio quality assessment using optimized vDSP operations
-    private func calculateSNR(_ audioChunk: [Float]) -> Float {
+    func calculateSNR(_ audioChunk: [Float]) -> Float {
         guard audioChunk.count > 0 else { return -Float.infinity }
 
         // Calculate signal energy using vDSP for SIMD acceleration
@@ -84,17 +74,18 @@ internal class VadAudioProcessor {
     func applyHannWindow(_ audioChunk: [Float]) -> [Float] {
         guard !audioChunk.isEmpty else { return audioChunk }
 
-        // Ensure temp buffer is sized correctly
+        // Resize buffer only if needed to minimize allocations
         if tempBuffer.count != audioChunk.count {
-            tempBuffer = Array(repeating: 0.0, count: audioChunk.count)
+            tempBuffer.removeAll(keepingCapacity: true)
+            tempBuffer.append(contentsOf: Array(repeating: 0.0, count: audioChunk.count))
         }
 
         return audioChunk.withUnsafeBufferPointer { inputBuffer in
             tempBuffer.withUnsafeMutableBufferPointer { outputBuffer in
-                // Generate Hann window
+                // Generate Hann window coefficients
                 vDSP_hann_window(outputBuffer.baseAddress!, vDSP_Length(audioChunk.count), 0)
 
-                // Apply window to audio data
+                // Apply window to audio data (multiply element-wise)
                 vDSP_vmul(
                     inputBuffer.baseAddress!, 1,
                     outputBuffer.baseAddress!, 1,
@@ -151,23 +142,6 @@ internal class VadAudioProcessor {
         }
 
         return totalEnergy > 0 ? weightedSum / totalEnergy : 0.0
-    }
-
-    /// Apply audio quality filtering based on SNR and spectral features
-    private func applyAudioQualityFiltering(
-        rawProbability: Float,
-        snr: Float?,
-        spectralFeatures: SpectralFeatures?
-    ) -> Float {
-        var filteredProbability = rawProbability
-
-        // 6.0 dB is the minimum SNR for intelligible speech (speech is ~4x louder than noise)
-        if let snr = snr, snr < 6.0 {  // Min SNR threshold
-            let snrPenalty = max(0.0, (6.0 - snr) / 6.0)
-            filteredProbability *= (1.0 - snrPenalty * 0.8)  // Reduce probability by up to 80%
-        }
-
-        return max(0.0, min(1.0, filteredProbability))
     }
 
 }

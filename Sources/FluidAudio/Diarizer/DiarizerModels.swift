@@ -105,7 +105,7 @@ extension DiarizerModels {
             applicationSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
+            .appendingPathComponent(Repo.diarizer.folderName, isDirectory: true)
     }
 
     static func defaultConfiguration() -> MLModelConfiguration {
