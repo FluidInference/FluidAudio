@@ -869,7 +869,6 @@ extension ASRBenchmark {
 
         // Initialize ASR manager with fast benchmark preset
         let asrConfig = ASRConfig(
-            enableDebug: debugMode,
             tdtConfig: TdtConfig()
         )
 
@@ -969,7 +968,7 @@ extension ASRBenchmark {
                 }
             }
 
-            let overallRTFx: Double = totalProcessingTime > 0 ? (totalAudioDuration / totalProcessingTime) : 0
+            let overallRTFx: Double = totalProcessingTime > 0 ? (totalAudioDuration / totalProcessingTime) : 0.0
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

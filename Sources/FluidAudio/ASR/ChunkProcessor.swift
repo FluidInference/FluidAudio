@@ -4,7 +4,6 @@ import OSLog
 
 struct ChunkProcessor {
     let audioSamples: [Float]
-    let enableDebug: Bool
 
     private let logger = AppLogger(category: "ChunkProcessor")
 
@@ -46,11 +45,9 @@ struct ChunkProcessor {
                 decoderState: &decoderState
             )
 
-            if enableDebug {
-                logger.debug(
-                    "Chunk \(segmentIndex): got \(windowTokens.count) tokens, timestamps range: \(windowTimestamps.min() ?? -1) to \(windowTimestamps.max() ?? -1)"
-                )
-            }
+            logger.debug(
+                "Chunk \(segmentIndex): got \(windowTokens.count) tokens, timestamps range: \(windowTimestamps.min() ?? -1) to \(windowTimestamps.max() ?? -1)"
+            )
 
             // Update last processed frame for next chunk
             if maxFrame > 0 {
@@ -100,11 +97,9 @@ struct ChunkProcessor {
         // Sort by timestamp to ensure chronological order
         allTokenData.sort { $0.timestamp < $1.timestamp }
 
-        if enableDebug {
-            logger.debug(
-                "Final processing: \(allTokenData.count) total tokens, timestamp range: \(allTokenData.first?.timestamp ?? -1) to \(allTokenData.last?.timestamp ?? -1)"
-            )
-        }
+        logger.debug(
+            "Final processing: \(allTokenData.count) total tokens, timestamp range: \(allTokenData.first?.timestamp ?? -1) to \(allTokenData.last?.timestamp ?? -1)"
+        )
 
         // Extract sorted arrays
         let allTokens = allTokenData.map { $0.token }
@@ -139,9 +134,6 @@ struct ChunkProcessor {
             // First chunk: no overlap, standard context
             adaptiveLeftContextSamples = leftContextSamples
             contextFrameAdjustment = 0
-            if enableDebug {
-                logger.debug("First chunk: no overlap, contextFrameAdjustment = 0")
-            }
         } else if isLastChunk && remainingSamples < centerSamples {
             // Last chunk can't fill center - maximize context usage
             // Try to use full model capacity (15s) if available
@@ -206,17 +198,14 @@ struct ChunkProcessor {
         // Calculate global frame offset for this chunk
         let globalFrameOffset = leftStart / ASRConstants.samplesPerEncoderFrame
 
-        if enableDebug {
-            logger.debug(
-                "Chunk \(segmentIndex): leftStart=\(leftStart), rightEnd=\(rightEnd), chunkSamples=\(chunkSamples.count), actualFrames=\(actualFrameCount), contextFrameAdjustment=\(contextFrameAdjustment), globalFrameOffset=\(globalFrameOffset)"
-            )
-        }
+        logger.debug(
+            "Chunk \(segmentIndex): leftStart=\(leftStart), rightEnd=\(rightEnd), chunkSamples=\(chunkSamples.count), actualFrames=\(actualFrameCount), contextFrameAdjustment=\(contextFrameAdjustment), globalFrameOffset=\(globalFrameOffset)"
+        )
 
         let (hypothesis, encLen) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: chunkSamples.count,
             actualAudioFrames: actualFrameCount,
-            enableDebug: enableDebug,
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,
             isLastChunk: isLastChunk,
@@ -224,13 +213,11 @@ struct ChunkProcessor {
         )
 
         if hypothesis.isEmpty || encLen == 0 {
-            if enableDebug {
-                logger.debug("Chunk \(segmentIndex): empty hypothesis or no encoder output")
-            }
+            logger.debug("Chunk \(segmentIndex): empty hypothesis or no encoder output")
             return ([], [], [], 0)
         }
 
-        if enableDebug && segmentIndex == 0 {
+        if segmentIndex == 0 {
             logger.debug(
                 "First chunk hypothesis: \(hypothesis.ySequence.count) tokens, max timestamp: \(hypothesis.maxTimestamp)"
             )

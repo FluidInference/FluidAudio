@@ -907,7 +907,6 @@ extension FLEURSBenchmark {
 
         // Initialize ASR manager
         let asrConfig = ASRConfig(
-            enableDebug: debugMode,
             tdtConfig: TdtConfig()  // Uses default config
         )
 
@@ -1051,7 +1050,6 @@ extension FLEURSBenchmark {
 
         // Initialize ASR manager
         let asrConfig = ASRConfig(
-            enableDebug: debugMode,
             tdtConfig: TdtConfig()
         )
 

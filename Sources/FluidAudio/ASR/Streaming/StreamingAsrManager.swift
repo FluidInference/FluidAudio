@@ -311,8 +311,7 @@ public actor StreamingAsrManager {
             let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
                 windowSamples,
                 source: audioSource,
-                previousTokens: accumulatedTokens,
-                enableDebug: config.enableDebug
+                previousTokens: accumulatedTokens
             )
 
             // Update state
@@ -473,8 +472,6 @@ public struct StreamingAsrConfig: Sendable {
     /// Minimum audio duration before confirming text (seconds). Should be ~10s
     public let minContextForConfirmation: TimeInterval
 
-    /// Enable debug logging
-    public let enableDebug: Bool
     /// Confidence threshold for promoting volatile text to confirmed (0.0...1.0)
     public let confirmationThreshold: Double
 
@@ -485,7 +482,6 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: 10.0,
         rightContextSeconds: 2.0,
         minContextForConfirmation: 10.0,
-        enableDebug: false,
         confirmationThreshold: 0.85
     )
 
@@ -498,7 +494,6 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: 2.0,  // Match ChunkProcessor left context
         rightContextSeconds: 2.0,  // Match ChunkProcessor right context
         minContextForConfirmation: 10.0,  // Need sufficient context before confirming
-        enableDebug: false,
         confirmationThreshold: 0.80  // Higher threshold for more stable confirmations
     )
 
@@ -508,7 +503,6 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: TimeInterval = 2.0,
         rightContextSeconds: TimeInterval = 2.0,
         minContextForConfirmation: TimeInterval = 10.0,
-        enableDebug: Bool = false,
         confirmationThreshold: Double = 0.85
     ) {
         self.chunkSeconds = chunkSeconds
@@ -516,7 +510,6 @@ public struct StreamingAsrConfig: Sendable {
         self.leftContextSeconds = leftContextSeconds
         self.rightContextSeconds = rightContextSeconds
         self.minContextForConfirmation = minContextForConfirmation
-        self.enableDebug = enableDebug
         self.confirmationThreshold = confirmationThreshold
     }
 
@@ -524,7 +517,6 @@ public struct StreamingAsrConfig: Sendable {
     public init(
         confirmationThreshold: Double = 0.85,
         chunkDuration: TimeInterval,
-        enableDebug: Bool = false
     ) {
         self.init(
             chunkSeconds: chunkDuration,
@@ -532,7 +524,6 @@ public struct StreamingAsrConfig: Sendable {
             leftContextSeconds: 10.0,
             rightContextSeconds: 2.0,
             minContextForConfirmation: 10.0,
-            enableDebug: enableDebug,
             confirmationThreshold: confirmationThreshold
         )
     }
@@ -541,7 +532,6 @@ public struct StreamingAsrConfig: Sendable {
     public static func custom(
         chunkDuration: TimeInterval,
         confirmationThreshold: Double,
-        enableDebug: Bool
     ) -> StreamingAsrConfig {
         StreamingAsrConfig(
             chunkSeconds: chunkDuration,
@@ -549,7 +539,6 @@ public struct StreamingAsrConfig: Sendable {
             leftContextSeconds: 10.0,
             rightContextSeconds: 2.0,
             minContextForConfirmation: 10.0,
-            enableDebug: enableDebug,
             confirmationThreshold: confirmationThreshold
         )
     }
@@ -558,7 +547,6 @@ public struct StreamingAsrConfig: Sendable {
     var asrConfig: ASRConfig {
         ASRConfig(
             sampleRate: 16000,
-            enableDebug: enableDebug,
             tdtConfig: TdtConfig()
         )
     }

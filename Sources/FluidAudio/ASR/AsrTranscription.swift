@@ -10,20 +10,6 @@ extension AsrManager {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
 
-        if config.enableDebug {
-            logger.debug("transcribeWithState: processing \(audioSamples.count) samples")
-            // Log decoder state values before processing
-            let hiddenBefore = (
-                decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
-            )
-            let cellBefore = (
-                decoderState.cellState[0].intValue, decoderState.cellState[1].intValue
-            )
-            logger.debug(
-                "Decoder state before: hidden[\(hiddenBefore.0),\(hiddenBefore.1)], cell[\(cellBefore.0),\(cellBefore.1)]"
-            )
-        }
-
         let startTime = Date()
 
         // Route to appropriate processing method based on audio length
@@ -35,7 +21,6 @@ extension AsrManager {
                 paddedAudio,
                 originalLength: originalLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
-                enableDebug: config.enableDebug,
                 decoderState: &decoderState
             )
 
@@ -48,24 +33,11 @@ extension AsrManager {
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
-
-            if config.enableDebug {
-                // Log decoder state values after processing
-                let hiddenAfter = (
-                    decoderState.hiddenState[0].intValue, decoderState.hiddenState[1].intValue
-                )
-                let cellAfter = (decoderState.cellState[0].intValue, decoderState.cellState[1].intValue)
-                logger.debug(
-                    "Decoder state after: hidden[\(hiddenAfter.0),\(hiddenAfter.1)], cell[\(cellAfter.0),\(cellAfter.1)]"
-                )
-                logger.debug("Transcription result: '\(result.text)'")
-            }
-
             return result
         }
 
         // ChunkProcessor now uses the passed-in decoder state for continuity
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: config.enableDebug)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
         return try await processor.process(using: self, decoderState: &decoderState, startTime: startTime)
     }
 
@@ -73,7 +45,6 @@ extension AsrManager {
         _ paddedAudio: [Float],
         originalLength: Int? = nil,
         actualAudioFrames: Int? = nil,
-        enableDebug: Bool = false,
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
@@ -135,8 +106,7 @@ extension AsrManager {
     internal func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
-        previousTokens: [Int] = [],
-        enableDebug: Bool
+        previousTokens: [Int] = []
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
@@ -147,7 +117,6 @@ extension AsrManager {
             padded,
             originalLength: originalLength,
             actualAudioFrames: nil,  // Will be calculated from originalLength
-            enableDebug: enableDebug,
             decoderState: &state,
             contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context
         )
@@ -168,10 +137,6 @@ extension AsrManager {
             let adjustedConfidences =
                 removedCount > 0
                 ? Array(hypothesis.tokenConfidences.dropFirst(removedCount)) : hypothesis.tokenConfidences
-
-            if enableDebug && removedCount > 0 {
-                logger.debug("Streaming chunk: removed \(removedCount) duplicate tokens")
-            }
 
             return (deduped, adjustedTimestamps, adjustedConfidences, encLen)
         }
@@ -318,19 +283,6 @@ extension AsrManager {
 
             timings.append(timing)
         }
-
-        // Validate final timing sequence
-        if config.enableDebug {
-            for i in 1..<timings.count {
-                if timings[i].startTime < timings[i - 1].startTime {
-                    logger.warning("Timestamp validation: token \(i) has earlier start time than token \(i-1)")
-                }
-                if timings[i].endTime <= timings[i].startTime {
-                    logger.warning("Timestamp validation: token \(i) has invalid end time <= start time")
-                }
-            }
-        }
-
         return timings
     }
 
@@ -402,9 +354,7 @@ extension AsrManager {
             let currPrefix = Array(workingCurrent.prefix(overlapLength))
 
             if prevSuffix == currPrefix {
-                if config.enableDebug {
-                    logger.debug("Found exact suffix-prefix overlap of length \(overlapLength): \(prevSuffix)")
-                }
+                logger.debug("Found exact suffix-prefix overlap of length \(overlapLength): \(prevSuffix)")
                 let finalRemoved = removedCount + overlapLength
                 return (Array(workingCurrent.dropFirst(overlapLength)), finalRemoved)
             }
@@ -427,11 +377,9 @@ extension AsrManager {
                 for currentStart in 0..<searchLimit {
                     let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
                     if prevSub == currSub {
-                        if config.enableDebug {
-                            logger.debug(
-                                "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub) (boundarySearch=\(boundarySearchFrames))"
-                            )
-                        }
+                        logger.debug(
+                            "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub) (boundarySearch=\(boundarySearchFrames))"
+                        )
                         let finalRemoved = removedCount + currentStart + overlapLength
                         return (Array(workingCurrent.dropFirst(currentStart + overlapLength)), finalRemoved)
                     }

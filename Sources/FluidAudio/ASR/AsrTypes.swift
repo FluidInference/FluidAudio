@@ -4,18 +4,15 @@ import Foundation
 
 public struct ASRConfig: Sendable {
     public let sampleRate: Int
-    public let enableDebug: Bool
     public let tdtConfig: TdtConfig
 
     public static let `default` = ASRConfig()
 
     public init(
         sampleRate: Int = 16000,
-        enableDebug: Bool = false,
         tdtConfig: TdtConfig = .default
     ) {
         self.sampleRate = sampleRate
-        self.enableDebug = enableDebug
         self.tdtConfig = tdtConfig
     }
 }

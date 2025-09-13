@@ -113,19 +113,13 @@ internal struct TdtDecoder {
         } else {
             // First chunk: start from beginning, accounting for any context frames that were already processed
             timeIndices = contextFrameAdjustment
-            if config.enableDebug {
-                logger.debug(
-                    "First chunk init: timeIndices=\(timeIndices), contextFrameAdjustment=\(contextFrameAdjustment)")
-            }
         }
         // Use the minimum of encoder sequence length and actual audio frames to avoid processing padding
         let effectiveSequenceLength = min(encoderSequenceLength, actualAudioFrames)
 
-        if config.enableDebug {
-            logger.debug(
-                "TDT Decoder: encoderSequenceLength=\(encoderSequenceLength), actualAudioFrames=\(actualAudioFrames), effectiveSequenceLength=\(effectiveSequenceLength), globalFrameOffset=\(globalFrameOffset)"
-            )
-        }
+        logger.debug(
+            "TDT Decoder: encoderSequenceLength=\(encoderSequenceLength), actualAudioFrames=\(actualAudioFrames), effectiveSequenceLength=\(effectiveSequenceLength), globalFrameOffset=\(globalFrameOffset)"
+        )
 
         // Key variables for frame navigation:
         var safeTimeIndices = min(timeIndices, effectiveSequenceLength - 1)  // Bounds-checked index
@@ -311,7 +305,7 @@ internal struct TdtDecoder {
                 }
 
                 // Debug logging for inner loop blank processing
-                if blankMask && config.enableDebug && blankFramesProcessed <= 20 && globalFrameOffset == 0 {
+                if blankMask && blankFramesProcessed <= 20 && globalFrameOffset == 0 {
                     blankFramesProcessed += 1
                     logger.debug(
                         "Inner Blank \(blankFramesProcessed): frame \(timeIndices) -> \(timeIndices + duration) (duration=\(duration))"
