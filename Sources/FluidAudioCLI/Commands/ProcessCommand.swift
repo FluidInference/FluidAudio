@@ -60,7 +60,7 @@ enum ProcessCommand {
 
         // Load and process audio file
         do {
-            let audioSamples = try await AudioProcessor.loadAudioFile(path: audioFile)
+            let audioSamples = try AudioConverter().resampleAudioFile(path: audioFile)
             logger.info("Loaded audio: \(audioSamples.count) samples")
 
             let startTime = Date()

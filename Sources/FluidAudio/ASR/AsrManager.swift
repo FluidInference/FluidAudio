@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreML
 import Foundation
 import OSLog
@@ -12,6 +13,7 @@ public final class AsrManager {
 
     internal let logger = AppLogger(category: "ASR")
     internal let config: ASRConfig
+    private let audioConverter: AudioConverter = AudioConverter()
 
     internal var melspectrogramModel: MLModel?
     internal var encoderModel: MLModel?
@@ -32,6 +34,7 @@ public final class AsrManager {
     }
     #endif
 
+    // TODO:: the decoder state should be moved higher up in the API interface
     internal var microphoneDecoderState: TdtDecoderState
     internal var systemDecoderState: TdtDecoderState
 
@@ -288,11 +291,27 @@ public final class AsrManager {
         )
     }
 
-    public func transcribe(_ audioSamples: [Float]) async throws -> ASRResult {
-        return try await transcribe(audioSamples, source: .microphone)
+    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
+    {
+        let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
+
+        let result = try await transcribe(audioFloatArray, source: source)
+
+        return result
     }
 
-    public func transcribe(_ audioSamples: [Float], source: AudioSource) async throws -> ASRResult {
+    public func transcribe(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+        let audioFloatArray = try audioConverter.resampleAudioFile(url)
+
+        let result = try await transcribe(audioFloatArray, source: source)
+
+        return result
+    }
+
+    public func transcribe(
+        _ audioSamples: [Float],
+        source: AudioSource = .microphone
+    ) async throws -> ASRResult {
         var result: ASRResult
         switch source {
         case .microphone:

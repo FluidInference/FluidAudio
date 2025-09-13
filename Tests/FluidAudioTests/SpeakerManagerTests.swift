@@ -181,8 +181,6 @@ final class SpeakerManagerTests: XCTestCase {
             XCTAssertEqual(publicDuration, 5.0)
             XCTAssertNotNil(publicUpdatedAt)
             XCTAssertEqual(publicUpdateCount, 1)
-
-            print("✅ All SpeakerInfo members are publicly accessible")
         }
     }
 

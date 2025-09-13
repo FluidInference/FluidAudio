@@ -7,7 +7,7 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = AppLogger(category: "StreamingASR")
-    private let audioConverter = AudioConverter()
+    private let audioConverter: AudioConverter = AudioConverter()
     private let config: StreamingAsrConfig
 
     // Audio input stream
@@ -102,8 +102,8 @@ public actor StreamingAsrManager {
 
             for await pcmBuffer in self.inputSequence {
                 do {
-                    // Convert to 16kHz mono
-                    let samples = try await audioConverter.convertToAsrFormat(pcmBuffer)
+                    // Convert to 16kHz mono (streaming)
+                    let samples = try audioConverter.resampleBuffer(pcmBuffer)
 
                     // Append to raw sample buffer and attempt windowed processing
                     await self.appendSamplesAndProcess(samples)
@@ -115,7 +115,9 @@ public actor StreamingAsrManager {
                 }
             }
 
-            // Stream ended: flush remaining audio (without requiring full right context)
+            // Stream ended: no need to flush converter since each conversion is stateless
+
+            // Then flush remaining assembled audio (no right-context requirement)
             await self.flushRemaining()
 
             logger.info("Recognition task completed")
@@ -208,9 +210,6 @@ public actor StreamingAsrManager {
         inputBuilder.finish()
         recognizerTask?.cancel()
         updateContinuation?.finish()
-
-        // Cleanup audio converter state
-        await audioConverter.cleanup()
 
         logger.info("StreamingAsrManager cancelled")
     }
@@ -312,8 +311,7 @@ public actor StreamingAsrManager {
             let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
                 windowSamples,
                 source: audioSource,
-                previousTokens: accumulatedTokens,
-                enableDebug: config.enableDebug
+                previousTokens: accumulatedTokens
             )
 
             // Update state
@@ -415,12 +413,10 @@ public actor StreamingAsrManager {
                 logger.error("Stream already exists - cannot recover automatically")
 
             case .audioBufferProcessingFailed:
-                logger.info("Recovering from audio buffer error - resetting audio converter")
-                await audioConverter.reset()
+                logger.info("Recovering from audio buffer error")
 
             case .audioConversionFailed:
-                logger.info("Recovering from audio conversion error - resetting converter")
-                await audioConverter.reset()
+                logger.info("Recovering from audio conversion error")
 
             case .modelProcessingFailed:
                 logger.info("Recovering from model processing error - resetting decoder state")
@@ -476,8 +472,6 @@ public struct StreamingAsrConfig: Sendable {
     /// Minimum audio duration before confirming text (seconds). Should be ~10s
     public let minContextForConfirmation: TimeInterval
 
-    /// Enable debug logging
-    public let enableDebug: Bool
     /// Confidence threshold for promoting volatile text to confirmed (0.0...1.0)
     public let confirmationThreshold: Double
 
@@ -488,7 +482,6 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: 10.0,
         rightContextSeconds: 2.0,
         minContextForConfirmation: 10.0,
-        enableDebug: false,
         confirmationThreshold: 0.85
     )
 
@@ -501,7 +494,6 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: 2.0,  // Match ChunkProcessor left context
         rightContextSeconds: 2.0,  // Match ChunkProcessor right context
         minContextForConfirmation: 10.0,  // Need sufficient context before confirming
-        enableDebug: false,
         confirmationThreshold: 0.80  // Higher threshold for more stable confirmations
     )
 
@@ -511,7 +503,6 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: TimeInterval = 2.0,
         rightContextSeconds: TimeInterval = 2.0,
         minContextForConfirmation: TimeInterval = 10.0,
-        enableDebug: Bool = false,
         confirmationThreshold: Double = 0.85
     ) {
         self.chunkSeconds = chunkSeconds
@@ -519,15 +510,13 @@ public struct StreamingAsrConfig: Sendable {
         self.leftContextSeconds = leftContextSeconds
         self.rightContextSeconds = rightContextSeconds
         self.minContextForConfirmation = minContextForConfirmation
-        self.enableDebug = enableDebug
         self.confirmationThreshold = confirmationThreshold
     }
 
     /// Backward-compatible convenience initializer used by tests (chunkDuration label)
     public init(
         confirmationThreshold: Double = 0.85,
-        chunkDuration: TimeInterval,
-        enableDebug: Bool = false
+        chunkDuration: TimeInterval
     ) {
         self.init(
             chunkSeconds: chunkDuration,
@@ -535,7 +524,6 @@ public struct StreamingAsrConfig: Sendable {
             leftContextSeconds: 10.0,
             rightContextSeconds: 2.0,
             minContextForConfirmation: 10.0,
-            enableDebug: enableDebug,
             confirmationThreshold: confirmationThreshold
         )
     }
@@ -543,8 +531,7 @@ public struct StreamingAsrConfig: Sendable {
     /// Custom configuration factory expected by tests
     public static func custom(
         chunkDuration: TimeInterval,
-        confirmationThreshold: Double,
-        enableDebug: Bool
+        confirmationThreshold: Double
     ) -> StreamingAsrConfig {
         StreamingAsrConfig(
             chunkSeconds: chunkDuration,
@@ -552,7 +539,6 @@ public struct StreamingAsrConfig: Sendable {
             leftContextSeconds: 10.0,
             rightContextSeconds: 2.0,
             minContextForConfirmation: 10.0,
-            enableDebug: enableDebug,
             confirmationThreshold: confirmationThreshold
         )
     }
@@ -561,7 +547,6 @@ public struct StreamingAsrConfig: Sendable {
     var asrConfig: ASRConfig {
         ASRConfig(
             sampleRate: 16000,
-            enableDebug: enableDebug,
             tdtConfig: TdtConfig()
         )
     }

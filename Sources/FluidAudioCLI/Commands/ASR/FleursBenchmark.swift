@@ -472,7 +472,7 @@ public class FLEURSBenchmark {
                 let audioSamples: [Float]
 
                 do {
-                    audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
+                    audioSamples = try AudioConverter().resampleAudioFile(path: sample.audioPath)
                 } catch {
                     // Continue to next sample instead of failing the entire benchmark
                     skippedCount += 1
@@ -484,8 +484,9 @@ public class FLEURSBenchmark {
                     "\t Processing \(sample.audioPath) Duration: \(String(format: "%.2f", audioDuration))s with samples: \(audioSamples.count)"
                 )
                 // Measure only inference time for accurate RTFx calculation
+                let url = URL(fileURLWithPath: sample.audioPath)
                 let inferenceStartTime = Date()
-                let result = try await asrManager.transcribe(audioSamples)
+                let result = try await asrManager.transcribe(url)
                 let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
                 // Calculate metrics if reference transcription is available
@@ -751,7 +752,7 @@ public class FLEURSBenchmark {
             // Generate inline diff
             let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
-            logger.info("\nNormalized Reference:\t\(referenceDiff)")
+            logger.info("Normalized Reference:\t\(referenceDiff)")
             logger.info("Normalized Hypothesis:\t\(hypothesisDiff)")
             logger.info("Original Hypothesis:\t\(sample.hypothesis)")
             logger.info(String(repeating: "-", count: 40))
@@ -906,7 +907,6 @@ extension FLEURSBenchmark {
 
         // Initialize ASR manager
         let asrConfig = ASRConfig(
-            enableDebug: debugMode,
             tdtConfig: TdtConfig()  // Uses default config
         )
 
@@ -1050,7 +1050,6 @@ extension FLEURSBenchmark {
 
         // Initialize ASR manager
         let asrConfig = ASRConfig(
-            enableDebug: debugMode,
             tdtConfig: TdtConfig()
         )
 
@@ -1161,7 +1160,7 @@ extension FLEURSBenchmark {
         // Load audio
         let audioSamples: [Float]
         do {
-            audioSamples = try await AudioProcessor.loadAudioFile(path: sample.audioPath)
+            audioSamples = try AudioConverter().resampleAudioFile(path: sample.audioPath)
         } catch {
             throw NSError(
                 domain: "FLEURSBenchmark",
@@ -1174,8 +1173,9 @@ extension FLEURSBenchmark {
         logger.info("  Duration: \(String(format: "%.2f", audioDuration))s")
 
         // Measure only inference time for accurate RTFx calculation
+        let url = URL(fileURLWithPath: sample.audioPath)
         let inferenceStartTime = Date()
-        let result = try await asrManager.transcribe(audioSamples)
+        let result = try await asrManager.transcribe(url)
         let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
         logger.info("  Hypothesis: \(result.text)")
@@ -1216,8 +1216,8 @@ extension FLEURSBenchmark {
                 )
             }
 
-            logger.info("  Normalized Reference: \(normalizedRef)")
-            logger.info("  Normalized Hypothesis: \(normalizedHyp)")
+            logger.info("Normalized Reference:\t\(normalizedRef)")
+            logger.info("Normalized Hypothesis:\t\(normalizedHyp)")
         }
 
         let rtfx = processingTime > 0 ? audioDuration / processingTime : 0.0

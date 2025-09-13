@@ -14,15 +14,19 @@ let models = try await DiarizerModels.downloadIfNeeded()
 let diarizer = DiarizerManager()
 diarizer.initialize(models: models)
 
-// Supports any RandomAccessCollection<Float> - Array, ArraySlice, ContiguousArray, etc.
-let audioSamples: [Float] = loadAudioFile() // 16kHz mono
+// 3. Normalize any audio file to 16kHz mono Float32 using AudioConverter
+let converter = AudioConverter()
+let url = URL(fileURLWithPath: "path/to/audio.wav")
+let audioSamples = try converter.resampleAudioFile(url)
+
+// 4. Run diarization (accepts any RandomAccessCollection<Float>)
 let result = try diarizer.performCompleteDiarization(audioSamples)
 
 // Alternative: Use ArraySlice for zero-copy processing
 let audioSlice = audioSamples[1000..<5000]  // No memory copy!
 let sliceResult = try diarizer.performCompleteDiarization(audioSlice)
 
-// 4. Get results
+// 5. Get results
 for segment in result.segments {
     print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
 }
@@ -121,7 +125,9 @@ class RealTimeDiarizer {
     private let sampleRate: Double = 16000
     private var chunkSamples: Int { Int(sampleRate * chunkDuration) }
     private var streamPosition: Double = 0
-
+    // Audio converter for format conversion
+    private let converter = AudioConverter()
+    
     init() async throws {
         let models = try await DiarizerModels.downloadIfNeeded()
         diarizer = DiarizerManager()  // Default config
@@ -136,9 +142,10 @@ class RealTimeDiarizer {
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
 
-            // Convert to 16kHz mono Float array
-            let samples = self.convertBuffer(buffer, targetSampleRate: 16000)
-            self.processAudioSamples(samples)
+            // Convert to 16kHz mono Float array using AudioConverter (streaming)
+            if let samples = try? self.converter.resampleBuffer(buffer) {
+                self.processAudioSamples(samples)
+            }
         }
 
         audioEngine.prepare()
@@ -172,9 +179,10 @@ class RealTimeDiarizer {
         }
     }
 
-    private func convertBuffer(_ buffer: AVAudioPCMBuffer, targetSampleRate: Double) -> [Float] {
-        // Audio conversion implementation here
-        // Returns 16kHz mono Float array
+    private func convertBuffer(_ buffer: AVAudioPCMBuffer) -> [Float] {
+        // Use FluidAudio.AudioConverter in streaming mode
+        // Returns 16kHz mono Float array; swallow conversion errors in sample code
+        return (try? converter.resampleBuffer(buffer)) ?? []
     }
 }
 ```
@@ -186,7 +194,10 @@ Main entry point for diarization pipeline:
 ```swift
 let diarizer = DiarizerManager()  // Default config (recommended)
 diarizer.initialize(models: models)
-let result = try diarizer.performCompleteDiarization(audio)
+
+// Normalize with AudioConverter
+let samples = try AudioConverter().resampleAudioFile(URL(fileURLWithPath: "path/to/audio.wav"))
+let result = try diarizer.performCompleteDiarization(samples)
 ```
 
 ### SpeakerManager

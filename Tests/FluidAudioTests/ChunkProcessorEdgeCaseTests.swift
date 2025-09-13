@@ -20,7 +20,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testFirstChunkBoundaryCalculations() {
         // Test first chunk boundary calculations without mocking
         let audioSamples = createMockAudio(durationSeconds: 12.0)
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         // Test the internal calculations that would be used in first chunk
         let centerSeconds = 11.2
@@ -53,7 +53,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
         // Test audio that fits exactly one center chunk (11.2s)
         let exactCenterSamples = Int(11.2 * 16000.0)  // 179,200 samples
         let audioSamples = Array(0..<exactCenterSamples).map { Float($0) / Float(exactCenterSamples) }
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(audioSamples.count, 179_200, "Exactly one center chunk should be 179,200 samples")
@@ -73,7 +73,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testVeryShortAudioBoundaries() {
         // Test very short audio (< 1 second)
         let shortAudio = createMockAudio(durationSeconds: 0.5)
-        let processor = ChunkProcessor(audioSamples: shortAudio, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: shortAudio)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(shortAudio.count, 8_000, "0.5s audio should be 8,000 samples")
@@ -96,7 +96,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testLastChunkAdaptiveContextCalculations() {
         // Test last chunk adaptive context calculations
         let audioSamples = createMockAudio(durationSeconds: 25.0)  // 2+ chunks, last will be partial
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
 
@@ -135,7 +135,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testLastChunkPaddingCalculations() {
         // Test padding calculations for last chunk
         let audioSamples = createMockAudio(durationSeconds: 13.5)  // Slightly longer than one chunk
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(audioSamples.count, 216_000, "13.5s should be 216,000 samples")
@@ -164,7 +164,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testChunkBoundaryOverlapCalculations() {
         // Test overlapping context calculations between chunks
         let audioSamples = createMockAudio(durationSeconds: 24.0)  // Exactly 2 chunks worth
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(audioSamples.count, 384_000, "24s should be 384,000 samples")
@@ -207,7 +207,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
         // Test precise frame boundary calculations
         let centerSamples = Int(11.2 * 16000.0)  // 179,200 samples = exactly 140 frames
         let audioSamples = Array(repeating: Float(0.1), count: centerSamples * 2)  // Exactly 2 center chunks
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
         XCTAssertEqual(audioSamples.count, 358_400, "Two center chunks should be 358,400 samples")
@@ -243,7 +243,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testDecoderStateTimeJumpCalculations() throws {
         // Test time jump calculations for decoder state persistence
         let audioSamples = createMockAudio(durationSeconds: 24.0)
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
 
@@ -286,7 +286,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testTokenDeduplicationLogic() {
         // Test deduplication logic without mocking the final class
         let audioSamples = createMockAudio(durationSeconds: 24.0)  // 2 chunks
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
 
@@ -322,7 +322,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
     func testFinalValidationCalculations() {
         // Test the final validation logic from ChunkProcessor
         let audioSamples = createMockAudio(durationSeconds: 30.0)
-        let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: true)
+        let processor = ChunkProcessor(audioSamples: audioSamples)
 
         XCTAssertNotNil(processor)
 
@@ -358,7 +358,7 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
 
         for (duration, expectedChunks) in testCases {
             let audioSamples = createMockAudio(durationSeconds: duration)
-            let processor = ChunkProcessor(audioSamples: audioSamples, enableDebug: false)
+            let processor = ChunkProcessor(audioSamples: audioSamples)
 
             XCTAssertNotNil(processor, "Processor should initialize for \(duration)s audio")
 

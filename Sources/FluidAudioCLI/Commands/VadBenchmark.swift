@@ -417,24 +417,18 @@ struct VadBenchmark {
             logger.info("   Processing \(index + 1)/\(testFiles.count): \(testFile.name)")
 
             do {
-                // Load audio file with optimized loading
+                // Load + convert audio (counted as loading time)
                 let loadStartTime = Date()
                 let audioFile = try AVAudioFile(forReading: testFile.url)
-                let audioData = try await loadVadAudioData(audioFile)
+                let audioDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
                 loadingTime += Date().timeIntervalSince(loadStartTime)
-
-                // Calculate audio duration
-                let audioDuration =
-                    Double(audioFile.length) / audioFile.processingFormat.sampleRate
                 totalAudioDuration += audioDuration
 
-                // Process with VAD
+                // Process with VAD using new convenience API for raw samples
+                let url = URL(fileURLWithPath: testFile.url.path)
                 let inferenceStartTime = Date()
-                let vadResults = try await vadManager.processAudioFile(audioData)
+                let vadResults = try await vadManager.process(url)
                 inferenceTime += Date().timeIntervalSince(inferenceStartTime)
-
-                // Free audio data immediately after processing
-                // This helps with GitHub Actions memory constraints
 
                 // Aggregate results (use max probability as file-level decision)
                 let maxProbability = vadResults.map { $0.probability }.max() ?? 0.0
@@ -514,53 +508,10 @@ struct VadBenchmark {
         )
     }
 
+    // VadManager.process(url:) which performs conversion internally.
     static func loadVadAudioData(_ audioFile: AVAudioFile) async throws -> [Float] {
-        let format = audioFile.processingFormat
-        let frameCount = AVAudioFrameCount(audioFile.length)
-
-        // Early exit if already 16kHz - avoid resampling overhead
-        let needsResampling = format.sampleRate != 16000
-
-        // Use smaller buffer size for GitHub Actions memory constraints
-        let bufferSize: AVAudioFrameCount = min(frameCount, 4096)
-
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: bufferSize) else {
-            throw NSError(domain: "AudioError", code: 1, userInfo: nil)
-        }
-
-        var allSamples: [Float] = []
-        allSamples.reserveCapacity(Int(frameCount))
-
-        // Read file in chunks to reduce memory pressure
-        var remainingFrames = frameCount
-
-        while remainingFrames > 0 {
-            let framesToRead = min(remainingFrames, bufferSize)
-            buffer.frameLength = 0  // Reset buffer
-
-            try audioFile.read(into: buffer, frameCount: framesToRead)
-
-            guard let floatData = buffer.floatChannelData?[0] else {
-                throw NSError(domain: "AudioError", code: 2, userInfo: nil)
-            }
-
-            let actualFrameCount = Int(buffer.frameLength)
-            if actualFrameCount == 0 { break }
-
-            // Direct append without intermediate array creation
-            let bufferPointer = UnsafeBufferPointer(start: floatData, count: actualFrameCount)
-            allSamples.append(contentsOf: bufferPointer)
-
-            remainingFrames -= AVAudioFrameCount(actualFrameCount)
-        }
-
-        // Resample to 16kHz if needed
-        if needsResampling {
-            allSamples = try await AudioProcessor.resampleAudio(
-                allSamples, from: format.sampleRate, to: 16000)
-        }
-
-        return allSamples
+        let converter: AudioConverter = AudioConverter()
+        return try converter.resampleAudioFile(audioFile.url)
     }
 
     static func calculateVadMetrics(

@@ -1,3 +1,4 @@
+import AVFoundation
 @preconcurrency import CoreML
 import Foundation
 import OSLog
@@ -14,6 +15,7 @@ public actor VadManager {
 
     private let logger = AppLogger(category: "VadManager")
     public let config: VadConfig
+    private let audioConverter: AudioConverter = AudioConverter()
 
     /// Required model names for VAD
     public static let requiredModelNames: Set<String> = ["silero_vad.mlmodelc"]
@@ -22,6 +24,35 @@ public actor VadManager {
 
     public var isAvailable: Bool {
         return vadModel != nil
+    }
+
+    // MARK: - Convenience processing APIs (input normalization)
+
+    /// Process an entire audio source from a file URL.
+    /// Automatically converts the audio to 16kHz mono Float32 and processes in 512-sample chunks.
+    /// - Parameter url: Audio file URL
+    /// - Returns: Array of per-chunk VAD results
+    public func process(_ url: URL) async throws -> [VadResult] {
+        let samples = try audioConverter.resampleAudioFile(url)
+        let results = try await processAudioFile(samples)
+        return results
+    }
+
+    /// Process an entire in-memory audio buffer.
+    /// Automatically converts the buffer to 16kHz mono Float32 and processes in 512-sample chunks.
+    /// - Parameter audioBuffer: Source buffer in any format
+    /// - Returns: Array of per-chunk VAD results
+    public func process(_ audioBuffer: AVAudioPCMBuffer) async throws -> [VadResult] {
+        let samples = try audioConverter.resampleBuffer(audioBuffer)
+        let results = try await processAudioFile(samples)
+        return results
+    }
+
+    /// Process raw 16kHz mono samples.
+    /// - Parameter samples: Audio samples (16kHz, mono)
+    /// - Returns: Array of per-chunk VAD results
+    public func process(_ samples: [Float]) async throws -> [VadResult] {
+        return try await processAudioFile(samples)
     }
 
     /// Initialize with configuration

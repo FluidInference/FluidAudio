@@ -4,7 +4,6 @@ import OSLog
 
 struct ChunkProcessor {
     let audioSamples: [Float]
-    let enableDebug: Bool
 
     private let logger = AppLogger(category: "ChunkProcessor")
 
@@ -13,8 +12,8 @@ struct ChunkProcessor {
     // 1.6s context = exactly 20 encoder frames each
     // Total: 14.4s (within 15s model limit, 180 total frames)
     private let sampleRate: Int = 16000
-    private let centerSeconds: Double = 11.2  // Exactly 140 frames (11.2 * 12.5)
-    private let leftContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
+    private let centerSeconds: Double = 11.2  // Reduced to allow for more overlap
+    private let leftContextSeconds: Double = 1.6  // Increased overlap to 30 frames to avoid missing speech
     private let rightContextSeconds: Double = 1.6  // Exactly 20 frames (1.6 * 12.5)
 
     private var centerSamples: Int { Int(centerSeconds * Double(sampleRate)) }
@@ -25,9 +24,8 @@ struct ChunkProcessor {
     func process(
         using manager: AsrManager, decoderState: inout TdtDecoderState, startTime: Date
     ) async throws -> ASRResult {
-        var allTokens: [Int] = []
-        var allTimestamps: [Int] = []
-        var allConfidences: [Float] = []
+        // Use a combined structure to keep tokens, timestamps, and confidences aligned
+        var allTokenData: [(token: Int, timestamp: Int, confidence: Float)] = []
 
         var centerStart = 0
         var segmentIndex = 0
@@ -52,26 +50,41 @@ struct ChunkProcessor {
                 lastProcessedFrame = maxFrame
             }
 
-            // For chunks after the first, check for and remove duplicated token sequences
-            if segmentIndex > 0 && !allTokens.isEmpty && !windowTokens.isEmpty {
-                let (deduped, removedCount) = manager.removeDuplicateTokenSequence(
-                    previous: allTokens, current: windowTokens, maxOverlap: 30)
-                let adjustedTimestamps = Array(windowTimestamps.dropFirst(removedCount))
-                let adjustedConfidences = Array(windowConfidences.dropFirst(removedCount))
+            // Combine tokens, timestamps, and confidences into aligned tuples
+            guard windowTokens.count == windowTimestamps.count && windowTokens.count == windowConfidences.count else {
+                throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
+            }
 
-                allTokens.append(contentsOf: deduped)
-                allTimestamps.append(contentsOf: adjustedTimestamps)
-                allConfidences.append(contentsOf: adjustedConfidences)
+            let windowData = zip(zip(windowTokens, windowTimestamps), windowConfidences).map {
+                (token: $0.0.0, timestamp: $0.0.1, confidence: $0.1)
+            }
+
+            // For chunks after the first, check for and remove duplicated token sequences
+            if segmentIndex > 0 && !allTokenData.isEmpty && !windowData.isEmpty {
+                let previousTokens = allTokenData.map { $0.token }
+                let currentTokens = windowData.map { $0.token }
+
+                let (_, removedCount) = manager.removeDuplicateTokenSequence(
+                    previous: previousTokens, current: currentTokens, maxOverlap: 30)
+                // Only keep the non-duplicate portion of window data
+                let adjustedWindowData = Array(windowData.dropFirst(removedCount))
+                allTokenData.append(contentsOf: adjustedWindowData)
             } else {
-                allTokens.append(contentsOf: windowTokens)
-                allTimestamps.append(contentsOf: windowTimestamps)
-                allConfidences.append(contentsOf: windowConfidences)
+                allTokenData.append(contentsOf: windowData)
             }
 
             centerStart += centerSamples
 
             segmentIndex += 1
         }
+
+        // Sort by timestamp to ensure chronological order
+        allTokenData.sort { $0.timestamp < $1.timestamp }
+
+        // Extract sorted arrays
+        let allTokens = allTokenData.map { $0.token }
+        let allTimestamps = allTokenData.map { $0.timestamp }
+        let allConfidences = allTokenData.map { $0.confidence }
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
@@ -140,8 +153,7 @@ struct ChunkProcessor {
             adaptiveLeftContextSamples = leftContextSamples
 
             // Standard chunks use physical overlap in audio windows for context
-            // Let deduplication handle any token overlap rather than negative frame adjustment
-            // This prevents edge cases when prevTimeJump = 0
+            // Don't skip frames - let the decoder handle continuity with its timeJump mechanism
             contextFrameAdjustment = 0
         }
 
@@ -170,7 +182,6 @@ struct ChunkProcessor {
             paddedChunk,
             originalLength: chunkSamples.count,
             actualAudioFrames: actualFrameCount,
-            enableDebug: enableDebug,
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,
             isLastChunk: isLastChunk,

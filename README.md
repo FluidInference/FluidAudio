@@ -107,13 +107,15 @@ Task {
     let asrManager = AsrManager(config: .default)
     try await asrManager.initialize(models: models)
 
-    // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
-    let samples = try await loadSamples16kMono(path: "path/to/audio.wav")
+    // 3) Transcribe the audio 16hz, already converted
+    let result = try await asrManager.transcribe(samples)
 
-    // 3) Transcribe the audio
-    let result = try await asrManager.transcribe(samples, source: .system)
+    // 3) Transcribe a file
+    // let url = URL(fileURLWithPath: sample.audioPath)
+
+    // 3) Transcribe AVAudioPCMBuffer
+    // let result = try await asrManager.transcribe(audioBuffer)
     print("Transcription: \(result.text)")
-    print("Confidence: \(result.confidence)")
 }
 ```
 
