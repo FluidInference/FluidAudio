@@ -93,9 +93,18 @@ final public class AudioConverter {
         var aggregated: [Float] = []
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
-        // Use atomic operations for thread safety
-        let providedRef = OSAllocatedUnfairLock(initialState: false)
+        // Extract audio data to avoid Sendable issues with buffer
+        let bufferFormat = buffer.format
+        let frameLength = buffer.frameLength
+        let audioData: [Float]
+        if let channelData = buffer.floatChannelData?[0] {
+            audioData = Array(UnsafeBufferPointer(start: channelData, count: Int(frameLength)))
+        } else {
+            audioData = []
+        }
 
+        // Create input block with captured audio data
+        let providedRef = OSAllocatedUnfairLock(initialState: false)
         let inputBlock: AVAudioConverterInputBlock = { _, status in
             let wasProvided = providedRef.withLock { provided in
                 let result = provided
@@ -104,8 +113,22 @@ final public class AudioConverter {
             }
 
             if !wasProvided {
+                // Create a new buffer with the copied data
+                guard let newBuffer = AVAudioPCMBuffer(pcmFormat: bufferFormat, frameCapacity: frameLength),
+                    let newChannelData = newBuffer.floatChannelData?[0]
+                else {
+                    status.pointee = .endOfStream
+                    return nil
+                }
+
+                // Copy the audio data
+                newBuffer.frameLength = frameLength
+                _ = audioData.withUnsafeBufferPointer { audioPtr in
+                    memcpy(newChannelData, audioPtr.baseAddress, Int(frameLength) * MemoryLayout<Float>.size)
+                }
+
                 status.pointee = .haveData
-                return buffer
+                return newBuffer
             } else {
                 status.pointee = .endOfStream
                 return nil
