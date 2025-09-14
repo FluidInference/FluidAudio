@@ -207,7 +207,7 @@ extension CoreMLDiarizerTests {
 
         // Check that the model files exist in the download directory
         let repoPath = downloadDir.deletingLastPathComponent()
-            .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName)
+            .appendingPathComponent(Repo.diarizer.folderName)
 
         // Clean up any unwanted models that might have been downloaded
         let unwantedModels = ["wespeaker.mlmodelc", "wespeaker_int8.mlmodelc"]
@@ -277,7 +277,7 @@ extension CoreMLDiarizerTests {
             appSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent(DownloadUtils.Repo.diarizer.folderName, isDirectory: true)
+            .appendingPathComponent(Repo.diarizer.folderName, isDirectory: true)
 
         // Clean up any unwanted models that might have been downloaded
         let unwantedModels = ["wespeaker.mlmodelc", "wespeaker_int8.mlmodelc"]

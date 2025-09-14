@@ -11,21 +11,23 @@ import FluidAudio
 
 // Programmatic VAD over an audio file
 Task {
-    // 1) Initialize VAD (async load of Silero model)
-    let vad = try await VadManager(config: VadConfig(threshold: 0.3))
+    // 1) Initialize VAD (async loads Silero model)
+    let vad = try await VadManager(
+        config: VadConfig(threshold: 0.85, debugMode: false)
+    )
 
-    // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
-    let samples = try await loadSamples16kMono(path: "path/to/audio.wav")
+    // 2) Process any supported file; conversion to 16 kHz mono is automatic
+    let url = URL(fileURLWithPath: "path/to/audio.wav")
+    let results = try await vad.process(url)
 
-    // 3) Run VAD and print speech segments (512-sample frames)
-    let results = try await vad.processAudioFile(samples)
+    // 3) Convert per-frame decisions into segments (512-sample frames @ 16 kHz)
     let sampleRate = 16000.0
     let frame = 512.0
 
     var startIndex: Int? = nil
     for (i, r) in results.enumerated() {
         if r.isVoiceActive {
-            if startIndex == nil { startIndex = i }
+            startIndex = startIndex ?? i
         } else if let s = startIndex {
             let startSec = (Double(s) * frame) / sampleRate
             let endSec = (Double(i + 1) * frame) / sampleRate
@@ -36,6 +38,10 @@ Task {
 }
 ```
 
+Notes:
+- You can also call `process(_ buffer: AVAudioPCMBuffer)` or `process(_ samples: [Float])`.
+- Frame size is `512` samples (32 ms at 16 kHz). Threshold defaults to `0.85`.
+
 ## CLI
 
 ```bash
@@ -45,7 +51,9 @@ swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
 # Save results and enable debug output
 swift run fluidaudio vad-benchmark --all-files --output vad_results.json --debug
 
+# VOiCES subset mixed-condition benchmark (high-precision setting)
+swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.85
+
 # Download VAD dataset if needed
 swift run fluidaudio download --dataset vad
 ```
-

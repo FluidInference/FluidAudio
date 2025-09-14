@@ -9,13 +9,38 @@ public struct VadConfig: Sendable {
     public static let `default` = VadConfig()
 
     public init(
-        threshold: Float = 0.5,
+        threshold: Float = 0.85,
         debugMode: Bool = false,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) {
         self.threshold = threshold
         self.debugMode = debugMode
         self.computeUnits = computeUnits
+    }
+}
+
+public struct VadSegmentationConfig: Sendable {
+    public var minSpeechDuration: TimeInterval
+    public var minSilenceDuration: TimeInterval
+    public var maxSpeechDuration: TimeInterval
+    public var speechPadding: TimeInterval
+    public var silenceThresholdForSplit: Float
+
+    public static let `default` = VadSegmentationConfig()
+
+    public init(
+        minSpeechDuration: TimeInterval = 0.15,
+        minSilenceDuration: TimeInterval = 0.75,
+        // ASR model by default is 15s, for other models you may want to adjust this
+        maxSpeechDuration: TimeInterval = 14.0,
+        speechPadding: TimeInterval = 0.1,
+        silenceThresholdForSplit: Float = 0.3
+    ) {
+        self.minSpeechDuration = minSpeechDuration
+        self.minSilenceDuration = minSilenceDuration
+        self.maxSpeechDuration = maxSpeechDuration
+        self.speechPadding = speechPadding
+        self.silenceThresholdForSplit = silenceThresholdForSplit
     }
 }
 
@@ -35,10 +60,33 @@ public struct VadResult: Sendable {
     }
 }
 
-// Internal struct for VadAudioProcessor compatibility
-internal struct SpectralFeatures {
-    let spectralFlux: Float
-    let mfccFeatures: [Float]
+public struct VadSegment: Sendable {
+    public let startTime: TimeInterval
+    public let endTime: TimeInterval
+
+    public var duration: TimeInterval {
+        return endTime - startTime
+    }
+
+    public func startSample(sampleRate: Int) -> Int {
+        return Int(startTime * Double(sampleRate))
+    }
+
+    public func endSample(sampleRate: Int) -> Int {
+        return Int(endTime * Double(sampleRate))
+    }
+
+    public func sampleCount(sampleRate: Int) -> Int {
+        return endSample(sampleRate: sampleRate) - startSample(sampleRate: sampleRate)
+    }
+
+    public init(
+        startTime: TimeInterval,
+        endTime: TimeInterval
+    ) {
+        self.startTime = startTime
+        self.endTime = endTime
+    }
 }
 
 public enum VadError: Error, LocalizedError {

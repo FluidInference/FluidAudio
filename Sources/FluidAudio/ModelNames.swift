@@ -1,5 +1,17 @@
 import Foundation
 
+/// Model repositories on HuggingFace
+public enum Repo: String, CaseIterable {
+    case vad = "FluidInference/silero-vad-coreml"
+    case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+    case diarizer = "FluidInference/speaker-diarization-coreml"
+
+    var folderName: String {
+        rawValue.split(separator: "/").last?.description ?? rawValue
+    }
+
+}
+
 /// Centralized model names for all FluidAudio components
 public enum ModelNames {
 
@@ -40,18 +52,25 @@ public enum ModelNames {
 
     /// VAD model names
     public enum VAD {
-        public static let stft = "silero_stft"
-        public static let encoder = "silero_encoder"
-        public static let rnnDecoder = "silero_rnn_decoder"
+        public static let sileroVad = "silero_vad_se_trained_4bit"
 
-        public static let stftFile = stft + ".mlmodelc"
-        public static let encoderFile = encoder + ".mlmodelc"
-        public static let rnnDecoderFile = rnnDecoder + ".mlmodelc"
+        public static let sileroVadFile = sileroVad + ".mlmodelc"
 
         public static let requiredModels: Set<String> = [
-            stftFile,
-            encoderFile,
-            rnnDecoderFile,
+            sileroVadFile
         ]
     }
+
+    @available(macOS 13.0, iOS 16.0, *)
+    static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+        switch repo {
+        case .vad:
+            return ModelNames.VAD.requiredModels
+        case .parakeet:
+            return ModelNames.ASR.requiredModels
+        case .diarizer:
+            return ModelNames.Diarizer.requiredModels
+        }
+    }
+
 }

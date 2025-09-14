@@ -35,7 +35,7 @@ final class AsrModelsTests: XCTestCase {
         // Verify path components
         XCTAssertTrue(cacheDir.path.contains("FluidAudio"))
         XCTAssertTrue(cacheDir.path.contains("Models"))
-        XCTAssertTrue(cacheDir.path.contains(DownloadUtils.Repo.parakeet.folderName))
+        XCTAssertTrue(cacheDir.path.contains(Repo.parakeet.folderName))
 
         // Verify it's an absolute path
         XCTAssertTrue(cacheDir.isFileURL)
@@ -130,10 +130,10 @@ final class AsrModelsTests: XCTestCase {
 
         // Test that download would target correct directory structure
         let expectedRepoPath = customDir.deletingLastPathComponent()
-            .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
+            .appendingPathComponent(Repo.parakeet.folderName)
 
         // Verify path components
-        XCTAssertTrue(expectedRepoPath.path.contains(DownloadUtils.Repo.parakeet.folderName))
+        XCTAssertTrue(expectedRepoPath.path.contains(Repo.parakeet.folderName))
     }
 
     // MARK: - Model Loading Configuration Tests
@@ -177,10 +177,10 @@ final class AsrModelsTests: XCTestCase {
     func testRepoPathCalculation() {
         let modelsDir = URL(fileURLWithPath: "/test/Models/parakeet-tdt-0.6b-v3-coreml")
         let repoPath = modelsDir.deletingLastPathComponent()
-            .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
+            .appendingPathComponent(Repo.parakeet.folderName)
 
-        XCTAssertTrue(repoPath.path.hasSuffix(DownloadUtils.Repo.parakeet.folderName))
-        XCTAssertEqual(repoPath.lastPathComponent, DownloadUtils.Repo.parakeet.folderName)
+        XCTAssertTrue(repoPath.path.hasSuffix(Repo.parakeet.folderName))
+        XCTAssertEqual(repoPath.lastPathComponent, Repo.parakeet.folderName)
     }
 
     // MARK: - Integration Test Helpers

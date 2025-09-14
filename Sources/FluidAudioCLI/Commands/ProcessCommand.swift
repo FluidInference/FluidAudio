@@ -23,7 +23,7 @@ enum ProcessCommand {
             switch arguments[i] {
             case "--threshold":
                 if i + 1 < arguments.count {
-                    threshold = Float(arguments[i + 1]) ?? 0.7
+                    threshold = Float(arguments[i + 1]) ?? 0.8
                     i += 1
                 }
             case "--debug":
@@ -109,7 +109,7 @@ enum ProcessCommand {
                 fluidaudio process <audio_file> [options]
 
             Options:
-                --threshold <float>    Clustering threshold (default: 0.7)
+                --threshold <float>    Clustering threshold (default: 0.8)
                 --debug               Enable debug mode
                 --output <file>       Save results to file instead of stdout
 

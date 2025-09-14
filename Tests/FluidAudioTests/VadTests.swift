@@ -115,7 +115,7 @@ final class VadTests: XCTestCase {
     }
 
     func testVadStateReset() async throws {
-        let config = VadConfig(threshold: 0.5)
+        let config = VadConfig(threshold: 0.1)
         let vad: VadManager
         do {
             vad = try await VadManager(config: config)
@@ -417,4 +417,269 @@ final class VadTests: XCTestCase {
         XCTAssertEqual(currentConfig.threshold, 0.3, "Should maintain configured threshold")
         XCTAssertEqual(currentConfig.debugMode, true, "Should maintain debug mode")
     }
+
+    // Segmentation tests moved entirely to VadSegmentationTests.
+
+    func testExtractSpeechSegmentsWithMultipleSegments() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15, minSilenceDuration: 0.75)
+        let pattern: [(Bool, Double)] = [(false, 1.0), (true, 2.0), (false, 1.0), (true, 2.0), (false, 1.0)]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertEqual(segments.count, 2, "Should produce two separate speech segments")
+
+        for segment in segments {
+            let segmentDuration = segment.endTime - segment.startTime
+            XCTAssertLessThan(segmentDuration, 15.0, "Each segment should be under 15s")
+        }
+    }
+
+    // MARK: - Segment Merging Tests
+
+    func testSegmentMergingWithinMinSilenceDuration() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15, minSilenceDuration: 0.75)
+        // 1s speech + 0.5s silence + 1s speech (should merge)
+        let pattern: [(Bool, Double)] = [(true, 1.0), (false, 0.5), (true, 1.0)]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertEqual(segments.count, 1, "Segments with <750ms gap should merge into one segment")
+        if let seg = segments.first {
+            let dur = seg.endTime - seg.startTime
+            // Merged segment should include both speech segments plus the silence gap: ~2.5s
+            XCTAssertGreaterThan(dur, 2.4)
+            XCTAssertLessThan(dur, 2.6)
+        }
+    }
+
+    func testSegmentNotMergingBeyondMinSilenceDuration() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15, minSilenceDuration: 0.75)
+        // 1s speech + 1s silence + 1s speech (should NOT merge)
+        let pattern: [(Bool, Double)] = [(true, 1.0), (false, 1.0), (true, 1.0)]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertEqual(segments.count, 2, "Segments with >750ms gap should remain separate")
+        for seg in segments {
+            let dur = seg.endTime - seg.startTime
+            XCTAssertGreaterThan(dur, 0.9)
+            XCTAssertLessThan(dur, 1.1)
+        }
+    }
+
+    func testMinSpeechDurationFiltering() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.5, minSilenceDuration: 0.75)
+        let pattern: [(Bool, Double)] = [(true, 0.2), (false, 1.0), (true, 0.8), (false, 1.0), (true, 0.1)]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertEqual(segments.count, 1, "Only segments ≥500ms should be kept")
+        if let segment = segments.first {
+            let duration = segment.endTime - segment.startTime
+            XCTAssertGreaterThan(duration, 0.7)
+            XCTAssertLessThan(duration, 0.9)
+        }
+    }
+
+    // MARK: - Long Segment Splitting Tests
+
+    func testSplitLongContinuousSpeech() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15, maxSpeechDuration: 15.0)
+        let (vadResults, totalSamples) = makeVadResults([(true, 30.0)])
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertGreaterThanOrEqual(segments.count, 2, "30s speech should split into multiple segments")
+        for (index, seg) in segments.enumerated() {
+            let dur = seg.endTime - seg.startTime
+            XCTAssertLessThan(dur, 15.1, "Segment \(index) should be under 15s")
+        }
+    }
+
+    func testMaxSpeechDurationEnforcement() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15, maxSpeechDuration: 10.0)
+        let (vadResults, totalSamples) = makeVadResults([(true, 25.0)])
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertGreaterThanOrEqual(segments.count, 3, "25s speech with 10s max should create at least 3 segments")
+        for (index, segment) in segments.enumerated() {
+            let duration = segment.endTime - segment.startTime
+            XCTAssertLessThan(duration, 10.1, "Segment \(index) must be under 10s")
+        }
+    }
+
+    func testSplitAtOrBeforeMaxDuration() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15, maxSpeechDuration: 15.0)
+        let (vadResults, totalSamples) = makeVadResults([(true, 16.0)])
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertGreaterThanOrEqual(segments.count, 2, "16s speech should split into at least 2 segments")
+        for seg in segments {
+            let dur = seg.endTime - seg.startTime
+            XCTAssertLessThanOrEqual(dur, 15.1)
+        }
+    }
+
+    func testRealWorldScenario120Seconds() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(
+            minSpeechDuration: 0.15, minSilenceDuration: 0.75, maxSpeechDuration: 15.0)
+        let pattern: [(Bool, Double)] = [(true, 5.0), (false, 85.0), (true, 30.0)]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertGreaterThanOrEqual(segments.count, 3)
+        XCTAssertLessThanOrEqual(segments.count, 4)
+        for seg in segments { XCTAssertLessThan(seg.endTime - seg.startTime, 15.1) }
+        XCTAssertGreaterThan(segments.first?.endTime ?? 0 - (segments.first?.startTime ?? 0), 4.9)
+    }
+
+    // MARK: - Edge Cases and Configuration Tests
+
+    func testEmptyAudioSegmentation() async throws {
+        let vad = try await VadManager(config: .default)
+        let segments = await vad.segmentSpeech(from: [], totalSamples: 0)
+        XCTAssertTrue(segments.isEmpty, "Empty audio should produce no segments")
+    }
+
+    func testVeryShortAudio() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15)
+        let (vadResults, totalSamples) = makeVadResults([(true, 0.05)])
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertTrue(segments.isEmpty, "Audio below minimum duration should produce no segments")
+    }
+
+    func testExactlyMaxDurationSegment() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.15, maxSpeechDuration: 5.0)
+        let (vadResults, totalSamples) = makeVadResults([(true, 5.0)])
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertFalse(segments.isEmpty, "Should produce at least one segment")
+        for (index, segment) in segments.enumerated() {
+            let duration = segment.endTime - segment.startTime
+            XCTAssertLessThanOrEqual(duration, 5.1, "Segment \(index) should not exceed max duration")
+        }
+    }
+
+    func testAlternatingSpeechSilence() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.1, minSilenceDuration: 0.2)
+        let pairs = 5
+        var pattern: [(Bool, Double)] = []
+        for _ in 0..<pairs {
+            pattern.append((true, 0.3))
+            pattern.append((false, 0.3))
+        }
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertGreaterThan(segments.count, 1, "Should detect multiple segments in alternating pattern")
+    }
+
+    func testCustomSegmentationConfig() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(
+            minSpeechDuration: 1.0,
+            minSilenceDuration: 2.0,
+            maxSpeechDuration: 8.0,
+            speechPadding: 0.2,
+            silenceThresholdForSplit: 0.5
+        )
+        let (vadResults, totalSamples) = makeVadResults([(true, 20.0)])
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        XCTAssertGreaterThanOrEqual(segments.count, 3, "Should split into at least 3 segments with 8s max")
+        for (index, segment) in segments.enumerated() {
+            let duration = segment.endTime - segment.startTime
+            XCTAssertLessThan(duration, 8.1, "Segment \(index) should be under 8s")
+        }
+    }
+
+    func testSpeechPaddingApplication() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig(speechPadding: 0.2)
+
+        let speechDuration = 2.0
+        let paddingDuration = 0.2
+        let silenceDuration = 1.0
+
+        // Create pattern: 1s silence + 2s speech + 1s silence
+        let pattern: [(Bool, Double)] = [(false, silenceDuration), (true, speechDuration), (false, silenceDuration)]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+
+        XCTAssertEqual(segments.count, 1, "Should produce one segment")
+
+        if let segment = segments.first {
+            let segmentDuration = segment.endTime - segment.startTime
+            // Should be speech duration + padding on both sides (but limited by audio bounds)
+            let expectedMinDuration = speechDuration
+            let expectedMaxDuration = speechDuration + paddingDuration * 2 + 0.1  // Some tolerance
+
+            XCTAssertGreaterThan(segmentDuration, expectedMinDuration, "Segment should be at least speech duration")
+            XCTAssertLessThan(segmentDuration, expectedMaxDuration, "Segment shouldn't be too much longer")
+        }
+    }
+
+    // MARK: - Performance Tests for Segmentation
+
+    func testSegmentationPerformance() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig()
+
+        // Create pattern: 12 alternating 5-second speech/silence segments for 60 seconds total
+        let pattern: [(Bool, Double)] = [
+            (true, 5.0), (false, 5.0), (true, 5.0), (false, 5.0),
+            (true, 5.0), (false, 5.0), (true, 5.0), (false, 5.0),
+            (true, 5.0), (false, 5.0), (true, 5.0), (false, 5.0),
+        ]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+
+        let audioDuration = 60.0  // 1 minute of audio
+
+        let startTime = Date()
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        let processingTime = Date().timeIntervalSince(startTime)
+
+        XCTAssertFalse(segments.isEmpty, "Should produce segments")
+
+        // Should process reasonably fast (allow generous time for CI)
+        let processingRTF = processingTime / audioDuration
+        XCTAssertLessThan(processingRTF, 0.5, "Processing should be faster than 0.5x real-time, got \(processingRTF)x")
+
+        print(
+            "Segmentation performance: \(String(format: "%.3f", processingRTF))x real-time for \(segments.count) segments"
+        )
+    }
+
+    func testSegmentationWithLargeAudio() async throws {
+        let vad = try await VadManager(config: .default)
+        let segConfig = VadSegmentationConfig()
+
+        // Create pattern: alternating 10-second speech and 20-second silence for 5 minutes
+        // Every 3rd chunk (30s) has 10s speech, creating sparse speech pattern
+        let pattern: [(Bool, Double)] = [
+            (true, 10.0), (false, 20.0), (true, 10.0), (false, 20.0),
+            (true, 10.0), (false, 20.0), (true, 10.0), (false, 20.0),
+            (true, 10.0), (false, 20.0), (true, 10.0), (false, 20.0),
+            (true, 10.0), (false, 20.0), (true, 10.0), (false, 20.0),
+            (true, 10.0), (false, 20.0),
+        ]
+        let (vadResults, totalSamples) = makeVadResults(pattern)
+
+        let audioDuration = 300.0  // 5 minutes of audio
+
+        let startTime = Date()
+        let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
+        let processingTime = Date().timeIntervalSince(startTime)
+
+        XCTAssertFalse(segments.isEmpty, "Should produce segments from large audio")
+
+        // All segments should respect max duration
+        for (index, segment) in segments.enumerated() {
+            let segmentDuration = segment.endTime - segment.startTime
+            XCTAssertLessThan(segmentDuration, 15.1, "Large audio segment \(index) should be under 15s")
+        }
+
+        print("Large audio segmentation: \(processingTime)s for \(audioDuration)s audio (\(segments.count) segments)")
+    }
+
 }
