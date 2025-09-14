@@ -18,7 +18,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
 
     func testANEBufferAlignment() throws {
         // Test that buffers created for embedding extraction are ANE-aligned
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         // Test waveform buffer creation
         let waveformBuffer = try optimizer.createAlignedArray(
@@ -44,7 +44,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
     }
 
     func testBufferPoolingForMasks() throws {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         // Test that mask buffers of different sizes are pooled correctly
         let sizes = [100, 500, 1000, 2000]
@@ -74,7 +74,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
     }
 
     func testMemoryStressWithMultipleMasks() throws {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         // Simulate processing many speakers with different mask sizes
         autoreleasepool {
@@ -105,7 +105,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
     }
 
     func testZeroCopyFeatureProvider() throws {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         // Create aligned buffers
         let waveformBuffer = try optimizer.createAlignedArray(
@@ -152,7 +152,7 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
     }
 
     func testConcurrentBufferAccess() {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
         let expectation = XCTestExpectation(description: "Concurrent access")
         expectation.expectedFulfillmentCount = 10
 

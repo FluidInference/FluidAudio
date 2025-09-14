@@ -17,6 +17,7 @@ public actor VadManager {
     private let logger = AppLogger(category: "VadManager")
     public let config: VadConfig
     private let audioConverter: AudioConverter = AudioConverter()
+    private let memoryOptimizer = ANEMemoryOptimizer()
 
     /// Model expects exactly 512 samples (32ms at 16kHz)
     public static let chunkSize = 512
@@ -244,7 +245,7 @@ public actor VadManager {
                     if isSilentAudio(audioChunk) {
                         silentChunkIndices.insert(index)
                         // Create zero-filled array for silent audio
-                        let audioArray = try ANEMemoryOptimizer.shared.createAlignedArray(
+                        let audioArray = try memoryOptimizer.createAlignedArray(
                             shape: [1, Self.chunkSize] as [NSNumber],
                             dataType: .float32
                         )
@@ -266,13 +267,13 @@ public actor VadManager {
                     }
 
                     // Use ANE-optimized array creation for better performance and memory efficiency
-                    let audioArray = try ANEMemoryOptimizer.shared.createAlignedArray(
+                    let audioArray = try memoryOptimizer.createAlignedArray(
                         shape: [1, Self.chunkSize] as [NSNumber],
                         dataType: .float32
                     )
 
                     // Use optimized copy operation
-                    ANEMemoryOptimizer.shared.optimizedCopy(
+                    memoryOptimizer.optimizedCopy(
                         from: processedChunk,
                         to: audioArray,
                         offset: 0
@@ -349,7 +350,7 @@ public actor VadManager {
 
             // Force cleanup between batches to prevent ANE memory buildup
             if batchEnd < audioChunks.count {
-                ANEMemoryOptimizer.shared.clearBufferPool()
+                memoryOptimizer.clearBufferPool()
             }
         }
 

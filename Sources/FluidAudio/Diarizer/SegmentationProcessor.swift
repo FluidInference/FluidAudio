@@ -8,7 +8,7 @@ import OSLog
 public struct SegmentationProcessor {
 
     private let logger = AppLogger(category: "Segmentation")
-    private let memoryOptimizer = ANEMemoryOptimizer.shared
+    private let memoryOptimizer = ANEMemoryOptimizer()
 
     public init() {}
 
