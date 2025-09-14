@@ -1,5 +1,5 @@
 import AVFoundation
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -211,7 +211,7 @@ public final class AsrManager {
         path: URL,
         name: String,
         configuration: MLModelConfiguration
-    ) async throws -> MLModel {
+    ) throws -> MLModel {
         do {
             return try MLModel(contentsOf: path, configuration: configuration)
         } catch {
@@ -228,15 +228,45 @@ public final class AsrManager {
         jointPath: URL,
         configuration: MLModelConfiguration
     ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
-        async let melspectrogram = loadModel(
-            path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
-        async let encoder = loadModel(
-            path: encoderPath, name: "encoder", configuration: configuration)
-        async let decoder = loadModel(
-            path: decoderPath, name: "decoder", configuration: configuration)
-        async let joint = loadModel(path: jointPath, name: "joint", configuration: configuration)
+        let items: [(key: String, path: URL, name: String)] = [
+            ("melspectrogram", melspectrogramPath, "mel-spectrogram"),
+            ("encoder", encoderPath, "encoder"),
+            ("decoder", decoderPath, "decoder"),
+            ("joint", jointPath, "joint")
+        ]
 
-        return try await (melspectrogram, encoder, decoder, joint)
+        return try await withThrowingTaskGroup(of: (String, MLModel).self) { group in
+            for item in items {
+                group.addTask { [logger, weak self] in
+                    guard let self = self else {
+                        // If the manager was deallocated, cancel/load can't proceed
+                        throw CancellationError()
+                    }
+                    logger.debug("Starting load for \(item.name)")
+                    let start = Date()
+                    let model = try self.loadModel(path: item.path, name: item.name, configuration: configuration)
+                    logger.debug("Loaded \(item.name) in \(-start.timeIntervalSinceNow)s")
+                    return (item.key, model)
+                }
+            }
+
+            var loaded: [String: MLModel] = [:]
+            for try await (key, model) in group {
+                loaded[key] = model
+            }
+
+            guard
+                let melspectrogram = loaded["melspectrogram"],
+                let encoder = loaded["encoder"],
+                let decoder = loaded["decoder"],
+                let joint = loaded["joint"]
+            else {
+                // Shouldn't happen unless a task unexpectedly returned without throwing
+                throw ASRError.modelLoadFailed
+            }
+
+            return (melspectrogram: melspectrogram, encoder: encoder, decoder: decoder, joint: joint)
+        }
     }
 
     private static func getDefaultModelsDirectory() -> URL {

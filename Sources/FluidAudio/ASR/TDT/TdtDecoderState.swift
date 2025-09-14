@@ -1,5 +1,5 @@
 import Accelerate
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 
 /// Manages LSTM hidden and cell states for the Parakeet decoder

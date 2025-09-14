@@ -88,6 +88,10 @@ public final class ANEMemoryOptimizer {
             elementSize = 8
         case .int32:
             elementSize = 4
+        #if compiler(>=6.2)
+        case .int8:
+            elementSize = 1
+        #endif 
         case .double:
             elementSize = 8
         @unknown default:

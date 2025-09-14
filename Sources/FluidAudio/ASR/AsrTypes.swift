@@ -25,19 +25,16 @@ public struct ASRResult: Sendable {
     public let duration: TimeInterval
     public let processingTime: TimeInterval
     public let tokenTimings: [TokenTiming]?
-    public let performanceMetrics: ASRPerformanceMetrics?
 
     public init(
         text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval,
         tokenTimings: [TokenTiming]? = nil,
-        performanceMetrics: ASRPerformanceMetrics? = nil
     ) {
         self.text = text
         self.confidence = confidence
         self.duration = duration
         self.processingTime = processingTime
         self.tokenTimings = tokenTimings
-        self.performanceMetrics = performanceMetrics
     }
 
     /// Real-time factor (RTFx) - how many times faster than real-time

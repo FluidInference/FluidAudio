@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Accelerate
 import Foundation
 import OSLog
@@ -12,22 +12,52 @@ import OSLog
 @available(macOS 13.0, iOS 16.0, *)
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
-    private let targetFormat: AVAudioFormat
+    private let targetSampleRate: Double
+    private let targetChannelCount: AVAudioChannelCount
+    private let targetCommonFormat: AVAudioCommonFormat
+    private let targetInterleaved: Bool
 
     /// Public initializer so external modules (e.g. CLI) can construct the converter
     public init(targetFormat: AVAudioFormat? = nil) {
         if let format = targetFormat {
-            self.targetFormat = format
+            self.targetSampleRate = format.sampleRate
+            self.targetChannelCount = format.channelCount
+            self.targetCommonFormat = format.commonFormat
+            self.targetInterleaved = format.isInterleaved
         } else {
             /// Most audio models expect this format.
             /// Target format for ASR, Speaker diarization model: 16kHz, mono
-            self.targetFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: 16000,
-                channels: 1,
-                interleaved: false
-            )!
+            self.targetSampleRate = 16000
+            self.targetChannelCount = 1
+            self.targetCommonFormat = .pcmFormatFloat32
+            self.targetInterleaved = false
         }
+    }
+
+    // Provide input once, then signal end-of-stream
+    // Use a class reference to hold mutable state that the closure can modify
+    // Provide input once, then signal end-of-stream
+    // Use a class reference to hold mutable state that the closure can modify
+    private final class InputState {
+        var provided: Bool = false
+
+        func markProvided() {
+            provided = true
+        }
+
+        func isProvided() -> Bool {
+            return provided
+        }
+    }
+
+    /// Create AVAudioFormat on-demand from stored parameters
+    private var targetFormat: AVAudioFormat {
+        AVAudioFormat(
+            commonFormat: targetCommonFormat,
+            sampleRate: targetSampleRate,
+            channels: targetChannelCount,
+            interleaved: targetInterleaved
+        )!
     }
 
     /// Convert a standalone buffer to the target format.
@@ -93,11 +123,11 @@ final public class AudioConverter {
         var aggregated: [Float] = []
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
-        // Provide input once, then signal end-of-stream
-        var provided = false
+
+        let state = InputState()
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
-                provided = true
+            if !state.isProvided() {
+                state.markProvided()
                 status.pointee = .haveData
                 return buffer
             } else {
@@ -134,10 +164,10 @@ final public class AudioConverter {
 
     /// Check if a format already matches the target output format.
     private func isTargetFormat(_ format: AVAudioFormat) -> Bool {
-        return format.sampleRate == targetFormat.sampleRate
-            && format.channelCount == targetFormat.channelCount
-            && format.commonFormat == targetFormat.commonFormat
-            && format.isInterleaved == targetFormat.isInterleaved
+        return format.sampleRate == targetSampleRate
+            && format.channelCount == targetChannelCount
+            && format.commonFormat == targetCommonFormat
+            && format.isInterleaved == targetInterleaved
     }
 
     /// Resample high channel count audio (>2 channels) using linear interpolation

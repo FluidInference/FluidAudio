@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import OSLog
 
@@ -83,11 +83,15 @@ public actor StreamingAsrManager {
         self.audioSource = source
 
         // Initialize ASR manager with provided models
-        asrManager = AsrManager(config: config.asrConfig)
-        try await asrManager?.initialize(models: models)
+        let newAsrManager = AsrManager(config: config.asrConfig)
+        try await newAsrManager.initialize(models: models)
+        self.asrManager = newAsrManager
 
-        // Reset decoder state for the specific source
-        try await asrManager?.resetDecoderState(for: source)
+        // Guard the asrManager before resetting decoder state
+        guard let asrManager = self.asrManager else {
+            throw StreamingAsrError.modelsNotLoaded
+        }
+        try await asrManager.resetDecoderState(for: source)
 
         // Reset sliding window state
         segmentIndex = 0

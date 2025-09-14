@@ -76,6 +76,10 @@ public enum ANEOptimizer {
             elementSize = 4
         case .double:
             elementSize = 8
+        #if compiler(>=6.2)
+        case .int8:
+            elementSize = 1
+        #endif            
         @unknown default:
             elementSize = 4
         }
