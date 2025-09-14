@@ -17,14 +17,14 @@ struct VadBenchmark {
     }
 
     static func runVadBenchmarkWithErrorHandling(arguments: [String]) async throws {
-        logger.info("🚀 Starting VAD Benchmark")
+        logger.info("Starting VAD Benchmark")
         var numFiles = -1  // Default to all files
         var useAllFiles = true  // Default to all files
         var vadThreshold: Float = 0.3
         var outputFile: String?
         var dataset = "mini50"  // Default to mini50 dataset
         var debugMode = false  // Default to no debug output
-        logger.info("   📝 Parsing arguments...")
+        logger.info("Parsing arguments...")
 
         // Parse arguments
         var i = 0
@@ -62,10 +62,10 @@ struct VadBenchmark {
             i += 1
         }
 
-        logger.info("🚀 Starting VAD Benchmark")
-        logger.info("   Test files: \(numFiles)")
-        logger.info("   VAD threshold: \(vadThreshold)")
-        logger.info("   Debug mode: \(debugMode)")
+        logger.info("Starting VAD Benchmark")
+        logger.info("Test files: \(numFiles)")
+        logger.info("VAD threshold: \(vadThreshold)")
+        logger.info("Debug mode: \(debugMode)")
 
         // Use VadManager with the trained model
         let vadManager = try await VadManager(
@@ -88,41 +88,41 @@ struct VadBenchmark {
         // Calculate RTFx for display
         let rtfx = try await calculateRTFx(result: result, testFiles: testFiles)
 
-        logger.info("\n📊 VAD Benchmark Results:")
-        logger.info("   Accuracy: \(String(format: "%.1f", result.accuracy))%")
-        logger.info("   Precision: \(String(format: "%.1f", result.precision))%")
-        logger.info("   Recall: \(String(format: "%.1f", result.recall))%")
-        logger.info("   F1-Score: \(String(format: "%.1f", result.f1Score))%")
-        logger.info("   Total Time: \(String(format: "%.2f", result.processingTime))s")
+        logger.info("VAD Benchmark Results:")
+        logger.info("Accuracy: \(String(format: "%.1f", result.accuracy))%")
+        logger.info("Precision: \(String(format: "%.1f", result.precision))%")
+        logger.info("Recall: \(String(format: "%.1f", result.recall))%")
+        logger.info("F1-Score: \(String(format: "%.1f", result.f1Score))%")
+        logger.info("Total Time: \(String(format: "%.2f", result.processingTime))s")
         if rtfx < 1.0 && rtfx > 0 {
-            logger.info("   RTFx: \(String(format: "%.1f", 1.0/rtfx))x faster than real-time")
+            logger.info("RTFx: \(String(format: "%.1f", 1.0/rtfx))x faster than real-time")
         } else if rtfx >= 1.0 {
-            logger.info("   RTFx: \(String(format: "%.1f", rtfx))x slower than real-time")
+            logger.info("RTFx: \(String(format: "%.1f", rtfx))x slower than real-time")
         } else {
-            logger.info("   RTFx: N/A")
+            logger.info("RTFx: N/A")
         }
-        logger.info("   Files Processed: \(result.totalFiles)")
+        logger.info("Files Processed: \(result.totalFiles)")
         logger.info(
-            "   Avg Time per File: \(String(format: "%.3f", result.processingTime / Double(result.totalFiles)))s")
+            "Avg Time per File: \(String(format: "%.3f", result.processingTime / Double(result.totalFiles)))s")
 
         // Save results with RTFx
         if let outputFile = outputFile {
             try await saveVadBenchmarkResultsWithRTFx(
                 result, testFiles: testFiles, to: outputFile)
-            logger.info("💾 Results saved to: \(outputFile)")
+            logger.info("Results saved to: \(outputFile)")
         } else {
             try await saveVadBenchmarkResultsWithRTFx(
                 result, testFiles: testFiles, to: "vad_benchmark_results.json")
-            logger.info("💾 Results saved to: vad_benchmark_results.json")
+            logger.info("Results saved to: vad_benchmark_results.json")
         }
 
         // Performance assessment
         if result.f1Score >= 70.0 {
-            logger.info("\nEXCELLENT: F1-Score above 70%")
+            logger.info("EXCELLENT: F1-Score above 70%")
         } else if result.f1Score >= 60.0 {
-            logger.warning("\n⚠️ ACCEPTABLE: F1-Score above 60%")
+            logger.warning("ACCEPTABLE: F1-Score above 60%")
         } else {
-            logger.warning("\nNEEDS IMPROVEMENT: F1-Score below 60%")
+            logger.warning("NEEDS IMPROVEMENT: F1-Score below 60%")
             // Don't exit - just report the poor performance
         }
     }
@@ -133,9 +133,9 @@ struct VadBenchmark {
         -> [VadTestFile]
     {
         if count == -1 {
-            logger.info("📥 Loading all available test audio files...")
+            logger.info("Loading all available test audio files...")
         } else {
-            logger.info("📥 Loading \(count) test audio files...")
+            logger.info("Loading \(count) test audio files...")
         }
 
         // First check if this is full MUSAN dataset
@@ -163,14 +163,14 @@ struct VadBenchmark {
         }
 
         // Finally, download from Hugging Face
-        logger.info("🌐 Downloading VAD dataset from Hugging Face...")
+        logger.info("Downloading VAD dataset from Hugging Face...")
         if let hfFiles = try await downloadHuggingFaceVadDataset(count: count, dataset: dataset) {
             return hfFiles
         }
 
         // No fallback to mock data - fail cleanly
         logger.error(
-            "Failed to load VAD dataset from all sources:\n   • Local dataset not found\n   • Hugging Face cache empty\n   • Hugging Face download failed\n💡 Try: swift run fluidaudio download --dataset vad"
+            "Failed to load VAD dataset from all sources:\nLocal dataset not found\nHugging Face cache empty\nHugging Face download failed\nTry: swift run fluidaudio download --dataset vad"
         )
         throw NSError(
             domain: "VadError", code: 404,
@@ -196,7 +196,7 @@ struct VadBenchmark {
                 continue
             }
 
-            logger.info("🗂️ Found local dataset at: \(basePath)")
+            logger.info("Found local dataset at: \(basePath)")
 
             var testFiles: [VadTestFile] = []
 
@@ -209,7 +209,7 @@ struct VadBenchmark {
                 let speechFiles = try loadAudioFiles(
                     from: speechDir, expectedLabel: 1, maxCount: maxSpeechFiles)
                 testFiles.append(contentsOf: speechFiles)
-                logger.info("   Loaded \(speechFiles.count) speech files")
+                logger.info("Loaded \(speechFiles.count) speech files")
             }
 
             if FileManager.default.fileExists(atPath: nonSpeechDir.path) {
@@ -217,11 +217,11 @@ struct VadBenchmark {
                 let nonSpeechFiles = try loadAudioFiles(
                     from: nonSpeechDir, expectedLabel: 0, maxCount: maxNoiseFiles)
                 testFiles.append(contentsOf: nonSpeechFiles)
-                logger.info("   Loaded \(nonSpeechFiles.count) non-speech files")
+                logger.info("Loaded \(nonSpeechFiles.count) non-speech files")
             }
 
             if !testFiles.isEmpty {
-                logger.info("📂 Using local dataset: \(testFiles.count) files total")
+                logger.info("Using local dataset: \(testFiles.count) files total")
                 return testFiles
             }
         }
@@ -287,7 +287,7 @@ struct VadBenchmark {
 
         // If count is -1, use all available files (but respect dataset limit)
         if count == -1 {
-            logger.info("📂 Loading all available files from Hugging Face cache...")
+            logger.info("Loading all available files from Hugging Face cache...")
 
             // Load speech files (half of dataset)
             let speechFiles = try loadAudioFiles(
@@ -317,7 +317,7 @@ struct VadBenchmark {
             return nil
         }
 
-        logger.info("🗂️ Found cached Hugging Face dataset: \(testFiles.count) files total")
+        logger.info("Found cached Hugging Face dataset: \(testFiles.count) files total")
         return testFiles
     }
 
@@ -349,7 +349,7 @@ struct VadBenchmark {
 
         do {
             // Download speech files
-            logger.info("   📢 Downloading speech samples...")
+            logger.info("Downloading speech samples...")
             let speechFiles = try await DatasetDownloader.downloadVadFilesFromHF(
                 baseUrl: "\(repoBase)/speech",
                 targetDir: speechDir,
@@ -361,7 +361,7 @@ struct VadBenchmark {
             testFiles.append(contentsOf: speechFiles)
 
             // Download noise files
-            logger.info("   🔇 Downloading noise samples...")
+            logger.info("Downloading noise samples...")
             let noiseFiles = try await DatasetDownloader.downloadVadFilesFromHF(
                 baseUrl: "\(repoBase)/noise",
                 targetDir: noiseDir,
@@ -402,7 +402,7 @@ struct VadBenchmark {
     static func runVadBenchmarkInternal(
         vadManager: VadManager, testFiles: [VadTestFile], threshold: Float
     ) async throws -> VadBenchmarkResult {
-        logger.info("\n🔍 Running VAD benchmark on \(testFiles.count) files...")
+        logger.info("Running VAD benchmark on \(testFiles.count) files...")
 
         let startTime = Date()
         var predictions: [Int] = []
@@ -414,7 +414,7 @@ struct VadBenchmark {
 
         for (index, testFile) in testFiles.enumerated() {
             let fileStartTime = Date()
-            logger.info("   Processing \(index + 1)/\(testFiles.count): \(testFile.name)")
+            logger.info("Processing \(index + 1)/\(testFiles.count): \(testFile.name)")
 
             do {
                 // Load + convert audio (counted as loading time)

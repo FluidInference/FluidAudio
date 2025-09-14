@@ -327,7 +327,7 @@ public actor VadManager {
         }
 
         // We see deminishing returns beyond this, and it doesn't increase much more
-        // Too high can cause memory issues. 
+        // Too high can cause memory issues.
         let maxBatchSize = 25
         var allResults: [VadResult] = []
 
