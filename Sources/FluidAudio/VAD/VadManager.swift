@@ -326,9 +326,9 @@ public actor VadManager {
             audioChunks.append(chunk)
         }
 
-        // Use smaller batch sizes to prevent ANE memory exhaustion
-        // Process in batches of maximum 50 chunks to avoid memory issues
-        let maxBatchSize = 50
+        // We see deminishing returns beyond this, and it doesn't increase much more
+        // Too high can cause memory issues. 
+        let maxBatchSize = 25
         var allResults: [VadResult] = []
 
         for batchStart in stride(from: 0, to: audioChunks.count, by: maxBatchSize) {
