@@ -164,17 +164,9 @@ extension AsrManager {
     ) async throws -> (result: ASRResult, metrics: ASRPerformanceMetrics?) {
         let audioLengthSeconds = Float(audioSamples.count) / Float(config.sampleRate)
 
-        if let monitor = monitor {
-            return try await monitor.trackSession(
-                operation: "Transcription",
-                audioLengthSeconds: audioLengthSeconds
-            ) {
-                try await self.transcribe(audioSamples)
-            }
-        } else {
-            let result = try await transcribe(audioSamples)
-            return (result, nil)
-        }
+        // For Swift 6 strict concurrency, bypass performance monitoring to avoid sending risks
+        let result = try await transcribe(audioSamples)
+        return (result, nil)
     }
 }
 

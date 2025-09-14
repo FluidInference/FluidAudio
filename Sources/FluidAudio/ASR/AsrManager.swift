@@ -9,6 +9,7 @@ public enum AudioSource: Sendable {
 }
 
 @available(macOS 13.0, *)
+@MainActor
 public final class AsrManager {
 
     internal let logger = AppLogger(category: "ASR")
@@ -121,7 +122,7 @@ public final class AsrManager {
         let actualAudioLength = actualLength ?? audioLength  // Use provided actual length or default to sample count
 
         // Use ANE-aligned array from cache
-        let audioArray = try await sharedMLArrayCache.getArray(
+        let audioArray = try sharedMLArrayCache.getArray(
             shape: [1, audioLength] as [NSNumber],
             dataType: .float32
         )
@@ -187,24 +188,26 @@ public final class AsrManager {
         ])
     }
 
-    internal func initializeDecoderState(decoderState: inout TdtDecoderState) async throws {
+    internal func initializeDecoderState(_ decoderState: TdtDecoderState) async throws -> TdtDecoderState {
         guard let decoderModel = decoderModel else {
             throw ASRError.notInitialized
         }
 
         // Reset the existing decoder state to clear all cached values including predictorOutput
-        decoderState.reset()
+        var newState = decoderState
+        newState.reset()
 
         let initDecoderInput = try prepareDecoderInput(
-            hiddenState: decoderState.hiddenState,
-            cellState: decoderState.cellState
+            hiddenState: newState.hiddenState,
+            cellState: newState.cellState
         )
 
         let initDecoderOutput = try decoderModel.prediction(
             from: initDecoderInput, options: predictionOptions)
 
-        decoderState.update(from: initDecoderOutput)
+        newState.update(from: initDecoderOutput)
 
+        return newState
     }
 
     private func loadModel(
@@ -228,15 +231,13 @@ public final class AsrManager {
         jointPath: URL,
         configuration: MLModelConfiguration
     ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
-        async let melspectrogram = loadModel(
-            path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
-        async let encoder = loadModel(
-            path: encoderPath, name: "encoder", configuration: configuration)
-        async let decoder = loadModel(
-            path: decoderPath, name: "decoder", configuration: configuration)
-        async let joint = loadModel(path: jointPath, name: "joint", configuration: configuration)
+        // Load models sequentially since MLModel is not Sendable
+        let melspectrogram = try await loadModel(path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
+        let encoder = try await loadModel(path: encoderPath, name: "encoder", configuration: configuration)
+        let decoder = try await loadModel(path: decoderPath, name: "decoder", configuration: configuration)
+        let joint = try await loadModel(path: jointPath, name: "joint", configuration: configuration)
 
-        return try await (melspectrogram, encoder, decoder, joint)
+        return (melspectrogram, encoder, decoder, joint)
     }
 
     private static func getDefaultModelsDirectory() -> URL {
@@ -312,13 +313,16 @@ public final class AsrManager {
         _ audioSamples: [Float],
         source: AudioSource = .microphone
     ) async throws -> ASRResult {
-        var result: ASRResult
+        let result: ASRResult
         switch source {
         case .microphone:
-            result = try await transcribeWithState(
-                audioSamples, decoderState: &microphoneDecoderState)
+            let (asrResult, updatedState) = try await transcribeWithState(audioSamples, decoderState: microphoneDecoderState)
+            microphoneDecoderState = updatedState
+            result = asrResult
         case .system:
-            result = try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
+            let (asrResult, updatedState) = try await transcribeWithState(audioSamples, decoderState: systemDecoderState)
+            systemDecoderState = updatedState
+            result = asrResult
         }
 
         // When batching audio, assume that the state needs to be reset comepletely between calls
@@ -338,9 +342,9 @@ public final class AsrManager {
     public func resetDecoderState(for source: AudioSource) async throws {
         switch source {
         case .microphone:
-            try await initializeDecoderState(decoderState: &microphoneDecoderState)
+            microphoneDecoderState = try await initializeDecoderState(microphoneDecoderState)
         case .system:
-            try await initializeDecoderState(decoderState: &systemDecoderState)
+            systemDecoderState = try await initializeDecoderState(systemDecoderState)
         }
     }
 

@@ -5,12 +5,13 @@ import OSLog
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout TdtDecoderState
-    ) async throws -> ASRResult {
+        _ audioSamples: [Float], decoderState: TdtDecoderState
+    ) async throws -> (result: ASRResult, updatedState: TdtDecoderState) {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
 
         let startTime = Date()
+        var mutableState = decoderState
 
         // Route to appropriate processing method based on audio length
 
@@ -21,7 +22,7 @@ extension AsrManager {
                 paddedAudio,
                 originalLength: originalLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
-                decoderState: &decoderState
+                decoderState: &mutableState
             )
 
             let result = processTranscriptionResult(
@@ -33,12 +34,13 @@ extension AsrManager {
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
-            return result
+            return (result, mutableState)
         }
 
         // ChunkProcessor now uses the passed-in decoder state for continuity
         let processor = ChunkProcessor(audioSamples: audioSamples)
-        return try await processor.process(using: self, decoderState: &decoderState, startTime: startTime)
+        let result = try await processor.process(using: self, decoderState: &mutableState, startTime: startTime)
+        return (result, mutableState)
     }
 
     internal func executeMLInferenceWithTimings(

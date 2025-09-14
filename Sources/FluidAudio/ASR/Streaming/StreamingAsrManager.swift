@@ -170,7 +170,9 @@ public actor StreamingAsrManager {
                 confidences: [],  // No per-token confidences needed for final text
                 encoderSequenceLength: 0,
                 audioSamples: [],  // Not needed for final text conversion
-                processingTime: 0
+                processingTime: 0,
+                vocabulary: await asrManager.vocabulary,
+                config: await asrManager.config
             )
             finalText = finalResult.text
         } else {
@@ -330,7 +332,9 @@ public actor StreamingAsrManager {
                 confidences: confidences,
                 encoderSequenceLength: 0,
                 audioSamples: windowSamples,
-                processingTime: processingTime
+                processingTime: processingTime,
+                vocabulary: await asrManager.vocabulary,
+                config: await asrManager.config
             )
 
             logger.debug(
