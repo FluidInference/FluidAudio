@@ -70,5 +70,29 @@ VAD Benchmark Results:
 [18:56:31.208] [INFO] [VAD]    Avg Time per File: 0.011s
 ```
 
+```text
+swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --threshold 0.8
+...
+[23:02:35.539] [INFO] [VAD] Total processing time: 322.31s
+[23:02:35.539] [INFO] [VAD] Timing Statistics:
+[23:02:35.539] [INFO] [VAD] RTFx: 1220.7x faster than real-time
+[23:02:35.539] [INFO] [VAD] Audio loading time: 1.20s (0.4%)
+[23:02:35.539] [INFO] [VAD] VAD inference time: 319.57s (99.1%)
+[23:02:35.539] [INFO] [VAD] Average per file: 0.160s
+[23:02:35.539] [INFO] [VAD] Total audio duration: 393442.58s
+[23:02:35.539] [INFO] [VAD] Min per file: 0.000s
+[23:02:35.539] [INFO] [VAD] Max per file: 0.873s
+[23:02:35.711] [INFO] [VAD] VAD Benchmark Results:
+[23:02:35.711] [INFO] [VAD] Accuracy: 94.2%
+[23:02:35.711] [INFO] [VAD] Precision: 92.6%
+[23:02:35.711] [INFO] [VAD] Recall: 78.9%
+[23:02:35.711] [INFO] [VAD] F1-Score: 85.2%
+[23:02:35.711] [INFO] [VAD] Total Time: 322.31s
+[23:02:35.711] [INFO] [VAD] RTFx: 1220.7x faster than real-time
+[23:02:35.711] [INFO] [VAD] Files Processed: 2016
+[23:02:35.711] [INFO] [VAD] Avg Time per File: 0.160s
+[23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
+```
+
 
 ## Speaker Diarization
