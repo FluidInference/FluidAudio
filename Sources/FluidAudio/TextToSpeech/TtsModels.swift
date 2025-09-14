@@ -37,15 +37,15 @@ public struct TtsModels {
         let baseDirectory: URL
         #if os(macOS)
         baseDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cache")
+            .appendingPathComponent("Library/Application Support")
         #else
-        guard let first = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            throw TTSError.processingFailed("Failed to locate caches directory")
+        guard let first = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw TTSError.processingFailed("Failed to locate application support directory")
         }
         baseDirectory = first
         #endif
 
-        let cacheDirectory = baseDirectory.appendingPathComponent("fluidaudio")
+        let cacheDirectory = baseDirectory.appendingPathComponent("FluidAudio")
 
         if !FileManager.default.fileExists(atPath: cacheDirectory.path) {
             try FileManager.default.createDirectory(

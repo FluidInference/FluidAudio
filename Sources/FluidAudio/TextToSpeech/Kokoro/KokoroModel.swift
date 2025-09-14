@@ -24,45 +24,10 @@ public struct KokoroModel {
     private static var wordToPhonemes: [String: [String]] = [:]
     private static var isSimpleDictLoaded = false
 
-    // Model and data URLs
-    private static let baseURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main"
-
-    /// Download file from URL if needed (uses DownloadUtils for consistency)
-    private static func downloadFileIfNeeded(filename: String, urlPath: String) async throws {
-        let cacheDir = try TtsModels.cacheDirectoryURL()
-        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
-
-        // Create directory if needed
-        try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
-
-        let localURL = kokoroDir.appendingPathComponent(filename)
-
-        guard !FileManager.default.fileExists(atPath: localURL.path) else {
-            logger.info("File already exists: \(filename)")
-            return
-        }
-
-        logger.info("Downloading \(filename)...")
-        let downloadURL = URL(string: "\(baseURL)/\(urlPath)")!
-
-        // Use DownloadUtils.sharedSession for consistent proxy and configuration handling
-        let (data, response) = try await DownloadUtils.sharedSession.data(from: downloadURL)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-            httpResponse.statusCode == 200
-        else {
-            throw TTSError.modelNotFound("Failed to download \(filename)")
-        }
-
-        try data.write(to: localURL)
-        logger.info("Downloaded \(filename) (\(data.count) bytes)")
-    }
-
-    /// Ensure required dictionary files exist
+    /// Ensure required dictionary files exist (now handled by DownloadUtils during model loading)
     public static func ensureRequiredFiles() async throws {
-        // Download dictionary files using our simplified helper (which uses DownloadUtils.sharedSession)
-        try await downloadFileIfNeeded(filename: "word_phonemes.json", urlPath: "word_phonemes.json")
-        try await downloadFileIfNeeded(filename: "word_frames_phonemes.json", urlPath: "word_frames_phonemes.json")
+        // Dictionary files are now downloaded automatically by DownloadUtils
+        // when the kokoro model is loaded. This method is kept for backward compatibility.
     }
 
     /// Load the Kokoro model
@@ -231,7 +196,7 @@ public struct KokoroModel {
     /// Load voice embedding (simplified for 3-second model)
     public static func loadVoiceEmbedding(voice: String = "af_heart", phonemeCount: Int) throws -> MLMultiArray {
         let voice = "af_heart"
-        // Try to load from cache: ~/.cache/fluidaudio/Models/kokoro/voices/<voice>.json
+        // Try to load from Application Support directory
         let cacheDir = try TtsModels.cacheDirectoryURL()
         let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
         try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)

@@ -294,6 +294,8 @@ public class DownloadUtils {
     /// Check if a file is essential for model operation
     private static func isEssentialFile(_ path: String) -> Bool {
         path.hasSuffix(".json") || path.hasSuffix(".txt") || path == "config.json"
+            // Kokoro-specific essential files
+            || path == "word_phonemes.json" || path == "word_frames_phonemes.json" || path == "vocab_index.json"
     }
 
     /// List files in a HuggingFace repository

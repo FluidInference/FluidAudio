@@ -73,47 +73,12 @@ public struct KokoroVocabulary {
         return vocabulary
     }
 
-    /// Download vocabulary file if missing
+    /// Download vocabulary file if missing (now handled by DownloadUtils)
     private static func downloadVocabularyFile(to cacheDir: URL) throws {
-        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
-
-        // Create directory if needed
-        try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
-
-        let baseURL = "https://huggingface.co/\(DownloadUtils.Repo.kokoro.rawValue)/resolve/main"
-        let fileName = "vocab_index.json"
-        let localPath = kokoroDir.appendingPathComponent(fileName)
-
-        if !FileManager.default.fileExists(atPath: localPath.path) {
-            guard let remoteURL = URL(string: "\(baseURL)/\(fileName)") else {
-                throw TTSError.downloadFailed("Invalid vocab URL base: \(baseURL)")
-            }
-            logger.info("Downloading \(fileName)...")
-            let (data, response) = try awaitURLData(remoteURL)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw TTSError.downloadFailed("Failed to download \(fileName)")
-            }
-            try data.write(to: localPath)
-            logger.info("Downloaded \(fileName) to cache")
-        }
+        // Vocabulary files are now downloaded automatically by DownloadUtils
+        // when the kokoro model is loaded. This method is kept for backward compatibility
+        // but no longer performs actual downloads.
+        logger.info("Vocabulary files are handled by DownloadUtils during model loading")
     }
 
-}
-
-@available(macOS 13.0, *)
-private func awaitURLData(_ url: URL) throws -> (Data, URLResponse) {
-    let semaphore = DispatchSemaphore(value: 0)
-    var outData: Data?
-    var outResp: URLResponse?
-    var outErr: Error?
-    let task = URLSession.shared.dataTask(with: url) { data, resp, err in
-        outData = data
-        outResp = resp
-        outErr = err
-        semaphore.signal()
-    }
-    task.resume()
-    semaphore.wait()
-    if let e = outErr { throw e }
-    return (outData ?? Data(), outResp ?? URLResponse())
 }

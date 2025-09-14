@@ -35,7 +35,7 @@ public enum VoiceEmbeddingDownloader {
                 if let httpResponse = response as? HTTPURLResponse,
                     httpResponse.statusCode == 200
                 {
-                    // Save .pt file to cache
+                    // Save .pt file to Application Support directory
                     let cacheDir = try TtsModels.cacheDirectoryURL()
                     let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
                     try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)
