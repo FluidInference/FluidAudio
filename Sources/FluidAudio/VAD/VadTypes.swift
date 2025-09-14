@@ -63,27 +63,29 @@ public struct VadResult: Sendable {
 public struct VadSegment: Sendable {
     public let startTime: TimeInterval
     public let endTime: TimeInterval
-    public let startSample: Int
-    public let endSample: Int
 
     public var duration: TimeInterval {
         return endTime - startTime
     }
 
-    public var sampleCount: Int {
-        return endSample - startSample
+    public func startSample(sampleRate: Int) -> Int {
+        return Int(startTime * Double(sampleRate))
+    }
+
+    public func endSample(sampleRate: Int) -> Int {
+        return Int(endTime * Double(sampleRate))
+    }
+
+    public func sampleCount(sampleRate: Int) -> Int {
+        return endSample(sampleRate: sampleRate) - startSample(sampleRate: sampleRate)
     }
 
     public init(
         startTime: TimeInterval,
-        endTime: TimeInterval,
-        startSample: Int,
-        endSample: Int
+        endTime: TimeInterval
     ) {
         self.startTime = startTime
         self.endTime = endTime
-        self.startSample = startSample
-        self.endSample = endSample
     }
 }
 
