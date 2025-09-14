@@ -39,7 +39,7 @@ public actor VadManager {
     /// - Returns: Array of per-chunk VAD results
     public func process(_ url: URL) async throws -> [VadResult] {
         let samples = try audioConverter.resampleAudioFile(url)
-        return try await processAudioFile(samples)
+        return try await processAudioSamples(samples)
     }
 
     /// Process an entire in-memory audio buffer.
@@ -48,7 +48,7 @@ public actor VadManager {
     /// - Returns: Array of per-chunk VAD results
     public func process(_ audioBuffer: AVAudioPCMBuffer) async throws -> [VadResult] {
         let samples = try audioConverter.resampleBuffer(audioBuffer)
-        return try await processAudioFile(samples)
+        return try await processAudioSamples(samples)
     }
 
     /// Process raw 16kHz mono samples.
@@ -56,7 +56,7 @@ public actor VadManager {
     /// - Parameter samples: Audio samples (must be 16kHz, mono)
     /// - Returns: Array of per-chunk VAD results
     public func process(_ samples: [Float]) async throws -> [VadResult] {
-        return try await processAudioFile(samples)
+        return try await processAudioSamples(samples)
     }
 
     /// Initialize with configuration
@@ -124,7 +124,7 @@ public actor VadManager {
         return audioChunk.allSatisfy { abs($0) <= silenceThreshold }
     }
 
-    public func processChunk(_ audioChunk: [Float]) async throws -> VadResult {
+    internal func processChunk(_ audioChunk: [Float]) async throws -> VadResult {
         guard let vadModel = vadModel else {
             throw VadError.notInitialized
         }
@@ -210,7 +210,7 @@ public actor VadManager {
     }
 
     /// Process multiple chunks in batch for improved performance
-    public func processBatch(_ audioChunks: [[Float]]) async throws -> [VadResult] {
+    internal func processBatch(_ audioChunks: [[Float]]) async throws -> [VadResult] {
         guard let vadModel = vadModel else {
             throw VadError.notInitialized
         }
@@ -316,8 +316,8 @@ public actor VadManager {
         }
     }
 
-    /// Process an entire audio file using adaptive batch processing for optimal performance
-    private func processAudioFile(_ audioData: [Float]) async throws -> [VadResult] {
+    /// Process audio samples using adaptive batch processing for optimal performance
+    internal func processAudioSamples(_ audioData: [Float]) async throws -> [VadResult] {
         // Split audio into chunks
         var audioChunks: [[Float]] = []
         for i in stride(from: 0, to: audioData.count, by: Self.chunkSize) {
@@ -335,8 +335,8 @@ public actor VadManager {
             let batchEnd = min(batchStart + maxBatchSize, audioChunks.count)
             let batchChunks = Array(audioChunks[batchStart..<batchEnd])
 
-            // Process batch with memory cleanup
-            let batchResults = try await processBatchWithCleanup(batchChunks)
+            // Process batch
+            let batchResults = try await processBatch(batchChunks)
             allResults.append(contentsOf: batchResults)
 
             // Force cleanup between batches to prevent ANE memory buildup
@@ -348,51 +348,8 @@ public actor VadManager {
         return allResults
     }
 
-    /// Process batch with automatic cleanup on failure
-    private func processBatchWithCleanup(_ audioChunks: [[Float]]) async throws -> [VadResult] {
-        do {
-            return try await processBatch(audioChunks)
-        } catch {
-            // If batch processing fails (likely due to memory), fall back to individual processing
-            logger.warning("Batch processing failed, falling back to individual chunk processing: \(error)")
-            ANEMemoryOptimizer.shared.clearBufferPool()
-
-            var results: [VadResult] = []
-            for chunk in audioChunks {
-                let result = try await processChunk(chunk)
-                results.append(result)
-            }
-            return results
-        }
-    }
-
     /// Get current configuration
     public var currentConfig: VadConfig {
         return config
-    }
-
-    // MARK: - Performance Benchmarking
-
-    /// Performance statistics for VAD processing
-    public struct VadPerformanceStats: Sendable {
-        public let totalProcessingTime: TimeInterval
-        public let averageChunkTime: TimeInterval
-        public let chunksProcessed: Int
-        public let realTimeFactorX: Double  // How many times faster than real-time
-        public let cacheStats: (hits: Int, misses: Int, hitRatio: Double)?
-
-        public init(
-            totalProcessingTime: TimeInterval,
-            averageChunkTime: TimeInterval,
-            chunksProcessed: Int,
-            realTimeFactorX: Double,
-            cacheStats: (hits: Int, misses: Int, hitRatio: Double)? = nil
-        ) {
-            self.totalProcessingTime = totalProcessingTime
-            self.averageChunkTime = averageChunkTime
-            self.chunksProcessed = chunksProcessed
-            self.realTimeFactorX = realTimeFactorX
-            self.cacheStats = cacheStats
-        }
     }
 }

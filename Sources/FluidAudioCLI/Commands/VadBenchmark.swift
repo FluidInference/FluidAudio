@@ -592,7 +592,7 @@ struct VadBenchmark {
             return nil
         }
 
-        logger.info("🗂️ Loading VOiCES subset with mixed speech/non-speech samples...")
+        logger.info("Loading VOiCES subset with mixed speech/non-speech samples...")
 
         var testFiles: [VadTestFile] = []
 
@@ -608,18 +608,18 @@ struct VadBenchmark {
             let cleanFiles = try loadAudioFiles(
                 from: cleanDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
             testFiles.append(contentsOf: cleanFiles)
-            logger.info("   Loaded \(cleanFiles.count) clean speech files")
+            logger.info("Loaded \(cleanFiles.count) clean speech files")
         }
 
         if FileManager.default.fileExists(atPath: noisyDir.path) {
             let noisyFiles = try loadAudioFiles(
                 from: noisyDir, expectedLabel: 1, maxCount: requestedSpeechCount / 2)
             testFiles.append(contentsOf: noisyFiles)
-            logger.info("   Loaded \(noisyFiles.count) noisy speech files")
+            logger.info("Loaded \(noisyFiles.count) noisy speech files")
         }
 
         // Load non-speech samples from MUSAN mini dataset
-        logger.info("   📥 Loading non-speech samples from MUSAN...")
+        logger.info("Loading non-speech samples from MUSAN...")
         let vadCacheDir = appSupport.appendingPathComponent("FluidAudio/vadDataset")
         let noiseDir = vadCacheDir.appendingPathComponent("noise")
 
@@ -628,17 +628,17 @@ struct VadBenchmark {
             let noiseFiles = try loadAudioFiles(
                 from: noiseDir, expectedLabel: 0, maxCount: requestedNoiseCount)
             testFiles.append(contentsOf: noiseFiles)
-            logger.info("   Loaded \(noiseFiles.count) non-speech files from MUSAN")
+            logger.info("Loaded \(noiseFiles.count) non-speech files from MUSAN")
         } else {
             // If MUSAN noise samples aren't available, download them
-            logger.info("   🌐 Downloading non-speech samples from MUSAN...")
+            logger.info("Downloading non-speech samples from MUSAN...")
             if let musanFiles = try await downloadHuggingFaceVadDataset(
                 count: testFiles.count, dataset: "mini50")
             {
                 // Filter only non-speech samples
                 let nonSpeechFiles = musanFiles.filter { $0.expectedLabel == 0 }
                 testFiles.append(contentsOf: nonSpeechFiles)
-                logger.info("   Downloaded \(nonSpeechFiles.count) non-speech files")
+                logger.info("Downloaded \(nonSpeechFiles.count) non-speech files")
             }
         }
 
@@ -649,10 +649,10 @@ struct VadBenchmark {
         // Shuffle to mix speech and non-speech samples
         testFiles.shuffle()
 
-        logger.info("📂 Using VOiCES + MUSAN mixed dataset: \(testFiles.count) files total")
-        logger.info("   Speech samples: \(testFiles.filter { $0.expectedLabel == 1 }.count)")
-        logger.info("   Non-speech samples: \(testFiles.filter { $0.expectedLabel == 0 }.count)")
-        logger.info("💡 This tests VAD robustness in real-world acoustic conditions")
+        logger.info("Using VOiCES + MUSAN mixed dataset: \(testFiles.count) files total")
+        logger.info("Speech samples: \(testFiles.filter { $0.expectedLabel == 1 }.count)")
+        logger.info("Non-speech samples: \(testFiles.filter { $0.expectedLabel == 0 }.count)")
+        logger.info("This tests VAD robustness in real-world acoustic conditions")
         return testFiles
     }
 
@@ -670,7 +670,7 @@ struct VadBenchmark {
             return nil
         }
 
-        logger.info("🗂️ Loading full MUSAN dataset...")
+        logger.info("Loading full MUSAN dataset...")
 
         var testFiles: [VadTestFile] = []
 
@@ -680,7 +680,7 @@ struct VadBenchmark {
             let speechFiles = try loadAudioFiles(
                 from: speechDir, expectedLabel: 1, maxCount: count == -1 ? Int.max : count / 3)
             testFiles.append(contentsOf: speechFiles)
-            logger.info("   Loaded \(speechFiles.count) speech files")
+            logger.info("Loaded \(speechFiles.count) speech files")
         }
 
         // Load music files (treat as non-speech for VAD)
@@ -689,7 +689,7 @@ struct VadBenchmark {
             let musicFiles = try loadAudioFiles(
                 from: musicDir, expectedLabel: 0, maxCount: count == -1 ? Int.max : count / 3)
             testFiles.append(contentsOf: musicFiles)
-            logger.info("   Loaded \(musicFiles.count) music files")
+            logger.info("Loaded \(musicFiles.count) music files")
         }
 
         // Load noise files
@@ -699,14 +699,14 @@ struct VadBenchmark {
                 from: noiseDir, expectedLabel: 0,
                 maxCount: count == -1 ? Int.max : count - testFiles.count)
             testFiles.append(contentsOf: noiseFiles)
-            logger.info("   Loaded \(noiseFiles.count) noise files")
+            logger.info("Loaded \(noiseFiles.count) noise files")
         }
 
         if testFiles.isEmpty {
             return nil
         }
 
-        logger.info("📂 Using full MUSAN dataset: \(testFiles.count) files total")
+        logger.info("Using full MUSAN dataset: \(testFiles.count) files total")
         return testFiles.shuffled()  // Shuffle to mix different types
     }
 
