@@ -1,3 +1,7 @@
+# Benchmarks
+
+2024 MacBook Pro, 48GB Ram, M4 Pro, Tahoe 26.0
+
 ## Transcription
 
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml 
