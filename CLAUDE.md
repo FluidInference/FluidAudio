@@ -8,12 +8,15 @@ FluidAudio is a comprehensive Swift framework for local, low-latency audio proce
 
 ## Critical Development Rules
 
-### ⚠️ NEVER USE "unchecked Sendable"
+### ⚠️ NEVER USE "unchecked Sendable" OR "@preconcurrency"
 
 - **DO NOT** use `@unchecked Sendable` under any circumstances
+- **DO NOT** use `@preconcurrency` imports - this is a strict rule
 - Always properly implement thread-safe code with proper synchronization
-- Use actors, `@MainActor`, or proper locking mechanisms instead
-- If you encounter Sendable conformance issues, fix them properly rather than bypassing with `@unchecked`
+- Use actors, `@MainActor`, or proper locking mechanisms (NSLock, OSAllocatedUnfairLock) instead
+- If you encounter Sendable conformance issues, fix them properly rather than bypassing with unsafe annotations
+- Convert classes to actors when they need to be accessed across concurrency boundaries
+- Use proper isolation and async/await patterns for thread safety
 
 ### ⚠️ NEVER CREATE DUMMY MODELS OR SYNTHETIC DATA
 

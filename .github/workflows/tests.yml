@@ -12,9 +12,17 @@ jobs:
   build-and-test-macos:
     name: Build and Test Swift Package (macOS)
     runs-on: macos-15
+    strategy:
+      matrix:
+        swift-version: ['5.10', '6.0', '6.1', '6.2']
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Setup Swift ${{ matrix.swift-version }}
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: ${{ matrix.swift-version }}
 
       - name: Check versions
         run: |
@@ -31,10 +39,17 @@ jobs:
   build-ios:
     name: Build (iOS)
     runs-on: macos-15
-
+    strategy:
+      matrix:
+        swift-version: ['6.1', '6.2']
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Setup Swift ${{ matrix.swift-version }}
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: ${{ matrix.swift-version }}
 
       - name: List available simulators
         run: xcrun simctl list devices available

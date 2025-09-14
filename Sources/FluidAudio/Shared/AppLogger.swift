@@ -3,12 +3,12 @@ import OSLog
 
 /// Lightweight logger that writes to Unified Logging and, optionally, to console.
 /// Use this instead of `OSLog.Logger` so CLI runs can surface logs without `print`.
-public struct AppLogger {
+public struct AppLogger: Sendable {
     /// Default subsystem for all loggers in FluidAudio.
     /// Keep this consistent; categories should vary per component.
-    public static var defaultSubsystem: String = "com.fluidinference"
+    public static let defaultSubsystem: String = "com.fluidinference"
 
-    public enum Level: Int {
+    public enum Level: Int, Sendable {
         case debug = 0
         case info
         case notice

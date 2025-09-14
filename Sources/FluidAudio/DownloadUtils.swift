@@ -86,7 +86,7 @@ public class DownloadUtils {
     public typealias ProgressHandler = (Double) -> Void
 
     /// Download configuration
-    public struct DownloadConfig {
+    public struct DownloadConfig: Sendable {
         public let timeout: TimeInterval
 
         public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
@@ -97,7 +97,7 @@ public class DownloadUtils {
     }
 
     /// Model repositories on HuggingFace
-    public enum Repo: String, CaseIterable {
+    public enum Repo: String, CaseIterable, Sendable {
         case vad = "FluidInference/silero-vad-coreml"
         case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
         case diarizer = "FluidInference/speaker-diarization-coreml"

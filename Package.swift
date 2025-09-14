@@ -23,7 +23,10 @@ let package = Package(
             name: "FluidAudio",
             dependencies: [],
             path: "Sources/FluidAudio",
-            exclude: []
+            exclude: [],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]
         ),
         .executableTarget(
             name: "FluidAudioCLI",
@@ -32,11 +35,17 @@ let package = Package(
             exclude: ["README.md"],
             resources: [
                 .process("Utils/english.json")
+            ],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
             ]
         ),
         .testTarget(
             name: "FluidAudioTests",
-            dependencies: ["FluidAudio"]
+            dependencies: ["FluidAudio"],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]
         ),
     ]
 )

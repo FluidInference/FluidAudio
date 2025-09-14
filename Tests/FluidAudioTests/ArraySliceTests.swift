@@ -1,3 +1,4 @@
+import CoreML
 import XCTest
 
 @testable import FluidAudio
@@ -61,7 +62,7 @@ final class ArraySliceTests: XCTestCase {
     }
 
     func testANEMemoryOptimizerWithArraySlice() throws {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         // Create test data
         let fullArray = [Float](repeating: 0.5, count: 1000)

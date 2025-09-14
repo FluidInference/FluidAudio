@@ -25,7 +25,7 @@ struct TdtDecoderState {
     /// - zero: Decoder exactly at the end of encoder frames
     var timeJump: Int?
 
-    enum InitError: Error {
+    enum InitError: Error, Sendable {
         case aneAllocationFailed(String)
     }
 

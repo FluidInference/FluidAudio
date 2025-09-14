@@ -93,11 +93,17 @@ final public class AudioConverter {
         var aggregated: [Float] = []
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
-        // Provide input once, then signal end-of-stream
-        var provided = false
+        // Use atomic operations for thread safety
+        let providedRef = OSAllocatedUnfairLock(initialState: false)
+
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
+            let wasProvided = providedRef.withLock { provided in
+                let result = provided
                 provided = true
+                return result
+            }
+
+            if !wasProvided {
                 status.pointee = .haveData
                 return buffer
             } else {
