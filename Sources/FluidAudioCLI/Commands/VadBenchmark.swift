@@ -411,6 +411,7 @@ struct VadBenchmark {
     ) async throws -> VadBenchmarkResult {
         logger.info("Running VAD benchmark on \(testFiles.count) files...")
 
+        let memoryOptimizer = ANEMemoryOptimizer()
         let startTime = Date()
         var predictions: [Int] = []
         var groundTruth: [Int] = []
@@ -472,7 +473,7 @@ struct VadBenchmark {
 
             // Periodic buffer pool cleanup every 10 files to prevent ANE memory buildup
             if (index + 1) % 10 == 0 {
-                ANEMemoryOptimizer.shared.clearBufferPool()
+                memoryOptimizer.clearBufferPool()
             }
         }
 

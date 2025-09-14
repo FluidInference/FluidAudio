@@ -143,7 +143,7 @@ final class RandomAccessCollectionTests: XCTestCase {
     // MARK: - ANEMemoryOptimizer Tests
 
     func testANEOptimizerWithContiguousArray() throws {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         let audio = ContiguousArray<Float>(repeating: 0.5, count: 1000)
         let destination = try optimizer.createAlignedArray(
@@ -159,7 +159,7 @@ final class RandomAccessCollectionTests: XCTestCase {
     }
 
     func testANEOptimizerWithCustomCollection() throws {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         let audioData = [Float](repeating: 0.3, count: 500)
         let customBuffer = CustomAudioBuffer(audioData)
@@ -177,7 +177,7 @@ final class RandomAccessCollectionTests: XCTestCase {
     }
 
     func testANEOptimizerWithLazyCollection() throws {
-        let optimizer = ANEMemoryOptimizer.shared
+        let optimizer = ANEMemoryOptimizer()
 
         // Lazy collection that transforms values
         let baseData = [Float](repeating: 0.25, count: 100)
