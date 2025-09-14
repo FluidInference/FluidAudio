@@ -35,6 +35,33 @@ public struct VadResult: Sendable {
     }
 }
 
+public struct VadSegment: Sendable {
+    public let startTime: TimeInterval
+    public let endTime: TimeInterval
+    public let startSample: Int
+    public let endSample: Int
+
+    public var duration: TimeInterval {
+        return endTime - startTime
+    }
+
+    public var sampleCount: Int {
+        return endSample - startSample
+    }
+
+    public init(
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        startSample: Int,
+        endSample: Int
+    ) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.startSample = startSample
+        self.endSample = endSample
+    }
+}
+
 // Internal struct for VadAudioProcessor compatibility
 internal struct SpectralFeatures {
     let spectralFlux: Float

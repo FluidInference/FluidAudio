@@ -450,11 +450,11 @@ struct VadBenchmark {
                     }
 
                 logger.info(
-                    "      Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)"
+                    "Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)"
                 )
 
             } catch {
-                logger.warning("      Error: \(error)")
+                logger.warning("Error: \(error)")
                 // Use default prediction on error
                 predictions.append(0)
                 groundTruth.append(testFile.expectedLabel)
@@ -481,25 +481,25 @@ struct VadBenchmark {
         // Calculate RTFx (Real-Time Factor)
         let rtfx = totalAudioDuration > 0 ? processingTime / totalAudioDuration : 0
 
-        logger.info("\n⏱️ Timing Statistics:")
-        logger.info("   Total processing time: \(String(format: "%.2f", processingTime))s")
-        logger.info("   Total audio duration: \(String(format: "%.2f", totalAudioDuration))s")
+        logger.info("Timing Statistics:")
+        logger.info("Total processing time: \(String(format: "%.2f", processingTime))s")
+        logger.info("Total audio duration: \(String(format: "%.2f", totalAudioDuration))s")
         if rtfx < 1.0 && rtfx > 0 {
-            logger.info("   RTFx: \(String(format: "%.1f", 1.0/rtfx))x faster than real-time")
+            logger.info("RTFx: \(String(format: "%.1f", 1.0/rtfx))x faster than real-time")
         } else if rtfx >= 1.0 {
-            logger.info("   RTFx: \(String(format: "%.1f", rtfx))x slower than real-time")
+            logger.info("RTFx: \(String(format: "%.1f", rtfx))x slower than real-time")
         } else {
-            logger.info("   RTFx: N/A")
+            logger.info("RTFx: N/A")
         }
         logger.info(
-            "   Audio loading time: \(String(format: "%.2f", loadingTime))s (\(String(format: "%.1f", loadingTime/processingTime*100))%)"
+            "Audio loading time: \(String(format: "%.2f", loadingTime))s (\(String(format: "%.1f", loadingTime/processingTime*100))%)"
         )
         logger.info(
-            "   VAD inference time: \(String(format: "%.2f", inferenceTime))s (\(String(format: "%.1f", inferenceTime/processingTime*100))%)"
+            "VAD inference time: \(String(format: "%.2f", inferenceTime))s (\(String(format: "%.1f", inferenceTime/processingTime*100))%)"
         )
-        logger.info("   Average per file: \(String(format: "%.3f", avgProcessingTime))s")
-        logger.info("   Min per file: \(String(format: "%.3f", minProcessingTime))s")
-        logger.info("   Max per file: \(String(format: "%.3f", maxProcessingTime))s")
+        logger.info("Average per file: \(String(format: "%.3f", avgProcessingTime))s")
+        logger.info("Min per file: \(String(format: "%.3f", minProcessingTime))s")
+        logger.info("Max per file: \(String(format: "%.3f", maxProcessingTime))s")
 
         return VadBenchmarkResult(
             testName: "VAD_Benchmark_\(testFiles.count)_Files",
