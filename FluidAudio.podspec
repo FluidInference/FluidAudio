@@ -19,6 +19,6 @@ Pod::Spec.new do |spec|
   spec.source       = { :git => "https://github.com/FluidInference/FluidAudio.git", :tag => "v#{spec.version}" }
   spec.source_files = "Sources/FluidAudio/**/*.swift"
   
-  spec.swift_versions = ["5.10", "6.0"]
+  spec.swift_versions = ["5.10"]
   spec.frameworks = "CoreML", "AVFoundation", "Accelerate"
 end
