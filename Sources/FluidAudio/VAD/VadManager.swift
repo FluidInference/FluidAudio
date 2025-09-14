@@ -72,6 +72,14 @@ public actor VadManager {
         logger.info("VAD system initialized in \(String(format: "%.2f", totalInitTime))s")
     }
 
+    /// Internal initializer for logic-only use (e.g., unit tests) that avoids model loading.
+    /// This allows calling segmentation helpers without performing any model I/O.
+    internal init(skipModelLoading: Bool, config: VadConfig = .default) {
+        self.config = config
+        self.vadModel = nil
+        logger.info("VAD initialized in logic-only mode (no model loaded)")
+    }
+
     /// Initialize with pre-loaded model
     public init(config: VadConfig = .default, vadModel: MLModel) {
         self.config = config
