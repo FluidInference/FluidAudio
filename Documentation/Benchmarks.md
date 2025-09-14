@@ -1,3 +1,7 @@
+# Benchmarks
+
+2024 MacBook Pro, 48GB Ram, M4 Pro, Tahoe 26.0
+
 ## Transcription
 
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml 
@@ -43,27 +47,51 @@ AVERAGE                   | 5.6    | 2.3    | 142.6   | 6545.5s  | 607       | 2
 Dataset: https://github.com/Lab41/VOiCES-subset
 
 ```text
-swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.5
+swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.85
 ...
-⏱️ Timing Statistics:
-[23:26:10.167] [INFO] [VAD]    Total processing time: 2.76s
-[23:26:10.167] [INFO] [VAD]    Total audio duration: 350.46s
-[23:26:10.167] [INFO] [VAD]    RTFx: 126.9x faster than real-time
-[23:26:10.167] [INFO] [VAD]    Audio loading time: 0.01s (0.2%)
-[23:26:10.167] [INFO] [VAD]    VAD inference time: 2.75s (99.7%)
-[23:26:10.167] [INFO] [VAD]    Average per file: 0.115s
-[23:26:10.167] [INFO] [VAD]    Min per file: 0.022s
-[23:26:10.167] [INFO] [VAD]    Max per file: 0.135s
-[23:26:10.167] [INFO] [VAD]
-📊 VAD Benchmark Results:
-[23:26:10.167] [INFO] [VAD]    Precision: 100.0%
-[23:26:10.167] [INFO] [VAD]    Accuracy: 100.0%
-[23:26:10.167] [INFO] [VAD]    Recall: 100.0%
-[23:26:10.167] [INFO] [VAD]    F1-Score: 100.0%
-[23:26:10.167] [INFO] [VAD]    Total Time: 2.76s
-[23:26:10.167] [INFO] [VAD]    RTFx: 126.9x faster than real-time
-[23:26:10.167] [INFO] [VAD]    Files Processed: 24
-[23:26:10.167] [INFO] [VAD]    Avg Time per File: 0.115s
+Timing Statistics:
+[18:56:31.208] [INFO] [VAD]    Total processing time: 0.29s
+[18:56:31.208] [INFO] [VAD]    Total audio duration: 351.05s
+[18:56:31.208] [INFO] [VAD]    RTFx: 1230.6x faster than real-time
+[18:56:31.208] [INFO] [VAD]    Audio loading time: 0.00s (0.6%)
+[18:56:31.208] [INFO] [VAD]    VAD inference time: 0.28s (98.7%)
+[18:56:31.208] [INFO] [VAD]    Average per file: 0.011s
+[18:56:31.208] [INFO] [VAD]    Min per file: 0.001s
+[18:56:31.208] [INFO] [VAD]    Max per file: 0.020s
+[18:56:31.208] [INFO] [VAD]
+VAD Benchmark Results:
+[18:56:31.208] [INFO] [VAD]    Accuracy: 96.0%
+[18:56:31.208] [INFO] [VAD]    Precision: 100.0%
+[18:56:31.208] [INFO] [VAD]    Recall: 95.8%
+[18:56:31.208] [INFO] [VAD]    F1-Score: 97.9%
+[18:56:31.208] [INFO] [VAD]    Total Time: 0.29s
+[18:56:31.208] [INFO] [VAD]    RTFx: 1230.6x faster than real-time
+[18:56:31.208] [INFO] [VAD]    Files Processed: 25
+[18:56:31.208] [INFO] [VAD]    Avg Time per File: 0.011s
+```
+
+```text
+swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --threshold 0.8
+...
+[23:02:35.539] [INFO] [VAD] Total processing time: 322.31s
+[23:02:35.539] [INFO] [VAD] Timing Statistics:
+[23:02:35.539] [INFO] [VAD] RTFx: 1220.7x faster than real-time
+[23:02:35.539] [INFO] [VAD] Audio loading time: 1.20s (0.4%)
+[23:02:35.539] [INFO] [VAD] VAD inference time: 319.57s (99.1%)
+[23:02:35.539] [INFO] [VAD] Average per file: 0.160s
+[23:02:35.539] [INFO] [VAD] Total audio duration: 393442.58s
+[23:02:35.539] [INFO] [VAD] Min per file: 0.000s
+[23:02:35.539] [INFO] [VAD] Max per file: 0.873s
+[23:02:35.711] [INFO] [VAD] VAD Benchmark Results:
+[23:02:35.711] [INFO] [VAD] Accuracy: 94.2%
+[23:02:35.711] [INFO] [VAD] Precision: 92.6%
+[23:02:35.711] [INFO] [VAD] Recall: 78.9%
+[23:02:35.711] [INFO] [VAD] F1-Score: 85.2%
+[23:02:35.711] [INFO] [VAD] Total Time: 322.31s
+[23:02:35.711] [INFO] [VAD] RTFx: 1220.7x faster than real-time
+[23:02:35.711] [INFO] [VAD] Files Processed: 2016
+[23:02:35.711] [INFO] [VAD] Avg Time per File: 0.160s
+[23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
 ```
 
 

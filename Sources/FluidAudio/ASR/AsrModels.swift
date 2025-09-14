@@ -40,7 +40,7 @@ extension AsrModels {
     /// Helper to get the repo path from a models directory
     private static func repoPath(from modelsDirectory: URL) -> URL {
         return modelsDirectory.deletingLastPathComponent()
-            .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName)
+            .appendingPathComponent(Repo.parakeet.folderName)
     }
 
     // Use centralized model names
@@ -346,7 +346,7 @@ extension AsrModels {
             appSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent(DownloadUtils.Repo.parakeet.folderName, isDirectory: true)
+            .appendingPathComponent(Repo.parakeet.folderName, isDirectory: true)
     }
 }
 

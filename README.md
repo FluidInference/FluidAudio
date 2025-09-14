@@ -181,21 +181,23 @@ import FluidAudio
 
 // Programmatic VAD over an audio file
 Task {
-    // 1) Initialize VAD (async load of Silero model)
-    let vad = try await VadManager(config: VadConfig(threshold: 0.3))
+    // 1) Initialize VAD (async loads Silero model)
+    let vad = try await VadManager(
+        config: VadConfig(threshold: 0.85) // tune per environment
+    )
 
-    // 2) Prepare 16 kHz mono samples (see: Audio Conversion)
-    let samples = try await loadSamples16kMono(path: "path/to/audio.wav")
+    // 2) Process file directly (auto-converts to 16 kHz mono)
+    let url = URL(fileURLWithPath: "path/to/audio.wav")
+    let results = try await vad.process(url)
 
-    // 3) Run VAD and print speech segments (512-sample frames)
-    let results = try await vad.processAudioFile(samples)
+    // 3) Convert per-frame decisions into segments (512-sample frames)
     let sampleRate = 16000.0
     let frame = 512.0
 
     var startIndex: Int? = nil
     for (i, r) in results.enumerated() {
         if r.isVoiceActive {
-            if startIndex == nil { startIndex = i }
+            startIndex = startIndex ?? i
         } else if let s = startIndex {
             let startSec = (Double(s) * frame) / sampleRate
             let endSec = (Double(i + 1) * frame) / sampleRate

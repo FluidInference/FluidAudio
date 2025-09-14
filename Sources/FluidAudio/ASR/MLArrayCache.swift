@@ -30,8 +30,6 @@ actor MLArrayCache {
             return arrays.removeLast()
         }
 
-        // Create new ANE-aligned array
-        logger.debug("Cache miss for shape: \(shape), creating ANE-aligned")
         return try ANEOptimizer.createANEAlignedArray(shape: shape, dataType: dataType)
     }
 
