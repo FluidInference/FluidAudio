@@ -21,6 +21,7 @@ struct VadBenchmark {
         var numFiles = -1  // Default to all files
         var useAllFiles = true  // Default to all files
         var vadThreshold: Float = 0.3
+        var activityThreshold: Float = 0.1  // Percentage of chunks that must be active
         var outputFile: String?
         var dataset = "mini50"  // Default to mini50 dataset
         var debugMode = false  // Default to no debug output
@@ -44,6 +45,11 @@ struct VadBenchmark {
                     vadThreshold = Float(arguments[i + 1]) ?? 0.3
                     i += 1
                 }
+            case "--activity-threshold":
+                if i + 1 < arguments.count {
+                    activityThreshold = Float(arguments[i + 1]) ?? 0.3
+                    i += 1
+                }
             case "--dataset":
                 if i + 1 < arguments.count {
                     dataset = arguments[i + 1]
@@ -65,6 +71,7 @@ struct VadBenchmark {
         logger.info("Starting VAD Benchmark")
         logger.info("Test files: \(numFiles)")
         logger.info("VAD threshold: \(vadThreshold)")
+        logger.info("Activity threshold: \(activityThreshold)")
         logger.info("Debug mode: \(debugMode)")
 
         // Use VadManager with the trained model
@@ -82,7 +89,7 @@ struct VadBenchmark {
 
         // Run benchmark
         let result = try await runVadBenchmarkInternal(
-            vadManager: vadManager, testFiles: testFiles, threshold: vadThreshold)
+            vadManager: vadManager, testFiles: testFiles, threshold: vadThreshold, activityThreshold: activityThreshold)
 
         // Print results
         // Calculate RTFx for display
@@ -400,7 +407,7 @@ struct VadBenchmark {
     }
 
     static func runVadBenchmarkInternal(
-        vadManager: VadManager, testFiles: [VadTestFile], threshold: Float
+        vadManager: VadManager, testFiles: [VadTestFile], threshold: Float, activityThreshold: Float
     ) async throws -> VadBenchmarkResult {
         logger.info("Running VAD benchmark on \(testFiles.count) files...")
 
@@ -430,9 +437,11 @@ struct VadBenchmark {
                 let vadResults = try await vadManager.process(url)
                 inferenceTime += Date().timeIntervalSince(inferenceStartTime)
 
-                // Aggregate results (use max probability as file-level decision)
+                // Aggregate results (use activity ratio as file-level decision)
+                let activeChunks = vadResults.filter { $0.isVoiceActive }.count
+                let activityRatio = Float(activeChunks) / Float(vadResults.count)
+                let prediction = activityRatio >= activityThreshold ? 1 : 0
                 let maxProbability = vadResults.map { $0.probability }.max() ?? 0.0
-                let prediction = maxProbability >= threshold ? 1 : 0
 
                 predictions.append(prediction)
                 groundTruth.append(testFile.expectedLabel)
@@ -450,7 +459,7 @@ struct VadBenchmark {
                     }
 
                 logger.info(
-                    "Result: max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)"
+                    "Result: activity_ratio=\(String(format: "%.3f", activityRatio)), max_prob=\(String(format: "%.3f", maxProbability)), prediction=\(prediction), expected=\(testFile.expectedLabel), time=\(String(format: "%.3f", fileProcessingTime))s, RTFx=\(rtfxDisplay)"
                 )
 
             } catch {
