@@ -7,7 +7,7 @@ import OSLog
 public class EmbeddingExtractor {
     private let wespeakerModel: MLModel
     private let logger = AppLogger(category: "EmbeddingExtractor")
-    private let memoryOptimizer = ANEMemoryOptimizer.shared
+    private let memoryOptimizer = ANEMemoryOptimizer()
 
     // Pre-allocated ANE-aligned buffers
     private var waveformBuffer: MLMultiArray?

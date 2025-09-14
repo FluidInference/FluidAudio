@@ -5,18 +5,15 @@ import Metal
 
 /// ANE-optimized memory management for speaker diarization pipeline
 @available(macOS 13.0, iOS 16.0, *)
-public class ANEMemoryOptimizer {
+public final class ANEMemoryOptimizer {
     // Use shared ANE constants
     public static let aneAlignment = ANEMemoryUtils.aneAlignment
     public static let aneTileSize = ANEMemoryUtils.aneTileSize
 
-    /// Shared instance for resource management
-    public static let shared = ANEMemoryOptimizer()
-
     private var bufferPool: [String: MLMultiArray] = [:]
     private let bufferLock = NSLock()
 
-    private init() {}
+    public init() {}
 
     /// Create ANE-aligned MLMultiArray with optimized memory layout
     public func createAlignedArray(
