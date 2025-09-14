@@ -17,9 +17,9 @@ public struct TtsModels {
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> TtsModels {
         // Unified Kokoro model (v21). Delegate download/load to DownloadUtils for consistency
-        let modelName = "kokoro_completev21.mlmodelc"
+        let modelName = ModelNames.TTS.kokoroModelFile
         let cacheDirectory = try getCacheDirectory()
-        // Pass Models subdirectory so models end up in ~/.cache/fluidaudio/Models/kokoro/
+        // Pass Models subdirectory so models end up in Application Support/FluidAudio/Models/kokoro/
         let modelsDirectory = cacheDirectory.appendingPathComponent("Models")
         let dict = try await DownloadUtils.loadModels(
             .kokoro,
@@ -34,18 +34,10 @@ public struct TtsModels {
     }
 
     private static func getCacheDirectory() throws -> URL {
-        let baseDirectory: URL
-        #if os(macOS)
-        baseDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support")
-        #else
-        guard let first = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            throw TTSError.processingFailed("Failed to locate application support directory")
-        }
-        baseDirectory = first
-        #endif
-
-        let cacheDirectory = baseDirectory.appendingPathComponent("FluidAudio")
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let cacheDirectory = appSupport.appendingPathComponent("FluidAudio", isDirectory: true)
 
         if !FileManager.default.fileExists(atPath: cacheDirectory.path) {
             try FileManager.default.createDirectory(

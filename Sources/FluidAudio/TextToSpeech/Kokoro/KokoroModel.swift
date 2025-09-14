@@ -7,7 +7,7 @@ import FoundationNetworking
 #endif
 
 /// Kokoro TTS implementation using unified CoreML model
-/// Uses kokoro_completev21.mlmodelc with word_phonemes.json dictionary
+/// Uses centralized model names from ModelNames.TTS
 @available(macOS 13.0, iOS 16.0, *)
 public struct KokoroModel {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroModel")
@@ -20,7 +20,7 @@ public struct KokoroModel {
     private static var phonemeDictionary: [String: (frameCount: Float, phonemes: [String])] = [:]
     private static var isDictionaryLoaded = false
 
-    // Preferred: Simple word -> phonemes mapping from word_phonemes.json
+    // Preferred: Simple word -> phonemes mapping from centralized file
     private static var wordToPhonemes: [String: [String]] = [:]
     private static var isSimpleDictLoaded = false
 
@@ -36,7 +36,7 @@ public struct KokoroModel {
 
         let fm = FileManager.default
         let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
-        let localPackage = cwd.appendingPathComponent("kokoro_completev21.mlpackage")
+        let localPackage = cwd.appendingPathComponent("\(ModelNames.TTS.kokoroModel).mlpackage")
 
         if fm.fileExists(atPath: localPackage.path) {
             logger.info("Loading Kokoro model from local package: \(localPackage.path)")
@@ -50,7 +50,7 @@ public struct KokoroModel {
             let models = try await TtsModels.download()
             kokoroModel = models.kokoro
         }
-        logger.info("Loaded kokoro_completev21 model")
+        logger.info("Loaded \(ModelNames.TTS.kokoroModel) model")
 
         isModelLoaded = true
         logger.info("Kokoro model successfully loaded")
@@ -65,7 +65,7 @@ public struct KokoroModel {
 
         let cacheDir = try TtsModels.cacheDirectoryURL()
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
-        let dictURL = kokoroDir.appendingPathComponent("word_phonemes.json")
+        let dictURL = kokoroDir.appendingPathComponent(ModelNames.TTS.wordPhonemesFile)
 
         guard FileManager.default.fileExists(atPath: dictURL.path) else {
             throw TTSError.modelNotFound("Phoneme dictionary not found at \(dictURL.path)")
@@ -73,14 +73,14 @@ public struct KokoroModel {
 
         let data = try Data(contentsOf: dictURL)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw TTSError.processingFailed("Invalid word_phonemes.json (not a JSON object)")
+            throw TTSError.processingFailed("Invalid \(ModelNames.TTS.wordPhonemesFile) (not a JSON object)")
         }
 
         // Case 1: expected wrapped format
         if let mapping = json["word_to_phonemes"] as? [String: [String]] {
             wordToPhonemes = mapping
             isSimpleDictLoaded = true
-            logger.info("Loaded \(wordToPhonemes.count) words from word_phonemes.json (wrapped)")
+            logger.info("Loaded \(wordToPhonemes.count) words from \(ModelNames.TTS.wordPhonemesFile) (wrapped)")
             return
         }
 
@@ -108,12 +108,12 @@ public struct KokoroModel {
         }
 
         guard !tmp.isEmpty else {
-            throw TTSError.processingFailed("Unsupported word_phonemes.json format (no usable entries)")
+            throw TTSError.processingFailed("Unsupported \(ModelNames.TTS.wordPhonemesFile) format (no usable entries)")
         }
 
         wordToPhonemes = tmp
         isSimpleDictLoaded = true
-        logger.info("Loaded \(wordToPhonemes.count) words from word_phonemes.json (flat)")
+        logger.info("Loaded \(wordToPhonemes.count) words from \(ModelNames.TTS.wordPhonemesFile) (flat)")
     }
 
     /// Tokenize an IPA string into model tokens.

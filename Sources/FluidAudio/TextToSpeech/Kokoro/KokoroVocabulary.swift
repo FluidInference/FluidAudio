@@ -8,7 +8,7 @@ public struct KokoroVocabulary {
     private static var vocabulary: [String: Int32] = [:]
     private static var isLoaded = false
 
-    /// Load vocabulary from kokoro_correct_vocab.json
+    /// Load vocabulary from centralized vocabulary file
     public static func loadVocabulary() {
         guard !isLoaded else { return }
 
@@ -22,7 +22,7 @@ public struct KokoroVocabulary {
         }
 
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
-        let vocabURL = kokoroDir.appendingPathComponent("vocab_index.json")
+        let vocabURL = kokoroDir.appendingPathComponent(ModelNames.TTS.vocabIndexFile)
 
         // Download if missing
         if !FileManager.default.fileExists(atPath: vocabURL.path) {
@@ -58,12 +58,12 @@ public struct KokoroVocabulary {
                     isLoaded = true
                     logger.info("Loaded \(vocabulary.count) vocabulary entries from Any dict")
                 } else {
-                    logger.error("Unexpected vocab format in vocab_index.json")
+                    logger.error("Unexpected vocab format in \(ModelNames.TTS.vocabIndexFile)")
                 }
             }
         } catch {
             logger.error("Failed to load vocabulary: \(error)")
-            fatalError("Failed to load vocabulary from vocab_index.json: \(error)")
+            fatalError("Failed to load vocabulary from \(ModelNames.TTS.vocabIndexFile): \(error)")
         }
     }
 

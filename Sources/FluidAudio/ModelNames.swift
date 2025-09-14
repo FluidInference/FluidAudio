@@ -5,9 +5,16 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case diarizer = "FluidInference/speaker-diarization-coreml"
+    case kokoro = "FluidInference/kokoro-82m-coreml"
 
     var folderName: String {
-        rawValue.split(separator: "/").last?.description ?? rawValue
+        switch self {
+        case .kokoro:
+            // Use "kokoro" instead of "kokoro-82m-coreml" for consistency with existing paths
+            return "kokoro"
+        default:
+            return rawValue.split(separator: "/").last?.description ?? rawValue
+        }
     }
 
 }
@@ -61,6 +68,22 @@ public enum ModelNames {
         ]
     }
 
+    /// TTS model names
+    public enum TTS {
+        public static let kokoroModel = "kokoro_completev21"
+        public static let kokoroModelFile = kokoroModel + ".mlmodelc"
+
+        // Dictionary and configuration files
+        public static let wordPhonemesFile = "word_phonemes.json"
+        public static let wordFramesPhonemesFile = "word_frames_phonemes.json"
+        public static let vocabIndexFile = "vocab_index.json"
+        public static let configFile = "config.json"
+
+        public static let requiredModels: Set<String> = [
+            kokoroModelFile
+        ]
+    }
+
     @available(macOS 13.0, iOS 16.0, *)
     static func getRequiredModelNames(for repo: Repo) -> Set<String> {
         switch repo {
@@ -70,6 +93,8 @@ public enum ModelNames {
             return ModelNames.ASR.requiredModels
         case .diarizer:
             return ModelNames.Diarizer.requiredModels
+        case .kokoro:
+            return ModelNames.TTS.requiredModels
         }
     }
 

@@ -96,25 +96,6 @@ public class DownloadUtils {
         public static let `default` = DownloadConfig()
     }
 
-    /// Model repositories on HuggingFace
-    public enum Repo: String, CaseIterable {
-        case vad = "FluidInference/silero-vad-coreml"
-        case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
-        case diarizer = "FluidInference/speaker-diarization-coreml"
-        case kokoro = "FluidInference/kokoro-82m-coreml"
-
-        var folderName: String {
-            switch self {
-            case .kokoro:
-                // Use "kokoro" instead of "kokoro-82m-coreml" for consistency with existing paths
-                return "kokoro"
-            default:
-                return rawValue.split(separator: "/").last?.description ?? rawValue
-            }
-        }
-
-    }
-
     public static func loadModels(
         _ repo: Repo,
         modelNames: [String],
@@ -235,17 +216,7 @@ public class DownloadUtils {
     /// Uses centralized ModelNames where available to avoid cross‑type coupling
     @available(macOS 13.0, iOS 16.0, *)
     private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
-        switch repo {
-        case .vad:
-            return ModelNames.VAD.requiredModels
-        case .parakeet:
-            return ModelNames.ASR.requiredModels
-        case .diarizer:
-            return ModelNames.Diarizer.requiredModels
-        case .kokoro:
-            // Unified Kokoro TTS model bundle name
-            return Set(["kokoro_completev21.mlmodelc"])
-        }
+        return ModelNames.getRequiredModelNames(for: repo)
     }
 
     /// Download a HuggingFace repository
@@ -293,9 +264,10 @@ public class DownloadUtils {
 
     /// Check if a file is essential for model operation
     private static func isEssentialFile(_ path: String) -> Bool {
-        path.hasSuffix(".json") || path.hasSuffix(".txt") || path == "config.json"
+        path.hasSuffix(".json") || path.hasSuffix(".txt") || path == ModelNames.TTS.configFile
             // Kokoro-specific essential files
-            || path == "word_phonemes.json" || path == "word_frames_phonemes.json" || path == "vocab_index.json"
+            || path == ModelNames.TTS.wordPhonemesFile || path == ModelNames.TTS.wordFramesPhonemesFile
+            || path == ModelNames.TTS.vocabIndexFile
     }
 
     /// List files in a HuggingFace repository
