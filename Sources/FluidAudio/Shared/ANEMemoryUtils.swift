@@ -99,6 +99,10 @@ public enum ANEMemoryUtils {
     /// Get element size in bytes for a given data type
     public static func getElementSize(for dataType: MLMultiArrayDataType) -> Int {
         switch dataType {
+        #if swift(>=6.2)
+        case .int8:
+            return 1
+        #endif
         case .float16:
             return 2
         case .float32:
