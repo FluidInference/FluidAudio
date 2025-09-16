@@ -19,6 +19,7 @@ public struct VadConfig: Sendable {
     }
 }
 
+// See Documentation/VAD/Segmentation.md for details
 public struct VadSegmentationConfig: Sendable {
     public var minSpeechDuration: TimeInterval
     public var minSilenceDuration: TimeInterval
