@@ -58,6 +58,7 @@ extension AsrManager {
             throw ASRError.processingFailed("Mel-spectrogram model failed")
         }
 
+        // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
         let melspectrogramOutput = try await melspectrogramModel.compatPrediction(
             from: melspectrogramInput,
             options: predictionOptions
@@ -69,6 +70,7 @@ extension AsrManager {
             throw ASRError.processingFailed("Encoder model failed")
         }
 
+        // Same bridge ensures encoder predictions stay non-blocking on newer platforms.
         let encoderOutput = try await encoderModel.compatPrediction(
             from: encoderInput,
             options: predictionOptions
