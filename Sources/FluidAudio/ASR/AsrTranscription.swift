@@ -54,25 +54,27 @@ extension AsrManager {
         let melspectrogramInput = try await prepareMelSpectrogramInput(
             paddedAudio, actualLength: originalLength)
 
-        guard
-            let melspectrogramOutput = try melspectrogramModel?.prediction(
-                from: melspectrogramInput,
-                options: predictionOptions
-            )
-        else {
+        guard let melspectrogramModel = melspectrogramModel else {
             throw ASRError.processingFailed("Mel-spectrogram model failed")
         }
 
+        // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
+        let melspectrogramOutput = try await melspectrogramModel.compatPrediction(
+            from: melspectrogramInput,
+            options: predictionOptions
+        )
+
         let encoderInput = try prepareEncoderInput(melspectrogramOutput)
 
-        guard
-            let encoderOutput = try encoderModel?.prediction(
-                from: encoderInput,
-                options: predictionOptions
-            )
-        else {
+        guard let encoderModel = encoderModel else {
             throw ASRError.processingFailed("Encoder model failed")
         }
+
+        // Same bridge ensures encoder predictions stay non-blocking on newer platforms.
+        let encoderOutput = try await encoderModel.compatPrediction(
+            from: encoderInput,
+            options: predictionOptions
+        )
 
         let rawEncoderOutput = try extractFeatureValue(
             from: encoderOutput, key: "encoder_output", errorMessage: "Invalid encoder output")
