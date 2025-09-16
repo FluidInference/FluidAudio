@@ -142,13 +142,6 @@ public actor VadManager {
 
         // Use input state or create initial state
         let currentState = inputState ?? VadState.initial()
-        if config.debugMode {
-            let hiddenPreview = currentState.hiddenState.prefix(4).map {
-                String(format: "%.4f", $0)
-            }.joined(separator: ", ")
-            logger.debug("Current hidden head=[\(hiddenPreview)]")
-        }
-
         // Ensure chunk is correct size (4096 samples of new audio)
         var processedChunk = audioChunk
         if processedChunk.count != Self.chunkSize {
@@ -247,16 +240,6 @@ public actor VadManager {
 
                 // Run prediction
                 let output = try model.prediction(from: input)
-
-                if config.debugMode {
-                    let contextPreview = inputState.context.prefix(4).map {
-                        String(format: "%.4f", $0)
-                    }.joined(separator: ", ")
-                    logger.debug(
-                        "Submitting chunk: context head=[\(contextPreview)] firstSample=\(String(format: "%.4f", audioChunk.first ?? 0))"
-                    )
-                }
-
                 // Extract outputs using flexible name matching (model outputs may include suffixes)
                 guard
                     let vadOutputArray = featureValue(
@@ -308,20 +291,6 @@ public actor VadManager {
                         count: Self.stateSize
                     )
                 )
-
-                if config.debugMode {
-                    let outputPreviewCount = min(3, vadOutputArray.count)
-                    let outputPreview = (0..<outputPreviewCount).map {
-                        String(format: "%.4f", Float(truncating: vadOutputArray[$0]))
-                    }.joined(separator: ", ")
-                    logger.debug(
-                        "vad_output preview=[\(outputPreview)] probability=\(String(format: "%.4f", probability))")
-                    let hiddenPreview = newHiddenState.prefix(4).map {
-                        String(format: "%.4f", $0)
-                    }.joined(separator: ", ")
-                    logger.debug("hidden[0..3]=[\(hiddenPreview)]")
-                }
-
                 return (probability, newHiddenState, newCellState)
             }
 
