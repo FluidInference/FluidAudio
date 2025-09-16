@@ -78,21 +78,7 @@ public final class ANEMemoryOptimizer {
         }
 
         // Calculate byte offset
-        let elementSize: Int
-        switch sourceArray.dataType {
-        case .float16:
-            elementSize = 2
-        case .float32:
-            elementSize = 4
-        case .float64:
-            elementSize = 8
-        case .int32:
-            elementSize = 4
-        case .double:
-            elementSize = 8
-        @unknown default:
-            elementSize = 4
-        }
+        let elementSize = ANEMemoryUtils.getElementSize(for: sourceArray.dataType)
 
         let byteOffset = offset * elementSize
         let offsetPointer = sourceArray.dataPointer.advanced(by: byteOffset)

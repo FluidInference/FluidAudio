@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms"
+abstract: "FluidAudio is a Swift SDK for fully local, low-latency audio AI on Apple devices, with inference offloaded to the Apple Neural Engine (ANE). The SDK includes state-of-the-art speaker diarization, automatic speech recognition, and voice activity detection via open-source models that can be integrated with just a few lines of code."
+authors:
+  - family-names: "FluidInference Team"
+url: "https://github.com/FluidInference/FluidAudio"
+repository-code: "https://github.com/FluidInference/FluidAudio"
+license: Apache-2.0
+version: "0.5.1"
+date-released: "2024-12-01"
+keywords:
+  - "speaker diarization"
+  - "automatic speech recognition"
+  - "voice activity detection"
+  - "apple neural engine"
+  - "coreml"
+  - "swift"
+  - "ios"
+  - "macos"
+  - "real-time audio processing"
+  - "local ai"
+  - "privacy-first"
+preferred-citation:
+  type: software
+  title: "FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms"
+  authors:
+    - family-names: "FluidInference Team"
+  url: "https://github.com/FluidInference/FluidAudio"
+  year: 2024
+  version: "0.5.1"
+references:
+  - type: software
+    title: "pyannote.audio: neural building blocks for speaker diarization"
+    authors:
+      - family-names: "Bredin"
+        given-names: "Hervé"
+    url: "https://github.com/pyannote/pyannote-audio"
+  - type: software
+    title: "sherpa-onnx: Next-gen Kaldi for speech-to-text, text-to-speech, and speaker recognition"
+    url: "https://github.com/k2-fsa/sherpa-onnx"
+  - type: software
+    title: "Silero VAD: pre-trained enterprise-grade Voice Activity Detector"
+    url: "https://github.com/snakers4/silero-vad"
+  - type: software
+    title: "Parakeet-MLX: Apple MLX implementation of Parakeet TDT models"
+    url: "https://github.com/senstella/parakeet-mlx"
