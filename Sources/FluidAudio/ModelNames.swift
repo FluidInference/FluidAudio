@@ -52,7 +52,7 @@ public enum ModelNames {
 
     /// VAD model names
     public enum VAD {
-        public static let sileroVad = "silero_vad_se_trained_4bit"
+        public static let sileroVad = "silero-vad-unified-256ms-v6.0.0"
 
         public static let sileroVadFile = sileroVad + ".mlmodelc"
 

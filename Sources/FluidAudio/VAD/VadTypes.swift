@@ -44,19 +44,47 @@ public struct VadSegmentationConfig: Sendable {
     }
 }
 
+public struct VadState: Sendable {
+    public static let contextLength = 64
+
+    public let hiddenState: [Float]
+    public let cellState: [Float]
+    public let context: [Float]
+
+    public init(
+        hiddenState: [Float], cellState: [Float], context: [Float] = Array(repeating: 0.0, count: contextLength)
+    ) {
+        self.hiddenState = hiddenState
+        self.cellState = cellState
+        self.context = context
+    }
+
+    /// Create initial zero states for the first chunk
+    public static func initial() -> VadState {
+        return VadState(
+            hiddenState: Array(repeating: 0.0, count: 128),
+            cellState: Array(repeating: 0.0, count: 128),
+            context: Array(repeating: 0.0, count: contextLength)
+        )
+    }
+}
+
 public struct VadResult: Sendable {
     public let probability: Float
     public let isVoiceActive: Bool
     public let processingTime: TimeInterval
+    public let outputState: VadState
 
     public init(
         probability: Float,
         isVoiceActive: Bool,
-        processingTime: TimeInterval
+        processingTime: TimeInterval,
+        outputState: VadState
     ) {
         self.probability = probability
         self.isVoiceActive = isVoiceActive
         self.processingTime = processingTime
+        self.outputState = outputState
     }
 }
 
