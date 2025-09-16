@@ -55,7 +55,7 @@ extension AsrManager {
             paddedAudio, actualLength: originalLength)
 
         guard
-            let melspectrogramOutput = try melspectrogramModel?.prediction(
+            let melspectrogramOutput = try await melspectrogramModel?.prediction(
                 from: melspectrogramInput,
                 options: predictionOptions
             )
