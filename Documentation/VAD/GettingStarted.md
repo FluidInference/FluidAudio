@@ -4,8 +4,24 @@ Fluid Audio ships the Silero VAD converted for Core ML together with Silero-styl
 timestamp extraction and streaming hysteresis. If you need help tuning the
 parameters for your use case, reach out on Discord.
 
-Our long-term goal is to align with Apple's upcoming SpeechDetector in
-[OS26](https://developer.apple.com/documentation/speech/speechdetector).
+## Quick Start
+
+Need chunk-level probabilities or state for custom pipelines? Call `process(_:)`
+to inspect every 256 ms hop:
+
+```swift
+let results = try await manager.process(samples)
+for (index, chunk) in results.enumerated() {
+    print(
+        String(
+            format: "Chunk %02d: prob=%.3f, inference=%.4fs",
+            index,
+            chunk.probability,
+            chunk.processingTime
+        )
+    )
+}
+```
 
 ## Offline Segmentation (Code)
 
@@ -161,3 +177,4 @@ Offline runs emit an RTFx summary calculated from per-chunk inference time. Use
 `--mode both` if you also want to see streaming start/end events in the same run.
 
 Datasets for benchmarking can be fetched with `swift run fluidaudio download --dataset vad`.
+

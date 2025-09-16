@@ -54,17 +54,19 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 ### Documentation Index
 
 - Guides
-  - [MCP](Documentation/Guides/MCP.md)
   - [Audio Conversion for Inference](Documentation/Guides/AudioConversion.md)
-- Modules
-  - ASR: [Getting Started](Documentation/ASR/GettingStarted.md)
-  - ASR: [Last Chunk Handling](Documentation/ASR/LastChunkHandling.md)
-  - Diarization: [Speaker Diarization Guide](Documentation/SpeakerDiarization.md)
+- Models
+  - Automatic Speech Recognition/Transcription
+    - [Getting Started](Documentation/ASR/GettingStarted.md)
+    - [Last Chunk Handling](Documentation/ASR/LastChunkHandling.md)
+  - Speaker Diarization
+    - [Speaker Diarization Guide](Documentation/SpeakerDiarization.md)
   - VAD: [Getting Started](Documentation/VAD/GettingStarted.md)
-- API
-  - [API Reference](Documentation/API.md)
-- CLI
-  - [Command Line Guide](Documentation/CLI.md)
+    - [Segmentation](Documentation/VAD/Segmentation.md)
+    - [Model Conversion Code](https://github.com/FluidInference/mobius)
+- [Benchmarks]([Documentation/Benchmarks.md])
+- [API Reference](Documentation/API.md)
+- [Command Line Guide](Documentation/CLI.md)
 
 ### MCP Server
 
