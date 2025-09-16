@@ -7,19 +7,9 @@ import Foundation
 enum VadAnalyzeCommand {
     private static let logger = AppLogger(category: "VadAnalyze")
 
-    private enum Mode: String {
-        case segmentation
-        case streaming
-        case both
-
-        static func from(_ value: String) -> Mode? {
-            Mode(rawValue: value.lowercased())
-        }
-    }
-
     private struct Options {
         var audioPath: String?
-        var mode: Mode = .segmentation
+        var streaming: Bool = false
         var threshold: Float?
         var debug: Bool = false
         var returnSeconds: Bool = false
@@ -33,7 +23,6 @@ enum VadAnalyzeCommand {
         var negativeThresholdOffset: Float?
         var minSilenceAtMaxSpeech: TimeInterval?
         var useMaxSilenceAtMaxSpeech: Bool = true
-        var chunkDuration: TimeInterval = Double(VadManager.chunkSize) / Double(VadManager.sampleRate)
     }
 
     static func run(arguments: [String]) async {
@@ -46,8 +35,8 @@ enum VadAnalyzeCommand {
             case "--help", "-h":
                 printUsage()
                 exit(0)
-            case "--mode":
-                options.mode = parseString(arguments, &index, transform: Mode.from) ?? options.mode
+            case "--streaming":
+                options.streaming = true
             case "--threshold":
                 options.threshold = parseString(arguments, &index, transform: Float.init)
             case "--debug":
@@ -78,10 +67,6 @@ enum VadAnalyzeCommand {
                 options.minSilenceAtMaxSpeech = parseDurationMillis(arguments, &index)
             case "--use-last-silence":
                 options.useMaxSilenceAtMaxSpeech = false
-            case "--chunk-ms":
-                if let value = parseString(arguments, &index, transform: Double.init) {
-                    options.chunkDuration = max(0.01, value / 1000.0)
-                }
             default:
                 if arg.hasPrefix("--") {
                     logger.warning("Unknown option: \(arg)")
@@ -111,7 +96,7 @@ enum VadAnalyzeCommand {
 
             let segmentationConfig = buildSegmentationConfig(options: options)
 
-            if options.mode == .segmentation || options.mode == .both {
+            if !options.streaming {
                 await runSegmentation(
                     manager: manager,
                     samples: samples,
@@ -119,7 +104,7 @@ enum VadAnalyzeCommand {
                 )
             }
 
-            if options.mode == .streaming || options.mode == .both {
+            if options.streaming {
                 await runStreaming(
                     manager: manager,
                     samples: samples,
@@ -193,7 +178,7 @@ enum VadAnalyzeCommand {
         do {
             logger.info("📶 Running streaming simulation...")
             var state = await manager.makeStreamState()
-            let chunkSamples = max(1, Int(options.chunkDuration * Double(VadManager.sampleRate)))
+            let chunkSamples = VadManager.chunkSize
             var emittedEvents: [VadStreamEvent] = []
 
             for start in stride(from: 0, to: samples.count, by: chunkSamples) {
@@ -302,12 +287,11 @@ enum VadAnalyzeCommand {
                 fluidaudio vad-analyze <audio_file> [options]
 
             Options:
-                --mode <segmentation|streaming|both>    Select analysis mode (default: both)
+                --streaming                              Run streaming simulation instead of offline segmentation
                 --threshold <float>                      Override VAD probability threshold
                 --debug                                  Enable VadManager debug logging
                 --seconds                                Emit streaming timestamps in seconds
                 --time-resolution <int>                  Decimal precision when using --seconds (default: 1)
-                --chunk-ms <double>                      Streaming chunk size in milliseconds (default: 256)
                 --min-speech-ms <double>                 Minimum speech span considered valid
                 --min-silence-ms <double>                Required trailing silence duration
                 --max-speech-s <double>                  Maximum length of a single speech segment
@@ -319,8 +303,8 @@ enum VadAnalyzeCommand {
                 --use-last-silence                       Prefer the last candidate silence when splitting
 
             Examples:
-                fluidaudio vad-analyze audio.wav --mode segmentation
-                fluidaudio vad-analyze audio.wav --mode streaming --seconds --chunk-ms 128
+                fluidaudio vad-analyze audio.wav
+                fluidaudio vad-analyze audio.wav --streaming --seconds
             """
         )
     }
