@@ -12,8 +12,6 @@ enum VadAnalyzeCommand {
         var streaming: Bool = false
         var threshold: Float?
         var debug: Bool = false
-        var returnSeconds: Bool = false
-        var timeResolution: Int = 1
         var minSpeechDuration: TimeInterval?
         var minSilenceDuration: TimeInterval?
         var maxSpeechDuration: TimeInterval?
@@ -41,12 +39,6 @@ enum VadAnalyzeCommand {
                 options.threshold = parseString(arguments, &index, transform: Float.init)
             case "--debug":
                 options.debug = true
-            case "--seconds":
-                options.returnSeconds = true
-            case "--time-resolution":
-                if let value = parseString(arguments, &index, transform: Int.init) {
-                    options.timeResolution = max(0, value)
-                }
             case "--min-speech-ms":
                 options.minSpeechDuration = parseDurationMillis(arguments, &index)
             case "--min-silence-ms":
@@ -188,13 +180,12 @@ enum VadAnalyzeCommand {
                     chunk,
                     state: state,
                     config: config,
-                    returnSeconds: options.returnSeconds,
-                    timeResolution: options.timeResolution
+                    returnSeconds: true
                 )
                 state = result.state
                 if let event = result.event {
                     emittedEvents.append(event)
-                    logStreamEvent(event, returnSeconds: options.returnSeconds)
+                    logStreamEvent(event)
                 }
             }
 
@@ -208,13 +199,12 @@ enum VadAnalyzeCommand {
                         silenceChunk,
                         state: flushState,
                         config: config,
-                        returnSeconds: options.returnSeconds,
-                        timeResolution: options.timeResolution
+                        returnSeconds: true
                     )
                     flushState = flush.state
                     if let event = flush.event {
                         emittedEvents.append(event)
-                        logStreamEvent(event, returnSeconds: options.returnSeconds)
+                        logStreamEvent(event)
                     }
                     guardCounter += 1
                 }
@@ -227,9 +217,9 @@ enum VadAnalyzeCommand {
         }
     }
 
-    private static func logStreamEvent(_ event: VadStreamEvent, returnSeconds: Bool) {
+    private static func logStreamEvent(_ event: VadStreamEvent) {
         let label = event.isStart ? "Speech Start" : "Speech End"
-        if returnSeconds, let time = event.time {
+        if let time = event.time {
             let formatted = String(format: "%.3fs", time)
             logger.info("  • \(label) at \(formatted)")
         } else {
@@ -290,8 +280,6 @@ enum VadAnalyzeCommand {
                 --streaming                              Run streaming simulation instead of offline segmentation
                 --threshold <float>                      Override VAD probability threshold
                 --debug                                  Enable VadManager debug logging
-                --seconds                                Emit streaming timestamps in seconds
-                --time-resolution <int>                  Decimal precision when using --seconds (default: 1)
                 --min-speech-ms <double>                 Minimum speech span considered valid
                 --min-silence-ms <double>                Required trailing silence duration
                 --max-speech-s <double>                  Maximum length of a single speech segment
@@ -304,7 +292,7 @@ enum VadAnalyzeCommand {
 
             Examples:
                 fluidaudio vad-analyze audio.wav
-                fluidaudio vad-analyze audio.wav --streaming --seconds
+                fluidaudio vad-analyze audio.wav --streaming
             """
         )
     }

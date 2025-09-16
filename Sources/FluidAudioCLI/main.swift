@@ -39,7 +39,7 @@ func printUsage() {
 
             fluidaudio multi-stream audio1.wav audio2.wav
 
-            fluidaudio vad-analyze audio.wav --mode streaming --seconds
+            fluidaudio vad-analyze audio.wav --streaming
 
             fluidaudio download --dataset ami-sdm
         """

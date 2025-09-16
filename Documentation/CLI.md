@@ -43,14 +43,10 @@ swift run fluidaudio diarization-benchmark --dataset ami-sdm \
 
 ```bash
 # Offline segmentation with seconds output (default mode)
-swift run fluidaudio vad-analyze path/to/audio.wav --seconds
+swift run fluidaudio vad-analyze path/to/audio.wav
 
-# Streaming only with 128 ms chunks and a custom threshold
-swift run fluidaudio vad-analyze path/to/audio.wav \
-  --mode streaming --chunk-ms 128 --threshold 0.65 --min-silence-ms 400
-
-# Offline + streaming in one pass
-swift run fluidaudio vad-analyze path/to/audio.wav --mode both
+# Streaming only with 128 ms chunks and a custom threshold (timestamps emitted in seconds)
+swift run fluidaudio vad-analyze path/to/audio.wav --streaming --threshold 0.65 --min-silence-ms 400
 
 # Run VAD benchmark (mini50 dataset by default)
 swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3

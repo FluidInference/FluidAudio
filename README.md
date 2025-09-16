@@ -179,6 +179,24 @@ environment.
 
 ### VAD Quick Start (Offline Segmentation)
 
+Simple call to return chunk-level probabilities every 256 ms hop:
+
+```swift
+let results = try await manager.process(samples)
+for (index, chunk) in results.enumerated() {
+    print(
+        String(
+            format: "Chunk %02d: prob=%.3f, inference=%.4fs",
+            index,
+            chunk.probability,
+            chunk.processingTime
+        )
+    )
+}
+```
+
+The following are higher level APIs better suited to integrate with other systems
+
 ```swift
 import FluidAudio
 
@@ -202,30 +220,6 @@ Task {
     }
 }
 ```
-
-Need chunk-level probabilities or state for custom pipelines? Call `process(_:)`
-to inspect every 256 ms hop:
-
-```swift
-let results = try await manager.process(samples)
-for (index, chunk) in results.enumerated() {
-    print(
-        String(
-            format: "Chunk %02d: prob=%.3f, inference=%.4fs",
-            index,
-            chunk.probability,
-            chunk.processingTime
-        )
-    )
-}
-```
-
-Need buffered audio instead of timestamps? Call `segmentSpeechAudio(_:,config:)`
-to receive padded clips ready for ASR.
-
-Want to benchmark non-streaming performance? Grab the raw `VadResult` array
-from `manager.process(samples)` and compute RTFx as the ratio of audio seconds
-to the summed `processingTime` values.
 
 ### Streaming
 
@@ -267,10 +261,10 @@ Once you need to experiment with VAD-specific knobs directly, reach for:
 
 ```bash
 # Inspect offline segments (default mode)
-swift run fluidaudio vad-analyze path/to/audio.wav --seconds
+swift run fluidaudio vad-analyze path/to/audio.wav
 
-# Streaming simulation only
-swift run fluidaudio vad-analyze path/to/audio.wav --mode streaming --seconds
+# Streaming simulation only (timestamps printed in seconds by default)
+swift run fluidaudio vad-analyze path/to/audio.wav --streaming
 
 # Benchmark accuracy/precision trade-offs
 swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
@@ -279,7 +273,6 @@ swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
 `swift run fluidaudio vad-analyze --help` lists every tuning option, including
 negative-threshold overrides, max-speech splitting, padding, and chunk size.
 Offline mode also reports RTFx using the model's per-chunk processing time.
-Add `--mode both` if you want offline and streaming output together.
 
 ## Showcase
 

@@ -158,11 +158,10 @@ CLI commands below:
 
 ```bash
 # Inspect offline segments (default mode is offline only)
-swift run fluidaudio vad-analyze path/to/audio.wav --seconds
+swift run fluidaudio vad-analyze path/to/audio.wav
 
-# Streaming only, 128 ms chunks, tighter silence rules
-swift run fluidaudio vad-analyze path/to/audio.wav \
-  --mode streaming --chunk-ms 128 --min-silence-ms 300
+# Streaming only, 128 ms chunks, tighter silence rules (timestamps are emitted in seconds)
+swift run fluidaudio vad-analyze path/to/audio.wav --streaming --min-silence-ms 300
 
 # Run both offline + streaming in one pass
 swift run fluidaudio vad-analyze path/to/audio.wav --mode both
@@ -177,4 +176,3 @@ Offline runs emit an RTFx summary calculated from per-chunk inference time. Use
 `--mode both` if you also want to see streaming start/end events in the same run.
 
 Datasets for benchmarking can be fetched with `swift run fluidaudio download --dataset vad`.
-
