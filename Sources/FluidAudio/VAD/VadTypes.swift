@@ -45,6 +45,27 @@ public struct VadSegmentationConfig: Sendable {
         minSilenceAtMaxSpeech: TimeInterval = 0.098,
         useMaxPossibleSilenceAtMaxSpeech: Bool = true
     ) {
+        // Hard runtime guarantees (will trap in debug & release if violated)
+        precondition(minSpeechDuration >= 0, "minSpeechDuration must be non-negative")
+        precondition(minSilenceDuration >= 0, "minSilenceDuration must be non-negative")
+        precondition(maxSpeechDuration > 0, "maxSpeechDuration must be positive")
+        precondition(speechPadding >= 0, "speechPadding must be non-negative")
+        precondition(silenceThresholdForSplit >= 0 && silenceThresholdForSplit <= 1,
+                     "silenceThresholdForSplit must be in [0, 1]")
+        precondition(negativeThresholdOffset >= 0, "negativeThresholdOffset must be non-negative")
+        precondition(minSilenceAtMaxSpeech >= 0, "minSilenceAtMaxSpeech must be non-negative")
+
+        // Debug-only assertions for logical consistency
+        assert(minSpeechDuration <= maxSpeechDuration, "minSpeechDuration should not exceed maxSpeechDuration")
+        assert(minSilenceDuration <= maxSpeechDuration, "minSilenceDuration should not exceed maxSpeechDuration")
+        assert(speechPadding <= minSpeechDuration, "speechPadding is typically <= minSpeechDuration")
+
+        if let negative = negativeThreshold {
+            precondition(negative >= 0 && negative <= 1, "negativeThreshold must be in [0, 1]")
+            assert(negative <= silenceThresholdForSplit,
+                   "negativeThreshold is typically <= silenceThresholdForSplit to preserve hysteresis behavior")
+        }
+
         self.minSpeechDuration = minSpeechDuration
         self.minSilenceDuration = minSilenceDuration
         self.maxSpeechDuration = maxSpeechDuration
