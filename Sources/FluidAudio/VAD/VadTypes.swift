@@ -51,7 +51,9 @@ public struct VadState: Sendable {
     public let cellState: [Float]
     public let context: [Float]
 
-    public init(hiddenState: [Float], cellState: [Float], context: [Float] = Array(repeating: 0.0, count: contextLength)) {
+    public init(
+        hiddenState: [Float], cellState: [Float], context: [Float] = Array(repeating: 0.0, count: contextLength)
+    ) {
         self.hiddenState = hiddenState
         self.cellState = cellState
         self.context = context

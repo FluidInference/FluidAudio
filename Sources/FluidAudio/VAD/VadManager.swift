@@ -28,7 +28,6 @@ public actor VadManager {
 
     private var vadModel: MLModel?
 
-
     public var isAvailable: Bool {
         return vadModel != nil
     }
@@ -260,7 +259,7 @@ public actor VadManager {
                 let input = try MLDictionaryFeatureProvider(dictionary: [
                     "audio_input": audioArray,
                     "hidden_state": hiddenStateArray,
-                    "cell_state": cellStateArray
+                    "cell_state": cellStateArray,
                 ])
 
                 // Run prediction
@@ -270,30 +269,38 @@ public actor VadManager {
                     let contextPreview = inputState.context.prefix(4).map {
                         String(format: "%.4f", $0)
                     }.joined(separator: ", ")
-                    logger.debug("Submitting chunk: context head=[\(contextPreview)] firstSample=\(String(format: "%.4f", audioChunk.first ?? 0))")
+                    logger.debug(
+                        "Submitting chunk: context head=[\(contextPreview)] firstSample=\(String(format: "%.4f", audioChunk.first ?? 0))"
+                    )
                 }
 
                 // Extract outputs using flexible name matching (model outputs may include suffixes)
-                guard let vadOutputArray = featureValue(
-                    in: output,
-                    matchingSubstrings: ["vad_output"]
-                ) else {
+                guard
+                    let vadOutputArray = featureValue(
+                        in: output,
+                        matchingSubstrings: ["vad_output"]
+                    )
+                else {
                     logger.error("No vad output found")
                     throw VadError.modelProcessingFailed("No VAD output")
                 }
 
-                guard let newHiddenStateArray = featureValue(
-                    in: output,
-                    matchingSubstrings: ["new_hidden_state"]
-                ) else {
+                guard
+                    let newHiddenStateArray = featureValue(
+                        in: output,
+                        matchingSubstrings: ["new_hidden_state"]
+                    )
+                else {
                     logger.error("No new hidden state output found")
                     throw VadError.modelProcessingFailed("No new hidden state output")
                 }
 
-                guard let newCellStateArray = featureValue(
-                    in: output,
-                    matchingSubstrings: ["new_cell_state"]
-                ) else {
+                guard
+                    let newCellStateArray = featureValue(
+                        in: output,
+                        matchingSubstrings: ["new_cell_state"]
+                    )
+                else {
                     logger.error("No new cell state output found")
                     throw VadError.modelProcessingFailed("No new cell state output")
                 }
@@ -324,7 +331,8 @@ public actor VadManager {
                     let outputPreview = (0..<outputPreviewCount).map {
                         String(format: "%.4f", Float(truncating: vadOutputArray[$0]))
                     }.joined(separator: ", ")
-                    logger.debug("vad_output preview=[\(outputPreview)] probability=\(String(format: "%.4f", probability))")
+                    logger.debug(
+                        "vad_output preview=[\(outputPreview)] probability=\(String(format: "%.4f", probability))")
                     let hiddenPreview = newHiddenState.prefix(4).map {
                         String(format: "%.4f", $0)
                     }.joined(separator: ", ")
@@ -364,7 +372,7 @@ public actor VadManager {
 
     /// Process audio samples using adaptive batch processing for optimal performance
     internal func processAudioSamples(_ audioData: [Float]) async throws -> [VadResult] {
-        
+
         // Split audio into chunks of chunkSize (4096 samples) as model is optimized for this size
         var audioChunks: [[Float]] = []
         for i in stride(from: 0, to: audioData.count, by: Self.chunkSize) {
