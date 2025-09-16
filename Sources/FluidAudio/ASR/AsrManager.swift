@@ -200,7 +200,7 @@ public final class AsrManager {
             cellState: decoderState.cellState
         )
 
-        let initDecoderOutput = try await decoderModel.prediction(
+        let initDecoderOutput = try decoderModel.prediction(
             from: initDecoderInput, options: predictionOptions)
 
         decoderState.update(from: initDecoderOutput)
