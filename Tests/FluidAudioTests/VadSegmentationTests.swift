@@ -98,11 +98,14 @@ final class VadSegmentationTests: XCTestCase {
 
     func testExactlyMaxDurationSegment() async throws {
         let vad = VadManager(skipModelLoading: true)
-        let cfg = VadSegmentationConfig(minSpeechDuration: 0.15, maxSpeechDuration: 5.0)
         let (res, total) = makeVadResults([(true, 5.0)])
+        let chunkDuration = Double(VadManager.chunkSize) / Double(VadManager.sampleRate)
+        let exactDuration = chunkDuration * Double(res.count)
+        let cfg = VadSegmentationConfig(minSpeechDuration: 0.15, maxSpeechDuration: exactDuration)
         let segments = await vad.segmentSpeech(from: res, totalSamples: total, config: cfg)
         XCTAssertEqual(segments.count, 1)
-        XCTAssertLessThanOrEqual(segments[0].endTime - segments[0].startTime, 5.1)
+        let duration = segments[0].endTime - segments[0].startTime
+        XCTAssertEqual(duration, exactDuration, accuracy: chunkDuration)
     }
 
     func testAlternatingSpeechSilence() async throws {

@@ -42,7 +42,10 @@ AVERAGE                   | 5.6    | 2.3    | 142.6   | 6545.5s  | 607       | 2
 
 ## Voice Activity Detection
 
-![assets/vad-graph.png](assets/vad-graph.png)
+Model is nearly identical to the base model in terms of quality, perforamnce wise we see an up to ~3.5x improvement compared to the silero Pytorch VAD model with the 256ms batch model (8 chunks of 32ms)
+
+![VAD/speed.png](VAD/speed.png)
+![VAD/correlation.png](VAD/correlation.png)
 
 Dataset: https://github.com/Lab41/VOiCES-subset
 
