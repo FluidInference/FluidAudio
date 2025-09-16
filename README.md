@@ -201,6 +201,23 @@ Task {
 }
 ```
 
+Need chunk-level probabilities or state for custom pipelines? Call `process(_:)`
+to inspect every 256 ms hop:
+
+```swift
+let results = try await manager.process(samples)
+for (index, chunk) in results.enumerated() {
+    print(
+        String(
+            format: "Chunk %02d: prob=%.3f, inference=%.4fs",
+            index,
+            chunk.probability,
+            chunk.processingTime
+        )
+    )
+}
+```
+
 Need buffered audio instead of timestamps? Call `segmentSpeechAudio(_:,config:)`
 to receive padded clips ready for ASR.
 
@@ -236,6 +253,15 @@ Task {
 ```
 
 ### CLI
+
+Start with the general-purpose `process` command, which runs the diarization
+pipeline (and therefore VAD) end-to-end on a single file:
+
+```bash
+swift run fluidaudio process path/to/audio.wav
+```
+
+Once you need to experiment with VAD-specific knobs directly, reach for:
 
 ```bash
 # Inspect offline segments (default mode)

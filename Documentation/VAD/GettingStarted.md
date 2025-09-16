@@ -47,6 +47,23 @@ Task {
 }
 ```
 
+Need chunk-level probabilities for each 256 ms hop? Use `process(_:)` and inspect
+`VadResult` directly:
+
+```swift
+let results = try await manager.process(samples)
+for (index, chunk) in results.enumerated() {
+    print(
+        String(
+            format: "Chunk %02d: prob=%.3f, inference=%.4fs",
+            index,
+            chunk.probability,
+            chunk.processingTime
+        )
+    )
+}
+```
+
 Key knobs in `VadSegmentationConfig`:
 - `minSpeechDuration`: discard very short bursts.
 - `minSilenceDuration`: silence length required to close a segment.
@@ -113,7 +130,15 @@ Notes:
 
 ## CLI
 
-Use the CLI to experiment with the same segmentation and streaming heuristics:
+Start with the general-purpose `process` command, which runs the diarization
+pipeline (and therefore VAD) end-to-end on a single file:
+
+```bash
+swift run fluidaudio process path/to/audio.wav
+```
+
+Once you need to experiment with the VAD-specific heuristics directly, use the
+CLI commands below:
 
 ```bash
 # Inspect offline segments (default mode is offline only)
