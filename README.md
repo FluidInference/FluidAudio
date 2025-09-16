@@ -248,3 +248,21 @@ Wewpeaker: https://github.com/wenet-e2e/wespeaker
 Parakeet-mlx: https://github.com/senstella/parakeet-mlx
 
 silero-vad: https://github.com/snakers4/silero-vad
+
+### Citation
+
+If you use FluidAudio in your work, please cite:
+
+FluidInference Team. (2024). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.5.1) [Computer software]. GitHub. https://github.com/FluidInference/FluidAudio
+
+```bibtex
+@software{FluidInferenceTeam_FluidAudio_2024,
+  author = {{FluidInference Team}},
+  title = {{FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms}},
+  year = {2024},
+  month = {12},
+  version = {0.5.1},
+  url = {https://github.com/FluidInference/FluidAudio},
+  note = {Computer software}
+}
+```
