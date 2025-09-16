@@ -101,7 +101,13 @@ final class VadTests: XCTestCase {
             (0..<512).map { i in sin(2 * .pi * 440 * Float(i) / 16000) },  // Tone
         ]
 
-        let results = try await vad.processBatch(chunks)
+        var results: [VadResult] = []
+        var state: VadState? = nil
+        for chunk in chunks {
+            let result = try await vad.processChunk(chunk, inputState: state)
+            results.append(result)
+            state = result.outputState
+        }
 
         XCTAssertEqual(results.count, 3, "Should process all chunks")
 
@@ -235,7 +241,11 @@ final class VadTests: XCTestCase {
         let chunks = Array(repeating: chunk, count: batchSize)
 
         let batchStartTime = Date()
-        _ = try await vad.processBatch(chunks)
+        var state: VadState? = nil
+        for chunk in chunks {
+            let result = try await vad.processChunk(chunk, inputState: state)
+            state = result.outputState
+        }
         let batchTime = Date().timeIntervalSince(batchStartTime)
 
         // Batch should be reasonably efficient

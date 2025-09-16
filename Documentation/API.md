@@ -35,22 +35,20 @@ Main class for speaker diarization and "who spoke when" analysis.
 ## Voice Activity Detection
 
 ### VadManager
-Voice activity detection using the Silero VAD Core ML model with high-throughput batch execution and ANE optimizations.
+Voice activity detection using the Silero VAD Core ML model with 256 ms unified inference and ANE optimizations.
 
 **Key Methods:**
 - `process(_ url: URL) async throws -> [VadResult]`
-  - Process an audio file end-to-end. Automatically converts to 16kHz mono Float32 and processes in 512-sample frames.
+  - Process an audio file end-to-end. Automatically converts to 16kHz mono Float32 and processes in 4096-sample frames (256 ms).
 - `process(_ buffer: AVAudioPCMBuffer) async throws -> [VadResult]`
   - Convert and process an in-memory buffer. Supports any input format; resampled to 16kHz mono internally.
 - `process(_ samples: [Float]) async throws -> [VadResult]`
   - Process pre-converted 16kHz mono samples.
-- `processChunk(_:) async throws -> VadResult`
-  - Process a single 512-sample frame (32 ms at 16 kHz).
-- `processBatch(_:) async throws -> [VadResult]`
-  - Process multiple frames in one call for maximum throughput.
+- `processChunk(_:inputState:) async throws -> VadResult`
+  - Process a single 4096-sample frame (256 ms at 16 kHz) with optional recurrent state.
 
 **Constants:**
-- `VadManager.chunkSize = 512`  // samples per frame (32 ms @ 16 kHz)
+- `VadManager.chunkSize = 4096`  // samples per frame (256 ms @ 16 kHz, plus 64-sample context managed internally)
 - `VadManager.sampleRate = 16000`
 
 **Configuration (`VadConfig`):**
@@ -63,8 +61,8 @@ Recommended threshold ranges depend on your acoustic conditions:
 - Noisy/mixed content: 0.3–0.6 (higher recall, more false positives)
 
 **Performance:**
-- Optimized for Apple Neural Engine (ANE) with aligned `MLMultiArray` buffers, silent-frame short-circuiting, and batched inference (adaptive batches up to 50 frames with buffer-pool cleanup).
-- Significantly improved real-time factor (RTFx) vs. prior versions; on Apple Silicon, VAD commonly runs orders of magnitude faster than real-time depending on input sizes and batching.
+- Optimized for Apple Neural Engine (ANE) with aligned `MLMultiArray` buffers, silent-frame short-circuiting, and recurrent state reuse (hidden/cell/context) for sequential inference.
+- Significantly improved throughput by processing 8×32 ms audio windows in a single Core ML call.
 
 ## Automatic Speech Recognition
 
