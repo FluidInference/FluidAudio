@@ -2,12 +2,12 @@ import Foundation
 
 @testable import FluidAudio
 
-// Deterministic VAD results builder (32ms chunks at 16kHz)
+// Deterministic VAD results builder (256ms chunks at 16kHz)
 // Shared for use across multiple VAD-related tests.
 func makeVadResults(_ pattern: [(isActive: Bool, seconds: Double)]) -> ([VadResult], Int) {
-    // Match VadManager expectations: 512-sample chunks at 16kHz
-    let chunkSize = 512
-    let sampleRate = 16000.0
+    // Match VadManager expectations: 4096-sample chunks at 16kHz
+    let chunkSize = VadManager.chunkSize
+    let sampleRate = Double(VadManager.sampleRate)
     let chunkDuration = Double(chunkSize) / sampleRate
 
     var results: [VadResult] = []

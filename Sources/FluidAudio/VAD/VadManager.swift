@@ -163,23 +163,6 @@ public actor VadManager {
         }
 
         let nextContext = Array(processedChunk.suffix(Self.contextSize))
-
-        // Check for completely silent audio first - no need to process through model
-        if isSilentAudio(processedChunk) {
-            let processingTime = Date().timeIntervalSince(processingStartTime)
-            let silentState = VadState(
-                hiddenState: currentState.hiddenState,
-                cellState: currentState.cellState,
-                context: nextContext
-            )
-            return VadResult(
-                probability: 0.0,
-                isVoiceActive: false,
-                processingTime: processingTime,
-                outputState: silentState
-            )
-        }
-
         // No normalization - preserve original amplitude information for VAD
 
         // Process through unified model
