@@ -1,10 +1,5 @@
-#if canImport(ESpeakNG) || canImport(CEspeakNG)
-
 #if canImport(ESpeakNG)
 import ESpeakNG
-#else
-import CEspeakNG
-#endif
 import Foundation
 
 /// Thread-safe wrapper around eSpeak NG C API to get IPA phonemes for a word.
@@ -49,53 +44,66 @@ final class EspeakG2P {
     static func findEspeakDataPath() -> String? {
         let fm = FileManager.default
 
-        func valid(_ path: String) -> String? {
-            let voices = URL(fileURLWithPath: path).appendingPathComponent("voices").path
-            return fm.fileExists(atPath: voices) ? path : nil
+        func valid(_ url: URL) -> String? {
+            let voices = url.appendingPathComponent("voices")
+            return fm.fileExists(atPath: voices.path) ? url.path : nil
         }
 
-        // 1. Check the embedded ESpeakNG.xcframework bundle first
-        #if canImport(ESpeakNG)
-        // Look for the framework in standard locations
-        let frameworkPaths = [
-            // Local project framework
-            "./Frameworks/ESpeakNG.xcframework/macos-arm64/ESpeakNG.framework/Resources/espeak-ng-data.bundle/espeak-ng-data",
-            "./Frameworks/ESpeakNG.xcframework/macos-arm64/ESpeakNG.framework/Versions/A/Resources/espeak-ng-data.bundle/espeak-ng-data",
-            "./Frameworks/ESpeakNG.xcframework/macos-arm64/ESpeakNG.framework/Versions/Current/Resources/espeak-ng-data.bundle/espeak-ng-data",
+        var candidates: [URL] = []
+
+        // Highest priority: explicit environment override
+        let envKeys = ["ESPEAKNG_DATA_PATH", "ESPEAKNG_DATA", "ESPEAK_DATA_PATH"]
+        for key in envKeys {
+            if let value = ProcessInfo.processInfo.environment[key], !value.isEmpty {
+                candidates.append(URL(fileURLWithPath: value))
+            }
+        }
+
+        // Preferred location: cache directory maintained by FluidAudio downloads
+        if let cacheBase = try? TtsModels.cacheDirectoryURL() {
+            let cacheCandidates = [
+                "Models/espeak-ng/espeak-ng-data",
+                "Models/espeak-ng/espeak-ng-data.bundle/espeak-ng-data",
+                "Models/kokoro/Resources/espeak-ng/espeak-ng-data.bundle/espeak-ng-data",
+                "Models/kokoro/espeak-ng-data",
+            ]
+            candidates.append(contentsOf: cacheCandidates.map { cacheBase.appendingPathComponent($0) })
+        }
+
+        // Check for system-wide installs (e.g. Homebrew or package managers)
+        let systemPaths = [
+            "/usr/local/share/espeak-ng-data",
+            "/opt/homebrew/share/espeak-ng-data",
+            "/usr/share/espeak-ng-data",
         ]
+        candidates.append(contentsOf: systemPaths.map { URL(fileURLWithPath: $0) })
 
-        // Convert relative paths to absolute
-        let cwd = fm.currentDirectoryPath
-        for relativePath in frameworkPaths {
-            let absolutePath = URL(fileURLWithPath: cwd).appendingPathComponent(relativePath).path
-            if let ok = valid(absolutePath) { return ok }
-        }
+        // Embedded framework/bundle (when the xcframework ships the data)
+        #if canImport(ESpeakNG)
+        let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
+        let frameworkRelative = [
+            "Frameworks/ESpeakNG.xcframework/macos-arm64/ESpeakNG.framework/Resources/espeak-ng-data.bundle/espeak-ng-data",
+            "Frameworks/ESpeakNG.xcframework/macos-arm64/ESpeakNG.framework/Versions/A/Resources/espeak-ng-data.bundle/espeak-ng-data",
+            "Frameworks/ESpeakNG.xcframework/macos-arm64/ESpeakNG.framework/Versions/Current/Resources/espeak-ng-data.bundle/espeak-ng-data",
+        ]
+        candidates.append(contentsOf: frameworkRelative.map { cwd.appendingPathComponent($0) })
 
-        // Try Bundle lookup
         if let bundle = Bundle(identifier: "org.espeak-ng.ESpeakNG") {
-            let bundleDataPath = bundle.bundlePath
-                .appending("/Resources/espeak-ng-data.bundle/espeak-ng-data")
-            if let ok = valid(bundleDataPath) { return ok }
-
-            // Also check Versions/A path structure
-            let versionedPath = bundle.bundlePath
-                .appending("/Versions/A/Resources/espeak-ng-data.bundle/espeak-ng-data")
-            if let ok = valid(versionedPath) { return ok }
+            let base = URL(fileURLWithPath: bundle.bundlePath)
+            let bundleCandidates = [
+                base.appendingPathComponent("Resources/espeak-ng-data.bundle/espeak-ng-data"),
+                base.appendingPathComponent("Versions/A/Resources/espeak-ng-data.bundle/espeak-ng-data"),
+            ]
+            candidates.append(contentsOf: bundleCandidates)
         }
         #endif
 
-        // 2. Fallback to local Resources directory if it exists
-        let localResources = URL(fileURLWithPath: fm.currentDirectoryPath)
-            .appendingPathComponent("Resources/espeak-ng-data")
-        if let ok = valid(localResources.path) { return ok }
-
-        // 3. Finally check the models cache (download from HF)
-        if let base = try? TtsModels.cacheDirectoryURL() {
-            let models = base.appendingPathComponent("Models/kokoro/Resources/espeak-ng/espeak-ng-data.bundle/espeak-ng-data")
-            if let ok = valid(models.path) { return ok }
+        for candidate in candidates {
+            if let ok = valid(candidate) {
+                return ok
+            }
         }
 
-        // Nothing found
         return nil
     }
 

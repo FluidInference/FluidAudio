@@ -482,16 +482,27 @@ public struct KokoroModel {
                     if oov.count >= 8 { break }
                 }
             }
-            #if canImport(ESpeakNG) || canImport(CEspeakNG)
-            if !oov.isEmpty && EspeakG2P.isDataAvailable() == false {
-                throw TTSError.processingFailed(
-                    "G2P (eSpeak NG) data missing but required for OOV words: \(Set(oov).sorted().prefix(5).joined(separator: ", ")). Ensure the eSpeak NG data bundle is available in the models cache (use DownloadUtils.ensureEspeakDataBundle)."
-                )
+            #if canImport(ESpeakNG)
+            if !oov.isEmpty {
+                if EspeakG2P.isDataAvailable() == false {
+                    do {
+                        let modelsDirectory = try TtsModels.cacheDirectoryURL().appendingPathComponent("Models")
+                        _ = try await DownloadUtils.ensureEspeakDataBundle(in: modelsDirectory)
+                    } catch {
+                        logger.warning("Failed to download eSpeak NG data: \(error.localizedDescription)")
+                    }
+                }
+
+                if EspeakG2P.isDataAvailable() == false {
+                    logger.warning(
+                        "G2P (eSpeak NG) data unavailable; skipping OOV words: \(Set(oov).sorted().prefix(5).joined(separator: ", "))"
+                    )
+                }
             }
             #else
             if !oov.isEmpty {
-                throw TTSError.processingFailed(
-                    "G2P (eSpeak NG) not included in this build but required for OOV words: \(Set(oov).sorted().prefix(5).joined(separator: ", "))."
+                logger.warning(
+                    "G2P (eSpeak NG) not included in this build; skipping OOV words: \(Set(oov).sorted().prefix(5).joined(separator: ", "))"
                 )
             }
             #endif
