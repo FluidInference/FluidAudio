@@ -56,15 +56,16 @@ final class VadStreamingTests: XCTestCase {
         let config = VadSegmentationConfig()
 
         // Trigger start event
-        state = (await vad.streamingStateMachine(
-            probability: 0.9,
-            chunkSampleCount: VadManager.chunkSize,
-            modelState: state.modelState,
-            state: state,
-            config: config,
-            returnSeconds: true,
-            timeResolution: 2
-        )).state
+        state =
+            (await vad.streamingStateMachine(
+                probability: 0.9,
+                chunkSampleCount: VadManager.chunkSize,
+                modelState: state.modelState,
+                state: state,
+                config: config,
+                returnSeconds: true,
+                timeResolution: 2
+            )).state
 
         var endEvent: VadStreamEvent?
         for _ in 0..<5 {

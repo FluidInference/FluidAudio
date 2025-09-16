@@ -587,7 +587,8 @@ final class VadTests: XCTestCase {
         }
         let (vadResults, totalSamples) = makeVadResults(pattern)
         let segments = await vad.segmentSpeech(from: vadResults, totalSamples: totalSamples, config: segConfig)
-        XCTAssertGreaterThanOrEqual(segments.count, 1, "Chunk resolution may merge short silences, but at least one segment should remain")
+        XCTAssertGreaterThanOrEqual(
+            segments.count, 1, "Chunk resolution may merge short silences, but at least one segment should remain")
     }
 
     func testCustomSegmentationConfig() async throws {

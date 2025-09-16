@@ -67,7 +67,8 @@ extension VadManager {
                 nextState.tempEndSample = nextState.processedSamples
             }
             if let silenceStart = nextState.tempEndSample,
-               nextState.processedSamples - silenceStart >= minSilenceSamples {
+                nextState.processedSamples - silenceStart >= minSilenceSamples
+            {
                 let rawEnd = silenceStart + speechPadSamples - chunkSampleCount
                 let endSample = max(0, rawEnd)
                 nextState.triggered = false

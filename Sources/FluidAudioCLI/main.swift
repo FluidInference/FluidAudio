@@ -66,49 +66,17 @@ Task {
     case "vad-benchmark":
         await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
     case "vad-analyze":
-        if #available(macOS 13.0, *) {
-            await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            cliLogger.error("VAD analysis requires macOS 13.0 or later")
-            exit(1)
-        }
+        await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "asr-benchmark":
-        cliLogger.debug("asr-benchmark command received")
-        if #available(macOS 13.0, *) {
-            cliLogger.debug("macOS version check passed")
-            await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            cliLogger.error("ASR benchmark requires macOS 13.0 or later")
-            exit(1)
-        }
+        await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
     case "fleurs-benchmark":
-        if #available(macOS 13.0, *) {
-            await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            cliLogger.error("FLEURS benchmark requires macOS 13.0 or later")
-            exit(1)
-        }
+        await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
     case "transcribe":
-        if #available(macOS 13.0, *) {
-            await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            cliLogger.error("Transcribe requires macOS 13.0 or later")
-            exit(1)
-        }
+        await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":
-        if #available(macOS 13.0, *) {
-            await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            cliLogger.error("Multi-stream requires macOS 13.0 or later")
-            exit(1)
-        }
+        await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "diarization-benchmark":
-        if #available(macOS 13.0, *) {
-            await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            cliLogger.error("Diarization benchmark requires macOS 13.0 or later")
-            exit(1)
-        }
+        await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
     case "process":
         await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "download":
