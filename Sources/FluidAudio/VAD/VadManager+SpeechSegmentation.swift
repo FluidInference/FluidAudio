@@ -18,9 +18,9 @@ extension VadManager {
         return await segmentSpeech(from: vadResults, totalSamples: samples.count, config: config)
     }
 
-    /// Internal helper to segment precomputed VAD results without running the model.
-    /// Useful for unit testing the splitting/merging logic deterministically.
-    internal func segmentSpeech(
+    /// Segment precomputed VAD results without re-running the model.
+    /// Can be used with `process(_:)` to compute metrics (e.g., RTF) alongside segmentation.
+    public func segmentSpeech(
         from vadResults: [VadResult],
         totalSamples: Int,
         config: VadSegmentationConfig = .default

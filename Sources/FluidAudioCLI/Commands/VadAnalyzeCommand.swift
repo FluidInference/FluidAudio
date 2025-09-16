@@ -19,7 +19,7 @@ enum VadAnalyzeCommand {
 
     private struct Options {
         var audioPath: String?
-        var mode: Mode = .both
+        var mode: Mode = .segmentation
         var threshold: Float?
         var debug: Bool = false
         var returnSeconds: Bool = false
@@ -140,12 +140,34 @@ enum VadAnalyzeCommand {
     ) async {
         do {
             logger.info("📍 Running offline speech segmentation...")
-            let start = Date()
-            let segments = try await manager.segmentSpeech(samples, config: config)
-            let duration = Date().timeIntervalSince(start)
+            let inferenceStart = Date()
+            let results = try await manager.process(samples)
+
+            let segments = await manager.segmentSpeech(
+                from: results,
+                totalSamples: samples.count,
+                config: config
+            )
+
+            let totalModelTime = results.reduce(0.0) { $0 + $1.processingTime }
+            let audioSeconds = Double(samples.count) / Double(VadManager.sampleRate)
+            let rtf = totalModelTime > 0 ? audioSeconds / totalModelTime : 0
+
+            let duration = Date().timeIntervalSince(inferenceStart)
             logger.info(
                 "Detected \(segments.count) speech segments in \(String(format: "%.2f", duration))s"
             )
+
+            if !results.isEmpty {
+                logger.info(
+                    String(
+                        format: "RTFx: %.2fx (audio: %.2fs, inference: %.2fs)",
+                        rtf,
+                        audioSeconds,
+                        totalModelTime
+                    )
+                )
+            }
 
             for (index, segment) in segments.enumerated() {
                 let startSample = segment.startSample(sampleRate: VadManager.sampleRate)

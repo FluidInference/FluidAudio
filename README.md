@@ -170,48 +170,88 @@ swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
 
 ## Voice Activity Detection (VAD)
 
-The current VAD APIs require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
+Silero VAD powers our on-device detector. The latest release surfaces the same
+timestamp extraction and streaming heuristics as the upstream PyTorch
+implementation. Ping us on Discord if you need help tuning it for your
+environment.
 
-Our goal is to provide a streamlined API similar to Apple's upcoming SpeechDetector in [OS26](https://developer.apple.com/documentation/speech/speechdetector).
-
-### VAD Quick Start
+### VAD Quick Start (Offline Segmentation)
 
 ```swift
 import FluidAudio
 
-// Programmatic VAD over an audio file
 Task {
-    // 1) Initialize VAD (async loads Silero model)
-    let vad = try await VadManager(
-        config: VadConfig(threshold: 0.85) // tune per environment
+    let manager = try await VadManager(
+        config: VadConfig(threshold: 0.75)
     )
 
-    // 2) Process file directly (auto-converts to 16 kHz mono)
-    let url = URL(fileURLWithPath: "path/to/audio.wav")
-    let results = try await vad.process(url)
+    let audioURL = URL(fileURLWithPath: "path/to/audio.wav")
+    let samples = try AudioConverter().resampleAudioFile(audioURL)
 
-    // 3) Convert per-frame decisions into segments (512-sample frames)
-    let sampleRate = 16000.0
-    let frame = 512.0
+    var segmentation = VadSegmentationConfig.default
+    segmentation.minSpeechDuration = 0.25
+    segmentation.minSilenceDuration = 0.4
 
-    var startIndex: Int? = nil
-    for (i, r) in results.enumerated() {
-        if r.isVoiceActive {
-            startIndex = startIndex ?? i
-        } else if let s = startIndex {
-            let startSec = (Double(s) * frame) / sampleRate
-            let endSec = (Double(i + 1) * frame) / sampleRate
-            print(String(format: "Speech: %.2f–%.2fs", startSec, endSec))
-            startIndex = nil
+    let segments = try await manager.segmentSpeech(samples, config: segmentation)
+    for segment in segments {
+        print(
+            String(format: "Speech %.2f–%.2fs", segment.startTime, segment.endTime)
+        )
+    }
+}
+```
+
+Need buffered audio instead of timestamps? Call `segmentSpeechAudio(_:,config:)`
+to receive padded clips ready for ASR.
+
+Want to benchmark non-streaming performance? Grab the raw `VadResult` array
+from `manager.process(samples)` and compute RTFx as the ratio of audio seconds
+to the summed `processingTime` values.
+
+### Streaming
+
+```swift
+import FluidAudio
+
+Task {
+    let manager = try await VadManager()
+    var state = await manager.makeStreamState()
+
+    for chunk in microphoneChunks {
+        let result = try await manager.processStreamingChunk(
+            chunk,
+            state: state,
+            config: .default,
+            returnSeconds: true,
+            timeResolution: 2
+        )
+
+        state = result.state
+        if let event = result.event {
+            let label = event.kind == .speechStart ? "Start" : "End"
+            print("\(label) @ \(event.time ?? 0)s")
         }
     }
 }
 ```
 
+### CLI
+
 ```bash
-# Run VAD benchmark (mini50 dataset by default)
+# Inspect offline segments (default mode)
+swift run fluidaudio vad-analyze path/to/audio.wav --seconds
+
+# Streaming simulation only
+swift run fluidaudio vad-analyze path/to/audio.wav --mode streaming --seconds
+
+# Benchmark accuracy/precision trade-offs
 swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
 ```
+
+`swift run fluidaudio vad-analyze --help` lists every tuning option, including
+negative-threshold overrides, max-speech splitting, padding, and chunk size.
+Offline mode also reports RTFx using the model's per-chunk processing time.
+Add `--mode both` if you want offline and streaming output together.
 
 ## Showcase
 
