@@ -23,6 +23,8 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <!-- Add your app: submit logo via PR -->
 </p>
 
+Wawnt to convert your own model? Check [möbius](https://github.com/FluidInference/mobius)
+
 ## Highlights
 
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for transcription; supports all 25 European languages
