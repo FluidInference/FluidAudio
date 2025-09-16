@@ -1,4 +1,5 @@
 #if os(macOS)
+import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -21,6 +22,7 @@ enum VadAnalyzeCommand {
         var negativeThresholdOffset: Float?
         var minSilenceAtMaxSpeech: TimeInterval?
         var useMaxSilenceAtMaxSpeech: Bool = true
+        var exportPath: String?
     }
 
     static func run(arguments: [String]) async {
@@ -59,6 +61,11 @@ enum VadAnalyzeCommand {
                 options.minSilenceAtMaxSpeech = parseDurationMillis(arguments, &index)
             case "--use-last-silence":
                 options.useMaxSilenceAtMaxSpeech = false
+            case "--export-wav":
+                options.exportPath = parseString(arguments, &index) { raw in
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }
             default:
                 if arg.hasPrefix("--") {
                     logger.warning("Unknown option: \(arg)")
@@ -88,12 +95,23 @@ enum VadAnalyzeCommand {
 
             let segmentationConfig = buildSegmentationConfig(options: options)
 
-            if !options.streaming {
-                await runSegmentation(
+            let shouldRunSegmentation = !options.streaming || options.exportPath != nil
+            var segments: [VadSegment] = []
+
+            if shouldRunSegmentation {
+                segments = await runSegmentation(
                     manager: manager,
                     samples: samples,
                     config: segmentationConfig
                 )
+
+                if let exportPath = options.exportPath {
+                    exportSpeechSegments(
+                        segments: segments,
+                        samples: samples,
+                        destinationPath: exportPath
+                    )
+                }
             }
 
             if options.streaming {
@@ -114,7 +132,7 @@ enum VadAnalyzeCommand {
         manager: VadManager,
         samples: [Float],
         config: VadSegmentationConfig
-    ) async {
+    ) async -> [VadSegment] {
         do {
             logger.info("📍 Running offline speech segmentation...")
             let inferenceStart = Date()
@@ -156,9 +174,135 @@ enum VadAnalyzeCommand {
                         + String(format: "%.2fs-%.2fs", startTime, endTime) + ")"
                 )
             }
+            return segments
         } catch {
             logger.error("Segmentation failed: \(error)")
+            return []
         }
+    }
+
+    private enum ExportError: Error {
+        case failedToCreateBuffer
+        case failedToAccessChannelData
+    }
+
+    private static func exportSpeechSegments(
+        segments: [VadSegment],
+        samples: [Float],
+        destinationPath: String
+    ) {
+        guard !segments.isEmpty else {
+            logger.info("No speech segments detected; nothing to export")
+            return
+        }
+
+        let sampleRate = VadManager.sampleRate
+
+        var totalSamples = 0
+        var ranges: [Range<Int>] = []
+        ranges.reserveCapacity(segments.count)
+
+        for segment in segments {
+            guard
+                let range = clampedRange(
+                    for: segment,
+                    sampleCount: samples.count,
+                    sampleRate: sampleRate
+                )
+            else { continue }
+            ranges.append(range)
+            totalSamples += range.count
+        }
+
+        guard totalSamples > 0 else {
+            logger.info("Speech segments were zero-length after clamping; nothing to export")
+            return
+        }
+
+        var concatenated = [Float]()
+        concatenated.reserveCapacity(totalSamples)
+
+        for range in ranges {
+            concatenated.append(contentsOf: samples[range])
+        }
+
+        do {
+            let expandedPath = (destinationPath as NSString).expandingTildeInPath
+            try writeWav(samples: concatenated, sampleRate: sampleRate, to: expandedPath)
+            let durationSeconds = Double(concatenated.count) / Double(sampleRate)
+            logger.info(
+                "Saved \(segments.count) speech segments to \(expandedPath) (~\(String(format: "%.2f", durationSeconds))s)"
+            )
+        } catch {
+            logger.error("Failed to export speech segments: \(error)")
+        }
+    }
+
+    private static func clampedRange(
+        for segment: VadSegment,
+        sampleCount: Int,
+        sampleRate: Int
+    ) -> Range<Int>? {
+        guard sampleCount > 0 else { return nil }
+        let startSample = segment.startSample(sampleRate: sampleRate)
+        let endSample = segment.endSample(sampleRate: sampleRate)
+        let clampedStart = max(0, min(startSample, sampleCount))
+        let clampedEnd = max(clampedStart, min(endSample, sampleCount))
+        return clampedStart < clampedEnd ? clampedStart..<clampedEnd : nil
+    }
+
+    private static func writeWav(samples: [Float], sampleRate: Int, to path: String) throws {
+        guard !samples.isEmpty else { return }
+
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: Double(sampleRate),
+                channels: 1,
+                interleaved: false
+            )
+        else {
+            throw ExportError.failedToCreateBuffer
+        }
+
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            )
+        else {
+            throw ExportError.failedToCreateBuffer
+        }
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+
+        guard let channelData = buffer.floatChannelData else {
+            throw ExportError.failedToAccessChannelData
+        }
+
+        samples.withUnsafeBufferPointer { pointer in
+            guard let base = pointer.baseAddress else { return }
+            channelData[0].update(from: base, count: samples.count)
+        }
+
+        let url = URL(fileURLWithPath: path)
+        let directoryURL = url.deletingLastPathComponent()
+        if !directoryURL.path.isEmpty && directoryURL.path != "." {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+        }
+
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+
+        let audioFile = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings
+        )
+        try audioFile.write(from: buffer)
     }
 
     private static func runStreaming(
@@ -289,6 +433,7 @@ enum VadAnalyzeCommand {
                 --neg-offset <float>                     Offset from threshold for negative threshold
                 --min-silence-max-ms <double>            Silence guard used when hitting max speech duration
                 --use-last-silence                       Prefer the last candidate silence when splitting
+                --export-wav <path>                      Write detected speech segments to a single WAV file
 
             Examples:
                 fluidaudio vad-analyze audio.wav

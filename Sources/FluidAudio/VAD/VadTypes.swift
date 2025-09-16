@@ -50,8 +50,9 @@ public struct VadSegmentationConfig: Sendable {
         precondition(minSilenceDuration >= 0, "minSilenceDuration must be non-negative")
         precondition(maxSpeechDuration > 0, "maxSpeechDuration must be positive")
         precondition(speechPadding >= 0, "speechPadding must be non-negative")
-        precondition(silenceThresholdForSplit >= 0 && silenceThresholdForSplit <= 1,
-                     "silenceThresholdForSplit must be in [0, 1]")
+        precondition(
+            silenceThresholdForSplit >= 0 && silenceThresholdForSplit <= 1,
+            "silenceThresholdForSplit must be in [0, 1]")
         precondition(negativeThresholdOffset >= 0, "negativeThresholdOffset must be non-negative")
         precondition(minSilenceAtMaxSpeech >= 0, "minSilenceAtMaxSpeech must be non-negative")
 
@@ -62,8 +63,9 @@ public struct VadSegmentationConfig: Sendable {
 
         if let negative = negativeThreshold {
             precondition(negative >= 0 && negative <= 1, "negativeThreshold must be in [0, 1]")
-            assert(negative <= silenceThresholdForSplit,
-                   "negativeThreshold is typically <= silenceThresholdForSplit to preserve hysteresis behavior")
+            assert(
+                negative <= silenceThresholdForSplit,
+                "negativeThreshold is typically <= silenceThresholdForSplit to preserve hysteresis behavior")
         }
 
         self.minSpeechDuration = minSpeechDuration
