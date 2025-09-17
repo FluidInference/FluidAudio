@@ -56,17 +56,19 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 ### Documentation Index
 
 - Guides
-  - [MCP](Documentation/Guides/MCP.md)
   - [Audio Conversion for Inference](Documentation/Guides/AudioConversion.md)
-- Modules
-  - ASR: [Getting Started](Documentation/ASR/GettingStarted.md)
-  - ASR: [Last Chunk Handling](Documentation/ASR/LastChunkHandling.md)
-  - Diarization: [Speaker Diarization Guide](Documentation/SpeakerDiarization.md)
+- Models
+  - Automatic Speech Recognition/Transcription
+    - [Getting Started](Documentation/ASR/GettingStarted.md)
+    - [Last Chunk Handling](Documentation/ASR/LastChunkHandling.md)
+  - Speaker Diarization
+    - [Speaker Diarization Guide](Documentation/SpeakerDiarization.md)
   - VAD: [Getting Started](Documentation/VAD/GettingStarted.md)
-- API
-  - [API Reference](Documentation/API.md)
-- CLI
-  - [Command Line Guide](Documentation/CLI.md)
+    - [Segmentation](Documentation/VAD/Segmentation.md)
+    - [Model Conversion Code](https://github.com/FluidInference/mobius)
+- [Benchmarks]([Documentation/Benchmarks.md])
+- [API Reference](Documentation/API.md)
+- [Command Line Guide](Documentation/CLI.md)
 
 ### MCP Server
 
@@ -172,48 +174,107 @@ swift run fluidaudio process meeting.wav --output results.json --threshold 0.6
 
 ## Voice Activity Detection (VAD)
 
-The current VAD APIs require careful tuning for your specific use case. If you need help integrating VAD, reach out in our Discord channel.
+Silero VAD powers our on-device detector. The latest release surfaces the same
+timestamp extraction and streaming heuristics as the upstream PyTorch
+implementation. Ping us on Discord if you need help tuning it for your
+environment.
 
-Our goal is to provide a streamlined API similar to Apple's upcoming SpeechDetector in [OS26](https://developer.apple.com/documentation/speech/speechdetector).
+### VAD Quick Start (Offline Segmentation)
 
-### VAD Quick Start
+Simple call to return chunk-level probabilities every 256 ms hop:
+
+```swift
+let results = try await manager.process(samples)
+for (index, chunk) in results.enumerated() {
+    print(
+        String(
+            format: "Chunk %02d: prob=%.3f, inference=%.4fs",
+            index,
+            chunk.probability,
+            chunk.processingTime
+        )
+    )
+}
+```
+
+The following are higher level APIs better suited to integrate with other systems
 
 ```swift
 import FluidAudio
 
-// Programmatic VAD over an audio file
 Task {
-    // 1) Initialize VAD (async loads Silero model)
-    let vad = try await VadManager(
-        config: VadConfig(threshold: 0.85) // tune per environment
+    let manager = try await VadManager(
+        config: VadConfig(threshold: 0.75)
     )
 
-    // 2) Process file directly (auto-converts to 16 kHz mono)
-    let url = URL(fileURLWithPath: "path/to/audio.wav")
-    let results = try await vad.process(url)
+    let audioURL = URL(fileURLWithPath: "path/to/audio.wav")
+    let samples = try AudioConverter().resampleAudioFile(audioURL)
 
-    // 3) Convert per-frame decisions into segments (512-sample frames)
-    let sampleRate = 16000.0
-    let frame = 512.0
+    var segmentation = VadSegmentationConfig.default
+    segmentation.minSpeechDuration = 0.25
+    segmentation.minSilenceDuration = 0.4
 
-    var startIndex: Int? = nil
-    for (i, r) in results.enumerated() {
-        if r.isVoiceActive {
-            startIndex = startIndex ?? i
-        } else if let s = startIndex {
-            let startSec = (Double(s) * frame) / sampleRate
-            let endSec = (Double(i + 1) * frame) / sampleRate
-            print(String(format: "Speech: %.2f–%.2fs", startSec, endSec))
-            startIndex = nil
+    let segments = try await manager.segmentSpeech(samples, config: segmentation)
+    for segment in segments {
+        print(
+            String(format: "Speech %.2f–%.2fs", segment.startTime, segment.endTime)
+        )
+    }
+}
+```
+
+### Streaming
+
+```swift
+import FluidAudio
+
+Task {
+    let manager = try await VadManager()
+    var state = await manager.makeStreamState()
+
+    for chunk in microphoneChunks {
+        let result = try await manager.processStreamingChunk(
+            chunk,
+            state: state,
+            config: .default,
+            returnSeconds: true,
+            timeResolution: 2
+        )
+
+        state = result.state
+        if let event = result.event {
+            let label = event.kind == .speechStart ? "Start" : "End"
+            print("\(label) @ \(event.time ?? 0)s")
         }
     }
 }
 ```
 
+### CLI
+
+Start with the general-purpose `process` command, which runs the diarization
+pipeline (and therefore VAD) end-to-end on a single file:
+
 ```bash
-# Run VAD benchmark (mini50 dataset by default)
+swift run fluidaudio process path/to/audio.wav
+```
+
+Once you need to experiment with VAD-specific knobs directly, reach for:
+
+```bash
+# Inspect offline segments (default mode)
+swift run fluidaudio vad-analyze path/to/audio.wav
+
+# Streaming simulation only (timestamps printed in seconds by default)
+swift run fluidaudio vad-analyze path/to/audio.wav --streaming
+
+# Benchmark accuracy/precision trade-offs
 swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
 ```
+
+`swift run fluidaudio vad-analyze --help` lists every tuning option, including
+negative-threshold overrides, max-speech splitting, padding, and chunk size.
+Offline mode also reports RTFx using the model's per-chunk processing time.
 
 ## Showcase
 
