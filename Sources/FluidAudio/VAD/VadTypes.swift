@@ -19,12 +19,17 @@ public struct VadConfig: Sendable {
     }
 }
 
+// See Documentation/VAD/Segmentation.md for details
 public struct VadSegmentationConfig: Sendable {
     public var minSpeechDuration: TimeInterval
     public var minSilenceDuration: TimeInterval
     public var maxSpeechDuration: TimeInterval
     public var speechPadding: TimeInterval
     public var silenceThresholdForSplit: Float
+    public var negativeThreshold: Float?
+    public var negativeThresholdOffset: Float
+    public var minSilenceAtMaxSpeech: TimeInterval
+    public var useMaxPossibleSilenceAtMaxSpeech: Bool
 
     public static let `default` = VadSegmentationConfig()
 
@@ -34,13 +39,53 @@ public struct VadSegmentationConfig: Sendable {
         // ASR model by default is 15s, for other models you may want to adjust this
         maxSpeechDuration: TimeInterval = 14.0,
         speechPadding: TimeInterval = 0.1,
-        silenceThresholdForSplit: Float = 0.3
+        silenceThresholdForSplit: Float = 0.3,
+        negativeThreshold: Float? = nil,
+        negativeThresholdOffset: Float = 0.15,
+        minSilenceAtMaxSpeech: TimeInterval = 0.098,
+        useMaxPossibleSilenceAtMaxSpeech: Bool = true
     ) {
+        // Hard runtime guarantees (will trap in debug & release if violated)
+        precondition(minSpeechDuration >= 0, "minSpeechDuration must be non-negative")
+        precondition(minSilenceDuration >= 0, "minSilenceDuration must be non-negative")
+        precondition(maxSpeechDuration > 0, "maxSpeechDuration must be positive")
+        precondition(speechPadding >= 0, "speechPadding must be non-negative")
+        precondition(
+            silenceThresholdForSplit >= 0 && silenceThresholdForSplit <= 1,
+            "silenceThresholdForSplit must be in [0, 1]")
+        precondition(negativeThresholdOffset >= 0, "negativeThresholdOffset must be non-negative")
+        precondition(minSilenceAtMaxSpeech >= 0, "minSilenceAtMaxSpeech must be non-negative")
+
+        // Debug-only assertions for logical consistency
+        assert(minSpeechDuration <= maxSpeechDuration, "minSpeechDuration should not exceed maxSpeechDuration")
+        assert(minSilenceDuration <= maxSpeechDuration, "minSilenceDuration should not exceed maxSpeechDuration")
+        assert(speechPadding <= minSpeechDuration, "speechPadding is typically <= minSpeechDuration")
+
+        if let negative = negativeThreshold {
+            precondition(negative >= 0 && negative <= 1, "negativeThreshold must be in [0, 1]")
+            assert(
+                negative <= silenceThresholdForSplit,
+                "negativeThreshold is typically <= silenceThresholdForSplit to preserve hysteresis behavior")
+        }
+
         self.minSpeechDuration = minSpeechDuration
         self.minSilenceDuration = minSilenceDuration
         self.maxSpeechDuration = maxSpeechDuration
         self.speechPadding = speechPadding
         self.silenceThresholdForSplit = silenceThresholdForSplit
+        self.negativeThreshold = negativeThreshold
+        self.negativeThresholdOffset = negativeThresholdOffset
+        self.minSilenceAtMaxSpeech = minSilenceAtMaxSpeech
+        self.useMaxPossibleSilenceAtMaxSpeech = useMaxPossibleSilenceAtMaxSpeech
+    }
+
+    /// Resolve the working negative threshold used for hysteresis when we only know the positive threshold.
+    /// Mirrors Silero's heuristic of subtracting a fixed offset, but keeps an override escape hatch.
+    public func effectiveNegativeThreshold(baseThreshold: Float) -> Float {
+        if let override = negativeThreshold {
+            return override
+        }
+        return max(baseThreshold - negativeThresholdOffset, 0.01)
     }
 }
 
@@ -114,6 +159,59 @@ public struct VadSegment: Sendable {
     ) {
         self.startTime = startTime
         self.endTime = endTime
+    }
+}
+
+public struct VadStreamState: Sendable {
+    public var modelState: VadState
+    public var triggered: Bool
+    public var tempEndSample: Int?
+    public var processedSamples: Int
+
+    public init(
+        modelState: VadState = .initial(),
+        triggered: Bool = false,
+        tempEndSample: Int? = nil,
+        processedSamples: Int = 0
+    ) {
+        self.modelState = modelState
+        self.triggered = triggered
+        self.tempEndSample = tempEndSample
+        self.processedSamples = processedSamples
+    }
+
+    public static func initial() -> VadStreamState {
+        VadStreamState()
+    }
+}
+
+public struct VadStreamEvent: Sendable {
+    public enum Kind: Sendable {
+        case speechStart
+        case speechEnd
+    }
+
+    public let kind: Kind
+    public let sampleIndex: Int
+    public let time: TimeInterval?
+
+    public init(kind: Kind, sampleIndex: Int, time: TimeInterval? = nil) {
+        self.kind = kind
+        self.sampleIndex = sampleIndex
+        self.time = time
+    }
+
+    public var isStart: Bool { kind == .speechStart }
+    public var isEnd: Bool { kind == .speechEnd }
+}
+
+public struct VadStreamResult: Sendable {
+    public let state: VadStreamState
+    public let event: VadStreamEvent?
+
+    public init(state: VadStreamState, event: VadStreamEvent?) {
+        self.state = state
+        self.event = event
     }
 }
 

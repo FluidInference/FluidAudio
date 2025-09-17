@@ -36,6 +36,10 @@ public actor VadManager {
 
     /// Process an entire audio source from a file URL.
     /// Automatically converts the audio to 16kHz mono Float32 and processes in 4096-sample chunks (256ms).
+    /// ```swift
+    /// let manager = try await VadManager()
+    /// let results = try await manager.process(audioURL)
+    /// ```
     /// - Parameter url: Audio file URL
     /// - Returns: Array of per-chunk VAD results
     public func process(_ url: URL) async throws -> [VadResult] {
@@ -45,6 +49,11 @@ public actor VadManager {
 
     /// Process an entire in-memory audio buffer.
     /// Automatically converts the buffer to 16kHz mono Float32 and processes in 4096-sample chunks (256ms).
+    /// ```swift
+    /// let buffer: AVAudioPCMBuffer = ...
+    /// let manager = try await VadManager()
+    /// let results = try await manager.process(buffer)
+    /// ```
     /// - Parameter audioBuffer: Source buffer in any format
     /// - Returns: Array of per-chunk VAD results
     public func process(_ audioBuffer: AVAudioPCMBuffer) async throws -> [VadResult] {
@@ -54,6 +63,13 @@ public actor VadManager {
 
     /// Process raw 16kHz mono samples.
     /// Processes audio in 4096-sample chunks (256ms at 16kHz).
+    /// ```swift
+    /// let samples = try AudioConverter().resampleAudioFile(audioURL)
+    /// let manager = try await VadManager()
+    /// let results = try await manager.process(samples)
+    /// let rtfx = (Double(samples.count) / Double(VadManager.sampleRate)) /
+    ///     results.reduce(0) { $0 + $1.processingTime }
+    /// ```
     /// - Parameter samples: Audio samples (must be 16kHz, mono)
     /// - Returns: Array of per-chunk VAD results
     public func process(_ samples: [Float]) async throws -> [VadResult] {

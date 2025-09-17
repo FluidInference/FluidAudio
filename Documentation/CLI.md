@@ -42,12 +42,21 @@ swift run fluidaudio diarization-benchmark --dataset ami-sdm \
 ## VAD
 
 ```bash
+# Offline segmentation with seconds output (default mode)
+swift run fluidaudio vad-analyze path/to/audio.wav
+
+# Streaming only with 128 ms chunks and a custom threshold (timestamps emitted in seconds)
+swift run fluidaudio vad-analyze path/to/audio.wav --streaming --threshold 0.65 --min-silence-ms 400
+
 # Run VAD benchmark (mini50 dataset by default)
 swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
 
-# Save results and enable debug output
+# Save benchmark results and enable debug output
 swift run fluidaudio vad-benchmark --all-files --output vad_results.json --debug
 ```
+
+`swift run fluidaudio vad-analyze --help` lists every tuning option (padding,
+negative threshold overrides, max-duration splitting, etc.).
 
 ## Datasets
 
@@ -58,4 +67,3 @@ swift run fluidaudio download --dataset librispeech-test-other
 swift run fluidaudio download --dataset ami-sdm
 swift run fluidaudio download --dataset vad
 ```
-
