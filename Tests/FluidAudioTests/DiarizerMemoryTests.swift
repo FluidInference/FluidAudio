@@ -13,7 +13,7 @@ final class DiarizerMemoryTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        optimizer = ANEMemoryOptimizer.shared
+        optimizer = ANEMemoryOptimizer()
         config = DiarizerConfig()
         segmentationProcessor = SegmentationProcessor()
     }

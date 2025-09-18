@@ -10,7 +10,7 @@ final class ANEMemoryOptimizerTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        optimizer = ANEMemoryOptimizer.shared
+        optimizer = ANEMemoryOptimizer()
     }
 
     override func tearDown() {

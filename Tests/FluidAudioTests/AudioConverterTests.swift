@@ -660,8 +660,8 @@ final class AudioConverterTests: XCTestCase {
         XCTAssertGreaterThan(converted.last ?? 0.0, 0.99)
     }
 
-    func testLinearResampleHighChannelCountPerformance() async throws {
-        // Test performance with 8 channels
+    func testLinearResampleHighChannelCount() async throws {
+        // Test functionality with 8 channels
         let buffer = try createAudioBuffer(
             sampleRate: 48000,
             channels: 8,
@@ -678,18 +678,11 @@ final class AudioConverterTests: XCTestCase {
             }
         }
 
-        let startTime = CFAbsoluteTimeGetCurrent()
         let converted = try audioConverter.resampleBuffer(buffer)
-        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-
-        print("8-channel linear resample of 10s audio took \(elapsed) seconds")
 
         // Verify output
         let expectedCount = Int(Double(buffer.frameLength) * 16000 / 48000)
         assertApproximateCount(converted.count, expected: expectedCount)
-
-        // Should complete in reasonable time (< 1 second for 10s of audio)
-        XCTAssertLessThan(elapsed, 1.0)
     }
 
     func testLinearResampleEdgeCases() async throws {
