@@ -60,6 +60,7 @@ enum TranscribeCommand {
         let audioFile = arguments[0]
         var streamingMode = false
         var showMetadata = false
+        var useVadChunking = false
 
         // Parse options
         var i = 1
@@ -72,6 +73,8 @@ enum TranscribeCommand {
                 streamingMode = true
             case "--metadata":
                 showMetadata = true
+            case "--vad-chunking":
+                useVadChunking = true
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -82,19 +85,28 @@ enum TranscribeCommand {
             logger.info(
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
-            await testStreamingTranscription(audioFile: audioFile, showMetadata: showMetadata)
+            await testStreamingTranscription(
+                audioFile: audioFile, showMetadata: showMetadata, useVadChunking: useVadChunking)
         } else {
-            logger.info("Using batch mode with direct processing\n")
-            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata)
+            if useVadChunking {
+                logger.info("Using batch mode with VAD-based chunking\n")
+            } else {
+                logger.info("Using batch mode with direct processing\n")
+            }
+            await testBatchTranscription(
+                audioFile: audioFile, showMetadata: showMetadata, useVadChunking: useVadChunking)
         }
     }
 
     /// Test batch transcription using AsrManager directly
-    private static func testBatchTranscription(audioFile: String, showMetadata: Bool) async {
+    private static func testBatchTranscription(
+        audioFile: String, showMetadata: Bool, useVadChunking: Bool = false
+    ) async {
         do {
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad()
-            let asrManager = AsrManager(config: .default)
+            let config = ASRConfig(useVadBasedChunking: useVadChunking)
+            let asrManager = AsrManager(config: config)
             try await asrManager.initialize(models: models)
 
             logger.info("ASR Manager initialized successfully")
@@ -125,14 +137,14 @@ enum TranscribeCommand {
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Print results
-            logger.info("\n" + String(repeating: "=", count: 50))
+            logger.info(String(repeating: "=", count: 50))
             logger.info("BATCH TRANSCRIPTION RESULTS")
             logger.info(String(repeating: "=", count: 50))
-            logger.info("\nFinal transcription:")
+            logger.info("Final transcription:")
             logger.info(result.text)
 
             if showMetadata {
-                logger.info("\nMetadata:")
+                logger.info("Metadata:")
                 logger.info("  Confidence: \(String(format: "%.3f", result.confidence))")
                 logger.info("  Duration: \(String(format: "%.3f", result.duration))s")
                 if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
@@ -140,7 +152,7 @@ enum TranscribeCommand {
                     let endTime = tokenTimings.last?.endTime ?? result.duration
                     logger.info("  Start time: \(String(format: "%.3f", startTime))s")
                     logger.info("  End time: \(String(format: "%.3f", endTime))s")
-                    logger.info("\nToken Timings:")
+                    logger.info("Token Timings:")
                     for (index, timing) in tokenTimings.enumerated() {
                         logger.info(
                             "    [\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(String(format: "%.3f", timing.startTime))s, end: \(String(format: "%.3f", timing.endTime))s, conf: \(String(format: "%.3f", timing.confidence)))"
@@ -155,7 +167,7 @@ enum TranscribeCommand {
 
             let rtfx = duration / processingTime
 
-            logger.info("\nPerformance:")
+            logger.info("Performance:")
             logger.info("  Audio duration: \(String(format: "%.2f", duration))s")
             logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
             logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
@@ -172,7 +184,13 @@ enum TranscribeCommand {
     }
 
     /// Test streaming transcription
-    private static func testStreamingTranscription(audioFile: String, showMetadata: Bool) async {
+    private static func testStreamingTranscription(
+        audioFile: String, showMetadata: Bool, useVadChunking: Bool = false
+    ) async {
+        if useVadChunking {
+            logger.warning("VAD chunking is not supported in streaming mode, using default streaming behavior")
+        }
+
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
 
@@ -324,11 +342,13 @@ enum TranscribeCommand {
                 --help, -h         Show this help message
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
+                --vad-chunking     Use VAD-based chunking instead of fixed chunks (batch mode only)
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)
                 fluidaudio transcribe audio.wav --streaming        # Streaming mode
                 fluidaudio transcribe audio.wav --metadata         # Batch mode with metadata
+                fluidaudio transcribe audio.wav --vad-chunking     # Batch mode with VAD-based chunks
                 fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
 
             Batch mode (default):

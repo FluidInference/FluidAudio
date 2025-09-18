@@ -536,7 +536,7 @@ extension ASRBenchmark {
             return
         }
 
-        logger.info("\n" + String(repeating: "=", count: 80))
+        logger.info("" + String(repeating: "=", count: 80))
         logger.info("📋 Detailed Analysis for Files with WER > \(Int(threshold * 100))%")
         logger.info(String(repeating: "=", count: 80))
 
@@ -549,7 +549,7 @@ extension ASRBenchmark {
     private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) {
         let werPercent = result.metrics.wer * 100
         logger.info(
-            "\nFile: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
+            "File: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
         )
         logger.info(String(repeating: "-", count: 60))
 
@@ -563,9 +563,9 @@ extension ASRBenchmark {
         // Generate inline diff
         let (referenceDiff, hypothesisDiff) = generateInlineDiff(reference: refWords, hypothesis: hypWords)
 
-        logger.info("Normalized Reference:\t\(referenceDiff)")
-        logger.info("Normalized Hypothesis:\t\(hypothesisDiff)")
-        logger.info("Original Hypothesis:\t\(result.hypothesis)")
+        logger.info("Normalized Reference:\(referenceDiff)")
+        logger.info("Normalized Hypothesis:\(hypothesisDiff)")
+        logger.info("Original Hypothesis:\(result.hypothesis)")
     }
 
     /// Generate word-level differences between reference and hypothesis
@@ -787,6 +787,7 @@ extension ASRBenchmark {
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
         var streamingChunkDuration = 10.0
+        var useVadChunking = false
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -835,13 +836,20 @@ extension ASRBenchmark {
                     }
                     i += 1
                 }
+            case "--vad-chunking":
+                useVadChunking = true
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        logger.info("\nStarting ASR benchmark on LibriSpeech \(subset)")
+        // VAD-based chunking is not compatible with streaming simulation
+        if testStreaming && useVadChunking {
+            logger.warning("VAD chunking is not supported in streaming mode; ignoring --vad-chunking")
+        }
+
+        logger.info("Starting ASR benchmark on LibriSpeech \(subset)")
         if singleFile != nil {
             logger.info("   Processing single file: \(singleFile!)")
         } else {
@@ -854,6 +862,7 @@ extension ASRBenchmark {
         if testStreaming {
             logger.info("   Chunk duration: \(streamingChunkDuration)s")
         }
+        logger.info("   VAD chunking (batch): \(useVadChunking && !testStreaming ? "enabled" : "disabled")")
 
         let config = ASRBenchmarkConfig(
             dataset: "librispeech",
@@ -869,7 +878,8 @@ extension ASRBenchmark {
 
         // Initialize ASR manager with fast benchmark preset
         let asrConfig = ASRConfig(
-            tdtConfig: TdtConfig()
+            tdtConfig: TdtConfig(),
+            useVadBasedChunking: (useVadChunking && !testStreaming)
         )
 
         let asrManager = AsrManager(config: asrConfig)
@@ -945,7 +955,7 @@ extension ASRBenchmark {
 
             // Print streaming metrics if available
             if config.testStreaming {
-                logger.info("\n--- Streaming Metrics ---")
+                logger.info("--- Streaming Metrics ---")
 
                 // Calculate aggregate streaming metrics
                 let streamingResults = results.compactMap { $0.streamingMetrics }
@@ -1061,7 +1071,7 @@ extension ASRBenchmark {
             // Print detailed analysis for files with high WER
             benchmark.printDetailedWERAnalysis(results)
 
-            logger.info("\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
+            logger.info("\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
 
             logger.info("--- Benchmark Results ---")
             logger.info("   Dataset: \(config.dataset) \(config.subset)")
@@ -1075,11 +1085,11 @@ extension ASRBenchmark {
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
 
-            logger.info("\nResults saved to: \(outputFile)")
+            logger.info("Results saved to: \(outputFile)")
             logger.info("ASR benchmark completed successfully")
 
         } catch {
-            logger.error("\nERROR: ASR benchmark failed: \(error)")
+            logger.error("ERROR: ASR benchmark failed: \(error)")
             exit(1)
         }
     }
@@ -1102,6 +1112,7 @@ extension ASRBenchmark {
                 --no-auto-download        Disable automatic dataset download
                 --test-streaming          Enable streaming simulation mode
                 --chunk-duration <secs>   Chunk duration for streaming mode (default: 0.1s, min: 1.0s)
+                --vad-chunking            Use VAD-based chunking (batch mode only)
                 --help, -h               Show this help message
 
             Description:
@@ -1129,6 +1140,9 @@ extension ASRBenchmark {
 
                 # Test streaming performance with 0.5s chunks
                 fluidaudio asr-benchmark --test-streaming --chunk-duration 1-
+
+                # Batch benchmark using VAD-based chunking
+                fluidaudio asr-benchmark --vad-chunking
 
                 # Debug mode with custom output file
                 fluidaudio asr-benchmark --debug --output my_results.json

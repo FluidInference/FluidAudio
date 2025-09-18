@@ -171,11 +171,11 @@ enum MultiStreamCommand {
 
             // Print results
             logger.info(
-                "\n" + String(repeating: "=", count: 60) + "\nTRANSCRIPTION RESULTS\n"
-                    + String(repeating: "=", count: 60) + "\n")
-            logger.info("\nMICROPHONE STREAM:\n\(micFinal)")
-            logger.info("\nSYSTEM AUDIO STREAM:\n\(systemFinal)")
-            logger.info("\nSession info:")
+                "" + String(repeating: "=", count: 60) + "TRANSCRIPTION RESULTS\n"
+                    + String(repeating: "=", count: 60) + "")
+            logger.info("MICROPHONE STREAM:\n\(micFinal)")
+            logger.info("SYSTEM AUDIO STREAM:\n\(systemFinal)")
+            logger.info("Session info:")
             let activeStreams = await session.activeStreams
             logger.info("Active streams: \(activeStreams.count)")
             for (source, stream) in activeStreams {

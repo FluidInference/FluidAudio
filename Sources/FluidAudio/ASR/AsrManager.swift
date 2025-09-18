@@ -143,7 +143,7 @@ public final class AsrManager {
 
     func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
         // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
-        if let provider = ZeroCopyFeatureProvider.chain(
+        if let provider: ZeroCopyFeatureProvider = ZeroCopyFeatureProvider.chain(
             from: melspectrogramOutput,
             outputName: "melspectrogram",
             to: "audio_signal"
@@ -315,6 +315,10 @@ public final class AsrManager {
         _ audioSamples: [Float],
         source: AudioSource = .microphone
     ) async throws -> ASRResult {
+        if config.useVadBasedChunking {
+            return try await transcribeWithVadChunking(audioSamples, source: source)
+        }
+
         var result: ASRResult
         switch source {
         case .microphone:
@@ -345,6 +349,19 @@ public final class AsrManager {
         case .system:
             try await initializeDecoderState(decoderState: &systemDecoderState)
         }
+    }
+
+    /// Transcribe audio using VAD-based chunking (stateless processing)
+    private func transcribeWithVadChunking(
+        _ audioSamples: [Float],
+        source: AudioSource = .microphone
+    ) async throws -> ASRResult {
+        let processor = VadBasedProcessor(
+            audioSamples: audioSamples,
+            vadConfig: config.vadSegmentationConfig,
+            minSegmentDuration: config.minSegmentDuration,
+        )
+        return try await processor.process(using: self)
     }
 
     internal func convertTokensWithExistingTimings(

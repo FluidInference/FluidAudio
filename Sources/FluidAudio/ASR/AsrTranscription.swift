@@ -4,6 +4,13 @@ import OSLog
 
 extension AsrManager {
 
+    // MARK: - Parallel Processing for VAD Chunking
+
+    internal struct EncoderOutput {
+        let hiddenStates: MLMultiArray
+        let sequenceLength: Int
+    }
+
     internal func transcribeWithState(
         _ audioSamples: [Float], decoderState: inout TdtDecoderState
     ) async throws -> ASRResult {

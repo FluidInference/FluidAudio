@@ -5,15 +5,24 @@ import Foundation
 public struct ASRConfig: Sendable {
     public let sampleRate: Int
     public let tdtConfig: TdtConfig
+    public let useVadBasedChunking: Bool
+    public let vadSegmentationConfig: VadSegmentationConfig
+    public let minSegmentDuration: Double
 
     public static let `default` = ASRConfig()
 
     public init(
         sampleRate: Int = 16000,
-        tdtConfig: TdtConfig = .default
+        tdtConfig: TdtConfig = .default,
+        useVadBasedChunking: Bool = false,
+        vadSegmentationConfig: VadSegmentationConfig = .default,
+        minSegmentDuration: Double = 5.0
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
+        self.useVadBasedChunking = useVadBasedChunking
+        self.vadSegmentationConfig = vadSegmentationConfig
+        self.minSegmentDuration = minSegmentDuration
     }
 }
 
