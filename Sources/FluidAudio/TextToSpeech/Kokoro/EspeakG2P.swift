@@ -113,7 +113,8 @@ final class EspeakG2P {
     }
 
     /// Return IPA tokens for a word, or nil on failure.
-    func phonemize(word: String) -> [String]? {
+    /// Optional voice/language arguments are currently ignored but kept for API compatibility.
+    func phonemize(word: String, voiceIdentifier: String? = nil, languageCode: String? = nil) -> [String]? {
         return queue.sync {
             guard initializeIfNeeded() else { return nil }
             return word.withCString { cstr -> [String]? in
