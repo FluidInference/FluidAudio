@@ -16,12 +16,16 @@ public struct KokoroModel {
     private static var kokoroModel: MLModel?
     private static var isModelLoaded = false
 
+    internal static var isModelInitialized: Bool { isModelLoaded }
+    internal static var currentModel: MLModel? { kokoroModel }
+
     // Legacy: Phoneme dictionary with frame counts (kept for backward compatibility)
     private static var phonemeDictionary: [String: (frameCount: Float, phonemes: [String])] = [:]
     private static var isDictionaryLoaded = false
 
     // Preferred: Simple word -> phonemes mapping from word_phonemes.json
     private static var wordToPhonemes: [String: [String]] = [:]
+    private static var wordToPhonemesByLanguage: [String: [String: [String]]] = [:]
     private static var isSimpleDictLoaded = false
 
     // Model and data URLs
@@ -116,44 +120,274 @@ public struct KokoroModel {
             throw TTSError.processingFailed("Invalid word_phonemes.json (not a JSON object)")
         }
 
-        // Case 1: expected wrapped format
-        if let mapping = json["word_to_phonemes"] as? [String: [String]] {
-            wordToPhonemes = mapping
-            isSimpleDictLoaded = true
-            logger.info("Loaded \(wordToPhonemes.count) words from word_phonemes.json (wrapped)")
-            return
-        }
-
-        // Case 2: flat map format (word -> String or [String])
-        var tmp: [String: [String]] = [:]
         let vocabulary = KokoroVocabulary.getVocabulary()
         let allowed = Set(vocabulary.keys)
 
+        wordToPhonemes = try parseWordPhonemeDictionary(
+            json, allowed: allowed,
+            preferredLanguage: nil)
+        buildLanguageSpecificDictionaries(baseDirectory: kokoroDir, allowed: allowed)
+
+        isSimpleDictLoaded = true
+        logger.info("Loaded \(wordToPhonemes.count) words from word_phonemes.json")
+    }
+
+    private static func parseWordPhonemeDictionary(
+        _ json: [String: Any],
+        allowed: Set<String>,
+        preferredLanguage: String?
+    ) throws -> [String: [String]] {
+        if let mapping = json["word_to_phonemes"] as? [String: Any] {
+            return try parseFlatDictionary(mapping, allowed: allowed, preferredLanguage: preferredLanguage)
+        }
+        return try parseFlatDictionary(json, allowed: allowed, preferredLanguage: preferredLanguage)
+    }
+
+    private static func parseFlatDictionary(
+        _ dictionary: [String: Any],
+        allowed: Set<String>,
+        preferredLanguage: String?
+    ) throws -> [String: [String]] {
+        var result: [String: [String]] = [:]
         var converted = 0
-        for (k, v) in json {
-            if let s = v as? String {
-                let toks = tokenizeIPAString(s)
-                let filtered = toks.filter { allowed.contains($0) }
-                if !filtered.isEmpty {
-                    tmp[k.lowercased()] = filtered
-                    converted += 1
+        for (word, value) in dictionary {
+            if let tokens = normalizedPhonemeEntry(
+                value,
+                allowed: allowed,
+                preferredLanguage: preferredLanguage
+            ) {
+                result[word.lowercased()] = tokens
+                converted += 1
+            }
+        }
+
+        guard !result.isEmpty else {
+            throw TTSError.processingFailed("No valid phoneme entries parsed from dictionary")
+        }
+        return result
+    }
+
+    private static func normalizedPhonemeEntry(
+        _ value: Any,
+        allowed: Set<String>,
+        preferredLanguage: String?
+    ) -> [String]? {
+        if let arr = value as? [String] {
+            let filtered = arr.filter { allowed.contains($0) }
+            return filtered.isEmpty ? nil : filtered
+        }
+
+        if let str = value as? String {
+            let tokens = tokenizeIPAString(str).filter { allowed.contains($0) }
+            return tokens.isEmpty ? nil : tokens
+        }
+
+        if let dict = value as? [String: Any] {
+            if let preferredLanguage,
+                let match = dict[preferredLanguage] ?? dict[preferredLanguage.lowercased()]
+            {
+                if let entry = normalizedPhonemeEntry(match, allowed: allowed, preferredLanguage: nil) {
+                    return entry
                 }
-            } else if let arr = v as? [String] {
-                let filtered = arr.filter { allowed.contains($0) }
-                if !filtered.isEmpty {
-                    tmp[k.lowercased()] = filtered
-                    converted += 1
+            }
+
+            if let defaultEntry = dict["default"] ?? dict["DEFAULT"] {
+                if let entry = normalizedPhonemeEntry(defaultEntry, allowed: allowed, preferredLanguage: nil) {
+                    return entry
+                }
+            }
+
+            for (_, nestedValue) in dict {
+                if let entry = normalizedPhonemeEntry(
+                    nestedValue, allowed: allowed, preferredLanguage: preferredLanguage)
+                {
+                    return entry
                 }
             }
         }
 
-        guard !tmp.isEmpty else {
-            throw TTSError.processingFailed("Unsupported word_phonemes.json format (no usable entries)")
+        return nil
+    }
+
+    private static func buildLanguageSpecificDictionaries(baseDirectory: URL, allowed: Set<String>) {
+        wordToPhonemesByLanguage.removeAll()
+
+        let languages = Set(KokoroVoiceCatalog.supportedLanguageCodes.map { $0.lowercased() })
+        guard !languages.isEmpty else { return }
+
+        for language in languages {
+            guard let overlay = loadOverlay(for: language, baseDirectory: baseDirectory, allowed: allowed),
+                !overlay.isEmpty
+            else { continue }
+
+            var merged = wordToPhonemes
+            for (word, tokens) in overlay { merged[word] = tokens }
+            wordToPhonemesByLanguage[language] = merged
+        }
+    }
+
+    private static func loadOverlay(
+        for language: String,
+        baseDirectory: URL,
+        allowed: Set<String>
+    ) -> [String: [String]]? {
+        let candidates = overlayFileCandidates(for: language)
+        let fm = FileManager.default
+        let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
+
+        var urls: [URL] = []
+        for name in candidates {
+            urls.append(baseDirectory.appendingPathComponent(name))
+            urls.append(cwd.appendingPathComponent(name))
         }
 
-        wordToPhonemes = tmp
-        isSimpleDictLoaded = true
-        logger.info("Loaded \(wordToPhonemes.count) words from word_phonemes.json (flat)")
+        for url in urls where fm.fileExists(atPath: url.path) {
+            do {
+                let data = try Data(contentsOf: url)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let mapping = try parseWordPhonemeDictionary(
+                        json,
+                        allowed: allowed,
+                        preferredLanguage: language
+                    )
+                    logger.info(
+                        "Loaded \(mapping.count) language-specific phoneme entries from \(url.lastPathComponent)")
+                    return mapping
+                }
+            } catch {
+                logger.warning("Failed to parse overlay dictionary at \(url.path): \(error.localizedDescription)")
+            }
+        }
+
+        return nil
+    }
+
+    private static func overlayFileCandidates(for language: String) -> [String] {
+        var variants: [String] = []
+        let normalized = language
+        let lower = language.lowercased()
+        let hyphenToUnderscore = language.replacingOccurrences(of: "-", with: "_")
+        let lowerHyphen = hyphenToUnderscore.lowercased()
+
+        variants.append("word_phonemes_\(normalized).json")
+        variants.append("word_phonemes_\(lower).json")
+        if normalized != hyphenToUnderscore {
+            variants.append("word_phonemes_\(hyphenToUnderscore).json")
+        }
+        if lower != lowerHyphen {
+            variants.append("word_phonemes_\(lowerHyphen).json")
+        }
+
+        if let hyphenIndex = language.firstIndex(of: "-") {
+            let prefix = String(language[..<hyphenIndex])
+            let lowerPrefix = prefix.lowercased()
+            variants.append("word_phonemes_\(prefix).json")
+            if prefix != lowerPrefix {
+                variants.append("word_phonemes_\(lowerPrefix).json")
+            }
+        }
+
+        var seen: Set<String> = []
+        var deduped: [String] = []
+        for name in variants {
+            if seen.insert(name).inserted {
+                deduped.append(name)
+            }
+        }
+        return deduped
+    }
+
+    internal static func phonemeDictionary(for languageCode: String?) throws -> [String: [String]] {
+        try loadSimplePhonemeDictionary()
+
+        guard let codeRaw = languageCode, !codeRaw.isEmpty else {
+            return wordToPhonemes
+        }
+
+        let code = codeRaw.lowercased()
+        if let dict = wordToPhonemesByLanguage[code] {
+            return dict
+        }
+
+        if let hyphenIndex = code.firstIndex(of: "-") {
+            let prefix = String(code[..<hyphenIndex])
+            if let dict = wordToPhonemesByLanguage[prefix] {
+                return dict
+            }
+        }
+
+        return wordToPhonemes
+    }
+
+    internal static func resetPhonemeDictionariesForTesting() {
+        wordToPhonemes = [:]
+        wordToPhonemesByLanguage = [:]
+        isSimpleDictLoaded = false
+    }
+
+    /// Normalize arbitrary voice identifiers to a snake_case form suitable for filenames.
+    private static func sanitizeVoiceIdentifier(_ voice: String) -> String {
+        let trimmed = voice.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        var working = trimmed.replacingOccurrences(of: "-", with: "_")
+        working = working.replacingOccurrences(of: " ", with: "_")
+
+        if !working.contains("_") {
+            var output = ""
+            output.reserveCapacity(working.count * 2)
+            for scalar in working {
+                if scalar.isUppercase {
+                    if !output.isEmpty { output.append("_") }
+                    output.append(Character(scalar.lowercased()))
+                } else {
+                    output.append(Character(scalar.lowercased()))
+                }
+            }
+            return output
+        }
+
+        return working.lowercased()
+    }
+
+    /// Determine canonical and fallback identifiers used when resolving voice embeddings.
+    private static func voiceSearchParameters(
+        for voice: String
+    ) -> (
+        canonical: String,
+        fileCandidates: [String],
+        keyCandidates: [String]
+    ) {
+        let sanitizedInput = sanitizeVoiceIdentifier(voice)
+        let canonical = KokoroVoiceCatalog.canonicalVoiceId(for: voice) ?? sanitizedInput
+
+        func appendUnique(_ value: String, to array: inout [String]) {
+            let normalized = sanitizeVoiceIdentifier(value)
+            guard !normalized.isEmpty else { return }
+            if !array.contains(normalized) {
+                array.append(normalized)
+            }
+        }
+
+        var fileCandidates: [String] = []
+        appendUnique(canonical, to: &fileCandidates)
+        appendUnique(voice, to: &fileCandidates)
+        appendUnique(sanitizedInput, to: &fileCandidates)
+
+        if fileCandidates.isEmpty {
+            fileCandidates.append(KokoroVoiceCatalog.defaultVoiceId)
+        }
+
+        var keyCandidates = fileCandidates
+        if !canonical.isEmpty && !keyCandidates.contains(canonical) {
+            keyCandidates.insert(canonical, at: 0)
+        }
+        if !keyCandidates.contains(KokoroVoiceCatalog.defaultVoiceId) {
+            keyCandidates.append(KokoroVoiceCatalog.defaultVoiceId)
+        }
+
+        let resolvedCanonical = canonical.isEmpty ? KokoroVoiceCatalog.defaultVoiceId : canonical
+        return (resolvedCanonical, fileCandidates, keyCandidates)
     }
 
     /// Tokenize an IPA string into model tokens.
@@ -174,13 +408,12 @@ public struct KokoroModel {
     // TextChunk is defined in KokoroChunker.swift
 
     /// Chunk text into segments under the model token budget, using punctuation-driven pauses.
-    private static func chunkText(_ text: String) throws -> [TextChunk] {
-        try loadSimplePhonemeDictionary()
+    private static func chunkText(_ text: String, using dictionary: [String: [String]]) throws -> [TextChunk] {
         let target = targetTokenLength()
         let hasLang = false
         return KokoroChunker.chunk(
             text: text,
-            wordToPhonemes: wordToPhonemes,
+            wordToPhonemes: dictionary,
             targetTokens: target,
             hasLanguageToken: hasLang
         )
@@ -218,7 +451,7 @@ public struct KokoroModel {
     }
 
     /// Inspect model to determine the expected token length for input_ids
-    private static func targetTokenLength() -> Int {
+    internal static func targetTokenLength() -> Int {
         if let model = kokoroModel {
             let inputs = model.modelDescription.inputDescriptionsByName
             if let inputDesc = inputs["input_ids"], let constraint = inputDesc.multiArrayConstraint {
@@ -234,27 +467,45 @@ public struct KokoroModel {
     }
 
     /// Load voice embedding (simplified for 3-second model)
-    public static func loadVoiceEmbedding(voice: String = "af_heart", phonemeCount: Int) throws -> MLMultiArray {
-        let voice = "af_heart"
+    public static func loadVoiceEmbedding(
+        voice: String = KokoroVoiceCatalog.defaultVoiceId,
+        phonemeCount: Int
+    ) throws -> MLMultiArray {
+        let requestedVoice = voice
+        let (canonicalVoice, fileCandidates, keyCandidates) = voiceSearchParameters(for: requestedVoice)
+
+        if requestedVoice != canonicalVoice {
+            logger.debug("Voice alias '\(requestedVoice)' normalized to '\(canonicalVoice)'")
+        }
+
         // Try to load from cache: ~/.cache/fluidaudio/Models/kokoro/voices/<voice>.json
         let cacheDir = try TtsModels.cacheDirectoryURL()
         let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
         try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 
-        // Try multiple candidates (prefer local repo files first)
-        let candidates: [URL] = [
-            cwd.appendingPathComponent("voices/\(voice).json"),
-            cwd.appendingPathComponent("\(voice).json"),
-            voicesDir.appendingPathComponent("\(voice).json"),
-        ]
-        let voiceJSON = candidates.first { FileManager.default.fileExists(atPath: $0.path) } ?? candidates[0]
+        let candidatePaths: [URL] = fileCandidates.flatMap { name in
+            [
+                cwd.appendingPathComponent("voices/\(name).json"),
+                cwd.appendingPathComponent("\(name).json"),
+                voicesDir.appendingPathComponent("\(name).json"),
+            ]
+        }
+
+        guard let primaryVoiceName = fileCandidates.first else {
+            throw TTSError.processingFailed("Unable to derive voice identifier from '\(requestedVoice)'")
+        }
+
+        let voiceJSON =
+            candidatePaths.first { FileManager.default.fileExists(atPath: $0.path) }
+            ?? voicesDir.appendingPathComponent("\(primaryVoiceName).json")
 
         var vector: [Float]?
         if FileManager.default.fileExists(atPath: voiceJSON.path) {
             do {
                 let data = try Data(contentsOf: voiceJSON)
                 let json = try JSONSerialization.jsonObject(with: data)
+
                 func parseArray(_ any: Any) -> [Float]? {
                     if let ds = any as? [Double] { return ds.map { Float($0) } }
                     if let fs = any as? [Float] { return fs }
@@ -281,44 +532,64 @@ public struct KokoroModel {
                 if let arr = parseArray(json) {
                     vector = arr
                 } else if let dict = json as? [String: Any] {
-                    if let embed = dict["embedding"], let arr = parseArray(embed) {
-                        vector = arr
-                    } else if let byVoice = dict[voice], let arr = parseArray(byVoice) {
-                        vector = arr
-                    } else {
-                        let keys = dict.keys.compactMap { Int($0) }.sorted()
-                        var chosen: [Float]? = nil
-                        if let exact = dict["\(phonemeCount)"] {
-                            chosen = parseArray(exact)
-                        } else if let k = keys.last(where: { $0 <= phonemeCount }), let cand = dict["\(k)"] {
-                            chosen = parseArray(cand)
+                    for key in keyCandidates {
+                        if let embed = dict[key], let arr = parseArray(embed) {
+                            vector = arr
+                            break
                         }
-                        if let c = chosen {
-                            vector = c
-                        } else if let any = dict.values.first {
-                            vector = parseArray(any)
+                    }
+
+                    if vector == nil, let embed = dict["embedding"], let arr = parseArray(embed) {
+                        vector = arr
+                    }
+
+                    if vector == nil {
+                        let numericKeys = dict.keys.compactMap { Int($0) }.sorted()
+                        if let exact = dict["\(phonemeCount)"], let arr = parseArray(exact) {
+                            vector = arr
+                        } else if let key = numericKeys.last(where: { $0 <= phonemeCount }),
+                            let candidate = dict["\(key)"], let arr = parseArray(candidate)
+                        {
+                            vector = arr
                         }
+                    }
+
+                    if vector == nil, let any = dict.values.first {
+                        vector = parseArray(any)
                     }
                 }
             } catch {
-                // Ignore parse errors; will fall back
+                logger.warning(
+                    "Failed to parse voice embedding JSON at \(voiceJSON.path): \(error.localizedDescription)")
             }
         }
 
         // Require a valid voice embedding; fail if missing or invalid
         let dim = refDimFromModel()
         guard let vec = vector, vec.count == dim else {
-            throw TTSError.modelNotFound("Voice embedding for \(voice) not found or invalid at \(voiceJSON.path)")
+            let descriptor =
+                canonicalVoice == requestedVoice
+                ? canonicalVoice
+                : "\(requestedVoice) → \(canonicalVoice)"
+            throw TTSError.modelNotFound(
+                "Voice embedding for \(descriptor) not found or invalid at \(voiceJSON.path)")
         }
         let embedding = try MLMultiArray(shape: [1, NSNumber(value: dim)] as [NSNumber], dataType: .float32)
-        var varsum: Float = 0
-        for i in 0..<dim {
-            let v = vec[i]
-            embedding[i] = NSNumber(value: v)
-            varsum += v * v
+        let destPointer = embedding.dataPointer.bindMemory(to: Float.self, capacity: dim)
+        vec.withUnsafeBufferPointer { src in
+            guard let base = src.baseAddress else { return }
+            destPointer.initialize(from: base, count: dim)
         }
-        logger.info(
-            "Loaded voice embedding: \(voice), dim=\(dim), l2norm=\(String(format: "%.3f", sqrt(Double(varsum))))")
+        let varsum = vec.reduce(into: Float.zero) { $0 += $1 * $1 }
+        let l2norm = String(format: "%.3f", sqrt(Double(varsum)))
+        if let metadata = KokoroVoiceCatalog.voice(for: canonicalVoice) {
+            logger.info(
+                "Loaded voice embedding: \(metadata.id) [\(metadata.languageCode), \(metadata.gender.rawValue.capitalized)], dim=\(dim), l2norm=\(l2norm)"
+            )
+        } else {
+            logger.info("Loaded voice embedding: \(canonicalVoice), dim=\(dim), l2norm=\(l2norm)")
+        }
+
         return embedding
     }
 
@@ -373,7 +644,8 @@ public struct KokoroModel {
 
         // Use zeros for phases for determinism (works well for 3s model)
         let phasesArray = try MLMultiArray(shape: [1, 9] as [NSNumber], dataType: .float32)
-        for i in 0..<9 { phasesArray[i] = 0 }
+        let phasesPointer = phasesArray.dataPointer.bindMemory(to: Float.self, capacity: 9)
+        phasesPointer.initialize(repeating: 0, count: 9)
 
         // Debug: print model IO
 
@@ -437,16 +709,35 @@ public struct KokoroModel {
     }
 
     /// Main synthesis function with chunking support
-    public static func synthesize(text: String, voice: String = "af_heart") async throws -> Data {
+    public static func synthesize(
+        text: String,
+        voice: String = KokoroVoiceCatalog.defaultVoiceId
+    ) async throws -> Data {
         let synthesisStart = Date()
 
         logger.info("Starting synthesis: '\(text)'")
         logger.info("Input length: \(text.count) characters")
 
+        let canonicalVoice = voiceSearchParameters(for: voice).canonical
+        let voiceMetadata = KokoroVoiceCatalog.voice(for: canonicalVoice)
+        if let metadata = voiceMetadata {
+            logger.info(
+                "Voice: \(metadata.label) [\(metadata.languageName), \(metadata.gender.rawValue.capitalized)]")
+        } else {
+            logger.info("Voice: \(canonicalVoice)")
+        }
+        if canonicalVoice != voice {
+            logger.debug("Voice alias '\(voice)' resolved to '\(canonicalVoice)'")
+        }
+
         // Ensure required files are downloaded
         try await ensureRequiredFiles()
         // Ensure voice embedding if available
-        try? await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: voice)
+        do {
+            try await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: canonicalVoice)
+        } catch {
+            logger.warning("Failed to prefetch voice embedding for \(canonicalVoice): \(error.localizedDescription)")
+        }
 
         // Load model if needed
         if !isModelLoaded {
@@ -455,6 +746,8 @@ public struct KokoroModel {
 
         // Preload dictionary for OOV detection
         try loadSimplePhonemeDictionary()
+        let languageCode = voiceMetadata?.languageCode
+        let phonemeDictionary = try phonemeDictionary(for: languageCode)
 
         // If there are OOV words and G2P data is missing, fail fast per policy.
         do {
@@ -474,10 +767,11 @@ public struct KokoroModel {
                 .map { String($0) }
             var oov: [String] = []
             oov.reserveCapacity(8)
+
             for raw in tokens {
                 let key = normalize(raw)
                 if key.isEmpty { continue }
-                if wordToPhonemes[key] == nil {
+                if phonemeDictionary[key] == nil {
                     oov.append(key)
                     if oov.count >= 8 { break }
                 }
@@ -509,7 +803,7 @@ public struct KokoroModel {
         }
 
         // Chunk the text based on frame counts
-        let chunks = try chunkText(text)
+        let chunks = try chunkText(text, using: phonemeDictionary)
 
         if chunks.isEmpty {
             throw TTSError.processingFailed("No valid words found in text")
@@ -521,7 +815,7 @@ public struct KokoroModel {
             let chunk = chunks[0]
             logger.info("Processing chunk: \(chunk.words.count) words, \(chunk.totalFrames) frames")
 
-            let samples = try await synthesizeChunk(chunk, voice: voice)
+            let samples = try await synthesizeChunk(chunk, voice: canonicalVoice)
 
             // Normalize and convert to WAV
             let maxVal = samples.map { abs($0) }.max() ?? 1.0
@@ -547,7 +841,7 @@ public struct KokoroModel {
                 logger.info(
                     "Processing chunk \(i+1)/\(chunks.count): \(chunk.words.count) words, \(chunk.totalFrames) frames")
                 logger.info("Chunk \(i+1) text: '\(chunk.words.joined(separator: " "))'")
-                let chunkSamples = try await synthesizeChunk(chunk, voice: voice)
+                let chunkSamples = try await synthesizeChunk(chunk, voice: canonicalVoice)
                 if i == 0 {
                     allSamples.append(contentsOf: chunkSamples)
                 } else {

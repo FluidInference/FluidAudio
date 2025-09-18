@@ -42,6 +42,7 @@ enum ChunkPreprocessor {
         processed = flipMoney(processed)
         processed = splitTimes(processed)
         processed = spellDecimals(processed)
+        processed = applyAliasReplacements(processed)
         return processed
     }
 
@@ -143,6 +144,37 @@ enum ChunkPreprocessor {
             let spelledDigits = decimalPart.map { String($0) }.joined(separator: " ")
             let replacement = "\(integerPart) point \(spelledDigits)"
             result = result.replacingCharacters(in: swiftRange, with: replacement)
+        }
+
+        return result
+    }
+
+    private static func applyAliasReplacements(_ text: String) -> String {
+        var result = text
+        let matches = linkRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+
+        for match in matches.reversed() {
+            guard match.numberOfRanges >= 3,
+                let fullRange = Range(match.range, in: text),
+                let originalRange = Range(match.range(at: 1), in: text),
+                let replacementRange = Range(match.range(at: 2), in: text)
+            else { continue }
+
+            let original = String(text[originalRange])
+            let replacement = String(text[replacementRange])
+
+            let trimmedReplacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedReplacement.isEmpty else { continue }
+
+            let isPhonemeDirective = trimmedReplacement.hasPrefix("/") && trimmedReplacement.hasSuffix("/")
+            let isNumericDirective = Float(trimmedReplacement) != nil
+
+            if isPhonemeDirective || isNumericDirective {
+                // For phoneme overrides or stress controls, keep the original surface text.
+                result.replaceSubrange(fullRange, with: original)
+            } else {
+                result.replaceSubrange(fullRange, with: replacement)
+            }
         }
 
         return result

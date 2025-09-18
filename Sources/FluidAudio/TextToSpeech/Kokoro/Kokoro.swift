@@ -11,36 +11,27 @@ public struct Kokoro {
     // Phoneme dictionary loaded from kokoro_word_phonemes_full.json
     private static var phonemeDictionary: [String: [String]] = [:]
     private static var isDictionaryLoaded = false
+    private static var activeLanguageCode: String? = nil
 
     // Voice embeddings loaded from JSON
     private static var voiceEmbeddings: [String: [Int: [Float]]] = [:]
 
     /// Load the comprehensive phoneme dictionary
-    public static func loadPhonemeDictionary() throws {
-        guard !isDictionaryLoaded else { return }
+    public static func loadPhonemeDictionary(for languageCode: String?) throws {
+        let normalized = languageCode?.lowercased()
+        if isDictionaryLoaded, normalized == activeLanguageCode { return }
 
-        let currentDir = FileManager.default.currentDirectoryPath
-        let dictURL = URL(fileURLWithPath: currentDir).appendingPathComponent("word_phonemes.json")
-
-        guard FileManager.default.fileExists(atPath: dictURL.path) else {
-            throw TTSError.modelNotFound("Phoneme dictionary not found at \(dictURL.path)")
-        }
-
-        let data = try Data(contentsOf: dictURL)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-
-        if let wordToPhonemes = json["word_to_phonemes"] as? [String: [String]] {
-            phonemeDictionary = wordToPhonemes
-            isDictionaryLoaded = true
-            logger.info("Loaded \(phonemeDictionary.count) words from phoneme dictionary")
-        } else {
-            throw TTSError.processingFailed("Invalid phoneme dictionary format")
-        }
+        let dictionary = try KokoroModel.phonemeDictionary(for: normalized)
+        phonemeDictionary = dictionary
+        activeLanguageCode = normalized
+        isDictionaryLoaded = true
+        logger.info(
+            "Loaded \(phonemeDictionary.count) words from phoneme dictionary (lang=\(normalized ?? "default"))")
     }
 
     /// Convert text to phonemes using dictionary lookup (like main.py)
     public static func textToPhonemes(_ text: String) throws -> [String] {
-        try loadPhonemeDictionary()
+        try loadPhonemeDictionary(for: activeLanguageCode)
 
         let words = text.lowercased().split(separator: " ")
         var allPhonemes: [String] = []
@@ -97,7 +88,15 @@ public struct Kokoro {
     }
 
     /// Load voice embedding from indexed JSON (matching main.py's approach)
-    public static func loadVoiceEmbedding(voice: String = "af_heart", phonemeCount: Int) throws -> [Float] {
+    public static func loadVoiceEmbedding(
+        voice: String = KokoroVoiceCatalog.defaultVoiceId,
+        phonemeCount: Int
+    ) throws -> [Float] {
+        let canonicalVoice = KokoroVoiceCatalog.canonicalVoiceId(for: voice) ?? voice
+        if canonicalVoice != voice {
+            logger.debug("Voice alias '\(voice)' normalized to '\(canonicalVoice)'")
+        }
+
         // Try to load from kokoro_voices_indexed.json
         let currentDir = FileManager.default.currentDirectoryPath
         let voicesURL = URL(fileURLWithPath: currentDir).appendingPathComponent("kokoro_voices_indexed.json")
@@ -113,7 +112,8 @@ public struct Kokoro {
                             voiceEmbeddingsByLength[length] = embedding.map { Float($0) }
                         }
                     }
-                    voiceEmbeddings[voiceName] = voiceEmbeddingsByLength
+                    let key = KokoroVoiceCatalog.canonicalVoiceId(for: voiceName) ?? voiceName
+                    voiceEmbeddings[key] = voiceEmbeddingsByLength
                 }
                 logger.info("Loaded voice embeddings for \(voiceEmbeddings.count) voices")
             }
@@ -122,26 +122,39 @@ public struct Kokoro {
         // Get embedding for this phoneme count
         let embeddingIndex = phonemeCount - 1  // Same as Python: len(ps) - 1
 
-        if let voiceData = voiceEmbeddings[voice],
+        if let voiceData = voiceEmbeddings[canonicalVoice],
             let embedding = voiceData[phonemeCount]
         {
             logger.info("Using embedding at index \(embeddingIndex) for \(phonemeCount) phonemes")
             print("DEBUG: Voice embedding first 5 values: \(embedding.prefix(5))")
             return embedding
         } else {
-            logger.warning("No embedding found for \(voice) with \(phonemeCount) phonemes, using zeros")
-            print("WARNING: Using zero embeddings! Voice: \(voice), phoneme count: \(phonemeCount)")
+            logger.warning(
+                "No embedding found for \(canonicalVoice) with \(phonemeCount) phonemes, using zeros")
+            print(
+                "WARNING: Using zero embeddings! Voice: \(canonicalVoice), phoneme count: \(phonemeCount)")
             print("DEBUG: Available voices: \(voiceEmbeddings.keys)")
-            if let voiceData = voiceEmbeddings[voice] {
-                print("DEBUG: Available lengths for \(voice): \(voiceData.keys.sorted())")
+            if let voiceData = voiceEmbeddings[canonicalVoice] {
+                print("DEBUG: Available lengths for \(canonicalVoice): \(voiceData.keys.sorted())")
             }
             return Array(repeating: 0.0, count: 256)
         }
     }
 
     /// Main synthesis function (following main.py logic)
-    public static func synthesize(text: String, voice: String = "af_heart") throws -> Data {
-        logger.info("Synthesizing: '\(text)' with voice: \(voice)")
+    public static func synthesize(
+        text: String,
+        voice: String = KokoroVoiceCatalog.defaultVoiceId
+    ) throws -> Data {
+        let canonicalVoice = KokoroVoiceCatalog.canonicalVoiceId(for: voice) ?? voice
+        logger.info("Synthesizing: '\(text)' with voice: \(canonicalVoice)")
+        if canonicalVoice != voice {
+            logger.debug("Voice alias '\(voice)' resolved to '\(canonicalVoice)'")
+        }
+
+        let voiceMetadata = KokoroVoiceCatalog.voice(for: canonicalVoice)
+        activeLanguageCode = voiceMetadata?.languageCode.lowercased()
+        try loadPhonemeDictionary(for: activeLanguageCode)
 
         // Step 1: Text to phonemes
         let phonemes = try textToPhonemes(text)
@@ -158,7 +171,7 @@ public struct Kokoro {
         }
 
         // Step 4: Get voice embedding
-        let voiceEmbedding = try loadVoiceEmbedding(voice: voice, phonemeCount: phonemes.count)
+        let voiceEmbedding = try loadVoiceEmbedding(voice: canonicalVoice, phonemeCount: phonemes.count)
 
         // Step 5: Create model inputs
         let inputShape = [1, 249] as [NSNumber]
@@ -169,16 +182,17 @@ public struct Kokoro {
 
         let refShape = [1, 256] as [NSNumber]
         let refArray = try MLMultiArray(shape: refShape, dataType: .float32)
-        for (i, val) in voiceEmbedding.enumerated() {
-            refArray[i] = NSNumber(value: val)
+        let refPointer = refArray.dataPointer.bindMemory(to: Float.self, capacity: voiceEmbedding.count)
+        voiceEmbedding.withUnsafeBufferPointer { src in
+            guard let base = src.baseAddress else { return }
+            refPointer.initialize(from: base, count: src.count)
         }
 
         // Fixed phases (all zeros, matching main.py)
         let phasesShape = [1, 9] as [NSNumber]
         let phasesArray = try MLMultiArray(shape: phasesShape, dataType: .float32)
-        for i in 0..<9 {
-            phasesArray[i] = NSNumber(value: Float(0.0))
-        }
+        let phasesPointer = phasesArray.dataPointer.bindMemory(to: Float.self, capacity: 9)
+        phasesPointer.initialize(repeating: 0, count: 9)
 
         logger.info(
             "Input shapes - input_ids: \(inputArray.shape), ref_s: \(refArray.shape), phases: \(phasesArray.shape)")

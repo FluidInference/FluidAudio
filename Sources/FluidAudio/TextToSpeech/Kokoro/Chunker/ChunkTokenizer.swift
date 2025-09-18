@@ -24,8 +24,19 @@ enum ChunkTokenizer {
     }
 
     private enum Constants {
-        static let sentenceTerminators: Set<String> = [".", "!", "?", "?!", "!?", "...", "…"]
-        static let clauseDelimiters: Set<String> = [",", ";", ":", "—", "–", "-"]
+        static let sentenceTerminators: Set<String> = [
+            ".", "!", "?", "?!", "!?", "...", "…",
+            "。", "！", "？", "？！", "！？", "！！", "？？", "｡", "．",
+        ]
+        static let sentenceTerminatorCharacters: Set<Character> = [
+            ".", "!", "?", "…", "。", "！", "？", "｡", "．",
+        ]
+        static let clauseDelimiters: Set<String> = [
+            ",", ";", ":", "—", "–", "-", "、", "，", "；", "：", "､",
+        ]
+        static let clauseDelimiterCharacters: Set<Character> = [
+            ",", ";", ":", "—", "–", "-", "、", "，", "；", "：", "､",
+        ]
         static let parentheticalOpeners: Set<String> = ["(", "[", "{"]
         static let parentheticalClosers: Set<String> = [")", "]", "}"]
         static let quotePunctuation: Set<String> = ["\"", "'", "“", "”", "‘", "’", "«", "»", "‹", "›", "„", "‟"]
@@ -219,16 +230,16 @@ enum ChunkTokenizer {
             return .sentence
         }
 
-        if punctuation.allSatisfy({ "!?".contains($0) }) {
-            return .sentence
-        }
-
-        if punctuation.allSatisfy({ $0 == "-" }) {
-            return .clause
-        }
-
         if Constants.sentenceTerminators.contains(punctuation) {
             return .sentence
+        }
+
+        if punctuation.allSatisfy({ Constants.sentenceTerminatorCharacters.contains($0) }) {
+            return .sentence
+        }
+
+        if punctuation.allSatisfy({ Constants.clauseDelimiterCharacters.contains($0) }) {
+            return .clause
         }
 
         if Constants.clauseDelimiters.contains(punctuation) {

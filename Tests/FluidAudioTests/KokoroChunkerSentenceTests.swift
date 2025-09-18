@@ -73,6 +73,175 @@ final class KokoroChunkerSentenceTests: XCTestCase {
         XCTAssertTrue(normalized.contains("!"))
     }
 
+    func testFrenchBasicSentences() {
+        let text = "Bonjour le monde. Comment allez-vous? J'espère que vous allez bien."
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "French text should produce chunks")
+        XCTAssertEqual(chunks.count, 1, "Short French text should merge into one chunk")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords, "Word sequence should be preserved")
+        XCTAssertTrue(flattened.contains("Bonjour"))
+        XCTAssertTrue(flattened.contains("allez-vous"))
+        XCTAssertTrue(flattened.contains("J'espère"))
+
+        let chunkTextValue = flattened.joined(separator: " ")
+        XCTAssertLessThanOrEqual(chunkTextValue.count, 300)
+    }
+
+    func testFrenchWithAccents() {
+        let text = "C'est très intéressant. Les élèves étudient français. Où êtes-vous né?"
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "French text with accents should produce chunks")
+        XCTAssertLessThanOrEqual(chunks.count, 2, "Should merge into a small number of chunks")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords)
+        XCTAssertTrue(flattened.contains("très"))
+        XCTAssertTrue(flattened.contains("élèves"))
+        XCTAssertTrue(flattened.contains("Où"))
+    }
+
+    func testSpanishBasicSentences() {
+        let text = "Hola mundo. ¿Cómo estás? ¡Esto es increíble!"
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "Spanish text should produce chunks")
+        XCTAssertEqual(chunks.count, 1, "Short Spanish text should merge into one chunk")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords)
+        XCTAssertTrue(flattened.contains("Hola"))
+        XCTAssertTrue(flattened.contains("Cómo"))
+        XCTAssertTrue(flattened.contains("increíble"))
+    }
+
+    func testSpanishInvertedPunctuation() {
+        let text = "¿Hablas español? ¡Qué maravilloso! Me gusta mucho este idioma."
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "Spanish text should produce chunks")
+        XCTAssertEqual(chunks.count, 1, "Short Spanish text should merge into one chunk")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords)
+        XCTAssertTrue(flattened.contains("Hablas"))
+        XCTAssertTrue(flattened.contains("español"))
+        XCTAssertTrue(flattened.contains("idioma"))
+    }
+
+    func testItalianBasicSentences() {
+        let text = "Ciao mondo. Come stai? Spero che tu stia bene."
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "Italian text should produce chunks")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords)
+        XCTAssertTrue(flattened.contains("Ciao"))
+        XCTAssertTrue(flattened.contains("Come"))
+        XCTAssertTrue(flattened.contains("bene"))
+
+        for (index, chunk) in chunks.enumerated() {
+            let chunkString = chunk.words.joined(separator: " ")
+            XCTAssertLessThanOrEqual(chunkString.count, 300, "Chunk \(index) should follow Latin limits")
+        }
+    }
+
+    func testItalianWithApostrophes() {
+        let text = "L'Italia è bella. Non c'è problema. Quest'anno andrò in vacanza."
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "Italian text with apostrophes should produce chunks")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords)
+        XCTAssertTrue(flattened.contains("L'Italia"))
+        XCTAssertTrue(flattened.contains("c'è"))
+        XCTAssertTrue(flattened.contains("Quest'anno"))
+    }
+
+    func testJapanesePunctuation() {
+        let text = "こんにちは世界。元気ですか？これはテストです！"
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "Japanese text should produce chunks")
+        XCTAssertEqual(chunks.count, 1, "Short Japanese text should stay in one chunk")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords)
+        XCTAssertTrue(flattened.contains("こんにちは世界"))
+        XCTAssertTrue(flattened.contains("元気ですか"))
+        XCTAssertTrue(flattened.contains("これはテストです"))
+    }
+
+    func testMandarinPunctuation() {
+        let text = "你好世界。你今天好吗？这是一个测试！"
+        let (chunks, expectedWords) = chunkText(text)
+
+        XCTAssertFalse(chunks.isEmpty, "Mandarin text should produce chunks")
+        XCTAssertEqual(chunks.count, 1, "Short Mandarin text should stay in one chunk")
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertEqual(flattened, expectedWords)
+        XCTAssertTrue(flattened.contains("你好世界"))
+        XCTAssertTrue(flattened.contains("你今天好吗"))
+        XCTAssertTrue(flattened.contains("这是一个测试"))
+    }
+
+    func testCurrencyNormalizationMatchesTokenizer() {
+        let text = "I paid $5.50 for lunch."
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("5 dollars and 50 cents"))
+    }
+
+    func testTimeNormalizationMatchesTokenizer() {
+        let text = "The meeting is at 5:30."
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("5 30") || normalized.contains("5 oh 30"))
+    }
+
+    func testDecimalNormalizationMatchesTokenizer() {
+        let text = "Pi is approximately 3.14."
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("3 point 1 4"))
+    }
+
+    func testDecimalInStressDirectiveNotExpanded() {
+        let text = "[important](1.5) topic"
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("important"))
+        XCTAssertFalse(normalized.contains("point"), "Stress directive decimals should remain untouched")
+    }
+
+    func testAliasReplacementUsesReplacementText() {
+        let text = "[Dr.](Doctor) Smith"
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("Doctor Smith"))
+        XCTAssertFalse(normalized.contains("Dr."))
+    }
+
+    func testAcronymAliasSpelling() {
+        let text = "[NASA](N A S A) launched a rocket."
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("N A S A launched"))
+    }
+
+    func testDirectPhonemeDirectiveKeepsSurfaceForm() {
+        let text = "[hello](/həˈloʊ/) world"
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("hello world"))
+    }
+
+    func testReplacementTextWithTimeNotAutoProcessed() {
+        let text = "[5:30](half past five) reminder"
+        let normalized = ChunkerTestSupport.normalize(text)
+        XCTAssertTrue(normalized.contains("half past five"))
+        XCTAssertFalse(normalized.contains("5 30"))
+    }
+
     // MARK: - Helpers
 
     private func chunkText(_ text: String) -> ([TextChunk], [String]) {
@@ -85,6 +254,8 @@ final class KokoroChunkerSentenceTests: XCTestCase {
             wordToPhonemes: lexicon,
             targetTokens: 512,
             hasLanguageToken: false,
+            languageCode: "en-us",
+            voiceIdentifier: KokoroVoiceCatalog.defaultVoiceId,
             allowedPhonemeTokens: allowedTokens
         )
 
@@ -93,44 +264,8 @@ final class KokoroChunkerSentenceTests: XCTestCase {
 }
 
 private enum ChunkerTestSupport {
-    private static let currencies: [Character: (bill: String, cent: String)] = [
-        "$": ("dollar", "cent"),
-        "£": ("pound", "pence"),
-        "€": ("euro", "cent"),
-    ]
-
-    private static let currencyRegex = try! NSRegularExpression(
-        pattern: #"[\$£€]\d+(?:\.\d+)?(?: hundred| thousand| (?:[bm]|tr)illion)*\b|[\$£€]\d+\.\d\d?\b"#
-    )
-
-    private static let timeRegex = try! NSRegularExpression(
-        pattern: #"\b(?:[1-9]|1[0-2]):[0-5]\d\b"#
-    )
-
-    private static let decimalRegex = try! NSRegularExpression(
-        pattern: #"\b\d*\.\d+\b"#
-    )
-
-    private static let rangeRegex = try! NSRegularExpression(
-        pattern: #"([\$£€]?\d+)-([\$£€]?\d+)"#
-    )
-
-    private static let commaInNumberRegex = try! NSRegularExpression(
-        pattern: #"(^|[^\d])(\d+(?:,\d+)*)([^\d]|$)"#
-    )
-
     static func normalize(_ text: String) -> String {
-        var processed = text
-        processed = removeCommas(from: processed)
-        processed = rangeRegex.stringByReplacingMatches(
-            in: processed,
-            range: NSRange(processed.startIndex..., in: processed),
-            withTemplate: "$1 to $2"
-        )
-        processed = flipMoney(processed)
-        processed = splitTimes(processed)
-        processed = spellDecimals(processed)
-        return processed
+        ChunkPreprocessor.process(text)
     }
 
     static func tokenizeWords(in text: String) -> [String] {
@@ -179,6 +314,7 @@ private enum ChunkerTestSupport {
         var dictionary: [String: [String]] = [:]
         var allowedTokens: Set<String> = [
             " ", ".", ",", "!", "?", "\"", "'", "…", ":", ";", "-", "—", "–",
+            "。", "！", "？", "、", "，", "；", "：", "¿", "¡", "｡", "．",
         ]
 
         for word in words {
@@ -246,113 +382,6 @@ private enum ChunkerTestSupport {
         }
         return character
     }
-
-    private static func removeCommas(from text: String) -> String {
-        let replaced = commaInNumberRegex.stringByReplacingMatches(
-            in: text,
-            range: NSRange(text.startIndex..., in: text),
-            withTemplate: "$1$2$3"
-        )
-        return replaced.replacingOccurrences(of: ",", with: "")
-    }
-
-    private static func flipMoney(_ text: String) -> String {
-        var result = text
-        let matches = currencyRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-
-        for match in matches.reversed() {
-            guard let range = Range(match.range, in: text) else { continue }
-            let token = String(text[range])
-            guard let symbol = token.first,
-                let currency = currencies[symbol]
-            else { continue }
-
-            let value = String(token.dropFirst())
-            let components = value.components(separatedBy: ".")
-            let dollars = components[0]
-            let cents = components.count > 1 ? components[1] : "0"
-
-            let replacement: String
-            if let centValue = Int(cents), centValue == 0 {
-                if let dollarValue = Int(dollars), dollarValue == 1 {
-                    replacement = "\(dollars) \(currency.bill)"
-                } else {
-                    replacement = "\(dollars) \(currency.bill)s"
-                }
-            } else {
-                let dollarPart: String
-                if let dollarValue = Int(dollars), dollarValue == 1 {
-                    dollarPart = "\(dollars) \(currency.bill)"
-                } else {
-                    dollarPart = "\(dollars) \(currency.bill)s"
-                }
-                replacement = "\(dollarPart) and \(cents) \(currency.cent)s"
-            }
-
-            result = result.replacingCharacters(in: range, with: replacement)
-        }
-
-        return result
-    }
-
-    private static func splitTimes(_ text: String) -> String {
-        var result = text
-        let matches = timeRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-
-        for match in matches.reversed() {
-            guard let range = Range(match.range, in: text) else { continue }
-            let substring = String(text[range])
-            let parts = substring.components(separatedBy: ":")
-            guard parts.count == 2,
-                let hour = Int(parts[0]),
-                let minute = Int(parts[1])
-            else { continue }
-
-            let replacement: String
-            if minute == 0 {
-                replacement = "\(hour) o'clock"
-            } else if minute < 10 {
-                replacement = "\(hour) oh \(minute)"
-            } else {
-                replacement = "\(hour) \(minute)"
-            }
-
-            result = result.replacingCharacters(in: range, with: replacement)
-        }
-
-        return result
-    }
-
-    private static func spellDecimals(_ text: String) -> String {
-        var result = text
-        let decimalMatches = decimalRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        let linkMatches = linkRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-
-        var excludedRanges: [NSRange] = []
-        for match in linkMatches where match.numberOfRanges >= 3 {
-            excludedRanges.append(match.range(at: 2))
-        }
-
-        for match in decimalMatches.reversed() {
-            let range = match.range
-            guard excludedRanges.allSatisfy({ NSIntersectionRange($0, range).length == 0 }) else { continue }
-            guard let swiftRange = Range(range, in: text) else { continue }
-            let substring = String(text[swiftRange])
-            let pieces = substring.components(separatedBy: ".")
-            guard pieces.count == 2 else { continue }
-            let integerPart = pieces[0]
-            let decimalPart = pieces[1]
-            let spelledDigits = decimalPart.map { String($0) }.joined(separator: " ")
-            let replacement = "\(integerPart) point \(spelledDigits)"
-            result = result.replacingCharacters(in: swiftRange, with: replacement)
-        }
-
-        return result
-    }
-
-    private static let linkRegex = try! NSRegularExpression(
-        pattern: #"\[([^\]]+)\]\(([^\)]*)\)"#
-    )
 }
 
 extension Array where Element == String {

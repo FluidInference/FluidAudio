@@ -13,7 +13,7 @@ public struct TTS {
 
         let text = arguments[0]
         var output = "output.wav"
-        var voice = "af_heart"
+        var voice = KokoroVoiceCatalog.defaultVoiceId
         var metricsPath: String? = nil
         // Always ensure required files in CLI
 
@@ -48,6 +48,15 @@ public struct TTS {
             i += 1
         }
 
+        let requestedVoice = voice
+        let canonicalVoice =
+            KokoroVoiceCatalog.canonicalVoiceId(for: requestedVoice)
+            ?? KokoroVoiceCatalog.defaultVoiceId
+        if canonicalVoice != requestedVoice {
+            print("Resolved voice '\(requestedVoice)' to '\(canonicalVoice)'")
+        }
+        voice = canonicalVoice
+
         do {
             // Timing buckets
             let tStart = Date()
@@ -56,7 +65,11 @@ public struct TTS {
             try await KokoroModel.ensureRequiredFiles()
 
             // 2) Ensure voice embedding in cache
-            try? await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: voice)
+            do {
+                try await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: voice)
+            } catch {
+                print("Warning: could not cache voice embedding for \(voice): \(error.localizedDescription)")
+            }
 
             // 3) Load/compile model if needed
             let tLoad0 = Date()
@@ -137,6 +150,7 @@ public struct TTS {
                 let dict: [String: Any] = [
                     "text": text,
                     "voice": voice,
+                    "requested_voice": requestedVoice,
                     "output": outURL.path,
                     "metrics": metricsDict,
                 ]
