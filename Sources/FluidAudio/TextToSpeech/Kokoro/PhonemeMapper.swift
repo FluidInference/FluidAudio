@@ -10,27 +10,67 @@ enum PhonemeMapper {
     static func mapIPA(_ ipaTokens: [String], allowed: Set<String>) -> [String] {
         var out: [String] = []
 
-        for (i, p) in ipaTokens.enumerated() {
-            if allowed.contains(p) {
-                out.append(p)
-                continue
-            }
-
-            // Try pair merge for affricates represented as separate chars
-            if i + 1 < ipaTokens.count {
-                let pair = p + ipaTokens[i + 1]
-                if let mapped = mapSingle(pair, allowed: allowed) {
-                    out.append(mapped)
+        for token in ipaTokens {
+            let expanded = expand(token, allowed: allowed)
+            for part in expanded {
+                if allowed.contains(part) {
+                    out.append(part)
                     continue
                 }
-            }
 
-            if let mapped = mapSingle(p, allowed: allowed) {
-                out.append(mapped)
+                if let mapped = mapSingle(part, allowed: allowed) {
+                    out.append(mapped)
+                }
             }
         }
 
         return out
+    }
+
+    private static let toneCharacters = CharacterSet(charactersIn: "0123456789˥˦˧˨˩ːˑ˘˙ˊˋˉˇˌˏˎˍ˔˕ˀˁ˞")
+
+    private static func expand(_ raw: String, allowed: Set<String>) -> [String] {
+        let sanitizedScalars = raw.unicodeScalars.filter { !toneCharacters.contains($0) }
+        if sanitizedScalars.isEmpty { return [] }
+
+        var sanitized = String(sanitizedScalars)
+        if sanitized.isEmpty { return [] }
+
+        sanitized = sanitized.replacingOccurrences(of: "_", with: "")
+        sanitized = sanitized.replacingOccurrences(of: "'", with: "")
+        sanitized = sanitized.replacingOccurrences(of: "ˈ", with: "")
+        sanitized = sanitized.replacingOccurrences(of: "ˌ", with: "")
+
+        // Normalize common affricate spellings from eSpeak output
+        let replacements: [(String, String)] = [
+            ("tsʰ", "ʦ"),
+            ("ts", "ʦ"),
+            ("tɕʰ", "ʨ"),
+            ("tɕ", "ʨ"),
+            ("dʑ", "ʥ"),
+            ("ʂʰ", "ʂ"),
+            ("ɕʰ", "ɕ"),
+        ]
+        for (old, new) in replacements {
+            sanitized = sanitized.replacingOccurrences(of: old, with: new)
+        }
+
+        sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty else { return [] }
+
+        if sanitized.contains(where: { $0.isWhitespace }) {
+            return sanitized.split { $0.isWhitespace }.map { String($0) }
+        }
+
+        if allowed.contains(sanitized) {
+            return [sanitized]
+        }
+
+        if sanitized.count > 1 {
+            return sanitized.unicodeScalars.map { String($0) }
+        }
+
+        return [sanitized]
     }
 
     private static func mapSingle(_ raw: String, allowed: Set<String>) -> String? {
@@ -54,6 +94,8 @@ enum PhonemeMapper {
             "ɛ": "ɛ", "e": "e", "o": "o", "ɔ": "ɔ",
             // Diphthongs
             "eɪ": "e", "oʊ": "o", "aɪ": "a", "aʊ": "a", "ɔɪ": "ɔ",
+            // Mandarin retroflex and alveolo-palatal approximations
+            "ɻ": "r",
         ]
 
         if let mapped = ipaToKokoro[raw], allowed.contains(mapped) { return mapped }

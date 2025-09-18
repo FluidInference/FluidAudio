@@ -100,6 +100,13 @@ public struct KokoroModel {
         logger.info("Kokoro model successfully loaded")
     }
 
+    /// Use a pre-loaded Kokoro model instance (primarily for unit tests or embedding contexts).
+    public static func useExternalModel(_ model: MLModel) {
+        kokoroModel = model
+        isModelLoaded = true
+        logger.info("Using externally provided Kokoro model instance")
+    }
+
     /// Load simple word->phonemes dictionary (preferred)
     /// Supports two formats:
     /// 1) { "word_to_phonemes": { word: [token, ...] } }
@@ -658,10 +665,11 @@ public struct KokoroModel {
         ])
 
         // Time ONLY the model prediction
-        let predictionStart = Date()
-        guard let output = try kokoroModel?.prediction(from: modelInput) else {
-            throw TTSError.processingFailed("Model prediction failed")
+        guard let model = kokoroModel else {
+            throw TTSError.modelNotFound("Kokoro model not initialized")
         }
+        let predictionStart = Date()
+        let output = try model.prediction(from: modelInput)
         let predictionTime = Date().timeIntervalSince(predictionStart)
         print("[PERF] Pure model.prediction() time: \(String(format: "%.3f", predictionTime))s")
 
@@ -713,6 +721,29 @@ public struct KokoroModel {
         text: String,
         voice: String = KokoroVoiceCatalog.defaultVoiceId
     ) async throws -> Data {
+        let (samples, totalTime) = try await synthesizeSamplesInternal(text: text, voice: voice)
+        let audioData = try AudioWAV.data(from: samples, sampleRate: 24000)
+        logger.info("Synthesis complete in \(String(format: "%.3f", totalTime))s")
+        logger.info("Audio size: \(audioData.count) bytes")
+        return audioData
+    }
+
+    /// Generate normalized PCM samples without packaging them into a WAV container.
+    public static func synthesizeSamples(
+        text: String,
+        voice: String = KokoroVoiceCatalog.defaultVoiceId
+    ) async throws -> [Float] {
+        let (samples, totalTime) = try await synthesizeSamplesInternal(text: text, voice: voice)
+        logger.info(
+            "Synthesis complete (samples only) in \(String(format: "%.3f", totalTime))s; sample count=\(samples.count)"
+        )
+        return samples
+    }
+
+    private static func synthesizeSamplesInternal(
+        text: String,
+        voice: String
+    ) async throws -> ([Float], Double) {
         let synthesisStart = Date()
 
         logger.info("Starting synthesis: '\(text)'")
@@ -722,7 +753,8 @@ public struct KokoroModel {
         let voiceMetadata = KokoroVoiceCatalog.voice(for: canonicalVoice)
         if let metadata = voiceMetadata {
             logger.info(
-                "Voice: \(metadata.label) [\(metadata.languageName), \(metadata.gender.rawValue.capitalized)]")
+                "Voice: \(metadata.label) [\(metadata.languageName), \(metadata.gender.rawValue.capitalized)]"
+            )
         } else {
             logger.info("Voice: \(canonicalVoice)")
         }
@@ -749,9 +781,7 @@ public struct KokoroModel {
         let languageCode = voiceMetadata?.languageCode
         let phonemeDictionary = try phonemeDictionary(for: languageCode)
 
-        // If there are OOV words and G2P data is missing, fail fast per policy.
         do {
-            // Normalize words similarly to chunker
             let allowedSet = CharacterSet.letters.union(.decimalDigits).union(CharacterSet(charactersIn: "'"))
             func normalize(_ s: String) -> String {
                 let lowered = s.lowercased()
@@ -802,44 +832,36 @@ public struct KokoroModel {
             #endif
         }
 
-        // Chunk the text based on frame counts
         let chunks = try chunkText(text, using: phonemeDictionary)
-
         if chunks.isEmpty {
             throw TTSError.processingFailed("No valid words found in text")
         }
 
         if chunks.count == 1 {
-            // Single chunk - process normally
             logger.info("Text fits in single chunk")
             let chunk = chunks[0]
             logger.info("Processing chunk: \(chunk.words.count) words, \(chunk.totalFrames) frames")
 
             let samples = try await synthesizeChunk(chunk, voice: canonicalVoice)
-
-            // Normalize and convert to WAV
             let maxVal = samples.map { abs($0) }.max() ?? 1.0
             let normalizedSamples = maxVal > 0 ? samples.map { $0 / maxVal } : samples
-            let audioData = try AudioWAV.data(from: normalizedSamples, sampleRate: 24000)
-
+            let minVal = normalizedSamples.min() ?? 0
+            let maxOut = normalizedSamples.max() ?? 0
+            logger.info("Audio range: [\(String(format: "%.4f", minVal)), \(String(format: "%.4f", maxOut))]")
             let totalTime = Date().timeIntervalSince(synthesisStart)
-            logger.info("Synthesis complete in \(String(format: "%.3f", totalTime))s")
-            logger.info("Audio size: \(audioData.count) bytes")
-
-            return audioData
+            return (normalizedSamples, totalTime)
         } else {
-            // Multiple chunks - process and concatenate with boundary handling
             logger.info("Text split into \(chunks.count) chunks")
             var allSamples: [Float] = []
 
-            // let sampleRate = 24000  // implicit by model; reserved for future resampling logic
             let crossfadeMs = 8
             let crossfadeN = max(0, Int(Double(crossfadeMs) * 24.0))
 
             for i in 0..<chunks.count {
                 let chunk = chunks[i]
                 logger.info(
-                    "Processing chunk \(i+1)/\(chunks.count): \(chunk.words.count) words, \(chunk.totalFrames) frames")
+                    "Processing chunk \(i+1)/\(chunks.count): \(chunk.words.count) words, \(chunk.totalFrames) frames"
+                )
                 logger.info("Chunk \(i+1) text: '\(chunk.words.joined(separator: " "))'")
                 let chunkSamples = try await synthesizeChunk(chunk, voice: canonicalVoice)
                 if i == 0 {
@@ -853,10 +875,8 @@ public struct KokoroModel {
                         }
                         allSamples.append(contentsOf: chunkSamples)
                     } else {
-                        // Micro crossfade join (only when no punctuation-driven pause)
                         let n = min(crossfadeN, allSamples.count, chunkSamples.count)
                         if n > 0 {
-                            // Fade out last n of allSamples, fade in first n of chunkSamples
                             for k in 0..<n {
                                 let aIdx = allSamples.count - n + k
                                 let bIdx = k
@@ -865,7 +885,6 @@ public struct KokoroModel {
                                 let fadeIn = t
                                 allSamples[aIdx] = allSamples[aIdx] * fadeOut + chunkSamples[bIdx] * fadeIn
                             }
-                            // Append remainder of chunk after crossfade overlap
                             if chunkSamples.count > n {
                                 allSamples.append(contentsOf: chunkSamples[n...])
                             }
@@ -876,19 +895,14 @@ public struct KokoroModel {
                 }
             }
 
-            // Normalize all samples together
             let maxVal = allSamples.map { abs($0) }.max() ?? 1.0
             let normalizedSamples = maxVal > 0 ? allSamples.map { $0 / maxVal } : allSamples
-
-            // Convert to WAV (24 kHz mono)
-            let audioData = try AudioWAV.data(from: normalizedSamples, sampleRate: 24000)
-
+            let minVal = normalizedSamples.min() ?? 0
+            let maxOut = normalizedSamples.max() ?? 0
+            logger.info("Audio range: [\(String(format: "%.4f", minVal)), \(String(format: "%.4f", maxOut))]")
+            logger.info("Total samples: \(normalizedSamples.count)")
             let totalTime = Date().timeIntervalSince(synthesisStart)
-            logger.info("Synthesis complete in \(String(format: "%.3f", totalTime))s")
-            logger.info("Total audio size: \(audioData.count) bytes")
-            logger.info("Total samples: \(allSamples.count)")
-
-            return audioData
+            return (normalizedSamples, totalTime)
         }
     }
 

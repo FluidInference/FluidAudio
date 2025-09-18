@@ -313,8 +313,11 @@ private struct WordPhonemizer {
             if !mapped.isEmpty {
                 output.append(contentsOf: mapped)
                 KokoroChunker.logger.info("EspeakG2P used for OOV word: \(key)")
+                KokoroChunker.logger.debug("IPA=\(ipa.joined(separator: " ")), mapped=\(mapped)")
             } else {
-                KokoroChunker.logger.warning("OOV word yielded no mappable IPA tokens: \(key)")
+                KokoroChunker.logger.warning(
+                    "OOV word yielded no mappable IPA tokens: \(key) (IPA=\(ipa.joined(separator: " "))"
+                )
             }
         } else {
             KokoroChunker.logger.warning("EspeakG2P failed for OOV word: \(key)")

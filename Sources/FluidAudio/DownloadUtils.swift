@@ -563,8 +563,11 @@ extension DownloadUtils {
             logger.info("Downloaded espeak-ng-data.zip")
         }
 
-        // Extract the zip
+        // Extract the zip (currently relies on the system unzip tool on macOS)
         let resourcesDir = repoPath.appendingPathComponent("Resources")
+        try FileManager.default.createDirectory(at: resourcesDir, withIntermediateDirectories: true)
+
+        #if os(macOS)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         process.arguments = ["-o", zipPath.path, "-d", resourcesDir.path]
@@ -575,7 +578,12 @@ extension DownloadUtils {
 
         if process.terminationStatus == 0 {
             logger.info("Extracted espeak-ng-data successfully")
+        } else {
+            logger.warning("unzip exited with status \(process.terminationStatus)")
         }
+        #else
+        throw TTSError.processingFailed("eSpeak NG extraction is only supported on macOS")
+        #endif
 
         // Validate after extraction
         guard FileManager.default.fileExists(atPath: voices.path) else {

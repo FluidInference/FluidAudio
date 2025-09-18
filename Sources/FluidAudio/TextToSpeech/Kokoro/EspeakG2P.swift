@@ -10,6 +10,9 @@ final class EspeakG2P {
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
     private let queue = DispatchQueue(label: "com.fluidaudio.tts.espeak.g2p")
     private var initialized = false
+    private var currentVoice: String?
+    private var availableVoicesByIdentifier: [String: String] = [:]
+    private var voicesByLanguage: [String: [String]] = [:]
 
     private init() {
         _ = initializeIfNeeded()
@@ -38,7 +41,95 @@ final class EspeakG2P {
         }
         _ = "en-us".withCString { espeak_SetVoiceByName($0) }
         initialized = true
+        populateVoiceCache()
         return true
+    }
+
+    private func populateVoiceCache() {
+        availableVoicesByIdentifier.removeAll()
+        voicesByLanguage.removeAll()
+
+        guard let voiceList = espeak_ListVoices(nil) else { return }
+
+        var index = 0
+        while let voicePointer = voiceList.advanced(by: index).pointee {
+            let voice = voicePointer.pointee
+
+            if let identifierPtr = voice.identifier {
+                let identifier = String(cString: identifierPtr)
+                let canonical = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !canonical.isEmpty {
+                    availableVoicesByIdentifier[canonical.lowercased()] = canonical
+                }
+
+                if let languagesPtr = voice.languages {
+                    let rawLanguages = String(cString: languagesPtr)
+                    let cleaned =
+                        rawLanguages
+                        .replacingOccurrences(of: "\u{05}", with: "")
+                        .replacingOccurrences(of: "\u{02}", with: "")
+                        .replacingOccurrences(of: "\n", with: "")
+                        .replacingOccurrences(of: "\r", with: "")
+                    let components = cleaned.split(separator: "+")
+                    for component in components {
+                        let lang = component.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        guard !lang.isEmpty else { continue }
+                        voicesByLanguage[lang, default: []].append(canonical)
+                        if let hyphen = lang.firstIndex(of: "-") {
+                            let prefix = String(lang[..<hyphen])
+                            voicesByLanguage[prefix, default: []].append(canonical)
+                        }
+                    }
+                }
+            }
+
+            index += 1
+        }
+    }
+
+    private func selectVoiceIfNeeded(voiceIdentifier: String?, languageCode: String?) -> Bool {
+        guard let desiredVoice = resolveVoice(voiceIdentifier: voiceIdentifier, languageCode: languageCode) else {
+            return false
+        }
+
+        if currentVoice == desiredVoice { return true }
+
+        let rc = desiredVoice.withCString { espeak_SetVoiceByName($0) }
+        if rc == EE_OK {
+            currentVoice = desiredVoice
+            return true
+        }
+        logger.debug("espeak_SetVoiceByName failed for \(desiredVoice) (rc=\(rc))")
+        return false
+    }
+
+    private func resolveVoice(voiceIdentifier: String?, languageCode: String?) -> String? {
+        if let voiceIdentifier {
+            let key = voiceIdentifier.lowercased()
+            if let exact = availableVoicesByIdentifier[key] {
+                return exact
+            }
+        }
+
+        if let languageCode, !languageCode.isEmpty {
+            let lower = languageCode.lowercased()
+            if let matches = voicesByLanguage[lower], let first = matches.first {
+                return first
+            }
+            if let hyphen = lower.firstIndex(of: "-") {
+                let prefix = String(lower[..<hyphen])
+                if let matches = voicesByLanguage[prefix], let first = matches.first {
+                    return first
+                }
+            }
+        }
+
+        // Fallback to English voices if available
+        if let enVoice = voicesByLanguage["en"]?.first ?? voicesByLanguage["en-us"]?.first {
+            return enVoice
+        }
+
+        return availableVoicesByIdentifier.values.first
     }
 
     static func findEspeakDataPath() -> String? {
@@ -113,10 +204,16 @@ final class EspeakG2P {
     }
 
     /// Return IPA tokens for a word, or nil on failure.
-    /// Optional voice/language arguments are currently ignored but kept for API compatibility.
     func phonemize(word: String, voiceIdentifier: String? = nil, languageCode: String? = nil) -> [String]? {
-        return queue.sync {
+        return queue.sync { () -> [String]? in
             guard initializeIfNeeded() else { return nil }
+
+            let didSelectVoice = selectVoiceIfNeeded(voiceIdentifier: voiceIdentifier, languageCode: languageCode)
+            if !didSelectVoice {
+                logger.debug(
+                    "Using default eSpeak voice; unable to resolve \(voiceIdentifier ?? languageCode ?? "default")")
+            }
+
             return word.withCString { cstr -> [String]? in
                 var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
                 let modeIPA = Int32(espeakPHONEMES_IPA)
