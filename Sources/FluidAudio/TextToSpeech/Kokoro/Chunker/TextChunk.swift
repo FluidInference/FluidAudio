@@ -10,4 +10,7 @@ struct TextChunk {
     let phonemes: [String]
     let totalFrames: Float
     let pauseAfterMs: Int
+    let isForcedSplit: Bool
+    let trailingPunctuation: String?
+    let isSentenceBoundary: Bool
 }

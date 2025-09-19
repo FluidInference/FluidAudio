@@ -73,6 +73,37 @@ final class KokoroChunkerSentenceTests: XCTestCase {
         XCTAssertTrue(normalized.contains("!"))
     }
 
+    func testHyphenatedWordsPreserved() {
+        let text = "The self-made inventor amazed everyone."
+        let (chunks, expectedWords) = chunkText(text)
+
+        let flattened = chunks.flatMap { $0.words }
+        XCTAssertTrue(flattened.contains("self-made"), "Chunks should retain hyphenated words")
+        XCTAssertTrue(expectedWords.contains("self-made"), "Expected word list should include hyphenated forms")
+    }
+
+    func testHyphenatedDictionaryLookup() {
+        let wordToPhonemes: [String: [String]] = [
+            "self-made": ["S1"],
+            "inventor": ["S2"],
+        ]
+        let allowedTokens: Set<String> = ["S1", "S2", " "]
+
+        let chunks = KokoroChunker.chunk(
+            text: "self-made inventor",
+            wordToPhonemes: wordToPhonemes,
+            targetTokens: 128,
+            hasLanguageToken: false,
+            languageCode: "en-us",
+            voiceIdentifier: nil,
+            allowedPhonemeTokens: allowedTokens
+        )
+
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertEqual(
+            chunks[0].phonemes, ["S1", " ", "S2"], "Hyphenated word should map through dictionary without fallback")
+    }
+
     func testFrenchBasicSentences() {
         let text = "Bonjour le monde. Comment allez-vous? J'espère que vous allez bien."
         let (chunks, expectedWords) = chunkText(text)
@@ -337,7 +368,7 @@ private enum ChunkerTestSupport {
             .replacingOccurrences(of: "\u{201B}", with: "'")
         let allowedSet = CharacterSet.letters
             .union(.decimalDigits)
-            .union(CharacterSet(charactersIn: "'"))
+            .union(CharacterSet(charactersIn: "'-"))
         return String(lowered.unicodeScalars.filter { allowedSet.contains($0) })
     }
 

@@ -6,18 +6,15 @@ public struct TTS {
 
     public static func run(arguments: [String]) async {
         // Usage: fluidaudio tts "text" [--output file.wav] [--voice af_heart] [--metrics metrics.json] [--auto-download]
-        guard !arguments.isEmpty else {
-            printUsage()
-            return
-        }
-
-        let text = arguments[0]
+        var textArgument: String? = nil
         var output = "output.wav"
         var voice = KokoroVoiceCatalog.defaultVoiceId
         var metricsPath: String? = nil
+        var inputPath: String? = nil
+        var chunkOutputDirPath: String? = nil
         // Always ensure required files in CLI
 
-        var i = 1
+        var i = 0
         while i < arguments.count {
             switch arguments[i] {
             case "--help", "-h":
@@ -38,14 +35,48 @@ public struct TTS {
                     metricsPath = arguments[i + 1]
                     i += 1
                 }
+            case "--input", "-f":
+                if i + 1 < arguments.count {
+                    inputPath = arguments[i + 1]
+                    i += 1
+                }
+            case "--chunk-dir":
+                if i + 1 < arguments.count {
+                    chunkOutputDirPath = arguments[i + 1]
+                    i += 1
+                }
             case "--auto-download":
                 // No-op: downloads are always ensured by the CLI
                 ()
             default:
-                // Unknown flag; ignore for forward-compat
-                ()
+                if textArgument == nil {
+                    textArgument = arguments[i]
+                }
             }
             i += 1
+        }
+
+        let text: String
+        if let inputPath {
+            let url = URL(fileURLWithPath: inputPath)
+                .resolvingSymlinksInPath()
+            let fm = FileManager.default
+            guard fm.fileExists(atPath: url.path) else {
+                print("Error: Input file not found at \(url.path)")
+                return
+            }
+            do {
+                text = try String(contentsOf: url, encoding: .utf8)
+            } catch {
+                print("Error: Failed to read input file at \(url.path): \(error.localizedDescription)")
+                return
+            }
+        } else if let textArgument {
+            text = textArgument
+        } else {
+            print("Error: Provide text or use --input <file>.")
+            printUsage()
+            return
         }
 
         let requestedVoice = voice
@@ -78,7 +109,20 @@ public struct TTS {
 
             // 4) Synthesize (includes chunking + inference + stitching + WAV pack)
             let tSynth0 = Date()
-            let wav = try await KokoroModel.synthesize(text: text, voice: voice)
+            let chunkDir: URL? = {
+                if let explicit = chunkOutputDirPath {
+                    return URL(fileURLWithPath: explicit)
+                }
+                if let metricsPath {
+                    let metricsURL = URL(fileURLWithPath: metricsPath)
+                    return metricsURL.deletingLastPathComponent().appendingPathComponent("chunks")
+                }
+                return nil
+            }()
+            let detailed = try await KokoroModel.synthesizeDetailed(
+                text: text, voice: voice, chunkOutputDirectory: chunkDir)
+            let wav = detailed.audio
+            let chunkDebug = detailed.chunks
             let tSynth1 = Date()
 
             // Write WAV
@@ -147,6 +191,28 @@ public struct TTS {
                     }
                 }
 
+                if !chunkDebug.isEmpty {
+                    let chunkArray: [[String: Any]] = chunkDebug.map { info in
+                        var entry: [String: Any] = [
+                            "index": info.index,
+                            "text": info.text,
+                            "words": info.words,
+                            "word_count": info.words.count,
+                            "phoneme_count": info.phonemeCount,
+                            "pause_after_ms": info.pauseAfterMs,
+                            "forced_split": info.isForcedSplit,
+                            "still_in_sentence": info.stillInSentence,
+                        ]
+                        entry["punctuation"] = info.trailingPunctuation ?? NSNull()
+                        return entry
+                    }
+                    metricsDict["chunks"] = chunkArray
+                }
+
+                if let chunkDir {
+                    metricsDict["chunk_output_dir"] = chunkDir.path
+                }
+
                 let dict: [String: Any] = [
                     "text": text,
                     "voice": voice,
@@ -173,6 +239,8 @@ public struct TTS {
 
             Options:
               --output, -o         Output WAV path (default: output.wav)
+              --input, -f          Read text from file (UTF-8). Overrides positional text
+              --chunk-dir          Save per-chunk text/WAV files to directory (default: metrics_dir/chunks)
               --voice, -v          Voice name (default: af_heart)
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)
               (models/dictionary auto-download is always on in CLI)

@@ -101,7 +101,12 @@ public enum TTSHarness {
             if inputs["random_phases"] != nil { dict["random_phases"] = MLFeatureValue(multiArray: phases) }
 
             let provider = try MLDictionaryFeatureProvider(dictionary: dict)
-            let out = try model.prediction(from: provider)
+            let out: MLFeatureProvider
+            if #available(macOS 14.0, iOS 17.0, *) {
+                out = try await model.prediction(from: provider)
+            } else {
+                out = try model.prediction(from: provider)
+            }
 
             // Extract audio and optional length
             guard let audioArr = out.featureValue(for: "audio")?.multiArrayValue else {
@@ -151,12 +156,7 @@ public enum TTSHarness {
             throw NSError(
                 domain: "TTSHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: "Model not found at \(u.path)"])
         }
-        // Prefer local mlpackage, then cache mlmodelc
-        let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
-        let localPkg = cwd.appendingPathComponent("kokoro_completev21.mlpackage")
-        if fm.fileExists(atPath: localPkg.path) { return localPkg }
-        let cache = try cacheDir().appendingPathComponent("Models/kokoro/kokoro_completev21.mlmodelc")
-        return cache
+        return try cacheDir().appendingPathComponent("Models/kokoro/kokoro_completev21.mlmodelc")
     }
 
     private static func loadModel(from url: URL) async throws -> MLModel {

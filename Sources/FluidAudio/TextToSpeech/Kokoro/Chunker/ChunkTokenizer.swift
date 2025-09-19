@@ -4,6 +4,8 @@ enum ChunkTokenizer {
     struct ClauseUnit {
         let words: [String]
         let pause: Int
+        let trailingPunctuation: String?
+        let isSentenceBoundary: Bool
     }
 
     private struct Token {
@@ -98,9 +100,9 @@ enum ChunkTokenizer {
         var currentWords: [String] = []
         var lastWord: String?
 
-        func flushCurrent(pause: Int) {
+        func flushCurrent(pause: Int, punctuation: String? = nil, isSentenceBoundary: Bool = false) {
             guard !currentWords.isEmpty else { return }
-            units.append(ClauseUnit(words: currentWords, pause: pause))
+            units.append(ClauseUnit(words: currentWords, pause: pause, trailingPunctuation: punctuation, isSentenceBoundary: isSentenceBoundary))
             currentWords.removeAll(keepingCapacity: true)
         }
 
@@ -120,16 +122,13 @@ enum ChunkTokenizer {
 
                 switch boundary {
                 case .sentence:
-                    flushCurrent(pause: pauseSentence)
+                    flushCurrent(pause: pauseSentence, punctuation: token.text, isSentenceBoundary: true)
                     lastWord = nil
                 case .clause:
-                    flushCurrent(pause: pauseClause)
+                    flushCurrent(pause: pauseClause, punctuation: token.text)
                     lastWord = nil
                 case .none:
-                    if Constants.parentheticalOpeners.contains(token.text) {
-                        flushCurrent(pause: pauseClause)
-                        lastWord = nil
-                    }
+                    break
                 }
             }
         }
@@ -217,10 +216,6 @@ enum ChunkTokenizer {
 
         if Constants.quotePunctuation.contains(punctuation) {
             return .none
-        }
-
-        if Constants.parentheticalClosers.contains(punctuation) {
-            return .clause
         }
 
         if punctuation.allSatisfy({ $0 == "." }) {

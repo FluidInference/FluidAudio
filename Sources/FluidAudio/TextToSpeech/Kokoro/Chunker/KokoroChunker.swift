@@ -109,6 +109,8 @@ enum KokoroChunker {
             var currentPhonemes: [String] = []
             var currentTokenCount = baseOverhead
             var lastPause = pIndex < paragraphs.count - 1 ? pauseParagraph : 0
+            var currentTrailingPunctuation: String? = nil
+            var currentSentenceBoundary = false
 
             for unit in units {
                 let phonemes = phonemizer.phonemize(words: unit.words)
@@ -128,12 +130,17 @@ enum KokoroChunker {
                             words: currentWords,
                             phonemes: currentPhonemes,
                             totalFrames: 0,
-                            pauseAfterMs: lastPause
+                            pauseAfterMs: lastPause,
+                            isForcedSplit: false,
+                            trailingPunctuation: currentTrailingPunctuation,
+                            isSentenceBoundary: currentSentenceBoundary
                         )
                     )
                     currentWords.removeAll()
                     currentPhonemes.removeAll()
                     currentTokenCount = baseOverhead
+                    currentTrailingPunctuation = nil
+                    currentSentenceBoundary = false
                 }
 
                 if !fitsEmpty {
@@ -141,13 +148,21 @@ enum KokoroChunker {
                     var subPhonemes: [String] = []
                     var subCount = baseOverhead
 
-                    func flushSub(finalPause: Int) {
+                    func flushSub(finalPause: Int, punctuation: String? = nil, isSentenceBoundary: Bool = false) {
                         guard !subPhonemes.isEmpty else { return }
                         if subPhonemes.last == " " {
                             subPhonemes.removeLast()
                         }
                         chunks.append(
-                            TextChunk(words: subWords, phonemes: subPhonemes, totalFrames: 0, pauseAfterMs: finalPause)
+                            TextChunk(
+                                words: subWords,
+                                phonemes: subPhonemes,
+                                totalFrames: 0,
+                                pauseAfterMs: finalPause,
+                                isForcedSplit: false,
+                                trailingPunctuation: punctuation,
+                                isSentenceBoundary: isSentenceBoundary
+                            )
                         )
                         subWords.removeAll(keepingCapacity: true)
                         subPhonemes.removeAll(keepingCapacity: true)
@@ -178,11 +193,13 @@ enum KokoroChunker {
                         }
 
                         if index == unit.words.count - 1 {
-                            flushSub(finalPause: unit.pause)
+                            flushSub(finalPause: unit.pause, punctuation: unit.trailingPunctuation, isSentenceBoundary: unit.isSentenceBoundary)
                             lastPause = unit.pause
                         }
                     }
 
+                    currentTrailingPunctuation = nil
+                    currentSentenceBoundary = false
                     continue
                 }
 
@@ -205,15 +222,22 @@ enum KokoroChunker {
                                 words: currentWords,
                                 phonemes: currentPhonemes,
                                 totalFrames: 0,
-                                pauseAfterMs: lastPause
+                                pauseAfterMs: lastPause,
+                                isForcedSplit: false,
+                                trailingPunctuation: currentTrailingPunctuation,
+                                isSentenceBoundary: currentSentenceBoundary
                             )
                         )
+                        currentTrailingPunctuation = nil
+                        currentSentenceBoundary = false
                     }
                     currentWords = unit.words
                     currentPhonemes = phonemes
                     currentTokenCount = baseOverhead + phonemes.count
                     lastPause = unit.pause
                 }
+                currentTrailingPunctuation = unit.trailingPunctuation
+                currentSentenceBoundary = unit.isSentenceBoundary
             }
 
             if !currentPhonemes.isEmpty {
@@ -222,7 +246,15 @@ enum KokoroChunker {
                 }
                 let finalPause = (pIndex < paragraphs.count - 1) ? pauseParagraph : lastPause
                 chunks.append(
-                    TextChunk(words: currentWords, phonemes: currentPhonemes, totalFrames: 0, pauseAfterMs: finalPause)
+                    TextChunk(
+                        words: currentWords,
+                        phonemes: currentPhonemes,
+                        totalFrames: 0,
+                        pauseAfterMs: finalPause,
+                        isForcedSplit: false,
+                        trailingPunctuation: currentTrailingPunctuation,
+                        isSentenceBoundary: currentSentenceBoundary
+                    )
                 )
             }
         }
@@ -313,11 +345,8 @@ private struct WordPhonemizer {
             if !mapped.isEmpty {
                 output.append(contentsOf: mapped)
                 KokoroChunker.logger.info("EspeakG2P used for OOV word: \(key)")
-                KokoroChunker.logger.debug("IPA=\(ipa.joined(separator: " ")), mapped=\(mapped)")
             } else {
-                KokoroChunker.logger.warning(
-                    "OOV word yielded no mappable IPA tokens: \(key) (IPA=\(ipa.joined(separator: " "))"
-                )
+                KokoroChunker.logger.warning("OOV word yielded no mappable IPA tokens: \(key)")
             }
         } else {
             KokoroChunker.logger.warning("EspeakG2P failed for OOV word: \(key)")

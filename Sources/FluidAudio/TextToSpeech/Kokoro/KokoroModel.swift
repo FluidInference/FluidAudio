@@ -7,10 +7,20 @@ import FoundationNetworking
 #endif
 
 /// Kokoro TTS implementation using unified CoreML model
-/// Uses kokoro_completev21.mlmodelc with word_phonemes.json dictionary
 @available(macOS 13.0, iOS 16.0, *)
 public struct KokoroModel {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroModel")
+
+    public struct ChunkDebugInfo {
+        public let index: Int
+        public let text: String
+        public let words: [String]
+        public let pauseAfterMs: Int
+        public let isForcedSplit: Bool
+        public let phonemeCount: Int
+        public let trailingPunctuation: String?
+        public let stillInSentence: Bool
+    }
 
     // Single model reference
     private static var kokoroModel: MLModel?
@@ -78,23 +88,9 @@ public struct KokoroModel {
     public static func loadModel() async throws {
         guard !isModelLoaded else { return }
 
-        let fm = FileManager.default
-        let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
-        let localPackage = cwd.appendingPathComponent("kokoro_completev21.mlpackage")
-
-        if fm.fileExists(atPath: localPackage.path) {
-            logger.info("Loading Kokoro model from local package: \(localPackage.path)")
-            // Compile the .mlpackage to a .mlmodelc bundle before loading
-            let compiledURL = try await MLModel.compileModel(at: localPackage)
-            let configuration = MLModelConfiguration()
-            configuration.computeUnits = .cpuAndNeuralEngine
-            kokoroModel = try MLModel(contentsOf: compiledURL, configuration: configuration)
-        } else {
-            // Delegate to TtsModels which uses DownloadUtils for all model downloads
-            let models = try await TtsModels.download()
-            kokoroModel = models.kokoro
-        }
-        logger.info("Loaded kokoro_completev21 model")
+        // Delegate to TtsModels which uses DownloadUtils for all model downloads
+        let models = try await TtsModels.download()
+        kokoroModel = models.kokoro
 
         isModelLoaded = true
         logger.info("Kokoro model successfully loaded")
@@ -633,7 +629,15 @@ public struct KokoroModel {
         if trimmedIds.count > targetTokens {
             trimmedIds = Array(trimmedIds.prefix(targetTokens))
         } else if trimmedIds.count < targetTokens {
-            trimmedIds.append(contentsOf: Array(repeating: Int32(0), count: targetTokens - trimmedIds.count))
+            var cycled: [Int32] = []
+            var index = 0
+            let baseCount = max(trimmedIds.count, 1)
+            while trimmedIds.count + cycled.count < targetTokens {
+                cycled.append(trimmedIds[index])
+                index = (index + 1) % baseCount
+            }
+            let needed = targetTokens - trimmedIds.count
+            trimmedIds.append(contentsOf: cycled.prefix(needed))
         }
 
         // Create model inputs
@@ -669,7 +673,36 @@ public struct KokoroModel {
             throw TTSError.modelNotFound("Kokoro model not initialized")
         }
         let predictionStart = Date()
-        let output = try model.prediction(from: modelInput)
+        let primaryOptions = MLPredictionOptions()
+        primaryOptions.usesCPUOnly = false
+        let cpuFallbackOptions = MLPredictionOptions()
+        cpuFallbackOptions.usesCPUOnly = true
+
+        let predictSynchronously: (MLPredictionOptions) throws -> MLFeatureProvider = { options in
+            try model.prediction(from: modelInput, options: options)
+        }
+
+        let output: MLFeatureProvider
+        if #available(macOS 14.0, iOS 17.0, *) {
+            do {
+                output = try await model.prediction(from: modelInput, options: primaryOptions)
+            } catch {
+                logger.warning("Async CoreML prediction failed; retrying synchronous (hardware): \(error.localizedDescription)")
+                do {
+                    output = try predictSynchronously(primaryOptions)
+                } catch {
+                    logger.warning("Synchronous hardware prediction failed; retrying CPU-only: \(error.localizedDescription)")
+                    output = try predictSynchronously(cpuFallbackOptions)
+                }
+            }
+        } else {
+            do {
+                output = try predictSynchronously(primaryOptions)
+            } catch {
+                logger.warning("Synchronous hardware prediction failed; retrying CPU-only: \(error.localizedDescription)")
+                output = try predictSynchronously(cpuFallbackOptions)
+            }
+        }
         let predictionTime = Date().timeIntervalSince(predictionStart)
         print("[PERF] Pure model.prediction() time: \(String(format: "%.3f", predictionTime))s")
 
@@ -681,8 +714,8 @@ public struct KokoroModel {
             throw TTSError.processingFailed("Failed to extract 'audio' output. Features: \(names)")
         }
 
-        // Optional: trim to audio_length_samples if provided
-        var effectiveCount = audioArrayUnwrapped.count
+        let rawCount = audioArrayUnwrapped.count
+        var effectiveCount = rawCount
         if let lenFV = output.featureValue(for: "audio_length_samples") {
             var n: Int = 0
             if let lenArray = lenFV.multiArrayValue, lenArray.count > 0 {
@@ -692,9 +725,13 @@ public struct KokoroModel {
             } else if lenFV.type == .double {
                 n = Int(lenFV.doubleValue)
             }
-            n = max(0, n)
-            if n > 0 && n <= audioArrayUnwrapped.count {
-                effectiveCount = n
+            if n < 0 {
+                logger.warning("audio_length_samples reported negative count (\(n)); ignoring")
+            } else {
+                if n > rawCount {
+                    logger.warning("audio_length_samples (\(n)) exceeds tensor count (\(rawCount)); clamping")
+                }
+                effectiveCount = min(n, rawCount)
             }
         }
 
@@ -721,7 +758,7 @@ public struct KokoroModel {
         text: String,
         voice: String = KokoroVoiceCatalog.defaultVoiceId
     ) async throws -> Data {
-        let (samples, totalTime) = try await synthesizeSamplesInternal(text: text, voice: voice)
+        let (samples, totalTime, _) = try await synthesizeSamplesInternal(text: text, voice: voice)
         let audioData = try AudioWAV.data(from: samples, sampleRate: 24000)
         logger.info("Synthesis complete in \(String(format: "%.3f", totalTime))s")
         logger.info("Audio size: \(audioData.count) bytes")
@@ -733,17 +770,46 @@ public struct KokoroModel {
         text: String,
         voice: String = KokoroVoiceCatalog.defaultVoiceId
     ) async throws -> [Float] {
-        let (samples, totalTime) = try await synthesizeSamplesInternal(text: text, voice: voice)
+        let (samples, totalTime, _) = try await synthesizeSamplesInternal(text: text, voice: voice)
         logger.info(
             "Synthesis complete (samples only) in \(String(format: "%.3f", totalTime))s; sample count=\(samples.count)"
         )
         return samples
     }
 
+    /// Synthesize speech and return chunk-level debug information.
+    public static func synthesizeDetailed(
+        text: String,
+        voice: String = KokoroVoiceCatalog.defaultVoiceId,
+        chunkOutputDirectory: URL? = nil
+    ) async throws -> (audio: Data, chunks: [ChunkDebugInfo]) {
+        let (samples, totalTime, chunks) = try await synthesizeSamplesInternal(
+            text: text,
+            voice: voice,
+            chunkOutputDirectory: chunkOutputDirectory
+        )
+        let audioData = try AudioWAV.data(from: samples, sampleRate: 24000)
+        logger.info("Detailed synthesis complete in \(String(format: "%.3f", totalTime))s (chunks=\(chunks.count))")
+        let debugChunks: [ChunkDebugInfo] = chunks.enumerated().map { index, chunk in
+            ChunkDebugInfo(
+                index: index,
+                text: chunk.words.joined(separator: " "),
+                words: chunk.words,
+                pauseAfterMs: chunk.pauseAfterMs,
+                isForcedSplit: chunk.isForcedSplit,
+                phonemeCount: chunk.phonemes.count,
+                trailingPunctuation: chunk.trailingPunctuation,
+                stillInSentence: !chunk.isSentenceBoundary
+            )
+        }
+        return (audioData, debugChunks)
+    }
+
     private static func synthesizeSamplesInternal(
         text: String,
-        voice: String
-    ) async throws -> ([Float], Double) {
+        voice: String,
+        chunkOutputDirectory: URL? = nil
+    ) async throws -> ([Float], Double, [TextChunk]) {
         let synthesisStart = Date()
 
         logger.info("Starting synthesis: '\(text)'")
@@ -837,6 +903,14 @@ public struct KokoroModel {
             throw TTSError.processingFailed("No valid words found in text")
         }
 
+        if let chunkOutputDirectory {
+            try await saveChunksDebug(
+                chunks: chunks,
+                baseDirectory: chunkOutputDirectory,
+                voice: canonicalVoice
+            )
+        }
+
         if chunks.count == 1 {
             logger.info("Text fits in single chunk")
             let chunk = chunks[0]
@@ -849,7 +923,7 @@ public struct KokoroModel {
             let maxOut = normalizedSamples.max() ?? 0
             logger.info("Audio range: [\(String(format: "%.4f", minVal)), \(String(format: "%.4f", maxOut))]")
             let totalTime = Date().timeIntervalSince(synthesisStart)
-            return (normalizedSamples, totalTime)
+            return (normalizedSamples, totalTime, chunks)
         } else {
             logger.info("Text split into \(chunks.count) chunks")
             var allSamples: [Float] = []
@@ -863,7 +937,7 @@ public struct KokoroModel {
                     "Processing chunk \(i+1)/\(chunks.count): \(chunk.words.count) words, \(chunk.totalFrames) frames"
                 )
                 logger.info("Chunk \(i+1) text: '\(chunk.words.joined(separator: " "))'")
-                let chunkSamples = try await synthesizeChunk(chunk, voice: canonicalVoice)
+                var chunkSamples = try await synthesizeChunk(chunk, voice: canonicalVoice)
                 if i == 0 {
                     allSamples.append(contentsOf: chunkSamples)
                 } else {
@@ -902,7 +976,32 @@ public struct KokoroModel {
             logger.info("Audio range: [\(String(format: "%.4f", minVal)), \(String(format: "%.4f", maxOut))]")
             logger.info("Total samples: \(normalizedSamples.count)")
             let totalTime = Date().timeIntervalSince(synthesisStart)
-            return (normalizedSamples, totalTime)
+            return (normalizedSamples, totalTime, chunks)
+        }
+    }
+
+    private static func saveChunksDebug(
+        chunks: [TextChunk],
+        baseDirectory: URL,
+        voice: String
+    ) async throws {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: baseDirectory.path) {
+            try fm.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        }
+
+        for (index, chunk) in chunks.enumerated() {
+            let words = chunk.words.joined(separator: " ")
+            let filenameBase = String(format: "chunk_%03d", index)
+            let textURL = baseDirectory.appendingPathComponent("\(filenameBase).txt")
+            try words.write(to: textURL, atomically: true, encoding: .utf8)
+
+            let chunkSamples = try await synthesizeChunk(chunk, voice: voice)
+            let maxVal = chunkSamples.map { abs($0) }.max() ?? 1.0
+            let normalized = maxVal > 0 ? chunkSamples.map { $0 / maxVal } : chunkSamples
+            let audioData = try AudioWAV.data(from: normalized, sampleRate: 24000)
+            let wavURL = baseDirectory.appendingPathComponent("\(filenameBase).wav")
+            try audioData.write(to: wavURL)
         }
     }
 
