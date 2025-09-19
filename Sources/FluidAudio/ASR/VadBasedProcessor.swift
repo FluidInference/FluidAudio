@@ -10,6 +10,7 @@ struct VadBasedProcessor {
     private let logger = AppLogger(category: "VadBasedProcessor")
     private let sampleRate: Int = 16000
     private let maxSegmentDuration: Double = 15.0  // 15s maximum for Parakeet model
+    private let shortSegmentDeduplicationThreshold: Double = 5.0
 
     init(
         audioSamples: [Float],
@@ -92,7 +93,13 @@ struct VadBasedProcessor {
                 logger.debug("Segment \(index) result: '\(tokensText)'")
             }
 
-            if index > 0 && !combinedTokenData.isEmpty && !segmentData.isEmpty {
+            let isLastSegment = index == processableSegments.count - 1
+            let isShortFinalSegment = segment.duration < shortSegmentDeduplicationThreshold
+            let shouldDeduplicateSegment =
+                isLastSegment && isShortFinalSegment && index > 0 && !combinedTokenData.isEmpty
+                && !segmentData.isEmpty
+
+            if shouldDeduplicateSegment {
                 let previousTokens = combinedTokenData.map { $0.token }
                 let currentTokens = segmentData.map { $0.token }
 
@@ -231,37 +238,31 @@ struct VadBasedProcessor {
     }
 
     private func splitLongSegment(_ segment: VadSegment) -> [ProcessableSegment] {
-        // Split segments > 15s into smaller chunks
+        // Split segments > 15s into smaller chunks without overlap
         var segments: [ProcessableSegment] = []
-        let maxChunkDuration = 14.0  // Conservative: ensure well under 15s limit
-        let overlapDuration = 1.0  // 1s overlap between chunks
+        let maxChunkDuration = 15.0  // Conservative: ensure well under 15s limit
 
         var currentStart = segment.startTime
         while currentStart < segment.endTime {
             let remainingDuration = segment.endTime - currentStart
+            let chunkDuration = min(maxChunkDuration, remainingDuration)
+            let currentEnd = currentStart + chunkDuration
 
-            if remainingDuration <= maxSegmentDuration {
-                // Last chunk - take everything remaining if it fits
-                let finalSegment = VadSegment(startTime: currentStart, endTime: segment.endTime)
-                segments.append(ProcessableSegment(single: finalSegment, in: audioSamples))
+            if currentEnd <= currentStart {
                 break
-            } else {
-                // Create a chunk of max duration
-                let currentEnd = currentStart + maxChunkDuration
-                let splitSegment = VadSegment(startTime: currentStart, endTime: currentEnd)
-                segments.append(ProcessableSegment(single: splitSegment, in: audioSamples))
-
-                // Move to next chunk with overlap
-                currentStart = currentEnd - overlapDuration
-
-                // Ensure we don't go backwards
-                if currentStart >= currentEnd {
-                    currentStart = currentEnd
-                }
             }
+
+            let splitSegment = VadSegment(startTime: currentStart, endTime: currentEnd)
+            segments.append(ProcessableSegment(single: splitSegment, in: audioSamples))
+
+            if currentEnd >= segment.endTime {
+                break
+            }
+
+            currentStart = currentEnd
         }
 
-        logger.debug("Split long segment (\(segment.duration)s) into \(segments.count) chunks")
+        logger.debug("Split long segment (\(segment.duration)s) into \(segments.count) chunks without overlap")
         return segments
     }
 }
