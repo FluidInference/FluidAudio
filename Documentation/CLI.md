@@ -8,15 +8,29 @@ This guide collects commonly used `fluidaudio` CLI commands for ASR, diarization
 # Transcribe an audio file (batch)
 swift run fluidaudio transcribe audio.wav
 
+# Batch with VAD-based chunking (skips silence)
+swift run fluidaudio transcribe audio.wav --vad-chunking
+
+# Simulated streaming with incremental updates
+swift run fluidaudio transcribe audio.wav --streaming --metadata
+
 # Transcribe multiple files in parallel
 swift run fluidaudio multi-stream audio1.wav audio2.wav
 
 # Benchmark ASR on LibriSpeech
 swift run fluidaudio asr-benchmark --subset test-clean --num-files 50
 
+# Batch benchmark using VAD-based chunking
+swift run fluidaudio asr-benchmark --subset test-clean --num-files 50 --vad-chunking
+
 # Multilingual ASR (FLEURS) benchmark
 swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+# FLEURS benchmark with VAD-based chunking (batch)
+swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10 --vad-chunking
 ```
+
+Note: `--vad-chunking` applies to batch mode only. The streaming API manages chunking internally.
 
 ## Diarization
 

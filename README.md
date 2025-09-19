@@ -94,17 +94,21 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 - **Model**: `FluidInference/parakeet-tdt-0.6b-v3-coreml`
 - **Languages**: All European languages (25) - see Huggingface models for exact list
-- **Processing Mode**: Batch transcription for complete audio files
+- **Processing Modes**:
+  - Batch (direct): Fastest end-to-end for full files
+  - Batch (VAD-based): Skip silence using VAD segmentation to reduce compute on long files
+  - Streaming API: Real-time via `StreamingAsrManager` (CLI supports simulated streaming)
 - **Real-time Factor**: ~120x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
-- **Streaming Support**: Coming soon — batch processing is recommended for production use
-- **Backend**: Same Parakeet TDT v3 model powers our backend ASR
+- **Notes**:
+  - VAD-based chunking is batch-only (not used by the streaming API)
+  - Same Parakeet TDT v3 model powers our backend ASR
 
 ### ASR Quick Start
 
 ```swift
 import FluidAudio
 
-// Batch transcription from an audio file
+// Batch transcription from an audio file (direct)
 Task {
     // 1) Initialize ASR manager and load models
     let models = try await AsrModels.downloadAndLoad()
@@ -126,7 +130,50 @@ Task {
 ```bash
 # Transcribe an audio file (batch)
 swift run fluidaudio transcribe audio.wav
+
+# Batch with VAD-based chunking (skips silence)
+swift run fluidaudio transcribe audio.wav --vad-chunking
+
+# Simulated streaming (shows incremental updates)
+swift run fluidaudio transcribe audio.wav --streaming --metadata
 ```
+
+### VAD-Based Chunking (Batch)
+
+Use VAD to segment speech first, then run ASR only on speech regions. This improves throughput on long files with silence, while preserving timestamps.
+
+```swift
+import FluidAudio
+
+Task {
+    let models = try await AsrModels.downloadAndLoad()
+
+    // Enable VAD-based chunking; customize segmentation if needed
+    let asrConfig = ASRConfig(
+        useVadBasedChunking: true,
+        vadSegmentationConfig: .init(
+            // keep defaults or tune per your content
+            minSpeechDuration: 0.15,
+            minSilenceDuration: 0.75,
+            maxSpeechDuration: 14.0,
+            speechPadding: 0.1
+        ),
+        // Merge short segments up to at least N seconds before ASR
+        minSegmentDuration: 5.0
+    )
+
+    let asr = AsrManager(config: asrConfig)
+    try await asr.initialize(models: models)
+
+    let samples = try await loadSamples16kMono(path: "path/to/audio.wav")
+    let result = try await asr.transcribe(samples, source: .system)
+    print(result.text)
+}
+```
+
+Notes:
+- VAD-based chunking is batch-only; the real-time API manages chunks internally.
+- Segments longer than the model window (~15s) are split with small overlaps.
 
 ## Speaker Diarization
 
