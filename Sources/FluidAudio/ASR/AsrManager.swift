@@ -15,8 +15,7 @@ public final class AsrManager {
     internal let config: ASRConfig
     private let audioConverter: AudioConverter = AudioConverter()
 
-    internal var melspectrogramModel: MLModel?
-    internal var encoderModel: MLModel?
+    internal var melEncoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
 
@@ -43,9 +42,6 @@ public final class AsrManager {
         AsrModels.optimizedPredictionOptions()
     }()
 
-    // Persistent feature providers for zero-copy model chaining
-    private var zeroCopyProviders: [String: ZeroCopyFeatureProvider] = [:]
-
     public init(config: ASRConfig = .default) {
         self.config = config
 
@@ -71,8 +67,7 @@ public final class AsrManager {
     }
 
     public var isAvailable: Bool {
-        return melspectrogramModel != nil && encoderModel != nil && decoderModel != nil
-            && jointModel != nil
+        return melEncoderModel != nil && decoderModel != nil && jointModel != nil
     }
 
     /// Initialize ASR Manager with pre-loaded models
@@ -81,8 +76,7 @@ public final class AsrManager {
         logger.info("Initializing AsrManager with provided models")
 
         self.asrModels = models
-        self.melspectrogramModel = models.melspectrogram
-        self.encoderModel = models.encoder
+        self.melEncoderModel = models.melEncoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
@@ -112,7 +106,7 @@ public final class AsrManager {
         return array
     }
 
-    func prepareMelSpectrogramInput(
+    func prepareMelEncoderInput(
         _ audioSamples: [Float], actualLength: Int? = nil
     ) async throws
         -> MLFeatureProvider
@@ -141,35 +135,72 @@ public final class AsrManager {
         ])
     }
 
-    func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
-        // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
-        if let provider = ZeroCopyFeatureProvider.chain(
-            from: melspectrogramOutput,
-            outputName: "melspectrogram",
-            to: "audio_signal"
-        ) {
-            // Also need to chain the length
-            if let melLength = melspectrogramOutput.featureValue(for: "melspectrogram_length") {
-                let features = [
-                    "audio_signal": provider.featureValue(for: "audio_signal")!,
-                    "length": melLength,
-                ]
-                return ZeroCopyFeatureProvider(features: features)
+    func normalizeEncoderOutput(_ encoderOutput: MLMultiArray) throws -> MLMultiArray {
+        let shape = encoderOutput.shape.map { $0.intValue }
+        guard shape.count == 3 else {
+            throw ASRError.processingFailed("Invalid encoder output rank: \(shape)")
+        }
+
+        let expectedHiddenSize = ASRConstants.encoderHiddenSize
+
+        // If the hidden dimension is already the last axis, nothing to do.
+        if shape[2] == expectedHiddenSize {
+            return encoderOutput
+        }
+
+        // Handle models that emit [batch, hidden, time] by transposing to [batch, time, hidden].
+        if shape[1] == expectedHiddenSize {
+            return try transposeHiddenAndTimeAxes(encoderOutput)
+        }
+
+        // Fallback: if shape mismatch but last dimension still looks like time, return as-is.
+        return encoderOutput
+    }
+
+    private func transposeHiddenAndTimeAxes(_ encoderOutput: MLMultiArray) throws -> MLMultiArray {
+        let shape = encoderOutput.shape.map { $0.intValue }
+        guard shape.count == 3 else {
+            throw ASRError.processingFailed("Invalid encoder output rank: \(shape)")
+        }
+
+        let batch = shape[0]
+        let hidden = shape[1]
+        let time = shape[2]
+
+        let transposedShape = [NSNumber(value: batch), NSNumber(value: time), NSNumber(value: hidden)]
+        let result = try MLMultiArray(shape: transposedShape, dataType: encoderOutput.dataType)
+
+        let srcStrides = encoderOutput.strides.map { $0.intValue }
+        let dstStrides = result.strides.map { $0.intValue }
+
+        switch encoderOutput.dataType {
+        case .float32:
+            let srcPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
+            let dstPtr = result.dataPointer.bindMemory(to: Float.self, capacity: result.count)
+
+            for b in 0..<batch {
+                for t in 0..<time {
+                    for h in 0..<hidden {
+                        let srcIndex = b * srcStrides[0] + h * srcStrides[1] + t * srcStrides[2]
+                        let dstIndex = b * dstStrides[0] + t * dstStrides[1] + h * dstStrides[2]
+                        dstPtr[dstIndex] = srcPtr[srcIndex]
+                    }
+                }
+            }
+
+        default:
+            for b in 0..<batch {
+                for t in 0..<time {
+                    for h in 0..<hidden {
+                        let srcIndex = b * srcStrides[0] + h * srcStrides[1] + t * srcStrides[2]
+                        let dstIndex = b * dstStrides[0] + t * dstStrides[1] + h * dstStrides[2]
+                        result[dstIndex] = encoderOutput[srcIndex]
+                    }
+                }
             }
         }
 
-        // Fallback to copying if zero-copy fails
-        let melspectrogram = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectrogram",
-            errorMessage: "Invalid mel-spectrogram output")
-        let melspectrogramLength = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectrogram_length",
-            errorMessage: "Invalid mel-spectrogram length output")
-
-        return try createFeatureProvider(features: [
-            ("audio_signal", melspectrogram),
-            ("length", melspectrogramLength),
-        ])
+        return result
     }
 
     private func prepareDecoderInput(
@@ -225,21 +256,18 @@ public final class AsrManager {
     }
 
     private func loadAllModels(
-        melspectrogramPath: URL,
-        encoderPath: URL,
+        melEncoderPath: URL,
         decoderPath: URL,
         jointPath: URL,
         configuration: MLModelConfiguration
-    ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
-        async let melspectrogram = loadModel(
-            path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
-        async let encoder = loadModel(
-            path: encoderPath, name: "encoder", configuration: configuration)
+    ) async throws -> (melEncoder: MLModel, decoder: MLModel, joint: MLModel) {
+        async let melEncoder = loadModel(
+            path: melEncoderPath, name: "mel-encoder", configuration: configuration)
         async let decoder = loadModel(
             path: decoderPath, name: "decoder", configuration: configuration)
         async let joint = loadModel(path: jointPath, name: "joint", configuration: configuration)
 
-        return try await (melspectrogram, encoder, decoder, joint)
+        return try await (melEncoder, decoder, joint)
     }
 
     private static func getDefaultModelsDirectory() -> URL {
@@ -260,8 +288,7 @@ public final class AsrManager {
     }
 
     public func cleanup() {
-        melspectrogramModel = nil
-        encoderModel = nil
+        melEncoderModel = nil
         decoderModel = nil
         jointModel = nil
         // Reset decoder states - use fallback initializer that won't throw

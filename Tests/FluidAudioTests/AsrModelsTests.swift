@@ -10,8 +10,7 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Model Names Tests
 
     func testModelNames() {
-        XCTAssertEqual(ModelNames.ASR.melspectrogramFile, "Melspectrogram_15s.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.encoderFile, "ParakeetEncoder_15s.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.melEncoderFile, "MelEncoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "ParakeetDecoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "RNNTJoint.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
@@ -65,15 +64,14 @@ final class AsrModelsTests: XCTestCase {
         // Test 2: The method should check for model files in the expected structure
         // We're testing the logic, not the actual file system operations
         let modelNames = [
-            ModelNames.ASR.melspectrogramFile,
-            ModelNames.ASR.encoderFile,
+            ModelNames.ASR.melEncoderFile,
             ModelNames.ASR.decoderFile,
             ModelNames.ASR.jointFile,
             ModelNames.ASR.vocabulary,
         ]
 
         // Verify all expected model names are defined
-        XCTAssertEqual(modelNames.count, 5)
+        XCTAssertEqual(modelNames.count, 4)
         XCTAssertTrue(modelNames.allSatisfy { !$0.isEmpty })
     }
 
@@ -111,13 +109,12 @@ final class AsrModelsTests: XCTestCase {
 
         // Test that AsrModels struct can be created with proper types
         let modelNames = [
-            ModelNames.ASR.melspectrogramFile,
-            ModelNames.ASR.encoderFile,
+            ModelNames.ASR.melEncoderFile,
             ModelNames.ASR.decoderFile,
             ModelNames.ASR.jointFile,
         ]
 
-        XCTAssertEqual(modelNames.count, 4)
+        XCTAssertEqual(modelNames.count, 3)
         XCTAssertTrue(modelNames.allSatisfy { $0.hasSuffix(".mlmodelc") })
     }
 
@@ -209,22 +206,14 @@ final class AsrModelsTests: XCTestCase {
         // In CI environment, all compute units are overridden to .cpuOnly
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
 
-        // Test mel-spectrogram configuration
-        let melConfig = AsrModels.optimizedConfiguration(for: .melSpectrogram)
+        // Test fused mel encoder configuration
+        let melConfig = AsrModels.optimizedConfiguration(for: .melEncoder)
         if isCI {
             XCTAssertEqual(melConfig.computeUnits, .cpuOnly)
         } else {
             XCTAssertEqual(melConfig.computeUnits, .cpuAndNeuralEngine)
         }
         XCTAssertTrue(melConfig.allowLowPrecisionAccumulationOnGPU)
-
-        // Test encoder configuration
-        let encoderConfig = AsrModels.optimizedConfiguration(for: .encoder)
-        if isCI {
-            XCTAssertEqual(encoderConfig.computeUnits, .cpuOnly)
-        } else {
-            XCTAssertEqual(encoderConfig.computeUnits, .cpuAndNeuralEngine)
-        }
 
         // Test decoder configuration
         let decoderConfig = AsrModels.optimizedConfiguration(for: .decoder)
@@ -243,7 +232,7 @@ final class AsrModelsTests: XCTestCase {
         }
 
         // Test with FP16 disabled
-        let fp32Config = AsrModels.optimizedConfiguration(for: .encoder, enableFP16: false)
+        let fp32Config = AsrModels.optimizedConfiguration(for: .melEncoder, enableFP16: false)
         XCTAssertFalse(fp32Config.allowLowPrecisionAccumulationOnGPU)
     }
 
@@ -259,7 +248,7 @@ final class AsrModelsTests: XCTestCase {
             }
         }
 
-        let config = AsrModels.optimizedConfiguration(for: .encoder)
+        let config = AsrModels.optimizedConfiguration(for: .melEncoder)
         XCTAssertEqual(config.computeUnits, .cpuOnly)
     }
 
@@ -332,8 +321,7 @@ final class AsrModelsTests: XCTestCase {
     func testOptimalComputeUnitsRespectsPlatform() {
         // Test each model type
         let modelTypes: [ANEOptimizer.ModelType] = [
-            .melSpectrogram,
-            .encoder,
+            .melEncoder,
             .decoder,
             .joint,
         ]
