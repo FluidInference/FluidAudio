@@ -135,22 +135,22 @@ actor StreamingUI {
             let finalResultsRow = 12 + max(min(terminalSize.rows - 12, 6), 3) + 2
             TerminalUI.moveTo(row: finalResultsRow, column: 1)
             TerminalUI.showCursor()
-            Swift.print("\n" + String(repeating: "═", count: 50))
+            Swift.print("" + String(repeating: "═", count: 50))
             Swift.print("FINAL TRANSCRIPTION RESULTS")
             Swift.print(String(repeating: "═", count: 50))
-            Swift.print("\nFinal transcription:")
+            Swift.print("Final transcription:")
             Swift.print(finalText)
-            Swift.print("\nPerformance:")
+            Swift.print("Performance:")
             Swift.print("  Audio duration: \(String(format: "%.2f", stats.audioDuration))s")
             Swift.print("  Processing time: \(String(format: "%.2f", totalTime))s")
             Swift.print("  RTFx: \(String(format: "%.2f", finalRtfx))x")
         } else {
-            Swift.print("\n" + String(repeating: "=", count: 50))
+            Swift.print("" + String(repeating: "=", count: 50))
             Swift.print("FINAL TRANSCRIPTION RESULTS")
             Swift.print(String(repeating: "=", count: 50))
-            Swift.print("\nFinal transcription:")
+            Swift.print("Final transcription:")
             Swift.print(finalText)
-            Swift.print("\nPerformance:")
+            Swift.print("Performance:")
             Swift.print("  Audio duration: \(String(format: "%.2f", stats.audioDuration))s")
             Swift.print("  Processing time: \(String(format: "%.2f", totalTime))s")
             Swift.print("  RTFx: \(String(format: "%.2f", finalRtfx))x")
@@ -166,40 +166,40 @@ actor StreamingUI {
 
         // Header
         TerminalUI.print(box.topBorder())
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Subtitle
         TerminalUI.print(box.contentLine(" Simulating real-time audio with 1-second chunks"))
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Divider
         TerminalUI.print(box.middleBorder())
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Progress section
         let progressPercent = Int(stats.progressPercentage * 100)
         let progressText =
             "\(progressBar.render(progress: stats.progressPercentage)) \(progressPercent)% (\(String(format: "%.1f", Double(stats.chunksProcessed) / Double(stats.totalChunks) * stats.audioDuration))s / \(String(format: "%.1f", stats.audioDuration))s)"
         TerminalUI.print(box.contentLine(" Progress: " + progressText))
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Stats section
         let statsText =
             " Speed: \(String(format: "%.1f", stats.rtfx))x RTF | Chunks: \(stats.chunksProcessed)/\(stats.totalChunks) | Elapsed: \(String(format: "%.1f", stats.elapsedTime))s"
         TerminalUI.print(box.contentLine(statsText))
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Divider
         TerminalUI.print(box.middleBorder())
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Transcription header
         TerminalUI.print(box.contentLine(" Transcription:"))
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Empty line
         TerminalUI.print(box.contentLine(""))
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Transcription content - word wrap for long text
         let transcriptionLines = wrapText(currentTranscription, maxWidth: box.width - 4)
@@ -222,12 +222,12 @@ actor StreamingUI {
             } else {
                 TerminalUI.print(box.contentLine(""))
             }
-            TerminalUI.print("\n")
+            TerminalUI.print("")
         }
 
         // Empty line
         TerminalUI.print(box.contentLine(""))
-        TerminalUI.print("\n")
+        TerminalUI.print("")
 
         // Bottom border
         TerminalUI.print(box.bottomBorder())

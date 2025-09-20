@@ -6,14 +6,14 @@ import Foundation
 struct ResultsFormatter {
 
     static func printResults(_ result: ProcessingResult) async {
-        print("\n📊 Diarization Results:")
+        print("📊 Diarization Results:")
         print("   Audio File: \(result.audioFile)")
         print("   Duration: \(String(format: "%.1f", result.durationSeconds))s")
         print("   Processing Time: \(String(format: "%.1f", result.processingTimeSeconds))s")
         let rtfx = result.realTimeFactor
         print("   Speed Factor (RTFx): \(String(format: "%.2f", rtfx))x")
         print("   Detected Speakers: \(result.speakerCount)")
-        print("\n🎤 Speaker Segments:")
+        print("🎤 Speaker Segments:")
 
         for (index, segment) in result.segments.enumerated() {
             let startTime = formatTime(segment.startTimeSeconds)
@@ -54,7 +54,7 @@ struct ResultsFormatter {
         _ results: [BenchmarkResult], avgDER: Float, avgJER: Float, dataset: String,
         customThresholds: (der: Float?, jer: Float?, rtf: Float?) = (nil, nil, nil)
     ) -> PerformanceAssessment {
-        print("\n🏆 \(dataset) Benchmark Results")
+        print("🏆 \(dataset) Benchmark Results")
         let separator = String(repeating: "=", count: 75)
         print("\(separator)")
 
@@ -112,7 +112,7 @@ struct ResultsFormatter {
 
         // Print threshold comparison metrics if custom thresholds are provided
         if customThresholds.der != nil || customThresholds.jer != nil || customThresholds.rtf != nil {
-            print("\n📊 Accuracy Metrics")
+            print("📊 Accuracy Metrics")
             let metricsHeader = "Metric    Value    Threshold    Status"
             print(metricsHeader)
 
@@ -158,7 +158,7 @@ struct ResultsFormatter {
             let derStdDev = calculateStandardDeviation(derValues)
             let jerStdDev = calculateStandardDeviation(jerValues)
 
-            print("\n📊 Statistical Analysis:")
+            print("📊 Statistical Analysis:")
             print(
                 "   DER: \(String(format: "%.1f", avgDER))% ± \(String(format: "%.1f", derStdDev))% (min: \(String(format: "%.1f", derValues.min()!))%, max: \(String(format: "%.1f", derValues.max()!))%)"
             )
@@ -172,7 +172,7 @@ struct ResultsFormatter {
         }
 
         // Print research comparison
-        print("\n📝 Research Comparison:")
+        print("📝 Research Comparison:")
         print("   Your Results:          \(String(format: "%.1f", avgDER))% DER")
         print("   Powerset BCE (2023):   18.5% DER")
         print("   EEND (2019):           25.3% DER")
@@ -186,7 +186,7 @@ struct ResultsFormatter {
         let avgRTF = results.reduce(0.0) { $0 + $1.realTimeFactor } / Float(results.count)
         let assessment = PerformanceAssessment.assess(
             der: avgDER, jer: avgJER, rtf: avgRTF, customThresholds: customThresholds)
-        print("\n\(assessment.description)")
+        print("\(assessment.description)")
 
         return assessment
     }
@@ -195,7 +195,7 @@ struct ResultsFormatter {
     static func printTimingBreakdown(_ results: [BenchmarkResult]) {
         guard !results.isEmpty else { return }
 
-        print("\n⏱️  Pipeline Timing Breakdown")
+        print("⏱️  Pipeline Timing Breakdown")
         let timingSeparator = String(repeating: "=", count: 95)
         print("\(timingSeparator)")
 
@@ -250,7 +250,7 @@ struct ResultsFormatter {
 
         // Print bottleneck analysis
         let bottleneck = avgTimings.bottleneckStage
-        print("\n🔍 Performance Analysis:")
+        print("🔍 Performance Analysis:")
         print("   Bottleneck Stage: \(bottleneck)")
         print(
             "   Inference Only: \(String(format: "%.3f", avgTimings.totalInferenceSeconds))s (\(String(format: "%.1f", (avgTimings.totalInferenceSeconds / totalAvgTime) * 100))% of total)"
@@ -262,15 +262,15 @@ struct ResultsFormatter {
         // Optimization suggestions
         if avgTimings.modelDownloadSeconds > avgTimings.totalInferenceSeconds {
             print(
-                "\n💡 Optimization Suggestion: Model download is dominating execution time - consider model caching"
+                "💡 Optimization Suggestion: Model download is dominating execution time - consider model caching"
             )
         } else if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
             print(
-                "\n💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization"
+                "💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization"
             )
         } else if avgTimings.embeddingExtractionSeconds > avgTimings.segmentationSeconds * 2 {
             print(
-                "\n💡 Optimization Suggestion: Embedding extraction is the bottleneck - consider batch processing"
+                "💡 Optimization Suggestion: Embedding extraction is the bottleneck - consider batch processing"
             )
         }
     }
