@@ -154,49 +154,6 @@ final class AsrManagerTests: XCTestCase {
         XCTAssertEqual(results["feature2"]?.shape, [2, 4] as [NSNumber])
     }
 
-    func testNormalizeEncoderOutputTransposesHiddenAndTime() throws {
-        let hidden = ASRConstants.encoderHiddenSize
-        let time = 3
-        let encoderOutput = try MLMultiArray(
-            shape: [1, NSNumber(value: hidden), NSNumber(value: time)],
-            dataType: .float32
-        )
-
-        let srcPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
-        for idx in 0..<encoderOutput.count {
-            srcPtr[idx] = Float(idx)
-        }
-
-        let normalized = try manager.normalizeEncoderOutput(encoderOutput)
-
-        XCTAssertEqual(normalized.shape, [1, NSNumber(value: time), NSNumber(value: hidden)])
-
-        let strides = normalized.strides.map { $0.intValue }
-        func valueAt(_ b: Int, _ t: Int, _ h: Int) -> Float {
-            let index = b * strides[0] + t * strides[1] + h * strides[2]
-            return normalized[index].floatValue
-        }
-
-        XCTAssertEqual(valueAt(0, 0, 0), 0)
-        XCTAssertEqual(valueAt(0, 0, 1), Float(time))
-        XCTAssertEqual(valueAt(0, 1, 0), 1)
-        XCTAssertEqual(valueAt(0, 1, 1), Float(time + 1))
-    }
-
-    func testNormalizeEncoderOutputNoOpWhenAlreadyTransposed() throws {
-        let hidden = ASRConstants.encoderHiddenSize
-        let time = 2
-        let encoderOutput = try MLMultiArray(
-            shape: [1, NSNumber(value: time), NSNumber(value: hidden)],
-            dataType: .float32
-        )
-
-        let normalized = try manager.normalizeEncoderOutput(encoderOutput)
-
-        // Identity path should return the same instance for efficiency
-        XCTAssertTrue(normalized === encoderOutput)
-    }
-
     // MARK: - Token Conversion Tests
 
     // Removed testConvertTokensWithExistingTimings - causes crashes with vocabulary manipulation

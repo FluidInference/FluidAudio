@@ -65,27 +65,6 @@ enum DownloadCommand {
                 logger.error("Failed to download LibriSpeech test-other: \(error)")
                 exit(1)
             }
-        case "parakeet-models":
-            do {
-                let modelsDir = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/FluidAudio/Models")
-                let modelNames = [
-                    "Melspectogram_15s.mlmodelc",
-                    "ParakeetEncoder_15s.mlmodelc",
-                    "ParakeetDecoder.mlmodelc",
-                    "RNNTJoint.mlmodelc",
-                ]
-                _ = try await DownloadUtils.loadModels(
-                    .parakeet,
-                    modelNames: modelNames,
-                    directory: modelsDir,
-                    computeUnits: .cpuAndNeuralEngine
-                )
-                logger.info("Parakeet models downloaded successfully")
-            } catch {
-                logger.error("Failed to download Parakeet models: \(error)")
-                exit(1)
-            }
         case "all":
             await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: forceDownload)
             await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: forceDownload)

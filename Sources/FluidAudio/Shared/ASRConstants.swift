@@ -11,6 +11,9 @@ public enum ASRConstants {
     /// Size of encoder hidden representation for Parakeet-TDT models
     public static let encoderHiddenSize: Int = 1024
 
+    /// Size of decoder hidden state for Parakeet-TDT models
+    public static let decoderHiddenSize: Int = 640
+
     /// Samples per encoder frame (melHopSize * encoderSubsampling)
     /// Each encoder frame represents ~80ms of audio at 16kHz
     public static let samplesPerEncoderFrame: Int = melHopSize * encoderSubsampling  // 1280

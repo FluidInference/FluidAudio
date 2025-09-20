@@ -11,7 +11,7 @@ final class AsrModelsTests: XCTestCase {
 
     func testModelNames() {
         XCTAssertEqual(ModelNames.ASR.melEncoderFile, "MelEncoder.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.decoderFile, "ParakeetDecoder.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.decoderFile, "Decoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "RNNTJoint.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
     }

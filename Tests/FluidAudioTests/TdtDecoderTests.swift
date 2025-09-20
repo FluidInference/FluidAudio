@@ -98,7 +98,7 @@ final class TdtDecoderTests: XCTestCase {
 
         // Verify all features are present
         XCTAssertNotNil(input.featureValue(for: "targets"))
-        XCTAssertNotNil(input.featureValue(for: "target_lengths"))
+        XCTAssertNotNil(input.featureValue(for: "target_length"))
         XCTAssertNotNil(input.featureValue(for: "h_in"))
         XCTAssertNotNil(input.featureValue(for: "c_in"))
 
@@ -118,9 +118,12 @@ final class TdtDecoderTests: XCTestCase {
         let encoderOutput = try MLMultiArray(shape: [1, 1, 256], dataType: .float32)
 
         // Create mock decoder output
-        let decoderOutputArray = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
+        let decoderOutputArray = try MLMultiArray(
+            shape: [1, NSNumber(value: ASRConstants.decoderHiddenSize), 1],
+            dataType: .float32
+        )
         let decoderOutput = try MLDictionaryFeatureProvider(dictionary: [
-            "decoder_output": MLFeatureValue(multiArray: decoderOutputArray)
+            "decoder": MLFeatureValue(multiArray: decoderOutputArray)
         ])
 
         let jointInput = try decoder.prepareJointInput(
@@ -144,7 +147,7 @@ final class TdtDecoderTests: XCTestCase {
             XCTFail("Missing decoder_outputs")
             return
         }
-        XCTAssertEqual(decoderFeature.shape, decoderOutputArray.shape)
+        XCTAssertEqual(decoderFeature.shape, [1, 1, NSNumber(value: ASRConstants.decoderHiddenSize)])
     }
 
     // MARK: - Predict Token and Duration Tests
