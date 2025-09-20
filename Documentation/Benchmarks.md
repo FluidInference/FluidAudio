@@ -11,36 +11,35 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 ```
 
 ```text
-[21:26:04.328] [INFO] [FLEURSBenchmark] ----------------------------------------
-[21:26:04.328] [INFO] [FLEURSBenchmark] ================================================================================
-[21:26:04.328] [INFO] [FLEURSBenchmark] ✓ Results saved to fleurs_benchmark_results.json
-[21:26:04.328] [INFO] [FLEURSBenchmark] ================================================================================
-[21:26:04.328] [INFO] [FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
-[21:26:04.328] [INFO] [FLEURSBenchmark] ================================================================================
-[21:26:04.328] [INFO] [FLEURSBenchmark]
-[21:26:04.328] [INFO] [FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
-[21:26:04.328] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[21:26:04.328] [INFO] [FLEURSBenchmark] English (US)              | 5.8    | 2.9    | 178.2   | 3442.9s  | 350       | -
-[21:26:04.328] [INFO] [FLEURSBenchmark] French (France)           | 8.8    | 3.8    | 163.8   | 560.8s   | 52        | 298
-[21:26:04.328] [INFO] [FLEURSBenchmark] German (Germany)          | 4.2    | 1.2    | 191.4   | 62.1s    | 5         | -
-[21:26:04.328] [INFO] [FLEURSBenchmark] Italian (Italy)           | 2.8    | 1.0    | 194.3   | 743.3s   | 50        | -
-[21:26:04.328] [INFO] [FLEURSBenchmark] Russian (Russia)          | 7.0    | 2.3    | 173.6   | 621.2s   | 50        | -
-[21:26:04.328] [INFO] [FLEURSBenchmark] Spanish (Spain)           | 4.0    | 1.8    | 195.3   | 586.9s   | 50        | -
-[21:26:04.328] [INFO] [FLEURSBenchmark] Ukrainian (Ukraine)       | 7.2    | 2.1    | 169.7   | 528.2s   | 50        | -
-[21:26:04.328] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[21:26:04.328] [INFO] [FLEURSBenchmark] AVERAGE                   | 5.7    | 2.2    | 180.9   | 6545.5s  | 607       | 298
+[22:00:56.652] [INFO] [FLEURSBenchmark] ================================================================================
+[22:00:56.652] [INFO] [FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
+[22:00:56.652] [INFO] [FLEURSBenchmark] ================================================================================
+[22:00:56.652] [INFO] [FLEURSBenchmark]
+[22:00:56.652] [INFO] [FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
+[22:00:56.652] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[22:00:56.652] [INFO] [FLEURSBenchmark] English (US)              | 5.8    | 2.9    | 189.4   | 3442.9s  | 350       | -
+[22:00:56.652] [INFO] [FLEURSBenchmark] French (France)           | 8.8    | 3.8    | 181.3   | 560.8s   | 52        | 298
+[22:00:56.652] [INFO] [FLEURSBenchmark] German (Germany)          | 4.2    | 1.2    | 211.2   | 62.1s    | 5         | -
+[22:00:56.652] [INFO] [FLEURSBenchmark] Italian (Italy)           | 2.8    | 1.0    | 206.6   | 743.3s   | 50        | -
+[22:00:56.652] [INFO] [FLEURSBenchmark] Russian (Russia)          | 7.0    | 2.3    | 185.3   | 621.2s   | 50        | -
+[22:00:56.652] [INFO] [FLEURSBenchmark] Spanish (Spain)           | 4.0    | 1.8    | 207.9   | 586.9s   | 50        | -
+[22:00:56.652] [INFO] [FLEURSBenchmark] Ukrainian (Ukraine)       | 7.2    | 2.1    | 182.8   | 528.2s   | 50        | -
+[22:00:56.652] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[22:00:56.652] [INFO] [FLEURSBenchmark] AVERAGE                   | 5.7    | 2.2    | 194.9   | 6545.5s  | 607       | 298
 ```
 
 ```text
-2620 files per dataset • Test runtime: 4m 1s • 09/04/2025, 1:55 AM EDT
-[21:36:14.730] [INFO] [Benchmark] --- Benchmark Results ---
-[21:36:14.730] [INFO] [Benchmark]    Dataset: librispeech test-clean
-[21:36:14.730] [INFO] [Benchmark]    Files processed: 2620
-[21:36:14.730] [INFO] [Benchmark]    Average WER: 2.7%
-[21:36:14.730] [INFO] [Benchmark]    Median WER: 0.0%
-[21:36:14.730] [INFO] [Benchmark]    Average CER: 1.1%
-[21:36:14.730] [INFO] [Benchmark]    Median RTFx: 124.7x
-[21:36:14.730] [INFO] [Benchmark]    Overall RTFx: 137.4x (19452.5s / 141.6s)
+[22:06:25.813] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 12s • 09/19/2025, 10:06 PM EDT
+[22:06:25.813] [INFO] [Benchmark] --- Benchmark Results ---
+[22:06:25.813] [INFO] [Benchmark]    Dataset: librispeech test-clean
+[22:06:25.813] [INFO] [Benchmark]    Files processed: 2620
+[22:06:25.813] [INFO] [Benchmark]    Average WER: 2.7%
+[22:06:25.813] [INFO] [Benchmark]    Median WER: 0.0%
+[22:06:25.813] [INFO] [Benchmark]    Average CER: 1.1%
+[22:06:25.813] [INFO] [Benchmark]    Median RTFx: 132.0x
+[22:06:25.813] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
+[22:06:25.813] [INFO] [Benchmark] ASR benchmark completed successfully
+[22:06:25.813] [INFO] [Benchmark]    Overall RTFx: 146.5x (19452.5s / 132.8s)
 ```
 
 ## Voice Activity Detection
