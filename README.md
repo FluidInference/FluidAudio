@@ -95,7 +95,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 - **Model**: `FluidInference/parakeet-tdt-0.6b-v3-coreml`
 - **Languages**: All European languages (25) - see Huggingface models for exact list
 - **Processing Mode**: Batch transcription for complete audio files
-- **Real-time Factor**: ~120x on M4 Pro (processes 1 minute of audio in ~0.5 seconds)
+- **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
 - **Streaming Support**: Coming soon — batch processing is recommended for production use
 - **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
