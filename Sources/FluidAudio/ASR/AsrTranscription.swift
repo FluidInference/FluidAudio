@@ -54,7 +54,7 @@ extension AsrManager {
             paddedAudio, actualLength: originalLength)
 
         guard let melEncoderModel = melEncoderModel else {
-            throw ASRError.processingFailed("Mel encoder model failed")
+            throw ASRError.processingFailed("Mel-encoder model failed")
         }
 
         // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
