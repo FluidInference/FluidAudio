@@ -30,8 +30,6 @@ import CoreML
 import Foundation
 import OSLog
 
-
-
 @available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoder {
 

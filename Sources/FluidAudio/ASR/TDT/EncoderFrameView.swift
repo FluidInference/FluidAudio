@@ -1,6 +1,6 @@
+import Accelerate
 import CoreML
 import Foundation
-import Accelerate
 
 /// Lightweight view over encoder frames that preserves original strides for zero-copy access.
 /// Provides contiguous frame vectors on demand without materializing intermediate arrays.
@@ -102,4 +102,3 @@ struct EncoderFrameView {
         }
     }
 }
-
