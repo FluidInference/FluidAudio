@@ -846,7 +846,8 @@ internal struct TdtDecoder {
 
         // Validate destination shape
         let outShape = out.shape.map { $0.intValue }
-        guard out.dataType == .float32, outShape.count == 3, outShape[0] == 1, outShape[2] == 1, outShape[1] == hiddenSize
+        guard out.dataType == .float32, outShape.count == 3, outShape[0] == 1, outShape[2] == 1,
+            outShape[1] == hiddenSize
         else {
             throw ASRError.processingFailed("Prepared decoder step shape mismatch: \(out.shapeString)")
         }
