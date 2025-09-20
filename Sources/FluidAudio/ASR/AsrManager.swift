@@ -53,11 +53,13 @@ public final class AsrManager {
             await sharedMLArrayCache.prewarm(shapes: [
                 ([NSNumber(value: 1), NSNumber(value: 240_000)], .float32),
                 ([NSNumber(value: 1)], .int32),
-                ([
-                    NSNumber(value: 2),
-                    NSNumber(value: 1),
-                    NSNumber(value: ASRConstants.decoderHiddenSize),
-                ], .float32),
+                (
+                    [
+                        NSNumber(value: 2),
+                        NSNumber(value: 1),
+                        NSNumber(value: ASRConstants.decoderHiddenSize),
+                    ], .float32
+                ),
             ])
         }
     }
