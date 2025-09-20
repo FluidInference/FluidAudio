@@ -6,14 +6,20 @@ import XCTest
 
 final class TdtDecoderStateTests: XCTestCase {
 
+    private let decoderStateShape: [NSNumber] = [
+        NSNumber(value: 2),
+        NSNumber(value: 1),
+        NSNumber(value: ASRConstants.decoderHiddenSize),
+    ]
+
     // MARK: - Initialization Tests
 
     func testDecoderStateInitialization() throws {
         let state = try TdtDecoderState()
 
         // Check shapes
-        XCTAssertEqual(state.hiddenState.shape, [2, 1, 640] as [NSNumber])
-        XCTAssertEqual(state.cellState.shape, [2, 1, 640] as [NSNumber])
+        XCTAssertEqual(state.hiddenState.shape, decoderStateShape)
+        XCTAssertEqual(state.cellState.shape, decoderStateShape)
 
         // Check data types
         XCTAssertEqual(state.hiddenState.dataType, .float32)
@@ -76,8 +82,8 @@ final class TdtDecoderStateTests: XCTestCase {
         var state = try TdtDecoderState()
 
         // Create mock decoder output
-        let newHiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        let newCellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        let newHiddenState = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
+        let newCellState = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
 
         // Fill with test values
         for i in 0..<newHiddenState.count {
@@ -121,7 +127,7 @@ final class TdtDecoderStateTests: XCTestCase {
         let originalHidden = state.hiddenState
 
         // Create new cell state only
-        let newCellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        let newCellState = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
         for i in 0..<newCellState.count {
             newCellState[i] = NSNumber(value: Float(i) * 0.3)
         }
@@ -224,8 +230,8 @@ final class TdtDecoderStateTests: XCTestCase {
     func testDecoderStateMemorySize() throws {
         let state = try TdtDecoderState()
 
-        // Each state has shape [2, 1, 640] with float32
-        let expectedElements = 2 * 1 * 640
+        // Each state has shape [2, 1, decoderHiddenSize] with float32
+        let expectedElements = 2 * 1 * ASRConstants.decoderHiddenSize
         XCTAssertEqual(state.hiddenState.count, expectedElements)
         XCTAssertEqual(state.cellState.count, expectedElements)
 

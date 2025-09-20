@@ -692,10 +692,16 @@ internal struct TdtDecoder {
             throw ASRError.processingFailed("Decoder projection stride exceeds buffer bounds")
         }
 
-        var src = sourcePtr.advanced(by: baseOffset)
-        for h in 0..<hiddenSize {
-            destPtr[h] = src.pointee
-            src = src.advanced(by: hiddenStride)
+        let startPtr = sourcePtr.advanced(by: baseOffset)
+        if hiddenStride == 1 {
+            destPtr.update(from: startPtr, count: hiddenSize)
+        } else {
+            guard let count = Int32(exactly: hiddenSize),
+                let stride = Int32(exactly: hiddenStride)
+            else {
+                throw ASRError.processingFailed("Decoder projection stride out of range")
+            }
+            cblas_scopy(count, startPtr, stride, destPtr, 1)
         }
 
         return normalized

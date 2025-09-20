@@ -219,7 +219,7 @@ public final class AsrManager {
         melEncoderModel = nil
         decoderModel = nil
         jointModel = nil
-        // Reset decoder states - use fallback initializer that won't throw
+        // Reset decoder states using fresh allocations for deterministic behavior
         microphoneDecoderState = TdtDecoderState.make()
         systemDecoderState = TdtDecoderState.make()
         logger.info("AsrManager resources cleaned up")

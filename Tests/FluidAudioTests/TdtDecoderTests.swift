@@ -87,8 +87,14 @@ final class TdtDecoderTests: XCTestCase {
     func testPrepareDecoderInput() throws {
 
         let token = 42
-        let hiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        let cellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        let stateShape: [NSNumber] = [
+            NSNumber(value: 2),
+            NSNumber(value: 1),
+            NSNumber(value: ASRConstants.decoderHiddenSize),
+        ]
+
+        let hiddenState = try MLMultiArray(shape: stateShape, dataType: .float32)
+        let cellState = try MLMultiArray(shape: stateShape, dataType: .float32)
 
         let input = try decoder.prepareDecoderInput(
             targetToken: token,
