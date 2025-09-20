@@ -8,14 +8,16 @@ import XCTest
 @available(macOS 13.0, iOS 16.0, *)
 final class TdtDecoderStateV3Tests: XCTestCase {
 
+    private let decoderStateShape: [NSNumber] = [2, 1, NSNumber(value: ASRConstants.decoderHiddenSize)]
+
     // MARK: - Initialization Tests
 
     func testDefaultInitialization() throws {
         let state = try TdtDecoderState()
 
         // Verify shapes
-        XCTAssertEqual(state.hiddenState.shape, [2, 1, 640] as [NSNumber])
-        XCTAssertEqual(state.cellState.shape, [2, 1, 640] as [NSNumber])
+        XCTAssertEqual(state.hiddenState.shape, decoderStateShape)
+        XCTAssertEqual(state.cellState.shape, decoderStateShape)
         XCTAssertEqual(state.hiddenState.dataType, .float32)
         XCTAssertEqual(state.cellState.dataType, .float32)
 
@@ -27,22 +29,6 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         // Verify arrays are zeroed
         verifyArrayIsZero(state.hiddenState)
         verifyArrayIsZero(state.cellState)
-    }
-
-    func testFallbackInitialization() {
-        let state = TdtDecoderState(fallback: true)
-
-        // Should have correct shapes
-        XCTAssertEqual(state.hiddenState.shape, [2, 1, 640] as [NSNumber])
-        XCTAssertEqual(state.cellState.shape, [2, 1, 640] as [NSNumber])
-
-        // Should be initialized to zeros
-        verifyArrayIsZero(state.hiddenState)
-        verifyArrayIsZero(state.cellState)
-
-        // Should have nil state
-        XCTAssertNil(state.lastToken)
-        XCTAssertNil(state.timeJump)
     }
 
     func testCopyInitialization() throws {
@@ -93,8 +79,8 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         var state = try TdtDecoderState()
 
         // Create mock decoder output
-        let newHidden = try createTestArray(shape: [2, 1, 640], multiplier: 5.0)
-        let newCell = try createTestArray(shape: [2, 1, 640], multiplier: 6.0)
+        let newHidden = try createTestArray(shape: decoderStateShape, multiplier: 5.0)
+        let newCell = try createTestArray(shape: decoderStateShape, multiplier: 6.0)
 
         let mockOutput = try MLDictionaryFeatureProvider(dictionary: [
             "h_out": MLFeatureValue(multiArray: newHidden),
@@ -111,8 +97,8 @@ final class TdtDecoderStateV3Tests: XCTestCase {
 
     func testUpdateFromIncompleteDecoderOutput() throws {
         var state = try TdtDecoderState()
-        let originalHidden = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        let originalCell = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        let originalHidden = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
+        let originalCell = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
 
         // Fill with initial test data
         fillArrayWithTestData(originalHidden, multiplier: 1.0)
@@ -121,7 +107,7 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         state.cellState.copyData(from: originalCell)
 
         // Create output missing one state
-        let newHidden = try createTestArray(shape: [2, 1, 640], multiplier: 10.0)
+        let newHidden = try createTestArray(shape: decoderStateShape, multiplier: 10.0)
         let mockOutput = try MLDictionaryFeatureProvider(dictionary: [
             "h_out": MLFeatureValue(multiArray: newHidden)
             // Missing c_out
@@ -252,15 +238,7 @@ final class TdtDecoderStateV3Tests: XCTestCase {
     // MARK: - Error Handling Tests
 
     func testInitializationDoesNotThrow() {
-        // Default init should handle ANE fallback gracefully
         XCTAssertNoThrow(try TdtDecoderState())
-    }
-
-    func testFallbackInitNeverFails() {
-        // Fallback init should never throw
-        let state = TdtDecoderState(fallback: true)
-        XCTAssertNotNil(state.hiddenState)
-        XCTAssertNotNil(state.cellState)
     }
 
     // MARK: - Performance Tests
@@ -304,7 +282,7 @@ final class TdtDecoderStateV3Tests: XCTestCase {
     }
 
     func testArrayResetPerformance() throws {
-        let array = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        let array = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
 
         measure {
             for _ in 0..<1000 {
@@ -314,8 +292,8 @@ final class TdtDecoderStateV3Tests: XCTestCase {
     }
 
     func testArrayCopyPerformance() throws {
-        let sourceArray = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        let destArray = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        let sourceArray = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
+        let destArray = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
 
         measure {
             for _ in 0..<1000 {
@@ -378,8 +356,8 @@ final class TdtDecoderStateV3Tests: XCTestCase {
         }
     }
 
-    private func createTestArray(shape: [Int], multiplier: Float) throws -> MLMultiArray {
-        let array = try MLMultiArray(shape: shape as [NSNumber], dataType: .float32)
+    private func createTestArray(shape: [NSNumber], multiplier: Float) throws -> MLMultiArray {
+        let array = try MLMultiArray(shape: shape, dataType: .float32)
         fillArrayWithTestData(array, multiplier: multiplier)
         return array
     }

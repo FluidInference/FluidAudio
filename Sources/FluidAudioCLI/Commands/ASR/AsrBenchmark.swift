@@ -536,7 +536,7 @@ extension ASRBenchmark {
             return
         }
 
-        logger.info("\n" + String(repeating: "=", count: 80))
+        logger.info("" + String(repeating: "=", count: 80))
         logger.info("📋 Detailed Analysis for Files with WER > \(Int(threshold * 100))%")
         logger.info(String(repeating: "=", count: 80))
 
@@ -549,7 +549,7 @@ extension ASRBenchmark {
     private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) {
         let werPercent = result.metrics.wer * 100
         logger.info(
-            "\nFile: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
+            "File: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
         )
         logger.info(String(repeating: "-", count: 60))
 
@@ -841,7 +841,7 @@ extension ASRBenchmark {
             i += 1
         }
 
-        logger.info("\nStarting ASR benchmark on LibriSpeech \(subset)")
+        logger.info("Starting ASR benchmark on LibriSpeech \(subset)")
         if singleFile != nil {
             logger.info("   Processing single file: \(singleFile!)")
         } else {
@@ -945,7 +945,7 @@ extension ASRBenchmark {
 
             // Print streaming metrics if available
             if config.testStreaming {
-                logger.info("\n--- Streaming Metrics ---")
+                logger.info("--- Streaming Metrics ---")
 
                 // Calculate aggregate streaming metrics
                 let streamingResults = results.compactMap { $0.streamingMetrics }
@@ -1061,7 +1061,7 @@ extension ASRBenchmark {
             // Print detailed analysis for files with high WER
             benchmark.printDetailedWERAnalysis(results)
 
-            logger.info("\n\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
+            logger.info("\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
 
             logger.info("--- Benchmark Results ---")
             logger.info("   Dataset: \(config.dataset) \(config.subset)")
@@ -1075,11 +1075,11 @@ extension ASRBenchmark {
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
 
-            logger.info("\nResults saved to: \(outputFile)")
+            logger.info("Results saved to: \(outputFile)")
             logger.info("ASR benchmark completed successfully")
 
         } catch {
-            logger.error("\nERROR: ASR benchmark failed: \(error)")
+            logger.error("ERROR: ASR benchmark failed: \(error)")
             exit(1)
         }
     }

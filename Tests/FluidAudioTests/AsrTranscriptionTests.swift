@@ -222,8 +222,13 @@ final class AsrTranscriptionTests: XCTestCase {
         let decoderState = try TdtDecoderState()
 
         // Verify decoder state is properly initialized
-        XCTAssertEqual(decoderState.hiddenState.shape, [2, 1, 640] as [NSNumber])
-        XCTAssertEqual(decoderState.cellState.shape, [2, 1, 640] as [NSNumber])
+        let expectedShape: [NSNumber] = [
+            NSNumber(value: 2),
+            NSNumber(value: 1),
+            NSNumber(value: ASRConstants.decoderHiddenSize),
+        ]
+        XCTAssertEqual(decoderState.hiddenState.shape, expectedShape)
+        XCTAssertEqual(decoderState.cellState.shape, expectedShape)
 
         // Test state values are initialized to zero
         XCTAssertEqual(decoderState.hiddenState[0].floatValue, 0.0, accuracy: 0.001)

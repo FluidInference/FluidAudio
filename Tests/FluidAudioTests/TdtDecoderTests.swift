@@ -87,8 +87,14 @@ final class TdtDecoderTests: XCTestCase {
     func testPrepareDecoderInput() throws {
 
         let token = 42
-        let hiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        let cellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
+        let stateShape: [NSNumber] = [
+            NSNumber(value: 2),
+            NSNumber(value: 1),
+            NSNumber(value: ASRConstants.decoderHiddenSize),
+        ]
+
+        let hiddenState = try MLMultiArray(shape: stateShape, dataType: .float32)
+        let cellState = try MLMultiArray(shape: stateShape, dataType: .float32)
 
         let input = try decoder.prepareDecoderInput(
             targetToken: token,
@@ -98,7 +104,7 @@ final class TdtDecoderTests: XCTestCase {
 
         // Verify all features are present
         XCTAssertNotNil(input.featureValue(for: "targets"))
-        XCTAssertNotNil(input.featureValue(for: "target_lengths"))
+        XCTAssertNotNil(input.featureValue(for: "target_length"))
         XCTAssertNotNil(input.featureValue(for: "h_in"))
         XCTAssertNotNil(input.featureValue(for: "c_in"))
 
@@ -115,12 +121,18 @@ final class TdtDecoderTests: XCTestCase {
     func testPrepareJointInput() throws {
 
         // Create encoder output
-        let encoderOutput = try MLMultiArray(shape: [1, 1, 256], dataType: .float32)
+        let encoderOutput = try MLMultiArray(
+            shape: [1, NSNumber(value: ASRConstants.encoderHiddenSize), 1],
+            dataType: .float32
+        )
 
         // Create mock decoder output
-        let decoderOutputArray = try MLMultiArray(shape: [1, 1, 128], dataType: .float32)
+        let decoderOutputArray = try MLMultiArray(
+            shape: [1, NSNumber(value: ASRConstants.decoderHiddenSize), 1],
+            dataType: .float32
+        )
         let decoderOutput = try MLDictionaryFeatureProvider(dictionary: [
-            "decoder_output": MLFeatureValue(multiArray: decoderOutputArray)
+            "decoder": MLFeatureValue(multiArray: decoderOutputArray)
         ])
 
         let jointInput = try decoder.prepareJointInput(
@@ -130,48 +142,22 @@ final class TdtDecoderTests: XCTestCase {
         )
 
         // Verify both inputs are present
-        XCTAssertNotNil(jointInput.featureValue(for: "encoder_outputs"))
-        XCTAssertNotNil(jointInput.featureValue(for: "decoder_outputs"))
+        XCTAssertNotNil(jointInput.featureValue(for: "encoder_step"))
+        XCTAssertNotNil(jointInput.featureValue(for: "decoder_step"))
 
         // Verify shapes
-        guard let encoderFeature = jointInput.featureValue(for: "encoder_outputs")?.multiArrayValue else {
-            XCTFail("Missing encoder_outputs")
+        guard let encoderFeature = jointInput.featureValue(for: "encoder_step")?.multiArrayValue else {
+            XCTFail("Missing encoder_step")
             return
         }
         XCTAssertEqual(encoderFeature.shape, encoderOutput.shape)
 
-        guard let decoderFeature = jointInput.featureValue(for: "decoder_outputs")?.multiArrayValue else {
-            XCTFail("Missing decoder_outputs")
+        guard let decoderFeature = jointInput.featureValue(for: "decoder_step")?.multiArrayValue else {
+            XCTFail("Missing decoder_step")
             return
         }
-        XCTAssertEqual(decoderFeature.shape, decoderOutputArray.shape)
+        XCTAssertEqual(decoderFeature.shape, [1, NSNumber(value: ASRConstants.decoderHiddenSize), 1])
     }
-
-    // MARK: - Predict Token and Duration Tests
-
-    func testPredictTokenAndDuration() throws {
-
-        // Create logits for 10 tokens + 5 durations
-        let logits = try MLMultiArray(shape: [15], dataType: .float32)
-
-        // Set token logits (make token 5 the highest)
-        for i in 0..<10 {
-            logits[i] = NSNumber(value: Float(i == 5 ? 0.9 : 0.1))
-        }
-
-        // Set duration logits (make duration 2 the highest)
-        for i in 0..<5 {
-            logits[10 + i] = NSNumber(value: Float(i == 2 ? 0.8 : 0.2))
-        }
-
-        let (token, score, duration) = try decoder.predictTokenAndDuration(
-            logits, durationBins: config.tdtConfig.durationBins)
-
-        XCTAssertEqual(token, 5)
-        XCTAssertEqual(score, 0.9, accuracy: 0.0001)
-        XCTAssertEqual(duration, 2)  // durations[2] = 2
-    }
-
     // MARK: - Update Hypothesis Tests
 
     func testUpdateHypothesis() throws {
@@ -215,157 +201,4 @@ final class TdtDecoderTests: XCTestCase {
         XCTAssertEqual(hypothesis.lastToken, 100)
     }
 
-    // MARK: - Softmax Tests
-
-    func testSoftmaxBasicComputation() throws {
-        let logits: [Float] = [1.0, 2.0, 3.0]
-        let result = decoder.softmax(logits)
-
-        XCTAssertEqual(result.count, 3)
-
-        // Verify it's a valid probability distribution (sums to 1.0)
-        let sum = result.reduce(0, +)
-        XCTAssertEqual(sum, 1.0, accuracy: 0.0001)
-
-        // Verify ordering is preserved (highest logit = highest probability)
-        XCTAssertTrue(result[2] > result[1])
-        XCTAssertTrue(result[1] > result[0])
-
-        // Verify specific values for known input
-        let expected: [Float] = [0.09003, 0.24473, 0.66524]
-        for i in 0..<3 {
-            XCTAssertEqual(result[i], expected[i], accuracy: 0.001)
-        }
-    }
-
-    func testSoftmaxNumericalStability() throws {
-        // Test with large values that could cause overflow without numerical stability
-        let largeLogits: [Float] = [1000.0, 1001.0, 1002.0]
-        let result = decoder.softmax(largeLogits)
-
-        XCTAssertEqual(result.count, 3)
-
-        // Should still sum to 1.0
-        let sum = result.reduce(0, +)
-        XCTAssertEqual(sum, 1.0, accuracy: 0.0001)
-
-        // Should not contain NaN or infinite values
-        for prob in result {
-            XCTAssertFalse(prob.isNaN, "Softmax result contains NaN")
-            XCTAssertFalse(prob.isInfinite, "Softmax result contains infinite value")
-            XCTAssertTrue(prob >= 0.0, "Softmax result contains negative probability")
-        }
-
-        // Ordering should still be preserved
-        XCTAssertTrue(result[2] > result[1])
-        XCTAssertTrue(result[1] > result[0])
-    }
-
-    func testSoftmaxEmptyArray() throws {
-        let emptyLogits: [Float] = []
-        let result = decoder.softmax(emptyLogits)
-
-        XCTAssertTrue(result.isEmpty)
-    }
-
-    func testSoftmaxSingleElement() throws {
-        let singleLogit: [Float] = [5.0]
-        let result = decoder.softmax(singleLogit)
-
-        XCTAssertEqual(result.count, 1)
-        XCTAssertEqual(result[0], 1.0, accuracy: 0.0001)
-    }
-
-    func testSoftmaxIdenticalValues() throws {
-        // When all logits are identical, probabilities should be uniform
-        let identicalLogits: [Float] = [2.0, 2.0, 2.0, 2.0]
-        let result = decoder.softmax(identicalLogits)
-
-        XCTAssertEqual(result.count, 4)
-
-        // Should sum to 1.0
-        let sum = result.reduce(0, +)
-        XCTAssertEqual(sum, 1.0, accuracy: 0.0001)
-
-        // All probabilities should be equal (0.25 each)
-        for prob in result {
-            XCTAssertEqual(prob, 0.25, accuracy: 0.0001)
-        }
-    }
-
-    func testSoftmaxNegativeValues() throws {
-        let negativeLogits: [Float] = [-1.0, -2.0, -3.0]
-        let result = decoder.softmax(negativeLogits)
-
-        XCTAssertEqual(result.count, 3)
-
-        // Should sum to 1.0
-        let sum = result.reduce(0, +)
-        XCTAssertEqual(sum, 1.0, accuracy: 0.0001)
-
-        // All probabilities should be positive
-        for prob in result {
-            XCTAssertTrue(prob > 0.0, "Probability should be positive")
-        }
-
-        // Higher logit should have higher probability
-        XCTAssertTrue(result[0] > result[1])
-        XCTAssertTrue(result[1] > result[2])
-    }
-
-    func testSoftmaxLargeArray() throws {
-        // Test with larger array similar to vocabulary size
-        let vocabSize = 1000
-        var logits = [Float](repeating: 0.1, count: vocabSize)
-
-        // Make a few tokens have higher probabilities
-        logits[42] = 5.0
-        logits[100] = 4.0
-        logits[500] = 3.0
-
-        let result = decoder.softmax(logits)
-
-        XCTAssertEqual(result.count, vocabSize)
-
-        // Should sum to 1.0
-        let sum = result.reduce(0, +)
-        XCTAssertEqual(sum, 1.0, accuracy: 0.001)
-
-        // The highest logit should have the highest probability
-        let maxIndex = result.enumerated().max(by: { $0.element < $1.element })?.offset
-        XCTAssertEqual(maxIndex, 42)
-
-        // Verify ordering of our special tokens
-        XCTAssertTrue(result[42] > result[100])
-        XCTAssertTrue(result[100] > result[500])
-
-        // All probabilities should be non-negative
-        for prob in result {
-            XCTAssertTrue(prob >= 0.0, "All probabilities should be non-negative")
-        }
-    }
-
-    func testSoftmaxAccelerateOptimization() throws {
-        // Test that the Accelerate framework implementation produces correct results
-        let logits: [Float] = [0.5, 1.5, 2.5, 3.5, 4.5]
-        let result = decoder.softmax(logits)
-
-        // Manually calculate expected softmax for comparison
-        let maxLogit = logits.max()!
-        let expValues = logits.map { exp($0 - maxLogit) }
-        let sumExp = expValues.reduce(0, +)
-        let expected = expValues.map { $0 / sumExp }
-
-        XCTAssertEqual(result.count, expected.count)
-
-        for i in 0..<result.count {
-            XCTAssertEqual(
-                result[i], expected[i], accuracy: 0.0001,
-                "Accelerate implementation should match manual calculation at index \(i)")
-        }
-
-        // Verify probability distribution properties
-        let sum = result.reduce(0, +)
-        XCTAssertEqual(sum, 1.0, accuracy: 0.0001)
-    }
 }

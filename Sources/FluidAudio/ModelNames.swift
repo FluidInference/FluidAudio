@@ -31,20 +31,17 @@ public enum ModelNames {
 
     /// ASR model names
     public enum ASR {
-        public static let melspectrogram = "Melspectrogram_15s"
-        public static let encoder = "ParakeetEncoder_15s"
-        public static let decoder = "ParakeetDecoder"
-        public static let joint = "RNNTJoint"
+        public static let melEncoder = "MelEncoder"
+        public static let decoder = "Decoder"
+        public static let joint = "JointDecision"
         public static let vocabulary = "parakeet_v3_vocab.json"
 
-        public static let melspectrogramFile = melspectrogram + ".mlmodelc"
-        public static let encoderFile = encoder + ".mlmodelc"
+        public static let melEncoderFile = melEncoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
 
         public static let requiredModels: Set<String> = [
-            melspectrogramFile,
-            encoderFile,
+            melEncoderFile,
             decoderFile,
             jointFile,
         ]

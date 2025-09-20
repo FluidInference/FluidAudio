@@ -3,7 +3,7 @@ import os
 
 /// Performance metrics for ASR processing
 public struct ASRPerformanceMetrics: Sendable {
-    public let melSpectrogramTime: TimeInterval
+    public let melEncoderTime: TimeInterval
     public let encoderTime: TimeInterval
     public let decoderTime: TimeInterval
     public let totalProcessingTime: TimeInterval
@@ -14,7 +14,7 @@ public struct ASRPerformanceMetrics: Sendable {
     public var summary: String {
         """
         Performance Metrics:
-        - Mel-spectrogram: \(String(format: "%.3f", melSpectrogramTime))s
+        - Mel encoder: \(String(format: "%.3f", melEncoderTime))s
         - Encoder: \(String(format: "%.3f", encoderTime))s
         - Decoder: \(String(format: "%.3f", decoderTime))s
         - Total: \(String(format: "%.3f", totalProcessingTime))s
@@ -47,7 +47,7 @@ public actor PerformanceMonitor {
         let startMemory = getCurrentMemoryUsage()
 
         // Track individual components
-        let melTime: TimeInterval = 0
+        let melEncoderTime: TimeInterval = 0
         let encoderTime: TimeInterval = 0
         let decoderTime: TimeInterval = 0
 
@@ -61,7 +61,7 @@ public actor PerformanceMonitor {
         signpostLogger.endInterval("ASR.Operation", state)
 
         let metrics = ASRPerformanceMetrics(
-            melSpectrogramTime: melTime,
+            melEncoderTime: melEncoderTime,
             encoderTime: encoderTime,
             decoderTime: decoderTime,
             totalProcessingTime: totalTime,

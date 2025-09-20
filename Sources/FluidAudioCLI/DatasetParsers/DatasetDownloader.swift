@@ -392,7 +392,7 @@ struct DatasetDownloader {
             failedFiles += 1
         }
 
-        logger.info("\n📊 VAD Dataset Download Summary:")
+        logger.info("📊 VAD Dataset Download Summary:")
         logger.info("   Downloaded: \(downloadedFiles) files")
         logger.info("   Failed: \(failedFiles) categories")
 
@@ -674,12 +674,12 @@ struct DatasetDownloader {
                 let musicFiles = countFiles(in: musanDir.appendingPathComponent("music"))
                 let noiseFiles = countFiles(in: musanDir.appendingPathComponent("noise"))
 
-                logger.info("\n📊 Full MUSAN Dataset Summary:")
+                logger.info("📊 Full MUSAN Dataset Summary:")
                 logger.info("   Speech files: \(speechFiles)")
                 logger.info("   Music files: \(musicFiles)")
                 logger.info("   Noise files: \(noiseFiles)")
                 logger.info("   Total files: \(speechFiles + musicFiles + noiseFiles)")
-                logger.info("\nFull MUSAN dataset ready for benchmarking")
+                logger.info("Full MUSAN dataset ready for benchmarking")
                 logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset musan-full")
             } else {
                 logger.error("Extraction failed")
@@ -814,7 +814,7 @@ struct DatasetDownloader {
                 // Clean up clone directory
                 try? FileManager.default.removeItem(at: cloneDir)
 
-                logger.info("\nVOiCES subset ready for benchmarking")
+                logger.info("VOiCES subset ready for benchmarking")
                 logger.info("💡 Run: swift run fluidaudio vad-benchmark --dataset voices-subset")
 
             } else {
