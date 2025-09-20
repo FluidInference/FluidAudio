@@ -69,8 +69,6 @@ extension AsrManager {
             from: melEncoderOutput, key: "encoder_length",
             errorMessage: "Invalid encoder output length")
 
-        let encoderHiddenStates = try normalizeEncoderOutput(rawEncoderOutput)
-
         let encoderSequenceLength = encoderLength[0].intValue
 
         // Calculate actual audio frames if not provided using shared constants
@@ -78,7 +76,7 @@ extension AsrManager {
             actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
 
         let hypothesis = try await tdtDecodeWithTimings(
-            encoderOutput: encoderHiddenStates,
+            encoderOutput: rawEncoderOutput,
             encoderSequenceLength: encoderSequenceLength,
             actualAudioFrames: actualFrames,
             originalAudioSamples: paddedAudio,

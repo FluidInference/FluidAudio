@@ -32,7 +32,7 @@ public enum ModelNames {
     /// ASR model names
     public enum ASR {
         public static let melEncoder = "MelEncoder"
-        public static let decoder = "ParakeetDecoder"
+        public static let decoder = "Decoder"
         public static let joint = "RNNTJoint"
         public static let vocabulary = "parakeet_v3_vocab.json"
 

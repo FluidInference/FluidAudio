@@ -12,7 +12,7 @@ struct TdtDecoderState {
     /// ensuring proper context continuity for real-time transcription.
     var lastToken: Int?
 
-    // Cached CoreML "decoder_output" used for the very first Joint at utterance/chunk start.
+    // Cached CoreML "decoder" output used for the very first Joint at utterance/chunk start.
     // This mirrors NeMo's behavior where SOS == blankId is used only to prime the predictor.
     var predictorOutput: MLMultiArray?
 
@@ -25,31 +25,29 @@ struct TdtDecoderState {
     /// - zero: Decoder exactly at the end of encoder frames
     var timeJump: Int?
 
-    enum InitError: Error {
-        case aneAllocationFailed(String)
-    }
-
     init() throws {
         // Use ANE-aligned arrays for optimal performance
-        do {
-            hiddenState = try ANEOptimizer.createANEAlignedArray(
-                shape: [2, 1, 640],
-                dataType: .float32
-            )
-            cellState = try ANEOptimizer.createANEAlignedArray(
-                shape: [2, 1, 640],
-                dataType: .float32
-            )
-        } catch {
-            // Fall back to standard MLMultiArray if ANE allocation fails
-            print("Warning: ANE-aligned allocation failed, falling back to standard MLMultiArray: \(error)")
-            hiddenState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-            cellState = try MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        }
+        let decoderHiddenSize = ASRConstants.decoderHiddenSize
+        hiddenState = try ANEOptimizer.createANEAlignedArray(
+            shape: [2, 1, NSNumber(value: decoderHiddenSize)],
+            dataType: .float32
+        )
+        cellState = try ANEOptimizer.createANEAlignedArray(
+            shape: [2, 1, NSNumber(value: decoderHiddenSize)],
+            dataType: .float32
+        )
 
         // Initialize to zeros using Accelerate
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
+    }
+
+    static func make() -> TdtDecoderState {
+        do {
+            return try TdtDecoderState()
+        } catch {
+            fatalError("Failed to allocate decoder state: \(error)")
+        }
     }
 
     mutating func update(from decoderOutput: MLFeatureProvider) {
@@ -65,17 +63,6 @@ struct TdtDecoderState {
 
         hiddenState.copyData(from: other.hiddenState)
         cellState.copyData(from: other.cellState)
-    }
-
-    /// Fallback initializer that never fails (for use in critical paths)
-    init(fallback: Bool) {
-        // Standard MLMultiArray allocation without ANE optimization
-        hiddenState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-        cellState = try! MLMultiArray(shape: [2, 1, 640], dataType: .float32)
-
-        // Initialize to zeros
-        hiddenState.resetData(to: 0)
-        cellState.resetData(to: 0)
     }
 
     /// Reset all state variables to initial values

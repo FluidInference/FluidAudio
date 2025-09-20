@@ -45,23 +45,19 @@ public final class AsrManager {
     public init(config: ASRConfig = .default) {
         self.config = config
 
-        // Initialize decoder states with fallback
-        do {
-            self.microphoneDecoderState = try TdtDecoderState()
-            self.systemDecoderState = try TdtDecoderState()
-        } catch {
-            logger.warning("Failed to create ANE-aligned decoder states, using standard allocation")
-            // This should rarely happen, but if it does, we'll create them during first use
-            self.microphoneDecoderState = TdtDecoderState(fallback: true)
-            self.systemDecoderState = TdtDecoderState(fallback: true)
-        }
+        self.microphoneDecoderState = TdtDecoderState.make()
+        self.systemDecoderState = TdtDecoderState.make()
 
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
-                ([1, 240000], .float32),
-                ([1], .int32),
-                ([2, 1, 640], .float32),
+                ([NSNumber(value: 1), NSNumber(value: 240_000)], .float32),
+                ([NSNumber(value: 1)], .int32),
+                ([
+                    NSNumber(value: 2),
+                    NSNumber(value: 1),
+                    NSNumber(value: ASRConstants.decoderHiddenSize),
+                ], .float32),
             ])
         }
     }
@@ -135,74 +131,6 @@ public final class AsrManager {
         ])
     }
 
-    func normalizeEncoderOutput(_ encoderOutput: MLMultiArray) throws -> MLMultiArray {
-        let shape = encoderOutput.shape.map { $0.intValue }
-        guard shape.count == 3 else {
-            throw ASRError.processingFailed("Invalid encoder output rank: \(shape)")
-        }
-
-        let expectedHiddenSize = ASRConstants.encoderHiddenSize
-
-        // If the hidden dimension is already the last axis, nothing to do.
-        if shape[2] == expectedHiddenSize {
-            return encoderOutput
-        }
-
-        // Handle models that emit [batch, hidden, time] by transposing to [batch, time, hidden].
-        if shape[1] == expectedHiddenSize {
-            return try transposeHiddenAndTimeAxes(encoderOutput)
-        }
-
-        // Fallback: if shape mismatch but last dimension still looks like time, return as-is.
-        return encoderOutput
-    }
-
-    private func transposeHiddenAndTimeAxes(_ encoderOutput: MLMultiArray) throws -> MLMultiArray {
-        let shape = encoderOutput.shape.map { $0.intValue }
-        guard shape.count == 3 else {
-            throw ASRError.processingFailed("Invalid encoder output rank: \(shape)")
-        }
-
-        let batch = shape[0]
-        let hidden = shape[1]
-        let time = shape[2]
-
-        let transposedShape = [NSNumber(value: batch), NSNumber(value: time), NSNumber(value: hidden)]
-        let result = try MLMultiArray(shape: transposedShape, dataType: encoderOutput.dataType)
-
-        let srcStrides = encoderOutput.strides.map { $0.intValue }
-        let dstStrides = result.strides.map { $0.intValue }
-
-        switch encoderOutput.dataType {
-        case .float32:
-            let srcPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: encoderOutput.count)
-            let dstPtr = result.dataPointer.bindMemory(to: Float.self, capacity: result.count)
-
-            for b in 0..<batch {
-                for t in 0..<time {
-                    for h in 0..<hidden {
-                        let srcIndex = b * srcStrides[0] + h * srcStrides[1] + t * srcStrides[2]
-                        let dstIndex = b * dstStrides[0] + t * dstStrides[1] + h * dstStrides[2]
-                        dstPtr[dstIndex] = srcPtr[srcIndex]
-                    }
-                }
-            }
-
-        default:
-            for b in 0..<batch {
-                for t in 0..<time {
-                    for h in 0..<hidden {
-                        let srcIndex = b * srcStrides[0] + h * srcStrides[1] + t * srcStrides[2]
-                        let dstIndex = b * dstStrides[0] + t * dstStrides[1] + h * dstStrides[2]
-                        result[dstIndex] = encoderOutput[srcIndex]
-                    }
-                }
-            }
-        }
-
-        return result
-    }
-
     private func prepareDecoderInput(
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
@@ -212,7 +140,7 @@ public final class AsrManager {
 
         return try createFeatureProvider(features: [
             ("targets", targetArray),
-            ("target_lengths", targetLengthArray),
+            ("target_length", targetLengthArray),
             ("h_in", hiddenState),
             ("c_in", cellState),
         ])
@@ -283,8 +211,8 @@ public final class AsrManager {
     }
 
     public func resetState() {
-        microphoneDecoderState = TdtDecoderState(fallback: true)
-        systemDecoderState = TdtDecoderState(fallback: true)
+        microphoneDecoderState = TdtDecoderState.make()
+        systemDecoderState = TdtDecoderState.make()
     }
 
     public func cleanup() {
@@ -292,8 +220,8 @@ public final class AsrManager {
         decoderModel = nil
         jointModel = nil
         // Reset decoder states - use fallback initializer that won't throw
-        microphoneDecoderState = TdtDecoderState(fallback: true)
-        systemDecoderState = TdtDecoderState(fallback: true)
+        microphoneDecoderState = TdtDecoderState.make()
+        systemDecoderState = TdtDecoderState.make()
         logger.info("AsrManager resources cleaned up")
     }
 
