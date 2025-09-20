@@ -5,6 +5,7 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case diarizer = "FluidInference/speaker-diarization-coreml"
+    case kokoro = "FluidInference/kokoro-82m-coreml"
 
     var folderName: String {
         rawValue.split(separator: "/").last?.description ?? rawValue
@@ -58,6 +59,15 @@ public enum ModelNames {
         ]
     }
 
+    /// TTS model names
+    public enum TTS {
+        public static let kokoroBundle = "kokoro_completev22.mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            kokoroBundle
+        ]
+    }
+
     @available(macOS 13.0, iOS 16.0, *)
     static func getRequiredModelNames(for repo: Repo) -> Set<String> {
         switch repo {
@@ -67,6 +77,8 @@ public enum ModelNames {
             return ModelNames.ASR.requiredModels
         case .diarizer:
             return ModelNames.Diarizer.requiredModels
+        case .kokoro:
+            return ModelNames.TTS.requiredModels
         }
     }
 

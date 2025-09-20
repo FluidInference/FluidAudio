@@ -96,6 +96,25 @@ public class DownloadUtils {
         public static let `default` = DownloadConfig()
     }
 
+    /// Model repositories on HuggingFace
+    public enum Repo: String, CaseIterable {
+        case vad = "FluidInference/silero-vad-coreml"
+        case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+        case diarizer = "FluidInference/speaker-diarization-coreml"
+        case kokoro = "FluidInference/kokoro-82m-coreml"
+
+        var folderName: String {
+            switch self {
+            case .kokoro:
+                // Use "kokoro" instead of "kokoro-82m-coreml" for consistency with existing paths
+                return "kokoro"
+            default:
+                return rawValue.split(separator: "/").last?.description ?? rawValue
+            }
+        }
+
+    }
+
     public static func loadModels(
         _ repo: Repo,
         modelNames: [String],
@@ -124,7 +143,7 @@ public class DownloadUtils {
     /// Internal helper to download repo (if needed) and load CoreML models
     /// - Parameters:
     ///   - repo: The HuggingFace repository to download
-    ///   - modelNames: Array of model file names to load (e.g., ["model.mlmodelc"])
+    ///   - modelNames: Array of model file names to load (e.g., ["model.mlpackage", "model.mlmodelc"])
     ///   - directory: Base directory to store repos (e.g., ~/Library/Application Support/FluidAudio)
     ///   - computeUnits: CoreML compute units to use (default: CPU and Neural Engine)
     /// - Returns: Dictionary mapping model names to loaded MLModel instances
@@ -165,7 +184,14 @@ public class DownloadUtils {
             }
 
             do {
-                // Validate model directory structure before loading
+                if modelPath.pathExtension == "mlpackage" {
+                    let compiledURL = try await MLModel.compileModel(at: modelPath)
+                    models[name] = try MLModel(contentsOf: compiledURL, configuration: config)
+                    logger.info("Compiled and loaded model package: \(name)")
+                    continue
+                }
+
+                // Validate model directory structure before loading (.mlmodelc bundle)
                 var isDirectory: ObjCBool = false
                 guard
                     FileManager.default.fileExists(
@@ -180,7 +206,6 @@ public class DownloadUtils {
                         ])
                 }
 
-                // Check for essential model files
                 let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
                 guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
                     logger.error("Missing coremldata.bin in \(name)")
@@ -193,16 +218,14 @@ public class DownloadUtils {
                 }
 
                 models[name] = try MLModel(contentsOf: modelPath, configuration: config)
-                logger.info("Loaded model: \(name)")
+                logger.info("Loaded model bundle: \(name)")
             } catch {
                 logger.error("Failed to load model \(name): \(error)")
 
-                // List directory contents for debugging
                 if let contents = try? FileManager.default.contentsOfDirectory(
-                    at: modelPath, includingPropertiesForKeys: nil)
+                    atPath: modelPath.deletingLastPathComponent().path)
                 {
-                    logger.error(
-                        "   Model directory contents: \(contents.map { $0.lastPathComponent })")
+                    logger.error("   Nearby contents: \(contents)")
                 }
 
                 throw error
@@ -210,6 +233,22 @@ public class DownloadUtils {
         }
 
         return models
+    }
+
+    /// Get required model names for a given repository
+    /// Uses centralized ModelNames where available to avoid cross‑type coupling
+    @available(macOS 13.0, iOS 16.0, *)
+    private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+        switch repo {
+        case .vad:
+            return ModelNames.VAD.requiredModels
+        case .parakeet:
+            return ModelNames.ASR.requiredModels
+        case .diarizer:
+            return ModelNames.Diarizer.requiredModels
+        case .kokoro:
+            return ModelNames.TTS.requiredModels
+        }
     }
 
     /// Download a HuggingFace repository
@@ -220,15 +259,15 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
-        // Get the required model names for this repo from the appropriate manager
-        let requiredModels = ModelNames.getRequiredModelNames(for: repo)
+        // Get the required model names for this repo
+        let requiredModels = getRequiredModelNames(for: repo)
 
         // Download all repository contents
         let files = try await listRepoFiles(repo)
 
         for file in files {
             switch file.type {
-            case "directory" where file.path.hasSuffix(".mlmodelc"):
+            case "directory" where file.path.hasSuffix(".mlmodelc") || file.path.hasSuffix(".mlpackage"):
                 // Only download if this model is in our required list
                 if requiredModels.contains(file.path) {
                     logger.info("Downloading required model: \(file.path)")
@@ -485,5 +524,66 @@ public class DownloadUtils {
                 case pointerSize = "pointer_size"
             }
         }
+    }
+}
+
+// MARK: - eSpeak NG Data (G2P)
+
+extension DownloadUtils {
+    /// Ensure the eSpeak NG data bundle is available locally for the given repo (kokoro).
+    /// Downloads `Resources/espeak-ng-data.zip` from HuggingFace and extracts it.
+    /// - Returns: URL to the `espeak-ng-data` directory that contains `voices/`.
+    @available(macOS 13.0, iOS 16.0, *)
+    public static func ensureEspeakDataBundle(in modelsDirectory: URL) async throws -> URL {
+        let logger = AppLogger(category: "DownloadUtils")
+
+        let repo = Repo.kokoro
+        let repoPath = modelsDirectory.appendingPathComponent(repo.folderName)
+        let bundleRoot = repoPath.appendingPathComponent("Resources/espeak-ng/espeak-ng-data.bundle/espeak-ng-data")
+        let voices = bundleRoot.appendingPathComponent("voices")
+
+        // If present, return immediately
+        if FileManager.default.fileExists(atPath: voices.path) {
+            return bundleRoot
+        }
+
+        // Ensure repo directory exists
+        try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
+
+        logger.info("Downloading eSpeak NG data bundle from HuggingFace…")
+
+        // Download the zip file
+        let zipPath = repoPath.appendingPathComponent("espeak-ng.zip")
+        let zipURL = URL(string: "https://huggingface.co/\(repo.rawValue)/resolve/main/espeak-ng.zip")!
+
+        // Download if not present
+        if !FileManager.default.fileExists(atPath: zipPath.path) {
+            try FileManager.default.createDirectory(
+                at: zipPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+            let (tempURL, _) = try await URLSession.shared.download(from: zipURL)
+            try FileManager.default.moveItem(at: tempURL, to: zipPath)
+            logger.info("Downloaded espeak-ng-data.zip")
+        }
+
+        // Extract the zip
+        let resourcesDir = repoPath.appendingPathComponent("Resources")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-o", zipPath.path, "-d", resourcesDir.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus == 0 {
+            logger.info("Extracted espeak-ng-data successfully")
+        }
+
+        // Validate after extraction
+        guard FileManager.default.fileExists(atPath: voices.path) else {
+            throw TTSError.downloadFailed("eSpeak NG data bundle missing 'voices' after extraction")
+        }
+        return bundleRoot
     }
 }
