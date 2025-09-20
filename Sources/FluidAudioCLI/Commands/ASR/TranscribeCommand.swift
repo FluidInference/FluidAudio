@@ -125,14 +125,14 @@ enum TranscribeCommand {
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Print results
-            logger.info("\n" + String(repeating: "=", count: 50))
+            logger.info("" + String(repeating: "=", count: 50))
             logger.info("BATCH TRANSCRIPTION RESULTS")
             logger.info(String(repeating: "=", count: 50))
-            logger.info("\nFinal transcription:")
+            logger.info("Final transcription:")
             logger.info(result.text)
 
             if showMetadata {
-                logger.info("\nMetadata:")
+                logger.info("Metadata:")
                 logger.info("  Confidence: \(String(format: "%.3f", result.confidence))")
                 logger.info("  Duration: \(String(format: "%.3f", result.duration))s")
                 if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
@@ -140,7 +140,7 @@ enum TranscribeCommand {
                     let endTime = tokenTimings.last?.endTime ?? result.duration
                     logger.info("  Start time: \(String(format: "%.3f", startTime))s")
                     logger.info("  End time: \(String(format: "%.3f", endTime))s")
-                    logger.info("\nToken Timings:")
+                    logger.info("Token Timings:")
                     for (index, timing) in tokenTimings.enumerated() {
                         logger.info(
                             "    [\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(String(format: "%.3f", timing.startTime))s, end: \(String(format: "%.3f", timing.endTime))s, conf: \(String(format: "%.3f", timing.confidence)))"
@@ -155,7 +155,7 @@ enum TranscribeCommand {
 
             let rtfx = duration / processingTime
 
-            logger.info("\nPerformance:")
+            logger.info("Performance:")
             logger.info("  Audio duration: \(String(format: "%.2f", duration))s")
             logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
             logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")

@@ -50,38 +50,25 @@ extension AsrManager {
         globalFrameOffset: Int = 0
     ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
 
-        let melspectrogramInput = try await prepareMelSpectrogramInput(
+        let melEncoderInput = try await prepareMelEncoderInput(
             paddedAudio, actualLength: originalLength)
 
-        guard let melspectrogramModel = melspectrogramModel else {
-            throw ASRError.processingFailed("Mel-spectrogram model failed")
+        guard let melEncoderModel = melEncoderModel else {
+            throw ASRError.processingFailed("Mel-encoder model failed")
         }
 
         // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
-        let melspectrogramOutput = try await melspectrogramModel.compatPrediction(
-            from: melspectrogramInput,
-            options: predictionOptions
-        )
-
-        let encoderInput = try prepareEncoderInput(melspectrogramOutput)
-
-        guard let encoderModel = encoderModel else {
-            throw ASRError.processingFailed("Encoder model failed")
-        }
-
-        // Same bridge ensures encoder predictions stay non-blocking on newer platforms.
-        let encoderOutput = try await encoderModel.compatPrediction(
-            from: encoderInput,
+        let melEncoderOutput = try await melEncoderModel.compatPrediction(
+            from: melEncoderInput,
             options: predictionOptions
         )
 
         let rawEncoderOutput = try extractFeatureValue(
-            from: encoderOutput, key: "encoder_output", errorMessage: "Invalid encoder output")
+            from: melEncoderOutput, key: "encoder", errorMessage: "Invalid encoder output")
         let encoderLength = try extractFeatureValue(
-            from: encoderOutput, key: "encoder_output_length",
+            from: melEncoderOutput, key: "encoder_length",
             errorMessage: "Invalid encoder output length")
 
-        let encoderHiddenStates = rawEncoderOutput
         let encoderSequenceLength = encoderLength[0].intValue
 
         // Calculate actual audio frames if not provided using shared constants
@@ -89,7 +76,7 @@ extension AsrManager {
             actualAudioFrames ?? ASRConstants.calculateEncoderFrames(from: originalLength ?? paddedAudio.count)
 
         let hypothesis = try await tdtDecodeWithTimings(
-            encoderOutput: encoderHiddenStates,
+            encoderOutput: rawEncoderOutput,
             encoderSequenceLength: encoderSequenceLength,
             actualAudioFrames: actualFrames,
             originalAudioSamples: paddedAudio,

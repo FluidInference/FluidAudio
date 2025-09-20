@@ -15,8 +15,7 @@ public final class AsrManager {
     internal let config: ASRConfig
     private let audioConverter: AudioConverter = AudioConverter()
 
-    internal var melspectrogramModel: MLModel?
-    internal var encoderModel: MLModel?
+    internal var melEncoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
 
@@ -43,36 +42,30 @@ public final class AsrManager {
         AsrModels.optimizedPredictionOptions()
     }()
 
-    // Persistent feature providers for zero-copy model chaining
-    private var zeroCopyProviders: [String: ZeroCopyFeatureProvider] = [:]
-
     public init(config: ASRConfig = .default) {
         self.config = config
 
-        // Initialize decoder states with fallback
-        do {
-            self.microphoneDecoderState = try TdtDecoderState()
-            self.systemDecoderState = try TdtDecoderState()
-        } catch {
-            logger.warning("Failed to create ANE-aligned decoder states, using standard allocation")
-            // This should rarely happen, but if it does, we'll create them during first use
-            self.microphoneDecoderState = TdtDecoderState(fallback: true)
-            self.systemDecoderState = TdtDecoderState(fallback: true)
-        }
+        self.microphoneDecoderState = TdtDecoderState.make()
+        self.systemDecoderState = TdtDecoderState.make()
 
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
-                ([1, 240000], .float32),
-                ([1], .int32),
-                ([2, 1, 640], .float32),
+                ([NSNumber(value: 1), NSNumber(value: 240_000)], .float32),
+                ([NSNumber(value: 1)], .int32),
+                (
+                    [
+                        NSNumber(value: 2),
+                        NSNumber(value: 1),
+                        NSNumber(value: ASRConstants.decoderHiddenSize),
+                    ], .float32
+                ),
             ])
         }
     }
 
     public var isAvailable: Bool {
-        return melspectrogramModel != nil && encoderModel != nil && decoderModel != nil
-            && jointModel != nil
+        return melEncoderModel != nil && decoderModel != nil && jointModel != nil
     }
 
     /// Initialize ASR Manager with pre-loaded models
@@ -81,8 +74,7 @@ public final class AsrManager {
         logger.info("Initializing AsrManager with provided models")
 
         self.asrModels = models
-        self.melspectrogramModel = models.melspectrogram
-        self.encoderModel = models.encoder
+        self.melEncoderModel = models.melEncoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
@@ -112,7 +104,7 @@ public final class AsrManager {
         return array
     }
 
-    func prepareMelSpectrogramInput(
+    func prepareMelEncoderInput(
         _ audioSamples: [Float], actualLength: Int? = nil
     ) async throws
         -> MLFeatureProvider
@@ -141,37 +133,6 @@ public final class AsrManager {
         ])
     }
 
-    func prepareEncoderInput(_ melspectrogramOutput: MLFeatureProvider) throws -> MLFeatureProvider {
-        // Zero-copy: chain mel-spectrogram outputs directly to encoder inputs
-        if let provider = ZeroCopyFeatureProvider.chain(
-            from: melspectrogramOutput,
-            outputName: "melspectrogram",
-            to: "audio_signal"
-        ) {
-            // Also need to chain the length
-            if let melLength = melspectrogramOutput.featureValue(for: "melspectrogram_length") {
-                let features = [
-                    "audio_signal": provider.featureValue(for: "audio_signal")!,
-                    "length": melLength,
-                ]
-                return ZeroCopyFeatureProvider(features: features)
-            }
-        }
-
-        // Fallback to copying if zero-copy fails
-        let melspectrogram = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectrogram",
-            errorMessage: "Invalid mel-spectrogram output")
-        let melspectrogramLength = try extractFeatureValue(
-            from: melspectrogramOutput, key: "melspectrogram_length",
-            errorMessage: "Invalid mel-spectrogram length output")
-
-        return try createFeatureProvider(features: [
-            ("audio_signal", melspectrogram),
-            ("length", melspectrogramLength),
-        ])
-    }
-
     private func prepareDecoderInput(
         hiddenState: MLMultiArray,
         cellState: MLMultiArray
@@ -181,7 +142,7 @@ public final class AsrManager {
 
         return try createFeatureProvider(features: [
             ("targets", targetArray),
-            ("target_lengths", targetLengthArray),
+            ("target_length", targetLengthArray),
             ("h_in", hiddenState),
             ("c_in", cellState),
         ])
@@ -225,21 +186,18 @@ public final class AsrManager {
     }
 
     private func loadAllModels(
-        melspectrogramPath: URL,
-        encoderPath: URL,
+        melEncoderPath: URL,
         decoderPath: URL,
         jointPath: URL,
         configuration: MLModelConfiguration
-    ) async throws -> (melspectrogram: MLModel, encoder: MLModel, decoder: MLModel, joint: MLModel) {
-        async let melspectrogram = loadModel(
-            path: melspectrogramPath, name: "mel-spectrogram", configuration: configuration)
-        async let encoder = loadModel(
-            path: encoderPath, name: "encoder", configuration: configuration)
+    ) async throws -> (melEncoder: MLModel, decoder: MLModel, joint: MLModel) {
+        async let melEncoder = loadModel(
+            path: melEncoderPath, name: "mel-encoder", configuration: configuration)
         async let decoder = loadModel(
             path: decoderPath, name: "decoder", configuration: configuration)
         async let joint = loadModel(path: jointPath, name: "joint", configuration: configuration)
 
-        return try await (melspectrogram, encoder, decoder, joint)
+        return try await (melEncoder, decoder, joint)
     }
 
     private static func getDefaultModelsDirectory() -> URL {
@@ -255,18 +213,17 @@ public final class AsrManager {
     }
 
     public func resetState() {
-        microphoneDecoderState = TdtDecoderState(fallback: true)
-        systemDecoderState = TdtDecoderState(fallback: true)
+        microphoneDecoderState = TdtDecoderState.make()
+        systemDecoderState = TdtDecoderState.make()
     }
 
     public func cleanup() {
-        melspectrogramModel = nil
-        encoderModel = nil
+        melEncoderModel = nil
         decoderModel = nil
         jointModel = nil
-        // Reset decoder states - use fallback initializer that won't throw
-        microphoneDecoderState = TdtDecoderState(fallback: true)
-        systemDecoderState = TdtDecoderState(fallback: true)
+        // Reset decoder states using fresh allocations for deterministic behavior
+        microphoneDecoderState = TdtDecoderState.make()
+        systemDecoderState = TdtDecoderState.make()
         logger.info("AsrManager resources cleaned up")
     }
 

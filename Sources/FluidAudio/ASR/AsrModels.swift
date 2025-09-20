@@ -8,8 +8,7 @@ public struct AsrModels: Sendable {
     /// Required model names for ASR
     public static let requiredModelNames = ModelNames.ASR.requiredModels
 
-    public let melspectrogram: MLModel
-    public let encoder: MLModel
+    public let melEncoder: MLModel
     public let decoder: MLModel
     public let joint: MLModel
     public let configuration: MLModelConfiguration
@@ -18,15 +17,13 @@ public struct AsrModels: Sendable {
     private static let logger = AppLogger(category: "AsrModels")
 
     public init(
-        melspectrogram: MLModel,
-        encoder: MLModel,
+        melEncoder: MLModel,
         decoder: MLModel,
         joint: MLModel,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String]
     ) {
-        self.melspectrogram = melspectrogram
-        self.encoder = encoder
+        self.melEncoder = melEncoder
         self.decoder = decoder
         self.joint = joint
         self.configuration = configuration
@@ -69,8 +66,7 @@ extension AsrModels {
 
         // Load each model with its optimal compute unit configuration
         let modelConfigs: [(name: String, modelType: ANEOptimizer.ModelType)] = [
-            (Names.melspectrogramFile, .melSpectrogram),
-            (Names.encoderFile, .encoder),
+            (Names.melEncoderFile, .melEncoder),
             (Names.decoderFile, .decoder),
             (Names.jointFile, .joint),
         ]
@@ -93,8 +89,7 @@ extension AsrModels {
             }
         }
 
-        guard let melModel = loadedModels[Names.melspectrogramFile],
-            let encoderModel = loadedModels[Names.encoderFile],
+        guard let melEncoderModel = loadedModels[Names.melEncoderFile],
             let decoderModel = loadedModels[Names.decoderFile],
             let jointModel = loadedModels[Names.jointFile]
         else {
@@ -102,8 +97,7 @@ extension AsrModels {
         }
 
         let asrModels = AsrModels(
-            melspectrogram: melModel,
-            encoder: encoderModel,
+            melEncoder: melEncoderModel,
             decoder: decoderModel,
             joint: jointModel,
             configuration: config,
@@ -212,53 +206,6 @@ extension AsrModels {
 
         return options
     }
-
-    /// Creates a configuration optimized for iOS background execution
-    /// - Returns: Configuration with CPU+ANE compute units to avoid background GPU restrictions
-    public static func iOSBackgroundConfiguration() -> MLModelConfiguration {
-        let config = MLModelConfiguration()
-        config.allowLowPrecisionAccumulationOnGPU = true
-        config.computeUnits = .cpuAndNeuralEngine
-        return config
-    }
-
-    /// Create performance-optimized configuration for specific use cases
-    public enum PerformanceProfile: Sendable {
-        case lowLatency  // Prioritize speed over accuracy
-        case balanced  // Balance between speed and accuracy
-        case highAccuracy  // Prioritize accuracy over speed
-        case streaming  // Optimized for real-time streaming
-
-        public var configuration: MLModelConfiguration {
-            let config = MLModelConfiguration()
-            config.allowLowPrecisionAccumulationOnGPU = true
-
-            switch self {
-            case .lowLatency:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-            case .balanced:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-            case .highAccuracy:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-                config.allowLowPrecisionAccumulationOnGPU = false
-            case .streaming:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-            }
-
-            return config
-        }
-
-        public var predictionOptions: MLPredictionOptions {
-            let options = MLPredictionOptions()
-
-            if #available(macOS 14.0, iOS 17.0, *) {
-                // Enable output buffer reuse for all profiles
-                options.outputBackings = [:]
-            }
-
-            return options
-        }
-    }
 }
 
 @available(macOS 13.0, iOS 16.0, *)
@@ -288,8 +235,7 @@ extension AsrModels {
         // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v3-coreml/
         // by DownloadUtils.loadModels, so we don't need to download separately
         let modelNames = [
-            Names.melspectrogramFile,
-            Names.encoderFile,
+            Names.melEncoderFile,
             Names.decoderFile,
             Names.jointFile,
         ]
@@ -317,8 +263,7 @@ extension AsrModels {
     public static func modelsExist(at directory: URL) -> Bool {
         let fileManager = FileManager.default
         let modelFiles = [
-            Names.melspectrogramFile,
-            Names.encoderFile,
+            Names.melEncoderFile,
             Names.decoderFile,
             Names.jointFile,
         ]
