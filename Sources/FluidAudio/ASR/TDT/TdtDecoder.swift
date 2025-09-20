@@ -150,6 +150,34 @@ internal struct TdtDecoder {
         self.config = config
     }
 
+    /// Reusable input provider that holds references to preallocated
+    /// encoder and decoder step tensors for the joint model.
+    private final class ReusableJointInput: NSObject, MLFeatureProvider {
+        let encoderStep: MLMultiArray
+        let decoderStep: MLMultiArray
+
+        init(encoderStep: MLMultiArray, decoderStep: MLMultiArray) {
+            self.encoderStep = encoderStep
+            self.decoderStep = decoderStep
+            super.init()
+        }
+
+        var featureNames: Set<String> {
+            ["encoder_step", "decoder_step"]
+        }
+
+        func featureValue(for featureName: String) -> MLFeatureValue? {
+            switch featureName {
+            case "encoder_step":
+                return MLFeatureValue(multiArray: encoderStep)
+            case "decoder_step":
+                return MLFeatureValue(multiArray: decoderStep)
+            default:
+                return nil
+            }
+        }
+    }
+
     /// Execute TDT decoding and return tokens with emission timestamps
     ///
     /// This is the main entry point for the decoder. It processes encoder frames sequentially,
@@ -240,6 +268,28 @@ internal struct TdtDecoder {
         let reusableTargetLengthArray = try MLMultiArray(shape: [1] as [NSNumber], dataType: .int32)
         reusableTargetLengthArray[0] = NSNumber(value: 1)
 
+        // Preallocate joint input tensors and a reusable provider to avoid per-step allocations.
+        let encoderHidden = encoderFrames.hiddenSize
+        let decoderHidden = ASRConstants.decoderHiddenSize
+        let reusableEncoderStep = try ANEOptimizer.createANEAlignedArray(
+            shape: [1, NSNumber(value: encoderHidden), 1],
+            dataType: .float32
+        )
+        let reusableDecoderStep = try ANEOptimizer.createANEAlignedArray(
+            shape: [1, NSNumber(value: decoderHidden), 1],
+            dataType: .float32
+        )
+        let jointInput = ReusableJointInput(encoderStep: reusableEncoderStep, decoderStep: reusableDecoderStep)
+        // Cache frequently used stride for copying encoder frames
+        let encDestStride = reusableEncoderStep.strides.map { $0.intValue }[1]
+        let encDestPtr = reusableEncoderStep.dataPointer.bindMemory(to: Float.self, capacity: encoderHidden)
+
+        // Preallocate small output backings for joint outputs (token_id, token_prob, duration)
+        // Joint model scalar outputs are shaped [1 x 1 x 1] in the model description
+        let tokenIdBacking = try MLMultiArray(shape: [1, 1, 1] as [NSNumber], dataType: .int32)
+        let tokenProbBacking = try MLMultiArray(shape: [1, 1, 1] as [NSNumber], dataType: .float32)
+        let durationBacking = try MLMultiArray(shape: [1, 1, 1] as [NSNumber], dataType: .int32)
+
         // Initialize decoder LSTM state for a fresh utterance
         // This ensures clean state when starting transcription
         if decoderState.lastToken == nil && decoderState.predictorOutput == nil {
@@ -302,13 +352,24 @@ internal struct TdtDecoder {
                 )
             }
 
-            // Run joint network: combines audio (encoder) + language (decoder) features
-            // Output: logits for both token prediction and duration prediction
-            let decision = try runJoint(
+            // Prepare decoder projection once and reuse for inner blank loop
+            let decoderProjection = try extractFeatureValue(
+                from: decoderResult.output, key: "decoder", errorMessage: "Invalid decoder output")
+            try populatePreparedDecoderProjection(decoderProjection, into: reusableDecoderStep)
+
+            // Run joint network with preallocated inputs
+            let decision = try runJointPrepared(
                 encoderFrames: encoderFrames,
                 timeIndex: safeTimeIndices,
-                decoderOutput: decoderResult.output,
-                model: jointModel
+                preparedDecoderStep: reusableDecoderStep,
+                model: jointModel,
+                encoderStep: reusableEncoderStep,
+                encoderDestPtr: encDestPtr,
+                encoderDestStride: encDestStride,
+                inputProvider: jointInput,
+                tokenIdBacking: tokenIdBacking,
+                tokenProbBacking: tokenProbBacking,
+                durationBacking: durationBacking
             )
 
             // Predict token (what to emit) and duration (how many frames to skip)
@@ -360,13 +421,19 @@ internal struct TdtDecoder {
             while advanceMask {
                 timeIndicesCurrentLabels = timeIndices
 
-                // INTENTIONAL: Reusing decoderResult.output from outside loop
-                // Blanks don't update language context - only speech tokens do
-                let innerDecision = try runJoint(
+                // INTENTIONAL: Reusing prepared decoder step from outside loop
+                let innerDecision = try runJointPrepared(
                     encoderFrames: encoderFrames,
                     timeIndex: safeTimeIndices,
-                    decoderOutput: decoderResult.output,  // Same decoder output (by design)
-                    model: jointModel
+                    preparedDecoderStep: reusableDecoderStep,
+                    model: jointModel,
+                    encoderStep: reusableEncoderStep,
+                    encoderDestPtr: encDestPtr,
+                    encoderDestStride: encDestStride,
+                    inputProvider: jointInput,
+                    tokenIdBacking: tokenIdBacking,
+                    tokenProbBacking: tokenProbBacking,
+                    durationBacking: durationBacking
                 )
 
                 label = innerDecision.token
@@ -483,11 +550,23 @@ internal struct TdtDecoder {
                     min(max(0, effectiveSequenceLength - 2), encoderFrames.count - 1),
                 ]
                 let frameIndex = frameVariations[additionalSteps % frameVariations.count]
-                let decision = try runJoint(
+                // Prepare decoder projection into reusable buffer (if not already)
+                let finalProjection = try extractFeatureValue(
+                    from: decoderResult.output, key: "decoder", errorMessage: "Invalid decoder output")
+                try populatePreparedDecoderProjection(finalProjection, into: reusableDecoderStep)
+
+                let decision = try runJointPrepared(
                     encoderFrames: encoderFrames,
                     timeIndex: frameIndex,
-                    decoderOutput: decoderResult.output,
-                    model: jointModel
+                    preparedDecoderStep: reusableDecoderStep,
+                    model: jointModel,
+                    encoderStep: reusableEncoderStep,
+                    encoderDestPtr: encDestPtr,
+                    encoderDestStride: encDestStride,
+                    inputProvider: jointInput,
+                    tokenIdBacking: tokenIdBacking,
+                    tokenProbBacking: tokenProbBacking,
+                    durationBacking: durationBacking
                 )
 
                 let token = decision.token
@@ -585,6 +664,13 @@ internal struct TdtDecoder {
             "c_in": MLFeatureValue(multiArray: state.cellState),
         ])
 
+        // Reuse decoder state output buffers to avoid CoreML allocating new ones
+        // Note: outputBackings expects raw backing objects (MLMultiArray / CVPixelBuffer)
+        predictionOptions.outputBackings = [
+            "h_out": state.hiddenState,
+            "c_out": state.cellState,
+        ]
+
         let output = try model.prediction(
             from: input,
             options: predictionOptions
@@ -597,42 +683,40 @@ internal struct TdtDecoder {
     }
 
     /// Joint network execution with zero-copy
-    private func runJoint(
+    /// Joint network execution using preallocated input arrays and a reusable provider.
+    private func runJointPrepared(
         encoderFrames: EncoderFrameView,
         timeIndex: Int,
-        decoderOutput: MLFeatureProvider,
-        model: MLModel
+        preparedDecoderStep: MLMultiArray,
+        model: MLModel,
+        encoderStep: MLMultiArray,
+        encoderDestPtr: UnsafeMutablePointer<Float>,
+        encoderDestStride: Int,
+        inputProvider: MLFeatureProvider,
+        tokenIdBacking: MLMultiArray,
+        tokenProbBacking: MLMultiArray,
+        durationBacking: MLMultiArray
     ) throws -> JointDecision {
 
-        // Create ANE-aligned encoder array for optimal performance
-        let encoderArray = try ANEOptimizer.createANEAlignedArray(
-            shape: [1, NSNumber(value: encoderFrames.hiddenSize), 1],
-            dataType: .float32
-        )
-
-        let destPtr = encoderArray.dataPointer.bindMemory(
-            to: Float.self, capacity: encoderFrames.hiddenSize)
-        let encoderStrides = encoderArray.strides.map { $0.intValue }
-        let destHiddenStride = encoderStrides[1]
-        try encoderFrames.copyFrame(at: timeIndex, into: destPtr, destinationStride: destHiddenStride)
-
-        let decoderProjection = try extractFeatureValue(
-            from: decoderOutput, key: "decoder", errorMessage: "Invalid decoder output")
-        let decoderOutputArray = try prepareDecoderProjection(decoderProjection)
+        // Fill encoder step with the requested frame
+        try encoderFrames.copyFrame(at: timeIndex, into: encoderDestPtr, destinationStride: encoderDestStride)
 
         // Prefetch arrays for ANE if available
         if #available(macOS 14.0, iOS 17.0, *) {
-            ANEOptimizer.prefetchToNeuralEngine(encoderArray)
-            ANEOptimizer.prefetchToNeuralEngine(decoderOutputArray)
+            ANEOptimizer.prefetchToNeuralEngine(encoderStep)
+            ANEOptimizer.prefetchToNeuralEngine(preparedDecoderStep)
         }
 
-        let input = try MLDictionaryFeatureProvider(dictionary: [
-            "encoder_step": MLFeatureValue(multiArray: encoderArray),
-            "decoder_step": MLFeatureValue(multiArray: decoderOutputArray),
-        ])
+        // Reuse tiny output tensors for joint prediction (provide raw MLMultiArray backings)
+        predictionOptions.outputBackings = [
+            "token_id": tokenIdBacking,
+            "token_prob": tokenProbBacking,
+            "duration": durationBacking,
+        ]
 
+        // Execute joint network using the reusable provider
         let output = try model.prediction(
-            from: input,
+            from: inputProvider,
             options: predictionOptions
         )
 
@@ -740,6 +824,86 @@ internal struct TdtDecoder {
         }
 
         return normalized
+    }
+
+    /// Populate a preallocated decoder-step array with the normalized projection data.
+    private func populatePreparedDecoderProjection(
+        _ projection: MLMultiArray,
+        into out: MLMultiArray
+    ) throws {
+        let hiddenSize = ASRConstants.decoderHiddenSize
+        let shape = projection.shape.map { $0.intValue }
+
+        guard shape.count == 3 else {
+            throw ASRError.processingFailed("Invalid decoder projection rank: \(shape)")
+        }
+        guard shape[0] == 1 else {
+            throw ASRError.processingFailed("Unsupported decoder batch dimension: \(shape[0])")
+        }
+        guard projection.dataType == .float32 else {
+            throw ASRError.processingFailed("Unsupported decoder projection type: \(projection.dataType)")
+        }
+
+        // Validate destination shape
+        let outShape = out.shape.map { $0.intValue }
+        guard out.dataType == .float32, outShape.count == 3, outShape[0] == 1, outShape[2] == 1, outShape[1] == hiddenSize
+        else {
+            throw ASRError.processingFailed("Prepared decoder step shape mismatch: \(out.shapeString)")
+        }
+
+        let hiddenAxis: Int
+        if shape[2] == hiddenSize {
+            hiddenAxis = 2
+        } else if shape[1] == hiddenSize {
+            hiddenAxis = 1
+        } else {
+            throw ASRError.processingFailed("Decoder projection hidden size mismatch: \(shape)")
+        }
+
+        let timeAxis = (0...2).first { $0 != hiddenAxis && $0 != 0 } ?? 1
+        guard shape[timeAxis] == 1 else {
+            throw ASRError.processingFailed("Decoder projection time axis must be 1: \(shape)")
+        }
+
+        let destPtr = out.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
+        let destStrides = out.strides.map { $0.intValue }
+        let destHiddenStride = destStrides[1]
+        let destStrideCblas: Int32
+        if destHiddenStride == 1 {
+            destStrideCblas = 1
+        } else if let stride = Int32(exactly: destHiddenStride) {
+            destStrideCblas = stride
+        } else {
+            throw ASRError.processingFailed("Decoder destination stride out of range")
+        }
+
+        let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
+        let strides = projection.strides.map { $0.intValue }
+        let hiddenStride = strides[hiddenAxis]
+        let timeStride = strides[timeAxis]
+        let batchStride = strides[0]
+
+        var baseOffset = 0
+        if batchStride < 0 { baseOffset += (shape[0] - 1) * batchStride }
+        if timeStride < 0 { baseOffset += (shape[timeAxis] - 1) * timeStride }
+
+        let minOffset = hiddenStride < 0 ? hiddenStride * (hiddenSize - 1) : 0
+        let maxOffset = hiddenStride > 0 ? hiddenStride * (hiddenSize - 1) : 0
+        let lowerBound = baseOffset + minOffset
+        let upperBound = baseOffset + maxOffset
+        guard lowerBound >= 0 && upperBound < projection.count else {
+            throw ASRError.processingFailed("Decoder projection stride exceeds buffer bounds")
+        }
+
+        let startPtr = sourcePtr.advanced(by: baseOffset)
+        if hiddenStride == 1 && destHiddenStride == 1 {
+            destPtr.update(from: startPtr, count: hiddenSize)
+        } else {
+            guard let count = Int32(exactly: hiddenSize), let stride = Int32(exactly: hiddenStride) else {
+                throw ASRError.processingFailed("Decoder projection stride out of range")
+            }
+            cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
+        }
     }
 
     /// Update hypothesis with new token
