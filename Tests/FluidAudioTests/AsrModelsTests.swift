@@ -12,7 +12,7 @@ final class AsrModelsTests: XCTestCase {
     func testModelNames() {
         XCTAssertEqual(ModelNames.ASR.melEncoderFile, "MelEncoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "Decoder.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.jointFile, "RNNTJoint.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.jointFile, "JointDecision.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
     }
 
@@ -262,29 +262,6 @@ final class AsrModelsTests: XCTestCase {
         }
     }
 
-    func testPerformanceProfiles() {
-        // Test low latency profile
-        let lowLatencyConfig = AsrModels.PerformanceProfile.lowLatency.configuration
-        XCTAssertEqual(lowLatencyConfig.computeUnits, .cpuAndNeuralEngine)
-        XCTAssertTrue(lowLatencyConfig.allowLowPrecisionAccumulationOnGPU)
-
-        let lowLatencyOptions = AsrModels.PerformanceProfile.lowLatency.predictionOptions
-        XCTAssertNotNil(lowLatencyOptions)
-
-        // Test balanced profile
-        let balancedConfig = AsrModels.PerformanceProfile.balanced.configuration
-        XCTAssertEqual(balancedConfig.computeUnits, .cpuAndNeuralEngine)
-
-        // Test high accuracy profile
-        let accuracyConfig = AsrModels.PerformanceProfile.highAccuracy.configuration
-        XCTAssertEqual(accuracyConfig.computeUnits, .cpuAndNeuralEngine)
-        XCTAssertFalse(accuracyConfig.allowLowPrecisionAccumulationOnGPU)
-
-        // Test streaming profile
-        let streamingConfig = AsrModels.PerformanceProfile.streaming.configuration
-        XCTAssertEqual(streamingConfig.computeUnits, .cpuAndNeuralEngine)
-    }
-
     // Removed testLoadWithANEOptimization - causes crashes when trying to load models
 
     // MARK: - User Configuration Tests
@@ -301,14 +278,6 @@ final class AsrModelsTests: XCTestCase {
 
         // The actual load test would require model files, so we test the configuration logic
         // The fix ensures that when configuration is not nil, it uses the user's compute units
-    }
-
-    func testIOSBackgroundConfiguration() {
-        let config = AsrModels.iOSBackgroundConfiguration()
-
-        // Should always use CPU+ANE for iOS background support
-        XCTAssertEqual(config.computeUnits, .cpuAndNeuralEngine)
-        XCTAssertTrue(config.allowLowPrecisionAccumulationOnGPU)
     }
 
     func testPlatformAwareDefaultConfiguration() {

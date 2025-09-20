@@ -206,53 +206,6 @@ extension AsrModels {
 
         return options
     }
-
-    /// Creates a configuration optimized for iOS background execution
-    /// - Returns: Configuration with CPU+ANE compute units to avoid background GPU restrictions
-    public static func iOSBackgroundConfiguration() -> MLModelConfiguration {
-        let config = MLModelConfiguration()
-        config.allowLowPrecisionAccumulationOnGPU = true
-        config.computeUnits = .cpuAndNeuralEngine
-        return config
-    }
-
-    /// Create performance-optimized configuration for specific use cases
-    public enum PerformanceProfile: Sendable {
-        case lowLatency  // Prioritize speed over accuracy
-        case balanced  // Balance between speed and accuracy
-        case highAccuracy  // Prioritize accuracy over speed
-        case streaming  // Optimized for real-time streaming
-
-        public var configuration: MLModelConfiguration {
-            let config = MLModelConfiguration()
-            config.allowLowPrecisionAccumulationOnGPU = true
-
-            switch self {
-            case .lowLatency:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-            case .balanced:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-            case .highAccuracy:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-                config.allowLowPrecisionAccumulationOnGPU = false
-            case .streaming:
-                config.computeUnits = .cpuAndNeuralEngine  // Optimal for all models
-            }
-
-            return config
-        }
-
-        public var predictionOptions: MLPredictionOptions {
-            let options = MLPredictionOptions()
-
-            if #available(macOS 14.0, iOS 17.0, *) {
-                // Enable output buffer reuse for all profiles
-                options.outputBackings = [:]
-            }
-
-            return options
-        }
-    }
 }
 
 @available(macOS 13.0, iOS 16.0, *)
