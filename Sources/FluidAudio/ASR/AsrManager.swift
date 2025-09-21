@@ -177,7 +177,8 @@ public final class AsrManager {
         configuration: MLModelConfiguration
     ) async throws -> MLModel {
         do {
-            return try MLModel(contentsOf: path, configuration: configuration)
+            let model = try MLModel(contentsOf: path, configuration: configuration)
+            return model
         } catch {
             logger.error("Failed to load \(name) model: \(error)")
 
