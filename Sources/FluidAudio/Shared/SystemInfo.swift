@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -42,7 +43,8 @@ public enum SystemInfo {
         }()
 
         // Chip / CPU brand if available
-        let chip = sysctlString("machdep.cpu.brand_string")
+        let chip =
+            sysctlString("machdep.cpu.brand_string")
             ?? sysctlString("hw.model")
             ?? "UnknownChip"
 
@@ -55,7 +57,8 @@ public enum SystemInfo {
         // Rosetta translation status (best-effort)
         let translated = isRunningTranslated()
 
-        return "\(osName) \(osVersionString), arch=\(arch), chip=\(chip), cores=\(coresActive)/\(coresTotal), mem=\(mem), rosetta=\(translated)"
+        return
+            "\(osName) \(osVersionString), arch=\(arch), chip=\(chip), cores=\(coresActive)/\(coresTotal), mem=\(mem), rosetta=\(translated)"
     }
 
     /// Logs the environment exactly once per process using the provided logger.
