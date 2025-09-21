@@ -153,6 +153,8 @@ public class DownloadUtils {
 
         // Load each model
         var models: [String: MLModel] = [:]
+        // Log host environment once per process (use local logger category)
+        await SystemInfo.logOnce(using: logger)
         for name in modelNames {
             let modelPath = repoPath.appendingPathComponent(name)
             guard FileManager.default.fileExists(atPath: modelPath.path) else {
@@ -192,8 +194,20 @@ public class DownloadUtils {
                         ])
                 }
 
-                models[name] = try MLModel(contentsOf: modelPath, configuration: config)
+                // Measure Core ML model initialization time (aka local compilation/open)
+                let start = Date()
+                let model = try MLModel(contentsOf: modelPath, configuration: config)
+                let elapsed = Date().timeIntervalSince(start)
+
+                models[name] = model
+
+                // Always log model load; additionally report timing for ASR (parakeet) models
                 logger.info("Loaded model: \(name)")
+                if repo == .parakeet {
+                    let ms = elapsed * 1000
+                    let formatted = String(format: "%.2f", ms)
+                    logger.info("Compiled ASR model \(name) in \(formatted) ms")
+                }
             } catch {
                 logger.error("Failed to load model \(name): \(error)")
 

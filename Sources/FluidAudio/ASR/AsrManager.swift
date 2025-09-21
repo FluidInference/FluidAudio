@@ -177,7 +177,15 @@ public final class AsrManager {
         configuration: MLModelConfiguration
     ) async throws -> MLModel {
         do {
-            return try MLModel(contentsOf: path, configuration: configuration)
+            // Log host environment information once per process
+            await SystemInfo.logOnce(using: logger)
+            // Measure Core ML model initialization time for ASR components
+            let start = Date()
+            let model = try MLModel(contentsOf: path, configuration: configuration)
+            let elapsed = Date().timeIntervalSince(start) * 1000
+            let formatted = String(format: "%.2f", elapsed)
+            logger.info("Compiled ASR model \(name) in \(formatted) ms")
+            return model
         } catch {
             logger.error("Failed to load \(name) model: \(error)")
 
