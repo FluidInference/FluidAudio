@@ -57,6 +57,11 @@ guard arguments.count > 1 else {
 // Mirror OSLog messages to console when running CLI
 AppLogger.enableConsoleOutput(true)
 
+// Log system information once at application startup
+Task {
+    await SystemInfo.logOnce(using: cliLogger)
+}
+
 let command = arguments[1]
 let semaphore = DispatchSemaphore(value: 0)
 
