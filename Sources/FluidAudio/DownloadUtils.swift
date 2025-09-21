@@ -153,8 +153,6 @@ public class DownloadUtils {
 
         // Load each model
         var models: [String: MLModel] = [:]
-        // Log host environment once per process (use local logger category)
-        await SystemInfo.logOnce(using: logger)
         for name in modelNames {
             let modelPath = repoPath.appendingPathComponent(name)
             guard FileManager.default.fileExists(atPath: modelPath.path) else {
