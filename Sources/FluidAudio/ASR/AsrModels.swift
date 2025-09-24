@@ -54,7 +54,7 @@ extension AsrModels {
         ]
         #else
         return [
-            ModelSpec(fileName: Names.melEncoderFile, computeUnits: config.computeUnits),
+            ModelSpec(fileName: Names.melEncoderFile, computeUnits: config.computeUnits)
         ]
         #endif
     }
