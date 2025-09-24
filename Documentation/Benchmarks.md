@@ -42,42 +42,19 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 [22:06:25.813] [INFO] [Benchmark]    Overall RTFx: 146.5x (19452.5s / 132.8s)
 ```
 
-### ASR Model Compilation (iPhone 16 Pro Max)
+### ASR Model Compilation
 
-Device: iPhone 16 Pro Max running the parakeet-tdt-0.6b-v3-coreml bundle. Cold-start
-compilation happens the first time each Core ML model is loaded; subsequent loads hit the
-cached binaries and bind to the targeted compute units.
+Core ML first-load compile times captured on iPhone 16 Pro Max and iPhone 13 running the
+parakeet-tdt-0.6b-v3-coreml bundle. Cold-start compilation happens the first time each Core ML model
+is loaded; subsequent loads hit the cached binaries. Warm compile metrics were collected only on
+the iPhone 16 Pro Max run.
 
-| Model         | Cold compile (ms) | Warm compile (ms) | Compute units               |
-| ------------- | ----------------: | ----------------: | --------------------------- |
-| Preprocessor  |              N/A  |             9.15  | MLComputeUnits(rawValue: 2) |
-| Encoder       |          3361.23  |           162.05  | MLComputeUnits(rawValue: 1) |
-| Decoder       |            88.49  |             8.11  | MLComputeUnits(rawValue: 1) |
-| JointDecision |            48.46  |             7.97  | MLComputeUnits(rawValue: 1) |
-
-Raw log excerpt:
-
-```text
-Loaded model: Encoder.mlmodelc
-Compiled ASR model Encoder.mlmodelc in 3361.23 ms
-Loaded model: Decoder.mlmodelc
-Compiled ASR model Decoder.mlmodelc in 88.49 ms
-Loaded model: JointDecision.mlmodelc
-Compiled ASR model JointDecision.mlmodelc in 48.46 ms
-Loaded model: Preprocessor.mlmodelc
-Compiled ASR model Preprocessor.mlmodelc in 9.15 ms
-Loaded Preprocessor.mlmodelc with compute units: MLComputeUnits(rawValue: 2)
-Loaded model: Encoder.mlmodelc
-Compiled ASR model Encoder.mlmodelc in 162.05 ms
-Loaded Encoder.mlmodelc with compute units: MLComputeUnits(rawValue: 1)
-Loaded model: Decoder.mlmodelc
-Compiled ASR model Decoder.mlmodelc in 8.11 ms
-Loaded Decoder.mlmodelc with compute units: MLComputeUnits(rawValue: 1)
-Loaded model: JointDecision.mlmodelc
-Compiled ASR model JointDecision.mlmodelc in 7.97 ms
-Loaded JointDecision.mlmodelc with compute units: MLComputeUnits(rawValue: 1)
-Successfully loaded all ASR models with optimized compute units
-```
+| Model         | iPhone 16 Pro Max cold (ms) | iPhone 16 Pro Max warm (ms) | iPhone 13 cold (ms) | Compute units               |
+| ------------- | --------------------------: | ---------------------------: | ------------------: | --------------------------- |
+| Preprocessor  |                         N/A |                        9.15 |              632.63 | MLComputeUnits(rawValue: 2) |
+| Encoder       |                     3361.23 |                      162.05 |             4396.00 | MLComputeUnits(rawValue: 1) |
+| Decoder       |                       88.49 |                        8.11 |              146.01 | MLComputeUnits(rawValue: 1) |
+| JointDecision |                       48.46 |                        7.97 |               71.85 | MLComputeUnits(rawValue: 1) |
 
 ## Voice Activity Detection
 
