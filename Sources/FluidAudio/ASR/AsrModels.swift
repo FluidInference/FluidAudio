@@ -9,6 +9,7 @@ public struct AsrModels: Sendable {
     public static let requiredModelNames = ModelNames.ASR.requiredModels
 
     public let melEncoder: MLModel
+    public let preprocessor: MLModel?
     public let decoder: MLModel
     public let joint: MLModel
     public let configuration: MLModelConfiguration
@@ -18,16 +19,22 @@ public struct AsrModels: Sendable {
 
     public init(
         melEncoder: MLModel,
+        preprocessor: MLModel? = nil,
         decoder: MLModel,
         joint: MLModel,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String]
     ) {
         self.melEncoder = melEncoder
+        self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
         self.configuration = configuration
         self.vocabulary = vocabulary
+    }
+
+    public var usesSplitFrontend: Bool {
+        preprocessor != nil
     }
 }
 
@@ -64,45 +71,81 @@ extension AsrModels {
 
         let config = configuration ?? defaultConfiguration()
 
-        // Load each model with its optimal compute unit configuration
-        let modelConfigs: [(name: String, modelType: ANEOptimizer.ModelType)] = [
-            (Names.melEncoderFile, .melEncoder),
-            (Names.decoderFile, .decoder),
-            (Names.jointFile, .joint),
-        ]
+        #if os(iOS)
+            if config.computeUnits == .cpuAndNeuralEngine {
+                config.computeUnits = .cpuAndGPU
+            }
+        #endif
+
+        struct ModelSpec {
+            let fileName: String
+            let computeUnits: MLComputeUnits
+        }
+
+        let parentDirectory = directory.deletingLastPathComponent()
+        var specs: [ModelSpec] = []
+
+        #if os(iOS)
+            let preprocessorUnits: MLComputeUnits = .all
+            specs.append(ModelSpec(fileName: Names.preprocessorFile, computeUnits: preprocessorUnits))
+            specs.append(ModelSpec(fileName: Names.encoderFile, computeUnits: config.computeUnits))
+        #else
+            specs.append(ModelSpec(fileName: Names.melEncoderFile, computeUnits: config.computeUnits))
+        #endif
+
+        specs.append(ModelSpec(fileName: Names.decoderFile, computeUnits: config.computeUnits))
+        specs.append(ModelSpec(fileName: Names.jointFile, computeUnits: config.computeUnits))
 
         var loadedModels: [String: MLModel] = [:]
 
-        for (modelName, _) in modelConfigs {
-            // Use DownloadUtils with optimal compute units
+        for spec in specs {
             let models = try await DownloadUtils.loadModels(
                 .parakeet,
-                modelNames: [modelName],
-                directory: directory.deletingLastPathComponent(),
-                computeUnits: config.computeUnits
+                modelNames: [spec.fileName],
+                directory: parentDirectory,
+                computeUnits: spec.computeUnits
             )
 
-            if let model = models[modelName] {
-                loadedModels[modelName] = model
-                let computeUnitsDescription = String(describing: config.computeUnits)
-                logger.info("Loaded \(modelName) with compute units: \(computeUnitsDescription)")
+            if let model = models[spec.fileName] {
+                loadedModels[spec.fileName] = model
+                let computeUnitsDescription = String(describing: spec.computeUnits)
+                logger.info("Loaded \(spec.fileName) with compute units: \(computeUnitsDescription)")
             }
         }
 
-        guard let melEncoderModel = loadedModels[Names.melEncoderFile],
-            let decoderModel = loadedModels[Names.decoderFile],
-            let jointModel = loadedModels[Names.jointFile]
-        else {
-            throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
-        }
+        #if os(iOS)
+            guard let preprocessorModel = loadedModels[Names.preprocessorFile],
+                let encoderModel = loadedModels[Names.encoderFile],
+                let decoderModel = loadedModels[Names.decoderFile],
+                let jointModel = loadedModels[Names.jointFile]
+            else {
+                throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
+            }
 
-        let asrModels = AsrModels(
-            melEncoder: melEncoderModel,
-            decoder: decoderModel,
-            joint: jointModel,
-            configuration: config,
-            vocabulary: try loadVocabulary(from: directory)
-        )
+            let asrModels = AsrModels(
+                melEncoder: encoderModel,
+                preprocessor: preprocessorModel,
+                decoder: decoderModel,
+                joint: jointModel,
+                configuration: config,
+                vocabulary: try loadVocabulary(from: directory)
+            )
+        #else
+            guard let melEncoderModel = loadedModels[Names.melEncoderFile],
+                let decoderModel = loadedModels[Names.decoderFile],
+                let jointModel = loadedModels[Names.jointFile]
+            else {
+                throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
+            }
+
+            let asrModels = AsrModels(
+                melEncoder: melEncoderModel,
+                decoder: decoderModel,
+                joint: jointModel,
+                configuration: config,
+                vocabulary: try loadVocabulary(from: directory)
+            )
+        #endif
 
         logger.info("Successfully loaded all ASR models with optimized compute units")
         return asrModels
@@ -172,8 +215,12 @@ extension AsrModels {
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
-        // Always use CPU+ANE for optimal performance
-        config.computeUnits = .cpuAndNeuralEngine
+        #if os(iOS)
+            config.computeUnits = .cpuAndGPU
+        #else
+            // Always use CPU+ANE for optimal performance on macOS
+            config.computeUnits = .cpuAndNeuralEngine
+        #endif
         return config
     }
 
@@ -232,21 +279,38 @@ extension AsrModels {
             }
         }
 
-        // The models will be downloaded to parentDir/parakeet-tdt-0.6b-v3-coreml/
-        // by DownloadUtils.loadModels, so we don't need to download separately
-        let modelNames = [
-            Names.melEncoderFile,
-            Names.decoderFile,
-            Names.jointFile,
-        ]
+        struct DownloadSpec {
+            let fileName: String
+            let computeUnits: MLComputeUnits
+        }
 
-        // Download models using DownloadUtils (this will download if needed)
-        _ = try await DownloadUtils.loadModels(
-            .parakeet,
-            modelNames: modelNames,
-            directory: parentDir,
-            computeUnits: defaultConfiguration().computeUnits
-        )
+        let defaultUnits = defaultConfiguration().computeUnits
+
+        var specs: [DownloadSpec] = []
+
+        #if os(iOS)
+            specs = [
+                DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .all),
+                DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
+            ]
+        #else
+            specs = [
+                DownloadSpec(fileName: Names.melEncoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
+                DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
+            ]
+        #endif
+
+        for spec in specs {
+            _ = try await DownloadUtils.loadModels(
+                .parakeet,
+                modelNames: [spec.fileName],
+                directory: parentDir,
+                computeUnits: spec.computeUnits
+            )
+        }
 
         logger.info("Successfully downloaded ASR models")
         return targetDir
@@ -262,16 +326,12 @@ extension AsrModels {
 
     public static func modelsExist(at directory: URL) -> Bool {
         let fileManager = FileManager.default
-        let modelFiles = [
-            Names.melEncoderFile,
-            Names.decoderFile,
-            Names.jointFile,
-        ]
+        let requiredFiles = ModelNames.ASR.requiredModels
 
         // Check in the DownloadUtils repo structure
         let repoPath = repoPath(from: directory)
 
-        let modelsPresent = modelFiles.allSatisfy { fileName in
+        let modelsPresent = requiredFiles.allSatisfy { fileName in
             let path = repoPath.appendingPathComponent(fileName)
             return fileManager.fileExists(atPath: path.path)
         }

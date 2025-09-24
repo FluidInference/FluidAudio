@@ -15,6 +15,7 @@ public final class AsrManager {
     internal let config: ASRConfig
     private let audioConverter: AudioConverter = AudioConverter()
 
+    internal var preprocessorModel: MLModel?
     internal var melEncoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
@@ -65,7 +66,17 @@ public final class AsrManager {
     }
 
     public var isAvailable: Bool {
-        return melEncoderModel != nil && decoderModel != nil && jointModel != nil
+        let baseReady = melEncoderModel != nil && decoderModel != nil && jointModel != nil
+
+        if let asrModels, asrModels.usesSplitFrontend {
+            return baseReady && preprocessorModel != nil
+        }
+
+        if preprocessorModel != nil {
+            return baseReady
+        }
+
+        return baseReady
     }
 
     /// Initialize ASR Manager with pre-loaded models
@@ -74,6 +85,7 @@ public final class AsrManager {
         logger.info("Initializing AsrManager with provided models")
 
         self.asrModels = models
+        self.preprocessorModel = models.preprocessor
         self.melEncoderModel = models.melEncoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
@@ -219,6 +231,7 @@ public final class AsrManager {
     }
 
     public func cleanup() {
+        preprocessorModel = nil
         melEncoderModel = nil
         decoderModel = nil
         jointModel = nil

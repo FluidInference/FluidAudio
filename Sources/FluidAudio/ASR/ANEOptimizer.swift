@@ -43,8 +43,12 @@ public enum ANEOptimizer {
 
     /// Configure optimal compute units for each model type
     public static func optimalComputeUnits(for modelType: ModelType) -> MLComputeUnits {
-        // Testing shows CPU+ANE is fastest for all models, including fused mel encoder
-        return .cpuAndNeuralEngine
+        #if os(iOS)
+            return .cpuAndGPU
+        #else
+            // Testing shows CPU+ANE is fastest for all models on macOS, including fused mel encoder
+            return .cpuAndNeuralEngine
+        #endif
     }
 
     /// Create zero-copy memory view between models

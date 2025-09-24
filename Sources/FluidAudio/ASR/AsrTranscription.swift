@@ -57,11 +57,31 @@ extension AsrManager {
             throw ASRError.processingFailed("Mel-encoder model failed")
         }
 
-        // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
-        let melEncoderOutput = try await melEncoderModel.compatPrediction(
-            from: melEncoderInput,
-            options: predictionOptions
-        )
+        let melEncoderOutput: MLFeatureProvider
+
+        if let preprocessorModel = preprocessorModel {
+            let preprocessorOutput = try await preprocessorModel.compatPrediction(
+                from: melEncoderInput,
+                options: predictionOptions
+            )
+
+            let encoderInput = try prepareEncoderInput(
+                encoder: melEncoderModel,
+                preprocessorOutput: preprocessorOutput,
+                originalInput: melEncoderInput
+            )
+
+            melEncoderOutput = try await melEncoderModel.compatPrediction(
+                from: encoderInput,
+                options: predictionOptions
+            )
+        } else {
+            // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
+            melEncoderOutput = try await melEncoderModel.compatPrediction(
+                from: melEncoderInput,
+                options: predictionOptions
+            )
+        }
 
         let rawEncoderOutput = try extractFeatureValue(
             from: melEncoderOutput, key: "encoder", errorMessage: "Invalid encoder output")
@@ -87,6 +107,40 @@ extension AsrManager {
         )
 
         return (hypothesis, encoderSequenceLength)
+    }
+
+    private func prepareEncoderInput(
+        encoder: MLModel,
+        preprocessorOutput: MLFeatureProvider,
+        originalInput: MLFeatureProvider
+    ) throws -> MLFeatureProvider {
+        let inputDescriptions = encoder.modelDescription.inputDescriptionsByName
+
+        let missingNames = inputDescriptions.keys.filter { name in
+            preprocessorOutput.featureValue(for: name) == nil
+        }
+
+        if missingNames.isEmpty {
+            return preprocessorOutput
+        }
+
+        var features: [String: MLFeatureValue] = [:]
+
+        for name in inputDescriptions.keys {
+            if let value = preprocessorOutput.featureValue(for: name) {
+                features[name] = value
+                continue
+            }
+
+            if let fallback = originalInput.featureValue(for: name) {
+                features[name] = fallback
+                continue
+            }
+
+            throw ASRError.processingFailed("Missing required encoder input: \(name)")
+        }
+
+        return try MLDictionaryFeatureProvider(dictionary: features)
     }
 
     /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
