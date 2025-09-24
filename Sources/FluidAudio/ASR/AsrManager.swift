@@ -43,17 +43,6 @@ public final class AsrManager {
         AsrModels.optimizedPredictionOptions()
     }()
 
-    private var hasRequiredModels: Bool {
-        let baseModelsReady = melEncoderModel != nil && decoderModel != nil && jointModel != nil
-        guard baseModelsReady else { return false }
-
-        if asrModels?.usesSplitFrontend == true {
-            return preprocessorModel != nil
-        }
-
-        return true
-    }
-
     public init(config: ASRConfig = .default) {
         self.config = config
 
@@ -76,7 +65,16 @@ public final class AsrManager {
         }
     }
 
-    public var isAvailable: Bool { hasRequiredModels }
+    public var isAvailable: Bool { 
+        let baseModelsReady = melEncoderModel != nil && decoderModel != nil && jointModel != nil
+        guard baseModelsReady else { return false }
+
+        if asrModels?.usesSplitFrontend == true {
+            return preprocessorModel != nil
+        }
+
+        return true
+     }
 
     /// Initialize ASR Manager with pre-loaded models
     /// - Parameter models: Pre-loaded ASR models
