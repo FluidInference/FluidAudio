@@ -37,7 +37,7 @@ buffer.add_audio_batch_(
 ```
 
 4. **State Management Across Chunks**
-
+```python
 if current_batched_hyps is None:
     current_batched_hyps = chunk_batched_hyps
 else:
