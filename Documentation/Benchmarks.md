@@ -42,6 +42,43 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 [22:06:25.813] [INFO] [Benchmark]    Overall RTFx: 146.5x (19452.5s / 132.8s)
 ```
 
+### ASR Model Compilation (iPhone 16 Pro Max)
+
+Device: iPhone 16 Pro Max running the parakeet-tdt-0.6b-v3-coreml bundle. Cold-start
+compilation happens the first time each Core ML model is loaded; subsequent loads hit the
+cached binaries and bind to the targeted compute units.
+
+| Model         | Cold compile (ms) | Warm compile (ms) | Compute units               |
+| ------------- | ----------------: | ----------------: | --------------------------- |
+| Preprocessor  |              N/A  |             9.15  | MLComputeUnits(rawValue: 2) |
+| Encoder       |          3361.23  |           162.05  | MLComputeUnits(rawValue: 1) |
+| Decoder       |            88.49  |             8.11  | MLComputeUnits(rawValue: 1) |
+| JointDecision |            48.46  |             7.97  | MLComputeUnits(rawValue: 1) |
+
+Raw log excerpt:
+
+```text
+Loaded model: Encoder.mlmodelc
+Compiled ASR model Encoder.mlmodelc in 3361.23 ms
+Loaded model: Decoder.mlmodelc
+Compiled ASR model Decoder.mlmodelc in 88.49 ms
+Loaded model: JointDecision.mlmodelc
+Compiled ASR model JointDecision.mlmodelc in 48.46 ms
+Loaded model: Preprocessor.mlmodelc
+Compiled ASR model Preprocessor.mlmodelc in 9.15 ms
+Loaded Preprocessor.mlmodelc with compute units: MLComputeUnits(rawValue: 2)
+Loaded model: Encoder.mlmodelc
+Compiled ASR model Encoder.mlmodelc in 162.05 ms
+Loaded Encoder.mlmodelc with compute units: MLComputeUnits(rawValue: 1)
+Loaded model: Decoder.mlmodelc
+Compiled ASR model Decoder.mlmodelc in 8.11 ms
+Loaded Decoder.mlmodelc with compute units: MLComputeUnits(rawValue: 1)
+Loaded model: JointDecision.mlmodelc
+Compiled ASR model JointDecision.mlmodelc in 7.97 ms
+Loaded JointDecision.mlmodelc with compute units: MLComputeUnits(rawValue: 1)
+Successfully loaded all ASR models with optimized compute units
+```
+
 ## Voice Activity Detection
 
 Model is nearly identical to the base model in terms of quality, perforamnce wise we see an up to ~3.5x improvement compared to the silero Pytorch VAD model with the 256ms batch model (8 chunks of 32ms)

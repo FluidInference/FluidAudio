@@ -137,7 +137,12 @@ extension AsrManager {
                 continue
             }
 
-            throw ASRError.processingFailed("Missing required encoder input: \(name)")
+            let availableInputs = preprocessorOutput.featureNames.sorted().joined(separator: ", ")
+            let fallbackInputs = originalInput.featureNames.sorted().joined(separator: ", ")
+            throw ASRError.processingFailed(
+                "Missing required encoder input: \(name). Available inputs: \(availableInputs), "
+                    + "fallback inputs: \(fallbackInputs)"
+            )
         }
 
         return try MLDictionaryFeatureProvider(dictionary: features)
