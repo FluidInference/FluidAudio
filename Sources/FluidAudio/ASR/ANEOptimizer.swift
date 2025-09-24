@@ -43,16 +43,7 @@ public enum ANEOptimizer {
 
     /// Configure optimal compute units for each model type
     public static func optimalComputeUnits(for modelType: ModelType) -> MLComputeUnits {
-        #if os(iOS)
-        // The ANE path rejects larger preprocessor tensors on iPhone 15/16 Pro Max,
-        // so default to `.cpuAndGPU` unless callers explicitly opt into ANE.
-        return .cpuAndGPU
-        #else
-        // On M3/M4 Pro macOS machines the ANE consistently completed the fleurs
-        // and LibriSpeech benchmark runs ~20% faster than GPU, so we favour
-        // `.cpuAndNeuralEngine` here.
         return .cpuAndNeuralEngine
-        #endif
     }
 
     /// Create zero-copy memory view between models
