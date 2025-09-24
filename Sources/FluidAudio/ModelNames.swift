@@ -45,18 +45,18 @@ public enum ModelNames {
         public static let jointFile = joint + ".mlmodelc"
 
         #if os(iOS)
-            public static let requiredModels: Set<String> = [
-                preprocessorFile,
-                encoderFile,
-                decoderFile,
-                jointFile,
-            ]
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile,
+            jointFile,
+        ]
         #else
-            public static let requiredModels: Set<String> = [
-                melEncoderFile,
-                decoderFile,
-                jointFile,
-            ]
+        public static let requiredModels: Set<String> = [
+            melEncoderFile,
+            decoderFile,
+            jointFile,
+        ]
         #endif
     }
 

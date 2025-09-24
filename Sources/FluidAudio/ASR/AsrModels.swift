@@ -72,9 +72,9 @@ extension AsrModels {
         let config = configuration ?? defaultConfiguration()
 
         #if os(iOS)
-            if config.computeUnits == .cpuAndNeuralEngine {
-                config.computeUnits = .cpuAndGPU
-            }
+        if config.computeUnits == .cpuAndNeuralEngine {
+            config.computeUnits = .cpuAndGPU
+        }
         #endif
 
         struct ModelSpec {
@@ -86,11 +86,11 @@ extension AsrModels {
         var specs: [ModelSpec] = []
 
         #if os(iOS)
-            let preprocessorUnits: MLComputeUnits = .all
-            specs.append(ModelSpec(fileName: Names.preprocessorFile, computeUnits: preprocessorUnits))
-            specs.append(ModelSpec(fileName: Names.encoderFile, computeUnits: config.computeUnits))
+        let preprocessorUnits: MLComputeUnits = .all
+        specs.append(ModelSpec(fileName: Names.preprocessorFile, computeUnits: preprocessorUnits))
+        specs.append(ModelSpec(fileName: Names.encoderFile, computeUnits: config.computeUnits))
         #else
-            specs.append(ModelSpec(fileName: Names.melEncoderFile, computeUnits: config.computeUnits))
+        specs.append(ModelSpec(fileName: Names.melEncoderFile, computeUnits: config.computeUnits))
         #endif
 
         specs.append(ModelSpec(fileName: Names.decoderFile, computeUnits: config.computeUnits))
@@ -114,37 +114,37 @@ extension AsrModels {
         }
 
         #if os(iOS)
-            guard let preprocessorModel = loadedModels[Names.preprocessorFile],
-                let encoderModel = loadedModels[Names.encoderFile],
-                let decoderModel = loadedModels[Names.decoderFile],
-                let jointModel = loadedModels[Names.jointFile]
-            else {
-                throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
-            }
+        guard let preprocessorModel = loadedModels[Names.preprocessorFile],
+            let encoderModel = loadedModels[Names.encoderFile],
+            let decoderModel = loadedModels[Names.decoderFile],
+            let jointModel = loadedModels[Names.jointFile]
+        else {
+            throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
+        }
 
-            let asrModels = AsrModels(
-                melEncoder: encoderModel,
-                preprocessor: preprocessorModel,
-                decoder: decoderModel,
-                joint: jointModel,
-                configuration: config,
-                vocabulary: try loadVocabulary(from: directory)
-            )
+        let asrModels = AsrModels(
+            melEncoder: encoderModel,
+            preprocessor: preprocessorModel,
+            decoder: decoderModel,
+            joint: jointModel,
+            configuration: config,
+            vocabulary: try loadVocabulary(from: directory)
+        )
         #else
-            guard let melEncoderModel = loadedModels[Names.melEncoderFile],
-                let decoderModel = loadedModels[Names.decoderFile],
-                let jointModel = loadedModels[Names.jointFile]
-            else {
-                throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
-            }
+        guard let melEncoderModel = loadedModels[Names.melEncoderFile],
+            let decoderModel = loadedModels[Names.decoderFile],
+            let jointModel = loadedModels[Names.jointFile]
+        else {
+            throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
+        }
 
-            let asrModels = AsrModels(
-                melEncoder: melEncoderModel,
-                decoder: decoderModel,
-                joint: jointModel,
-                configuration: config,
-                vocabulary: try loadVocabulary(from: directory)
-            )
+        let asrModels = AsrModels(
+            melEncoder: melEncoderModel,
+            decoder: decoderModel,
+            joint: jointModel,
+            configuration: config,
+            vocabulary: try loadVocabulary(from: directory)
+        )
         #endif
 
         logger.info("Successfully loaded all ASR models with optimized compute units")
@@ -216,10 +216,10 @@ extension AsrModels {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
         #if os(iOS)
-            config.computeUnits = .cpuAndGPU
+        config.computeUnits = .cpuAndGPU
         #else
-            // Always use CPU+ANE for optimal performance on macOS
-            config.computeUnits = .cpuAndNeuralEngine
+        // Always use CPU+ANE for optimal performance on macOS
+        config.computeUnits = .cpuAndNeuralEngine
         #endif
         return config
     }
@@ -289,18 +289,18 @@ extension AsrModels {
         var specs: [DownloadSpec] = []
 
         #if os(iOS)
-            specs = [
-                DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .all),
-                DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
-                DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
-                DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
-            ]
+        specs = [
+            DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .all),
+            DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
+            DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
+            DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
+        ]
         #else
-            specs = [
-                DownloadSpec(fileName: Names.melEncoderFile, computeUnits: defaultUnits),
-                DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
-                DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
-            ]
+        specs = [
+            DownloadSpec(fileName: Names.melEncoderFile, computeUnits: defaultUnits),
+            DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
+            DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
+        ]
         #endif
 
         for spec in specs {
