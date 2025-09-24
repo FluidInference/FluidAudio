@@ -46,12 +46,12 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 
 Core ML first-load compile times captured on iPhone 16 Pro Max and iPhone 13 running the
 parakeet-tdt-0.6b-v3-coreml bundle. Cold-start compilation happens the first time each Core ML model
-is loaded; subsequent loads hit the cached binaries. Warm compile metrics were collected only on
-the iPhone 16 Pro Max run.
+is loaded; subsequent loads hit the cached binaries. Warm compile metrics were collected only on the
+iPhone 16 Pro Max run, and only for models that were reloaded during the session.
 
 | Model         | iPhone 16 Pro Max cold (ms) | iPhone 16 Pro Max warm (ms) | iPhone 13 cold (ms) | Compute units               |
 | ------------- | --------------------------: | ---------------------------: | ------------------: | --------------------------- |
-| Preprocessor  |                         N/A |                        9.15 |              632.63 | MLComputeUnits(rawValue: 2) |
+| Preprocessor  |                        9.15 |                           - |              632.63 | MLComputeUnits(rawValue: 2) |
 | Encoder       |                     3361.23 |                      162.05 |             4396.00 | MLComputeUnits(rawValue: 1) |
 | Decoder       |                       88.49 |                        8.11 |              146.01 | MLComputeUnits(rawValue: 1) |
 | JointDecision |                       48.46 |                        7.97 |               71.85 | MLComputeUnits(rawValue: 1) |
