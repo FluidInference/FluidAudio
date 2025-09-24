@@ -139,12 +139,12 @@ final class AsrModelsTests: XCTestCase {
         // Test that custom configuration would be used correctly
         let customConfig = MLModelConfiguration()
         customConfig.modelDisplayName = "Test ASR Model"
-        customConfig.computeUnits = .cpuAndGPU
+        customConfig.computeUnits = .cpuAndNeuralEngine
         customConfig.allowLowPrecisionAccumulationOnGPU = false
 
         // Verify configuration properties
         XCTAssertEqual(customConfig.modelDisplayName, "Test ASR Model")
-        XCTAssertEqual(customConfig.computeUnits, .cpuAndGPU)
+        XCTAssertEqual(customConfig.computeUnits, .cpuAndNeuralEngine)
         XCTAssertFalse(customConfig.allowLowPrecisionAccumulationOnGPU)
     }
 

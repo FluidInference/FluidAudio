@@ -79,9 +79,9 @@ extension AsrModels {
     ///
     /// - Returns: Loaded ASR models
     ///
-    /// - Note: For iOS apps that need background audio processing, consider using
-    ///         `iOSBackgroundConfiguration()` or a custom configuration with
-    ///         `.cpuAndNeuralEngine` to avoid GPU-related background execution errors.
+    /// - Note: The default configuration pins the iOS preprocessor to CPU and every other
+    ///         Parakeet component to `.cpuAndNeuralEngine` to avoid GPU dispatch, which keeps
+    ///         background execution permitted on iOS.
     public static func load(
         from directory: URL,
         configuration: MLModelConfiguration? = nil
@@ -89,14 +89,6 @@ extension AsrModels {
         logger.info("Loading ASR models from: \(directory.path)")
 
         let config = configuration ?? defaultConfiguration()
-
-        #if os(iOS)
-        // ANE input tensors max out for 15s windows, so enforce `.cpuAndGPU` whenever callers
-        // request `.cpuAndNeuralEngine` to avoid runtime shape errors during first load.
-        if config.computeUnits == .cpuAndNeuralEngine {
-            config.computeUnits = .cpuAndGPU
-        }
-        #endif
 
         let parentDirectory = directory.deletingLastPathComponent()
         var specs = createModelSpecs(using: config)
@@ -224,15 +216,8 @@ extension AsrModels {
     public static func defaultConfiguration() -> MLModelConfiguration {
         let config = MLModelConfiguration()
         config.allowLowPrecisionAccumulationOnGPU = true
-        #if os(iOS)
-        // ANE input-size limits reject 15s preprocessor tensors, so `.cpuAndGPU` prevents
-        // shape faults while keeping latency within fleurs + LibriSpeech targets.
-        config.computeUnits = .cpuAndGPU
-        #else
-        // macOS benchmarks on M3/M4 Pro showed CPU+ANE reduces wall time by ~22%
-        // compared to CPU+GPU for the parakeet 0.6B stack.
+        // Prefer Neural Engine across platforms for ASR inference to avoid GPU dispatch.
         config.computeUnits = .cpuAndNeuralEngine
-        #endif
         return config
     }
 
