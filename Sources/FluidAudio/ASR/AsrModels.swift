@@ -49,7 +49,8 @@ extension AsrModels {
     private static func createModelSpecs(using config: MLModelConfiguration) -> [ModelSpec] {
         #if os(iOS)
         return [
-            ModelSpec(fileName: Names.preprocessorFile, computeUnits: .all),
+            // Preprocessor ops map to CPU-only; don't request ANE/GPU.
+            ModelSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
             ModelSpec(fileName: Names.encoderFile, computeUnits: config.computeUnits),
         ]
         #else
@@ -301,7 +302,8 @@ extension AsrModels {
 
         #if os(iOS)
         specs = [
-            DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .all),
+            // Preprocessor ops map to CPU-only; don't request ANE/GPU.
+            DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
             DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
             DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
             DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
