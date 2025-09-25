@@ -73,9 +73,6 @@ extension AsrManager {
             options: predictionOptions
         )
 
-            
-
-
         let rawEncoderOutput = try extractFeatureValue(
             from: melEncoderOutput, key: "encoder", errorMessage: "Invalid encoder output")
         let encoderLength = try extractFeatureValue(
@@ -167,7 +164,6 @@ extension AsrManager {
         } else {
             systemDecoderState = state
         }
-
 
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {

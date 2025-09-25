@@ -48,7 +48,7 @@ extension AsrModels {
 
     private static func createModelSpecs(using config: MLModelConfiguration) -> [ModelSpec] {
         return [
-            // Preprocessor ops map to CPU-only across all platforms. XCode profiling shows 
+            // Preprocessor ops map to CPU-only across all platforms. XCode profiling shows
             // that 100% of the the operations map to the CPU anyways.
             ModelSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
 
@@ -135,7 +135,7 @@ extension AsrModels {
             configuration: config,
             vocabulary: try loadVocabulary(from: directory)
         )
-logger.info("Successfully loaded all ASR models with optimized compute units")
+        logger.info("Successfully loaded all ASR models with optimized compute units")
         return asrModels
     }
 
