@@ -11,36 +11,50 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 ```
 
 ```text
-[22:00:56.652] [INFO] [FLEURSBenchmark] ================================================================================
-[22:00:56.652] [INFO] [FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
-[22:00:56.652] [INFO] [FLEURSBenchmark] ================================================================================
-[22:00:56.652] [INFO] [FLEURSBenchmark]
-[22:00:56.652] [INFO] [FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
-[22:00:56.652] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[22:00:56.652] [INFO] [FLEURSBenchmark] English (US)              | 5.8    | 2.9    | 189.4   | 3442.9s  | 350       | -
-[22:00:56.652] [INFO] [FLEURSBenchmark] French (France)           | 8.8    | 3.8    | 181.3   | 560.8s   | 52        | 298
-[22:00:56.652] [INFO] [FLEURSBenchmark] German (Germany)          | 4.2    | 1.2    | 211.2   | 62.1s    | 5         | -
-[22:00:56.652] [INFO] [FLEURSBenchmark] Italian (Italy)           | 2.8    | 1.0    | 206.6   | 743.3s   | 50        | -
-[22:00:56.652] [INFO] [FLEURSBenchmark] Russian (Russia)          | 7.0    | 2.3    | 185.3   | 621.2s   | 50        | -
-[22:00:56.652] [INFO] [FLEURSBenchmark] Spanish (Spain)           | 4.0    | 1.8    | 207.9   | 586.9s   | 50        | -
-[22:00:56.652] [INFO] [FLEURSBenchmark] Ukrainian (Ukraine)       | 7.2    | 2.1    | 182.8   | 528.2s   | 50        | -
-[22:00:56.652] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[22:00:56.652] [INFO] [FLEURSBenchmark] AVERAGE                   | 5.7    | 2.2    | 194.9   | 6545.5s  | 607       | 298
+[01:58:26.666] [INFO] [FLEURSBenchmark] ================================================================================
+[01:58:26.666] [INFO] [FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
+[01:58:26.666] [INFO] [FLEURSBenchmark] ================================================================================
+[01:58:26.666] [INFO] [FLEURSBenchmark]
+[01:58:26.666] [INFO] [FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
+[01:58:26.666] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[01:58:26.666] [INFO] [FLEURSBenchmark] English (US)              | 5.7    | 2.8    | 197.8   | 3442.9s  | 350       | -
+[01:58:26.666] [INFO] [FLEURSBenchmark] French (France)           | 6.3    | 3.0    | 191.3   | 560.8s   | 52        | 298
+[01:58:26.667] [INFO] [FLEURSBenchmark] German (Germany)          | 3.1    | 1.2    | 216.7   | 62.1s    | 5         | -
+[01:58:26.667] [INFO] [FLEURSBenchmark] Italian (Italy)           | 4.3    | 2.0    | 213.5   | 743.3s   | 50        | -
+[01:58:26.667] [INFO] [FLEURSBenchmark] Russian (Russia)          | 7.8    | 2.8    | 186.3   | 621.2s   | 50        | -
+[01:58:26.667] [INFO] [FLEURSBenchmark] Spanish (Spain)           | 5.6    | 2.7    | 214.6   | 586.9s   | 50        | -
+[01:58:26.667] [INFO] [FLEURSBenchmark] Ukrainian (Ukraine)       | 7.2    | 2.1    | 192.8   | 528.2s   | 50        | -
+[01:58:26.667] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[01:58:26.667] [INFO] [FLEURSBenchmark] AVERAGE                   | 5.7    | 2.4    | 201.9   | 6545.5s  | 607       | 298
 ```
 
 ```text
-[22:06:25.813] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 12s • 09/19/2025, 10:06 PM EDT
-[22:06:25.813] [INFO] [Benchmark] --- Benchmark Results ---
-[22:06:25.813] [INFO] [Benchmark]    Dataset: librispeech test-clean
-[22:06:25.813] [INFO] [Benchmark]    Files processed: 2620
-[22:06:25.813] [INFO] [Benchmark]    Average WER: 2.7%
-[22:06:25.813] [INFO] [Benchmark]    Median WER: 0.0%
-[22:06:25.813] [INFO] [Benchmark]    Average CER: 1.1%
-[22:06:25.813] [INFO] [Benchmark]    Median RTFx: 132.0x
-[22:06:25.813] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
-[22:06:25.813] [INFO] [Benchmark] ASR benchmark completed successfully
-[22:06:25.813] [INFO] [Benchmark]    Overall RTFx: 146.5x (19452.5s / 132.8s)
+[02:01:49.655] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 2s • 09/25/2025, 2:01 AM EDT
+[02:01:49.655] [INFO] [Benchmark] --- Benchmark Results ---
+[02:01:49.655] [INFO] [Benchmark]    Dataset: librispeech test-clean
+[02:01:49.655] [INFO] [Benchmark]    Files processed: 2620
+[02:01:49.655] [INFO] [Benchmark]    Average WER: 2.6%
+[02:01:49.655] [INFO] [Benchmark]    Median WER: 0.0%
+[02:01:49.655] [INFO] [Benchmark]    Average CER: 1.1%
+[02:01:49.655] [INFO] [Benchmark]    Median RTFx: 137.8x
+[02:01:49.655] [INFO] [Benchmark]    Overall RTFx: 153.4x (19452.5s / 126.8s)
+[02:01:49.655] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
+[02:01:49.655] [INFO] [Benchmark] ASR benchmark completed successfully
 ```
+
+### ASR Model Compilation
+
+Core ML first-load compile times captured on iPhone 16 Pro Max and iPhone 13 running the
+parakeet-tdt-0.6b-v3-coreml bundle. Cold-start compilation happens the first time each Core ML model
+is loaded; subsequent loads hit the cached binaries. Warm compile metrics were collected only on the
+iPhone 16 Pro Max run, and only for models that were reloaded during the session.
+
+| Model         | iPhone 16 Pro Max cold (ms) | iPhone 16 Pro Max warm (ms) | iPhone 13 cold (ms) | Compute units               |
+| ------------- | --------------------------: | ---------------------------: | ------------------: | --------------------------- |
+| Preprocessor  |                        9.15 |                           - |              632.63 | MLComputeUnits(rawValue: 2) |
+| Encoder       |                     3361.23 |                      162.05 |             4396.00 | MLComputeUnits(rawValue: 1) |
+| Decoder       |                       88.49 |                        8.11 |              146.01 | MLComputeUnits(rawValue: 1) |
+| JointDecision |                       48.46 |                        7.97 |               71.85 | MLComputeUnits(rawValue: 1) |
 
 ## Voice Activity Detection
 
