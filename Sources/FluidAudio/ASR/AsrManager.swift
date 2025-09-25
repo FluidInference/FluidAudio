@@ -65,7 +65,7 @@ public final class AsrManager {
         }
     }
 
-    public var isAvailable: Bool { 
+    public var isAvailable: Bool {
         let baseModelsReady = melEncoderModel != nil && decoderModel != nil && jointModel != nil
         guard baseModelsReady else { return false }
 
@@ -74,7 +74,7 @@ public final class AsrManager {
         }
 
         return true
-     }
+    }
 
     /// Initialize ASR Manager with pre-loaded models
     /// - Parameter models: Pre-loaded ASR models
