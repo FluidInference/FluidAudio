@@ -209,7 +209,7 @@ final class AsrModelsTests: XCTestCase {
         // In CI environment, all compute units are overridden to .cpuOnly
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
 
-        // Test fused mel encoder configuration
+        // Test encoder configuration
         let melConfig = AsrModels.optimizedConfiguration(for: .encoder)
         if isCI {
             XCTAssertEqual(melConfig.computeUnits, .cpuOnly)

@@ -202,12 +202,6 @@ extension AsrManager {
         // Use existing timings if provided, otherwise use timings from timestamps
         let resultTimings = tokenTimings.isEmpty ? timingsFromTimestamps : finalTimings
 
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && duration > 1.0 {
-            logger.warning(
-                "⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))"
-            )
-        }
-
         // Calculate confidence based on actual model confidence scores from TDT decoder
         let confidence = calculateConfidence(
             duration: duration,
