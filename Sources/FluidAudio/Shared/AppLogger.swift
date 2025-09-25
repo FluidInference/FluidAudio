@@ -35,10 +35,6 @@ public struct AppLogger {
 
     // MARK: - Public API
 
-    public static func enableConsoleOutput(_ enabled: Bool = true, minimumLevel: Level = .debug) {
-        Task { await LogConsole.shared.update(enabled: enabled, minimumLevel: minimumLevel) }
-    }
-
     public func debug(_ message: String) {
         log(.debug, message)
     }
@@ -97,37 +93,15 @@ public struct AppLogger {
 actor LogConsole {
     static let shared = LogConsole()
 
-    private var enabled: Bool = {
-        #if DEBUG
-        // Enable console output for debug builds by default
-        return true
-        #else
-        // Allow environment variable to toggle without code changes for non-debug builds
-        if let env = ProcessInfo.processInfo.environment["FLUIDAUDIO_LOG_TO_CONSOLE"],
-            env == "1" || env.lowercased() == "true"
-        {
-            return true
-        }
-        return false
-        #endif
-    }()
-
-    private var minimumLevel: AppLogger.Level = .info
     private let dateFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "HH:mm:ss.SSS"
         return df
     }()
 
-    func update(enabled: Bool, minimumLevel: AppLogger.Level) {
-        self.enabled = enabled
-        self.minimumLevel = minimumLevel
-    }
-
     func write(level: AppLogger.Level, category: String, message: String) {
-        guard enabled, level.rawValue >= minimumLevel.rawValue else { return }
         let timestamp = dateFormatter.string(from: Date())
-        let line = "[\(timestamp)] [\(label(for: level))] [\(category)] \(message)\n"
+        let line = "[\(timestamp)] [\(label(for: level))] [FluidAudio.\(category)] \(message)\n"
         if let data = line.data(using: .utf8) {
             FileHandle.standardError.write(data)
         }
