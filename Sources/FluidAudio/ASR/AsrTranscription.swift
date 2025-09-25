@@ -68,15 +68,15 @@ extension AsrManager {
             originalInput: preprocessorInput
         )
 
-        let melEncoderOutput = try await encoderModel.compatPrediction(
+        let encoderOutputProvider = try await encoderModel.compatPrediction(
             from: encoderInput,
             options: predictionOptions
         )
 
         let rawEncoderOutput = try extractFeatureValue(
-            from: melEncoderOutput, key: "encoder", errorMessage: "Invalid encoder output")
+            from: encoderOutputProvider, key: "encoder", errorMessage: "Invalid encoder output")
         let encoderLength = try extractFeatureValue(
-            from: melEncoderOutput, key: "encoder_length",
+            from: encoderOutputProvider, key: "encoder_length",
             errorMessage: "Invalid encoder output length")
 
         let encoderSequenceLength = encoderLength[0].intValue
