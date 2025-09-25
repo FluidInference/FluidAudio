@@ -92,7 +92,7 @@ actor LogConsole {
         return false
     }()
 
-    private var minimumLevel: AppLogger.Level = .debug
+    private var minimumLevel: AppLogger.Level = .info
     private let dateFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "HH:mm:ss.SSS"

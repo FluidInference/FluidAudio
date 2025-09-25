@@ -203,13 +203,9 @@ public class DownloadUtils {
 
                 models[name] = model
 
-                // Always log model load; additionally report timing for ASR (parakeet) models
-                logger.info("Loaded model: \(name)")
-                if repo == .parakeet {
-                    let ms = elapsed * 1000
-                    let formatted = String(format: "%.2f", ms)
-                    logger.info("Compiled ASR model \(name) in \(formatted) ms")
-                }
+                let ms = elapsed * 1000
+                let formatted = String(format: "%.2f", ms)
+                logger.info("Compiled model \(name) in \(formatted) ms :: \(SystemInfo.summary())")
             } catch {
                 logger.error("Failed to load model \(name): \(error)")
 
@@ -217,8 +213,7 @@ public class DownloadUtils {
                 if let contents = try? FileManager.default.contentsOfDirectory(
                     at: modelPath, includingPropertiesForKeys: nil)
                 {
-                    logger.error(
-                        "   Model directory contents: \(contents.map { $0.lastPathComponent })")
+                    logger.error("Model directory contents: \(contents.map { $0.lastPathComponent })")
                 }
 
                 throw error
