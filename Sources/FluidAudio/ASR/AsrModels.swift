@@ -109,7 +109,7 @@ extension AsrModels {
 
             if let model = models[spec.fileName] {
                 loadedModels[spec.fileName] = model
-                let computeUnitsDescription = String(describing: spec.computeUnits)
+                let computeUnitsDescription = String(describing: spec.computeUnits.rawValue)
                 logger.info("Loaded \(spec.fileName) with compute units: \(computeUnitsDescription)")
             }
         }
