@@ -31,33 +31,23 @@ public enum ModelNames {
 
     /// ASR model names
     public enum ASR {
-        public static let melEncoder = "MelEncoder"
         public static let preprocessor = "Preprocessor"
         public static let encoder = "Encoder"
         public static let decoder = "Decoder"
         public static let joint = "JointDecision"
         public static let vocabulary = "parakeet_v3_vocab.json"
 
-        public static let melEncoderFile = melEncoder + ".mlmodelc"
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
 
-        #if os(iOS)
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             encoderFile,
             decoderFile,
             jointFile,
         ]
-        #else
-        public static let requiredModels: Set<String> = [
-            melEncoderFile,
-            decoderFile,
-            jointFile,
-        ]
-        #endif
     }
 
     /// VAD model names

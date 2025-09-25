@@ -50,38 +50,31 @@ extension AsrManager {
         globalFrameOffset: Int = 0
     ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
 
-        let melEncoderInput = try await prepareMelEncoderInput(
+        let preprocessorInput = try await preparePreprocessorInput(
             paddedAudio, actualLength: originalLength)
 
-        guard let melEncoderModel = melEncoderModel else {
-            throw ASRError.processingFailed("Mel-encoder model failed")
+        guard let preprocessorModel = preprocessorModel, let encoderModel = encoderModel else {
+            throw ASRError.notInitialized
         }
 
-        let melEncoderOutput: MLFeatureProvider
+        let preprocessorOutput = try await preprocessorModel.compatPrediction(
+            from: preprocessorInput,
+            options: predictionOptions
+        )
 
-        if let preprocessorModel = preprocessorModel {
-            let preprocessorOutput = try await preprocessorModel.compatPrediction(
-                from: melEncoderInput,
-                options: predictionOptions
-            )
+        let encoderInput = try prepareEncoderInput(
+            encoder: encoderModel,
+            preprocessorOutput: preprocessorOutput,
+            originalInput: preprocessorInput
+        )
 
-            let encoderInput = try prepareEncoderInput(
-                encoder: melEncoderModel,
-                preprocessorOutput: preprocessorOutput,
-                originalInput: melEncoderInput
-            )
+        let melEncoderOutput = try await encoderModel.compatPrediction(
+            from: encoderInput,
+            options: predictionOptions
+        )
 
-            melEncoderOutput = try await melEncoderModel.compatPrediction(
-                from: encoderInput,
-                options: predictionOptions
-            )
-        } else {
-            // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
-            melEncoderOutput = try await melEncoderModel.compatPrediction(
-                from: melEncoderInput,
-                options: predictionOptions
-            )
-        }
+            
+
 
         let rawEncoderOutput = try extractFeatureValue(
             from: melEncoderOutput, key: "encoder", errorMessage: "Invalid encoder output")
@@ -174,6 +167,7 @@ extension AsrManager {
         } else {
             systemDecoderState = state
         }
+
 
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {
@@ -307,7 +301,7 @@ extension AsrManager {
                 let nextStartTime = TimeInterval(sortedData[i + 1].timestamp) * 0.08
                 endTime = max(nextStartTime, startTime + 0.08)  // Ensure end > start
             } else {
-                // For the last token, use a default duration
+                // Last token: assume minimum duration
                 endTime = startTime + 0.08
             }
 

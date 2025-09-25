@@ -8,8 +8,8 @@ public struct AsrModels: Sendable {
     /// Required model names for ASR
     public static let requiredModelNames = ModelNames.ASR.requiredModels
 
-    public let melEncoder: MLModel
-    public let preprocessor: MLModel?
+    public let encoder: MLModel
+    public let preprocessor: MLModel
     public let decoder: MLModel
     public let joint: MLModel
     public let configuration: MLModelConfiguration
@@ -18,14 +18,14 @@ public struct AsrModels: Sendable {
     private static let logger = AppLogger(category: "AsrModels")
 
     public init(
-        melEncoder: MLModel,
-        preprocessor: MLModel? = nil,
+        encoder: MLModel,
+        preprocessor: MLModel,
         decoder: MLModel,
         joint: MLModel,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String]
     ) {
-        self.melEncoder = melEncoder
+        self.encoder = encoder
         self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
@@ -34,7 +34,7 @@ public struct AsrModels: Sendable {
     }
 
     public var usesSplitFrontend: Bool {
-        preprocessor != nil
+        true
     }
 }
 
@@ -47,17 +47,13 @@ extension AsrModels {
     }
 
     private static func createModelSpecs(using config: MLModelConfiguration) -> [ModelSpec] {
-        #if os(iOS)
         return [
-            // Preprocessor ops map to CPU-only; don't request ANE/GPU.
+            // Preprocessor ops map to CPU-only across all platforms. XCode profiling shows 
+            // that 100% of the the operations map to the CPU anyways.
             ModelSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
+
             ModelSpec(fileName: Names.encoderFile, computeUnits: config.computeUnits),
         ]
-        #else
-        return [
-            ModelSpec(fileName: Names.melEncoderFile, computeUnits: config.computeUnits)
-        ]
-        #endif
     }
 
     /// Helper to get the repo path from a models directory
@@ -79,7 +75,7 @@ extension AsrModels {
     ///
     /// - Returns: Loaded ASR models
     ///
-    /// - Note: The default configuration pins the iOS preprocessor to CPU and every other
+    /// - Note: The default configuration pins the preprocessor to CPU and every other
     ///         Parakeet component to `.cpuAndNeuralEngine` to avoid GPU dispatch, which keeps
     ///         background execution permitted on iOS.
     public static func load(
@@ -91,11 +87,8 @@ extension AsrModels {
         let config = configuration ?? defaultConfiguration()
 
         let parentDirectory = directory.deletingLastPathComponent()
-        var specs = createModelSpecs(using: config)
-        specs.append(contentsOf: [
-            ModelSpec(fileName: Names.decoderFile, computeUnits: config.computeUnits),
-            ModelSpec(fileName: Names.jointFile, computeUnits: config.computeUnits),
-        ])
+        // Load preprocessor and encoder first; decoder and joint are loaded below as well.
+        let specs = createModelSpecs(using: config)
 
         var loadedModels: [String: MLModel] = [:]
 
@@ -109,46 +102,40 @@ extension AsrModels {
 
             if let model = models[spec.fileName] {
                 loadedModels[spec.fileName] = model
-                let computeUnitsDescription = String(describing: spec.computeUnits.rawValue)
-                logger.info("Loaded \(spec.fileName) with compute units: \(computeUnitsDescription)")
+                let unitsText = Self.describeComputeUnits(spec.computeUnits)
+                logger.info("Loaded \(spec.fileName) with compute units: \(unitsText)")
             }
         }
 
-        #if os(iOS)
         guard let preprocessorModel = loadedModels[Names.preprocessorFile],
-            let encoderModel = loadedModels[Names.encoderFile],
-            let decoderModel = loadedModels[Names.decoderFile],
-            let jointModel = loadedModels[Names.jointFile]
+            let encoderModel = loadedModels[Names.encoderFile]
         else {
-            throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
+            throw AsrModelsError.loadingFailed("Failed to load preprocessor or encoder model")
+        }
+
+        // Load decoder and joint as well
+        let decoderAndJoint = try await DownloadUtils.loadModels(
+            .parakeet,
+            modelNames: [Names.decoderFile, Names.jointFile],
+            directory: parentDirectory,
+            computeUnits: config.computeUnits
+        )
+
+        guard let decoderModel = decoderAndJoint[Names.decoderFile],
+            let jointModel = decoderAndJoint[Names.jointFile]
+        else {
+            throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
 
         let asrModels = AsrModels(
-            melEncoder: encoderModel,
+            encoder: encoderModel,
             preprocessor: preprocessorModel,
             decoder: decoderModel,
             joint: jointModel,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory)
         )
-        #else
-        guard let melEncoderModel = loadedModels[Names.melEncoderFile],
-            let decoderModel = loadedModels[Names.decoderFile],
-            let jointModel = loadedModels[Names.jointFile]
-        else {
-            throw AsrModelsError.loadingFailed("Failed to load one or more ASR models")
-        }
-
-        let asrModels = AsrModels(
-            melEncoder: melEncoderModel,
-            decoder: decoderModel,
-            joint: jointModel,
-            configuration: config,
-            vocabulary: try loadVocabulary(from: directory)
-        )
-        #endif
-
-        logger.info("Successfully loaded all ASR models with optimized compute units")
+logger.info("Successfully loaded all ASR models with optimized compute units")
         return asrModels
     }
 
@@ -201,6 +188,22 @@ extension AsrModels {
     }
 
     /// Load models with ANE-optimized configurations
+
+    private static func describeComputeUnits(_ units: MLComputeUnits) -> String {
+        switch units {
+        case .cpuOnly:
+            return "cpuOnly"
+        case .cpuAndGPU:
+            return "cpuAndGPU"
+        case .cpuAndNeuralEngine:
+            return "cpuAndNeuralEngine"
+        case .all:
+            return "all"
+        @unknown default:
+            return "unknown(\(units.rawValue))"
+        }
+    }
+
     public static func loadWithANEOptimization(
         from directory: URL? = nil,
         enableFP16: Bool = true
@@ -283,23 +286,13 @@ extension AsrModels {
 
         let defaultUnits = defaultConfiguration().computeUnits
 
-        var specs: [DownloadSpec] = []
-
-        #if os(iOS)
-        specs = [
-            // Preprocessor ops map to CPU-only; don't request ANE/GPU.
+        let specs: [DownloadSpec] = [
+            // Preprocessor ops map to CPU-only across all platforms.
             DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
             DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
             DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
             DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
         ]
-        #else
-        specs = [
-            DownloadSpec(fileName: Names.melEncoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
-        ]
-        #endif
 
         for spec in specs {
             _ = try await DownloadUtils.loadModels(

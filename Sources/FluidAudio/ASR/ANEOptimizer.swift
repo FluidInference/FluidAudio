@@ -130,7 +130,7 @@ public enum ANEOptimizer {
 
     /// Model type enumeration for compute unit selection
     public enum ModelType {
-        case melEncoder
+        case encoder
         case decoder
         case joint
     }

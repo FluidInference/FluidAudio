@@ -102,6 +102,8 @@ public class DownloadUtils {
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) async throws -> [String: MLModel] {
+        // Ensure host environment is logged for debugging (once per process)
+        await SystemInfo.logOnce(using: logger)
         do {
             // 1st attempt: normal load
             return try await loadModelsOnce(
@@ -134,6 +136,8 @@ public class DownloadUtils {
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) async throws -> [String: MLModel] {
+        // Ensure host environment is logged for debugging (once per process)
+        await SystemInfo.logOnce(using: logger)
         // Ensure base directory exists
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
