@@ -40,36 +40,51 @@ public struct AppLogger {
     }
 
     public func debug(_ message: String) {
-        osLogger.debug("\(message)")
-        logToConsole(.debug, message)
+        log(.debug, message)
     }
 
     public func info(_ message: String) {
-        osLogger.info("\(message)")
-        logToConsole(.info, message)
+        log(.info, message)
     }
 
     public func notice(_ message: String) {
-        osLogger.notice("\(message)")
-        logToConsole(.notice, message)
+        log(.notice, message)
     }
 
     public func warning(_ message: String) {
-        osLogger.warning("\(message)")
-        logToConsole(.warning, message)
+        log(.warning, message)
     }
 
     public func error(_ message: String) {
-        osLogger.error("\(message)")
-        logToConsole(.error, message)
+        log(.error, message)
     }
 
     public func fault(_ message: String) {
-        osLogger.fault("\(message)")
-        logToConsole(.fault, message)
+        log(.fault, message)
     }
 
     // MARK: - Console Mirroring
+    private func log(_ level: Level, _ message: String) {
+        #if DEBUG
+        logToConsole(level, message)
+        #else
+        switch level {
+        case .debug:
+            osLogger.debug("\(message)")
+        case .info:
+            osLogger.info("\(message)")
+        case .notice:
+            osLogger.notice("\(message)")
+        case .warning:
+            osLogger.warning("\(message)")
+        case .error:
+            osLogger.error("\(message)")
+        case .fault:
+            osLogger.fault("\(message)")
+        }
+        #endif
+    }
+
     private func logToConsole(_ level: Level, _ message: String) {
         Task.detached(priority: .utility) {
             await LogConsole.shared.write(level: level, category: category, message: message)
@@ -89,7 +104,7 @@ actor LogConsole {
         #else
         // Allow environment variable to toggle without code changes for non-debug builds
         if let env = ProcessInfo.processInfo.environment["FLUIDAUDIO_LOG_TO_CONSOLE"],
-           env == "1" || env.lowercased() == "true"
+            env == "1" || env.lowercased() == "true"
         {
             return true
         }
