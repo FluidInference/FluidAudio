@@ -15,7 +15,8 @@ public final class AsrManager {
     internal let config: ASRConfig
     private let audioConverter: AudioConverter = AudioConverter()
 
-    internal var melEncoderModel: MLModel?
+    internal var preprocessorModel: MLModel?
+    internal var encoderModel: MLModel?
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
 
@@ -65,7 +66,14 @@ public final class AsrManager {
     }
 
     public var isAvailable: Bool {
-        return melEncoderModel != nil && decoderModel != nil && jointModel != nil
+        let baseModelsReady = encoderModel != nil && decoderModel != nil && jointModel != nil
+        guard baseModelsReady else { return false }
+
+        if asrModels?.usesSplitFrontend == true {
+            return preprocessorModel != nil
+        }
+
+        return true
     }
 
     /// Initialize ASR Manager with pre-loaded models
@@ -74,7 +82,8 @@ public final class AsrManager {
         logger.info("Initializing AsrManager with provided models")
 
         self.asrModels = models
-        self.melEncoderModel = models.melEncoder
+        self.preprocessorModel = models.preprocessor
+        self.encoderModel = models.encoder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
@@ -104,7 +113,7 @@ public final class AsrManager {
         return array
     }
 
-    func prepareMelEncoderInput(
+    func preparePreprocessorInput(
         _ audioSamples: [Float], actualLength: Int? = nil
     ) async throws
         -> MLFeatureProvider
@@ -185,22 +194,6 @@ public final class AsrManager {
             throw ASRError.modelLoadFailed
         }
     }
-
-    private func loadAllModels(
-        melEncoderPath: URL,
-        decoderPath: URL,
-        jointPath: URL,
-        configuration: MLModelConfiguration
-    ) async throws -> (melEncoder: MLModel, decoder: MLModel, joint: MLModel) {
-        async let melEncoder = loadModel(
-            path: melEncoderPath, name: "mel-encoder", configuration: configuration)
-        async let decoder = loadModel(
-            path: decoderPath, name: "decoder", configuration: configuration)
-        async let joint = loadModel(path: jointPath, name: "joint", configuration: configuration)
-
-        return try await (melEncoder, decoder, joint)
-    }
-
     private static func getDefaultModelsDirectory() -> URL {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -219,7 +212,8 @@ public final class AsrManager {
     }
 
     public func cleanup() {
-        melEncoderModel = nil
+        preprocessorModel = nil
+        encoderModel = nil
         decoderModel = nil
         jointModel = nil
         // Reset decoder states using fresh allocations for deterministic behavior

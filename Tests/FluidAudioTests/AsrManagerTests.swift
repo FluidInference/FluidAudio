@@ -23,10 +23,10 @@ final class AsrManagerTests: XCTestCase {
 
     // MARK: - Mel Encoder Input Tests
 
-    func testPrepareMelEncoderInput() async throws {
+    func testPreparePreprocessorInput() async throws {
         // Test normal audio samples
         let audioSamples: [Float] = [0.1, -0.2, 0.3, -0.4, 0.5]
-        let input = try await manager.prepareMelEncoderInput(audioSamples)
+        let input = try await manager.preparePreprocessorInput(audioSamples)
 
         // Verify audio_signal feature
         guard let audioSignal = input.featureValue(for: "audio_signal")?.multiArrayValue else {
@@ -50,10 +50,10 @@ final class AsrManagerTests: XCTestCase {
         XCTAssertEqual(audioLength[0].intValue, 5)
     }
 
-    func testPrepareMelEncoderInputEdgeCases() async throws {
+    func testPreparePreprocessorInputEdgeCases() async throws {
         // Test empty audio
         let emptyAudio: [Float] = []
-        let emptyInput = try await manager.prepareMelEncoderInput(emptyAudio)
+        let emptyInput = try await manager.preparePreprocessorInput(emptyAudio)
         guard let emptySignal = emptyInput.featureValue(for: "audio_signal")?.multiArrayValue else {
             XCTFail("Missing audio_signal feature")
             return
@@ -62,7 +62,7 @@ final class AsrManagerTests: XCTestCase {
 
         // Test single sample
         let singleSample: [Float] = [0.5]
-        let singleInput = try await manager.prepareMelEncoderInput(singleSample)
+        let singleInput = try await manager.preparePreprocessorInput(singleSample)
         guard let singleSignal = singleInput.featureValue(for: "audio_signal")?.multiArrayValue else {
             XCTFail("Missing audio_signal feature")
             return
@@ -72,7 +72,7 @@ final class AsrManagerTests: XCTestCase {
 
         // Test large audio
         let largeAudio = Array(repeating: Float(0.1), count: 16000)
-        let largeInput = try await manager.prepareMelEncoderInput(largeAudio)
+        let largeInput = try await manager.preparePreprocessorInput(largeAudio)
         guard let largeLength = largeInput.featureValue(for: "audio_length")?.multiArrayValue else {
             XCTFail("Missing audio_length feature")
             return

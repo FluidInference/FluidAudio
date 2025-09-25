@@ -3,7 +3,7 @@ import os
 
 /// Performance metrics for ASR processing
 public struct ASRPerformanceMetrics: Sendable {
-    public let melEncoderTime: TimeInterval
+    public let preprocessorTime: TimeInterval
     public let encoderTime: TimeInterval
     public let decoderTime: TimeInterval
     public let totalProcessingTime: TimeInterval
@@ -14,7 +14,7 @@ public struct ASRPerformanceMetrics: Sendable {
     public var summary: String {
         """
         Performance Metrics:
-        - Mel encoder: \(String(format: "%.3f", melEncoderTime))s
+        - Preprocessor: \(String(format: "%.3f", preprocessorTime))s
         - Encoder: \(String(format: "%.3f", encoderTime))s
         - Decoder: \(String(format: "%.3f", decoderTime))s
         - Total: \(String(format: "%.3f", totalProcessingTime))s
@@ -47,7 +47,7 @@ public actor PerformanceMonitor {
         let startMemory = getCurrentMemoryUsage()
 
         // Track individual components
-        let melEncoderTime: TimeInterval = 0
+        let preprocessorTime: TimeInterval = 0
         let encoderTime: TimeInterval = 0
         let decoderTime: TimeInterval = 0
 
@@ -61,7 +61,7 @@ public actor PerformanceMonitor {
         signpostLogger.endInterval("ASR.Operation", state)
 
         let metrics = ASRPerformanceMetrics(
-            melEncoderTime: melEncoderTime,
+            preprocessorTime: preprocessorTime,
             encoderTime: encoderTime,
             decoderTime: decoderTime,
             totalProcessingTime: totalTime,

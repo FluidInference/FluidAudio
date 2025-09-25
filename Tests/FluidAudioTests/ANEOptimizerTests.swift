@@ -88,7 +88,7 @@ final class ANEOptimizerTests: XCTestCase {
     func testOptimalComputeUnits() {
         // All models use CPU+ANE for optimal performance
         XCTAssertEqual(
-            ANEOptimizer.optimalComputeUnits(for: .melEncoder),
+            ANEOptimizer.optimalComputeUnits(for: .encoder),
             .cpuAndNeuralEngine
         )
 

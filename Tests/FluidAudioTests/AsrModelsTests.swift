@@ -10,7 +10,8 @@ final class AsrModelsTests: XCTestCase {
     // MARK: - Model Names Tests
 
     func testModelNames() {
-        XCTAssertEqual(ModelNames.ASR.melEncoderFile, "MelEncoder.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.preprocessorFile, "Preprocessor.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.encoderFile, "Encoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "Decoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "JointDecision.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
@@ -64,14 +65,15 @@ final class AsrModelsTests: XCTestCase {
         // Test 2: The method should check for model files in the expected structure
         // We're testing the logic, not the actual file system operations
         let modelNames = [
-            ModelNames.ASR.melEncoderFile,
+            ModelNames.ASR.preprocessorFile,
+            ModelNames.ASR.encoderFile,
             ModelNames.ASR.decoderFile,
             ModelNames.ASR.jointFile,
             ModelNames.ASR.vocabulary,
         ]
 
         // Verify all expected model names are defined
-        XCTAssertEqual(modelNames.count, 4)
+        XCTAssertEqual(modelNames.count, 5)
         XCTAssertTrue(modelNames.allSatisfy { !$0.isEmpty })
     }
 
@@ -109,12 +111,13 @@ final class AsrModelsTests: XCTestCase {
 
         // Test that AsrModels struct can be created with proper types
         let modelNames = [
-            ModelNames.ASR.melEncoderFile,
+            ModelNames.ASR.preprocessorFile,
+            ModelNames.ASR.encoderFile,
             ModelNames.ASR.decoderFile,
             ModelNames.ASR.jointFile,
         ]
 
-        XCTAssertEqual(modelNames.count, 3)
+        XCTAssertEqual(modelNames.count, 4)
         XCTAssertTrue(modelNames.allSatisfy { $0.hasSuffix(".mlmodelc") })
     }
 
@@ -139,12 +142,12 @@ final class AsrModelsTests: XCTestCase {
         // Test that custom configuration would be used correctly
         let customConfig = MLModelConfiguration()
         customConfig.modelDisplayName = "Test ASR Model"
-        customConfig.computeUnits = .cpuAndGPU
+        customConfig.computeUnits = .cpuAndNeuralEngine
         customConfig.allowLowPrecisionAccumulationOnGPU = false
 
         // Verify configuration properties
         XCTAssertEqual(customConfig.modelDisplayName, "Test ASR Model")
-        XCTAssertEqual(customConfig.computeUnits, .cpuAndGPU)
+        XCTAssertEqual(customConfig.computeUnits, .cpuAndNeuralEngine)
         XCTAssertFalse(customConfig.allowLowPrecisionAccumulationOnGPU)
     }
 
@@ -206,8 +209,8 @@ final class AsrModelsTests: XCTestCase {
         // In CI environment, all compute units are overridden to .cpuOnly
         let isCI = ProcessInfo.processInfo.environment["CI"] != nil
 
-        // Test fused mel encoder configuration
-        let melConfig = AsrModels.optimizedConfiguration(for: .melEncoder)
+        // Test encoder configuration
+        let melConfig = AsrModels.optimizedConfiguration(for: .encoder)
         if isCI {
             XCTAssertEqual(melConfig.computeUnits, .cpuOnly)
         } else {
@@ -232,7 +235,7 @@ final class AsrModelsTests: XCTestCase {
         }
 
         // Test with FP16 disabled
-        let fp32Config = AsrModels.optimizedConfiguration(for: .melEncoder, enableFP16: false)
+        let fp32Config = AsrModels.optimizedConfiguration(for: .encoder, enableFP16: false)
         XCTAssertFalse(fp32Config.allowLowPrecisionAccumulationOnGPU)
     }
 
@@ -248,7 +251,7 @@ final class AsrModelsTests: XCTestCase {
             }
         }
 
-        let config = AsrModels.optimizedConfiguration(for: .melEncoder)
+        let config = AsrModels.optimizedConfiguration(for: .encoder)
         XCTAssertEqual(config.computeUnits, .cpuOnly)
     }
 
@@ -290,7 +293,7 @@ final class AsrModelsTests: XCTestCase {
     func testOptimalComputeUnitsRespectsPlatform() {
         // Test each model type
         let modelTypes: [ANEOptimizer.ModelType] = [
-            .melEncoder,
+            .encoder,
             .decoder,
             .joint,
         ]

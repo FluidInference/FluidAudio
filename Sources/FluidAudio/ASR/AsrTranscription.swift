@@ -50,23 +50,33 @@ extension AsrManager {
         globalFrameOffset: Int = 0
     ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
 
-        let melEncoderInput = try await prepareMelEncoderInput(
+        let preprocessorInput = try await preparePreprocessorInput(
             paddedAudio, actualLength: originalLength)
 
-        guard let melEncoderModel = melEncoderModel else {
-            throw ASRError.processingFailed("Mel-encoder model failed")
+        guard let preprocessorModel = preprocessorModel, let encoderModel = encoderModel else {
+            throw ASRError.notInitialized
         }
 
-        // Bridge async Core ML prediction while supporting legacy synchronous toolchains.
-        let melEncoderOutput = try await melEncoderModel.compatPrediction(
-            from: melEncoderInput,
+        let preprocessorOutput = try await preprocessorModel.compatPrediction(
+            from: preprocessorInput,
+            options: predictionOptions
+        )
+
+        let encoderInput = try prepareEncoderInput(
+            encoder: encoderModel,
+            preprocessorOutput: preprocessorOutput,
+            originalInput: preprocessorInput
+        )
+
+        let encoderOutputProvider = try await encoderModel.compatPrediction(
+            from: encoderInput,
             options: predictionOptions
         )
 
         let rawEncoderOutput = try extractFeatureValue(
-            from: melEncoderOutput, key: "encoder", errorMessage: "Invalid encoder output")
+            from: encoderOutputProvider, key: "encoder", errorMessage: "Invalid encoder output")
         let encoderLength = try extractFeatureValue(
-            from: melEncoderOutput, key: "encoder_length",
+            from: encoderOutputProvider, key: "encoder_length",
             errorMessage: "Invalid encoder output length")
 
         let encoderSequenceLength = encoderLength[0].intValue
@@ -87,6 +97,45 @@ extension AsrManager {
         )
 
         return (hypothesis, encoderSequenceLength)
+    }
+
+    private func prepareEncoderInput(
+        encoder: MLModel,
+        preprocessorOutput: MLFeatureProvider,
+        originalInput: MLFeatureProvider
+    ) throws -> MLFeatureProvider {
+        let inputDescriptions = encoder.modelDescription.inputDescriptionsByName
+
+        let missingNames = inputDescriptions.keys.filter { name in
+            preprocessorOutput.featureValue(for: name) == nil
+        }
+
+        if missingNames.isEmpty {
+            return preprocessorOutput
+        }
+
+        var features: [String: MLFeatureValue] = [:]
+
+        for name in inputDescriptions.keys {
+            if let value = preprocessorOutput.featureValue(for: name) {
+                features[name] = value
+                continue
+            }
+
+            if let fallback = originalInput.featureValue(for: name) {
+                features[name] = fallback
+                continue
+            }
+
+            let availableInputs = preprocessorOutput.featureNames.sorted().joined(separator: ", ")
+            let fallbackInputs = originalInput.featureNames.sorted().joined(separator: ", ")
+            throw ASRError.processingFailed(
+                "Missing required encoder input: \(name). Available inputs: \(availableInputs), "
+                    + "fallback inputs: \(fallbackInputs)"
+            )
+        }
+
+        return try MLDictionaryFeatureProvider(dictionary: features)
     }
 
     /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
@@ -152,12 +201,6 @@ extension AsrManager {
 
         // Use existing timings if provided, otherwise use timings from timestamps
         let resultTimings = tokenTimings.isEmpty ? timingsFromTimestamps : finalTimings
-
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && duration > 1.0 {
-            logger.warning(
-                "⚠️ Empty transcription for \(String(format: "%.1f", duration))s audio (tokens: \(tokenIds.count))"
-            )
-        }
 
         // Calculate confidence based on actual model confidence scores from TDT decoder
         let confidence = calculateConfidence(
@@ -248,7 +291,7 @@ extension AsrManager {
                 let nextStartTime = TimeInterval(sortedData[i + 1].timestamp) * 0.08
                 endTime = max(nextStartTime, startTime + 0.08)  // Ensure end > start
             } else {
-                // For the last token, use a default duration
+                // Last token: assume minimum duration
                 endTime = startTime + 0.08
             }
 

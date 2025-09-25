@@ -43,7 +43,6 @@ public enum ANEOptimizer {
 
     /// Configure optimal compute units for each model type
     public static func optimalComputeUnits(for modelType: ModelType) -> MLComputeUnits {
-        // Testing shows CPU+ANE is fastest for all models, including fused mel encoder
         return .cpuAndNeuralEngine
     }
 
@@ -131,7 +130,7 @@ public enum ANEOptimizer {
 
     /// Model type enumeration for compute unit selection
     public enum ModelType {
-        case melEncoder
+        case encoder
         case decoder
         case joint
     }
