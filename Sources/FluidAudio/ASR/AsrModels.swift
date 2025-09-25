@@ -15,7 +15,7 @@ public struct AsrModels: Sendable {
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
 
-    static let logger = AppLogger(category: "AsrModels")
+    private static let logger = AppLogger(category: "AsrModels")
 
     public init(
         encoder: MLModel,
