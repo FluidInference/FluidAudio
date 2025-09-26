@@ -236,19 +236,17 @@ public final class AsrManager {
         switch asrModels!.version {
         case .v2:
             let decoder = TdtDecoderV2(config: config)
-            let tokens = try await decoder.decode(
+            return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
+                actualAudioFrames: actualAudioFrames,
                 decoderModel: decoderModel!,
                 jointModel: jointModel!,
-                decoderState: &decoderState
+                decoderState: &decoderState,
+                contextFrameAdjustment: contextFrameAdjustment,
+                isLastChunk: isLastChunk,
+                globalFrameOffset: globalFrameOffset
             )
-            // Convert token sequence to TdtHypothesis for V2 compatibility
-            var hypothesis = TdtHypothesis(decState: decoderState)
-            hypothesis.ySequence = tokens
-            hypothesis.score = Float(tokens.count)  // Simple scoring for V2
-            hypothesis.timestamps = Array(0..<tokens.count)  // Basic timestamps
-            return hypothesis
         case .v3:
             let decoder = TdtDecoderV3(config: config)
             return try await decoder.decodeWithTimings(
