@@ -78,6 +78,19 @@ extension AsrModels {
             .appendingPathComponent(version.repo.folderName)
     }
 
+    private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
+        let directoryPath = directory.path.lowercased()
+        let knownVersions: [AsrModelVersion] = [.v2, .v3]
+
+        for version in knownVersions {
+            if directoryPath.contains(version.repo.folderName.lowercased()) {
+                return version
+            }
+        }
+
+        return nil
+    }
+
     // Use centralized model names
     private typealias Names = ModelNames.ASR
 
@@ -289,7 +302,7 @@ extension AsrModels {
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
 
-        if !force && modelsExist(at: targetDir) {
+        if !force && modelsExist(at: targetDir, version: version) {
             logger.info("ASR models already present at: \(targetDir.path)")
             return targetDir
         }
@@ -339,19 +352,24 @@ extension AsrModels {
     }
 
     public static func modelsExist(at directory: URL) -> Bool {
+        let detectedVersion = inferredVersion(from: directory) ?? .v3
+        return modelsExist(at: directory, version: detectedVersion)
+    }
+
+    public static func modelsExist(at directory: URL, version: AsrModelVersion) -> Bool {
         let fileManager = FileManager.default
         let requiredFiles = ModelNames.ASR.requiredModels
 
         // Check in the DownloadUtils repo structure
-        let repoPath = repoPath(from: directory)
+        let repoPath = repoPath(from: directory, version: version)
 
         let modelsPresent = requiredFiles.allSatisfy { fileName in
             let path = repoPath.appendingPathComponent(fileName)
             return fileManager.fileExists(atPath: path.path)
         }
 
-        // Also check for vocabulary file (default to V3)
-        let vocabPath = repoPath.appendingPathComponent(Names.vocabulary(for: .parakeet))
+        // Also check for vocabulary file associated with the version
+        let vocabPath = repoPath.appendingPathComponent(Names.vocabulary(for: version.repo))
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
 
         return modelsPresent && vocabPresent
