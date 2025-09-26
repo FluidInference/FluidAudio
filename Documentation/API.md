@@ -67,7 +67,7 @@ Recommended threshold ranges depend on your acoustic conditions:
 ## Automatic Speech Recognition
 
 ### AsrManager
-Automatic speech recognition using Parakeet TDT models (v2 English-optimized, v3 multilingual).
+Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 multilingual).
 
 **Key Methods:**
 - `transcribe(_:source:) throws -> AsrTranscription`
@@ -80,7 +80,7 @@ Automatic speech recognition using Parakeet TDT models (v2 English-optimized, v3
 **Model Management:**
 - `AsrModels.downloadAndLoad(version: AsrModelVersion = .v3) async throws -> AsrModels`
   - Download models from HuggingFace and compile for CoreML
-  - Pass `.v2` to load the English-optimized bundle when you do not need multilingual coverage
+  - Pass `.v2` to load the English-only bundle when you do not need multilingual coverage
   - Models cached locally after first download
 - `ASRConfig`: Beam size, temperature, language model weights
 

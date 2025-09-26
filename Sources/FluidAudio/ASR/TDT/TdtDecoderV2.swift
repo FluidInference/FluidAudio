@@ -1,10 +1,3 @@
-//
-//  TdtDecoderV2.swift
-//  FluidAudio
-//
-//  Copyright © 2025 Brandon Weng. All rights reserved.
-//
-
 import CoreML
 import Foundation
 

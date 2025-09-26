@@ -1,7 +1,7 @@
 # Automatic Speech Recognition (ASR) / Transcription
 
 - Model (multilingual): `FluidInference/parakeet-tdt-0.6b-v3-coreml`
-- Model (English-optimized): `FluidInference/parakeet-tdt-0.6b-v2-coreml`
+- Model (English-only): `FluidInference/parakeet-tdt-0.6b-v2-coreml`
 - Languages: v3 spans 25 European languages; v2 focuses on English accuracy
 - Processing Mode: Batch transcription for complete audio files
 - Real-time Factor: ~120x on M4 Pro (1 minute ≈ 0.5 seconds)
@@ -14,7 +14,7 @@
 - Both versions share the same API surface—set `AsrModelVersion` in code or pass `--model-version` in the CLI.
 
 ```swift
-// Download the English-optimized bundle when you only need English transcripts
+// Download the English-only bundle when you only need English transcripts
 let models = try await AsrModels.downloadAndLoad(version: .v2)
 ```
 
@@ -55,7 +55,7 @@ swift run fluidaudio multi-stream audio1.wav audio2.wav
 # Benchmark ASR on LibriSpeech
 swift run fluidaudio asr-benchmark --subset test-clean --max-files 50
 
-# Run the English-optimized benchmark
+# Run the English-only benchmark
 swift run fluidaudio asr-benchmark --subset test-clean --max-files 50 --model-version v2
 
 # Multilingual ASR (FLEURS) benchmark

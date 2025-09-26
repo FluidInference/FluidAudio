@@ -28,25 +28,6 @@ jobs:
         run: swift test --parallel --num-workers $(sysctl -n hw.ncpu)
         timeout-minutes: 10
 
-  build-and-test-macos-v2:
-    name: V2 Configuration Tests (macOS)
-    runs-on: macos-15
-    needs: build-and-test-macos
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Check versions
-        run: |
-          swift --version
-          xcodebuild -version
-
-      - name: Run v2-specific tests
-        env:
-          FLUIDAUDIO_TEST_MODEL_VERSION: v2
-        run: swift test --parallel --filter TdtDecoderV2Tests
-        timeout-minutes: 5
-
   build-ios:
     name: Build (iOS)
     runs-on: macos-15
