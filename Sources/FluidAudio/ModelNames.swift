@@ -4,6 +4,7 @@ import Foundation
 public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+    case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case diarizer = "FluidInference/speaker-diarization-coreml"
 
     var folderName: String {
@@ -35,7 +36,10 @@ public enum ModelNames {
         public static let encoder = "Encoder"
         public static let decoder = "Decoder"
         public static let joint = "JointDecision"
-        public static let vocabulary = "parakeet_v3_vocab.json"
+
+        // Version-specific vocabulary files
+        public static let vocabularyV3 = "parakeet_v3_vocab.json"
+        public static let vocabularyV2 = "parakeet_vocab.json"
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
@@ -48,6 +52,18 @@ public enum ModelNames {
             decoderFile,
             jointFile,
         ]
+
+        /// Get vocabulary filename for specific model version
+        public static func vocabulary(for repo: Repo) -> String {
+            switch repo {
+            case .parakeet:
+                return vocabularyV3
+            case .parakeetV2:
+                return vocabularyV2
+            default:
+                return vocabularyV3
+            }
+        }
     }
 
     /// VAD model names
@@ -66,7 +82,7 @@ public enum ModelNames {
         switch repo {
         case .vad:
             return ModelNames.VAD.requiredModels
-        case .parakeet:
+        case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
         case .diarizer:
             return ModelNames.Diarizer.requiredModels
