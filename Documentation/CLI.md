@@ -8,11 +8,17 @@ This guide collects commonly used `fluidaudio` CLI commands for ASR, diarization
 # Transcribe an audio file (batch)
 swift run fluidaudio transcribe audio.wav
 
+# English-only run with higher accuracy
+swift run fluidaudio transcribe audio.wav --model-version v2
+
 # Transcribe multiple files in parallel
 swift run fluidaudio multi-stream audio1.wav audio2.wav
 
 # Benchmark ASR on LibriSpeech
-swift run fluidaudio asr-benchmark --subset test-clean --num-files 50
+swift run fluidaudio asr-benchmark --subset test-clean --max-files 50
+
+# English benchmark preset (LibriSpeech)
+swift run fluidaudio asr-benchmark --subset test-clean --max-files 50 --model-version v2
 
 # Multilingual ASR (FLEURS) benchmark
 swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10

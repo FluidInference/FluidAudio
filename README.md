@@ -92,8 +92,9 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
 
 ## Automatic Speech Recognition (ASR) / Transcription
 
-- **Model**: `FluidInference/parakeet-tdt-0.6b-v3-coreml`
-- **Languages**: All European languages (25) - see Huggingface models for exact list
+- **Models**:
+  - `FluidInference/parakeet-tdt-0.6b-v3-coreml` (multilingual, 25 European languages)
+  - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
 - **Streaming Support**: Coming soon — batch processing is recommended for production use
@@ -107,7 +108,7 @@ import FluidAudio
 // Batch transcription from an audio file
 Task {
     // 1) Initialize ASR manager and load models
-    let models = try await AsrModels.downloadAndLoad()
+    let models = try await AsrModels.downloadAndLoad(version: .v3)  // Switch to .v2 for English-only work
     let asrManager = AsrManager(config: .default)
     try await asrManager.initialize(models: models)
 
@@ -126,6 +127,9 @@ Task {
 ```bash
 # Transcribe an audio file (batch)
 swift run fluidaudio transcribe audio.wav
+
+# English-only run with higher recall
+swift run fluidaudio transcribe audio.wav --model-version v2
 ```
 
 ## Speaker Diarization
