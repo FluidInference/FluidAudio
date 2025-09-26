@@ -37,9 +37,8 @@ public enum ModelNames {
         public static let decoder = "Decoder"
         public static let joint = "JointDecision"
 
-        // Version-specific vocabulary files
-        public static let vocabularyV3 = "parakeet_v3_vocab.json"
-        public static let vocabularyV2 = "parakeet_vocab.json"
+        // Shared vocabulary file across all model versions
+        public static let vocabularyFile = "parakeet_vocab.json"
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
@@ -55,14 +54,7 @@ public enum ModelNames {
 
         /// Get vocabulary filename for specific model version
         public static func vocabulary(for repo: Repo) -> String {
-            switch repo {
-            case .parakeet:
-                return vocabularyV3
-            case .parakeetV2:
-                return vocabularyV2
-            default:
-                return vocabularyV3
-            }
+            return vocabularyFile
         }
     }
 
