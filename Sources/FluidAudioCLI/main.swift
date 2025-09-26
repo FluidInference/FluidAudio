@@ -54,8 +54,7 @@ guard arguments.count > 1 else {
     exit(1)
 }
 
-// Mirror OSLog messages to console when running CLI
-AppLogger.enableConsoleOutput(true)
+// Debug builds automatically mirror OSLog messages to console
 
 // Log system information once at application startup
 Task {
