@@ -2,6 +2,19 @@
 import Foundation
 import OSLog
 
+/// ASR model version enum
+public enum AsrModelVersion: Sendable {
+    case v2
+    case v3
+
+    var repo: Repo {
+        switch self {
+        case .v2: return .parakeetV2
+        case .v3: return .parakeet
+        }
+    }
+}
+
 @available(macOS 13.0, iOS 16.0, *)
 public struct AsrModels: Sendable {
 
@@ -14,6 +27,7 @@ public struct AsrModels: Sendable {
     public let joint: MLModel
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
+    public let version: AsrModelVersion
 
     private static let logger = AppLogger(category: "AsrModels")
 
@@ -23,7 +37,8 @@ public struct AsrModels: Sendable {
         decoder: MLModel,
         joint: MLModel,
         configuration: MLModelConfiguration,
-        vocabulary: [Int: String]
+        vocabulary: [Int: String],
+        version: AsrModelVersion
     ) {
         self.encoder = encoder
         self.preprocessor = preprocessor
@@ -31,6 +46,7 @@ public struct AsrModels: Sendable {
         self.joint = joint
         self.configuration = configuration
         self.vocabulary = vocabulary
+        self.version = version
     }
 
     public var usesSplitFrontend: Bool {
@@ -57,9 +73,22 @@ extension AsrModels {
     }
 
     /// Helper to get the repo path from a models directory
-    private static func repoPath(from modelsDirectory: URL) -> URL {
+    private static func repoPath(from modelsDirectory: URL, version: AsrModelVersion = .v3) -> URL {
         return modelsDirectory.deletingLastPathComponent()
-            .appendingPathComponent(Repo.parakeet.folderName)
+            .appendingPathComponent(version.repo.folderName)
+    }
+
+    private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
+        let directoryPath = directory.path.lowercased()
+        let knownVersions: [AsrModelVersion] = [.v2, .v3]
+
+        for version in knownVersions {
+            if directoryPath.contains(version.repo.folderName.lowercased()) {
+                return version
+            }
+        }
+
+        return nil
     }
 
     // Use centralized model names
@@ -72,6 +101,7 @@ extension AsrModels {
     ///   - configuration: Optional MLModel configuration. When provided, the configuration's
     ///                   computeUnits will be respected. When nil, platform-optimized defaults
     ///                   are used (per-model optimization based on model type).
+    ///   - version: ASR model version to load (defaults to v3)
     ///
     /// - Returns: Loaded ASR models
     ///
@@ -80,7 +110,8 @@ extension AsrModels {
     ///         background execution permitted on iOS.
     public static func load(
         from directory: URL,
-        configuration: MLModelConfiguration? = nil
+        configuration: MLModelConfiguration? = nil,
+        version: AsrModelVersion = .v3
     ) async throws -> AsrModels {
         logger.info("Loading ASR models from: \(directory.path)")
 
@@ -94,7 +125,7 @@ extension AsrModels {
 
         for spec in specs {
             let models = try await DownloadUtils.loadModels(
-                .parakeet,
+                version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDirectory,
                 computeUnits: spec.computeUnits
@@ -115,7 +146,7 @@ extension AsrModels {
 
         // Load decoder and joint as well
         let decoderAndJoint = try await DownloadUtils.loadModels(
-            .parakeet,
+            version.repo,
             modelNames: [Names.decoderFile, Names.jointFile],
             directory: parentDirectory,
             computeUnits: config.computeUnits
@@ -133,20 +164,22 @@ extension AsrModels {
             decoder: decoderModel,
             joint: jointModel,
             configuration: config,
-            vocabulary: try loadVocabulary(from: directory)
+            vocabulary: try loadVocabulary(from: directory, version: version),
+            version: version
         )
         logger.info("Successfully loaded all ASR models with optimized compute units")
         return asrModels
     }
 
-    private static func loadVocabulary(from directory: URL) throws -> [Int: String] {
-        let vocabPath = repoPath(from: directory).appendingPathComponent(Names.vocabulary)
+    private static func loadVocabulary(from directory: URL, version: AsrModelVersion) throws -> [Int: String] {
+        let vocabPath = repoPath(from: directory, version: version).appendingPathComponent(
+            Names.vocabulary(for: version.repo))
 
         if !FileManager.default.fileExists(atPath: vocabPath.path) {
             logger.warning(
                 "Vocabulary file not found at \(vocabPath.path). Please ensure the vocab file is downloaded with the models."
             )
-            throw AsrModelsError.modelNotFound(Names.vocabulary, vocabPath)
+            throw AsrModelsError.modelNotFound(Names.vocabulary(for: version.repo), vocabPath)
         }
 
         do {
@@ -172,10 +205,11 @@ extension AsrModels {
     }
 
     public static func loadFromCache(
-        configuration: MLModelConfiguration? = nil
+        configuration: MLModelConfiguration? = nil,
+        version: AsrModelVersion = .v3
     ) async throws -> AsrModels {
-        let cacheDir = defaultCacheDirectory()
-        return try await load(from: cacheDir, configuration: configuration)
+        let cacheDir = defaultCacheDirectory(for: version)
+        return try await load(from: cacheDir, configuration: configuration, version: version)
     }
 
     /// Load models with automatic recovery on compilation failures
@@ -261,13 +295,14 @@ extension AsrModels {
     @discardableResult
     public static func download(
         to directory: URL? = nil,
-        force: Bool = false
+        force: Bool = false,
+        version: AsrModelVersion = .v3
     ) async throws -> URL {
-        let targetDir = directory ?? defaultCacheDirectory()
+        let targetDir = directory ?? defaultCacheDirectory(for: version)
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
 
-        if !force && modelsExist(at: targetDir) {
+        if !force && modelsExist(at: targetDir, version: version) {
             logger.info("ASR models already present at: \(targetDir.path)")
             return targetDir
         }
@@ -296,7 +331,7 @@ extension AsrModels {
 
         for spec in specs {
             _ = try await DownloadUtils.loadModels(
-                .parakeet,
+                version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDir,
                 computeUnits: spec.computeUnits
@@ -309,32 +344,38 @@ extension AsrModels {
 
     public static func downloadAndLoad(
         to directory: URL? = nil,
-        configuration: MLModelConfiguration? = nil
+        configuration: MLModelConfiguration? = nil,
+        version: AsrModelVersion = .v3
     ) async throws -> AsrModels {
-        let targetDir = try await download(to: directory)
-        return try await load(from: targetDir, configuration: configuration)
+        let targetDir = try await download(to: directory, version: version)
+        return try await load(from: targetDir, configuration: configuration, version: version)
     }
 
     public static func modelsExist(at directory: URL) -> Bool {
+        let detectedVersion = inferredVersion(from: directory) ?? .v3
+        return modelsExist(at: directory, version: detectedVersion)
+    }
+
+    public static func modelsExist(at directory: URL, version: AsrModelVersion) -> Bool {
         let fileManager = FileManager.default
         let requiredFiles = ModelNames.ASR.requiredModels
 
         // Check in the DownloadUtils repo structure
-        let repoPath = repoPath(from: directory)
+        let repoPath = repoPath(from: directory, version: version)
 
         let modelsPresent = requiredFiles.allSatisfy { fileName in
             let path = repoPath.appendingPathComponent(fileName)
             return fileManager.fileExists(atPath: path.path)
         }
 
-        // Also check for vocabulary file
-        let vocabPath = repoPath.appendingPathComponent(Names.vocabulary)
+        // Also check for vocabulary file associated with the version
+        let vocabPath = repoPath.appendingPathComponent(Names.vocabulary(for: version.repo))
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
 
         return modelsPresent && vocabPresent
     }
 
-    public static func defaultCacheDirectory() -> URL {
+    public static func defaultCacheDirectory(for version: AsrModelVersion = .v3) -> URL {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
@@ -342,7 +383,12 @@ extension AsrModels {
             appSupport
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent(Repo.parakeet.folderName, isDirectory: true)
+            .appendingPathComponent(version.repo.folderName, isDirectory: true)
+    }
+
+    // Legacy method for backward compatibility
+    public static func defaultCacheDirectory() -> URL {
+        return defaultCacheDirectory(for: .v3)
     }
 }
 

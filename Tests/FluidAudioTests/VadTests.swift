@@ -611,7 +611,7 @@ final class VadTests: XCTestCase {
 
     func testSpeechPaddingApplication() async throws {
         let vad = try await VadManager(config: .default)
-        let segConfig = VadSegmentationConfig(speechPadding: 0.2)
+        let segConfig = VadSegmentationConfig(minSpeechDuration: 0.25, speechPadding: 0.2)
 
         let speechDuration = 2.0
         let paddingDuration = 0.2

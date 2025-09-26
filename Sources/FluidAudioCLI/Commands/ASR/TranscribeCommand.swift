@@ -60,6 +60,7 @@ enum TranscribeCommand {
         let audioFile = arguments[0]
         var streamingMode = false
         var showMetadata = false
+        var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Parse options
         var i = 1
@@ -72,6 +73,19 @@ enum TranscribeCommand {
                 streamingMode = true
             case "--metadata":
                 showMetadata = true
+            case "--model-version":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "v2", "2":
+                        modelVersion = .v2
+                    case "v3", "3":
+                        modelVersion = .v3
+                    default:
+                        logger.error("Invalid model version: \(arguments[i + 1]). Use 'v2' or 'v3'")
+                        exit(1)
+                    }
+                    i += 1
+                }
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -82,18 +96,21 @@ enum TranscribeCommand {
             logger.info(
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
-            await testStreamingTranscription(audioFile: audioFile, showMetadata: showMetadata)
+            await testStreamingTranscription(
+                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
         } else {
             logger.info("Using batch mode with direct processing\n")
-            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata)
+            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
         }
     }
 
     /// Test batch transcription using AsrManager directly
-    private static func testBatchTranscription(audioFile: String, showMetadata: Bool) async {
+    private static func testBatchTranscription(
+        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+    ) async {
         do {
             // Initialize ASR models
-            let models = try await AsrModels.downloadAndLoad()
+            let models = try await AsrModels.downloadAndLoad(version: modelVersion)
             let asrManager = AsrManager(config: .default)
             try await asrManager.initialize(models: models)
 
@@ -172,7 +189,9 @@ enum TranscribeCommand {
     }
 
     /// Test streaming transcription
-    private static func testStreamingTranscription(audioFile: String, showMetadata: Bool) async {
+    private static func testStreamingTranscription(
+        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+    ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
 
@@ -180,8 +199,11 @@ enum TranscribeCommand {
         let streamingAsr = StreamingAsrManager(config: config)
 
         do {
-            // Start the engine
-            try await streamingAsr.start()
+            // Initialize ASR models
+            let models = try await AsrModels.downloadAndLoad(version: modelVersion)
+
+            // Start the engine with the models
+            try await streamingAsr.start(models: models)
 
             // Load audio file
             let audioFileURL = URL(fileURLWithPath: audioFile)
@@ -324,6 +346,7 @@ enum TranscribeCommand {
                 --help, -h         Show this help message
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
+                --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)

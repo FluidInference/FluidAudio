@@ -5,15 +5,15 @@ import XCTest
 @testable import FluidAudio
 
 @available(macOS 13.0, iOS 16.0, *)
-final class TdtDecoderTests: XCTestCase {
+final class TdtDecoderV3HelperTests: XCTestCase {
 
-    var decoder: TdtDecoder!
+    var decoder: TdtDecoderV3!
     var config: ASRConfig!
 
     override func setUp() {
         super.setUp()
         config = ASRConfig.default
-        decoder = TdtDecoder(config: config)
+        decoder = TdtDecoderV3(config: config)
     }
 
     override func tearDown() {

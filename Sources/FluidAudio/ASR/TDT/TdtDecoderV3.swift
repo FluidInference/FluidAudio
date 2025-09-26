@@ -31,7 +31,7 @@ import Foundation
 import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
-internal struct TdtDecoder {
+internal struct TdtDecoderV3 {
 
     /// Joint model decision for a single encoder/decoder step.
     private struct JointDecision {

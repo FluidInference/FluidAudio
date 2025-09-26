@@ -7,13 +7,13 @@ import XCTest
 @available(macOS 13.0, iOS 16.0, *)
 final class TdtDecoderChunkTests: XCTestCase {
 
-    private var decoder: TdtDecoder!
+    private var decoder: TdtDecoderV3!
     private var config: ASRConfig!
 
     override func setUp() {
         super.setUp()
         config = ASRConfig.default
-        decoder = TdtDecoder(config: config)
+        decoder = TdtDecoderV3(config: config)
     }
 
     override func tearDown() {
@@ -320,7 +320,7 @@ final class TdtDecoderChunkTests: XCTestCase {
 
         XCTAssertTrue(punctuationTokens.contains(lastToken), "Test token should be punctuation")
 
-        // Simulate the clearing logic from TdtDecoder
+        // Simulate the clearing logic from TdtDecoderV3
         if punctuationTokens.contains(lastToken) {
             decoderState.predictorOutput = nil
             // lastToken is kept for linguistic context
