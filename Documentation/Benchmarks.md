@@ -42,6 +42,30 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 [02:01:49.655] [INFO] [Benchmark] ASR benchmark completed successfully
 ```
 
+`swift run fluidaudio asr-benchmark --max-files all --model-version v2`
+
+Use v2 if you only need English, it is a bit more accurate
+
+```text
+ansient day, like music in the air. Ah
+[01:35:16.880] [INFO] [Benchmark] File: 908-157963-0010.flac (WER: 15.4%) (Duration: 6.28s)
+[01:35:16.880] [INFO] [Benchmark] ------------------------------------------------------------
+[01:35:16.894] [INFO] [Benchmark] Normalized Reference: she ceasd and smild in tears then sat down in her silver shrine
+[01:35:16.894] [INFO] [Benchmark] Normalized Hypothesis:        she ceased and smiled in tears then sat down in her silver shrine
+[01:35:16.894] [INFO] [Benchmark] Original Hypothesis:  She ceased and smiled in tears, Then sat down in her silver shrine,
+[01:35:16.894] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 25s • 09/26/2025, 1:35 AM EDT
+[01:35:16.894] [INFO] [Benchmark] --- Benchmark Results ---
+[01:35:16.894] [INFO] [Benchmark]    Dataset: librispeech test-clean
+[01:35:16.894] [INFO] [Benchmark]    Files processed: 2620
+[01:35:16.894] [INFO] [Benchmark]    Average WER: 2.2%
+[01:35:16.894] [INFO] [Benchmark]    Median WER: 0.0%
+[01:35:16.894] [INFO] [Benchmark]    Average CER: 0.7%
+[01:35:16.894] [INFO] [Benchmark]    Median RTFx: 125.6x
+[01:35:16.894] [INFO] [Benchmark]    Overall RTFx: 141.2x (19452.5s / 137.7s)
+[01:35:16.894] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
+[01:35:16.894] [INFO] [Benchmark] ASR benchmark completed successfully
+```
+
 ### ASR Model Compilation
 
 Core ML first-load compile times captured on iPhone 16 Pro Max and iPhone 13 running the
