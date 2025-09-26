@@ -787,6 +787,7 @@ extension ASRBenchmark {
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
         var streamingChunkDuration = 10.0
+        var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -835,6 +836,19 @@ extension ASRBenchmark {
                     }
                     i += 1
                 }
+            case "--model-version":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "v2", "2":
+                        modelVersion = .v2
+                    case "v3", "3":
+                        modelVersion = .v3
+                    default:
+                        logger.error("Invalid model version: \(arguments[i + 1]). Use 'v2' or 'v3'")
+                        exit(1)
+                    }
+                    i += 1
+                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
@@ -848,6 +862,7 @@ extension ASRBenchmark {
             logger.info("   Max files: \(maxFiles?.description ?? "all")")
         }
         logger.info("   Output file: \(outputFile)")
+        logger.info("   Model version: \(modelVersion == .v2 ? "v2" : "v3")")
         logger.info("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         logger.info("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
         logger.info("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
@@ -879,7 +894,7 @@ extension ASRBenchmark {
 
             logger.info("Initializing ASR system...")
             do {
-                let models = try await AsrModels.downloadAndLoad()
+                let models = try await AsrModels.downloadAndLoad(version: modelVersion)
                 try await asrManager.initialize(models: models)
                 logger.info("ASR system initialized successfully")
 
@@ -892,9 +907,9 @@ extension ASRBenchmark {
                     logger.debug("🔍 CI Debug Information:")
                     let modelsDir = FileManager.default.homeDirectoryForCurrentUser
                         .appendingPathComponent(
-                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
+                            "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-\(modelVersion == .v2 ? "v2" : "v3")-coreml"
                         )
-                    logger.debug("   Models directory: \(modelsDir.path)")
+                    logger.debug("Models directory: \(modelsDir.path)")
                     logger.debug(
                         "   Directory exists: \(FileManager.default.fileExists(atPath: modelsDir.path))"
                     )
@@ -1097,6 +1112,7 @@ extension ASRBenchmark {
                 --max-files <number>      Maximum number of files to process (default: all)
                 --single-file <id>        Process only a specific file (e.g., 1089-134686-0011)
                 --output <file>           Output JSON file path (default: asr_benchmark_results.json)
+                --model-version <version> ASR model version to use: v2 or v3 (default: v3)
                 --debug                   Enable debug logging
                 --auto-download           Automatically download LibriSpeech dataset (default)
                 --no-auto-download        Disable automatic dataset download

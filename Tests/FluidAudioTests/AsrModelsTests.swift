@@ -14,7 +14,8 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertEqual(ModelNames.ASR.encoderFile, "Encoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "Decoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.jointFile, "JointDecision.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.vocabulary, "parakeet_v3_vocab.json")
+        XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeet), "parakeet_vocab.json")
+        XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeetV2), "parakeet_vocab.json")
     }
 
     // MARK: - Configuration Tests
@@ -64,12 +65,12 @@ final class AsrModelsTests: XCTestCase {
 
         // Test 2: The method should check for model files in the expected structure
         // We're testing the logic, not the actual file system operations
-        let modelNames = [
+        let modelNames: [String] = [
             ModelNames.ASR.preprocessorFile,
             ModelNames.ASR.encoderFile,
             ModelNames.ASR.decoderFile,
             ModelNames.ASR.jointFile,
-            ModelNames.ASR.vocabulary,
+            ModelNames.ASR.vocabulary(for: .parakeet),
         ]
 
         // Verify all expected model names are defined

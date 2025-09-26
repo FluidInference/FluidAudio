@@ -232,18 +232,35 @@ public final class AsrManager {
         isLastChunk: Bool = false,
         globalFrameOffset: Int = 0
     ) async throws -> TdtHypothesis {
-        let decoder = TdtDecoder(config: config)
-        return try await decoder.decodeWithTimings(
-            encoderOutput: encoderOutput,
-            encoderSequenceLength: encoderSequenceLength,
-            actualAudioFrames: actualAudioFrames,
-            decoderModel: decoderModel!,
-            jointModel: jointModel!,
-            decoderState: &decoderState,
-            contextFrameAdjustment: contextFrameAdjustment,
-            isLastChunk: isLastChunk,
-            globalFrameOffset: globalFrameOffset
-        )
+        // Route to appropriate decoder based on model version
+        switch asrModels!.version {
+        case .v2:
+            let decoder = TdtDecoderV2(config: config)
+            return try await decoder.decodeWithTimings(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderSequenceLength,
+                actualAudioFrames: actualAudioFrames,
+                decoderModel: decoderModel!,
+                jointModel: jointModel!,
+                decoderState: &decoderState,
+                contextFrameAdjustment: contextFrameAdjustment,
+                isLastChunk: isLastChunk,
+                globalFrameOffset: globalFrameOffset
+            )
+        case .v3:
+            let decoder = TdtDecoderV3(config: config)
+            return try await decoder.decodeWithTimings(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderSequenceLength,
+                actualAudioFrames: actualAudioFrames,
+                decoderModel: decoderModel!,
+                jointModel: jointModel!,
+                decoderState: &decoderState,
+                contextFrameAdjustment: contextFrameAdjustment,
+                isLastChunk: isLastChunk,
+                globalFrameOffset: globalFrameOffset
+            )
+        }
     }
 
     public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
