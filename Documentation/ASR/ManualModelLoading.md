@@ -19,7 +19,7 @@ Pick the folder that matches the version you want to serve:
 
 ## Stage the directory layout
 
-`AsrModels.load(from:)` expects the directory you pass to be the staged HuggingFace repo folder itself (the one that contains the `.mlmodelc` bundles and `parakeet_vocab.json`). Place the assets exactly once in the structure below (replace `/opt/models` with your storage path):
+`AsrModels.load(from:)` expects the directory you pass to be the staged HuggingFace repo folder itself (the one that contains the `.mlmodelc` bundles and `parakeet_vocab.json`). Place the assets in the structure below (replace `/opt/models` with your storage path):
 
 ```
 /opt/models
