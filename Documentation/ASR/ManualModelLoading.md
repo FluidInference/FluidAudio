@@ -19,7 +19,7 @@ Pick the folder that matches the version you want to serve:
 
 ## Stage the directory layout
 
-`AsrModels.load(from:)` expects the HuggingFace repo folder to sit underneath a parent directory. Place the assets exactly once in the structure below (replace `/opt/models` with your storage path):
+`AsrModels.load(from:)` expects the directory you pass to be the staged HuggingFace repo folder itself (the one that contains the `.mlmodelc` bundles and `parakeet_vocab.json`). Place the assets exactly once in the structure below (replace `/opt/models` with your storage path):
 
 ```
 /opt/models
@@ -60,7 +60,7 @@ import CoreML
 struct ManualLoader {
     static func main() async {
         do {
-            // Point to the directory that holds the staged repo folder
+            // Point to the staged repo directory that contains the Core ML bundles
             let repoDirectory = URL(fileURLWithPath: "/opt/models/parakeet-tdt-0.6b-v3-coreml", isDirectory: true)
 
             // Optional: customize compute units; default uses CPU+ANE
