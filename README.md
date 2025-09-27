@@ -57,6 +57,7 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 
 - Guides
   - [Audio Conversion for Inference](Documentation/Guides/AudioConversion.md)
+  - Manual model download & loading options: [ASR](Documentation/ASR/ManualModelLoading.md), [Diarizer](Documentation/SpeakerDiarization.md#manual-model-loading), [VAD](Documentation/VAD/GettingStarted.md#manual-model-loading)
 - Models
   - Automatic Speech Recognition/Transcription
     - [Getting Started](Documentation/ASR/GettingStarted.md)
