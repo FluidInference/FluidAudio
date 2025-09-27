@@ -32,6 +32,69 @@ for segment in result.segments {
 }
 ```
 
+## Manual Model Loading
+
+If you deploy in an offline environment, stage the Core ML bundles manually and skip the automatic HuggingFace downloader.
+
+### Required assets
+
+Download the two `.mlmodelc` folders from `FluidInference/speaker-diarization-coreml`:
+
+- `pyannote_segmentation.mlmodelc`
+- `wespeaker_v2.mlmodelc`
+
+Keep the folder names unchanged so the loader can find `coremldata.bin` inside each bundle.
+
+### Folder layout
+
+Place the staged repo in persistent storage (replace `/opt/models` with your path):
+
+```
+/opt/models
+└── speaker-diarization-coreml
+    ├── pyannote_segmentation.mlmodelc
+    │   ├── coremldata.bin
+    │   └── ...
+    └── wespeaker_v2.mlmodelc
+        ├── coremldata.bin
+        └── ...
+```
+
+You can clone with Git LFS, download the `.tar` archives from HuggingFace, or copy the directory from a machine that already ran `DiarizerModels.downloadIfNeeded()` (macOS cache: `~/Library/Application Support/FluidAudio/Models/speaker-diarization-coreml`).
+
+### Loading without downloads
+
+Point `DiarizerModels.load` at the staged bundles and initialize the manager with the returned models:
+
+```swift
+import FluidAudio
+
+@main
+struct OfflineDiarizer {
+    static func main() async {
+        do {
+            let basePath = "/opt/models/speaker-diarization-coreml"
+            let segmentation = URL(fileURLWithPath: basePath).appendingPathComponent("pyannote_segmentation.mlmodelc")
+            let embedding = URL(fileURLWithPath: basePath).appendingPathComponent("wespeaker_v2.mlmodelc")
+
+            let models = try await DiarizerModels.load(
+                localSegmentationModel: segmentation,
+                localEmbeddingModel: embedding
+            )
+
+            let diarizer = DiarizerManager()
+            diarizer.initialize(models: models)
+
+            // ... run diarization as usual
+        } catch {
+            print("Failed to load diarizer models: \(error)")
+        }
+    }
+}
+```
+
+Use `FileManager` to verify the two `.mlmodelc` folders exist before loading. When paths are correct, the loader never contacts the network and no auto-download occurs.
+
 ### Custom Configuration (Optional)
 
 For fine-tuning, you can customize the configuration:
