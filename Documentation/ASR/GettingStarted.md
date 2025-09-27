@@ -40,6 +40,10 @@ Task {
 }
 ```
 
+## Manual model loading
+
+Working offline? Follow the [Manual Model Loading guide](ManualModelLoading.md) to stage the CoreML bundles and call `AsrModels.load` without triggering HuggingFace downloads.
+
 ## CLI
 
 ```bash
