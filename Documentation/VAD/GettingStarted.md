@@ -23,6 +23,55 @@ for (index, chunk) in results.enumerated() {
 }
 ```
 
+## Manual Model Loading
+
+Stage the Core ML bundle yourself when the runtime cannot reach HuggingFace.
+
+### Required asset
+
+- `silero-vad-unified-256ms-v6.0.0.mlmodelc`
+
+The bundle lives in the `FluidInference/silero-vad-coreml` repo. Keep the folder name intact so `coremldata.bin` remains discoverable.
+
+### Folder layout
+
+```
+/opt/models
+└── silero-vad-coreml
+    └── silero-vad-unified-256ms-v6.0.0.mlmodelc
+        ├── coremldata.bin
+        └── ...
+```
+
+Clone with Git LFS, download the archive from the HuggingFace UI, or copy from a machine that already initialized `VadManager()` (cache path: `~/Library/Application Support/FluidAudio/Models/silero-vad-coreml`).
+
+### Loading without downloads
+
+Supply the staged bundle to the `VadManager(config:vadModel:)` initializer:
+
+```swift
+import FluidAudio
+import CoreML
+
+Task {
+    do {
+        let modelURL = URL(fileURLWithPath: "/opt/models/silero-vad-coreml/silero-vad-unified-256ms-v6.0.0.mlmodelc", isDirectory: true)
+
+        var configuration = MLModelConfiguration()
+        configuration.computeUnits = .cpuOnly
+        let vadModel = try MLModel(contentsOf: modelURL, configuration: configuration)
+
+        let manager = VadManager(config: .default, vadModel: vadModel)
+
+        // Ready for segmenting or streaming without network downloads
+    } catch {
+        print("Failed to load VAD model: \(error)")
+    }
+}
+```
+
+Use `FileManager` to confirm the `.mlmodelc` directory exists before constructing the manager. When the bundle is present, no fallback download attempts occur.
+
 ## Offline Segmentation (Code)
 
 `VadManager` can now emit ready-to-use speech intervals directly from PCM
