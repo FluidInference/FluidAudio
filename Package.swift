@@ -19,9 +19,14 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        .binaryTarget(
+            name: "ESpeakNG",
+            url: "https://github.com/FluidInference/FluidAudio/releases/download/v0.5.1/ESpeakNG.xcframework.zip",
+            checksum: "054c5d1409b864c07b3612c6fd4b05eff6d696cbbef03901ac9ac575ede543f3"
+        ),
         .target(
             name: "FluidAudio",
-            dependencies: [],
+            dependencies: ["ESpeakNG"],
             path: "Sources/FluidAudio",
             exclude: []
         ),
