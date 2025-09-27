@@ -65,7 +65,6 @@ struct ManualLoader {
 
             // Optional: customize compute units; default uses CPU+ANE
             var configuration = AsrModels.defaultConfiguration()
-            configuration.computeUnits = .cpuOnly  // e.g., for servers without Neural Engine
 
             let models = try await AsrModels.load(
                 from: repoDirectory,
