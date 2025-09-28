@@ -180,6 +180,17 @@ enum TranscribeCommand {
                 logger.info("  Confidence: \(String(format: "%.3f", result.confidence))")
             }
 
+            if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
+                let debugDump = tokenTimings.enumerated().map { index, timing in
+                    let start = String(format: "%.3f", timing.startTime)
+                    let end = String(format: "%.3f", timing.endTime)
+                    let confidence = String(format: "%.3f", timing.confidence)
+                    return
+                        "[\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(start)s, end: \(end)s, conf: \(confidence))"
+                }.joined(separator: ", ")
+                logger.debug("Token timings (count: \(tokenTimings.count)): \(debugDump)")
+            }
+
             // Cleanup
             asrManager.cleanup()
 
