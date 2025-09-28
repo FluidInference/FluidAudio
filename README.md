@@ -294,6 +294,7 @@ Make a PR if you want to add your app!
 | **[Slipbox](https://slipbox.ai/)** | Privacy-first meeting assistant for real-time conversation intelligence. Uses Parakeet ASR (iOS) and speaker diarization across platforms. |
 | **[Whisper Mate](https://whisper.marksdo.com)** | Transcribes movies and audio locally; records and transcribes in real time from speakers or system apps. Uses speaker diarization. |
 | **[Altic/Fluid](https://github.com/altic-dev/Fluid-oss)** | Voice-to-text dictation app for macOS with AI enhancement. |
+| **[Paraspeech](https://paraspeech.com)** | AI powered voice to text. Fully offline. No subscriptions. |
 | **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | Comparison of different local ASR, including one of the first verions of FluidAudio's ASR models |
 
 ## Everything Else
