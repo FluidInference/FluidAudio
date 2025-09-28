@@ -1,0 +1,94 @@
+name: Release Version Sync
+
+on:
+  release:
+    types:
+      - released
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-version:
+    if: github.event.release.draft == false && github.event.release.prerelease == false && github.event.release.target_commitish == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: release
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update README and podspec versions
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          python <<'PYTHON'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["RELEASE_VERSION"]
+          version_pattern = r"[0-9]+(?:\.[0-9]+)*(?:-[A-Za-z0-9.]+)?"
+
+          readme_path = pathlib.Path("README.md")
+          readme = readme_path.read_text()
+          replacements = [
+              (re.compile(r"(from:\s*")" + version_pattern + r"(")"), r"\\1" + version + r"\\2"),
+              (re.compile(r"(pod 'FluidAudio',\s*'~>\s*)" + version_pattern + r"(')"), r"\\1" + version + r"\\2"),
+              (re.compile(r"(Version )" + version_pattern), r"\\1" + version),
+              (re.compile(r"(version = \{)" + version_pattern + r"(\})"), r"\\1" + version + r"\\2"),
+          ]
+          updated = 0
+          for pattern, repl in replacements:
+              readme, count = pattern.subn(repl, readme)
+              updated += count
+
+          if updated == 0:
+              raise SystemExit("No version placeholders updated in README.md")
+
+          readme_path.write_text(readme)
+
+          podspec_path = pathlib.Path("FluidAudio.podspec")
+          podspec = podspec_path.read_text()
+          podspec_pattern = re.compile(r"(spec.version\s*=\s*")" + version_pattern + r"(")")
+          podspec, count = podspec_pattern.subn(r"\\1" + version + r"\\2", podspec)
+          if count == 0:
+              raise SystemExit("FluidAudio.podspec version not updated")
+
+          podspec_path.write_text(podspec)
+          PYTHON
+
+      - name: Commit changes
+        id: commit
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config user.name "eddy"
+            git config user.email "eddy@users.noreply.github.com"
+            git pull --ff-only origin main
+            git add README.md FluidAudio.podspec
+            git commit -m "chore: sync release version ${VERSION}"
+            echo "changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changes to commit"
+            echo "changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push changes
+        if: steps.commit.outputs.changes == 'true'
+        run: git push origin HEAD:main
