@@ -316,6 +316,10 @@ public final class AsrManager {
         }
     }
 
+    internal func normalizedTimingToken(_ token: String) -> String {
+        token.replacingOccurrences(of: "▁", with: " ")
+    }
+
     internal func convertTokensWithExistingTimings(
         _ tokenIds: [Int], timings: [TokenTiming]
     ) -> (
@@ -349,7 +353,7 @@ public final class AsrManager {
         let adjustedTimings = tokenInfos.compactMap { info in
             info.timing.map { timing in
                 TokenTiming(
-                    token: info.token.replacingOccurrences(of: "▁", with: ""),
+                    token: normalizedTimingToken(info.token),
                     tokenId: info.tokenId,
                     startTime: timing.startTime,
                     endTime: timing.endTime,
