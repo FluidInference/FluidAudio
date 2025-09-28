@@ -185,7 +185,8 @@ enum TranscribeCommand {
                     let start = String(format: "%.3f", timing.startTime)
                     let end = String(format: "%.3f", timing.endTime)
                     let confidence = String(format: "%.3f", timing.confidence)
-                    return "[\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(start)s, end: \(end)s, conf: \(confidence))"
+                    return
+                        "[\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(start)s, end: \(end)s, conf: \(confidence))"
                 }.joined(separator: ", ")
                 logger.debug("Token timings (count: \(tokenTimings.count)): \(debugDump)")
             }
