@@ -208,10 +208,12 @@ public struct VadStreamEvent: Sendable {
 public struct VadStreamResult: Sendable {
     public let state: VadStreamState
     public let event: VadStreamEvent?
+    public let probability: Float
 
-    public init(state: VadStreamState, event: VadStreamEvent?) {
+    public init(state: VadStreamState, event: VadStreamEvent?, probability: Float) {
         self.state = state
         self.event = event
+        self.probability = probability
     }
 }
 
