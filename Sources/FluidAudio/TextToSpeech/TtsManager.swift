@@ -9,6 +9,9 @@ public final class TtSManager {
     private var ttsModels: TtsModels?
     private var isInitialized = false
 
+    private static let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
+    private static let delimiterCharacters: Set<Character> = ["(", ")", "[", "]", "{", "}"]
+
     private let availableVoices = [
         "af_heart",
         "am_adam",
@@ -146,7 +149,14 @@ public final class TtSManager {
             throw TTSError.processingFailed("Input text is empty")
         }
 
-        return cleanText
+        let withoutParentheses = Self.removeDelimiterCharacters(from: cleanText)
+        let normalizedWhitespace = Self.collapseWhitespace(in: withoutParentheses)
+
+        guard !normalizedWhitespace.isEmpty else {
+            throw TTSError.processingFailed("Input text is empty after stripping parentheses")
+        }
+
+        return normalizedWhitespace
     }
 
     private func resolveVoice(_ requested: String?, speakerId: Int) -> String {
@@ -166,6 +176,21 @@ public final class TtSManager {
         guard !availableVoices.isEmpty else { return "af_heart" }
         let index = abs(speakerId) % availableVoices.count
         return availableVoices[index]
+    }
+
+    private static func removeDelimiterCharacters(from text: String) -> String {
+        return String(text.filter { !delimiterCharacters.contains($0) })
+    }
+
+    private static func collapseWhitespace(in text: String) -> String {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        let collapsed = whitespacePattern.stringByReplacingMatches(
+            in: text,
+            options: [],
+            range: range,
+            withTemplate: " "
+        )
+        return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func adjustSamples(_ samples: [Float], factor: Float) -> [Float] {
