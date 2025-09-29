@@ -5,58 +5,78 @@ import OSLog
 public final class TtSManager {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "TtSManager")
+    private let modelCache: KokoroModelCache
 
     private var ttsModels: TtsModels?
     private var isInitialized = false
+    private var assetsReady = false
+    private var defaultVoice: String
+    private var defaultSpeakerId: Int
+    private var ensuredVoices: Set<String> = []
 
-    public init() {}
+    public init(
+        defaultVoice: String = "af_heart",
+        defaultSpeakerId: Int = 0,
+        modelCache: KokoroModelCache = KokoroModelCache()
+    ) {
+        self.modelCache = modelCache
+        self.defaultVoice = Self.normalizeVoice(defaultVoice)
+        self.defaultSpeakerId = defaultSpeakerId
+        KokoroSynthesizer.configure(modelCache: modelCache)
+    }
 
     public var isAvailable: Bool {
         isInitialized
     }
 
     public func initialize(models: TtsModels) async throws {
-        logger.info("Initializing TtSManager with provided models")
-
         self.ttsModels = models
 
-        await KokoroModelCache.shared.registerPreloadedModels(models)
-        try await LexiconAssetManager.ensureCoreAssets()
+        await modelCache.registerPreloadedModels(models)
+        try await prepareLexiconAssetsIfNeeded()
+        try await ensureVoiceEmbeddingIfNeeded(for: defaultVoice)
         try await KokoroSynthesizer.loadSimplePhonemeDictionary()
-        try await KokoroModelCache.shared.loadModelsIfNeeded(variants: models.availableVariants)
+        try await modelCache.loadModelsIfNeeded(variants: models.availableVariants)
         isInitialized = true
-
-        logger.info("TtSManager initialized successfully with preloaded models")
+        logger.notice("TtSManager initialized with provided models")
     }
 
     public func initialize() async throws {
-        logger.info("Initializing TtSManager with downloaded models")
-
         let models = try await TtsModels.download()
         try await initialize(models: models)
     }
 
     public func synthesize(
         text: String,
+        voice: String? = nil,
         voiceSpeed: Float = 1.0,
         speakerId: Int = 0,
         variantPreference: ModelNames.TTS.Variant? = nil
     ) async throws -> Data {
-        let detailed = try await synthesizeDetailed(
-            text: text,
-            voice: nil,
+        guard isInitialized else {
+            throw TTSError.modelNotFound("Kokoro model not initialized")
+        }
+
+        try await prepareLexiconAssetsIfNeeded()
+
+        let cleanedText = try KokoroSynthesizer.sanitizeInput(text)
+        let selectedVoice = resolveVoice(voice, speakerId: speakerId)
+        try await ensureVoiceEmbeddingIfNeeded(for: selectedVoice)
+
+        let synthesis = try await KokoroSynthesizer.synthesizeDetailed(
+            text: cleanedText,
+            voice: selectedVoice,
             voiceSpeed: voiceSpeed,
-            speakerId: speakerId,
             variantPreference: variantPreference
         )
 
-        logger.info("Successfully synthesized \(detailed.audio.count) bytes of audio")
-        return detailed.audio
+        return synthesis.audio
     }
 
     public func synthesizeToFile(
         text: String,
         outputURL: URL,
+        voice: String? = nil,
         voiceSpeed: Float = 1.0,
         speakerId: Int = 0,
         variantPreference: ModelNames.TTS.Variant? = nil
@@ -67,90 +87,22 @@ public final class TtSManager {
 
         let audioData = try await synthesize(
             text: text,
+            voice: voice,
             voiceSpeed: voiceSpeed,
             speakerId: speakerId,
             variantPreference: variantPreference
         )
 
         try audioData.write(to: outputURL)
-        logger.info("Saved synthesized audio to: \(outputURL.path)")
+        logger.notice("Saved synthesized audio to: \(outputURL.lastPathComponent)")
     }
 
-    public func synthesizeDetailed(
-        text: String,
-        voice: String? = nil,
-        voiceSpeed: Float = 1.0,
-        speakerId: Int = 0,
-        variantPreference: ModelNames.TTS.Variant? = nil
-    ) async throws -> KokoroSynthesizer.SynthesisResult {
-        guard isInitialized else {
-            throw TTSError.modelNotFound("Kokoro model not initialized")
-        }
-
-        let cleanedText = try sanitizeInput(text)
-        let selectedVoice = resolveVoice(voice, speakerId: speakerId)
-
-        try await LexiconAssetManager.ensureCoreAssets()
-        try await TtsResourceDownloader.ensureVoiceEmbedding(voice: selectedVoice)
-
-        let synthesis = try await KokoroSynthesizer.synthesizeDetailed(
-            text: cleanedText,
-            voice: selectedVoice,
-            variantPreference: variantPreference
-        )
-        let factor = max(0.1, voiceSpeed)
-
-        if abs(factor - 1.0) < 0.01 {
-            return synthesis
-        }
-
-        let adjustedChunks = synthesis.chunks.map { chunk -> KokoroSynthesizer.ChunkInfo in
-            let stretched = adjustSamples(chunk.samples, factor: factor)
-            return KokoroSynthesizer.ChunkInfo(
-                index: chunk.index,
-                text: chunk.text,
-                wordCount: chunk.wordCount,
-                words: chunk.words,
-                atoms: chunk.atoms,
-                pauseAfterMs: chunk.pauseAfterMs,
-                tokenCount: chunk.tokenCount,
-                samples: stretched,
-                variant: chunk.variant
-            )
-        }
-
-        let combinedSamples = adjustedChunks.flatMap { $0.samples }
-        let audioData = try AudioWAV.data(
-            from: combinedSamples,
-            sampleRate: Double(TtsConstants.audioSampleRate)
-        )
-        let updatedDiagnostics = synthesis.diagnostics?.updating(
-            audioSampleBytes: combinedSamples.count * MemoryLayout<Float>.size,
-            outputWavBytes: audioData.count
-        )
-
-        return KokoroSynthesizer.SynthesisResult(
-            audio: audioData,
-            chunks: adjustedChunks,
-            diagnostics: updatedDiagnostics
-        )
-    }
-
-    private func sanitizeInput(_ text: String) throws -> String {
-        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !cleanText.isEmpty else {
-            throw TTSError.processingFailed("Input text is empty")
-        }
-
-        let withoutParentheses = Self.removeDelimiterCharacters(from: cleanText)
-        let normalizedWhitespace = Self.collapseWhitespace(in: withoutParentheses)
-
-        guard !normalizedWhitespace.isEmpty else {
-            throw TTSError.processingFailed("Input text is empty after stripping parentheses")
-        }
-
-        return normalizedWhitespace
+    public func setDefaultVoice(_ voice: String, speakerId: Int = 0) async throws {
+        let normalized = Self.normalizeVoice(voice)
+        try await ensureVoiceEmbeddingIfNeeded(for: normalized)
+        defaultVoice = normalized
+        defaultSpeakerId = speakerId
+        ensuredVoices.insert(normalized)
     }
 
     private func resolveVoice(_ requested: String?, speakerId: Int) -> String {
@@ -163,55 +115,34 @@ public final class TtSManager {
     public func cleanup() {
         ttsModels = nil
         isInitialized = false
-        logger.info("TtSManager cleaned up")
+        assetsReady = false
+        ensuredVoices.removeAll(keepingCapacity: false)
     }
 
     private func voiceName(for speakerId: Int) -> String {
+        if speakerId == defaultSpeakerId {
+            return defaultVoice
+        }
         let voices = TtsConstants.availableVoices
-        guard !voices.isEmpty else { return "af_heart" }
+        guard !voices.isEmpty else { return defaultVoice }
         let index = abs(speakerId) % voices.count
         return voices[index]
     }
 
-    private static func removeDelimiterCharacters(from text: String) -> String {
-        return String(text.filter { !TtsConstants.delimiterCharacters.contains($0) })
+    private func prepareLexiconAssetsIfNeeded() async throws {
+        if assetsReady { return }
+        try await LexiconAssetManager.ensureCoreAssets()
+        assetsReady = true
     }
 
-    private static func collapseWhitespace(in text: String) -> String {
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        let collapsed = TtsConstants.whitespacePattern.stringByReplacingMatches(
-            in: text,
-            options: [],
-            range: range,
-            withTemplate: " "
-        )
-        return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func ensureVoiceEmbeddingIfNeeded(for voice: String) async throws {
+        if ensuredVoices.contains(voice) { return }
+        try await TtsResourceDownloader.ensureVoiceEmbedding(voice: voice)
+        ensuredVoices.insert(voice)
     }
 
-    private func adjustSamples(_ samples: [Float], factor: Float) -> [Float] {
-        let clamped = max(0.1, factor)
-        if abs(clamped - 1.0) < 0.01 { return samples }
-
-        if clamped < 1.0 {
-            let repeatCount = max(1, Int(round(1.0 / clamped)))
-            var stretched: [Float] = []
-            stretched.reserveCapacity(samples.count * repeatCount)
-            for sample in samples {
-                for _ in 0..<repeatCount {
-                    stretched.append(sample)
-                }
-            }
-            return stretched
-        } else {
-            let skip = max(1, Int(round(clamped)))
-            var reduced: [Float] = []
-            reduced.reserveCapacity(samples.count / skip)
-            var index = 0
-            while index < samples.count {
-                reduced.append(samples[index])
-                index += skip
-            }
-            return reduced.isEmpty ? samples : reduced
-        }
+    private static func normalizeVoice(_ voice: String) -> String {
+        let trimmed = voice.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "af_heart" : trimmed
     }
 }

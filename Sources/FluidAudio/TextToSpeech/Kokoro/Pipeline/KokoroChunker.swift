@@ -1,8 +1,5 @@
 import Foundation
-
-#if canImport(NaturalLanguage)
 import NaturalLanguage
-#endif
 
 /// Text chunking system for Kokoro TTS that segments input text into optimal chunks based on token capacity limits.
 /// Handles sentence splitting, phoneme resolution, and ensures each chunk fits within the model's processing constraints.
@@ -17,7 +14,9 @@ struct TextChunk: Sendable {
     let text: String
 }
 
-/// Chunker that mirrors the reference MLX Swift sentence-merging strategy for English text.
+/// Splits normalized input text into Kokoro-friendly segments: sentence tokenization,
+/// punctuation-aware merging, and phoneme lookup ensure each chunk stays within the model’s
+/// token capacity before synthesis.
 enum KokoroChunker {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroChunker")
     private static let decimalDigits = CharacterSet.decimalDigits
@@ -41,7 +40,10 @@ enum KokoroChunker {
         let (sentences, _) = splitIntoSentences(normalized)
         guard !sentences.isEmpty else { return [] }
 
-        let refinedSentences = applyRefinements(sentences)
+        let refinedSentences = sentences.compactMap { sentence in
+            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
         guard !refinedSentences.isEmpty else {
             logger.info("Kokoro chunker produced no segments after refinement")
             return []
@@ -113,10 +115,6 @@ enum KokoroChunker {
             segmentsByPunctuations.append(segment)
         }
 
-        for (index, segment) in segmentsByPunctuations.enumerated() {
-            logger.info("segmentsByPunctuations[\(index)]: \(segment)")
-        }
-
         let chunks = segmentsByPunctuations.flatMap { chunkText in
             buildChunks(
                 from: chunkText,
@@ -131,6 +129,8 @@ enum KokoroChunker {
     }
 
     private static func computeCapacity(targetTokens: Int, hasLanguageToken: Bool) -> Int {
+        // Kokoro inputs prepend BOS, EOS, and optionally a language token, so reserve space for them.
+        // A small safety margin keeps us under the model limit after merging and punctuation splits.
         let baseOverhead = 2 + (hasLanguageToken ? 1 : 0)
         let safety = 12
         return max(1, targetTokens - baseOverhead - safety)
@@ -139,7 +139,6 @@ enum KokoroChunker {
     // MARK: - Sentence Processing
 
     private static func splitIntoSentences(_ text: String) -> ([String], NLLanguage?) {
-        #if canImport(NaturalLanguage)
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(text)
         let dominant = recognizer.dominantLanguage ?? .english
@@ -160,36 +159,6 @@ enum KokoroChunker {
             return ([text], dominant)
         }
         return (sentences, dominant)
-        #else
-        // Fallback: split on period/question/exclamation marks.
-        let delimiters = CharacterSet(charactersIn: ".?!")
-        var current = ""
-        var sentences: [String] = []
-        for char in text {
-            current.append(char)
-            if let scalar = char.unicodeScalars.first, delimiters.contains(scalar) {
-                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    sentences.append(trimmed)
-                }
-                current.removeAll(keepingCapacity: true)
-            }
-        }
-        if !current.isEmpty {
-            let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                sentences.append(trimmed)
-            }
-        }
-        return (sentences.isEmpty ? [text] : sentences, nil)
-        #endif
-    }
-
-    private static func applyRefinements(_ sentences: [String]) -> [String] {
-        sentences.compactMap { sentence in
-            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
-        }
     }
 
     private static func mergeShortSentences(

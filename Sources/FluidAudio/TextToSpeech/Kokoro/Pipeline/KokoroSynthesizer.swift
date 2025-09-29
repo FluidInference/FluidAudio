@@ -10,700 +10,20 @@ import FoundationNetworking
 /// Supports both 5s and 15s variants with US English phoneme lexicons
 @available(macOS 13.0, iOS 16.0, *)
 public struct KokoroSynthesizer {
-    public struct TokenCapacities {
-        public let short: Int
-        public let long: Int
+    static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
+    static var modelCache = KokoroModelCache()
 
-        public func capacity(for variant: ModelNames.TTS.Variant) -> Int {
-            switch variant {
-            case .fiveSecond:
-                return short
-            case .fifteenSecond:
-                return long
-            }
-        }
+    static let lexiconCache = LexiconCache()
+    static let multiArrayPool = MultiArrayPool()
+
+    public static func configure(modelCache: KokoroModelCache) {
+        Self.modelCache = modelCache
     }
 
-    private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
-    private static let memoryFormatter: ByteCountFormatter = {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .binary
-        formatter.allowsNonnumericFormatting = false
-        return formatter
-    }()
+    static var voiceEmbeddingPayloads: [String: VoiceEmbeddingPayload] = [:]
+    static var voiceEmbeddingVectors: [VoiceEmbeddingCacheKey: [Float]] = [:]
+    static let voiceEmbeddingLock = NSLock()
 
-    /// Detailed synthesis output including audio data and per-chunk metadata.
-    public struct SynthesisResult: Sendable {
-        public let audio: Data
-        public let chunks: [ChunkInfo]
-        public let diagnostics: Diagnostics?
-
-        public init(audio: Data, chunks: [ChunkInfo], diagnostics: Diagnostics? = nil) {
-            self.audio = audio
-            self.chunks = chunks
-            self.diagnostics = diagnostics
-        }
-    }
-
-    public struct Diagnostics: Sendable {
-        public let variantFootprints: [ModelNames.TTS.Variant: Int]
-        public let lexiconEntryCount: Int
-        public let lexiconEstimatedBytes: Int
-        public let audioSampleBytes: Int
-        public let outputWavBytes: Int
-
-        public func updating(audioSampleBytes: Int, outputWavBytes: Int) -> Diagnostics {
-            Diagnostics(
-                variantFootprints: variantFootprints,
-                lexiconEntryCount: lexiconEntryCount,
-                lexiconEstimatedBytes: lexiconEstimatedBytes,
-                audioSampleBytes: audioSampleBytes,
-                outputWavBytes: outputWavBytes
-            )
-        }
-    }
-
-    /// Metadata describing each chunk synthesized by the Kokoro pipeline.
-    public struct ChunkInfo: Sendable {
-        public let index: Int
-        public let text: String
-        public let wordCount: Int
-        public let words: [String]
-        public let atoms: [String]
-        public let pauseAfterMs: Int
-        public let tokenCount: Int
-        public let samples: [Float]
-        public let variant: ModelNames.TTS.Variant
-
-        public init(
-            index: Int,
-            text: String,
-            wordCount: Int,
-            words: [String],
-            atoms: [String],
-            pauseAfterMs: Int,
-            tokenCount: Int,
-            samples: [Float],
-            variant: ModelNames.TTS.Variant
-        ) {
-            self.index = index
-            self.text = text
-            self.wordCount = wordCount
-            self.words = words
-            self.atoms = atoms
-            self.pauseAfterMs = pauseAfterMs
-            self.tokenCount = tokenCount
-            self.samples = samples
-            self.variant = variant
-        }
-    }
-
-    private struct ChunkInfoTemplate: Sendable {
-        let index: Int
-        let text: String
-        let wordCount: Int
-        let words: [String]
-        let atoms: [String]
-        let pauseAfterMs: Int
-        let tokenCount: Int
-        let variant: ModelNames.TTS.Variant
-        let targetTokens: Int
-    }
-
-    private struct ChunkEntry: Sendable {
-        let chunk: TextChunk
-        let inputIds: [Int32]
-        let template: ChunkInfoTemplate
-    }
-
-    private struct MultiArrayKey: Hashable {
-        let dataTypeRawValue: Int
-        let shape: [Int]
-
-        init(dataType: MLMultiArrayDataType, shape: [NSNumber]) {
-            dataTypeRawValue = dataType.rawValue
-            self.shape = shape.map { $0.intValue }
-        }
-
-        func hash(into hasher: inout Hasher) {
-            hasher.combine(dataTypeRawValue)
-            for dimension in shape {
-                hasher.combine(dimension)
-            }
-        }
-    }
-
-    private actor MultiArrayPool {
-        private var storage: [MultiArrayKey: [MLMultiArray]] = [:]
-
-        func rent(
-            shape: [NSNumber],
-            dataType: MLMultiArrayDataType,
-            zeroFill: Bool
-        ) async throws -> MLMultiArray {
-            let key = MultiArrayKey(dataType: dataType, shape: shape)
-            let array: MLMultiArray
-            if var cached = storage[key], let candidate = cached.popLast() {
-                storage[key] = cached
-                array = candidate
-            } else {
-                array = try MLMultiArray(shape: shape, dataType: dataType)
-            }
-
-            if zeroFill {
-                zero(array)
-            }
-            return array
-        }
-
-        func recycle(_ array: MLMultiArray, zeroFill: Bool) {
-            if zeroFill {
-                zero(array)
-            }
-            let key = MultiArrayKey(dataType: array.dataType, shape: array.shape)
-            storage[key, default: []].append(array)
-        }
-
-        func preallocate(
-            shape: [NSNumber],
-            dataType: MLMultiArrayDataType,
-            count: Int,
-            zeroFill: Bool
-        ) async throws {
-            guard count > 0 else { return }
-            let key = MultiArrayKey(dataType: dataType, shape: shape)
-            var pool = storage[key] ?? []
-            if pool.count >= count {
-                storage[key] = pool
-                return
-            }
-
-            let additional = count - pool.count
-            pool.reserveCapacity(count)
-            for _ in 0..<additional {
-                let array = try MLMultiArray(shape: shape, dataType: dataType)
-                if zeroFill {
-                    zero(array)
-                }
-                pool.append(array)
-            }
-            storage[key] = pool
-        }
-
-        private func zero(_ array: MLMultiArray) {
-            let elementCount = array.count
-            guard elementCount > 0 else { return }
-
-            switch array.dataType {
-            case .int32:
-                let pointer = array.dataPointer.bindMemory(to: Int32.self, capacity: elementCount)
-                pointer.initialize(repeating: 0, count: elementCount)
-            case .float32:
-                let pointer = array.dataPointer.bindMemory(to: Float.self, capacity: elementCount)
-                vDSP_vclr(pointer, 1, vDSP_Length(elementCount))
-            case .double:
-                let pointer = array.dataPointer.bindMemory(to: Double.self, capacity: elementCount)
-                vDSP_vclrD(pointer, 1, vDSP_Length(elementCount))
-            case .float16:
-                let pointer = array.dataPointer.bindMemory(to: UInt16.self, capacity: elementCount)
-                pointer.initialize(repeating: 0, count: elementCount)
-            #if swift(>=6.2)
-            case .int8:
-                array.dataPointer.initializeMemory(as: Int8.self, repeating: 0, count: elementCount)
-            #endif
-            default:
-                memset(array.dataPointer, 0, elementCount * MemoryLayout<Float>.stride)
-            }
-        }
-    }
-    // Cached CoreML models per Kokoro variant
-    // Legacy: Phoneme dictionary with frame counts (kept for backward compatibility)
-    private actor LexiconCache {
-        private var wordToPhonemes: [String: [String]] = [:]
-        private var caseSensitiveWordToPhonemes: [String: [String]] = [:]
-        private var isLoaded = false
-
-        struct Metrics: Sendable {
-            let entryCount: Int
-            let tokenCount: Int
-            let characterCount: Int
-
-            var estimatedBytes: Int {
-                characterCount * 2  // approximate UTF-16 storage
-            }
-        }
-
-        private struct CachePayload: Codable {
-            let lower: [String: [String]]
-            let caseSensitive: [String: [String]]
-        }
-
-        func ensureLoaded(kokoroDirectory: URL, allowedTokens: Set<String>) async throws {
-            if isLoaded && !caseSensitiveWordToPhonemes.isEmpty { return }
-
-            let cacheURL = kokoroDirectory.appendingPathComponent("us_lexicon_cache.json")
-            if await loadFromCache(cacheURL, allowedTokens: allowedTokens) {
-                return
-            }
-            throw TTSError.processingFailed("No lexicon cache found and raw lexicon merge disabled")
-        }
-
-        func lexicons() -> (word: [String: [String]], caseSensitive: [String: [String]]) {
-            (wordToPhonemes, caseSensitiveWordToPhonemes)
-        }
-
-        func metrics() -> Metrics {
-            var entryCount = 0
-            var tokenCount = 0
-            var characterCount = 0
-
-            for (key, value) in wordToPhonemes {
-                entryCount += 1
-                characterCount += key.utf16.count
-                for token in value {
-                    tokenCount += 1
-                    characterCount += token.utf16.count
-                }
-            }
-
-            for (key, value) in caseSensitiveWordToPhonemes {
-                entryCount += 1
-                characterCount += key.utf16.count
-                for token in value {
-                    tokenCount += 1
-                    characterCount += token.utf16.count
-                }
-            }
-
-            return Metrics(entryCount: entryCount, tokenCount: tokenCount, characterCount: characterCount)
-        }
-
-        private func loadFromCache(_ url: URL, allowedTokens: Set<String>) async -> Bool {
-            guard FileManager.default.fileExists(atPath: url.path) else { return false }
-            do {
-                let data = try Data(contentsOf: url)
-                let payload = try JSONDecoder().decode(CachePayload.self, from: data)
-                let filteredLower = payload.lower.mapValues { $0.filter { allowedTokens.contains($0) } }
-                let filteredCase = payload.caseSensitive.mapValues { $0.filter { allowedTokens.contains($0) } }
-
-                guard !filteredLower.isEmpty else { return false }
-
-                wordToPhonemes = filteredLower
-                caseSensitiveWordToPhonemes = filteredCase
-                isLoaded = true
-                KokoroSynthesizer.logger.info("Loaded lexicon cache: \(filteredLower.count) entries")
-                return true
-            } catch {
-                KokoroSynthesizer.logger.warning("Failed to load lexicon cache: \(error.localizedDescription)")
-                wordToPhonemes = [:]
-                caseSensitiveWordToPhonemes = [:]
-                isLoaded = false
-                return false
-            }
-        }
-
-        private func writeCache(payload: CachePayload, to url: URL) async {
-            do {
-                try FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.sortedKeys]
-                let data = try encoder.encode(payload)
-                try data.write(to: url, options: [.atomic])
-                KokoroSynthesizer.logger.info("Wrote lexicon cache to \(url.path)")
-            } catch {
-                KokoroSynthesizer.logger.warning("Failed to persist lexicon cache: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    private static let lexiconCache = LexiconCache()
-    private static let multiArrayPool = MultiArrayPool()
-
-    private struct VoiceEmbeddingPayload {
-        let sourceURL: URL
-        let json: Any
-    }
-
-    private struct VoiceEmbeddingCacheKey: Hashable {
-        let voiceID: String
-        let phonemeCount: Int
-    }
-
-    private struct VoiceEmbeddingData: Sendable {
-        let voiceID: String
-        let vector: [Float]
-        let l2Norm: Float
-    }
-
-    private static var voiceEmbeddingPayloads: [String: VoiceEmbeddingPayload] = [:]
-    private static var voiceEmbeddingVectors: [VoiceEmbeddingCacheKey: [Float]] = [:]
-    private static let voiceEmbeddingLock = NSLock()
-
-    private static func candidateVoiceEmbeddingURLs(
-        for voiceID: String,
-        cwd: URL,
-        voicesDir: URL
-    ) -> [URL] {
-        [
-            cwd.appendingPathComponent("voices/\(voiceID).json"),
-            cwd.appendingPathComponent("\(voiceID).json"),
-            voicesDir.appendingPathComponent("\(voiceID).json"),
-        ]
-    }
-
-    private static func cachedVoiceEmbeddingPayload(
-        for voiceID: String,
-        candidates: [URL]
-    ) throws -> VoiceEmbeddingPayload {
-        voiceEmbeddingLock.lock()
-        if let payload = voiceEmbeddingPayloads[voiceID] {
-            voiceEmbeddingLock.unlock()
-            return payload
-        }
-        voiceEmbeddingLock.unlock()
-
-        guard let source = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
-            let checkedPaths = candidates.map { $0.path }.joined(separator: ", ")
-            throw TTSError.modelNotFound(
-                "Voice embedding unavailable for \(voiceID); checked paths: \(checkedPaths)")
-        }
-
-        let data = try Data(contentsOf: source)
-        let json = try JSONSerialization.jsonObject(with: data)
-        let payload = VoiceEmbeddingPayload(sourceURL: source, json: json)
-
-        voiceEmbeddingLock.lock()
-        voiceEmbeddingPayloads[voiceID] = payload
-        voiceEmbeddingLock.unlock()
-
-        return payload
-    }
-
-    private static func cachedVoiceEmbeddingVector(for key: VoiceEmbeddingCacheKey) -> [Float]? {
-        voiceEmbeddingLock.lock()
-        let vector = voiceEmbeddingVectors[key]
-        voiceEmbeddingLock.unlock()
-        return vector
-    }
-
-    private static func storeVoiceEmbeddingVector(_ vector: [Float], for key: VoiceEmbeddingCacheKey) {
-        voiceEmbeddingLock.lock()
-        voiceEmbeddingVectors[key] = vector
-        voiceEmbeddingLock.unlock()
-    }
-
-    private static func fetchVoiceEmbeddingData(
-        voice: String,
-        phonemeCount: Int,
-        expectedDimension: Int
-    ) throws -> VoiceEmbeddingData {
-        let cacheDir = try TtsModels.cacheDirectoryURL()
-        let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
-        try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)
-        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-
-        func resolveVector(for voiceID: String) throws -> ([Float]?, URL, Bool) {
-            let candidates = candidateVoiceEmbeddingURLs(for: voiceID, cwd: cwd, voicesDir: voicesDir)
-            do {
-                let payload = try cachedVoiceEmbeddingPayload(for: voiceID, candidates: candidates)
-                let key = VoiceEmbeddingCacheKey(voiceID: voiceID, phonemeCount: phonemeCount)
-                if let cached = Self.cachedVoiceEmbeddingVector(for: key) {
-                    return (cached, payload.sourceURL, true)
-                }
-                let vector = parseVoiceEmbeddingVector(payload.json, voiceID: voiceID, phonemeCount: phonemeCount)
-                if let vector {
-                    Self.storeVoiceEmbeddingVector(vector, for: key)
-                } else {
-                    Self.logger.warning(
-                        "Voice embedding payload lacked usable vector for \(voiceID) at \(payload.sourceURL.path)"
-                    )
-                }
-                return (vector, payload.sourceURL, false)
-            } catch {
-                Self.logger.warning("Failed to load voice embedding for \(voiceID): \(error.localizedDescription)")
-                return (nil, candidates.first ?? voicesDir, false)
-            }
-        }
-
-        var voiceUsed = voice
-        var attemptedVoices = [voice]
-        var (vector, sourceURL, wasCached) = try resolveVector(for: voiceUsed)
-
-        if vector == nil && voice != "af_heart" {
-            Self.logger.warning("Voice embedding for \(voice) not found; falling back to af_heart")
-            voiceUsed = "af_heart"
-            attemptedVoices.append("af_heart")
-            (vector, sourceURL, wasCached) = try resolveVector(for: voiceUsed)
-        }
-
-        guard let resolvedVector = vector else {
-            throw TTSError.modelNotFound(
-                "Voice embedding unavailable for \(attemptedVoices.joined(separator: ", ")); checked \(sourceURL.path)"
-            )
-        }
-
-        guard resolvedVector.count == expectedDimension else {
-            throw TTSError.modelNotFound(
-                "Voice embedding for \(voiceUsed) has unexpected length (expected \(expectedDimension), got \(resolvedVector.count))"
-            )
-        }
-
-        var sumSquares: Float = 0
-        resolvedVector.withUnsafeBufferPointer { sourcePointer in
-            guard let baseAddress = sourcePointer.baseAddress, !sourcePointer.isEmpty else { return }
-            vDSP_svesq(baseAddress, 1, &sumSquares, vDSP_Length(sourcePointer.count))
-        }
-        let norm = sqrt(Double(sumSquares))
-
-        let formattedNorm = String(format: "%.3f", norm)
-        let payloadCached = isVoiceEmbeddingPayloadCached(for: voiceUsed)
-        if wasCached || payloadCached {
-            Self.logger.debug(
-                "Reusing cached voice embedding: \(voiceUsed), dim=\(expectedDimension), l2norm=\(formattedNorm)")
-        } else {
-            Self.logger.info("Loaded voice embedding: \(voiceUsed), dim=\(expectedDimension), l2norm=\(formattedNorm)")
-        }
-
-        return VoiceEmbeddingData(voiceID: voiceUsed, vector: resolvedVector, l2Norm: Float(norm))
-    }
-
-    private static func isVoiceEmbeddingPayloadCached(for voiceID: String) -> Bool {
-        voiceEmbeddingLock.lock()
-        let cached = voiceEmbeddingPayloads[voiceID] != nil
-        voiceEmbeddingLock.unlock()
-        return cached
-    }
-
-    private static func parseVoiceEmbeddingVector(
-        _ json: Any,
-        voiceID: String,
-        phonemeCount: Int
-    ) -> [Float]? {
-        func parseArray(_ any: Any) -> [Float]? {
-            if let doubles = any as? [Double] { return doubles.map(Float.init) }
-            if let floats = any as? [Float] { return floats }
-            if let numbers = any as? [NSNumber] { return numbers.map { $0.floatValue } }
-            if let anyArray = any as? [Any] {
-                var out: [Float] = []
-                out.reserveCapacity(anyArray.count)
-                for value in anyArray {
-                    if let num = value as? NSNumber {
-                        out.append(num.floatValue)
-                    } else if let dbl = value as? Double {
-                        out.append(Float(dbl))
-                    } else if let flt = value as? Float {
-                        out.append(flt)
-                    } else {
-                        return nil
-                    }
-                }
-                return out
-            }
-            return nil
-        }
-
-        if let direct = parseArray(json) {
-            return direct
-        }
-
-        guard let dict = json as? [String: Any] else { return nil }
-
-        if let embed = dict["embedding"], let parsed = parseArray(embed) {
-            return parsed
-        }
-
-        if let voiceSpecific = dict[voiceID], let parsed = parseArray(voiceSpecific) {
-            return parsed
-        }
-
-        var numericCandidates: [(Int, [Float])] = []
-        numericCandidates.reserveCapacity(dict.count)
-        for (key, value) in dict {
-            guard let intKey = Int(key), let parsed = parseArray(value) else { continue }
-            numericCandidates.append((intKey, parsed))
-        }
-
-        numericCandidates.sort { $0.0 < $1.0 }
-
-        if let exact = numericCandidates.first(where: { $0.0 == phonemeCount }) {
-            return exact.1
-        }
-
-        if let fallback = numericCandidates.last(where: { $0.0 <= phonemeCount }) {
-            return fallback.1
-        }
-
-        for value in dict.values {
-            if let parsed = parseArray(value) {
-                return parsed
-            }
-        }
-
-        return nil
-    }
-
-    // Model and data URLs
-    private static func variantDescription(_ variant: ModelNames.TTS.Variant) -> String {
-        switch variant {
-        case .fiveSecond:
-            return "5s"
-        case .fifteenSecond:
-            return "15s"
-        }
-    }
-
-    private static func model(for variant: ModelNames.TTS.Variant) async throws -> MLModel {
-        try await KokoroModelCache.shared.model(for: variant)
-    }
-
-    internal static func inferTokenLength(from model: MLModel) -> Int {
-        let inputs = model.modelDescription.inputDescriptionsByName
-        if let inputDesc = inputs["input_ids"], let constraint = inputDesc.multiArrayConstraint {
-            let shape = constraint.shape
-            if shape.count >= 2 {
-                let n = shape.last!.intValue
-                if n > 0 { return n }
-            }
-        }
-        return 124
-    }
-
-    /// Ensure required dictionary files exist
-    public static func ensureRequiredFiles() async throws {
-        try await LexiconAssetManager.ensureCoreAssets()
-    }
-
-    /// Load Kokoro CoreML models, optionally restricting to a specific variant.
-    public static func loadModel(variant: ModelNames.TTS.Variant? = nil) async throws {
-        if let variant {
-            try await KokoroModelCache.shared.loadModelsIfNeeded(variants: Set([variant]))
-        } else {
-            try await KokoroModelCache.shared.loadModelsIfNeeded()
-        }
-    }
-
-    /// Register a bundle of preloaded Core ML models so future calls to `loadModel()` reuse them.
-    /// This allows higher-level managers to inject models that were downloaded elsewhere (e.g. pod lint).
-    internal static func registerPreloadedModels(_ models: TtsModels) async {
-        await KokoroModelCache.shared.registerPreloadedModels(models)
-    }
-
-    /// Load simple word->phonemes dictionary (preferred)
-    /// Uses the richer US English lexicons (gold/silver) as the primary source.
-    public static func loadSimplePhonemeDictionary() async throws {
-        let cacheDir = try TtsModels.cacheDirectoryURL()
-        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
-        let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
-        let allowed = Set(vocabulary.keys)
-        try await lexiconCache.ensureLoaded(kokoroDirectory: kokoroDir, allowedTokens: allowed)
-    }
-
-    /// Tokenize an IPA string into model tokens.
-    /// If the string contains whitespace, split on whitespace; otherwise split into Unicode scalars.
-    private static func tokenizeIPAString(_ s: String) -> [String] {
-        if s.contains(where: { $0.isWhitespace }) {
-            return
-                s
-                .components(separatedBy: .whitespacesAndNewlines)
-                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ",.;:()[]{}\"'")) }
-                .filter { !$0.isEmpty }
-        }
-        // Split into Unicode scalars to preserve single-codepoint IPA tokens (e.g., ʧ, ʤ, ˈ)
-        return s.unicodeScalars.map { String($0) }
-    }
-
-    private static func modelBundleURL(for variant: ModelNames.TTS.Variant) throws -> URL {
-        let base = try TtsModels.cacheDirectoryURL().appendingPathComponent("Models/kokoro")
-        return base.appendingPathComponent(variant.fileName)
-    }
-
-    private static func directorySize(at url: URL) -> Int {
-        let fm = FileManager.default
-        guard
-            let enumerator = fm.enumerator(
-                at: url,
-                includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
-                options: [],
-                errorHandler: nil
-            )
-        else {
-            return 0
-        }
-
-        var total = 0
-        for case let fileURL as URL in enumerator {
-            do {
-                let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
-                if resourceValues.isDirectory == true { continue }
-                if let fileSize = resourceValues.fileSize {
-                    total += fileSize
-                }
-            } catch {
-                continue
-            }
-        }
-        return total
-    }
-
-    private static func logMemoryCheckpoint(_ label: String) {
-        #if canImport(Darwin)
-        guard let bytes = SystemInfo.currentResidentMemoryBytes() else { return }
-        let formatted = memoryFormatter.string(fromByteCount: Int64(bytes))
-        logger.info("Memory after \(label): \(formatted) (\(bytes) bytes)")
-        #endif
-    }
-
-    private static func validateTextHasDictionaryCoverage(_ text: String) async throws {
-        let allowedSet = CharacterSet.letters.union(.decimalDigits).union(CharacterSet(charactersIn: "'"))
-        func normalize(_ s: String) -> String {
-            let lowered = s.lowercased()
-                .replacingOccurrences(of: "\u{2019}", with: "'")
-                .replacingOccurrences(of: "\u{2018}", with: "'")
-            return String(lowered.unicodeScalars.filter { allowedSet.contains($0) })
-        }
-
-        let tokens =
-            text
-            .lowercased()
-            .split(whereSeparator: { $0.isWhitespace })
-            .map { String($0) }
-
-        let lexicons = await lexiconCache.lexicons()
-        let mapping = lexicons.word
-
-        var oov: [String] = []
-        oov.reserveCapacity(8)
-        for raw in tokens {
-            let key = normalize(raw)
-            if key.isEmpty { continue }
-            if mapping[key] == nil {
-                oov.append(key)
-                if oov.count >= 8 { break }
-            }
-        }
-
-        #if canImport(ESpeakNG)
-        if !oov.isEmpty && EspeakG2P.isDataAvailable() == false {
-            let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
-            throw TTSError.processingFailed(
-                "G2P (eSpeak NG) data missing but required for OOV words: \(sample). Ensure the eSpeak NG data bundle is available in the models cache (use TtsResourceDownloader.ensureEspeakDataBundle)."
-            )
-        }
-        #else
-        if !oov.isEmpty {
-            let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
-            throw TTSError.processingFailed(
-                "G2P (eSpeak NG) not included in this build but required for OOV words: \(sample)."
-            )
-        }
-        #endif
-    }
-
-    /// Structure to hold a chunk of text that fits within 3.17 seconds
-    // TextChunk is defined in KokoroChunker.swift
-
-    /// Chunk text into segments under the model token budget, using punctuation-driven pauses.
     private static func chunkText(
         _ text: String,
         vocabulary: [String: Int32],
@@ -807,7 +127,7 @@ public struct KokoroSynthesizer {
 
     /// Inspect model to determine the expected token length for input_ids
     private static func tokenLength(for variant: ModelNames.TTS.Variant) async throws -> Int {
-        try await KokoroModelCache.shared.tokenLength(for: variant)
+        try await modelCache.tokenLength(for: variant)
     }
 
     public static func capacities(for preference: ModelNames.TTS.Variant?) async throws -> TokenCapacities {
@@ -864,60 +184,6 @@ public struct KokoroSynthesizer {
             "Promoting chunk to Kokoro 15s variant: token count \(tokenCount) exceeds short threshold=\(shortThreshold) (short capacity=\(shortCapacity), long capacity=\(longCapacity))"
         )
         return .fifteenSecond
-    }
-
-    public static func loadVoiceEmbedding(voice: String = "af_heart", phonemeCount: Int) async throws -> MLMultiArray {
-        let expectedDimension = try await KokoroModelCache.shared.referenceEmbeddingDimension()
-        let data = try fetchVoiceEmbeddingData(
-            voice: voice,
-            phonemeCount: phonemeCount,
-            expectedDimension: expectedDimension
-        )
-
-        let embedding = try MLMultiArray(
-            shape: [1, NSNumber(value: data.vector.count)] as [NSNumber],
-            dataType: .float32
-        )
-
-        data.vector.withUnsafeBufferPointer { sourcePointer in
-            guard let baseAddress = sourcePointer.baseAddress, !sourcePointer.isEmpty else { return }
-            let destinationPointer = embedding.dataPointer.assumingMemoryBound(to: Float.self)
-            destinationPointer.update(from: baseAddress, count: sourcePointer.count)
-        }
-
-        return embedding
-    }
-
-    /// Helper to fetch ref_s expected dimension from model
-    internal static func refDim(from model: MLModel) -> Int {
-        if let desc = model.modelDescription.inputDescriptionsByName["ref_s"],
-            let shape = desc.multiArrayConstraint?.shape,
-            shape.count >= 2
-        {
-            let n = shape.last!.intValue
-            if n > 0 { return n }
-        }
-        return 256
-    }
-
-    private static func prepareVoiceEmbeddingCache(
-        voice: String,
-        entries: [ChunkEntry],
-        embeddingDimension: Int
-    ) throws -> [Int: VoiceEmbeddingData] {
-        let uniqueCounts = Set(entries.map { $0.inputIds.count })
-        var cache: [Int: VoiceEmbeddingData] = [:]
-        cache.reserveCapacity(uniqueCounts.count)
-
-        for count in uniqueCounts {
-            cache[count] = try fetchVoiceEmbeddingData(
-                voice: voice,
-                phonemeCount: count,
-                expectedDimension: embeddingDimension
-            )
-        }
-
-        return cache
     }
 
     /// Synthesize a single chunk of text using precomputed token IDs.
@@ -1095,12 +361,14 @@ public struct KokoroSynthesizer {
     public static func synthesize(
         text: String,
         voice: String = "af_heart",
+        voiceSpeed: Float = 1.0,
         variantPreference: ModelNames.TTS.Variant? = nil
     ) async throws -> Data {
         let startTime = Date()
         let result = try await synthesizeDetailed(
             text: text,
             voice: voice,
+            voiceSpeed: voiceSpeed,
             variantPreference: variantPreference
         )
         let totalTime = Date().timeIntervalSince(startTime)
@@ -1112,6 +380,7 @@ public struct KokoroSynthesizer {
     public static func synthesizeDetailed(
         text: String,
         voice: String = "af_heart",
+        voiceSpeed: Float = 1.0,
         variantPreference: ModelNames.TTS.Variant? = nil
     ) async throws -> SynthesisResult {
 
@@ -1122,7 +391,6 @@ public struct KokoroSynthesizer {
         } else {
             logger.info("Variant preference requested: automatic")
         }
-        logMemoryCheckpoint("synthesis start")
 
         try await ensureRequiredFiles()
         if !isVoiceEmbeddingPayloadCached(for: voice) {
@@ -1130,17 +398,14 @@ public struct KokoroSynthesizer {
         }
 
         try await loadModel(variant: variantPreference)
-        logMemoryCheckpoint("loadModel")
 
         try await loadSimplePhonemeDictionary()
-        logMemoryCheckpoint("loadSimplePhonemeDictionary")
 
         try await validateTextHasDictionaryCoverage(text)
 
         let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
         let capacities = try await capacities(for: variantPreference)
         let lexiconMetrics = await lexiconCache.metrics()
-        logMemoryCheckpoint("tokenCapacities")
 
         let chunks = try await chunkText(
             text,
@@ -1150,7 +415,6 @@ public struct KokoroSynthesizer {
         guard !chunks.isEmpty else {
             throw TTSError.processingFailed("No valid words found in text")
         }
-        logMemoryCheckpoint("chunkText")
 
         let entries = try buildChunkEntries(
             from: chunks,
@@ -1158,7 +422,6 @@ public struct KokoroSynthesizer {
             preference: variantPreference,
             capacities: capacities
         )
-        logMemoryCheckpoint("buildChunkEntries")
 
         struct ChunkSynthesisResult: Sendable {
             let index: Int
@@ -1166,7 +429,7 @@ public struct KokoroSynthesizer {
             let predictionTime: TimeInterval
         }
 
-        let embeddingDimension = try await KokoroModelCache.shared.referenceEmbeddingDimension()
+        let embeddingDimension = try await modelCache.referenceEmbeddingDimension()
         let embeddingCache = try prepareVoiceEmbeddingCache(
             voice: voice,
             entries: entries,
@@ -1366,7 +629,6 @@ public struct KokoroSynthesizer {
             from: allSamples,
             sampleRate: Double(TtsConstants.audioSampleRate)
         )
-        logMemoryCheckpoint("audio assembly")
 
         let chunkInfos = zip(chunkTemplates, chunkSampleBuffers).map { template, samples in
             ChunkInfo(
@@ -1400,9 +662,86 @@ public struct KokoroSynthesizer {
             audioSampleBytes: allSamples.count * MemoryLayout<Float>.size,
             outputWavBytes: audioData.count
         )
-        logMemoryCheckpoint("diagnostics")
+        let baseResult = SynthesisResult(audio: audioData, chunks: chunkInfos, diagnostics: diagnostics)
 
-        return SynthesisResult(audio: audioData, chunks: chunkInfos, diagnostics: diagnostics)
+        let factor = max(0.1, voiceSpeed)
+        if abs(factor - 1.0) < 0.01 {
+            return baseResult
+        }
+
+        let adjustedChunks = baseResult.chunks.map { chunk -> ChunkInfo in
+            let stretched = adjustSamples(chunk.samples, factor: factor)
+            return ChunkInfo(
+                index: chunk.index,
+                text: chunk.text,
+                wordCount: chunk.wordCount,
+                words: chunk.words,
+                atoms: chunk.atoms,
+                pauseAfterMs: chunk.pauseAfterMs,
+                tokenCount: chunk.tokenCount,
+                samples: stretched,
+                variant: chunk.variant
+            )
+        }
+
+        let combinedSamples = adjustedChunks.flatMap { $0.samples }
+        let adjustedAudio = try AudioWAV.data(
+            from: combinedSamples,
+            sampleRate: Double(TtsConstants.audioSampleRate)
+        )
+        let updatedDiagnostics = baseResult.diagnostics?.updating(
+            audioSampleBytes: combinedSamples.count * MemoryLayout<Float>.size,
+            outputWavBytes: adjustedAudio.count
+        )
+
+        return SynthesisResult(
+            audio: adjustedAudio,
+            chunks: adjustedChunks,
+            diagnostics: updatedDiagnostics
+        )
+    }
+
+    private static func adjustSamples(_ samples: [Float], factor: Float) -> [Float] {
+        let clamped = max(0.1, factor)
+        if abs(clamped - 1.0) < 0.01 { return samples }
+
+        if clamped < 1.0 {
+            let repeatCount = max(1, Int(round(1.0 / clamped)))
+            var stretched: [Float] = []
+            stretched.reserveCapacity(samples.count * repeatCount)
+            for sample in samples {
+                for _ in 0..<repeatCount {
+                    stretched.append(sample)
+                }
+            }
+            return stretched
+        }
+
+        let step = Int(clamped)
+        guard step > 1 else { return samples }
+        var compressed: [Float] = []
+        compressed.reserveCapacity(samples.count / step + 1)
+        var index = 0
+        while index < samples.count {
+            compressed.append(samples[index])
+            index += step
+        }
+        return compressed
+    }
+
+    static func removeDelimiterCharacters(from text: String) -> String {
+        String(text.filter { !TtsConstants.delimiterCharacters.contains($0) })
+    }
+
+    static func collapseWhitespace(in text: String) -> String {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        let collapsed = TtsConstants.whitespacePattern.stringByReplacingMatches(
+            in: text,
+            options: [],
+            range: range,
+            withTemplate: " "
+        )
+        return collapsed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // convertSamplesToWAV moved to AudioWAV

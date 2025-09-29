@@ -3,8 +3,7 @@ import Foundation
 import OSLog
 
 @available(macOS 13.0, iOS 16.0, *)
-actor KokoroModelCache {
-    static let shared = KokoroModelCache()
+public actor KokoroModelCache {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroModelCache")
     private var kokoroModels: [ModelNames.TTS.Variant: MLModel] = [:]
@@ -12,7 +11,9 @@ actor KokoroModelCache {
     private var downloadedModels: [ModelNames.TTS.Variant: MLModel] = [:]
     private var referenceDimension: Int?
 
-    func loadModelsIfNeeded(variants: Set<ModelNames.TTS.Variant>? = nil) async throws {
+    public init() {}
+
+    public func loadModelsIfNeeded(variants: Set<ModelNames.TTS.Variant>? = nil) async throws {
         let targetVariants: Set<ModelNames.TTS.Variant> = {
             if let variants = variants, !variants.isEmpty {
                 return variants
@@ -51,7 +52,7 @@ actor KokoroModelCache {
         logger.info("Kokoro models ready: [\(loadedVariants)]")
     }
 
-    func model(for variant: ModelNames.TTS.Variant) async throws -> MLModel {
+    public func model(for variant: ModelNames.TTS.Variant) async throws -> MLModel {
         if let existing = kokoroModels[variant] {
             return existing
         }
@@ -62,7 +63,7 @@ actor KokoroModelCache {
         return model
     }
 
-    func tokenLength(for variant: ModelNames.TTS.Variant) async throws -> Int {
+    public func tokenLength(for variant: ModelNames.TTS.Variant) async throws -> Int {
         if let cached = tokenLengthCache[variant] {
             return cached
         }
@@ -72,7 +73,7 @@ actor KokoroModelCache {
         return length
     }
 
-    func referenceEmbeddingDimension() async throws -> Int {
+    public func referenceEmbeddingDimension() async throws -> Int {
         if let cached = referenceDimension { return cached }
 
         if let defaultModel = kokoroModels[ModelNames.TTS.defaultVariant] {
@@ -97,7 +98,7 @@ actor KokoroModelCache {
         throw TTSError.modelNotFound("Kokoro reference embedding model not available")
     }
 
-    func registerPreloadedModels(_ models: TtsModels) {
+    public func registerPreloadedModels(_ models: TtsModels) {
         for (variant, model) in models.modelsByVariant {
             downloadedModels[variant] = model
             kokoroModels[variant] = model

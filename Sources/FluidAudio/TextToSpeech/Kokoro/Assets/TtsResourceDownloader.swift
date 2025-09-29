@@ -1,14 +1,15 @@
 import Foundation
 
-/// Kokoro TTS resource downloader (voice embeddings, eSpeak data)
+/// Kokoro TTS resource downloader (lexicons, voice embeddings, eSpeak data)
 public enum TtsResourceDownloader {
 
     private static let logger = AppLogger(category: "TtsResourceDownloader")
+    private static let kokoroBaseURL = "https://huggingface.co/\(Repo.kokoro.remotePath)/resolve/main"
 
     /// Download a voice embedding JSON file from HuggingFace
     public static func downloadVoiceEmbedding(voice: String) async throws -> Data {
         // Try to download pre-converted JSON first
-        let jsonURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/voices/\(voice).json"
+        let jsonURL = "\(kokoroBaseURL)/voices/\(voice).json"
 
         if let url = URL(string: jsonURL) {
             do {
@@ -30,7 +31,7 @@ public enum TtsResourceDownloader {
         var downloadedPtPath: String?
 
         // Download the .pt file for future conversion
-        let ptURL = "https://huggingface.co/FluidInference/kokoro-82m-coreml/resolve/main/voices/\(voice).pt"
+        let ptURL = "\(kokoroBaseURL)/voices/\(voice).pt"
         if let url = URL(string: ptURL) {
             do {
                 // Use DownloadUtils.sharedSession for consistent proxy and configuration handling
@@ -87,6 +88,33 @@ public enum TtsResourceDownloader {
         let data = try await downloadVoiceEmbedding(voice: voice)
         try data.write(to: jsonURL)
         logger.info("Voice embedding cached: \(voice)")
+    }
+
+    /// Ensure a Kokoro lexicon file exists locally (e.g. `us_gold.json`).
+    @discardableResult
+    public static func ensureLexiconFile(named filename: String) async throws -> URL {
+        let cacheDir = try TtsModels.cacheDirectoryURL()
+        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+        try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
+
+        let localURL = kokoroDir.appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return localURL
+        }
+
+        guard let remoteURL = URL(string: "\(kokoroBaseURL)/\(filename)") else {
+            throw TTSError.modelNotFound("Invalid URL for \(filename)")
+        }
+
+        logger.info("Downloading \(filename)…")
+        let (data, response) = try await DownloadUtils.sharedSession.data(from: remoteURL)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw TTSError.modelNotFound("Failed to download \(filename)")
+        }
+
+        try data.write(to: localURL)
+        logger.info("Downloaded \(filename) (\(data.count) bytes)")
+        return localURL
     }
 
     /// Ensure the eSpeak NG data bundle is available locally for Kokoro G2P

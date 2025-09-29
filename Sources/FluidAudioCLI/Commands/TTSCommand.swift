@@ -206,9 +206,10 @@ public struct TTS {
             let tSynth0 = Date()
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let usedVoice = requestedVoice.isEmpty ? "af_heart" : requestedVoice
-            let detailed = try await manager.synthesizeDetailed(
-                text: text,
-                voice: requestedVoice.isEmpty ? nil : requestedVoice,
+            let cleanedText = try KokoroSynthesizer.sanitizeInput(text)
+            let detailed = try await KokoroSynthesizer.synthesizeDetailed(
+                text: cleanedText,
+                voice: usedVoice,
                 variantPreference: variantPreference
             )
             let wav = detailed.audio
@@ -391,7 +392,8 @@ public struct TTS {
                     logger.info(
                         "Total audio duration: \(String(format: "%.3f", audioSecs))s (\(totalFrames) frames)")
                 } else {
-                    let frames = Int((audioSecs * Double(TtsConstants.audioSampleRate)) / Double(TtsConstants.kokoroFrameSamples))
+                    let frames = Int(
+                        (audioSecs * Double(TtsConstants.audioSampleRate)) / Double(TtsConstants.kokoroFrameSamples))
                     logger.info(
                         "Total audio duration: \(String(format: "%.3f", audioSecs))s (\(frames) frames)")
                 }
@@ -463,6 +465,7 @@ extension TTS {
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedVoice = requestedVoice.isEmpty ? nil : requestedVoice
             let usedVoice = normalizedVoice ?? "af_heart"
+            try await TtsResourceDownloader.ensureVoiceEmbedding(voice: usedVoice)
 
             var results: [BenchmarkResult] = []
             var totalAudioDuration: Double = 0
@@ -470,9 +473,10 @@ extension TTS {
 
             for (index, sentence) in benchmarkSentences.enumerated() {
                 let synthStart = Date()
-                let detailed = try await manager.synthesizeDetailed(
-                    text: sentence,
-                    voice: normalizedVoice,
+                let cleaned = try KokoroSynthesizer.sanitizeInput(sentence)
+                let detailed = try await KokoroSynthesizer.synthesizeDetailed(
+                    text: cleaned,
+                    voice: usedVoice,
                     variantPreference: variantPreference
                 )
                 let synthEnd = Date()
@@ -559,7 +563,7 @@ extension TTS {
     private static func audioDurationSeconds(for detailed: KokoroSynthesizer.SynthesisResult) -> Double {
         let totalSamples = detailed.chunks.reduce(0) { $0 + $1.samples.count }
         if totalSamples > 0 {
-        return Double(totalSamples) / Double(TtsConstants.audioSampleRate)
+            return Double(totalSamples) / Double(TtsConstants.audioSampleRate)
         }
 
         let bytes = detailed.audio.count
