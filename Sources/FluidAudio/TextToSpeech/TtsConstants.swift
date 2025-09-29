@@ -38,7 +38,7 @@ public enum TtsConstants {
 
     /// Core Kokoro tuning parameters. For 5s model configuration specifically
     public static let kokoroFrameSamples: Int = 600
-    public static let shortVariantGuardThresholdSeconds: Double = 3.0
+    public static let shortVariantGuardThresholdSeconds: Double = 4.5
     public static let shortVariantGuardFrameCount: Int = 4
     public static let shortSentenceMergeTokenThreshold: Int = 242
 
