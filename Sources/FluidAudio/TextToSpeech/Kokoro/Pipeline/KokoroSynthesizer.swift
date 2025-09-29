@@ -11,10 +11,6 @@ import FoundationNetworking
 @available(macOS 13.0, iOS 16.0, *)
 public struct KokoroSynthesizer {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
-    private static let sampleRateHz = 24_000
-    private static let shortVariantGuardThresholdSeconds = 3.0
-    private static let shortVariantGuardFrameCount = 4
-    private static let kokoroFrameSamples = 600  // Kokoro vocoder output samples per frame
     private static let memoryFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .binary
@@ -1045,9 +1041,13 @@ public struct KokoroSynthesizer {
         }
 
         if variant == .fiveSecond {
-            let thresholdSamples = Int(shortVariantGuardThresholdSeconds * Double(sampleRateHz))
+            let thresholdSamples = Int(
+                TtsConstants.shortVariantGuardThresholdSeconds
+                    * Double(TtsConstants.audioSampleRate)
+            )
             if effectiveCount < thresholdSamples {
-                let guardSamples = shortVariantGuardFrameCount * kokoroFrameSamples
+                let guardSamples =
+                    TtsConstants.shortVariantGuardFrameCount * TtsConstants.kokoroFrameSamples
                 if effectiveCount > guardSamples {
                     effectiveCount -= guardSamples
                 }
@@ -1193,7 +1193,8 @@ public struct KokoroSynthesizer {
         var chunkSampleBuffers = Array(repeating: [Float](), count: totalChunks)
         var allSamples: [Float] = []
         let crossfadeMs = 8
-        let crossfadeN = max(0, Int(Double(crossfadeMs) * 24.0))
+        let samplesPerMillisecond = Double(TtsConstants.audioSampleRate) / 1_000.0
+        let crossfadeN = max(0, Int(Double(crossfadeMs) * samplesPerMillisecond))
         var totalPredictionTime: TimeInterval = 0
         Self.logger.info("Starting audio inference across \(totalChunks) chunk(s)")
 
@@ -1246,8 +1247,10 @@ public struct KokoroSynthesizer {
 
             Self.logger.info(
                 "Chunk \(index + 1) model prediction latency: \(String(format: "%.3f", output.predictionTime))s")
-            let chunkDurationSeconds = Double(chunkSamples.count) / Double(sampleRateHz)
-            let chunkFrameCount = kokoroFrameSamples > 0 ? chunkSamples.count / kokoroFrameSamples : 0
+            let chunkDurationSeconds = Double(chunkSamples.count) / Double(TtsConstants.audioSampleRate)
+            let chunkFrameCount = TtsConstants.kokoroFrameSamples > 0
+                ? chunkSamples.count / TtsConstants.kokoroFrameSamples
+                : 0
             Self.logger.info(
                 "Chunk \(index + 1) duration: \(String(format: "%.3f", chunkDurationSeconds))s (\(chunkFrameCount) frames)"
             )
@@ -1259,7 +1262,7 @@ public struct KokoroSynthesizer {
 
             let prevPause = entries[index - 1].chunk.pauseAfterMs
             if prevPause > 0 {
-                let silenceCount = Int(Double(prevPause) * 24.0)
+                let silenceCount = Int(Double(prevPause) * samplesPerMillisecond)
                 let expectedAppend = chunkSamples.count + max(0, silenceCount)
                 if expectedAppend > 0 {
                     allSamples.reserveCapacity(allSamples.count + expectedAppend)
@@ -1349,7 +1352,10 @@ public struct KokoroSynthesizer {
             }
         }
 
-        let audioData = try AudioWAV.data(from: allSamples, sampleRate: 24000)
+        let audioData = try AudioWAV.data(
+            from: allSamples,
+            sampleRate: Double(TtsConstants.audioSampleRate)
+        )
         logMemoryCheckpoint("audio assembly")
 
         let chunkInfos = zip(chunkTemplates, chunkSampleBuffers).map { template, samples in

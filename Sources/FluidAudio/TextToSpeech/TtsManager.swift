@@ -9,15 +9,6 @@ public final class TtSManager {
     private var ttsModels: TtsModels?
     private var isInitialized = false
 
-    private static let whitespacePattern = try! NSRegularExpression(pattern: "\\s+", options: [])
-    private static let delimiterCharacters: Set<Character> = ["(", ")", "[", "]", "{", "}"]
-
-    private let availableVoices = [
-        "af_heart",
-        "am_adam",
-        "af_alloy",
-    ]
-
     public init() {}
 
     public var isAvailable: Bool {
@@ -129,7 +120,10 @@ public final class TtSManager {
         }
 
         let combinedSamples = adjustedChunks.flatMap { $0.samples }
-        let audioData = try AudioWAV.data(from: combinedSamples, sampleRate: 24_000)
+        let audioData = try AudioWAV.data(
+            from: combinedSamples,
+            sampleRate: Double(TtsConstants.audioSampleRate)
+        )
         let updatedDiagnostics = synthesis.diagnostics?.updating(
             audioSampleBytes: combinedSamples.count * MemoryLayout<Float>.size,
             outputWavBytes: audioData.count
@@ -173,18 +167,19 @@ public final class TtSManager {
     }
 
     private func voiceName(for speakerId: Int) -> String {
-        guard !availableVoices.isEmpty else { return "af_heart" }
-        let index = abs(speakerId) % availableVoices.count
-        return availableVoices[index]
+        let voices = TtsConstants.availableVoices
+        guard !voices.isEmpty else { return "af_heart" }
+        let index = abs(speakerId) % voices.count
+        return voices[index]
     }
 
     private static func removeDelimiterCharacters(from text: String) -> String {
-        return String(text.filter { !delimiterCharacters.contains($0) })
+        return String(text.filter { !TtsConstants.delimiterCharacters.contains($0) })
     }
 
     private static func collapseWhitespace(in text: String) -> String {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        let collapsed = whitespacePattern.stringByReplacingMatches(
+        let collapsed = TtsConstants.whitespacePattern.stringByReplacingMatches(
             in: text,
             options: [],
             range: range,
