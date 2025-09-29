@@ -157,7 +157,7 @@ the array yields the full pass latency.
 
 For streaming workloads you control the chunk size and maintain a
 `VadStreamState`. Each call emits at most one `VadStreamEvent` describing a
-speech start or end boundary.
+speech start or end boundary, along with the raw probability for the chunk.
 
 ```swift
 import FluidAudio
@@ -176,6 +176,10 @@ Task {
         )
 
         state = result.state
+
+        // Access the raw VAD probability (0.0-1.0) for this chunk
+        print(String(format: "Probability: %.3f", result.probability))
+
         if let event = result.event {
             switch event.kind {
             case .speechStart:
@@ -188,10 +192,16 @@ Task {
 }
 ```
 
+The `VadStreamResult` contains:
+- `state`: Updated state to pass to the next chunk
+- `event`: Optional speech start/end event (only emitted at boundaries)
+- `probability`: Raw VAD probability (0.0-1.0) for the current chunk
+
 Notes:
 - Stream chunks do not need to be exactly 4096 samples; choose what matches your input cadence.
 - Call `makeStreamState()` whenever you reset your audio stream (equivalent to Silero's `reset_states`).
 - When requesting seconds (`returnSeconds: true`), timestamps are rounded using `timeResolution` decimal places.
+- Use `probability` for custom thresholding logic or confidence tracking alongside the built-in hysteresis.
 
 ## CLI
 
