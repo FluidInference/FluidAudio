@@ -1,0 +1,156 @@
+name: Release Version Sync
+
+on:
+  release:
+    types:
+      - released
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semantic version to sync (e.g. 0.6.1)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare version metadata
+        id: prepare
+        run: |
+          set -euo pipefail
+          event="$GITHUB_EVENT_NAME"
+
+          if [[ "$event" == "release" ]]; then
+            draft="${{ github.event.release.draft }}"
+            prerelease="${{ github.event.release.prerelease }}"
+            target="${{ github.event.release.target_commitish }}"
+
+            if [[ "$draft" == "true" || "$prerelease" == "true" ]]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "reason=Release is draft or prerelease" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if [[ "$target" != "main" ]]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "reason=Release target is not main" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            tag="${{ github.event.release.tag_name }}"
+            version="${tag#v}"
+          else
+            version="${{ inputs.version }}"
+
+            if [[ -z "$version" ]]; then
+              echo "Version input is required for manual runs" >&2
+              exit 1
+            fi
+
+            tag="v${version}"
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "reason=" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Skip summary
+        if: steps.prepare.outputs.skip == 'true'
+        run: echo "Skipping workflow: ${{ steps.prepare.outputs.reason }}"
+
+      - name: Checkout main
+        if: steps.prepare.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Update README and podspec versions
+        if: steps.prepare.outputs.skip != 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          python3 <<'PYTHON'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["RELEASE_VERSION"]
+          version_pattern = r"[0-9]+(?:\.[0-9]+)*(?:-[A-Za-z0-9.]+)?"
+
+          def apply_replacements(text: str, replacements) -> tuple[str, int]:
+            total = 0
+            for pattern, group_indices in replacements:
+              def _replace(match, idx=group_indices):
+                before_idx, after_idx = idx
+                parts = []
+                if before_idx is not None:
+                  parts.append(match.group(before_idx))
+                parts.append(version)
+                if after_idx is not None:
+                  parts.append(match.group(after_idx))
+                return ''.join(parts)
+
+              text, count = pattern.subn(_replace, text)
+              total += count
+            return text, total
+
+          readme_path = pathlib.Path("README.md")
+          readme = readme_path.read_text()
+          readme_replacements = [
+              (re.compile(r'(from:\s*")' + version_pattern + r'(")'), (1, 2)),
+              (re.compile(r"(pod 'FluidAudio',\s*'~>\s*)" + version_pattern + r"(')"), (1, 2)),
+              (re.compile(r'(Version )' + version_pattern), (1, None)),
+              (re.compile(r'(version = \{)' + version_pattern + r'(\})'), (1, 2)),
+          ]
+          readme, updated = apply_replacements(readme, readme_replacements)
+
+          if updated == 0:
+              raise SystemExit("No version placeholders updated in README.md")
+
+          readme_path.write_text(readme)
+
+          podspec_path = pathlib.Path("FluidAudio.podspec")
+          podspec = podspec_path.read_text()
+          podspec_pattern = re.compile(r'(spec.version\s*=\s*")' + version_pattern + r'(")')
+
+          podspec, count = podspec_pattern.subn(
+              lambda match: f"{match.group(1)}{version}{match.group(2)}",
+              podspec,
+          )
+          if count == 0:
+              raise SystemExit("FluidAudio.podspec version not updated")
+
+          podspec_path.write_text(podspec)
+          PYTHON
+
+      - name: Commit changes
+        if: steps.prepare.outputs.skip != 'true'
+        id: commit
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config user.name "eddy"
+            git config user.email "eddy@users.noreply.github.com"
+            git pull --ff-only origin main
+            git add README.md FluidAudio.podspec
+            git commit -m "chore: sync release version ${VERSION}"
+            echo "changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changes to commit"
+            echo "changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push changes
+        if: steps.prepare.outputs.skip != 'true' && steps.commit.outputs.changes == 'true'
+        run: git push origin HEAD:main

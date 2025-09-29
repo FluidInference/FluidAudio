@@ -298,8 +298,9 @@ extension AsrManager {
             // Validate that end time is after start time
             let validatedEndTime = max(endTime, startTime + 0.001)  // Minimum 1ms gap
 
-            // Get token text from vocabulary if available
-            let tokenText = vocabulary[tokenId] ?? "token_\(tokenId)"
+            // Get token text from vocabulary if available and normalize for timing display
+            let rawToken = vocabulary[tokenId] ?? "token_\(tokenId)"
+            let tokenText = normalizedTimingToken(rawToken)
 
             // Use actual confidence score from TDT decoder
             let tokenConfidence = data.confidence
