@@ -82,7 +82,7 @@ extension VadManager {
             }
         }
 
-        return VadStreamResult(state: nextState, event: event)
+        return VadStreamResult(state: nextState, event: event, probability: probability)
     }
 
     private func makeStreamEvent(
