@@ -29,7 +29,7 @@ public final class TtSManager {
         await KokoroModelCache.shared.registerPreloadedModels(models)
         try await LexiconAssetManager.ensureCoreAssets()
         try await KokoroSynthesizer.loadSimplePhonemeDictionary()
-        try await KokoroModelCache.shared.loadModelsIfNeeded()
+        try await KokoroModelCache.shared.loadModelsIfNeeded(variants: models.availableVariants)
         isInitialized = true
 
         logger.info("TtSManager initialized successfully with preloaded models")
@@ -127,8 +127,16 @@ public final class TtSManager {
 
         let combinedSamples = adjustedChunks.flatMap { $0.samples }
         let audioData = try AudioWAV.data(from: combinedSamples, sampleRate: 24_000)
+        let updatedDiagnostics = synthesis.diagnostics?.updating(
+            audioSampleBytes: combinedSamples.count * MemoryLayout<Float>.size,
+            outputWavBytes: audioData.count
+        )
 
-        return KokoroSynthesizer.SynthesisResult(audio: audioData, chunks: adjustedChunks)
+        return KokoroSynthesizer.SynthesisResult(
+            audio: audioData,
+            chunks: adjustedChunks,
+            diagnostics: updatedDiagnostics
+        )
     }
 
     private func sanitizeInput(_ text: String) throws -> String {

@@ -12,18 +12,33 @@ public struct TtsModels {
         self.kokoroModels = models
     }
 
+    internal var modelsByVariant: [ModelNames.TTS.Variant: MLModel] {
+        kokoroModels
+    }
+
+    public var availableVariants: Set<ModelNames.TTS.Variant> {
+        Set(kokoroModels.keys)
+    }
+
     public func model(for variant: ModelNames.TTS.Variant = ModelNames.TTS.defaultVariant) -> MLModel? {
         kokoroModels[variant]
     }
 
     public static func download(
-        from repo: String = "FluidInference/kokoro-82m-coreml",
+        variants requestedVariants: Set<ModelNames.TTS.Variant>? = nil,
+        from repo: String = TtsConstants.defaultRepository,
         progressHandler: DownloadUtils.ProgressHandler? = nil
     ) async throws -> TtsModels {
         let cacheDirectory = try getCacheDirectory()
         // Pass Models subdirectory so models end up in ~/.cache/fluidaudio/Models/kokoro/
-        let modelsDirectory = cacheDirectory.appendingPathComponent("Models")
-        let modelNames = ModelNames.TTS.Variant.allCases.map { $0.fileName }
+        let modelsDirectory = cacheDirectory.appendingPathComponent(TtsConstants.defaultModelsSubdirectory)
+        let targetVariants: [ModelNames.TTS.Variant] = {
+            if let requested = requestedVariants, !requested.isEmpty {
+                return requested.sorted { $0.fileName < $1.fileName }
+            }
+            return ModelNames.TTS.Variant.allCases
+        }()
+        let modelNames = targetVariants.map { $0.fileName }
         let dict = try await DownloadUtils.loadModels(
             .kokoro,
             modelNames: modelNames,
@@ -34,7 +49,7 @@ public struct TtsModels {
         var loaded: [ModelNames.TTS.Variant: MLModel] = [:]
         var warmUpDurations: [ModelNames.TTS.Variant: TimeInterval] = [:]
 
-        for variant in ModelNames.TTS.Variant.allCases {
+        for variant in targetVariants {
             let name = variant.fileName
             guard let model = dict[name] else {
                 throw TTSError.modelNotFound(name)
@@ -57,10 +72,10 @@ public struct TtsModels {
             }
         }
 
-        for variant in ModelNames.TTS.Variant.allCases {
+        for variant in targetVariants {
             if let duration = warmUpDurations[variant] {
-                logger.info(
-                    "Warm-up completed for \(variantDescription(variant)) in \(String(format: "%.2f", duration))s")
+                let formatted = String(format: "%.2f", duration)
+                logger.info("Warm-up completed for \(variantDescription(variant)) in \(formatted)s")
             }
         }
 

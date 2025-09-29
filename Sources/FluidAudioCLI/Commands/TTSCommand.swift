@@ -7,6 +7,22 @@ public struct TTS {
     private static let logger = AppLogger(category: "TTSCommand")
     private static let artifactsDirectoryName = "fluidaudio_cli"
 
+    private static func formatBytes(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .binary
+        formatter.allowsNonnumericFormatting = false
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    private static func label(for variant: ModelNames.TTS.Variant) -> String {
+        switch variant {
+        case .fiveSecond:
+            return "5s"
+        case .fifteenSecond:
+            return "15s"
+        }
+    }
+
     private static func ensureArtifactsRoot() throws -> URL {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         let root = cwd.appendingPathComponent(artifactsDirectoryName, isDirectory: true)
@@ -179,7 +195,12 @@ public struct TTS {
             let manager = TtSManager()
 
             let tLoad0 = Date()
-            try await manager.initialize()
+            if let variantPreference = variantPreference {
+                let models = try await TtsModels.download(variants: Set([variantPreference]))
+                try await manager.initialize(models: models)
+            } else {
+                try await manager.initialize()
+            }
             let tLoad1 = Date()
 
             let tSynth0 = Date()
@@ -207,6 +228,31 @@ public struct TTS {
             try wav.write(to: outURL)
             logger.info("Saved output WAV: \(outURL.path)")
 
+            if let diagnostics = detailed.diagnostics {
+                let variants = diagnostics.variantFootprints.keys.sorted { lhs, rhs in
+                    let order = ModelNames.TTS.Variant.allCases
+                    return order.firstIndex(of: lhs)! < order.firstIndex(of: rhs)!
+                }
+                if !variants.isEmpty {
+                    for variant in variants {
+                        if let footprint = diagnostics.variantFootprints[variant] {
+                            logger.info(
+                                "Model bundle \(label(for: variant)) size: \(formatBytes(footprint)) (\(footprint) bytes)"
+                            )
+                        }
+                    }
+                }
+                logger.info(
+                    "Lexicon entries: \(diagnostics.lexiconEntryCount), estimated memory: \(formatBytes(diagnostics.lexiconEstimatedBytes)) (\(diagnostics.lexiconEstimatedBytes) bytes)"
+                )
+                logger.info(
+                    "Audio buffer (float32) footprint: \(formatBytes(diagnostics.audioSampleBytes)) (\(diagnostics.audioSampleBytes) bytes)"
+                )
+                logger.info(
+                    "Output WAV payload: \(formatBytes(diagnostics.outputWavBytes)) (\(diagnostics.outputWavBytes) bytes)"
+                )
+            }
+
             var chunkFileMap: [Int: String] = [:]
             let artifactsRoot = try ensureArtifactsRoot()
 
@@ -219,7 +265,10 @@ public struct TTS {
                 for chunk in detailed.chunks {
                     let fileName = String(format: "chunk_%03d.wav", chunk.index)
                     let fileURL = dirURL.appendingPathComponent(fileName)
-                    let chunkData = try AudioWAV.data(from: chunk.samples, sampleRate: 24_000)
+                    let chunkData = try AudioWAV.data(
+                        from: chunk.samples,
+                        sampleRate: Double(TtsConstants.audioSampleRate)
+                    )
                     try chunkData.write(to: fileURL)
                     chunkFileMap[chunk.index] = fileURL.path
                 }
@@ -235,10 +284,10 @@ public struct TTS {
                 // Approx audio seconds from WAV header (24 kHz mono)
                 let audioSecs: Double = {
                     // 44-byte header typical, but use Data length minus header if possible.
-                    // We store raw bytes; Safe estimate: payload / (24000 * 2)
+                    let sampleRate = Double(TtsConstants.audioSampleRate)
                     let bytes = wav.count
                     let payload = max(0, bytes - 44)
-                    return Double(payload) / Double(24000 * 2)
+                    return Double(payload) / (sampleRate * 2.0)
                 }()
                 let rtf = audioSecs > 0 ? (synthS / audioSecs) : 0
                 let realtimeSpeed = rtf > 0 ? (1.0 / rtf) : 0
@@ -294,12 +343,12 @@ public struct TTS {
                 }
 
                 if !detailed.chunks.isEmpty {
-                    let frameSamples = 600
+                    let frameSamples = TtsConstants.kokoroFrameSamples
                     var totalChunkSamples = 0
                     var chunkLogLines: [String] = []
 
                     detailed.chunks.enumerated().forEach { index, chunk in
-                        let chunkSeconds = Double(chunk.samples.count) / 24_000.0
+                        let chunkSeconds = Double(chunk.samples.count) / Double(TtsConstants.audioSampleRate)
                         let frameCount = frameSamples > 0 ? chunk.samples.count / frameSamples : 0
                         totalChunkSamples += chunk.samples.count
                         let line = String(
@@ -319,7 +368,7 @@ public struct TTS {
                         if !chunk.words.isEmpty {
                             entry["normalized_words"] = chunk.words
                         }
-                        let chunkSeconds = Double(chunk.samples.count) / 24_000.0
+                        let chunkSeconds = Double(chunk.samples.count) / Double(TtsConstants.audioSampleRate)
                         let frameCount = frameSamples > 0 ? chunk.samples.count / frameSamples : 0
                         entry["audio_duration_s"] = chunkSeconds
                         entry["frame_count"] = frameCount
@@ -342,7 +391,7 @@ public struct TTS {
                     logger.info(
                         "Total audio duration: \(String(format: "%.3f", audioSecs))s (\(totalFrames) frames)")
                 } else {
-                    let frames = Int((audioSecs * 24_000.0) / 600.0)
+                    let frames = Int((audioSecs * Double(TtsConstants.audioSampleRate)) / Double(TtsConstants.kokoroFrameSamples))
                     logger.info(
                         "Total audio duration: \(String(format: "%.3f", audioSecs))s (\(frames) frames)")
                 }
@@ -510,12 +559,12 @@ extension TTS {
     private static func audioDurationSeconds(for detailed: KokoroSynthesizer.SynthesisResult) -> Double {
         let totalSamples = detailed.chunks.reduce(0) { $0 + $1.samples.count }
         if totalSamples > 0 {
-            return Double(totalSamples) / 24_000.0
+        return Double(totalSamples) / Double(TtsConstants.audioSampleRate)
         }
 
         let bytes = detailed.audio.count
         let payload = max(0, bytes - 44)
-        return Double(payload) / Double(24_000 * 2)
+        return Double(payload) / (Double(TtsConstants.audioSampleRate) * 2.0)
     }
 
     private static func writeChunks(
@@ -531,7 +580,10 @@ extension TTS {
         for chunk in detailed.chunks {
             let fileName = String(format: "chunk_%03d.wav", chunk.index)
             let fileURL = sampleDirectory.appendingPathComponent(fileName)
-            let chunkData = try AudioWAV.data(from: chunk.samples, sampleRate: 24_000)
+            let chunkData = try AudioWAV.data(
+                from: chunk.samples,
+                sampleRate: Double(TtsConstants.audioSampleRate)
+            )
             try chunkData.write(to: fileURL)
         }
     }

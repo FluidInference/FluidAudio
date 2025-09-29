@@ -9,29 +9,42 @@ actor KokoroModelCache {
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroModelCache")
     private var kokoroModels: [ModelNames.TTS.Variant: MLModel] = [:]
     private var tokenLengthCache: [ModelNames.TTS.Variant: Int] = [:]
-    private var downloadedModelBundle: TtsModels?
+    private var downloadedModels: [ModelNames.TTS.Variant: MLModel] = [:]
     private var referenceDimension: Int?
 
-    func loadModelsIfNeeded() async throws {
-        if kokoroModels.count == ModelNames.TTS.Variant.allCases.count {
-            return
+    func loadModelsIfNeeded(variants: Set<ModelNames.TTS.Variant>? = nil) async throws {
+        let targetVariants: Set<ModelNames.TTS.Variant> = {
+            if let variants = variants, !variants.isEmpty {
+                return variants
+            }
+            return Set(ModelNames.TTS.Variant.allCases)
+        }()
+
+        let missingVariants = targetVariants.filter { kokoroModels[$0] == nil }
+        if missingVariants.isEmpty { return }
+
+        let variantsNeedingDownload = missingVariants.filter { downloadedModels[$0] == nil }
+
+        if !variantsNeedingDownload.isEmpty {
+            let newlyDownloaded = try await TtsModels.download(variants: Set(variantsNeedingDownload))
+            for (variant, model) in newlyDownloaded.modelsByVariant {
+                downloadedModels[variant] = model
+            }
         }
 
-        if downloadedModelBundle == nil {
-            downloadedModelBundle = try await TtsModels.download()
-        }
-
-        guard let bundle = downloadedModelBundle else {
-            throw TTSError.modelNotFound("Kokoro models unavailable after download attempt")
-        }
-
-        for variant in ModelNames.TTS.Variant.allCases where kokoroModels[variant] == nil {
-            guard let model = bundle.model(for: variant) else {
+        for variant in missingVariants {
+            guard let model = downloadedModels[variant] else {
                 throw TTSError.modelNotFound(ModelNames.TTS.bundle(for: variant))
             }
             kokoroModels[variant] = model
             tokenLengthCache[variant] = KokoroSynthesizer.inferTokenLength(from: model)
             logger.info("Loaded Kokoro \(variantDescription(variant)) model from cache")
+        }
+
+        if referenceDimension == nil,
+            let referenceModel = kokoroModels[ModelNames.TTS.defaultVariant] ?? kokoroModels.values.first
+        {
+            referenceDimension = KokoroSynthesizer.refDim(from: referenceModel)
         }
 
         let loadedVariants = kokoroModels.keys.map { variantDescription($0) }.sorted().joined(separator: ", ")
@@ -42,7 +55,7 @@ actor KokoroModelCache {
         if let existing = kokoroModels[variant] {
             return existing
         }
-        try await loadModelsIfNeeded()
+        try await loadModelsIfNeeded(variants: Set([variant]))
         guard let model = kokoroModels[variant] else {
             throw TTSError.modelNotFound(ModelNames.TTS.bundle(for: variant))
         }
@@ -61,25 +74,43 @@ actor KokoroModelCache {
 
     func referenceEmbeddingDimension() async throws -> Int {
         if let cached = referenceDimension { return cached }
-        let model = try await model(for: ModelNames.TTS.defaultVariant)
-        let dim = KokoroSynthesizer.refDim(from: model)
-        referenceDimension = dim
-        return dim
+
+        if let defaultModel = kokoroModels[ModelNames.TTS.defaultVariant] {
+            let dim = KokoroSynthesizer.refDim(from: defaultModel)
+            referenceDimension = dim
+            return dim
+        }
+
+        if let existing = kokoroModels.values.first {
+            let dim = KokoroSynthesizer.refDim(from: existing)
+            referenceDimension = dim
+            return dim
+        }
+
+        try await loadModelsIfNeeded(variants: Set([ModelNames.TTS.defaultVariant]))
+        if let model = kokoroModels[ModelNames.TTS.defaultVariant] ?? kokoroModels.values.first {
+            let dim = KokoroSynthesizer.refDim(from: model)
+            referenceDimension = dim
+            return dim
+        }
+
+        throw TTSError.modelNotFound("Kokoro reference embedding model not available")
     }
 
     func registerPreloadedModels(_ models: TtsModels) {
-        downloadedModelBundle = models
-
-        for variant in ModelNames.TTS.Variant.allCases {
-            if let model = models.model(for: variant) {
-                kokoroModels[variant] = model
-                tokenLengthCache[variant] = KokoroSynthesizer.inferTokenLength(from: model)
-            }
+        for (variant, model) in models.modelsByVariant {
+            downloadedModels[variant] = model
+            kokoroModels[variant] = model
+            tokenLengthCache[variant] = KokoroSynthesizer.inferTokenLength(from: model)
         }
-        if referenceDimension == nil,
+
+        if referenceDimension == nil {
             let defaultModel = models.model(for: ModelNames.TTS.defaultVariant)
-        {
-            referenceDimension = KokoroSynthesizer.refDim(from: defaultModel)
+                ?? kokoroModels[ModelNames.TTS.defaultVariant]
+                ?? kokoroModels.values.first
+            if let defaultModel {
+                referenceDimension = KokoroSynthesizer.refDim(from: defaultModel)
+            }
         }
     }
 

@@ -15,15 +15,41 @@ public struct KokoroSynthesizer {
     private static let shortVariantGuardThresholdSeconds = 3.0
     private static let shortVariantGuardFrameCount = 4
     private static let kokoroFrameSamples = 600  // Kokoro vocoder output samples per frame
+    private static let memoryFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .binary
+        formatter.allowsNonnumericFormatting = false
+        return formatter
+    }()
 
     /// Detailed synthesis output including audio data and per-chunk metadata.
     public struct SynthesisResult: Sendable {
         public let audio: Data
         public let chunks: [ChunkInfo]
+        public let diagnostics: Diagnostics?
 
-        public init(audio: Data, chunks: [ChunkInfo]) {
+        public init(audio: Data, chunks: [ChunkInfo], diagnostics: Diagnostics? = nil) {
             self.audio = audio
             self.chunks = chunks
+            self.diagnostics = diagnostics
+        }
+    }
+
+    public struct Diagnostics: Sendable {
+        public let variantFootprints: [ModelNames.TTS.Variant: Int]
+        public let lexiconEntryCount: Int
+        public let lexiconEstimatedBytes: Int
+        public let audioSampleBytes: Int
+        public let outputWavBytes: Int
+
+        public func updating(audioSampleBytes: Int, outputWavBytes: Int) -> Diagnostics {
+            Diagnostics(
+                variantFootprints: variantFootprints,
+                lexiconEntryCount: lexiconEntryCount,
+                lexiconEstimatedBytes: lexiconEstimatedBytes,
+                audioSampleBytes: audioSampleBytes,
+                outputWavBytes: outputWavBytes
+            )
         }
     }
 
@@ -202,6 +228,16 @@ public struct KokoroSynthesizer {
         private var caseSensitiveWordToPhonemes: [String: [String]] = [:]
         private var isLoaded = false
 
+        struct Metrics: Sendable {
+            let entryCount: Int
+            let tokenCount: Int
+            let characterCount: Int
+
+            var estimatedBytes: Int {
+                characterCount * 2  // approximate UTF-16 storage
+            }
+        }
+
         private struct CachePayload: Codable {
             let lower: [String: [String]]
             let caseSensitive: [String: [String]]
@@ -219,6 +255,32 @@ public struct KokoroSynthesizer {
 
         func lexicons() -> (word: [String: [String]], caseSensitive: [String: [String]]) {
             (wordToPhonemes, caseSensitiveWordToPhonemes)
+        }
+
+        func metrics() -> Metrics {
+            var entryCount = 0
+            var tokenCount = 0
+            var characterCount = 0
+
+            for (key, value) in wordToPhonemes {
+                entryCount += 1
+                characterCount += key.utf16.count
+                for token in value {
+                    tokenCount += 1
+                    characterCount += token.utf16.count
+                }
+            }
+
+            for (key, value) in caseSensitiveWordToPhonemes {
+                entryCount += 1
+                characterCount += key.utf16.count
+                for token in value {
+                    tokenCount += 1
+                    characterCount += token.utf16.count
+                }
+            }
+
+            return Metrics(entryCount: entryCount, tokenCount: tokenCount, characterCount: characterCount)
         }
 
         private func loadFromCache(_ url: URL, allowedTokens: Set<String>) async -> Bool {
@@ -515,9 +577,13 @@ public struct KokoroSynthesizer {
         try await LexiconAssetManager.ensureCoreAssets()
     }
 
-    /// Load Kokoro CoreML models for all supported variants.
-    public static func loadModel() async throws {
-        try await KokoroModelCache.shared.loadModelsIfNeeded()
+    /// Load Kokoro CoreML models, optionally restricting to a specific variant.
+    public static func loadModel(variant: ModelNames.TTS.Variant? = nil) async throws {
+        if let variant {
+            try await KokoroModelCache.shared.loadModelsIfNeeded(variants: Set([variant]))
+        } else {
+            try await KokoroModelCache.shared.loadModelsIfNeeded()
+        }
     }
 
     /// Register a bundle of preloaded Core ML models so future calls to `loadModel()` reuse them.
@@ -548,6 +614,47 @@ public struct KokoroSynthesizer {
         }
         // Split into Unicode scalars to preserve single-codepoint IPA tokens (e.g., ʧ, ʤ, ˈ)
         return s.unicodeScalars.map { String($0) }
+    }
+
+    private static func modelBundleURL(for variant: ModelNames.TTS.Variant) throws -> URL {
+        let base = try TtsModels.cacheDirectoryURL().appendingPathComponent("Models/kokoro")
+        return base.appendingPathComponent(variant.fileName)
+    }
+
+    private static func directorySize(at url: URL) -> Int {
+        let fm = FileManager.default
+        guard
+            let enumerator = fm.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+                options: [],
+                errorHandler: nil
+            )
+        else {
+            return 0
+        }
+
+        var total = 0
+        for case let fileURL as URL in enumerator {
+            do {
+                let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+                if resourceValues.isDirectory == true { continue }
+                if let fileSize = resourceValues.fileSize {
+                    total += fileSize
+                }
+            } catch {
+                continue
+            }
+        }
+        return total
+    }
+
+    private static func logMemoryCheckpoint(_ label: String) {
+        #if canImport(Darwin)
+        guard let bytes = SystemInfo.currentResidentMemoryBytes() else { return }
+        let formatted = memoryFormatter.string(fromByteCount: Int64(bytes))
+        logger.info("Memory after \(label): \(formatted) (\(bytes) bytes)")
+        #endif
     }
 
     private static func validateTextHasDictionaryCoverage(_ text: String) async throws {
@@ -706,10 +813,19 @@ public struct KokoroSynthesizer {
         try await KokoroModelCache.shared.tokenLength(for: variant)
     }
 
-    private static func tokenCapacities() async throws -> TokenCapacities {
-        async let short = tokenLength(for: .fiveSecond)
-        async let long = tokenLength(for: .fifteenSecond)
-        return try await TokenCapacities(short: short, long: long)
+    private static func tokenCapacities(preference: ModelNames.TTS.Variant?) async throws -> TokenCapacities {
+        switch preference {
+        case .fiveSecond?:
+            let short = try await tokenLength(for: .fiveSecond)
+            return TokenCapacities(short: short, long: short)
+        case .fifteenSecond?:
+            let long = try await tokenLength(for: .fifteenSecond)
+            return TokenCapacities(short: long, long: long)
+        case nil:
+            async let short = tokenLength(for: .fiveSecond)
+            async let long = tokenLength(for: .fifteenSecond)
+            return try await TokenCapacities(short: short, long: long)
+        }
     }
 
     private static func selectVariant(
@@ -719,19 +835,12 @@ public struct KokoroSynthesizer {
     ) throws -> ModelNames.TTS.Variant {
         if let preference {
             let capacity = capacities.capacity(for: preference)
-            if tokenCount <= capacity {
-                return preference
-            }
-
-            logger.notice(
-                "Requested \(variantDescription(preference)) variant but token count \(tokenCount) exceeds capacity=\(capacity); falling back to automatic selection"
-            )
-            if preference == .fifteenSecond {
+            guard tokenCount <= capacity else {
                 throw TTSError.processingFailed(
                     "Chunk token count \(tokenCount) exceeds \(variantDescription(preference)) capacity \(capacity)"
                 )
             }
-            // fall through to automatic selection
+            return preference
         }
         let shortCapacity = capacities.short
         let longCapacity = capacities.long
@@ -999,20 +1108,30 @@ public struct KokoroSynthesizer {
 
         logger.info("Starting synthesis: '\(text)'")
         logger.info("Input length: \(text.count) characters")
+        if let variantPreference {
+            logger.info("Variant preference requested: \(variantDescription(variantPreference))")
+        } else {
+            logger.info("Variant preference requested: automatic")
+        }
+        logMemoryCheckpoint("synthesis start")
 
         try await ensureRequiredFiles()
         if !isVoiceEmbeddingPayloadCached(for: voice) {
             try? await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: voice)
         }
 
-        try await loadModel()
+        try await loadModel(variant: variantPreference)
+        logMemoryCheckpoint("loadModel")
 
         try await loadSimplePhonemeDictionary()
+        logMemoryCheckpoint("loadSimplePhonemeDictionary")
 
         try await validateTextHasDictionaryCoverage(text)
 
         let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
-        let capacities = try await tokenCapacities()
+        let capacities = try await tokenCapacities(preference: variantPreference)
+        let lexiconMetrics = await lexiconCache.metrics()
+        logMemoryCheckpoint("tokenCapacities")
 
         let chunks = try await chunkText(
             text,
@@ -1022,6 +1141,7 @@ public struct KokoroSynthesizer {
         guard !chunks.isEmpty else {
             throw TTSError.processingFailed("No valid words found in text")
         }
+        logMemoryCheckpoint("chunkText")
 
         let entries = try buildChunkEntries(
             from: chunks,
@@ -1029,6 +1149,7 @@ public struct KokoroSynthesizer {
             preference: variantPreference,
             capacities: capacities
         )
+        logMemoryCheckpoint("buildChunkEntries")
 
         struct ChunkSynthesisResult: Sendable {
             let index: Int
@@ -1229,6 +1350,7 @@ public struct KokoroSynthesizer {
         }
 
         let audioData = try AudioWAV.data(from: allSamples, sampleRate: 24000)
+        logMemoryCheckpoint("audio assembly")
 
         let chunkInfos = zip(chunkTemplates, chunkSampleBuffers).map { template, samples in
             ChunkInfo(
@@ -1247,7 +1369,24 @@ public struct KokoroSynthesizer {
         Self.logger.notice(
             "Total model prediction time: \(String(format: "%.3f", totalPredictionTime))s for \(entries.count) chunk(s)"
         )
-        return SynthesisResult(audio: audioData, chunks: chunkInfos)
+        let variantsUsed = Set(entries.map { $0.template.variant })
+        var footprints: [ModelNames.TTS.Variant: Int] = [:]
+        for variant in variantsUsed {
+            if let bundleURL = try? modelBundleURL(for: variant) {
+                footprints[variant] = directorySize(at: bundleURL)
+            }
+        }
+
+        let diagnostics = Diagnostics(
+            variantFootprints: footprints,
+            lexiconEntryCount: lexiconMetrics.entryCount,
+            lexiconEstimatedBytes: lexiconMetrics.estimatedBytes,
+            audioSampleBytes: allSamples.count * MemoryLayout<Float>.size,
+            outputWavBytes: audioData.count
+        )
+        logMemoryCheckpoint("diagnostics")
+
+        return SynthesisResult(audio: audioData, chunks: chunkInfos, diagnostics: diagnostics)
     }
 
     // convertSamplesToWAV moved to AudioWAV
