@@ -10,6 +10,20 @@ import FoundationNetworking
 /// Supports both 5s and 15s variants with US English phoneme lexicons
 @available(macOS 13.0, iOS 16.0, *)
 public struct KokoroSynthesizer {
+    public struct TokenCapacities {
+        public let short: Int
+        public let long: Int
+
+        public func capacity(for variant: ModelNames.TTS.Variant) -> Int {
+            switch variant {
+            case .fiveSecond:
+                return short
+            case .fifteenSecond:
+                return long
+            }
+        }
+    }
+
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
     private static let memoryFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -100,20 +114,6 @@ public struct KokoroSynthesizer {
         let chunk: TextChunk
         let inputIds: [Int32]
         let template: ChunkInfoTemplate
-    }
-
-    private struct TokenCapacities: Sendable {
-        let short: Int
-        let long: Int
-
-        func capacity(for variant: ModelNames.TTS.Variant) -> Int {
-            switch variant {
-            case .fiveSecond:
-                return short
-            case .fifteenSecond:
-                return long
-            }
-        }
     }
 
     private struct MultiArrayKey: Hashable {
@@ -216,7 +216,6 @@ public struct KokoroSynthesizer {
             }
         }
     }
-
     // Cached CoreML models per Kokoro variant
     // Legacy: Phoneme dictionary with frame counts (kept for backward compatibility)
     private actor LexiconCache {
@@ -809,7 +808,7 @@ public struct KokoroSynthesizer {
         try await KokoroModelCache.shared.tokenLength(for: variant)
     }
 
-    private static func tokenCapacities(preference: ModelNames.TTS.Variant?) async throws -> TokenCapacities {
+    public static func capacities(for preference: ModelNames.TTS.Variant?) async throws -> TokenCapacities {
         switch preference {
         case .fiveSecond?:
             let short = try await tokenLength(for: .fiveSecond)
@@ -822,6 +821,14 @@ public struct KokoroSynthesizer {
             async let long = tokenLength(for: .fifteenSecond)
             return try await TokenCapacities(short: short, long: long)
         }
+    }
+
+    public static func tokenBudget(for preference: ModelNames.TTS.Variant?) async throws -> Int {
+        let capacities = try await capacities(for: preference)
+        if let variant = preference {
+            return capacities.capacity(for: variant)
+        }
+        return capacities.long
     }
 
     private static func selectVariant(
@@ -1129,7 +1136,7 @@ public struct KokoroSynthesizer {
         try await validateTextHasDictionaryCoverage(text)
 
         let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
-        let capacities = try await tokenCapacities(preference: variantPreference)
+        let capacities = try await capacities(for: variantPreference)
         let lexiconMetrics = await lexiconCache.metrics()
         logMemoryCheckpoint("tokenCapacities")
 

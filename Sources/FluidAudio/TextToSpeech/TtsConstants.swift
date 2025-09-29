@@ -40,6 +40,7 @@ public enum TtsConstants {
     public static let kokoroFrameSamples: Int = 600
     public static let shortVariantGuardThresholdSeconds: Double = 3.0
     public static let shortVariantGuardFrameCount: Int = 4
+    public static let shortSentenceMergeTokenThreshold: Int = 242
 
     /// Model fetch configuration.
     public static let defaultRepository: String = "FluidInference/kokoro-82m-coreml"

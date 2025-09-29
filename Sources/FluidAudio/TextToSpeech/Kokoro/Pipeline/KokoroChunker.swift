@@ -31,18 +31,28 @@ enum KokoroChunker {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
+        let capacity = computeCapacity(targetTokens: targetTokens, hasLanguageToken: hasLanguageToken)
+
         let normalized = collapseNewlines(trimmed)
 
         let (sentences, _) = splitIntoSentences(normalized)
         guard !sentences.isEmpty else { return [] }
 
-        let segmentsByPeriods = applyRefinements(sentences)
-        guard !segmentsByPeriods.isEmpty else {
+        let refinedSentences = applyRefinements(sentences)
+        guard !refinedSentences.isEmpty else {
             logger.info("Kokoro chunker produced no segments after refinement")
             return []
         }
 
-        let capacity = computeCapacity(targetTokens: targetTokens, hasLanguageToken: hasLanguageToken)
+        let mergedSentences = mergeShortSentences(
+            refinedSentences,
+            lexicon: wordToPhonemes,
+            caseSensitiveLexicon: caseSensitiveLexicon,
+            allowed: allowedPhonemes,
+            capacity: capacity
+        )
+
+        let segmentsByPeriods = mergedSentences.isEmpty ? refinedSentences : mergedSentences
 
         for (index, segment) in segmentsByPeriods.enumerated() {
             logger.info("segmentsByPeriods[\(index)]: \(segment)")
@@ -177,6 +187,90 @@ enum KokoroChunker {
             let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
+    }
+
+    private static func mergeShortSentences(
+        _ sentences: [String],
+        lexicon: [String: [String]],
+        caseSensitiveLexicon: [String: [String]],
+        allowed: Set<String>,
+        capacity: Int
+    ) -> [String] {
+        guard !sentences.isEmpty else { return [] }
+
+        let threshold = max(1, min(capacity, TtsConstants.shortSentenceMergeTokenThreshold))
+        var merged: [String] = []
+        var buffer: String = ""
+        var bufferTokens = 0
+        var didMerge = false
+
+        func flushBuffer() {
+            let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                merged.append(trimmed)
+            }
+            buffer.removeAll(keepingCapacity: false)
+            bufferTokens = 0
+        }
+
+        for sentence in sentences {
+            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            let sentenceTokens = tokenCountForSegment(
+                for: trimmed,
+                lexicon: lexicon,
+                caseSensitiveLexicon: caseSensitiveLexicon,
+                allowed: allowed,
+                capacity: capacity
+            )
+
+            if sentenceTokens > threshold {
+                flushBuffer()
+                merged.append(trimmed)
+                continue
+            }
+
+            if buffer.isEmpty {
+                buffer = trimmed
+                bufferTokens = sentenceTokens
+                continue
+            }
+
+            if bufferTokens > threshold {
+                flushBuffer()
+                buffer = trimmed
+                bufferTokens = sentenceTokens
+                continue
+            }
+
+            let candidate = appendSegment(buffer, with: trimmed)
+            let candidateTokens = tokenCountForSegment(
+                for: candidate,
+                lexicon: lexicon,
+                caseSensitiveLexicon: caseSensitiveLexicon,
+                allowed: allowed,
+                capacity: capacity
+            )
+
+            if candidateTokens <= threshold {
+                buffer = candidate
+                bufferTokens = candidateTokens
+                didMerge = true
+            } else {
+                flushBuffer()
+                buffer = trimmed
+                bufferTokens = sentenceTokens
+            }
+        }
+
+        flushBuffer()
+
+        if didMerge {
+            logger.debug("Merged short sentences into \(merged.count) segments (threshold=\(threshold) tokens)")
+        }
+
+        return merged
     }
 
     // MARK: - Chunk Construction
