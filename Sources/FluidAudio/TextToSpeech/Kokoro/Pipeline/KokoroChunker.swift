@@ -4,6 +4,9 @@ import Foundation
 import NaturalLanguage
 #endif
 
+/// Text chunking system for Kokoro TTS that segments input text into optimal chunks based on token capacity limits.
+/// Handles sentence splitting, phoneme resolution, and ensures each chunk fits within the model's processing constraints.
+
 /// Lightweight chunk representation passed into Kokoro synthesis.
 struct TextChunk: Sendable {
     let words: [String]
