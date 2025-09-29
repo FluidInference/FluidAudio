@@ -11,7 +11,7 @@ import OSLog
 /// - Creates a new converter for each operation (stateless).
 @available(macOS 13.0, iOS 16.0, *)
 final public class AudioConverter {
-    private let logger = AppLogger(subsystem: "com.fluidaudio.audio", category: "AudioConverter")
+    private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
 
     /// Public initializer so external modules (e.g. CLI) can construct the converter

@@ -457,8 +457,10 @@ public struct KokoroSynthesizer {
         let norm = sqrt(Double(sumSquares))
 
         let formattedNorm = String(format: "%.3f", norm)
-        if wasCached {
-            Self.logger.debug("Reusing cached voice embedding: \(voiceUsed), dim=\(expectedDimension), l2norm=\(formattedNorm)")
+        let payloadCached = isVoiceEmbeddingPayloadCached(for: voiceUsed)
+        if wasCached || payloadCached {
+            Self.logger.debug(
+                "Reusing cached voice embedding: \(voiceUsed), dim=\(expectedDimension), l2norm=\(formattedNorm)")
         } else {
             Self.logger.info("Loaded voice embedding: \(voiceUsed), dim=\(expectedDimension), l2norm=\(formattedNorm)")
         }
@@ -685,7 +687,7 @@ public struct KokoroSynthesizer {
         if !oov.isEmpty && EspeakG2P.isDataAvailable() == false {
             let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
             throw TTSError.processingFailed(
-                "G2P (eSpeak NG) data missing but required for OOV words: \(sample). Ensure the eSpeak NG data bundle is available in the models cache (use DownloadUtils.ensureEspeakDataBundle)."
+                "G2P (eSpeak NG) data missing but required for OOV words: \(sample). Ensure the eSpeak NG data bundle is available in the models cache (use TtsResourceDownloader.ensureEspeakDataBundle)."
             )
         }
         #else
@@ -1124,7 +1126,7 @@ public struct KokoroSynthesizer {
 
         try await ensureRequiredFiles()
         if !isVoiceEmbeddingPayloadCached(for: voice) {
-            try? await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: voice)
+            try? await TtsResourceDownloader.ensureVoiceEmbedding(voice: voice)
         }
 
         try await loadModel(variant: variantPreference)
@@ -1255,7 +1257,8 @@ public struct KokoroSynthesizer {
             Self.logger.info(
                 "Chunk \(index + 1) model prediction latency: \(String(format: "%.3f", output.predictionTime))s")
             let chunkDurationSeconds = Double(chunkSamples.count) / Double(TtsConstants.audioSampleRate)
-            let chunkFrameCount = TtsConstants.kokoroFrameSamples > 0
+            let chunkFrameCount =
+                TtsConstants.kokoroFrameSamples > 0
                 ? chunkSamples.count / TtsConstants.kokoroFrameSamples
                 : 0
             Self.logger.info(

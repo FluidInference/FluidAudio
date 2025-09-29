@@ -1,9 +1,9 @@
 import Foundation
 
-/// Downloads voice embeddings from HuggingFace
-public enum VoiceEmbeddingDownloader {
+/// Kokoro TTS resource downloader (voice embeddings, eSpeak data)
+public enum TtsResourceDownloader {
 
-    private static let logger = AppLogger(category: "VoiceEmbeddingDownloader")
+    private static let logger = AppLogger(category: "TtsResourceDownloader")
 
     /// Download a voice embedding JSON file from HuggingFace
     public static func downloadVoiceEmbedding(voice: String) async throws -> Data {
@@ -87,5 +87,60 @@ public enum VoiceEmbeddingDownloader {
         let data = try await downloadVoiceEmbedding(voice: voice)
         try data.write(to: jsonURL)
         logger.info("Voice embedding cached: \(voice)")
+    }
+
+    /// Ensure the eSpeak NG data bundle is available locally for Kokoro G2P
+    @available(macOS 13.0, iOS 16.0, *)
+    public static func ensureEspeakDataBundle(in modelsDirectory: URL) async throws -> URL {
+        let repo = Repo.kokoro
+        let repoPath = modelsDirectory.appendingPathComponent(repo.folderName)
+        let bundleRoot = repoPath.appendingPathComponent(
+            "Resources/espeak-ng/espeak-ng-data.bundle/espeak-ng-data"
+        )
+        let voices = bundleRoot.appendingPathComponent("voices")
+
+        if FileManager.default.fileExists(atPath: voices.path) {
+            return bundleRoot
+        }
+
+        try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
+
+        logger.info("Downloading eSpeak NG data bundle from HuggingFace…")
+
+        let zipPath = repoPath.appendingPathComponent("espeak-ng.zip")
+        let zipURL = URL(string: "https://huggingface.co/\(repo.remotePath)/resolve/main/espeak-ng.zip")!
+
+        if !FileManager.default.fileExists(atPath: zipPath.path) {
+            try FileManager.default.createDirectory(
+                at: zipPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+            let (tempURL, _) = try await DownloadUtils.sharedSession.download(from: zipURL)
+            try FileManager.default.moveItem(at: tempURL, to: zipPath)
+            logger.info("Downloaded espeak-ng-data.zip")
+        }
+
+        #if os(macOS)
+        let resourcesDir = repoPath.appendingPathComponent("Resources")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-o", zipPath.path, "-d", resourcesDir.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus == 0 {
+            logger.info("Extracted espeak-ng-data successfully")
+        }
+        #else
+        logger.warning(
+            "Skipping espeak-ng.zip extraction on this platform; expecting pre-extracted Resources bundle"
+        )
+        #endif
+
+        guard FileManager.default.fileExists(atPath: voices.path) else {
+            throw TTSError.downloadFailed("eSpeak NG data bundle missing 'voices' after extraction")
+        }
+        return bundleRoot
     }
 }

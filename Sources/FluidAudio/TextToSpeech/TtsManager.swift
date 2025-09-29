@@ -91,7 +91,7 @@ public final class TtSManager {
         let selectedVoice = resolveVoice(voice, speakerId: speakerId)
 
         try await LexiconAssetManager.ensureCoreAssets()
-        try await VoiceEmbeddingDownloader.ensureVoiceEmbedding(voice: selectedVoice)
+        try await TtsResourceDownloader.ensureVoiceEmbedding(voice: selectedVoice)
 
         let synthesis = try await KokoroSynthesizer.synthesizeDetailed(
             text: cleanedText,

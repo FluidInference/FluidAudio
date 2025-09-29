@@ -128,12 +128,6 @@ Task {
     case "transcribe":
         await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":
-        if #available(macOS 13.0, *) {
-            await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            cliLogger.error("Multi-stream requires macOS 13.0 or later")
-            exitWithPeakMemory(1)
-        }
         await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 
     case "tts":

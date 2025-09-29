@@ -49,7 +49,7 @@ actor LexiconAssetManager {
         let cacheDir = try? TtsModels.cacheDirectoryURL()
         guard let cacheDir else { return }
         let modelsDirectory = cacheDir.appendingPathComponent("Models")
-        _ = try? await DownloadUtils.ensureEspeakDataBundle(in: modelsDirectory)
+        _ = try? await TtsResourceDownloader.ensureEspeakDataBundle(in: modelsDirectory)
     }
 
     func ensureCoreAssets() async throws {

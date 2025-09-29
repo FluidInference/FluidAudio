@@ -105,7 +105,8 @@ actor KokoroModelCache {
         }
 
         if referenceDimension == nil {
-            let defaultModel = models.model(for: ModelNames.TTS.defaultVariant)
+            let defaultModel =
+                models.model(for: ModelNames.TTS.defaultVariant)
                 ?? kokoroModels[ModelNames.TTS.defaultVariant]
                 ?? kokoroModels.values.first
             if let defaultModel {
