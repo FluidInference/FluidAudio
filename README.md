@@ -248,6 +248,10 @@ Task {
         )
 
         state = result.state
+
+        // Access raw probability (0.0-1.0) for custom logic
+        print(String(format: "Probability: %.3f", result.probability))
+
         if let event = result.event {
             let label = event.kind == .speechStart ? "Start" : "End"
             print("\(label) @ \(event.time ?? 0)s")
