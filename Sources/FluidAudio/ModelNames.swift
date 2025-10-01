@@ -110,7 +110,7 @@ public enum ModelNames {
                 case .fiveSecond:
                     return "kokoro_21_5s.mlmodelc"
                 case .fifteenSecond:
-                    return "kokoro_21_5s.mlmodelc"
+                    return "kokoro_21_15s.mlmodelc"
                 }
             }
 
