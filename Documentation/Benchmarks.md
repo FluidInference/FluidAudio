@@ -142,21 +142,22 @@ Total  -        461.650      24.874       18.559x    3.37
 ```text
 Build of product 'fluidaudio' complete! (16.37s)
 
-TTS benchmark for voice af_heart (warm-up took an extra 6.831s)
-Test   Chars    Ouput (s)    Inf(s)       RTFx
-1      42       2.825        0.215        13.159x
-2      129      7.750        0.380        20.389x
-3      254      13.925       0.697        19.985x
-4      93       5.875        0.382        15.362x
-5      104      6.825        0.386        17.690x
-6      130      8.350        0.386        21.616x
-7      197      10.925       0.398        27.463x
-8      6        0.850        0.133        6.396x
-9      1228     69.525       2.436        28.541x
-10     567      33.825       1.159        29.187x
-Total  -        160.675      6.572        24.450
+FluidAudio TTS benchmark for voice af_heart (warm-up took an extra 7.173s) using model prince-canuma/Kokoro-82M
+Test   Chars    Output (s)   Inf(s)       RTFx       Peak GB
+1      42       2.750        0.411        6.684x     1.01
+2      129      8.650        0.921        9.397x     1.97
+3      254      15.525       1.784        8.705x     2.39
+4      93       6.125        0.824        7.433x     2.39
+5      104      7.200        0.825        8.723x     2.39
+6      130      9.300        0.952        9.764x     2.39
+7      197      12.850       1.288        9.980x     2.39
+8      6        1.350        0.233        5.792x     2.39
+9      1228     76.200       7.376        10.331x    2.98
+10     567      35.200       3.579        9.836x     3.16
+11     4615     286.500      27.551       10.399x    3.16
+Total  -        461.650      45.744       10.092x    3.16
 
-[16:28:17.323] [INFO] [Main] Peak memory usage: 1.747 GB
+Peak memory usage (process-wide): 3.16 GB
 ```
 
 ## Voice Activity Detection
