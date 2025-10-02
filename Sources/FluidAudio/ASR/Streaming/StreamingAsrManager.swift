@@ -170,7 +170,8 @@ public actor StreamingAsrManager {
         let minimumProcessingTime: TimeInterval = 1e-6
 
         let maxTimestampFrame = accumulatedTokenTimestamps.max() ?? 0
-        let derivedSampleCount = maxTimestampFrame > 0
+        let derivedSampleCount =
+            maxTimestampFrame > 0
             ? (maxTimestampFrame + 1) * ASRConstants.samplesPerEncoderFrame : 0
         let finalSampleCount = max(totalSamplesProcessed, derivedSampleCount)
         let finalProcessingTime = finalSampleCount > 0 ? max(elapsedTime, minimumProcessingTime) : elapsedTime
