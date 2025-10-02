@@ -111,7 +111,8 @@ extension KokoroSynthesizer {
         var (vector, sourceURL, wasCached) = try resolveVector(for: voiceUsed)
 
         if vector == nil && voice != TtsConstants.recommendedVoice {
-            Self.logger.warning("Voice embedding for \(voice) not found; falling back to \(TtsConstants.recommendedVoice)")
+            Self.logger.warning(
+                "Voice embedding for \(voice) not found; falling back to \(TtsConstants.recommendedVoice)")
             voiceUsed = TtsConstants.recommendedVoice
             attemptedVoices.append(TtsConstants.recommendedVoice)
             (vector, sourceURL, wasCached) = try resolveVector(for: voiceUsed)
@@ -243,7 +244,9 @@ extension KokoroSynthesizer {
         return cache
     }
 
-    public static func loadVoiceEmbedding(voice: String = TtsConstants.recommendedVoice, phonemeCount: Int) async throws -> MLMultiArray {
+    public static func loadVoiceEmbedding(
+        voice: String = TtsConstants.recommendedVoice, phonemeCount: Int
+    ) async throws -> MLMultiArray {
         let cache = try currentModelCache()
         let expectedDimension = try await cache.referenceEmbeddingDimension()
         let data = try fetchVoiceEmbeddingData(

@@ -3,16 +3,17 @@
 FluidAudio bundles the eSpeak-NG phoneme resources so Kokoro can fall back to G2P lookups when the US lexicons don’t contain a word. The Core ML pipeline expects the resources under `Resources/espeak-ng/espeak-ng-data.bundle` with the canonical `voices/` directory inside.
 
 ## macOS (and desktop) builds
-- The `DownloadUtils.ensureEspeakDataBundle` helper downloads `espeak-ng.zip` from HuggingFace the first time it’s needed.
-- On macOS the archive is extracted with `/usr/bin/unzip` into `~/.cache/fluidaudio/Models/kokoro/Resources/`.
+- `TtsResourceDownloader.ensureEspeakDataBundle` first stages the packaged `espeak-ng-data.bundle` directly from the SwiftPM resources.
+- If the packaged copy is removed, macOS falls back to downloading `espeak-ng.zip` and extracts it with `/usr/bin/unzip` into `~/.cache/fluidaudio/Models/kokoro/Resources/`.
 - The `voices/` directory is validated after extraction; if it’s missing we raise `TTSError.downloadFailed`.
 
 ## iOS / tvOS / watchOS
-- The eSpeak bundle must be pre-packaged in the app or the models cache; the GitHub iOS simulator runner cannot invoke `/usr/bin/unzip`.
-- `ensureEspeakDataBundle` skips extraction on these platforms and logs a warning if the bundle is missing.
+- The Swift package now looks for a pre-packaged `espeak-ng-data.bundle` under `Sources/FluidAudio/Resources/espeak-ng/` and stages it into the cache on first use.
+- If the bundle is missing, we surface `TTSError.downloadFailed`; iOS builds no longer attempt to shell out or download the ZIP on-device.
+- Seed the packaged bundle (or pre-populate the on-device cache) before running TTS on these platforms.
 
 ## Best practices
-- Keep the `espeak-ng.zip` artifact in sync with any updates to the Kokoro phoneme mapper.
+- Keep the `espeak-ng-data.bundle` (packaged copy) and the optional `espeak-ng.zip` fallback in sync with any updates to the Kokoro phoneme mapper.
 - If you customize the cache location, be sure the `Resources/espeak-ng/espeak-ng-data.bundle/voices/` directory is present before running TTS.
 - When testing on iOS, bundle the extracted resources with the app or seed the simulator cache in advance to avoid runtime failures.
 

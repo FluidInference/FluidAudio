@@ -203,7 +203,8 @@ public enum TtsResourceDownloader {
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            throw TTSError.downloadFailed("Failed to extract eSpeak NG data bundle via unzip (status=\(process.terminationStatus))")
+            throw TTSError.downloadFailed(
+                "Failed to extract eSpeak NG data bundle via unzip (status=\(process.terminationStatus))")
         }
         logger.info("Extracted espeak-ng-data successfully")
         #else
