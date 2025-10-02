@@ -162,9 +162,9 @@ final class StreamingAsrManagerTests: XCTestCase {
         // Test with token timings
         let tokenTimings = [
             TokenTiming(token: "hello", tokenId: 1, startTime: 0.0, endTime: 0.5, confidence: 0.9),
-            TokenTiming(token: "world", tokenId: 2, startTime: 0.5, endTime: 1.0, confidence: 0.95)
+            TokenTiming(token: "world", tokenId: 2, startTime: 0.5, endTime: 1.0, confidence: 0.95),
         ]
-        
+
         let updateWithTimings = StreamingTranscriptionUpdate(
             text: "hello world",
             isConfirmed: true,
@@ -172,7 +172,7 @@ final class StreamingAsrManagerTests: XCTestCase {
             tokenTimings: tokenTimings,
             timestamp: Date()
         )
-        
+
         XCTAssertEqual(updateWithTimings.text, "hello world")
         XCTAssertTrue(updateWithTimings.isConfirmed)
         XCTAssertEqual(updateWithTimings.confidence, 0.92)
