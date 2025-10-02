@@ -182,6 +182,62 @@ final class StreamingAsrManagerTests: XCTestCase {
         XCTAssertEqual(updateWithTimings.tokenTimings?[1].token, "world")
     }
 
+    func testFinishIncludesTokenTimingsWhenMetadataPresent() async throws {
+        let manager = StreamingAsrManager()
+        let testAsrManager = AsrManager()
+        #if DEBUG
+        testAsrManager.setVocabularyForTesting([
+            1: "▁hello",
+            2: "▁world",
+        ])
+        #endif
+
+        await manager.setAsrManagerForTesting(testAsrManager)
+        await manager.accumulateTokenMetadata(
+            tokens: [1, 2],
+            timestamps: [10, 25],
+            confidences: [0.9, 0.8]
+        )
+
+        let result = try await manager.finish()
+
+        guard let tokenTimings = result.tokenTimings else {
+            return XCTFail("Expected token timings in final result")
+        }
+
+        XCTAssertEqual(tokenTimings.count, 2)
+        XCTAssertEqual(tokenTimings[0].tokenId, 1)
+        XCTAssertEqual(tokenTimings[1].tokenId, 2)
+        XCTAssertEqual(tokenTimings[0].startTime, 0.8, accuracy: 1e-6)
+        XCTAssertEqual(tokenTimings[1].startTime, 2.0, accuracy: 1e-6)
+        XCTAssertEqual(Double(tokenTimings[0].confidence), 0.9, accuracy: 1e-6)
+        XCTAssertEqual(Double(tokenTimings[1].confidence), 0.8, accuracy: 1e-6)
+        XCTAssertEqual(result.text, "hello world")
+    }
+
+    func testFinishOmitsTimingsWhenMetadataMismatchOccurs() async throws {
+        let manager = StreamingAsrManager()
+        let testAsrManager = AsrManager()
+        #if DEBUG
+        testAsrManager.setVocabularyForTesting([
+            1: "▁hello",
+            2: "▁world",
+        ])
+        #endif
+
+        await manager.setAsrManagerForTesting(testAsrManager)
+        await manager.accumulateTokenMetadata(
+            tokens: [1, 2],
+            timestamps: [10],
+            confidences: [0.9]
+        )
+
+        let result = try await manager.finish()
+
+        XCTAssertTrue(result.tokenTimings?.isEmpty ?? true)
+        XCTAssertEqual(result.text, "hello world")
+    }
+
     // MARK: - Audio Source Tests
 
     func testAudioSourceConfiguration() async throws {

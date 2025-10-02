@@ -26,6 +26,8 @@ public actor StreamingAsrManager {
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
     private var accumulatedTokens: [Int] = []
+    private var accumulatedTokenTimestamps: [Int] = []
+    private var accumulatedTokenConfidences: [Float] = []
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -92,7 +94,7 @@ public actor StreamingAsrManager {
         // Reset sliding window state
         segmentIndex = 0
         lastProcessedFrame = 0
-        accumulatedTokens.removeAll()
+        resetAccumulatedMetadata()
 
         startTime = Date()
 
@@ -164,10 +166,34 @@ public actor StreamingAsrManager {
         // Convert final accumulated tokens to ASRResult (proper way to avoid duplicates)
         let finalResult: ASRResult
         if let asrManager = asrManager, !accumulatedTokens.isEmpty {
+            let timestamps: [Int]
+            if accumulatedTokenTimestamps.count == accumulatedTokens.count {
+                timestamps = accumulatedTokenTimestamps
+            } else {
+                if !accumulatedTokenTimestamps.isEmpty {
+                    logger.warning(
+                        "Final token timestamp count (\(accumulatedTokenTimestamps.count)) does not match token count (\(accumulatedTokens.count)); omitting token timings"
+                    )
+                }
+                timestamps = []
+            }
+
+            let confidences: [Float]
+            if accumulatedTokenConfidences.count == accumulatedTokens.count {
+                confidences = accumulatedTokenConfidences
+            } else {
+                if !accumulatedTokenConfidences.isEmpty {
+                    logger.warning(
+                        "Final token confidence count (\(accumulatedTokenConfidences.count)) does not match token count (\(accumulatedTokens.count)); omitting confidence data"
+                    )
+                }
+                confidences = []
+            }
+
             finalResult = asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
-                timestamps: [],
-                confidences: [],  // No per-token confidences needed for final text
+                timestamps: timestamps,
+                confidences: confidences,
                 encoderSequenceLength: 0,
                 audioSamples: [],  // Not needed for final text conversion
                 processingTime: 0
@@ -206,7 +232,7 @@ public actor StreamingAsrManager {
         // Reset sliding window state
         segmentIndex = 0
         lastProcessedFrame = 0
-        accumulatedTokens.removeAll()
+        resetAccumulatedMetadata()
 
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -223,6 +249,34 @@ public actor StreamingAsrManager {
     /// Clear the update continuation
     private func clearUpdateContinuation() {
         updateContinuation = nil
+    }
+
+    private func resetAccumulatedMetadata() {
+        accumulatedTokens.removeAll()
+        accumulatedTokenTimestamps.removeAll()
+        accumulatedTokenConfidences.removeAll()
+    }
+
+    func accumulateTokenMetadata(tokens: [Int], timestamps: [Int], confidences: [Float]) {
+        guard !tokens.isEmpty else { return }
+
+        accumulatedTokens.append(contentsOf: tokens)
+
+        if timestamps.count == tokens.count {
+            accumulatedTokenTimestamps.append(contentsOf: timestamps)
+        } else if !timestamps.isEmpty {
+            logger.warning(
+                "Token timestamp count (\(timestamps.count)) does not match token count (\(tokens.count))"
+            )
+        }
+
+        if confidences.count == tokens.count {
+            accumulatedTokenConfidences.append(contentsOf: confidences)
+        } else if !confidences.isEmpty {
+            logger.warning(
+                "Token confidence count (\(confidences.count)) does not match token count (\(tokens.count))"
+            )
+        }
     }
 
     // MARK: - Private Methods
@@ -321,7 +375,7 @@ public actor StreamingAsrManager {
             )
 
             // Update state
-            accumulatedTokens.append(contentsOf: tokens)
+            accumulateTokenMetadata(tokens: tokens, timestamps: timestamps, confidences: confidences)
             lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? 0)
             segmentIndex += 1
 
@@ -464,6 +518,14 @@ public actor StreamingAsrManager {
         }
     }
 }
+
+#if DEBUG
+extension StreamingAsrManager {
+    internal func setAsrManagerForTesting(_ manager: AsrManager?) {
+        asrManager = manager
+    }
+}
+#endif
 
 /// Configuration for StreamingAsrManager
 @available(macOS 13.0, iOS 16.0, *)
