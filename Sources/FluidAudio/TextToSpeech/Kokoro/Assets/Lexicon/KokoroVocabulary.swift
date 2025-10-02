@@ -85,24 +85,17 @@ public actor KokoroVocabulary {
             throw TTSError.downloadFailed("Invalid Kokoro vocabulary URL: \(baseURL)/\(fileName)")
         }
 
-        let (data, response): (Data, URLResponse)
+        let descriptor = AssetDownloader.Descriptor(
+            description: fileName,
+            remoteURL: remoteURL,
+            destinationURL: localPath
+        )
+
         do {
-            (data, response) = try await DownloadUtils.sharedSession.data(from: remoteURL)
+            _ = try await AssetDownloader.ensure(descriptor, logger: logger)
         } catch {
             logger.error("Failed to download vocabulary: \(error.localizedDescription)")
-            throw TTSError.downloadFailed("Failed to download Kokoro vocabulary: \(error.localizedDescription)")
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw TTSError.downloadFailed("Unexpected response downloading Kokoro vocabulary")
-        }
-
-        do {
-            try data.write(to: localPath)
-            logger.info("Downloaded \(fileName) to cache")
-        } catch {
-            logger.error("Failed to save vocabulary to disk: \(error.localizedDescription)")
-            throw TTSError.processingFailed("Failed to persist Kokoro vocabulary: \(error.localizedDescription)")
+            throw TTSError.downloadFailed("Failed to obtain Kokoro vocabulary: \(error.localizedDescription)")
         }
     }
 }

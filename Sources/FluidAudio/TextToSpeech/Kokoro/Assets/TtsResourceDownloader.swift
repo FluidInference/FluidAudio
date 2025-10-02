@@ -13,17 +13,14 @@ public enum TtsResourceDownloader {
 
         if let url = URL(string: jsonURL) {
             do {
-                // Use DownloadUtils.sharedSession for consistent proxy and configuration handling
-                let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
-
-                if let httpResponse = response as? HTTPURLResponse,
-                    httpResponse.statusCode == 200
-                {
-                    logger.info("Downloaded voice embedding JSON for \(voice)")
-                    return data
-                }
+                let data = try await AssetDownloader.fetchData(
+                    from: url,
+                    description: "\(voice) voice embedding JSON",
+                    logger: logger
+                )
+                logger.info("Downloaded voice embedding JSON for \(voice)")
+                return data
             } catch {
-                // JSON not available, try to download .pt file
                 logger.warning("Could not download \(voice).json: \(error.localizedDescription)")
             }
         }
@@ -34,26 +31,24 @@ public enum TtsResourceDownloader {
         let ptURL = "\(kokoroBaseURL)/voices/\(voice).pt"
         if let url = URL(string: ptURL) {
             do {
-                // Use DownloadUtils.sharedSession for consistent proxy and configuration handling
-                let (ptData, response) = try await DownloadUtils.sharedSession.data(from: url)
+                let ptData = try await AssetDownloader.fetchData(
+                    from: url,
+                    description: "\(voice) voice embedding (.pt)",
+                    logger: logger
+                )
 
-                if let httpResponse = response as? HTTPURLResponse,
-                    httpResponse.statusCode == 200
-                {
-                    // Save .pt file to cache
-                    let cacheDir = try TtsModels.cacheDirectoryURL()
-                    let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
-                    try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)
+                let cacheDir = try TtsModels.cacheDirectoryURL()
+                let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
+                try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)
 
-                    let ptFileURL = voicesDir.appendingPathComponent("\(voice).pt")
-                    try ptData.write(to: ptFileURL)
-                    downloadedPtPath = ptFileURL.path
-                    logger.info(
-                        "Downloaded voice embedding .pt file for \(voice) (\(ptData.count) bytes)")
-                    logger.notice(
-                        "Run 'python3 extract_voice_embeddings.py' to convert \(voice).pt to JSON format"
-                    )
-                }
+                let ptFileURL = voicesDir.appendingPathComponent("\(voice).pt")
+                try ptData.write(to: ptFileURL, options: [.atomic])
+                downloadedPtPath = ptFileURL.path
+                logger.info(
+                    "Downloaded voice embedding .pt file for \(voice) (\(ptData.count) bytes)")
+                logger.notice(
+                    "Run 'python3 extract_voice_embeddings.py' to convert \(voice).pt to JSON format"
+                )
             } catch {
                 logger.warning("Could not download \(voice).pt: \(error.localizedDescription)")
             }
@@ -86,7 +81,7 @@ public enum TtsResourceDownloader {
 
         // Try to download
         let data = try await downloadVoiceEmbedding(voice: voice)
-        try data.write(to: jsonURL)
+        try data.write(to: jsonURL, options: [.atomic])
         logger.info("Voice embedding cached: \(voice)")
     }
 
@@ -106,15 +101,19 @@ public enum TtsResourceDownloader {
             throw TTSError.modelNotFound("Invalid URL for \(filename)")
         }
 
-        logger.info("Downloading \(filename)…")
-        let (data, response) = try await DownloadUtils.sharedSession.data(from: remoteURL)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw TTSError.modelNotFound("Failed to download \(filename)")
+        do {
+            let descriptor = AssetDownloader.Descriptor(
+                description: filename,
+                remoteURL: remoteURL,
+                destinationURL: localURL
+            )
+            return try await AssetDownloader.ensure(
+                descriptor,
+                logger: logger
+            )
+        } catch {
+            throw TTSError.modelNotFound("Failed to download \(filename): \(error.localizedDescription)")
         }
-
-        try data.write(to: localURL)
-        logger.info("Downloaded \(filename) (\(data.count) bytes)")
-        return localURL
     }
 
     /// Ensure the eSpeak NG data bundle is available locally for Kokoro G2P
@@ -139,12 +138,13 @@ public enum TtsResourceDownloader {
         let zipURL = URL(string: "https://huggingface.co/\(repo.remotePath)/resolve/main/espeak-ng.zip")!
 
         if !FileManager.default.fileExists(atPath: zipPath.path) {
-            try FileManager.default.createDirectory(
-                at: zipPath.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-            let (tempURL, _) = try await DownloadUtils.sharedSession.download(from: zipURL)
-            try FileManager.default.moveItem(at: tempURL, to: zipPath)
-            logger.info("Downloaded espeak-ng-data.zip")
+            let descriptor = AssetDownloader.Descriptor(
+                description: "espeak-ng.zip",
+                remoteURL: zipURL,
+                destinationURL: zipPath,
+                transferMode: .file()
+            )
+            _ = try await AssetDownloader.ensure(descriptor, logger: logger)
         }
 
         #if os(macOS)

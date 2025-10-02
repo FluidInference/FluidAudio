@@ -59,18 +59,6 @@ enum KokoroChunker {
 
         let segmentsByPeriods = mergedSentences.isEmpty ? refinedSentences : mergedSentences
 
-        for (index, segment) in segmentsByPeriods.enumerated() {
-            logger.info("segmentsByPeriods[\(index)]: \(segment)")
-            let tokenCount = tokenCountForSegment(
-                for: segment,
-                lexicon: wordToPhonemes,
-                caseSensitiveLexicon: caseSensitiveLexicon,
-                allowed: allowedPhonemes,
-                capacity: capacity
-            )
-            logger.debug("segmentsByPeriods[\(index)] tokenCount=\(tokenCount) capacity=\(capacity)")
-        }
-
         var segmentsByPunctuations: [String] = []
         segmentsByPunctuations.reserveCapacity(segmentsByPeriods.count)
 
@@ -93,17 +81,6 @@ enum KokoroChunker {
                     capacity: capacity
                 )
                 if !reassembled.isEmpty {
-                    logger.debug(
-                        "Segment exceeded capacity; punctuation split yielded \(reassembled.count) subsegments"
-                    )
-                    logger.info(
-                        "segmentsByPeriodsSplit[\(periodIndex)]: original='\(segment)'"
-                    )
-                    for (fragmentIndex, part) in reassembled.enumerated() {
-                        logger.info(
-                            "segmentsByPeriodsSplit[\(periodIndex)].part[\(fragmentIndex)]: \(part)"
-                        )
-                    }
                     segmentsByPunctuations.append(contentsOf: reassembled)
                     continue
                 }

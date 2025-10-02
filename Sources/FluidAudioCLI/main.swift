@@ -1,4 +1,3 @@
-#if os(macOS)
 import AVFoundation
 import FluidAudio
 import Foundation
@@ -156,6 +155,3 @@ Task {
 
 // Wait for async task to complete
 semaphore.wait()
-#else
-#error("FluidAudioCLI is only supported on macOS")
-#endif

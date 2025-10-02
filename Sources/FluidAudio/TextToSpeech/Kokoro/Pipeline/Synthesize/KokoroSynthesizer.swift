@@ -212,6 +212,8 @@ public struct KokoroSynthesizer {
             )
         }
 
+        // Kokoro 5s CoreML export fixes the input_ids window at 71 tokens (shape [1, 71]) so clamp the
+        // threshold to that empirically verified limit even if model metadata reports a larger capacity.
         let shortThreshold = min(71, shortCapacity)
         if tokenCount <= shortThreshold {
             return .fiveSecond
