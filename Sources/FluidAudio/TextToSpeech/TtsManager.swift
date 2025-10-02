@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-@available(macOS 13.0, *)
+@available(macOS 13.0, iOS 16.0, *)
 public final class TtSManager {
 
     private let logger = AppLogger(category: "TtSManager")
