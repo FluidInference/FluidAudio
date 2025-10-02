@@ -10,14 +10,50 @@ import FoundationNetworking
 /// Supports both 5s and 15s variants with US English phoneme lexicons
 @available(macOS 13.0, iOS 16.0, *)
 public struct KokoroSynthesizer {
-    static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroSynthesizer")
-    static var modelCache = KokoroModelCache()
+    static let logger = AppLogger(category: "KokoroSynthesizer")
 
     static let lexiconCache = LexiconCache()
     static let multiArrayPool = MultiArrayPool()
 
-    public static func configure(modelCache: KokoroModelCache) {
-        Self.modelCache = modelCache
+    private enum Context {
+        @TaskLocal static var modelCache: KokoroModelCache?
+        @TaskLocal static var lexiconAssets: LexiconAssetManager?
+    }
+
+    static func withModelCache<T>(
+        _ cache: KokoroModelCache,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        try await Context.$modelCache.withValue(cache) {
+            try await operation()
+        }
+    }
+
+    static func withLexiconAssets<T>(
+        _ assets: LexiconAssetManager,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        try await Context.$lexiconAssets.withValue(assets) {
+            try await operation()
+        }
+    }
+
+    static func currentModelCache() throws -> KokoroModelCache {
+        guard let cache = Context.modelCache else {
+            throw TTSError.processingFailed(
+                "KokoroSynthesizer requires a model cache context. Use TtSManager or withModelCache(_:operation:)."
+            )
+        }
+        return cache
+    }
+
+    static func currentLexiconAssets() throws -> LexiconAssetManager {
+        guard let assets = Context.lexiconAssets else {
+            throw TTSError.processingFailed(
+                "KokoroSynthesizer requires lexicon assets context. Use TtSManager or withLexiconAssets(_:operation:)."
+            )
+        }
+        return assets
     }
 
     static var voiceEmbeddingPayloads: [String: VoiceEmbeddingPayload] = [:]
@@ -127,7 +163,8 @@ public struct KokoroSynthesizer {
 
     /// Inspect model to determine the expected token length for input_ids
     private static func tokenLength(for variant: ModelNames.TTS.Variant) async throws -> Int {
-        try await modelCache.tokenLength(for: variant)
+        let cache = try currentModelCache()
+        return try await cache.tokenLength(for: variant)
     }
 
     public static func capacities(for preference: ModelNames.TTS.Variant?) async throws -> TokenCapacities {
@@ -360,7 +397,7 @@ public struct KokoroSynthesizer {
     /// Main synthesis function returning audio bytes only.
     public static func synthesize(
         text: String,
-        voice: String = "af_heart",
+        voice: String = TtsConstants.recommendedVoice,
         voiceSpeed: Float = 1.0,
         variantPreference: ModelNames.TTS.Variant? = nil
     ) async throws -> Data {
@@ -379,7 +416,7 @@ public struct KokoroSynthesizer {
     /// Synthesize audio while returning per-chunk metadata used during inference.
     public static func synthesizeDetailed(
         text: String,
-        voice: String = "af_heart",
+        voice: String = TtsConstants.recommendedVoice,
         voiceSpeed: Float = 1.0,
         variantPreference: ModelNames.TTS.Variant? = nil
     ) async throws -> SynthesisResult {
@@ -403,6 +440,7 @@ public struct KokoroSynthesizer {
 
         try await validateTextHasDictionaryCoverage(text)
 
+        let modelCache = try currentModelCache()
         let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
         let capacities = try await capacities(for: variantPreference)
         let lexiconMetrics = await lexiconCache.metrics()
@@ -511,6 +549,7 @@ public struct KokoroSynthesizer {
 
         let sortedOutputs = chunkOutputs.sorted { $0.index < $1.index }
 
+        var totalFrameCount = 0
         for output in sortedOutputs {
             let index = output.index
             let chunkSamples = output.samples
@@ -524,6 +563,9 @@ public struct KokoroSynthesizer {
                 TtsConstants.kokoroFrameSamples > 0
                 ? chunkSamples.count / TtsConstants.kokoroFrameSamples
                 : 0
+            if TtsConstants.kokoroFrameSamples > 0 {
+                totalFrameCount += chunkFrameCount
+            }
             Self.logger.info(
                 "Chunk \(index + 1) duration: \(String(format: "%.3f", chunkDurationSeconds))s (\(chunkFrameCount) frames)"
             )
@@ -644,9 +686,16 @@ public struct KokoroSynthesizer {
             )
         }
 
-        Self.logger.notice(
-            "Total model prediction time: \(String(format: "%.3f", totalPredictionTime))s for \(entries.count) chunk(s)"
-        )
+        if TtsConstants.kokoroFrameSamples > 0 {
+            let frameLabel = totalFrameCount == 1 ? "frame" : "frames"
+            Self.logger.notice(
+                "Total model prediction time: \(String(format: "%.3f", totalPredictionTime))s for \(entries.count) chunk(s), \(totalFrameCount) total \(frameLabel)"
+            )
+        } else {
+            Self.logger.notice(
+                "Total model prediction time: \(String(format: "%.3f", totalPredictionTime))s for \(entries.count) chunk(s)"
+            )
+        }
         let variantsUsed = Set(entries.map { $0.template.variant })
         var footprints: [ModelNames.TTS.Variant: Int] = [:]
         for variant in variantsUsed {

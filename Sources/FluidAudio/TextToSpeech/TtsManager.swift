@@ -4,8 +4,9 @@ import OSLog
 @available(macOS 13.0, *)
 public final class TtSManager {
 
-    private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "TtSManager")
+    private let logger = AppLogger(category: "TtSManager")
     private let modelCache: KokoroModelCache
+    private let lexiconAssets: LexiconAssetManager
 
     private var ttsModels: TtsModels?
     private var isInitialized = false
@@ -15,35 +16,50 @@ public final class TtSManager {
     private var ensuredVoices: Set<String> = []
 
     public init(
-        defaultVoice: String = "af_heart",
+        defaultVoice: String = TtsConstants.recommendedVoice,
         defaultSpeakerId: Int = 0,
         modelCache: KokoroModelCache = KokoroModelCache()
     ) {
         self.modelCache = modelCache
+        self.lexiconAssets = LexiconAssetManager()
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
-        KokoroSynthesizer.configure(modelCache: modelCache)
+    }
+
+    init(
+        defaultVoice: String = TtsConstants.recommendedVoice,
+        defaultSpeakerId: Int = 0,
+        modelCache: KokoroModelCache = KokoroModelCache(),
+        lexiconAssets: LexiconAssetManager
+    ) {
+        self.modelCache = modelCache
+        self.lexiconAssets = lexiconAssets
+        self.defaultVoice = Self.normalizeVoice(defaultVoice)
+        self.defaultSpeakerId = defaultSpeakerId
     }
 
     public var isAvailable: Bool {
         isInitialized
     }
 
-    public func initialize(models: TtsModels) async throws {
+    public func initialize(
+        models: TtsModels,
+        preloadVoices: Set<String>? = nil
+    ) async throws {
         self.ttsModels = models
 
         await modelCache.registerPreloadedModels(models)
         try await prepareLexiconAssetsIfNeeded()
-        try await ensureVoiceEmbeddingIfNeeded(for: defaultVoice)
+        try await preloadVoiceEmbeddings(preloadVoices)
         try await KokoroSynthesizer.loadSimplePhonemeDictionary()
         try await modelCache.loadModelsIfNeeded(variants: models.availableVariants)
         isInitialized = true
         logger.notice("TtSManager initialized with provided models")
     }
 
-    public func initialize() async throws {
+    public func initialize(preloadVoices: Set<String>? = nil) async throws {
         let models = try await TtsModels.download()
-        try await initialize(models: models)
+        try await initialize(models: models, preloadVoices: preloadVoices)
     }
 
     public func synthesize(
@@ -53,6 +69,23 @@ public final class TtSManager {
         speakerId: Int = 0,
         variantPreference: ModelNames.TTS.Variant? = nil
     ) async throws -> Data {
+        let detailed = try await synthesizeDetailed(
+            text: text,
+            voice: voice,
+            voiceSpeed: voiceSpeed,
+            speakerId: speakerId,
+            variantPreference: variantPreference
+        )
+        return detailed.audio
+    }
+
+    public func synthesizeDetailed(
+        text: String,
+        voice: String? = nil,
+        voiceSpeed: Float = 1.0,
+        speakerId: Int = 0,
+        variantPreference: ModelNames.TTS.Variant? = nil
+    ) async throws -> KokoroSynthesizer.SynthesisResult {
         guard isInitialized else {
             throw TTSError.modelNotFound("Kokoro model not initialized")
         }
@@ -63,14 +96,16 @@ public final class TtSManager {
         let selectedVoice = resolveVoice(voice, speakerId: speakerId)
         try await ensureVoiceEmbeddingIfNeeded(for: selectedVoice)
 
-        let synthesis = try await KokoroSynthesizer.synthesizeDetailed(
-            text: cleanedText,
-            voice: selectedVoice,
-            voiceSpeed: voiceSpeed,
-            variantPreference: variantPreference
-        )
-
-        return synthesis.audio
+        return try await KokoroSynthesizer.withLexiconAssets(lexiconAssets) {
+            try await KokoroSynthesizer.withModelCache(modelCache) {
+                try await KokoroSynthesizer.synthesizeDetailed(
+                    text: cleanedText,
+                    voice: selectedVoice,
+                    voiceSpeed: voiceSpeed,
+                    variantPreference: variantPreference
+                )
+            }
+        }
     }
 
     public func synthesizeToFile(
@@ -131,7 +166,7 @@ public final class TtSManager {
 
     private func prepareLexiconAssetsIfNeeded() async throws {
         if assetsReady { return }
-        try await LexiconAssetManager.ensureCoreAssets()
+        try await lexiconAssets.ensureCoreAssets()
         assetsReady = true
     }
 
@@ -141,8 +176,18 @@ public final class TtSManager {
         ensuredVoices.insert(voice)
     }
 
+    private func preloadVoiceEmbeddings(_ requestedVoices: Set<String>?) async throws {
+        var voices = requestedVoices ?? Set<String>()
+        voices.insert(defaultVoice)
+
+        for voice in voices {
+            let normalized = Self.normalizeVoice(voice)
+            try await ensureVoiceEmbeddingIfNeeded(for: normalized)
+        }
+    }
+
     private static func normalizeVoice(_ voice: String) -> String {
         let trimmed = voice.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "af_heart" : trimmed
+        return trimmed.isEmpty ? TtsConstants.recommendedVoice : trimmed
     }
 }

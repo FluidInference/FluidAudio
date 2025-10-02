@@ -98,9 +98,12 @@ extension KokoroSynthesizer {
             #if swift(>=6.2)
             case .int8:
                 array.dataPointer.initializeMemory(as: Int8.self, repeating: 0, count: elementCount)
-            #endif
+            @unknown default:
+                memset(array.dataPointer, 0, elementCount * MemoryLayout<Float>.stride)
+            #else
             default:
                 memset(array.dataPointer, 0, elementCount * MemoryLayout<Float>.stride)
+            #endif
             }
         }
     }

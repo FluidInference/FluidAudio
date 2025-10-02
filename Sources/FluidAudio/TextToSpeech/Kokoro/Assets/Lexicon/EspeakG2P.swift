@@ -1,7 +1,8 @@
-#if canImport(ESpeakNG)
-
-import ESpeakNG
 import Foundation
+
+#if canImport(ESpeakNG)
+import ESpeakNG
+#endif
 
 /// Thread-safe wrapper around eSpeak NG C API to get IPA phonemes for a word.
 /// Uses espeak_TextToPhonemes with IPA mode.
@@ -9,13 +10,24 @@ import Foundation
 final class EspeakG2P {
     static let shared = EspeakG2P()
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
+
+    #if canImport(ESpeakNG)
     private let queue = DispatchQueue(label: "com.fluidaudio.tts.espeak.g2p")
     private var initialized = false
+    #endif
 
     private init() {}
 
-    /// Return IPA tokens for a word, or nil on failure.
+    static var isAvailable: Bool {
+        #if canImport(ESpeakNG)
+        true
+        #else
+        false
+        #endif
+    }
+
     func phonemize(word: String) -> [String]? {
+        #if canImport(ESpeakNG)
         return queue.sync {
             guard initializeIfNeeded() else { return nil }
             return word.withCString { cstr -> [String]? in
@@ -35,8 +47,13 @@ final class EspeakG2P {
                 }
             }
         }
+        #else
+        logger.fault("Attempted to phonemize '\(word)' without eSpeak NG support. Bundle the ESpeakNG module.")
+        return nil
+        #endif
     }
 
+    #if canImport(ESpeakNG)
     private func initializeIfNeeded() -> Bool {
         if initialized { return true }
 
@@ -66,13 +83,17 @@ final class EspeakG2P {
         initialized = true
         return true
     }
+    #endif
 
     static func isDataAvailable() -> Bool {
+        #if canImport(ESpeakNG)
         guard let base = try? TtsModels.cacheDirectoryURL() else { return false }
         let voices =
             base
             .appendingPathComponent("Models/kokoro/Resources/espeak-ng/espeak-ng-data.bundle/espeak-ng-data/voices")
         return FileManager.default.fileExists(atPath: voices.path)
+        #else
+        return false
+        #endif
     }
 }
-#endif

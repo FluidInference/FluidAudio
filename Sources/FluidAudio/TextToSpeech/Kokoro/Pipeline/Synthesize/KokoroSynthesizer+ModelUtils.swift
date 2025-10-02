@@ -4,14 +4,16 @@ import Foundation
 @available(macOS 13.0, iOS 16.0, *)
 extension KokoroSynthesizer {
     public static func ensureRequiredFiles() async throws {
-        try await LexiconAssetManager.ensureCoreAssets()
+        let assets = try currentLexiconAssets()
+        try await assets.ensureCoreAssets()
     }
 
     public static func loadModel(variant: ModelNames.TTS.Variant? = nil) async throws {
+        let cache = try currentModelCache()
         if let variant {
-            try await modelCache.loadModelsIfNeeded(variants: Set([variant]))
+            try await cache.loadModelsIfNeeded(variants: Set([variant]))
         } else {
-            try await modelCache.loadModelsIfNeeded()
+            try await cache.loadModelsIfNeeded()
         }
     }
 
@@ -24,7 +26,8 @@ extension KokoroSynthesizer {
     }
 
     static func model(for variant: ModelNames.TTS.Variant) async throws -> MLModel {
-        try await modelCache.model(for: variant)
+        let cache = try currentModelCache()
+        return try await cache.model(for: variant)
     }
 
     public static func sanitizeInput(_ text: String) throws -> String {
@@ -93,21 +96,19 @@ extension KokoroSynthesizer {
             }
         }
 
-        #if canImport(ESpeakNG)
-        if !oov.isEmpty && EspeakG2P.isDataAvailable() == false {
-            let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
-            throw TTSError.processingFailed(
-                "G2P (eSpeak NG) data missing but required for OOV words: \(sample). Ensure the eSpeak NG data bundle is available in the models cache (use TtsResourceDownloader.ensureEspeakDataBundle)."
-            )
-        }
-        #else
         if !oov.isEmpty {
             let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
-            throw TTSError.processingFailed(
-                "G2P (eSpeak NG) not included in this build but required for OOV words: \(sample)."
-            )
+            guard EspeakG2P.isAvailable else {
+                throw TTSError.processingFailed(
+                    "G2P (eSpeak NG) not included in this build but required for OOV words: \(sample)."
+                )
+            }
+            guard EspeakG2P.isDataAvailable() else {
+                throw TTSError.processingFailed(
+                    "G2P (eSpeak NG) data missing but required for OOV words: \(sample). Ensure the eSpeak NG data bundle is available in the models cache (use TtsResourceDownloader.ensureEspeakDataBundle)."
+                )
+            }
         }
-        #endif
     }
 
     static func modelBundleURL(for variant: ModelNames.TTS.Variant) throws -> URL {

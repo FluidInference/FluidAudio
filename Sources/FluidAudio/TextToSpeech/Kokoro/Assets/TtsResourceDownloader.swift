@@ -69,7 +69,7 @@ public enum TtsResourceDownloader {
     }
 
     /// Ensure a voice embedding is available in cache
-    public static func ensureVoiceEmbedding(voice: String = "af_heart") async throws {
+    public static func ensureVoiceEmbedding(voice: String = TtsConstants.recommendedVoice) async throws {
         let cacheDir = try TtsModels.cacheDirectoryURL()
         let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
 

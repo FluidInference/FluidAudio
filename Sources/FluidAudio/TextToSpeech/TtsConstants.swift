@@ -2,7 +2,11 @@ import Foundation
 
 public enum TtsConstants {
 
+    /// Voice identifier we regression-test and ship by default.
+    public static let recommendedVoice = "af_heart"
+
     /// Canonical voice identifiers bundled with the Kokoro CoreML release.
+    /// Only `recommendedVoice` is covered by automated QA; the rest are experimental.
     public static let availableVoices: [String] = [
         // American English
         "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole", "af_nova",

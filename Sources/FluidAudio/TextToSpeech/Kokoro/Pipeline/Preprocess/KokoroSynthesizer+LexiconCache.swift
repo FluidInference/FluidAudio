@@ -30,7 +30,7 @@ extension KokoroSynthesizer {
             if await loadFromCache(cacheURL, allowedTokens: allowedTokens) {
                 return
             }
-            throw TTSError.processingFailed("No lexicon cache found and raw lexicon merge disabled")
+            throw TTSError.processingFailed("Missing lexicon cache (expected us_lexicon_cache.json)")
         }
 
         func lexicons() -> (word: [String: [String]], caseSensitive: [String: [String]]) {

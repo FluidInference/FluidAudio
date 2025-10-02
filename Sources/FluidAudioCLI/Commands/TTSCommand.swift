@@ -110,7 +110,7 @@ public struct TTS {
 
     public static func run(arguments: [String]) async {
         var output = "output.wav"
-        var voice = "af_heart"
+        var voice = TtsConstants.recommendedVoice
         var metricsPath: String? = nil
         var chunkDirectory: String? = nil
         var variantPreference: ModelNames.TTS.Variant? = nil
@@ -193,23 +193,24 @@ public struct TTS {
             let tStart = Date()
 
             let manager = TtSManager()
+            let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
+            let voiceOverride = requestedVoice.isEmpty ? nil : requestedVoice
+            let preloadVoices = voiceOverride.map { Set([$0]) }
 
             let tLoad0 = Date()
             if let variantPreference = variantPreference {
                 let models = try await TtsModels.download(variants: Set([variantPreference]))
-                try await manager.initialize(models: models)
+                try await manager.initialize(models: models, preloadVoices: preloadVoices)
             } else {
-                try await manager.initialize()
+                try await manager.initialize(preloadVoices: preloadVoices)
             }
             let tLoad1 = Date()
 
             let tSynth0 = Date()
-            let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
-            let usedVoice = requestedVoice.isEmpty ? "af_heart" : requestedVoice
-            let cleanedText = try KokoroSynthesizer.sanitizeInput(text)
-            let detailed = try await KokoroSynthesizer.synthesizeDetailed(
-                text: cleanedText,
-                voice: usedVoice,
+            let resolvedVoice = voiceOverride ?? TtsConstants.recommendedVoice
+            let detailed = try await manager.synthesizeDetailed(
+                text: text,
+                voice: voiceOverride,
                 variantPreference: variantPreference
             )
             let wav = detailed.audio
@@ -400,7 +401,7 @@ public struct TTS {
 
                 let dict: [String: Any] = [
                     "text": text,
-                    "voice": usedVoice,
+                    "voice": resolvedVoice,
                     "output": outURL.path,
                     "metrics": metricsDict,
                 ]
@@ -458,13 +459,15 @@ extension TTS {
         do {
             let manager = TtSManager()
 
-            let initStart = Date()
-            try await manager.initialize()
-            let initEnd = Date()
-
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedVoice = requestedVoice.isEmpty ? nil : requestedVoice
-            let usedVoice = normalizedVoice ?? "af_heart"
+            let preloadVoices = normalizedVoice.map { Set([$0]) }
+
+            let initStart = Date()
+            try await manager.initialize(preloadVoices: preloadVoices)
+            let initEnd = Date()
+
+            let usedVoice = normalizedVoice ?? TtsConstants.recommendedVoice
             try await TtsResourceDownloader.ensureVoiceEmbedding(voice: usedVoice)
 
             var results: [BenchmarkResult] = []
@@ -473,10 +476,9 @@ extension TTS {
 
             for (index, sentence) in benchmarkSentences.enumerated() {
                 let synthStart = Date()
-                let cleaned = try KokoroSynthesizer.sanitizeInput(sentence)
-                let detailed = try await KokoroSynthesizer.synthesizeDetailed(
-                    text: cleaned,
-                    voice: usedVoice,
+                let detailed = try await manager.synthesizeDetailed(
+                    text: sentence,
+                    voice: normalizedVoice,
                     variantPreference: variantPreference
                 )
                 let synthEnd = Date()
