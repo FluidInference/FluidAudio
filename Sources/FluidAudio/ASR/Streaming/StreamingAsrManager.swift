@@ -28,6 +28,7 @@ public actor StreamingAsrManager {
     private var accumulatedTokens: [Int] = []
     private var accumulatedTokenTimestamps: [Int] = []
     private var accumulatedTokenConfidences: [Float] = []
+    private var totalSamplesProcessed: Int = 0
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -95,6 +96,7 @@ public actor StreamingAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         resetAccumulatedMetadata()
+        totalSamplesProcessed = 0
 
         startTime = Date()
 
@@ -163,6 +165,16 @@ public actor StreamingAsrManager {
             throw error
         }
 
+        let now = Date()
+        let elapsedTime = startTime.map { now.timeIntervalSince($0) } ?? 0
+        let minimumProcessingTime: TimeInterval = 1e-6
+
+        let maxTimestampFrame = accumulatedTokenTimestamps.max() ?? 0
+        let derivedSampleCount = maxTimestampFrame > 0
+            ? (maxTimestampFrame + 1) * ASRConstants.samplesPerEncoderFrame : 0
+        let finalSampleCount = max(totalSamplesProcessed, derivedSampleCount)
+        let finalProcessingTime = finalSampleCount > 0 ? max(elapsedTime, minimumProcessingTime) : elapsedTime
+
         // Convert final accumulated tokens to ASRResult (proper way to avoid duplicates)
         let finalResult: ASRResult
         if let asrManager = asrManager, !accumulatedTokens.isEmpty {
@@ -195,8 +207,9 @@ public actor StreamingAsrManager {
                 timestamps: timestamps,
                 confidences: confidences,
                 encoderSequenceLength: 0,
-                audioSamples: [],  // Not needed for final text conversion
-                processingTime: 0
+                audioSamples: [],  // No need to retain audio samples for final aggregation
+                processingTime: finalProcessingTime,
+                totalSampleCount: finalSampleCount
             )
         } else {
             // Fallback to text concatenation if no tokens available
@@ -204,8 +217,8 @@ public actor StreamingAsrManager {
             finalResult = ASRResult(
                 text: fallbackText,
                 confidence: 1.0,
-                duration: 0,
-                processingTime: 0,
+                duration: TimeInterval(finalSampleCount) / TimeInterval(config.asrConfig.sampleRate),
+                processingTime: finalProcessingTime,
                 tokenTimings: nil
             )
         }
@@ -233,6 +246,7 @@ public actor StreamingAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         resetAccumulatedMetadata()
+        totalSamplesProcessed = 0
 
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -255,6 +269,11 @@ public actor StreamingAsrManager {
         accumulatedTokens.removeAll()
         accumulatedTokenTimestamps.removeAll()
         accumulatedTokenConfidences.removeAll()
+    }
+
+    private func calculateGlobalFrameOffset(for sampleIndex: Int) -> Int {
+        guard sampleIndex > 0 else { return 0 }
+        return sampleIndex / ASRConstants.samplesPerEncoderFrame
     }
 
     func accumulateTokenMetadata(tokens: [Int], timestamps: [Int], confidences: [Float]) {
@@ -285,6 +304,7 @@ public actor StreamingAsrManager {
     private func appendSamplesAndProcess(_ samples: [Float]) async {
         // Append samples to buffer
         sampleBuffer.append(contentsOf: samples)
+        totalSamplesProcessed += samples.count
 
         // Process while we have at least chunk + right ahead of the current center start
         let chunk = config.chunkSamples
@@ -304,7 +324,11 @@ public actor StreamingAsrManager {
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
             let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+            await processWindow(
+                window,
+                actualLeftSeconds: actualLeftSecs,
+                windowStartSample: leftStartAbs
+            )
 
             // Advance by chunk size
             nextWindowCenterStart += chunk
@@ -342,7 +366,11 @@ public actor StreamingAsrManager {
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
             let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+            await processWindow(
+                window,
+                actualLeftSeconds: actualLeftSecs,
+                windowStartSample: leftStartAbs
+            )
 
             nextWindowCenterStart += effectiveChunk
 
@@ -359,7 +387,11 @@ public actor StreamingAsrManager {
     }
 
     /// Process a single assembled window: [left, chunk, right]
-    private func processWindow(_ windowSamples: [Float], actualLeftSeconds: Double) async {
+    private func processWindow(
+        _ windowSamples: [Float],
+        actualLeftSeconds _: Double,
+        windowStartSample: Int
+    ) async {
         guard let asrManager = asrManager else { return }
 
         do {
@@ -374,9 +406,12 @@ public actor StreamingAsrManager {
                 previousTokens: accumulatedTokens
             )
 
+            let frameOffset = calculateGlobalFrameOffset(for: windowStartSample)
+            let adjustedTimestamps = timestamps.map { $0 + frameOffset }
+
             // Update state
-            accumulateTokenMetadata(tokens: tokens, timestamps: timestamps, confidences: confidences)
-            lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? 0)
+            accumulateTokenMetadata(tokens: tokens, timestamps: adjustedTimestamps, confidences: confidences)
+            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
             segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
@@ -386,7 +421,7 @@ public actor StreamingAsrManager {
             // The final result will use all accumulated tokens for proper deduplication
             let interim = asrManager.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
-                timestamps: timestamps,
+                timestamps: adjustedTimestamps,
                 confidences: confidences,
                 encoderSequenceLength: 0,
                 audioSamples: windowSamples,
@@ -523,6 +558,10 @@ public actor StreamingAsrManager {
 extension StreamingAsrManager {
     internal func setAsrManagerForTesting(_ manager: AsrManager?) {
         asrManager = manager
+    }
+
+    internal func setTotalSamplesProcessedForTesting(_ count: Int) {
+        totalSamplesProcessed = count
     }
 }
 #endif

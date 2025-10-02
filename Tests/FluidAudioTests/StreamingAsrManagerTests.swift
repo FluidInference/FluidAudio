@@ -198,6 +198,7 @@ final class StreamingAsrManagerTests: XCTestCase {
             timestamps: [10, 25],
             confidences: [0.9, 0.8]
         )
+        await manager.setTotalSamplesProcessedForTesting((25 + 1) * ASRConstants.samplesPerEncoderFrame)
 
         let result = try await manager.finish()
 
@@ -213,6 +214,8 @@ final class StreamingAsrManagerTests: XCTestCase {
         XCTAssertEqual(Double(tokenTimings[0].confidence), 0.9, accuracy: 1e-6)
         XCTAssertEqual(Double(tokenTimings[1].confidence), 0.8, accuracy: 1e-6)
         XCTAssertEqual(result.text, "hello world")
+        XCTAssertGreaterThan(result.duration, 0)
+        XCTAssertGreaterThan(result.processingTime, 0)
     }
 
     func testFinishOmitsTimingsWhenMetadataMismatchOccurs() async throws {
@@ -231,11 +234,14 @@ final class StreamingAsrManagerTests: XCTestCase {
             timestamps: [10],
             confidences: [0.9]
         )
+        await manager.setTotalSamplesProcessedForTesting(32_000)
 
         let result = try await manager.finish()
 
         XCTAssertTrue(result.tokenTimings?.isEmpty ?? true)
         XCTAssertEqual(result.text, "hello world")
+        XCTAssertGreaterThan(result.duration, 0)
+        XCTAssertGreaterThan(result.processingTime, 0)
     }
 
     // MARK: - Audio Source Tests
