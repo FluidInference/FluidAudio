@@ -6,6 +6,44 @@ public enum TtsResourceDownloader {
     private static let logger = AppLogger(category: "TtsResourceDownloader")
     private static let kokoroBaseURL = "https://huggingface.co/\(Repo.kokoro.remotePath)/resolve/main"
 
+    private static func packagedEspeakBundleURL() -> URL? {
+        #if SWIFT_PACKAGE
+        return Bundle.module.url(
+            forResource: "espeak-ng-data",
+            withExtension: "bundle",
+            subdirectory: "espeak-ng"
+        )
+        #else
+        return nil
+        #endif
+    }
+
+    private static func stagePackagedEspeakBundle(
+        from bundleURL: URL,
+        into repoPath: URL,
+        voicesPath: URL
+    ) throws {
+        let targetBundle = repoPath.appendingPathComponent("Resources/espeak-ng/espeak-ng-data.bundle")
+        let parentDir = targetBundle.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: targetBundle.path) {
+            try FileManager.default.removeItem(at: targetBundle)
+        }
+        do {
+            try FileManager.default.copyItem(at: bundleURL, to: targetBundle)
+        } catch {
+            throw TTSError.downloadFailed(
+                "Failed to stage packaged eSpeak NG bundle: \(error.localizedDescription)"
+            )
+        }
+
+        guard FileManager.default.fileExists(atPath: voicesPath.path) else {
+            throw TTSError.downloadFailed(
+                "Packaged eSpeak NG data bundle missing 'voices' directory after copy"
+            )
+        }
+    }
+
     /// Download a voice embedding JSON file from HuggingFace
     public static func downloadVoiceEmbedding(voice: String) async throws -> Data {
         // Try to download pre-converted JSON first
@@ -132,6 +170,13 @@ public enum TtsResourceDownloader {
 
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
+        if let bundledBundle = packagedEspeakBundleURL() {
+            try stagePackagedEspeakBundle(from: bundledBundle, into: repoPath, voicesPath: voices)
+            logger.info("Using packaged espeak-ng-data bundle shipped with FluidAudio resources")
+            return bundleRoot
+        }
+
+        #if os(macOS)
         logger.info("Downloading eSpeak NG data bundle from HuggingFace…")
 
         let zipPath = repoPath.appendingPathComponent("espeak-ng.zip")
@@ -147,8 +192,8 @@ public enum TtsResourceDownloader {
             _ = try await AssetDownloader.ensure(descriptor, logger: logger)
         }
 
-        #if os(macOS)
         let resourcesDir = repoPath.appendingPathComponent("Resources")
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         process.arguments = ["-o", zipPath.path, "-d", resourcesDir.path]
@@ -157,12 +202,13 @@ public enum TtsResourceDownloader {
         try process.run()
         process.waitUntilExit()
 
-        if process.terminationStatus == 0 {
-            logger.info("Extracted espeak-ng-data successfully")
+        guard process.terminationStatus == 0 else {
+            throw TTSError.downloadFailed("Failed to extract eSpeak NG data bundle via unzip (status=\(process.terminationStatus))")
         }
+        logger.info("Extracted espeak-ng-data successfully")
         #else
-        logger.warning(
-            "Skipping espeak-ng.zip extraction on this platform; expecting pre-extracted Resources bundle"
+        throw TTSError.downloadFailed(
+            "Packaged eSpeak NG data bundle missing from FluidAudio resources"
         )
         #endif
 
