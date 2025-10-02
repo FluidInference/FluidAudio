@@ -89,26 +89,20 @@ uv run python benchmark_kokoro_pip.py
 ```
 
 ```text
-WARNING: Defaulting repo_id to hexgrad/Kokoro-82M. Pass repo_id='hexgrad/Kokoro-82M' to suppress this warning.
-/Users/brandonweng/code/fluid/models/kokoro-82m/.venv/lib/python3.10/site-packages/torch/nn/modules/rnn.py:123: UserWarning: dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1, but got dropout=0.2 and num_layers=1
-  warnings.warn(
-/Users/brandonweng/code/fluid/models/kokoro-82m/.venv/lib/python3.10/site-packages/torch/nn/utils/weight_norm.py:143: FutureWarning: `torch.nn.utils.weight_norm` is deprecated in favor of `torch.nn.utils.parametrizations.weight_norm`.
-  WeightNorm.apply(module, name, dim)
-
-KPipeline benchmark for voice af_heart (warm-up took 0.220s) using pip package
-Test   Chars    Output (s)   Inf(s)       RTFx       Peak GB
-1      42       2.750        0.224        12.250x    1.47
-2      129      8.625        0.539        16.002x    1.89
-3      254      15.525       0.922        16.846x    2.69
-4      93       6.125        0.346        17.725x    2.70
-5      104      7.200        0.403        17.875x    2.72
-6      130      9.300        0.499        18.619x    2.72
-7      197      12.850       0.768        16.733x    2.83
-8      6        1.350        0.095        14.270x    2.83
-9      1228     76.200       4.247        17.940x    3.19
-10     567      35.200       2.052        17.156x    4.85
-11     4615     286.525      18.347       15.617x    4.79
-Total  -        461.650      28.442       16.231x    4.85
+KPipeline benchmark for voice af_heart (warm-up took 0.345s) using pip package
+Test   Chars    Output (s)   Inf(s)       RTFx       Peak GB     
+1      42       2.750        0.471        5.841x     1.47        
+2      129      8.625        1.401        6.156x     1.89        
+3      254      15.525       2.651        5.857x     2.69        
+4      93       6.125        1.114        5.497x     2.70        
+5      104      7.200        1.156        6.226x     2.72        
+6      130      9.300        1.525        6.099x     2.72        
+7      197      12.850       2.208        5.819x     2.83        
+8      6        1.350        0.312        4.325x     2.83        
+9      1228     76.200       13.240       5.755x     3.18        
+10     567      35.200       7.124        4.941x     3.35        
+11     4615     286.525      46.747       6.129x     3.47        
+Total  -        461.650      77.950       5.922x     3.47        
 ```
 
 ### Kokoro-82M MLX Pipeline
@@ -117,47 +111,42 @@ Total  -        461.650      28.442       16.231x    4.85
 uv run python benchmark_kokoro_mlx.py
 ```
 
-```text
-Fetching 2 files: 100%|##################################################| 2/2 [00:00<00:00, 41734.37it/s]
-2025-09-26 20:13:39.173 | INFO     | mlx_audio.tts.models.kokoro.kokoro:_get_pipeline:261 - Creating new KokoroPipeline for language: a
-
-TTS benchmark for voice af_heart (warm-up took an extra 3.343s) using model prince-canuma/Kokoro-82M
+```
 Test   Chars    Output (s)   Inf(s)       RTFx       Peak GB
-1      42       2.750        0.796        3.456x     1.12
-2      129      8.650        1.204        7.186x     2.47
-3      254      15.525       2.589        5.996x     2.65
-4      93       6.125        1.100        5.566x     2.65
-5      104      7.200        1.211        5.944x     2.65
-6      130      9.300        1.416        6.566x     2.65
-7      197      12.850       0.692        18.567x    2.65
-8      6        1.350        0.112        12.099x    2.65
-9      1228     76.200       2.787        27.344x    3.29
-10     567      35.200       1.846        19.068x    3.37
-11     4615     286.500      11.121       25.762x    3.37
-Total  -        461.650      24.874       18.559x    3.37
+1      42       2.750        0.411        6.684x     1.01        
+2      129      8.650        0.921        9.397x     1.97        
+3      254      15.525       1.784        8.705x     2.39        
+4      93       6.125        0.824        7.433x     2.39        
+5      104      7.200        0.825        8.723x     2.39        
+6      130      9.300        0.952        9.764x     2.39        
+7      197      12.850       1.288        9.980x     2.39        
+8      6        1.350        0.233        5.792x     2.39        
+9      1228     76.200       7.376        10.331x    2.98        
+10     567      35.200       3.579        9.836x     3.16        
+11     4615     286.500      27.551       10.399x    3.16        
+Total  -        461.650      45.744       10.092x    3.16  
 ```
 
-### FluidAudio CLI TTS Benchmark
+#### Variant preference: 5s
 
 ```text
-Build of product 'fluidaudio' complete! (16.37s)
+FluidAudio TTS benchmark for voice af_heart (warm-up took an extra 45.239s)
+Variant preference: 5s
+Test   Chars    Ouput (s)    Inf(s)       RTFx      
+1      42       2.825        0.855        3.303x    
+2      129      8.050        1.299        6.198x    
+3      254      14.450       1.712        8.441x    
+4      93       6.025        0.809        7.444x    
+5      104      7.250        1.200        6.042x    
+6      130      9.025        1.325        6.813x    
+7      197      12.200       1.280        9.534x    
+8      6        0.825        0.749        1.102x    
+9      1228     74.625       5.721        13.043x   
+10     567      36.125       3.108        11.623x   
+11     4269     266.400      25.100       10.613x   
+Total  -        437.800      43.158       10.144    
 
-FluidAudio TTS benchmark for voice af_heart (warm-up took an extra 7.173s) using model prince-canuma/Kokoro-82M
-Test   Chars    Output (s)   Inf(s)       RTFx       Peak GB
-1      42       2.750        0.411        6.684x     1.01
-2      129      8.650        0.921        9.397x     1.97
-3      254      15.525       1.784        8.705x     2.39
-4      93       6.125        0.824        7.433x     2.39
-5      104      7.200        0.825        8.723x     2.39
-6      130      9.300        0.952        9.764x     2.39
-7      197      12.850       1.288        9.980x     2.39
-8      6        1.350        0.233        5.792x     2.39
-9      1228     76.200       7.376        10.331x    2.98
-10     567      35.200       3.579        9.836x     3.16
-11     4615     286.500      27.551       10.399x    3.16
-Total  -        461.650      45.744       10.092x    3.16
-
-Peak memory usage (process-wide): 3.16 GB
+Peak memory usage (process-wide): 1.073 GB
 ```
 
 ## Voice Activity Detection
