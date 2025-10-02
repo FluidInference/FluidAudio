@@ -162,8 +162,10 @@ enum MultiStreamCommand {
             logger.info("Finalizing transcriptions...")
 
             // Get final results
-            let micFinal = try await micStream.finish()
-            let systemFinal = try await systemStream.finish()
+            let micFinalResult = try await micStream.finish()
+            let systemFinalResult = try await systemStream.finish()
+            let micFinal = micFinalResult.text
+            let systemFinal = systemFinalResult.text
 
             // Cancel update tasks
             micTask.cancel()

@@ -146,8 +146,8 @@ public actor StreamingAsrManager {
     }
 
     /// Finish streaming and get the final transcription
-    /// - Returns: The complete transcription text
-    public func finish() async throws -> String {
+    /// - Returns: The complete ASR result with token timings
+    public func finish() async throws -> ASRResult {
         logger.info("Finishing streaming ASR...")
 
         // Signal end of input
@@ -161,10 +161,10 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text (proper way to avoid duplicates)
-        let finalText: String
+        // Convert final accumulated tokens to ASRResult (proper way to avoid duplicates)
+        let finalResult: ASRResult
         if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let finalResult = asrManager.processTranscriptionResult(
+            finalResult = asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
                 confidences: [],  // No per-token confidences needed for final text
@@ -172,14 +172,20 @@ public actor StreamingAsrManager {
                 audioSamples: [],  // Not needed for final text conversion
                 processingTime: 0
             )
-            finalText = finalResult.text
         } else {
             // Fallback to text concatenation if no tokens available
-            finalText = confirmedTranscript + volatileTranscript
+            let fallbackText = confirmedTranscript + volatileTranscript
+            finalResult = ASRResult(
+                text: fallbackText,
+                confidence: 1.0,
+                duration: 0,
+                processingTime: 0,
+                tokenTimings: nil
+            )
         }
 
-        logger.info("Final transcription: \(finalText.count) characters")
-        return finalText
+        logger.info("Final transcription: \(finalResult.text.count) characters")
+        return finalResult
     }
 
     /// Reset the transcriber for a new session
@@ -350,6 +356,7 @@ public actor StreamingAsrManager {
                 text: interim.text,
                 isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
+                tokenTimings: interim.tokenTimings,
                 timestamp: Date()
             )
 
@@ -576,6 +583,9 @@ public struct StreamingTranscriptionUpdate: Sendable {
     /// Confidence score (0.0 - 1.0)
     public let confidence: Float
 
+    /// Token-level timing information for diarization
+    public let tokenTimings: [TokenTiming]?
+
     /// Timestamp of this update
     public let timestamp: Date
 
@@ -583,11 +593,13 @@ public struct StreamingTranscriptionUpdate: Sendable {
         text: String,
         isConfirmed: Bool,
         confidence: Float,
+        tokenTimings: [TokenTiming]? = nil,
         timestamp: Date
     ) {
         self.text = text
         self.isConfirmed = isConfirmed
         self.confidence = confidence
+        self.tokenTimings = tokenTimings
         self.timestamp = timestamp
     }
 }
