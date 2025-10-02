@@ -17,6 +17,13 @@ FluidAudio bundles the eSpeak-NG phoneme resources so Kokoro can fall back to G2
 - If you customize the cache location, be sure the `Resources/espeak-ng/espeak-ng-data.bundle/voices/` directory is present before running TTS.
 - When testing on iOS, bundle the extracted resources with the app or seed the simulator cache in advance to avoid runtime failures.
 
+## CocoaPods integration notes
+- The `ESpeakNG.xcframework` now includes support for iOS device (arm64), iOS Simulator (arm64 + x86_64), and macOS (arm64 + x86_64).
+- iOS Simulator support is provided via a stub framework that allows building and linking but returns failure values for ESpeakNG function calls.
+- Pod validation passes successfully with `pod lib lint FluidAudio.podspec --allow-warnings` for all platforms.
+- On iOS Simulator, ESpeakNG initialization will fail gracefully and phonemization requests will return `nil` due to the stub implementation.
+- Full ESpeakNG functionality is available on iOS device and macOS platforms.
+
 ## Licensing notes
 - eSpeak-NG is distributed under the GNU GPL v3 (or later). Both the core library and the `espeak-ng-data` voices inherit the same license.
 - The full license text now lives at `Licenses/ESpeakNG_LICENSE.txt`; ship this file (or the upstream `COPYING`) anywhere the framework is redistributed and surface it in your third-party notices UI.
