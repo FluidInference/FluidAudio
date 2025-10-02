@@ -165,64 +165,11 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        let now = Date()
-        let elapsedTime = startTime.map { now.timeIntervalSince($0) } ?? 0
-        let minimumProcessingTime: TimeInterval = 1e-6
-
-        let maxTimestampFrame = accumulatedTokenTimestamps.max() ?? 0
-        let derivedSampleCount =
-            maxTimestampFrame > 0
-            ? (maxTimestampFrame + 1) * ASRConstants.samplesPerEncoderFrame : 0
-        let finalSampleCount = max(totalSamplesProcessed, derivedSampleCount)
-        let finalProcessingTime = finalSampleCount > 0 ? max(elapsedTime, minimumProcessingTime) : elapsedTime
-
-        // Convert final accumulated tokens to ASRResult (proper way to avoid duplicates)
-        let finalResult: ASRResult
-        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let timestamps: [Int]
-            if accumulatedTokenTimestamps.count == accumulatedTokens.count {
-                timestamps = accumulatedTokenTimestamps
-            } else {
-                if !accumulatedTokenTimestamps.isEmpty {
-                    logger.warning(
-                        "Final token timestamp count (\(accumulatedTokenTimestamps.count)) does not match token count (\(accumulatedTokens.count)); omitting token timings"
-                    )
-                }
-                timestamps = []
-            }
-
-            let confidences: [Float]
-            if accumulatedTokenConfidences.count == accumulatedTokens.count {
-                confidences = accumulatedTokenConfidences
-            } else {
-                if !accumulatedTokenConfidences.isEmpty {
-                    logger.warning(
-                        "Final token confidence count (\(accumulatedTokenConfidences.count)) does not match token count (\(accumulatedTokens.count)); omitting confidence data"
-                    )
-                }
-                confidences = []
-            }
-
-            finalResult = asrManager.processTranscriptionResult(
-                tokenIds: accumulatedTokens,
-                timestamps: timestamps,
-                confidences: confidences,
-                encoderSequenceLength: 0,
-                audioSamples: [],  // No need to retain audio samples for final aggregation
-                processingTime: finalProcessingTime,
-                totalSampleCount: finalSampleCount
-            )
-        } else {
-            // Fallback to text concatenation if no tokens available
-            let fallbackText = confirmedTranscript + volatileTranscript
-            finalResult = ASRResult(
-                text: fallbackText,
-                confidence: 1.0,
-                duration: TimeInterval(finalSampleCount) / TimeInterval(config.asrConfig.sampleRate),
-                processingTime: finalProcessingTime,
-                tokenTimings: nil
-            )
-        }
+        let metrics = resolveFinalMetrics(at: Date())
+        let finalResult = buildFinalResult(
+            processingTime: metrics.processingTime,
+            sampleCount: metrics.sampleCount
+        )
 
         logger.info("Final transcription: \(finalResult.text.count) characters")
         return finalResult
@@ -282,21 +229,123 @@ public actor StreamingAsrManager {
 
         accumulatedTokens.append(contentsOf: tokens)
 
-        if timestamps.count == tokens.count {
-            accumulatedTokenTimestamps.append(contentsOf: timestamps)
-        } else if !timestamps.isEmpty {
+        appendTokenMetadata(
+            timestamps,
+            expectedCount: tokens.count,
+            into: &accumulatedTokenTimestamps,
+            label: "timestamp"
+        )
+
+        appendTokenMetadata(
+            confidences,
+            expectedCount: tokens.count,
+            into: &accumulatedTokenConfidences,
+            label: "confidence"
+        )
+    }
+
+    private func appendTokenMetadata<Value>(
+        _ values: [Value],
+        expectedCount: Int,
+        into storage: inout [Value],
+        label: String
+    ) {
+        guard !values.isEmpty else { return }
+
+        guard values.count == expectedCount else {
             logger.warning(
-                "Token timestamp count (\(timestamps.count)) does not match token count (\(tokens.count))"
+                "Token \(label) count (\(values.count)) does not match token count (\(expectedCount))"
+            )
+            return
+        }
+
+        storage.append(contentsOf: values)
+    }
+
+    private func resolveFinalMetrics(at now: Date) -> (sampleCount: Int, processingTime: TimeInterval) {
+        let elapsedTime = startTime.map { now.timeIntervalSince($0) } ?? 0
+        let minimumProcessingTime: TimeInterval = 1e-6
+
+        let maxTimestampFrame = accumulatedTokenTimestamps.max() ?? 0
+        let derivedSampleCount = maxTimestampFrame > 0
+            ? (maxTimestampFrame + 1) * ASRConstants.samplesPerEncoderFrame : 0
+        let sampleCount = max(totalSamplesProcessed, derivedSampleCount)
+        let processingTime = sampleCount > 0 ? max(elapsedTime, minimumProcessingTime) : elapsedTime
+
+        return (sampleCount, processingTime)
+    }
+
+    private func buildFinalResult(processingTime: TimeInterval, sampleCount: Int) -> ASRResult {
+        guard let asrManager = asrManager, !accumulatedTokens.isEmpty else {
+            let duration = TimeInterval(sampleCount) / TimeInterval(config.asrConfig.sampleRate)
+            return ASRResult(
+                text: finalTranscriptText(),
+                confidence: 1.0,
+                duration: duration,
+                processingTime: processingTime,
+                tokenTimings: nil
             )
         }
 
-        if confidences.count == tokens.count {
-            accumulatedTokenConfidences.append(contentsOf: confidences)
-        } else if !confidences.isEmpty {
+        let metadata = finalTokenMetadata(forTokenCount: accumulatedTokens.count)
+
+        return asrManager.processTranscriptionResult(
+            tokenIds: accumulatedTokens,
+            timestamps: metadata.timestamps,
+            confidences: metadata.confidences,
+            encoderSequenceLength: 0,
+            audioSamples: [],
+            processingTime: processingTime,
+            totalSampleCount: sampleCount
+        )
+    }
+
+    private func finalTokenMetadata(forTokenCount count: Int) -> (timestamps: [Int], confidences: [Float]) {
+        let timestamps = sanitizedFinalValues(
+            accumulatedTokenTimestamps,
+            expectedCount: count,
+            label: "timestamp",
+            omissionDetail: "omitting token timings"
+        )
+
+        let confidences = sanitizedFinalValues(
+            accumulatedTokenConfidences,
+            expectedCount: count,
+            label: "confidence",
+            omissionDetail: "omitting confidence data"
+        )
+
+        return (timestamps, confidences)
+    }
+
+    private func sanitizedFinalValues<Value>(
+        _ values: [Value],
+        expectedCount: Int,
+        label: String,
+        omissionDetail: String
+    ) -> [Value] {
+        guard !values.isEmpty else { return [] }
+
+        guard values.count == expectedCount else {
             logger.warning(
-                "Token confidence count (\(confidences.count)) does not match token count (\(tokens.count))"
+                "Final token \(label) count (\(values.count)) does not match token count (\(expectedCount)); \(omissionDetail)"
             )
+            return []
         }
+
+        return values
+    }
+
+    private func finalTranscriptText() -> String {
+        var components: [String] = []
+        if !confirmedTranscript.isEmpty {
+            components.append(confirmedTranscript)
+        }
+        if !volatileTranscript.isEmpty {
+            components.append(volatileTranscript)
+        }
+        return components.joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Private Methods
@@ -324,10 +373,8 @@ public actor StreamingAsrManager {
             }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
             await processWindow(
                 window,
-                actualLeftSeconds: actualLeftSecs,
                 windowStartSample: leftStartAbs
             )
 
@@ -366,10 +413,8 @@ public actor StreamingAsrManager {
             if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
             await processWindow(
                 window,
-                actualLeftSeconds: actualLeftSecs,
                 windowStartSample: leftStartAbs
             )
 
@@ -390,7 +435,6 @@ public actor StreamingAsrManager {
     /// Process a single assembled window: [left, chunk, right]
     private func processWindow(
         _ windowSamples: [Float],
-        actualLeftSeconds _: Double,
         windowStartSample: Int
     ) async {
         guard let asrManager = asrManager else { return }
