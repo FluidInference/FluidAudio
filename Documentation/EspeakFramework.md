@@ -2,15 +2,15 @@
 
 FluidAudio bundles the eSpeak-NG phoneme resources so Kokoro can fall back to G2P lookups when the US lexicons don’t contain a word. The Core ML pipeline expects the resources under `Resources/espeak-ng/espeak-ng-data.bundle` with the canonical `voices/` directory inside.
 
-## macOS (and desktop) builds
-- `TtsResourceDownloader.ensureEspeakDataBundle` first stages the packaged `espeak-ng-data.bundle` directly from the SwiftPM resources.
-- If the packaged copy is removed, macOS falls back to downloading `espeak-ng.zip` and extracts it with `/usr/bin/unzip` into `~/.cache/fluidaudio/Models/kokoro/Resources/`.
-- The `voices/` directory is validated after extraction; if it’s missing we raise `TTSError.downloadFailed`.
+## All Platforms (Primary Flow)
+- `TtsResourceDownloader.ensureEspeakDataBundle` first attempts to stage the packaged `espeak-ng-data.bundle` from SwiftPM resources (`Sources/FluidAudio/Resources/espeak-ng/`).
+- The bundle is copied to `~/.cache/fluidaudio/Models/kokoro/Resources/espeak-ng/`.
+- The `voices/` directory is validated after staging; if missing, `TTSError.downloadFailed` is raised.
 
-## iOS / tvOS / watchOS
-- The Swift package now looks for a pre-packaged `espeak-ng-data.bundle` under `Sources/FluidAudio/Resources/espeak-ng/` and stages it into the cache on first use.
-- If the bundle is missing, we surface `TTSError.downloadFailed`; iOS builds no longer attempt to shell out or download the ZIP on-device.
-- Seed the packaged bundle (or pre-populate the on-device cache) before running TTS on these platforms.
+## Fallback Behavior (macOS Only)
+- If the packaged bundle is unavailable, **macOS only** falls back to downloading `espeak-ng.zip` from HuggingFace and extracting it with `/usr/bin/unzip`.
+- **iOS/tvOS/watchOS** do not support fallback downloads and will throw `TTSError.downloadFailed` if the packaged bundle is missing.
+- For mobile platforms, ensure the packaged bundle is present in the Swift package resources before building.
 
 ## Best practices
 - Keep the `espeak-ng-data.bundle` (packaged copy) and the optional `espeak-ng.zip` fallback in sync with any updates to the Kokoro phoneme mapper.

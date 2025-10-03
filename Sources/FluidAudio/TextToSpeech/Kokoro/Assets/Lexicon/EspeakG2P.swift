@@ -17,9 +17,9 @@ final class EspeakG2P {
         true
     }
 
-    func phonemize(word: String) -> [String]? {
+    func phonemize(word: String, espeakVoice: String = "en-us") -> [String]? {
         return queue.sync {
-            guard initializeIfNeeded() else { return nil }
+            guard initializeIfNeeded(espeakVoice: espeakVoice) else { return nil }
             return word.withCString { cstr -> [String]? in
                 var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
                 let modeIPA = Int32(espeakPHONEMES_IPA)
@@ -39,8 +39,16 @@ final class EspeakG2P {
         }
     }
 
-    private func initializeIfNeeded() -> Bool {
-        if initialized { return true }
+    private var currentVoice: String = "en-us"
+
+    private func initializeIfNeeded(espeakVoice: String = "en-us") -> Bool {
+        if initialized {
+            if espeakVoice != currentVoice {
+                _ = espeakVoice.withCString { espeak_SetVoiceByName($0) }
+                currentVoice = espeakVoice
+            }
+            return true
+        }
 
         guard let base = try? TtsModels.cacheDirectoryURL() else {
             logger.warning("Unable to resolve TTS cache directory; disabling eSpeak G2P")
@@ -64,7 +72,8 @@ final class EspeakG2P {
             logger.error("eSpeak NG initialization failed (rc=\(rc))")
             return false
         }
-        _ = "en-us".withCString { espeak_SetVoiceByName($0) }
+        _ = espeakVoice.withCString { espeak_SetVoiceByName($0) }
+        currentVoice = espeakVoice
         initialized = true
         return true
     }

@@ -23,10 +23,9 @@ jobs:
       - name: Check formatting
         run: |
           # Create a copy to check if formatting would change files
-          rm -rf Sources.bak Tests.bak Examples.bak
-          rsync -a --safe-links --copy-links Sources/ Sources.bak || true
-          rsync -a --safe-links --copy-links Tests/ Tests.bak || true
-          rsync -a --safe-links --copy-links Examples/ Examples.bak || true
+          cp -r Sources Sources.bak
+          cp -r Tests Tests.bak
+          cp -r Examples Examples.bak || true
           
           # Format in place
           swift format --in-place --recursive --configuration .swift-format Sources/ Tests/ Examples/ || true

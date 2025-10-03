@@ -46,59 +46,23 @@ public enum TtsResourceDownloader {
 
     /// Download a voice embedding JSON file from HuggingFace
     public static func downloadVoiceEmbedding(voice: String) async throws -> Data {
-        // Try to download pre-converted JSON first
         let jsonURL = "\(kokoroBaseURL)/voices/\(voice).json"
 
-        if let url = URL(string: jsonURL) {
-            do {
-                let data = try await AssetDownloader.fetchData(
-                    from: url,
-                    description: "\(voice) voice embedding JSON",
-                    logger: logger
-                )
-                logger.info("Downloaded voice embedding JSON for \(voice)")
-                return data
-            } catch {
-                logger.warning("Could not download \(voice).json: \(error.localizedDescription)")
-            }
+        guard let url = URL(string: jsonURL) else {
+            throw TTSError.modelNotFound("Invalid URL for voice embedding: \(voice)")
         }
 
-        var downloadedPtPath: String?
-
-        // Download the .pt file for future conversion
-        let ptURL = "\(kokoroBaseURL)/voices/\(voice).pt"
-        if let url = URL(string: ptURL) {
-            do {
-                let ptData = try await AssetDownloader.fetchData(
-                    from: url,
-                    description: "\(voice) voice embedding (.pt)",
-                    logger: logger
-                )
-
-                let cacheDir = try TtsModels.cacheDirectoryURL()
-                let voicesDir = cacheDir.appendingPathComponent("Models/kokoro/voices")
-                try FileManager.default.createDirectory(at: voicesDir, withIntermediateDirectories: true)
-
-                let ptFileURL = voicesDir.appendingPathComponent("\(voice).pt")
-                try ptData.write(to: ptFileURL, options: [.atomic])
-                downloadedPtPath = ptFileURL.path
-                logger.info(
-                    "Downloaded voice embedding .pt file for \(voice) (\(ptData.count) bytes)")
-                logger.notice(
-                    "Run 'python3 extract_voice_embeddings.py' to convert \(voice).pt to JSON format"
-                )
-            } catch {
-                logger.warning("Could not download \(voice).pt: \(error.localizedDescription)")
-            }
-        }
-
-        if let path = downloadedPtPath {
-            throw TTSError.processingFailed(
-                "Voice embedding JSON unavailable for \(voice). Downloaded .pt to \(path); run 'python3 extract_voice_embeddings.py' to convert it."
+        do {
+            let data = try await AssetDownloader.fetchData(
+                from: url,
+                description: "\(voice) voice embedding JSON",
+                logger: logger
             )
+            logger.info("Downloaded voice embedding JSON for \(voice)")
+            return data
+        } catch {
+            throw TTSError.modelNotFound("Voice embedding JSON unavailable for \(voice): \(error.localizedDescription)")
         }
-
-        throw TTSError.modelNotFound("Voice embedding JSON for \(voice)")
     }
 
     /// Ensure a voice embedding is available in cache

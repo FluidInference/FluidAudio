@@ -385,18 +385,12 @@ enum KokoroChunker {
             phonemes = lexicon[normalized]
         }
 
-        #if canImport(ESpeakNG)
-        if phonemes == nil {
-            if #available(macOS 13.0, iOS 16.0, *) {
-                if let ipa = EspeakG2P.shared.phonemize(word: normalized) {
-                    let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
-                    if !mapped.isEmpty {
-                        phonemes = mapped
-                    }
-                }
+        if phonemes == nil, let ipa = EspeakG2P.shared.phonemize(word: normalized) {
+            let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
+            if !mapped.isEmpty {
+                phonemes = mapped
             }
         }
-        #endif
 
         if phonemes == nil,
             let spelledTokens = spelledOutTokens(for: normalized),
@@ -408,18 +402,12 @@ enum KokoroChunker {
             for spelled in spelledTokens {
                 var segment = lexicon[spelled]
 
-                #if canImport(ESpeakNG)
-                if segment == nil {
-                    if #available(macOS 13.0, iOS 16.0, *) {
-                        if let ipa = EspeakG2P.shared.phonemize(word: spelled) {
-                            let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
-                            if !mapped.isEmpty {
-                                segment = mapped
-                            }
-                        }
+                if segment == nil, let ipa = EspeakG2P.shared.phonemize(word: spelled) {
+                    let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
+                    if !mapped.isEmpty {
+                        segment = mapped
                     }
                 }
-                #endif
 
                 if segment == nil, let fallback = letterPronunciations[spelled] {
                     let filtered = fallback.filter { allowed.contains($0) }
@@ -590,60 +578,18 @@ enum KokoroChunker {
         let breakCharacters = CharacterSet(charactersIn: ",;:")
         let separatorTokens = [": ", "; ", ", "]
 
-        #if canImport(NaturalLanguage)
-        if #available(macOS 10.14, iOS 12.0, *) {
-            let tagger = NLTagger(tagSchemes: [.lexicalClass])
-            tagger.string = text
-            tagger.enumerateTags(
-                in: text.startIndex..<text.endIndex,
-                unit: .word,
-                scheme: .lexicalClass,
-                options: []
-            ) { tag, range in
-                guard tag == .punctuation else { return true }
-                let token = text[range]
-                if token.unicodeScalars.contains(where: { breakCharacters.contains($0) }) {
-                    var endIndex = range.upperBound
-                    for separator in separatorTokens where text[endIndex...].hasPrefix(separator) {
-                        endIndex = text.index(endIndex, offsetBy: separator.count)
-                        break
-                    }
-                    let segment = text[currentStart..<endIndex]
-                    let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        segments.append(trimmed)
-                    }
-                    currentStart = endIndex
-                }
-                return true
-            }
-        } else {
-            let tagger = NSLinguisticTagger(tagSchemes: [.lexicalClass], options: 0)
-            tagger.string = text
-            let nsRange = NSRange(location: 0, length: (text as NSString).length)
-            tagger.enumerateTags(in: nsRange, unit: .word, scheme: .lexicalClass, options: []) {
-                tag, range, _ in
-                guard tag == .punctuation, let tokenRange = Range(range, in: text) else { return }
-                let token = text[tokenRange]
-                if token.unicodeScalars.contains(where: { breakCharacters.contains($0) }) {
-                    var endIndex = tokenRange.upperBound
-                    for separator in separatorTokens where text[endIndex...].hasPrefix(separator) {
-                        endIndex = text.index(endIndex, offsetBy: separator.count)
-                        break
-                    }
-                    let segment = text[currentStart..<endIndex]
-                    let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        segments.append(trimmed)
-                    }
-                    currentStart = endIndex
-                }
-            }
-        }
-        #else
-        for (offset, character) in text.enumerated() {
-            if let scalar = character.unicodeScalars.first, breakCharacters.contains(scalar) {
-                var endIndex = text.index(text.startIndex, offsetBy: offset + 1)
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        tagger.enumerateTags(
+            in: text.startIndex..<text.endIndex,
+            unit: .word,
+            scheme: .lexicalClass,
+            options: []
+        ) { tag, range in
+            guard tag == .punctuation else { return true }
+            let token = text[range]
+            if token.unicodeScalars.contains(where: { breakCharacters.contains($0) }) {
+                var endIndex = range.upperBound
                 for separator in separatorTokens where text[endIndex...].hasPrefix(separator) {
                     endIndex = text.index(endIndex, offsetBy: separator.count)
                     break
@@ -655,8 +601,8 @@ enum KokoroChunker {
                 }
                 currentStart = endIndex
             }
+            return true
         }
-        #endif
 
         if currentStart < text.endIndex {
             let tail = text[currentStart..<text.endIndex]
