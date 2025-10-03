@@ -415,7 +415,9 @@ public struct TTS {
                 logger.info("Metrics saved: \(mURL.path)")
             }
         } catch {
-            logger.error("Error: \(error.localizedDescription)")
+            logger.error("TTS Error: \(error)")
+            print("❌ TTS failed: \(error)")
+            exit(1)
         }
     }
 
