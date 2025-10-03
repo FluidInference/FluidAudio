@@ -69,28 +69,19 @@ final class EspeakG2P {
     }
 
     private static func frameworkBundledDataPath() -> URL? {
-        // ESpeakNG.xcframework has espeak-ng-data.bundle embedded
-        guard let frameworkBundle = Bundle(identifier: "com.fluidaudio.ESpeakNG") else {
-            return nil
+        // Try to find espeak-ng-data.bundle in all loaded bundles
+        for bundle in Bundle.allBundles {
+            if let bundleURL = bundle.url(forResource: "espeak-ng-data", withExtension: "bundle") {
+                let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
+                let voicesPath = dataDir.appendingPathComponent("voices")
+
+                if FileManager.default.fileExists(atPath: voicesPath.path) {
+                    return dataDir
+                }
+            }
         }
 
-        guard
-            let bundleURL = frameworkBundle.url(
-                forResource: "espeak-ng-data",
-                withExtension: "bundle"
-            )
-        else {
-            return nil
-        }
-
-        let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
-        let voicesPath = dataDir.appendingPathComponent("voices")
-
-        guard FileManager.default.fileExists(atPath: voicesPath.path) else {
-            return nil
-        }
-
-        return dataDir
+        return nil
     }
 
     static func isDataAvailable() -> Bool {
