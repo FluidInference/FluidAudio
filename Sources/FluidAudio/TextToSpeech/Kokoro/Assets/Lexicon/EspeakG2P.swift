@@ -70,17 +70,24 @@ final class EspeakG2P {
 
     private static func frameworkBundledDataPath() -> URL? {
         // Try to find espeak-ng-data.bundle in all loaded bundles
+        let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
+
         for bundle in Bundle.allBundles {
             if let bundleURL = bundle.url(forResource: "espeak-ng-data", withExtension: "bundle") {
                 let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
                 let voicesPath = dataDir.appendingPathComponent("voices")
 
                 if FileManager.default.fileExists(atPath: voicesPath.path) {
+                    logger.info("Found eSpeak data bundle at: \(dataDir.path)")
                     return dataDir
+                } else {
+                    logger.warning("Found espeak-ng-data.bundle but voices directory missing at: \(voicesPath.path)")
                 }
             }
         }
 
+        logger.error(
+            "Could not find espeak-ng-data.bundle in any loaded bundle. Searched \(Bundle.allBundles.count) bundles.")
         return nil
     }
 
