@@ -29,10 +29,7 @@ let package = Package(
                 "ESpeakNG",
             ],
             path: "Sources/FluidAudio",
-            exclude: [],
-            resources: [
-                .copy("Resources")
-            ]
+            exclude: []
         ),
         .executableTarget(
             name: "FluidAudioCLI",

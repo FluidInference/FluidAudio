@@ -50,22 +50,12 @@ final class EspeakG2P {
             return true
         }
 
-        guard let base = try? TtsModels.cacheDirectoryURL() else {
-            logger.warning("Unable to resolve TTS cache directory; disabling eSpeak G2P")
+        guard let dataDir = Self.frameworkBundledDataPath() else {
+            logger.warning("eSpeak NG data bundle not found in ESpeakNG.xcframework; disabling G2P")
             return false
         }
 
-        let dataDir =
-            base
-            .appendingPathComponent("Models/kokoro/Resources/espeak-ng/espeak-ng-data.bundle/espeak-ng-data")
-
-        let voicesPath = dataDir.appendingPathComponent("voices")
-        guard FileManager.default.fileExists(atPath: voicesPath.path) else {
-            logger.warning("eSpeak NG voices directory not found at \(dataDir.path); disabling G2P")
-            return false
-        }
-
-        logger.info("Using eSpeak NG data from: \(dataDir.path)")
+        logger.info("Using eSpeak NG data from framework: \(dataDir.path)")
         let rc: Int32 = dataDir.path.withCString { espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0, $0, 0) }
 
         guard rc >= 0 else {
@@ -78,11 +68,32 @@ final class EspeakG2P {
         return true
     }
 
+    private static func frameworkBundledDataPath() -> URL? {
+        // ESpeakNG.xcframework has espeak-ng-data.bundle embedded
+        guard let frameworkBundle = Bundle(identifier: "com.fluidaudio.ESpeakNG") else {
+            return nil
+        }
+
+        guard
+            let bundleURL = frameworkBundle.url(
+                forResource: "espeak-ng-data",
+                withExtension: "bundle"
+            )
+        else {
+            return nil
+        }
+
+        let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
+        let voicesPath = dataDir.appendingPathComponent("voices")
+
+        guard FileManager.default.fileExists(atPath: voicesPath.path) else {
+            return nil
+        }
+
+        return dataDir
+    }
+
     static func isDataAvailable() -> Bool {
-        guard let base = try? TtsModels.cacheDirectoryURL() else { return false }
-        let voices =
-            base
-            .appendingPathComponent("Models/kokoro/Resources/espeak-ng/espeak-ng-data.bundle/espeak-ng-data/voices")
-        return FileManager.default.fileExists(atPath: voices.path)
+        return frameworkBundledDataPath() != nil
     }
 }

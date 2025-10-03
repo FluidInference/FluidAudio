@@ -13,15 +13,7 @@ actor LexiconAssetManager {
         }
     }
 
-    private func ensureEspeakAssets() async {
-        let cacheDir = try? TtsModels.cacheDirectoryURL()
-        guard let cacheDir else { return }
-        let modelsDirectory = cacheDir.appendingPathComponent("Models")
-        _ = try? await TtsResourceDownloader.ensureEspeakDataBundle(in: modelsDirectory)
-    }
-
     func ensureCoreAssets() async throws {
         await ensureLexiconCache()
-        await ensureEspeakAssets()
     }
 }
