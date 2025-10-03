@@ -189,11 +189,13 @@ extension AsrManager {
         encoderSequenceLength: Int,
         audioSamples: [Float],
         processingTime: TimeInterval,
-        tokenTimings: [TokenTiming] = []
+        tokenTimings: [TokenTiming] = [],
+        totalSampleCount: Int? = nil
     ) -> ASRResult {
 
         let (text, finalTimings) = convertTokensWithExistingTimings(tokenIds, timings: tokenTimings)
-        let duration = TimeInterval(audioSamples.count) / TimeInterval(config.sampleRate)
+        let effectiveSampleCount = totalSampleCount ?? audioSamples.count
+        let duration = TimeInterval(effectiveSampleCount) / TimeInterval(config.sampleRate)
 
         // Convert timestamps to TokenTiming objects if provided
         let timingsFromTimestamps = createTokenTimings(

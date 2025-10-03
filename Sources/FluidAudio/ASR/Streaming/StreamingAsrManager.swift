@@ -26,6 +26,9 @@ public actor StreamingAsrManager {
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
     private var accumulatedTokens: [Int] = []
+    private var accumulatedTokenTimestamps: [Int] = []
+    private var accumulatedTokenConfidences: [Float] = []
+    private var totalSamplesProcessed: Int = 0
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -92,7 +95,8 @@ public actor StreamingAsrManager {
         // Reset sliding window state
         segmentIndex = 0
         lastProcessedFrame = 0
-        accumulatedTokens.removeAll()
+        resetAccumulatedMetadata()
+        totalSamplesProcessed = 0
 
         startTime = Date()
 
@@ -146,8 +150,8 @@ public actor StreamingAsrManager {
     }
 
     /// Finish streaming and get the final transcription
-    /// - Returns: The complete transcription text
-    public func finish() async throws -> String {
+    /// - Returns: The complete ASR result with token timings
+    public func finish() async throws -> ASRResult {
         logger.info("Finishing streaming ASR...")
 
         // Signal end of input
@@ -161,25 +165,14 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text (proper way to avoid duplicates)
-        let finalText: String
-        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let finalResult = asrManager.processTranscriptionResult(
-                tokenIds: accumulatedTokens,
-                timestamps: [],
-                confidences: [],  // No per-token confidences needed for final text
-                encoderSequenceLength: 0,
-                audioSamples: [],  // Not needed for final text conversion
-                processingTime: 0
-            )
-            finalText = finalResult.text
-        } else {
-            // Fallback to text concatenation if no tokens available
-            finalText = confirmedTranscript + volatileTranscript
-        }
+        let metrics = resolveFinalMetrics(at: Date())
+        let finalResult = buildFinalResult(
+            processingTime: metrics.processingTime,
+            sampleCount: metrics.sampleCount
+        )
 
-        logger.info("Final transcription: \(finalText.count) characters")
-        return finalText
+        logger.info("Final transcription: \(finalResult.text.count) characters")
+        return finalResult
     }
 
     /// Reset the transcriber for a new session
@@ -200,7 +193,8 @@ public actor StreamingAsrManager {
         // Reset sliding window state
         segmentIndex = 0
         lastProcessedFrame = 0
-        accumulatedTokens.removeAll()
+        resetAccumulatedMetadata()
+        totalSamplesProcessed = 0
 
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -219,12 +213,149 @@ public actor StreamingAsrManager {
         updateContinuation = nil
     }
 
+    private func resetAccumulatedMetadata() {
+        accumulatedTokens.removeAll()
+        accumulatedTokenTimestamps.removeAll()
+        accumulatedTokenConfidences.removeAll()
+    }
+
+    private func calculateGlobalFrameOffset(for sampleIndex: Int) -> Int {
+        guard sampleIndex > 0 else { return 0 }
+        return sampleIndex / ASRConstants.samplesPerEncoderFrame
+    }
+
+    func accumulateTokenMetadata(tokens: [Int], timestamps: [Int], confidences: [Float]) {
+        guard !tokens.isEmpty else { return }
+
+        accumulatedTokens.append(contentsOf: tokens)
+
+        appendTokenMetadata(
+            timestamps,
+            expectedCount: tokens.count,
+            into: &accumulatedTokenTimestamps,
+            label: "timestamp"
+        )
+
+        appendTokenMetadata(
+            confidences,
+            expectedCount: tokens.count,
+            into: &accumulatedTokenConfidences,
+            label: "confidence"
+        )
+    }
+
+    private func appendTokenMetadata<Value>(
+        _ values: [Value],
+        expectedCount: Int,
+        into storage: inout [Value],
+        label: String
+    ) {
+        guard !values.isEmpty else { return }
+
+        guard values.count == expectedCount else {
+            logger.warning(
+                "Token \(label) count (\(values.count)) does not match token count (\(expectedCount))"
+            )
+            return
+        }
+
+        storage.append(contentsOf: values)
+    }
+
+    private func resolveFinalMetrics(at now: Date) -> (sampleCount: Int, processingTime: TimeInterval) {
+        let elapsedTime = startTime.map { now.timeIntervalSince($0) } ?? 0
+        let minimumProcessingTime: TimeInterval = 1e-6
+
+        let maxTimestampFrame = accumulatedTokenTimestamps.max() ?? 0
+        let derivedSampleCount =
+            maxTimestampFrame > 0
+            ? (maxTimestampFrame + 1) * ASRConstants.samplesPerEncoderFrame : 0
+        let sampleCount = max(totalSamplesProcessed, derivedSampleCount)
+        let processingTime = sampleCount > 0 ? max(elapsedTime, minimumProcessingTime) : elapsedTime
+
+        return (sampleCount, processingTime)
+    }
+
+    private func buildFinalResult(processingTime: TimeInterval, sampleCount: Int) -> ASRResult {
+        guard let asrManager = asrManager, !accumulatedTokens.isEmpty else {
+            let duration = TimeInterval(sampleCount) / TimeInterval(config.asrConfig.sampleRate)
+            return ASRResult(
+                text: finalTranscriptText(),
+                confidence: 1.0,
+                duration: duration,
+                processingTime: processingTime,
+                tokenTimings: nil
+            )
+        }
+
+        let metadata = finalTokenMetadata(forTokenCount: accumulatedTokens.count)
+
+        return asrManager.processTranscriptionResult(
+            tokenIds: accumulatedTokens,
+            timestamps: metadata.timestamps,
+            confidences: metadata.confidences,
+            encoderSequenceLength: 0,
+            audioSamples: [],
+            processingTime: processingTime,
+            totalSampleCount: sampleCount
+        )
+    }
+
+    private func finalTokenMetadata(forTokenCount count: Int) -> (timestamps: [Int], confidences: [Float]) {
+        let timestamps = sanitizedFinalValues(
+            accumulatedTokenTimestamps,
+            expectedCount: count,
+            label: "timestamp",
+            omissionDetail: "omitting token timings"
+        )
+
+        let confidences = sanitizedFinalValues(
+            accumulatedTokenConfidences,
+            expectedCount: count,
+            label: "confidence",
+            omissionDetail: "omitting confidence data"
+        )
+
+        return (timestamps, confidences)
+    }
+
+    private func sanitizedFinalValues<Value>(
+        _ values: [Value],
+        expectedCount: Int,
+        label: String,
+        omissionDetail: String
+    ) -> [Value] {
+        guard !values.isEmpty else { return [] }
+
+        guard values.count == expectedCount else {
+            logger.warning(
+                "Final token \(label) count (\(values.count)) does not match token count (\(expectedCount)); \(omissionDetail)"
+            )
+            return []
+        }
+
+        return values
+    }
+
+    private func finalTranscriptText() -> String {
+        var components: [String] = []
+        if !confirmedTranscript.isEmpty {
+            components.append(confirmedTranscript)
+        }
+        if !volatileTranscript.isEmpty {
+            components.append(volatileTranscript)
+        }
+        return components.joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     // MARK: - Private Methods
 
     /// Append new samples and process as many windows as available
     private func appendSamplesAndProcess(_ samples: [Float]) async {
         // Append samples to buffer
         sampleBuffer.append(contentsOf: samples)
+        totalSamplesProcessed += samples.count
 
         // Process while we have at least chunk + right ahead of the current center start
         let chunk = config.chunkSamples
@@ -243,8 +374,10 @@ public actor StreamingAsrManager {
             }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+            await processWindow(
+                window,
+                windowStartSample: leftStartAbs
+            )
 
             // Advance by chunk size
             nextWindowCenterStart += chunk
@@ -281,8 +414,10 @@ public actor StreamingAsrManager {
             if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+            await processWindow(
+                window,
+                windowStartSample: leftStartAbs
+            )
 
             nextWindowCenterStart += effectiveChunk
 
@@ -299,7 +434,10 @@ public actor StreamingAsrManager {
     }
 
     /// Process a single assembled window: [left, chunk, right]
-    private func processWindow(_ windowSamples: [Float], actualLeftSeconds: Double) async {
+    private func processWindow(
+        _ windowSamples: [Float],
+        windowStartSample: Int
+    ) async {
         guard let asrManager = asrManager else { return }
 
         do {
@@ -314,9 +452,12 @@ public actor StreamingAsrManager {
                 previousTokens: accumulatedTokens
             )
 
+            let frameOffset = calculateGlobalFrameOffset(for: windowStartSample)
+            let adjustedTimestamps = timestamps.map { $0 + frameOffset }
+
             // Update state
-            accumulatedTokens.append(contentsOf: tokens)
-            lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? 0)
+            accumulateTokenMetadata(tokens: tokens, timestamps: adjustedTimestamps, confidences: confidences)
+            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
             segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
@@ -326,7 +467,7 @@ public actor StreamingAsrManager {
             // The final result will use all accumulated tokens for proper deduplication
             let interim = asrManager.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
-                timestamps: timestamps,
+                timestamps: adjustedTimestamps,
                 confidences: confidences,
                 encoderSequenceLength: 0,
                 audioSamples: windowSamples,
@@ -350,6 +491,7 @@ public actor StreamingAsrManager {
                 text: interim.text,
                 isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
+                tokenTimings: interim.tokenTimings,
                 timestamp: Date()
             )
 
@@ -457,6 +599,18 @@ public actor StreamingAsrManager {
         }
     }
 }
+
+#if DEBUG
+extension StreamingAsrManager {
+    internal func setAsrManagerForTesting(_ manager: AsrManager?) {
+        asrManager = manager
+    }
+
+    internal func setTotalSamplesProcessedForTesting(_ count: Int) {
+        totalSamplesProcessed = count
+    }
+}
+#endif
 
 /// Configuration for StreamingAsrManager
 @available(macOS 13.0, iOS 16.0, *)
@@ -576,6 +730,9 @@ public struct StreamingTranscriptionUpdate: Sendable {
     /// Confidence score (0.0 - 1.0)
     public let confidence: Float
 
+    /// Token-level timing information for diarization
+    public let tokenTimings: [TokenTiming]?
+
     /// Timestamp of this update
     public let timestamp: Date
 
@@ -583,11 +740,13 @@ public struct StreamingTranscriptionUpdate: Sendable {
         text: String,
         isConfirmed: Bool,
         confidence: Float,
+        tokenTimings: [TokenTiming]? = nil,
         timestamp: Date
     ) {
         self.text = text
         self.isConfirmed = isConfirmed
         self.confidence = confidence
+        self.tokenTimings = tokenTimings
         self.timestamp = timestamp
     }
 }

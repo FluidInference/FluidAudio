@@ -132,6 +132,7 @@ final class StreamingAsrManagerTests: XCTestCase {
         XCTAssertEqual(update.text, "Hello world")
         XCTAssertTrue(update.isConfirmed)
         XCTAssertEqual(update.confidence, 0.95)
+        XCTAssertNil(update.tokenTimings)
         XCTAssertNotNil(update.timestamp)
     }
 
@@ -155,6 +156,92 @@ final class StreamingAsrManagerTests: XCTestCase {
         )
         XCTAssertTrue(highConfUpdate.isConfirmed)
         XCTAssertGreaterThan(highConfUpdate.confidence, 0.85)
+    }
+
+    func testStreamingTranscriptionUpdateWithTokenTimings() {
+        // Test with token timings
+        let tokenTimings = [
+            TokenTiming(token: "hello", tokenId: 1, startTime: 0.0, endTime: 0.5, confidence: 0.9),
+            TokenTiming(token: "world", tokenId: 2, startTime: 0.5, endTime: 1.0, confidence: 0.95),
+        ]
+
+        let updateWithTimings = StreamingTranscriptionUpdate(
+            text: "hello world",
+            isConfirmed: true,
+            confidence: 0.92,
+            tokenTimings: tokenTimings,
+            timestamp: Date()
+        )
+
+        XCTAssertEqual(updateWithTimings.text, "hello world")
+        XCTAssertTrue(updateWithTimings.isConfirmed)
+        XCTAssertEqual(updateWithTimings.confidence, 0.92)
+        XCTAssertNotNil(updateWithTimings.tokenTimings)
+        XCTAssertEqual(updateWithTimings.tokenTimings?.count, 2)
+        XCTAssertEqual(updateWithTimings.tokenTimings?[0].token, "hello")
+        XCTAssertEqual(updateWithTimings.tokenTimings?[1].token, "world")
+    }
+
+    func testFinishIncludesTokenTimingsWhenMetadataPresent() async throws {
+        let manager = StreamingAsrManager()
+        let testAsrManager = AsrManager()
+        #if DEBUG
+        testAsrManager.setVocabularyForTesting([
+            1: "▁hello",
+            2: "▁world",
+        ])
+        #endif
+
+        await manager.setAsrManagerForTesting(testAsrManager)
+        await manager.accumulateTokenMetadata(
+            tokens: [1, 2],
+            timestamps: [10, 25],
+            confidences: [0.9, 0.8]
+        )
+        await manager.setTotalSamplesProcessedForTesting((25 + 1) * ASRConstants.samplesPerEncoderFrame)
+
+        let result = try await manager.finish()
+
+        guard let tokenTimings = result.tokenTimings else {
+            return XCTFail("Expected token timings in final result")
+        }
+
+        XCTAssertEqual(tokenTimings.count, 2)
+        XCTAssertEqual(tokenTimings[0].tokenId, 1)
+        XCTAssertEqual(tokenTimings[1].tokenId, 2)
+        XCTAssertEqual(tokenTimings[0].startTime, 0.8, accuracy: 1e-6)
+        XCTAssertEqual(tokenTimings[1].startTime, 2.0, accuracy: 1e-6)
+        XCTAssertEqual(Double(tokenTimings[0].confidence), 0.9, accuracy: 1e-6)
+        XCTAssertEqual(Double(tokenTimings[1].confidence), 0.8, accuracy: 1e-6)
+        XCTAssertEqual(result.text, "hello world")
+        XCTAssertGreaterThan(result.duration, 0)
+        XCTAssertGreaterThan(result.processingTime, 0)
+    }
+
+    func testFinishOmitsTimingsWhenMetadataMismatchOccurs() async throws {
+        let manager = StreamingAsrManager()
+        let testAsrManager = AsrManager()
+        #if DEBUG
+        testAsrManager.setVocabularyForTesting([
+            1: "▁hello",
+            2: "▁world",
+        ])
+        #endif
+
+        await manager.setAsrManagerForTesting(testAsrManager)
+        await manager.accumulateTokenMetadata(
+            tokens: [1, 2],
+            timestamps: [10],
+            confidences: [0.9]
+        )
+        await manager.setTotalSamplesProcessedForTesting(32_000)
+
+        let result = try await manager.finish()
+
+        XCTAssertTrue(result.tokenTimings?.isEmpty ?? true)
+        XCTAssertEqual(result.text, "hello world")
+        XCTAssertGreaterThan(result.duration, 0)
+        XCTAssertGreaterThan(result.processingTime, 0)
     }
 
     // MARK: - Audio Source Tests
