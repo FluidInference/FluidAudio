@@ -10,8 +10,17 @@ final class EspeakG2P {
 
     private let queue = DispatchQueue(label: "com.fluidaudio.tts.espeak.g2p")
     private var initialized = false
+    private var currentVoice: String = ""
 
     private init() {}
+
+    deinit {
+        queue.sync {
+            if initialized {
+                espeak_Terminate()
+            }
+        }
+    }
 
     static var isAvailable: Bool {
         true
@@ -28,8 +37,10 @@ final class EspeakG2P {
                     logger.warning("espeak_TextToPhonemes returned nil for word: \(word)")
                     return nil
                 }
+                // eSpeak returns a static buffer that doesn't need to be freed
                 let s = String(cString: outPtr)
                 if s.isEmpty { return nil }
+                // Split by whitespace for word-level phonemes, otherwise Unicode scalars for character-level
                 if s.contains(where: { $0.isWhitespace }) {
                     return s.split { $0.isWhitespace }.map { String($0) }
                 } else {
@@ -39,12 +50,14 @@ final class EspeakG2P {
         }
     }
 
-    private var currentVoice: String = "en-us"
-
     private func initializeIfNeeded(espeakVoice: String = "en-us") -> Bool {
         if initialized {
             if espeakVoice != currentVoice {
-                _ = espeakVoice.withCString { espeak_SetVoiceByName($0) }
+                let result = espeakVoice.withCString { espeak_SetVoiceByName($0) }
+                if result != EE_OK {
+                    logger.error("Failed to set voice to \(espeakVoice), error code: \(result)")
+                    return false
+                }
                 currentVoice = espeakVoice
             }
             return true
@@ -62,32 +75,42 @@ final class EspeakG2P {
             logger.error("eSpeak NG initialization failed (rc=\(rc))")
             return false
         }
-        _ = espeakVoice.withCString { espeak_SetVoiceByName($0) }
+        let voiceResult = espeakVoice.withCString { espeak_SetVoiceByName($0) }
+        if voiceResult != EE_OK {
+            logger.error("Failed to set initial voice to \(espeakVoice), error code: \(voiceResult)")
+            espeak_Terminate()
+            return false
+        }
         currentVoice = espeakVoice
         initialized = true
         return true
     }
 
+    private static let staticLogger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
+
     private static func frameworkBundledDataPath() -> URL? {
-        // Try to find espeak-ng-data.bundle in all loaded bundles
-        let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
+        let logger = staticLogger
 
-        for bundle in Bundle.allBundles {
-            if let bundleURL = bundle.url(forResource: "espeak-ng-data", withExtension: "bundle") {
-                let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
-                let voicesPath = dataDir.appendingPathComponent("voices")
-
-                if FileManager.default.fileExists(atPath: voicesPath.path) {
-                    logger.info("Found eSpeak data bundle at: \(dataDir.path)")
-                    return dataDir
-                } else {
-                    logger.warning("Found espeak-ng-data.bundle but voices directory missing at: \(voicesPath.path)")
-                }
-            }
+        // The espeak-ng-data.bundle should be in the ESpeakNG.framework's Resources
+        guard let bundle = Bundle(identifier: "com.kokoro.espeakng") else {
+            logger.warning("Could not find ESpeakNG framework bundle (com.kokoro.espeakng)")
+            return nil
         }
 
-        logger.error(
-            "Could not find espeak-ng-data.bundle in any loaded bundle. Searched \(Bundle.allBundles.count) bundles.")
+        guard let bundleURL = bundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
+            logger.warning("Could not find espeak-ng-data.bundle in ESpeakNG framework")
+            return nil
+        }
+
+        let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
+        let voicesPath = dataDir.appendingPathComponent("voices")
+
+        if FileManager.default.fileExists(atPath: voicesPath.path) {
+            logger.info("Found eSpeak data at: \(dataDir.path)")
+            return dataDir
+        }
+
+        logger.error("espeak-ng-data.bundle found but voices directory missing")
         return nil
     }
 
