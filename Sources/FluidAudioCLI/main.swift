@@ -1,3 +1,4 @@
+#if os(macOS)
 import AVFoundation
 import FluidAudio
 import Foundation
@@ -48,7 +49,6 @@ func printUsage() {
     )
 }
 
-#if os(macOS)
 // Returns the Mach high-water resident memory footprint for the current process.
 // This captures the peak physical memory, including shared framework pages, rather than
 // the CLI's current or private usage.
@@ -87,11 +87,6 @@ func logPeakMemoryUsage() {
         "Peak memory usage (process-wide): \(formatted) GB"
     )
 }
-#else
-func logPeakMemoryUsage() {
-    print("Memory monitoring not available on this platform")
-}
-#endif
 
 func exitWithPeakMemory(_ code: Int32) -> Never {
     logPeakMemoryUsage()
@@ -161,3 +156,6 @@ Task {
 
 // Wait for async task to complete
 semaphore.wait()
+#else
+#error("FluidAudioCLI is only supported on macOS")
+#endif
