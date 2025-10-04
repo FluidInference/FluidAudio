@@ -169,7 +169,7 @@ public class DownloadUtils {
             }
 
             do {
-                // Validate model directory structure before loading
+                // Validate model directory structure before loading (.mlmodelc bundle)
                 var isDirectory: ObjCBool = false
                 guard
                     FileManager.default.fileExists(
@@ -184,7 +184,6 @@ public class DownloadUtils {
                         ])
                 }
 
-                // Check for essential model files
                 let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
                 guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
                     logger.error("Missing coremldata.bin in \(name)")
@@ -209,11 +208,10 @@ public class DownloadUtils {
             } catch {
                 logger.error("Failed to load model \(name): \(error)")
 
-                // List directory contents for debugging
                 if let contents = try? FileManager.default.contentsOfDirectory(
-                    at: modelPath, includingPropertiesForKeys: nil)
+                    atPath: modelPath.deletingLastPathComponent().path)
                 {
-                    logger.error("Model directory contents: \(contents.map { $0.lastPathComponent })")
+                    logger.error("Model directory contents: \(contents)")
                 }
 
                 throw error
@@ -223,6 +221,22 @@ public class DownloadUtils {
         return models
     }
 
+    /// Get required model names for a given repository
+    /// Uses centralized ModelNames where available to avoid cross‑type coupling
+    @available(macOS 13.0, iOS 16.0, *)
+    private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+        switch repo {
+        case .vad:
+            return ModelNames.VAD.requiredModels
+        case .parakeet, .parakeetV2:
+            return ModelNames.ASR.requiredModels
+        case .diarizer:
+            return ModelNames.Diarizer.requiredModels
+        case .kokoro:
+            return ModelNames.TTS.requiredModels
+        }
+    }
+
     /// Download a HuggingFace repository
     private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
@@ -230,8 +244,8 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
-        // Get the required model names for this repo from the appropriate manager
-        let requiredModels = ModelNames.getRequiredModelNames(for: repo)
+        // Get the required model names for this repo
+        let requiredModels = getRequiredModelNames(for: repo)
 
         // Download all repository contents
         let files = try await listRepoFiles(repo)
@@ -273,7 +287,7 @@ public class DownloadUtils {
     /// List files in a HuggingFace repository
     private static func listRepoFiles(_ repo: Repo, path: String = "") async throws -> [RepoFile] {
         let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
-        let apiURL = URL(string: "https://huggingface.co/api/models/\(repo.rawValue)/\(apiPath)")!
+        let apiURL = URL(string: "https://huggingface.co/api/models/\(repo.remotePath)/\(apiPath)")!
 
         var request = URLRequest(url: apiURL)
         request.timeoutInterval = 30
@@ -358,7 +372,6 @@ public class DownloadUtils {
         let parentDir = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
 
-        // Check if file already exists and is complete
         if let attrs = try? FileManager.default.attributesOfItem(atPath: destination.path),
             let fileSize = attrs[.size] as? Int64,
             fileSize == expectedSize
@@ -382,7 +395,7 @@ public class DownloadUtils {
 
         // Download URL
         let downloadURL = URL(
-            string: "https://huggingface.co/\(repo.rawValue)/resolve/main/\(path)")!
+            string: "https://huggingface.co/\(repo.remotePath)/resolve/main/\(path)")!
 
         // Download the file (no retries)
         do {

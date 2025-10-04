@@ -80,6 +80,75 @@ iPhone 16 Pro Max run, and only for models that were reloaded during the session
 | Decoder       |                       88.49 |                        8.11 |              146.01 | MLComputeUnits(rawValue: 1) |
 | JointDecision |                       48.46 |                        7.97 |               71.85 | MLComputeUnits(rawValue: 1) |
 
+## Text-to-Speech
+
+### Kokoro-82M PyTorch Pipeline
+
+```bash
+uv run python benchmark_kokoro_pip.py
+```
+
+```text
+KPipeline benchmark for voice af_heart (warm-up took 0.345s) using pip package
+Test   Chars    Output (s)   Inf(s)       RTFx       Peak GB     
+1      42       2.750        0.471        5.841x     1.47        
+2      129      8.625        1.401        6.156x     1.89        
+3      254      15.525       2.651        5.857x     2.69        
+4      93       6.125        1.114        5.497x     2.70        
+5      104      7.200        1.156        6.226x     2.72        
+6      130      9.300        1.525        6.099x     2.72        
+7      197      12.850       2.208        5.819x     2.83        
+8      6        1.350        0.312        4.325x     2.83        
+9      1228     76.200       13.240       5.755x     3.18        
+10     567      35.200       7.124        4.941x     3.35        
+11     4615     286.525      46.747       6.129x     3.47        
+Total  -        461.650      77.950       5.922x     3.47        
+```
+
+### Kokoro-82M MLX Pipeline
+
+```bash
+uv run python benchmark_kokoro_mlx.py
+```
+
+```
+Test   Chars    Output (s)   Inf(s)       RTFx       Peak GB
+1      42       2.750        0.411        6.684x     1.01        
+2      129      8.650        0.921        9.397x     1.97        
+3      254      15.525       1.784        8.705x     2.39        
+4      93       6.125        0.824        7.433x     2.39        
+5      104      7.200        0.825        8.723x     2.39        
+6      130      9.300        0.952        9.764x     2.39        
+7      197      12.850       1.288        9.980x     2.39        
+8      6        1.350        0.233        5.792x     2.39        
+9      1228     76.200       7.376        10.331x    2.98        
+10     567      35.200       3.579        9.836x     3.16        
+11     4615     286.500      27.551       10.399x    3.16        
+Total  -        461.650      45.744       10.092x    3.16  
+```
+
+#### Variant preference: 5s
+
+```text
+FluidAudio TTS benchmark for voice af_heart (warm-up took an extra 45.239s)
+Variant preference: 5s
+Test   Chars    Ouput (s)    Inf(s)       RTFx      
+1      42       2.825        0.855        3.303x    
+2      129      8.050        1.299        6.198x    
+3      254      14.450       1.712        8.441x    
+4      93       6.025        0.809        7.444x    
+5      104      7.250        1.200        6.042x    
+6      130      9.025        1.325        6.813x    
+7      197      12.200       1.280        9.534x    
+8      6        0.825        0.749        1.102x    
+9      1228     74.625       5.721        13.043x   
+10     567      36.125       3.108        11.623x   
+11     4269     266.400      25.100       10.613x   
+Total  -        437.800      43.158       10.144    
+
+Peak memory usage (process-wide): 1.073 GB
+```
+
 ## Voice Activity Detection
 
 Model is nearly identical to the base model in terms of quality, perforamnce wise we see an up to ~3.5x improvement compared to the silero Pytorch VAD model with the 256ms batch model (8 chunks of 32ms)

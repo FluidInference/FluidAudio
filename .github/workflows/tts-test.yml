@@ -1,0 +1,43 @@
+name: TTS Test
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-tts:
+    runs-on: macos-14
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build FluidAudio
+      run: |
+        swift build -c release
+    
+    - name: Generate TTS Audio
+      run: |
+        echo "🎤 Generating TTS audio (ground truth test)..."
+        TEXT="I can't believe we finally made it to the summit after climbing for twelve exhausting hours through wind and rain, but wow, this view of the endless mountain ranges stretching to the horizon makes every single difficult step completely worth the journey."
+        
+        # This will auto-download model and generate audio
+        swift run --configuration release fluidaudio tts "$TEXT" --output kokoro_output.wav --auto-download
+        
+        # Verify output
+        if [ -f kokoro_output.wav ]; then
+          SIZE=$(ls -l kokoro_output.wav | awk '{print $5}')
+          echo "✅ TTS successful: kokoro_output.wav ($SIZE bytes)"
+        else
+          echo "❌ Output file not created"
+          exit 1
+        fi
+    
+    - name: Upload Audio Output
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: kokoro-tts-output
+        path: kokoro_output.wav
+        retention-days: 7
+    

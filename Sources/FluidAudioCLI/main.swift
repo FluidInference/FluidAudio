@@ -21,6 +21,7 @@ func printUsage() {
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
+            tts                     Synthesize speech from text using Kokoro TTS
             download                Download evaluation datasets
             help                    Show this help message
 
@@ -38,6 +39,8 @@ func printUsage() {
             fluidaudio transcribe audio.wav --low-latency
 
             fluidaudio multi-stream audio1.wav audio2.wav
+            
+            fluidaudio tts "Hello world" --output hello.wav
 
             fluidaudio vad-analyze audio.wav --streaming
 
@@ -46,15 +49,57 @@ func printUsage() {
     )
 }
 
+// Returns the Mach high-water resident memory footprint for the current process.
+// This captures the peak physical memory, including shared framework pages, rather than
+// the CLI's current or private usage.
+func fetchPeakMemoryUsageBytes() -> UInt64? {
+    var info = task_vm_info_data_t()
+    var count =
+        mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size)
+        / mach_msg_type_number_t(MemoryLayout<natural_t>.size)
+
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(
+                mach_task_self_,
+                task_flavor_t(TASK_VM_INFO),
+                $0,
+                &count)
+        }
+    }
+
+    guard result == KERN_SUCCESS else {
+        return nil
+    }
+
+    return info.resident_size_peak
+}
+
+func logPeakMemoryUsage() {
+    guard let peakBytes = fetchPeakMemoryUsageBytes() else {
+        cliLogger.error("Unable to determine peak memory usage")
+        return
+    }
+
+    let peakGigabytes = Double(peakBytes) / 1024.0 / 1024.0 / 1024.0
+    let formatted = String(format: "%.3f", peakGigabytes)
+    print(
+        "Peak memory usage (process-wide): \(formatted) GB"
+    )
+}
+
+func exitWithPeakMemory(_ code: Int32) -> Never {
+    logPeakMemoryUsage()
+    exit(code)
+}
+
 // Main entry point
 let arguments = CommandLine.arguments
 
 guard arguments.count > 1 else {
     printUsage()
-    exit(1)
+    exitWithPeakMemory(1)
 }
-
-// Debug builds automatically mirror OSLog messages to console
 
 // Log system information once at application startup
 Task {
@@ -66,6 +111,11 @@ let semaphore = DispatchSemaphore(value: 0)
 
 // Use Task to handle async commands
 Task {
+    defer {
+        logPeakMemoryUsage()
+        semaphore.signal()
+    }
+
     switch command {
     case "vad-benchmark":
         await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
@@ -79,6 +129,15 @@ Task {
         await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":
         await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
+
+    case "tts":
+        if #available(macOS 13.0, *) {
+            await TTS.run(arguments: Array(arguments.dropFirst(2)))
+        } else {
+            print("TTS requires macOS 13.0 or later")
+            exitWithPeakMemory(1)
+        }
+
     case "diarization-benchmark":
         await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
     case "process":
@@ -87,14 +146,12 @@ Task {
         await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "help", "--help", "-h":
         printUsage()
-        exit(0)
+        exitWithPeakMemory(0)
     default:
         cliLogger.error("Unknown command: \(command)")
         printUsage()
-        exit(1)
+        exitWithPeakMemory(1)
     }
-
-    semaphore.signal()
 }
 
 // Wait for async task to complete
