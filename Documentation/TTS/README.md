@@ -1,5 +1,7 @@
 # Text-To-Speech (TTS) Code Examples
 
+> **⚠️ Beta:** The TTS system is currently in beta and only supports American English. Additional language support is planned for future releases.
+
 Quick recipes for running the Kokoro synthesis stack.
 
 ## CLI quick start

@@ -287,7 +287,10 @@ Offline mode also reports RTFx using the model's per-chunk processing time.
 
 ## Text‑To‑Speech (TTS)
 
+> **⚠️ Beta:** The TTS system is currently in beta and only supports American English. Additional language support is planned for future releases.
+
 - Model: Kokoro (CoreML unified model)
+- Language: American English (beta)
 - G2P: Dictionary first, then eSpeak NG (CEspeakNG) for OOV words
 - Output: 24 kHz mono WAV
 

@@ -1,32 +1,41 @@
 import Foundation
 
+/// Constants for the TTS (Text-to-Speech) system.
+///
+/// - Note: **Beta:** The TTS system is currently in beta and only supports American English.
+///   While voice identifiers for other languages are included in the model, only American English
+///   voices are currently tested and supported. Additional language support is planned for future releases.
 public enum TtsConstants {
 
     /// Voice identifier we regression-test and ship by default.
+    /// This is the recommended American English voice for production use.
     public static let recommendedVoice = "af_heart"
 
     /// Canonical voice identifiers bundled with the Kokoro CoreML release.
-    /// Only `recommendedVoice` is covered by automated QA; the rest are experimental.
+    ///
+    /// - Important: Only American English voices (af_*, am_*) are currently supported and tested.
+    ///   Only `recommendedVoice` is covered by automated QA; all other voices are experimental.
+    ///   Non-English voices are present in the model but are not yet quality-assured for production use.
     public static let availableVoices: [String] = [
-        // American English
+        // American English (supported, beta)
         "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole", "af_nova",
         "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam",
         "am_michael", "am_onyx", "am_puck", "am_santa",
-        // British English
+        // British English (experimental, not tested)
         "bf_alice", "bf_emma", "bf_isabella", "bf_lily", "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
-        // Spanish (LATAM)
+        // Spanish (LATAM) (experimental, not tested)
         "ef_dora", "em_alex", "em_santa",
-        // French
+        // French (experimental, not tested)
         "ff_siwis",
-        // Hindi
+        // Hindi (experimental, not tested)
         "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
-        // Italian
+        // Italian (experimental, not tested)
         "if_sara", "im_nicola",
-        // Japanese
+        // Japanese (experimental, not tested)
         "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo",
-        // Brazilian Portuguese
+        // Brazilian Portuguese (experimental, not tested)
         "pf_dora", "pm_alex", "pm_santa",
-        // Mandarin Chinese
+        // Mandarin Chinese (experimental, not tested)
         "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi", "zm_yunjian", "zm_yunxi", "zm_yunxia",
         "zm_yunyang",
     ]

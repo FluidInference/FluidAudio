@@ -1,6 +1,17 @@
 import Foundation
 import OSLog
 
+/// Manages text-to-speech synthesis using the Kokoro CoreML model.
+///
+/// - Note: **Beta:** The TTS system is currently in beta and only supports American English.
+///   Additional language support is planned for future releases.
+///
+/// Example usage:
+/// ```swift
+/// let manager = TtSManager()
+/// try await manager.initialize()
+/// let audioData = try await manager.synthesize(text: "Hello, world!")
+/// ```
 @available(macOS 13.0, iOS 16.0, *)
 public final class TtSManager {
 
