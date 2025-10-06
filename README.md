@@ -281,10 +281,60 @@ swift run fluidaudio vad-analyze path/to/audio.wav --streaming
 # Benchmark accuracy/precision trade-offs
 swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
 ```
-
 `swift run fluidaudio vad-analyze --help` lists every tuning option, including
 negative-threshold overrides, max-speech splitting, padding, and chunk size.
 Offline mode also reports RTFx using the model's per-chunk processing time.
+
+## Text‑To‑Speech (TTS)
+
+> **⚠️ Beta:** The TTS system is currently in beta and only supports American English. Additional language support is planned for future releases.
+
+- Model: Kokoro (CoreML unified model)
+- Language: American English (beta)
+- G2P: Dictionary first, then eSpeak NG (CEspeakNG) for OOV words
+- Output: 24 kHz mono WAV
+
+Requirements (macOS)
+Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
+https://github.com/espeak-ng/espeak-ng/tree/master 
+
+### Quick Start (CLI)
+
+```bash
+# First run will download the Kokoro model and vocab
+swift run fluidaudio tts "Hello from FluidAudio." --auto-download --output out.wav
+
+# Another example with punctuation and OOV handling
+swift run fluidaudio tts "Edge-cases: URLs like https://example.com and e-mail test@example.com." --output out2.wav
+```
+
+Notes
+- The TTS pipeline uses a word→phoneme dictionary first; unknown words are phonemized with eSpeak NG (C API) and mapped to the model’s token set.
+- OOV words are printed with their IPA and mapped tokens for visibility during synthesis.
+- We do not prepend any “language token” to avoid leading vowel artifacts.
+
+### Quick Start (Code)
+
+```swift
+import FluidAudio
+
+Task {
+  do {
+    let data = try await KokoroModel.synthesize(text: "Hello from FluidAudio.")
+    try data.write(to: URL(fileURLWithPath: "out.wav"))
+  } catch {
+    print("TTS error: \(error)")
+  }
+}
+```
+
+Troubleshooting
+Build requires eSpeak NG headers/libs for the C API discoverable via pkg-config (`espeak-ng`).
+- If SwiftPM cannot find headers, build with explicit paths:
+  - `swift build -Xcc -I/opt/homebrew/include -Xlinker -L/opt/homebrew/lib`
+- Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
+
+## Showcase 
 
 ## Showcase
 
@@ -325,6 +375,8 @@ Wewpeaker: https://github.com/wenet-e2e/wespeaker
 Parakeet-mlx: https://github.com/senstella/parakeet-mlx
 
 silero-vad: https://github.com/snakers4/silero-vad
+
+Kokoro-82M: https://huggingface.co/hexgrad/Kokoro-82M
 
 ### Citation
 
