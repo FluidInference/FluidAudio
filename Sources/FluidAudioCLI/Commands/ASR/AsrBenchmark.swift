@@ -286,30 +286,15 @@ public class ASRBenchmark {
 
     /// Calculate WER and CER metrics with HuggingFace-compatible normalization
     public func calculateASRMetrics(hypothesis: String, reference: String) -> ASRMetrics {
-        let normalizedHypothesis = TextNormalizer.normalize(hypothesis)
-        let normalizedReference = TextNormalizer.normalize(reference)
-
-        let hypWords = normalizedHypothesis.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        let refWords = normalizedReference.components(separatedBy: .whitespacesAndNewlines).filter {
-            !$0.isEmpty
-        }
-
-        let wordEditDistance = editDistance(hypWords, refWords)
-        let wer = refWords.isEmpty ? 0.0 : Double(wordEditDistance.total) / Double(refWords.count)
-
-        let hypChars = Array(normalizedHypothesis.replacingOccurrences(of: " ", with: ""))
-        let refChars = Array(normalizedReference.replacingOccurrences(of: " ", with: ""))
-        let charEditDistance = editDistance(hypChars.map(String.init), refChars.map(String.init))
-        let cer = refChars.isEmpty ? 0.0 : Double(charEditDistance.total) / Double(refChars.count)
-
+        let metrics = WERCalculator.calculateWERAndCER(hypothesis: hypothesis, reference: reference)
         return ASRMetrics(
-            wer: wer,
-            cer: cer,
-            insertions: wordEditDistance.insertions,
-            deletions: wordEditDistance.deletions,
-            substitutions: wordEditDistance.substitutions,
-            totalWords: refWords.count,
-            totalCharacters: refChars.count
+            wer: metrics.wer,
+            cer: metrics.cer,
+            insertions: metrics.insertions,
+            deletions: metrics.deletions,
+            substitutions: metrics.substitutions,
+            totalWords: metrics.totalWords,
+            totalCharacters: metrics.totalCharacters
         )
     }
 
@@ -430,84 +415,6 @@ public class ASRBenchmark {
 
         logger.info("Dataset extracted successfully")
     }
-}
-
-// MARK: - Edit Distance Algorithm
-
-private struct EditDistanceResult {
-    let total: Int
-    let insertions: Int
-    let deletions: Int
-    let substitutions: Int
-}
-
-private func editDistance<T: Equatable>(_ seq1: [T], _ seq2: [T]) -> EditDistanceResult {
-    let m = seq1.count
-    let n = seq2.count
-
-    if m == 0 {
-        return EditDistanceResult(total: n, insertions: n, deletions: 0, substitutions: 0)
-    }
-    if n == 0 {
-        return EditDistanceResult(total: m, insertions: 0, deletions: m, substitutions: 0)
-    }
-
-    var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-
-    for i in 0...m {
-        dp[i][0] = i
-    }
-    for j in 0...n {
-        dp[0][j] = j
-    }
-
-    for i in 1...m {
-        for j in 1...n {
-            if seq1[i - 1] == seq2[j - 1] {
-                dp[i][j] = dp[i - 1][j - 1]
-            } else {
-                dp[i][j] =
-                    1
-                    + min(
-                        dp[i - 1][j],  // deletion
-                        dp[i][j - 1],  // insertion
-                        dp[i - 1][j - 1]  // substitution
-                    )
-            }
-        }
-    }
-
-    var i = m
-    var j = n
-    var insertions = 0
-    var deletions = 0
-    var substitutions = 0
-
-    while i > 0 || j > 0 {
-        if i > 0 && j > 0 && seq1[i - 1] == seq2[j - 1] {
-            i -= 1
-            j -= 1
-        } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
-            substitutions += 1
-            i -= 1
-            j -= 1
-        } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
-            deletions += 1
-            i -= 1
-        } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
-            insertions += 1
-            j -= 1
-        } else {
-            break
-        }
-    }
-
-    return EditDistanceResult(
-        total: dp[m][n],
-        insertions: insertions,
-        deletions: deletions,
-        substitutions: substitutions
-    )
 }
 
 // MARK: - Detailed WER Analysis

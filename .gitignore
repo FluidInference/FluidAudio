@@ -97,6 +97,10 @@ FluidAudioDatasets/
 *.wav
 *.mp3
 Resources/
+!Sources/FluidAudio/Resources/
+!Sources/FluidAudio/Resources/**
 scripts/
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
+
+fluidaudio_cli/*
