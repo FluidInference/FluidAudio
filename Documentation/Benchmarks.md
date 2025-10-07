@@ -224,3 +224,24 @@ swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --thresh
 
 
 ## Speaker Diarization
+
+### Offline VBx (pyannote community-1)
+
+The offline controller mirrors the pyannote Community-1 pipeline (powerset segmentation + WeSpeaker + VBx).
+
+```bash
+swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6 --auto-download
+```
+
+- Default configuration (`OfflineDiarizerConfig.default`) matches the exporter values: threshold = 0.6, minimum cluster size 12, `Fa=0.07`, `Fb=0.8`, 10 s windows.
+- Segmentation emits 589 frames per 10 s chunk; soft weights stay in probability space before being resampled with the `scipy.ndimage.zoom`-compatible helper.
+- On an M4 Pro, the offline pipeline typically processes AMI-SDM at ~5.2× real time (RTFx ≈ 5.2) with DER ≈ 18–19 %, in line with the original pyannote numbers.
+- Enable `--debug` to collect `PipelineTimings` and per-speaker embeddings for post-analysis.
+
+For quick spot checks on a single file without the benchmark harness:
+
+```bash
+swift run fluidaudio process ES2004a.Mix-Headset.wav --mode offline --threshold 0.6 --debug --output es2004a_offline.json
+```
+
+The JSON output matches the streaming format (list of `TimedSpeakerSegment`s) so you can diff results between streaming and offline runs.

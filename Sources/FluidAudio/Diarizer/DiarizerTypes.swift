@@ -126,10 +126,10 @@ public struct PipelineTimings: Sendable, Codable {
 public struct DiarizationResult: Sendable {
     public let segments: [TimedSpeakerSegment]
 
-    /// Speaker database with embeddings (only populated when debugMode is enabled)
+    /// Speaker database with embeddings (populated by offline pipelines for downstream use)
     public let speakerDatabase: [String: [Float]]?
 
-    /// Performance timings (only populated when debugMode is enabled)
+    /// Performance timings collected during diarization
     public let timings: PipelineTimings?
 
     public init(

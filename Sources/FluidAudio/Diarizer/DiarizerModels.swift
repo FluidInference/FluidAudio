@@ -98,7 +98,7 @@ extension DiarizerModels {
         return try await download(to: directory, configuration: configuration)
     }
 
-    static func defaultModelsDirectory() -> URL {
+    public static func defaultModelsDirectory() -> URL {
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return
             applicationSupport

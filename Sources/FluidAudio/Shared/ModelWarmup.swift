@@ -1,0 +1,83 @@
+import Accelerate
+import CoreML
+import Foundation
+
+/// Lightweight helpers that exercise Core ML models with zero-valued inputs to
+/// prime memory allocations before running the offline diarization pipeline.
+@available(macOS 13.0, iOS 16.0, *)
+enum ModelWarmup {
+
+    /// Performs a warmup loop for a model with a single MLMultiArray input.
+    ///
+    /// - Parameters:
+    ///   - model: Model to warm up.
+    ///   - inputName: Feature name expected by the model.
+    ///   - inputShape: Shape of the MLMultiArray (e.g. `[1, 1, 160_000]`).
+    ///   - iterations: Number of times to execute `prediction`.
+    /// - Returns: Total elapsed duration in seconds.
+    static func warmup(
+        model: MLModel,
+        inputName: String,
+        inputShape: [Int],
+        iterations: Int = 1
+    ) throws -> TimeInterval {
+        precondition(iterations > 0, "Warmup iterations must be positive")
+        precondition(!inputShape.isEmpty, "Input shape must not be empty")
+
+        let array = try MLMultiArray(
+            shape: inputShape.map { NSNumber(value: $0) },
+            dataType: .float32
+        )
+        array.resetToZeros()
+
+        let features = try MLDictionaryFeatureProvider(dictionary: [
+            inputName: MLFeatureValue(multiArray: array)
+        ])
+
+        let start = Date()
+        for _ in 0..<iterations {
+            _ = try model.prediction(from: features)
+        }
+        return Date().timeIntervalSince(start)
+    }
+
+    /// Warm up the embedding extractor with representative audio + weight inputs.
+    ///
+    /// We reproduce the exact shapes used during inference to make sure Core ML
+    /// allocates and caches buffers on the correct compute units (ANE/GPU).
+    static func warmupEmbeddingModel(
+        _ model: MLModel,
+        weightFrames: Int,
+        audioSamples: Int = 160_000
+    ) throws {
+        precondition(weightFrames > 0, "weightFrames must be positive")
+
+        let audioArray = try MLMultiArray(
+            shape: [1, 1, NSNumber(value: audioSamples)],
+            dataType: .float32
+        )
+        audioArray.resetToZeros()
+
+        let weightArray = try MLMultiArray(
+            shape: [1, NSNumber(value: weightFrames)],
+            dataType: .float32
+        )
+        weightArray.resetToZeros()
+
+        let provider = try MLDictionaryFeatureProvider(dictionary: [
+            "audio": MLFeatureValue(multiArray: audioArray),
+            "weights": MLFeatureValue(multiArray: weightArray),
+        ])
+
+        _ = try model.prediction(from: provider)
+    }
+}
+
+extension MLMultiArray {
+    fileprivate func resetToZeros() {
+        let pointer = dataPointer.assumingMemoryBound(to: Float.self)
+        let count = self.count
+        var zero: Float = 0
+        vDSP_vfill(&zero, pointer, 1, vDSP_Length(count))
+    }
+}

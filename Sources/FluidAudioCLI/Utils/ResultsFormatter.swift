@@ -13,6 +13,21 @@ struct ResultsFormatter {
         let rtfx = result.realTimeFactor
         print("   Speed Factor (RTFx): \(String(format: "%.2f", rtfx))x")
         print("   Detected Speakers: \(result.speakerCount)")
+        if let metrics = result.metrics {
+            print(
+                "   DER: \(String(format: "%.1f", metrics.der))% (Miss="
+                    + "\(String(format: "%.1f", metrics.missRate))%, FA="
+                    + "\(String(format: "%.1f", metrics.falseAlarmRate))%, SE="
+                    + "\(String(format: "%.1f", metrics.speakerErrorRate))%, JER="
+                    + "\(String(format: "%.1f", metrics.jer))%)"
+            )
+            if !metrics.speakerMapping.isEmpty {
+                print("   Speaker Mapping:")
+                for (pred, truth) in metrics.speakerMapping.sorted(by: { $0.key < $1.key }) {
+                    print("      \(pred) → \(truth)")
+                }
+            }
+        }
         print("🎤 Speaker Segments:")
 
         for (index, segment) in result.segments.enumerated() {

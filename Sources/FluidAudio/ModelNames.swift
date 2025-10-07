@@ -57,6 +57,29 @@ public enum ModelNames {
         ]
     }
 
+    /// Offline diarizer model names (VBx-based clustering)
+    public enum OfflineDiarizer {
+        public static let subfolder = "speaker-diarization-offline"
+        public static let segmentation = "Segmentation"
+        public static let embedding = "Embedding"
+        public static let pldaRho = "PldaRho"
+
+        public static let segmentationFile = segmentation + ".mlmodelc"
+        public static let embeddingFile = embedding + ".mlmodelc"
+        public static let pldaRhoFile = pldaRho + ".mlmodelc"
+
+        // Full paths including subfolder (for DownloadUtils)
+        public static let segmentationPath = subfolder + "/" + segmentationFile
+        public static let embeddingPath = subfolder + "/" + embeddingFile
+        public static let pldaRhoPath = subfolder + "/" + pldaRhoFile
+
+        public static let requiredModels: Set<String> = [
+            segmentationPath,
+            embeddingPath,
+            pldaRhoPath,
+        ]
+    }
+
     /// ASR model names
     public enum ASR {
         public static let preprocessor = "Preprocessor"
@@ -144,13 +167,16 @@ public enum ModelNames {
         }
     }
 
-    static func getRequiredModelNames(for repo: Repo) -> Set<String> {
+    static func getRequiredModelNames(for repo: Repo, varient: String?) -> Set<String> {
         switch repo {
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
         case .diarizer:
+            if varient == "offline" {
+                return ModelNames.OfflineDiarizer.requiredModels
+            }
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
             return ModelNames.TTS.requiredModels

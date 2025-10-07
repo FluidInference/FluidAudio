@@ -27,6 +27,7 @@ let package = Package(
             name: "FluidAudio",
             dependencies: [
                 "ESpeakNG"
+                "FastClusterWrapper",
             ],
             path: "Sources/FluidAudio",
             exclude: ["Frameworks"],
@@ -38,6 +39,14 @@ let package = Package(
                     "-Xcc", "-DACCELERATE_LAPACK_ILP64",
                 ])
            ]
+        ),
+        .target(
+            name: "FastClusterWrapper",
+            path: "Sources/FastClusterWrapper",
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .unsafeFlags(["-std=c++17"])
+            ]
         ),
         .executableTarget(
             name: "FluidAudioCLI",

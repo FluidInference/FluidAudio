@@ -40,6 +40,26 @@ Task {
 }
 ```
 
+> **Important:** Do not parse WAV/PCM bytes by hand (e.g., slicing headers or assuming 16-bit samples).
+> Always convert with `AudioConverter` so differing bit depths, channel layouts, metadata chunks,
+> or compressed formats (MP3/M4A/FLAC) get normalized to the 16 kHz mono Float32 tensors that Parakeet expects.
+> Manually decoded buffers frequently contain garbage values, which shows up as empty transcripts even though the models load successfully.
+
+### Transcribing directly from a file URL
+
+If you already have an audio file on disk you can skip manual sample loading—`AsrManager.transcribe(_ url:source:)`
+handles format conversion internally via `AudioConverter`.
+
+```swift
+let models = try await AsrModels.downloadAndLoad(version: .v3)
+let asrManager = AsrManager()
+try await asrManager.initialize(models: models)
+
+let audioURL = URL(fileURLWithPath: "/path/to/audio.wav")
+let result = try await asrManager.transcribe(audioURL, source: .system)
+print(result.text)
+```
+
 ## Manual model loading
 
 Working offline? Follow the [Manual Model Loading guide](ManualModelLoading.md) to stage the CoreML bundles and call `AsrModels.load` without triggering HuggingFace downloads.

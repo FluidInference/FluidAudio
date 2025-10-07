@@ -11,6 +11,8 @@ This guide defines how Codex should create comprehensive plans before tackling a
 
 ## Plan Creation Workflow
 
+Before drafting the plan, conduct any necessary research using Context7 or DeepWiki (or both). Summarize the key findings and links from that research inside the plan so reviewers can trace assumptions. During execution, keep leveraging Context7/DeepWiki whenever you need additional context or verification, and note their use in updates.
+
 1. **Restate the Mission**
    - Summarize the problem in your own words.
    - List explicit goals, non-goals, stakeholders (CLI users, diarizer pipeline, model loaders), and success criteria (latency/accuracy targets, UX expectations, guardrails).

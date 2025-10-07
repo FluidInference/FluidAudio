@@ -43,6 +43,13 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a \
 # Balanced throughput/quality (~10s chunks with 5s overlap)
 swift run fluidaudio diarization-benchmark --dataset ami-sdm \
   --chunk-seconds 10 --overlap-seconds 5
+
+# Run the full VBx offline pipeline
+swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6
+
+# Process a single file with streaming vs. offline inference
+swift run fluidaudio process meeting.wav --mode streaming --threshold 0.7
+swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
 ```
 
 ## VAD

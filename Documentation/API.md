@@ -32,6 +32,35 @@ Main class for speaker diarization and "who spoke when" analysis.
 - `DiarizerConfig`: Clustering threshold, minimum durations, activity thresholds
 - Optimal threshold: 0.7 (17.7% DER on AMI dataset)
 
+### OfflineDiarizerManager
+Full batch pipeline that mirrors the pyannote/Core ML exporter (powerset segmentation + VBx clustering).
+
+**Key Methods:**
+- `init(config: OfflineDiarizerConfig = .default)`
+  - Creates manager with configuration
+- `initialize(models: OfflineDiarizerModels)`
+  - Initializes with models containing segmentation, embedding, and PLDA components
+- `process(audio: [Float]) async throws -> DiarizationResult`
+  - Runs the full 10 s window pipeline: segmentation → soft mask interpolation → embedding → VBx → timeline reconstruction.
+
+**Supporting Types:**
+- `OfflineDiarizerConfig`
+  - Mirrors pyannote `config.yaml` (`clusteringThreshold`, `Fa`, `Fb`, `maxVBxIterations`, `minDurationOn/off`, batch sizes, logging flags).
+- `SegmentationRunner`
+  - Batches 160 k-sample chunks through the segmentation model (589 frames per chunk).
+- `Binarization`
+  - Converts log probabilities to soft VAD weights while retaining binary masks for diagnostics.
+- `WeightInterpolation`
+  - Reimplements `scipy.ndimage.zoom` (half-pixel offsets) so 589-frame weights align with the embedding model’s pooling stride.
+- `EmbeddingRunner`
+  - Batches audio + weights, resamples masks, and emits 256-d L2-normalized embeddings.
+- `PLDAScoring` / `VBxClustering`
+  - Apply the exported PLDA transforms and iterative VBx refinement to group embeddings into speakers.
+- `TimelineReconstruction`
+  - Derives timestamps directly from the segmentation frame count and `OfflineDiarizerConfig.windowDuration`, then enforces minimum gap/duration constraints.
+
+Use `OfflineDiarizerManager` when you need offline DER parity or want to run the new CLI offline mode (`fluidaudio process --mode offline`, `fluidaudio diarization-benchmark --mode offline`).
+
 ## Voice Activity Detection
 
 ### VadManager
@@ -70,10 +99,12 @@ Recommended threshold ranges depend on your acoustic conditions:
 Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 multilingual).
 
 **Key Methods:**
-- `transcribe(_:source:) throws -> AsrTranscription`
-  - Process complete audio and return transcription
-  - Parameters: `RandomAccessCollection<Float>` samples, `AudioSource` (microphone/system)
-  - Returns: `AsrTranscription` with text, confidence, and timing
+- `transcribe(_:source:) async throws -> ASRResult`
+  - Accepts `[Float]` samples already converted to 16 kHz mono; returns transcription text, confidence, and token timings.
+- `transcribe(_ url: URL, source:) async throws -> ASRResult`
+  - Loads the file directly and performs format conversion internally (`AudioConverter`).
+- `transcribe(_ buffer: AVAudioPCMBuffer, source:) async throws -> ASRResult`
+  - Convenience overload for capture pipelines that already produce PCM buffers.
 - `initialize(models:) async throws`
   - Load and initialize ASR models (automatic download if needed)
 
@@ -90,6 +121,11 @@ Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 mult
 - `AudioConverter.resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float]`
   - Convert a buffer to 16kHz mono (stateless conversion)
 - `AudioSource`: `.microphone` or `.system` for different processing paths
+
+> **Warning:** Avoid hand-decoding audio payloads (e.g., truncating WAV headers or treating bytes as raw `Int16` samples).
+> The Core ML models require correctly resampled 16 kHz mono Float32 tensors; manual parsing will silently corrupt input when
+> formats carry metadata chunks, different bit depths, stereo channels, or compression. Always route files and live buffers
+> through `AudioConverter` before calling `AsrManager.transcribe`.
 
 **Performance:**
 - Real-time factor: ~120x on M4 Pro (processes 1min audio in 0.5s)

@@ -107,6 +107,50 @@ let config = DiarizerConfig(
 let diarizer = DiarizerManager(config: config)
 ```
 
+### Offline VBx Pipeline (Batch Diarization)
+
+When you need full parity with the pyannote/Core ML exporter (powerset segmentation + VBx clustering), use the new `OfflineDiarizerManager`. It orchestrates segmentation, soft mask interpolation, WeSpeaker embedding extraction, PLDA/VBx clustering, and timeline reconstruction in one place:
+
+```swift
+import FluidAudio
+
+let config = OfflineDiarizerConfig()
+let manager = OfflineDiarizerManager(config: config)
+
+let modelDirectory = DiarizerModels.defaultModelsDirectory()
+let models = try await OfflineDiarizerModels.load(from: modelDirectory)
+manager.initialize(models: models)
+
+let samples = try AudioConverter().resampleAudioFile(path: "meeting.wav")
+let result = try await manager.process(audio: samples)
+
+for segment in result.segments {
+    print("\(segment.speakerId) → \(segment.startTimeSeconds)s – \(segment.endTimeSeconds)s")
+}
+```
+
+`OfflineDiarizerManager` mirrors the reference pipeline:
+
+- **Segmentation:** `SegmentationRunner` feeds 10 s/160 k sample chunks through the Core ML segmentation model. Each chunk yields 589 frame-level log probabilities over the 7 local powerset classes.
+- **Binarization:** `Binarization.logProbsToWeights` converts log probabilities to soft VAD weights; binary masks are still available for diagnostics.
+- **Weight interpolation:** `WeightInterpolation` applies the same half-pixel mapping as `scipy.ndimage.zoom`, preserving the Core ML exporter’s alignment when resampling 589-frame masks to the embedding model’s pooling rate.
+- **Embedding extraction:** `EmbeddingRunner` batches audio + resampled weights and returns L2-normalized 256-d embeddings.
+- **VBx clustering:** `VBxClustering` (with `AHCClustering` warm start and `PLDAScoring`) runs the full VBx refinement loop using the JSON parameters exported with the model bundle.
+- **Timeline reconstruction:** `TimelineReconstruction` now derives frame duration from the actual segmentation output and `OfflineDiarizerConfig.windowDuration`, ensuring timestamps stay correct if you swap in models with different hop sizes.
+
+Key configuration knobs live in `OfflineDiarizerConfig` (clustering threshold & minimum cluster size, `Fa`/`Fb`, VBx convergence, minimum segment durations). `DiarizationResult` now always includes `PipelineTimings` and per-speaker embeddings so downstream tooling can introspect performance and speaker profiles without toggling a debug flag.
+
+#### CLI shortcut
+
+The CLI exposes the same controller via `fluidaudio process` and the diarization benchmark tooling:
+
+```bash
+swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
+swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6
+```
+
+Both commands reuse the shared model cache (`DiarizerModels.defaultModelsDirectory()`) and emit JSON payloads compatible with the streaming pipeline.
+
 ## Streaming/Real-time Processing
 
 Process audio in chunks for real-time applications:
@@ -455,8 +499,8 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a
 | Property | Type | Description |
 |----------|------|-------------|
 | `segments` | `[TimedSpeakerSegment]` | Speaker segments with timing |
-| `speakerDatabase` | `[String: [Float]]?` | Speaker embeddings (debug mode) |
-| `timings` | `PipelineTimings?` | Processing timings (debug mode) |
+| `speakerDatabase` | `[String: [Float]]?` | Speaker embeddings keyed by speaker ID |
+| `timings` | `PipelineTimings?` | Processing timings for the diarization pass |
 
 ## Requirements
 
