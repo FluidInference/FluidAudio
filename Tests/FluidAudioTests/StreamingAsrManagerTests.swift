@@ -133,6 +133,50 @@ final class StreamingAsrManagerTests: XCTestCase {
         XCTAssertTrue(update.isConfirmed)
         XCTAssertEqual(update.confidence, 0.95)
         XCTAssertNotNil(update.timestamp)
+        XCTAssertTrue(update.tokenIds.isEmpty)
+        XCTAssertTrue(update.tokenTimings.isEmpty)
+        XCTAssertTrue(update.tokens.isEmpty)
+    }
+
+    func testApplyGlobalFrameOffset() {
+        let baseTimestamps = [0, 5, 10]
+        let offsetSamples = 3 * ASRConstants.samplesPerEncoderFrame  // 3 frames of left context
+
+        let adjusted = StreamingAsrManager.applyGlobalFrameOffset(
+            to: baseTimestamps,
+            windowStartSample: offsetSamples
+        )
+
+        XCTAssertEqual(adjusted, [3, 8, 13], "Timestamps should be shifted by frame offset")
+
+        let zeroOffset = StreamingAsrManager.applyGlobalFrameOffset(
+            to: baseTimestamps,
+            windowStartSample: 0
+        )
+        XCTAssertEqual(zeroOffset, baseTimestamps, "Zero offset should preserve timestamps")
+
+        let emptyAdjusted = StreamingAsrManager.applyGlobalFrameOffset(to: [], windowStartSample: offsetSamples)
+        XCTAssertTrue(emptyAdjusted.isEmpty, "Empty input should remain empty")
+    }
+
+    func testStreamingTranscriptionUpdateTokenMetadata() {
+        let tokenTimings = [
+            TokenTiming(token: "hello", tokenId: 1, startTime: 0.0, endTime: 0.32, confidence: 0.98),
+            TokenTiming(token: "world", tokenId: 2, startTime: 0.32, endTime: 0.64, confidence: 0.97),
+        ]
+
+        let update = StreamingTranscriptionUpdate(
+            text: "Hello world",
+            isConfirmed: true,
+            confidence: 0.95,
+            timestamp: Date(),
+            tokenIds: [1, 2],
+            tokenTimings: tokenTimings
+        )
+
+        XCTAssertEqual(update.tokenIds, [1, 2])
+        XCTAssertEqual(update.tokenTimings.count, 2)
+        XCTAssertEqual(update.tokens, ["hello", "world"])
     }
 
     func testStreamingTranscriptionUpdateConfidence() {
