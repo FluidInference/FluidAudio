@@ -302,7 +302,9 @@ enum TranscribeCommand {
                     if showMetadata {
                         let timestampString = timestampFormatter.string(from: update.timestamp)
                         let timingSummary = streamingTimingSummary(for: update)
-                        logger.info("[\(updateType)] '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))")
+                        logger.info(
+                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
+                        )
                         logger.info("  \(timingSummary)")
                         if !update.tokenTimings.isEmpty {
                             for (index, timing) in update.tokenTimings.enumerated() {
@@ -397,7 +399,8 @@ enum TranscribeCommand {
 
             if showMetadata {
                 if let snapshot = await tracker.metadataSnapshot() {
-                    let summaryLabel = snapshot.isConfirmed
+                    let summaryLabel =
+                        snapshot.isConfirmed
                         ? "Confirmed token timings"
                         : "Latest token timings (volatile)"
                     logger.info(summaryLabel + ":")
