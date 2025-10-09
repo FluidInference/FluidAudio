@@ -1,5 +1,6 @@
 import Accelerate
 import CoreML
+import Darwin
 import Foundation
 import Metal
 
@@ -66,7 +67,8 @@ public enum ANEMemoryUtils {
             dataType: dataType,
             strides: strides,
             deallocator: { bytes in
-                bytes.deallocate()
+                // `posix_memalign` requires `free` for cleanup; `deallocate()` would trap.
+                Darwin.free(bytes)
             }
         )
 
