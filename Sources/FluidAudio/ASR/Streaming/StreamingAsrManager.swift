@@ -243,8 +243,7 @@ public actor StreamingAsrManager {
             }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+            await processWindow(window, windowStartSample: leftStartAbs)
 
             // Advance by chunk size
             nextWindowCenterStart += chunk
@@ -281,8 +280,7 @@ public actor StreamingAsrManager {
             if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            let actualLeftSecs = Double(nextWindowCenterStart - leftStartAbs) / Double(sampleRate)
-            await processWindow(window, actualLeftSeconds: actualLeftSecs)
+            await processWindow(window, windowStartSample: leftStartAbs)
 
             nextWindowCenterStart += effectiveChunk
 
@@ -299,7 +297,7 @@ public actor StreamingAsrManager {
     }
 
     /// Process a single assembled window: [left, chunk, right]
-    private func processWindow(_ windowSamples: [Float], actualLeftSeconds: Double) async {
+    private func processWindow(_ windowSamples: [Float], windowStartSample: Int) async {
         guard let asrManager = asrManager else { return }
 
         do {
@@ -314,9 +312,14 @@ public actor StreamingAsrManager {
                 previousTokens: accumulatedTokens
             )
 
+            let adjustedTimestamps = Self.applyGlobalFrameOffset(
+                to: timestamps,
+                windowStartSample: windowStartSample
+            )
+
             // Update state
             accumulatedTokens.append(contentsOf: tokens)
-            lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? 0)
+            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
             segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
@@ -326,7 +329,7 @@ public actor StreamingAsrManager {
             // The final result will use all accumulated tokens for proper deduplication
             let interim = asrManager.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
-                timestamps: timestamps,
+                timestamps: adjustedTimestamps,
                 confidences: confidences,
                 encoderSequenceLength: 0,
                 audioSamples: windowSamples,
@@ -350,7 +353,9 @@ public actor StreamingAsrManager {
                 text: interim.text,
                 isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
-                timestamp: Date()
+                timestamp: Date(),
+                tokenIds: tokens,
+                tokenTimings: interim.tokenTimings ?? []
             )
 
             updateContinuation?.yield(update)
@@ -397,6 +402,16 @@ public actor StreamingAsrManager {
                 ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
             logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
         }
+    }
+
+    /// Apply encoder-frame offset derived from the absolute window start sample
+    internal static func applyGlobalFrameOffset(to timestamps: [Int], windowStartSample: Int) -> [Int] {
+        guard !timestamps.isEmpty else { return timestamps }
+
+        let frameOffset = windowStartSample / ASRConstants.samplesPerEncoderFrame
+        guard frameOffset != 0 else { return timestamps }
+
+        return timestamps.map { $0 + frameOffset }
     }
 
     /// Attempt to recover from processing errors
@@ -579,15 +594,30 @@ public struct StreamingTranscriptionUpdate: Sendable {
     /// Timestamp of this update
     public let timestamp: Date
 
+    /// Raw token identifiers emitted for this update
+    public let tokenIds: [Int]
+
+    /// Token-level timing information aligned with the decoded text
+    public let tokenTimings: [TokenTiming]
+
+    /// Human-readable tokens (normalized) for this update
+    public var tokens: [String] {
+        tokenTimings.map(\.token)
+    }
+
     public init(
         text: String,
         isConfirmed: Bool,
         confidence: Float,
-        timestamp: Date
+        timestamp: Date,
+        tokenIds: [Int] = [],
+        tokenTimings: [TokenTiming] = []
     ) {
         self.text = text
         self.isConfirmed = isConfirmed
         self.confidence = confidence
         self.timestamp = timestamp
+        self.tokenIds = tokenIds
+        self.tokenTimings = tokenTimings
     }
 }
