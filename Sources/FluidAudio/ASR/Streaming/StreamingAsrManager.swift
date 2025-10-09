@@ -404,7 +404,10 @@ public actor StreamingAsrManager {
         }
     }
 
-    /// Apply encoder-frame offset derived from the absolute window start sample
+    /// Apply encoder-frame offset derived from the absolute window start sample.
+    /// Streaming runs in disjoint chunks, so we need to add the global offset to
+    /// keep each chunk's token timings aligned to the full audio timeline rather
+    /// than resetting back to zero for every window.
     internal static func applyGlobalFrameOffset(to timestamps: [Int], windowStartSample: Int) -> [Int] {
         guard !timestamps.isEmpty else { return timestamps }
 
