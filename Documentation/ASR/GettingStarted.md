@@ -5,7 +5,7 @@
 - Languages: v3 spans 25 European languages; v2 focuses on English accuracy
 - Processing Mode: Batch transcription for complete audio files
 - Real-time Factor: ~120x on M4 Pro (1 minute ≈ 0.5 seconds)
-- Streaming Support: Coming soon — batch processing recommended for production use
+- Streaming Support: Stabilized streaming with VAD gating (see [Stabilized Streaming](StabilizedStreaming.md))
 
 ## Choosing a model version
 

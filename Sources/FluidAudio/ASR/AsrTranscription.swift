@@ -4,6 +4,20 @@ import OSLog
 
 extension AsrManager {
 
+    internal struct StreamingChunkParameters {
+        let actualAudioFrames: Int?
+        let contextFrameAdjustment: Int
+        let isLastChunk: Bool
+        let globalFrameOffset: Int
+
+        static let `default` = StreamingChunkParameters(
+            actualAudioFrames: nil,
+            contextFrameAdjustment: 0,
+            isLastChunk: false,
+            globalFrameOffset: 0
+        )
+    }
+
     internal func transcribeWithState(
         _ audioSamples: [Float], decoderState: inout TdtDecoderState
     ) async throws -> ASRResult {
@@ -143,19 +157,23 @@ extension AsrManager {
     internal func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
-        previousTokens: [Int] = []
+        previousTokens: [Int] = [],
+        parameters: StreamingChunkParameters? = nil
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
 
         let originalLength = chunkSamples.count
         let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
+        let params = parameters ?? .default
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: originalLength,
-            actualAudioFrames: nil,  // Will be calculated from originalLength
+            actualAudioFrames: params.actualAudioFrames,
             decoderState: &state,
-            contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context
+            contextFrameAdjustment: params.contextFrameAdjustment,
+            isLastChunk: params.isLastChunk,
+            globalFrameOffset: params.globalFrameOffset
         )
 
         // Persist updated state back to the source-specific slot
@@ -168,7 +186,10 @@ extension AsrManager {
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {
             let (deduped, removedCount) = removeDuplicateTokenSequence(
-                previous: previousTokens, current: hypothesis.ySequence)
+                previous: previousTokens,
+                current: hypothesis.ySequence,
+                maxOverlap: 30
+            )
             let adjustedTimestamps =
                 removedCount > 0 ? Array(hypothesis.timestamps.dropFirst(removedCount)) : hypothesis.timestamps
             let adjustedConfidences =
@@ -359,12 +380,14 @@ extension AsrManager {
     ) -> (deduped: [Int], removedCount: Int) {
 
         // Handle single punctuation token duplicates first
-        let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
+        let punctuationTokens = ASRConstants.punctuationTokenIds
         var workingCurrent = current
         var removedCount = 0
 
-        if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
-            && punctuationTokens.contains(workingCurrent.first!)
+        if let previousLast = previous.last,
+            let currentFirst = workingCurrent.first,
+            previousLast == currentFirst,
+            punctuationTokens.contains(previousLast)
         {
             // Remove the duplicate punctuation token from the beginning of current
             workingCurrent = Array(workingCurrent.dropFirst())

@@ -39,6 +39,7 @@ public struct StreamingMetrics: Sendable {
     public let minChunkProcessingTime: Double  // Minimum time to process any chunk
     public let totalChunks: Int  // Total number of chunks processed
     public let firstTokenLatency: Double?  // Time to first token (if measurable)
+    public let firstConfirmedTokenLatency: Double?  // Time to first confirmed token commit (if measurable)
     public let streamingRTFx: Double  // Streaming real-time factor
     public let chunkDuration: Double  // Configured chunk duration in seconds
 
@@ -48,6 +49,7 @@ public struct StreamingMetrics: Sendable {
         minChunkProcessingTime: Double,
         totalChunks: Int,
         firstTokenLatency: Double? = nil,
+        firstConfirmedTokenLatency: Double? = nil,
         streamingRTFx: Double,
         chunkDuration: Double
     ) {
@@ -56,6 +58,7 @@ public struct StreamingMetrics: Sendable {
         self.minChunkProcessingTime = minChunkProcessingTime
         self.totalChunks = totalChunks
         self.firstTokenLatency = firstTokenLatency
+        self.firstConfirmedTokenLatency = firstConfirmedTokenLatency
         self.streamingRTFx = streamingRTFx
         self.chunkDuration = chunkDuration
     }

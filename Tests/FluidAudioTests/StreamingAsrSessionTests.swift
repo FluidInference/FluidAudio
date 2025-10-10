@@ -84,8 +84,6 @@ final class StreamingAsrSessionTests: XCTestCase {
 
         // Verify all configs are valid
         for config in configs {
-            XCTAssertGreaterThan(config.confirmationThreshold, 0)
-            XCTAssertLessThanOrEqual(config.confirmationThreshold, 1.0)
             XCTAssertGreaterThan(config.chunkDuration, 0)
         }
     }

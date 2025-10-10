@@ -520,12 +520,11 @@ internal struct TdtDecoderV3 {
 
         // Clear cached predictor output if ending with punctuation
         // This prevents punctuation from being duplicated at chunk boundaries
-        if let lastToken = hypothesis.lastToken {
-            let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
-            if punctuationTokens.contains(lastToken) {
-                decoderState.predictorOutput = nil
-                // Keep lastToken for linguistic context - deduplication handles duplicates at higher level
-            }
+        if let lastToken = hypothesis.lastToken,
+            ASRConstants.punctuationTokenIds.contains(lastToken)
+        {
+            decoderState.predictorOutput = nil
+            // Keep lastToken for linguistic context - deduplication handles duplicates at higher level
         }
 
         // Always store time jump for streaming: how far beyond this chunk we've processed

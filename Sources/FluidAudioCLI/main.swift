@@ -20,6 +20,7 @@ func printUsage() {
             asr-benchmark           Run ASR benchmark on LibriSpeech
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             transcribe              Transcribe audio file using streaming ASR
+            mic-transcribe          Live microphone transcription with stabilized streaming
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
             download                Download evaluation datasets
@@ -127,6 +128,8 @@ Task {
         await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
     case "transcribe":
         await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "mic-transcribe":
+        await MicTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":
         await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 

@@ -163,7 +163,7 @@ final class AsrManagerExtensionTests: XCTestCase {
     }
 
     func testRemoveDuplicateTokenSequencePunctuation() {
-        let previous = [1, 2, 3, 7883]  // 7883 is period
+        let previous = [1, 2, 3, 7883]  // 7883 is period in v3 vocabulary
         let current = [7883, 4, 5, 6]
 
         let (deduped, removedCount) = manager.removeDuplicateTokenSequence(previous: previous, current: current)
@@ -174,8 +174,8 @@ final class AsrManagerExtensionTests: XCTestCase {
     }
 
     func testRemoveDuplicateTokenSequenceQuestionMark() {
-        let previous = [1, 2, 7952]  // 7952 is question mark
-        let current = [7952, 3, 4]
+        let previous = [1, 2, 7956]  // 7956 is question mark in v3 vocabulary
+        let current = [7956, 3, 4]
 
         let (deduped, removedCount) = manager.removeDuplicateTokenSequence(previous: previous, current: current)
 
@@ -184,8 +184,8 @@ final class AsrManagerExtensionTests: XCTestCase {
     }
 
     func testRemoveDuplicateTokenSequenceExclamation() {
-        let previous = [1, 2, 7948]  // 7948 is exclamation
-        let current = [7948, 3, 4]
+        let previous = [1, 2, 8020]  // 8020 is exclamation mark in v3 vocabulary
+        let current = [8020, 3, 4]
 
         let (deduped, removedCount) = manager.removeDuplicateTokenSequence(previous: previous, current: current)
 

@@ -99,32 +99,79 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
-- **Streaming Support**: Coming soon — batch processing is recommended for production use
+- **Streaming Support**: `StreamingAsrManager` provides live transcription (beta) with stabilized output to prevent text rewinds—stabilization is always enabled.
 - **Backend**: Same Parakeet TDT v3 model powers our backend ASR
 
 ### ASR Quick Start
 
+#### Batch transcription
+
 ```swift
 import FluidAudio
 
-// Batch transcription from an audio file
+// Transcribe 16 kHz mono samples that are already in memory
 Task {
-    // 1) Initialize ASR manager and load models
     let models = try await AsrModels.downloadAndLoad(version: .v3)  // Switch to .v2 for English-only work
     let asrManager = AsrManager(config: .default)
     try await asrManager.initialize(models: models)
 
-    // 3) Transcribe the audio 16hz, already converted
     let result = try await asrManager.transcribe(samples)
 
-    // 3) Transcribe a file
-    // let url = URL(fileURLWithPath: sample.audioPath)
-
-    // 3) Transcribe AVAudioPCMBuffer
-    // let result = try await asrManager.transcribe(audioBuffer)
+    // Or: let url = URL(fileURLWithPath: sample.audioPath)
+    // Or: let result = try await asrManager.transcribe(audioBuffer)
     print("Transcription: \(result.text)")
 }
 ```
+
+#### Streaming transcription (stabilized + VAD-gated)
+
+```swift
+import AVFoundation
+import FluidAudio
+
+@available(macOS 13.0, iOS 16.0, *)
+func startStreaming() async throws {
+    let models = try await AsrModels.downloadAndLoad()
+    let streamingAsr = StreamingAsrManager(config: .streaming)
+    try await streamingAsr.start(models: models, source: .microphone)
+
+    let engine = AVAudioEngine()
+    let inputNode = engine.inputNode
+    let format = inputNode.outputFormat(forBus: 0)
+    let bufferSize: AVAudioFrameCount = 4096
+
+    inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { buffer, _ in
+        Task(priority: .userInitiated) {
+            await streamingAsr.streamAudio(buffer)
+        }
+    }
+
+    engine.prepare()
+    try engine.start()
+
+    let updatesTask = Task {
+        for await update in await streamingAsr.transcriptionUpdates {
+            if update.isConfirmed {
+                print("✅ \(update.text)")
+            } else {
+                print("… \(update.text)")
+            }
+        }
+    }
+
+    // ... later, when you are ready to stop streaming:
+    inputNode.removeTap(onBus: 0)
+    engine.stop()
+
+    let finalText = try await streamingAsr.finish()
+    updatesTask.cancel()
+    await updatesTask.value
+
+    print("Final transcript: \(finalText)")
+}
+```
+
+The `.streaming` preset enables the integrated voice activity detector so silence is gated automatically. On first use, the VAD Core ML model is downloaded and cached alongside the ASR models. Learn more in [Documentation/ASR/StabilizedStreaming.md](Documentation/ASR/StabilizedStreaming.md).
 
 ```bash
 # Transcribe an audio file (batch)
@@ -132,6 +179,10 @@ swift run fluidaudio transcribe audio.wav
 
 # English-only run with higher recall
 swift run fluidaudio transcribe audio.wav --model-version v2
+
+# Streaming transcription with stabilized output and VAD gating
+swift run fluidaudio transcribe audio.wav --streaming \
+  --stabilize-profile balanced
 ```
 
 ## Speaker Diarization
@@ -210,7 +261,7 @@ import FluidAudio
 
 Task {
     let manager = try await VadManager(
-        config: VadConfig(threshold: 0.75)
+        config: VadConfig(threshold: 0.30)
     )
 
     let audioURL = URL(fileURLWithPath: "path/to/audio.wav")

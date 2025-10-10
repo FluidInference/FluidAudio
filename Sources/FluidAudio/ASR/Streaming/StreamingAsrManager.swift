@@ -2,6 +2,17 @@ import AVFoundation
 import Foundation
 import OSLog
 
+@available(macOS 13.0, iOS 16.0, *)
+public struct StreamingAsrEngineMetrics: Sendable {
+    public let chunkCount: Int
+    public let totalChunkProcessingTime: TimeInterval
+    public let averageChunkProcessingTime: TimeInterval?
+    public let maxChunkProcessingTime: TimeInterval?
+    public let minChunkProcessingTime: TimeInterval?
+    public let firstTokenLatency: TimeInterval?
+    public let firstConfirmedTokenLatency: TimeInterval?
+}
+
 /// A high-level streaming ASR manager that provides a simple API for real-time transcription
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
 @available(macOS 13.0, iOS 16.0, *)
@@ -22,19 +33,26 @@ public actor StreamingAsrManager {
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 
+    // VAD components
+    private let injectedVadManager: VadManager?
+    private var vadPipeline: StreamingVadPipeline
+
     // Sliding window state
+    private var windowProcessor: StreamingWindowProcessor
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
-    private var accumulatedTokens: [Int] = []
-
-    // Raw sample buffer for sliding-window assembly (absolute indexing)
-    private var sampleBuffer: [Float] = []
-    private var bufferStartIndex: Int = 0  // absolute index of sampleBuffer[0]
-    private var nextWindowCenterStart: Int = 0  // absolute index where next chunk (center) begins
+    private var tokenAccumulator = StreamingTokenAccumulator()
+    private var stabilizerSink: StreamingStabilizerSink
+    private var cumulativeVadDroppedSamples: Int = 0
 
     // Two-tier transcription state (like Apple's Speech API)
-    public private(set) var volatileTranscript: String = ""
-    public private(set) var confirmedTranscript: String = ""
+    public var volatileTranscript: String {
+        stabilizerSink.volatileTranscript
+    }
+
+    public var confirmedTranscript: String {
+        stabilizerSink.confirmedTranscript
+    }
 
     /// The audio source this stream is configured for
     public var source: AudioSource {
@@ -44,11 +62,24 @@ public actor StreamingAsrManager {
     // Metrics
     private var startTime: Date?
     private var processedChunks: Int = 0
+    private var totalChunkProcessingTime: TimeInterval = 0
+    private var maxChunkProcessingTime: TimeInterval = 0
+    private var minChunkProcessingTime: TimeInterval = .infinity
+    private var firstTokenLatencySeconds: TimeInterval?
 
     /// Initialize the streaming ASR manager
     /// - Parameter config: Configuration for streaming behavior
-    public init(config: StreamingAsrConfig = .default) {
+    /// Initialize a streaming ASR manager.
+    /// - Parameters:
+    ///   - config: Streaming configuration including stabilizer and VAD policies.
+    ///   - vadManager: Optional voice activity detector to reuse. When `nil` and
+    ///     `config.vad.isEnabled` is true, the manager will auto-initialize a VAD instance.
+    public init(config: StreamingAsrConfig = .default, vadManager: VadManager? = nil) {
         self.config = config
+        self.injectedVadManager = vadManager
+        self.vadPipeline = StreamingVadPipeline(config: config, injectedManager: vadManager)
+        self.windowProcessor = StreamingWindowProcessor(config: config)
+        self.stabilizerSink = StreamingStabilizerSink(config: config.stabilizer)
 
         // Create input stream
         let (stream, continuation) = AsyncStream<AVAudioPCMBuffer>.makeStream()
@@ -56,7 +87,7 @@ public actor StreamingAsrManager {
         self.inputBuilder = continuation
 
         logger.info(
-            "Initialized StreamingAsrManager with config: chunk=\(config.chunkSeconds)s left=\(config.leftContextSeconds)s right=\(config.rightContextSeconds)s"
+            "Initialized StreamingAsrManager with config: chunk=\(config.chunkSeconds)s left=\(config.leftContextSeconds)s right=\(config.rightContextSeconds)s vadEnabled=\(config.vad.isEnabled)"
         )
     }
 
@@ -89,10 +120,31 @@ public actor StreamingAsrManager {
         // Reset decoder state for the specific source
         try await asrManager?.resetDecoderState(for: source)
 
+        stabilizerSink.initialize(
+            using: asrManager,
+            uid: stabilizerUID(for: source),
+            logger: logger
+        )
+
+        do {
+            try await setupVad(for: source)
+        } catch {
+            stabilizerSink.handleInitializationFailure(logger: logger)
+            throw error
+        }
+
         // Reset sliding window state
+        windowProcessor.reset()
         segmentIndex = 0
         lastProcessedFrame = 0
-        accumulatedTokens.removeAll()
+        tokenAccumulator.reset()
+        stabilizerSink.resetTranscripts()
+        processedChunks = 0
+        cumulativeVadDroppedSamples = 0
+        totalChunkProcessingTime = 0
+        maxChunkProcessingTime = 0
+        minChunkProcessingTime = .infinity
+        firstTokenLatencySeconds = nil
 
         startTime = Date()
 
@@ -105,8 +157,8 @@ public actor StreamingAsrManager {
                     // Convert to 16kHz mono (streaming)
                     let samples = try audioConverter.resampleBuffer(pcmBuffer)
 
-                    // Append to raw sample buffer and attempt windowed processing
-                    await self.appendSamplesAndProcess(samples)
+                    // Append to raw sample buffer and attempt windowed processing (with VAD gating if enabled)
+                    await self.processIncomingSamples(samples)
                 } catch {
                     let streamingError = StreamingAsrError.audioBufferProcessingFailed(error)
                     logger.error(
@@ -117,8 +169,11 @@ public actor StreamingAsrManager {
 
             // Stream ended: no need to flush converter since each conversion is stateless
 
+            await self.flushPendingVadBuffers()
+
             // Then flush remaining assembled audio (no right-context requirement)
             await self.flushRemaining()
+            self.finalizeStabilizerAfterStreamEnd()
 
             logger.info("Recognition task completed")
         }
@@ -161,22 +216,30 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text (proper way to avoid duplicates)
-        let finalText: String
-        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            let finalResult = asrManager.processTranscriptionResult(
-                tokenIds: accumulatedTokens,
-                timestamps: [],
-                confidences: [],  // No per-token confidences needed for final text
-                encoderSequenceLength: 0,
-                audioSamples: [],  // Not needed for final text conversion
-                processingTime: 0
-            )
-            finalText = finalResult.text
-        } else {
-            // Fallback to text concatenation if no tokens available
-            finalText = confirmedTranscript + volatileTranscript
+        finalizeStabilizerAfterStreamEnd()
+
+        // Use the stabilized transcripts as the authoritative final result.
+        let stabilizedText = confirmedTranscript + volatileTranscript
+        var finalText = stabilizedText
+        if finalText.isEmpty,
+            tokenAccumulator.trimmedTotalCount == 0,
+            let asrManager = asrManager
+        {
+            let accumulatedTokens = tokenAccumulator.tokens
+            if !accumulatedTokens.isEmpty {
+                let finalResult = asrManager.processTranscriptionResult(
+                    tokenIds: accumulatedTokens,
+                    timestamps: [],
+                    confidences: [],
+                    encoderSequenceLength: 0,
+                    audioSamples: [],
+                    processingTime: 0
+                )
+                finalText = finalResult.text
+            }
         }
+
+        await resetVadState()
 
         logger.info("Final transcription: \(finalText.count) characters")
         return finalText
@@ -184,13 +247,11 @@ public actor StreamingAsrManager {
 
     /// Reset the transcriber for a new session
     public func reset() async throws {
-        volatileTranscript = ""
-        confirmedTranscript = ""
+        stabilizerSink.resetTranscripts()
         processedChunks = 0
         startTime = Date()
-        sampleBuffer.removeAll(keepingCapacity: false)
-        bufferStartIndex = 0
-        nextWindowCenterStart = 0
+        firstTokenLatencySeconds = nil
+        windowProcessor.reset()
 
         // Reset decoder state for the current audio source
         if let asrManager = asrManager {
@@ -200,7 +261,18 @@ public actor StreamingAsrManager {
         // Reset sliding window state
         segmentIndex = 0
         lastProcessedFrame = 0
-        accumulatedTokens.removeAll()
+        tokenAccumulator.reset()
+        stabilizerSink.initialize(
+            using: asrManager,
+            uid: stabilizerUID(for: audioSource),
+            logger: logger
+        )
+
+        await resetVadState()
+        cumulativeVadDroppedSamples = 0
+        totalChunkProcessingTime = 0
+        maxChunkProcessingTime = 0
+        minChunkProcessingTime = .infinity
 
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -211,6 +283,10 @@ public actor StreamingAsrManager {
         recognizerTask?.cancel()
         updateContinuation?.finish()
 
+        finalizeStabilizerAfterStreamEnd()
+
+        await resetVadState()
+
         logger.info("StreamingAsrManager cancelled")
     }
 
@@ -219,146 +295,221 @@ public actor StreamingAsrManager {
         updateContinuation = nil
     }
 
+    public func metricsSnapshot() -> StreamingAsrEngineMetrics {
+        let average: TimeInterval?
+        if processedChunks > 0 && totalChunkProcessingTime > 0 {
+            average = totalChunkProcessingTime / Double(processedChunks)
+        } else {
+            average = nil
+        }
+
+        let minValue = processedChunks > 0 && minChunkProcessingTime.isFinite ? minChunkProcessingTime : nil
+        let maxValue = processedChunks > 0 && maxChunkProcessingTime > 0 ? maxChunkProcessingTime : nil
+        let stabilizerMetrics = stabilizerSink.metricsSnapshot()
+
+        return StreamingAsrEngineMetrics(
+            chunkCount: processedChunks,
+            totalChunkProcessingTime: totalChunkProcessingTime,
+            averageChunkProcessingTime: average,
+            maxChunkProcessingTime: maxValue,
+            minChunkProcessingTime: minValue,
+            firstTokenLatency: firstTokenLatencySeconds,
+            firstConfirmedTokenLatency: stabilizerMetrics.firstCommitLatencySeconds
+        )
+    }
+
+    private func recordChunkProcessingTime(_ duration: TimeInterval) {
+        guard duration.isFinite else { return }
+        totalChunkProcessingTime += duration
+        if duration > maxChunkProcessingTime {
+            maxChunkProcessingTime = duration
+        }
+        if duration < minChunkProcessingTime {
+            minChunkProcessingTime = duration
+        }
+    }
+
+    private func recordFirstTokenLatencyIfNeeded(for update: StreamingTranscriptionUpdate) {
+        guard firstTokenLatencySeconds == nil else { return }
+        guard let startTime else { return }
+        let normalized = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        let latency = update.timestamp.timeIntervalSince(startTime)
+        guard latency.isFinite else { return }
+        firstTokenLatencySeconds = max(0, latency)
+    }
+
+    private func buildChunkParameters(
+        for window: StreamingWindow,
+        additionalOffsetSamples: Int
+    ) -> AsrManager.StreamingChunkParameters {
+        let samplesPerFrame = ASRConstants.samplesPerEncoderFrame
+        let effectiveStartSample = window.startSample + additionalOffsetSamples
+        let globalFrameOffset = effectiveStartSample / samplesPerFrame
+
+        let isFinalChunk = window.isFinalChunk
+
+        let frameCount = ASRConstants.calculateEncoderFrames(from: window.samples.count)
+        return AsrManager.StreamingChunkParameters(
+            actualAudioFrames: frameCount,
+            contextFrameAdjustment: 0,
+            isLastChunk: isFinalChunk,
+            globalFrameOffset: globalFrameOffset
+        )
+    }
+
     // MARK: - Private Methods
 
-    /// Append new samples and process as many windows as available
-    private func appendSamplesAndProcess(_ samples: [Float]) async {
-        // Append samples to buffer
-        sampleBuffer.append(contentsOf: samples)
+    private func setupVad(for source: AudioSource) async throws {
+        try await vadPipeline.prepare(for: source, logger: logger)
+    }
 
-        // Process while we have at least chunk + right ahead of the current center start
-        let chunk = config.chunkSamples
-        let right = config.rightContextSamples
-        let left = config.leftContextSamples
-        let sampleRate = config.asrConfig.sampleRate
-
-        var currentAbsEnd = bufferStartIndex + sampleBuffer.count
-        while currentAbsEnd >= (nextWindowCenterStart + chunk + right) {
-            let leftStartAbs = max(0, nextWindowCenterStart - left)
-            let rightEndAbs = nextWindowCenterStart + chunk + right
-            let startIdx = max(leftStartAbs - bufferStartIndex, 0)
-            let endIdx = rightEndAbs - bufferStartIndex
-            if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx {
-                break
+    private func processIncomingSamples(_ samples: [Float]) async {
+        await vadPipeline.process(samples: samples, logger: logger) { [self] event in
+            switch event {
+            case .speech(let segment):
+                await self.appendSamplesAndProcess(segment, allowPartialWindows: vadPipeline.isEnabled)
+            case .silence(samples: let count, cumulativeDroppedSamples: let cumulative):
+                await self.handleSilenceGap(count: count, cumulativeDroppedSamples: cumulative)
             }
-
-            let window = Array(sampleBuffer[startIdx..<endIdx])
-            await processWindow(window, windowStartSample: leftStartAbs)
-
-            // Advance by chunk size
-            nextWindowCenterStart += chunk
-
-            // Trim buffer to keep only what's needed for left context
-            let trimToAbs = max(0, nextWindowCenterStart - left)
-            let dropCount = max(0, trimToAbs - bufferStartIndex)
-            if dropCount > 0 && dropCount <= sampleBuffer.count {
-                sampleBuffer.removeFirst(dropCount)
-                bufferStartIndex += dropCount
-            }
-
-            currentAbsEnd = bufferStartIndex + sampleBuffer.count
         }
+    }
+
+    private func flushPendingVadBuffers() async {
+        await vadPipeline.flushPending(logger: logger) { [self] event in
+            switch event {
+            case .speech(let segment):
+                await self.appendSamplesAndProcess(segment, allowPartialWindows: true)
+            case .silence(samples: let count, cumulativeDroppedSamples: let cumulative):
+                await self.handleSilenceGap(count: count, cumulativeDroppedSamples: cumulative)
+            }
+        }
+    }
+
+    private func resetVadState() async {
+        await vadPipeline.resetState()
+    }
+
+    /// Append new samples and process as many windows as available
+    private func appendSamplesAndProcess(
+        _ segment: StreamingVadSegment,
+        allowPartialWindows: Bool
+    ) async {
+        guard !segment.samples.isEmpty else { return }
+        cumulativeVadDroppedSamples = segment.cumulativeDroppedSamples
+        let minimumCenterSamples: Int?
+        if allowPartialWindows {
+            let sampleRate: Double
+            if config.chunkSeconds > 0 {
+                sampleRate = Double(config.chunkSamples) / config.chunkSeconds
+            } else {
+                sampleRate = 16_000.0
+            }
+            let onsetSeconds = max(1.0, min(2.0, config.chunkSeconds / 4.0))
+            let continuationSeconds = max(onsetSeconds, min(3.0, config.chunkSeconds / 3.0))
+            let targetSeconds = segment.isSpeechOnset ? onsetSeconds : continuationSeconds
+            minimumCenterSamples = max(1, Int(targetSeconds * sampleRate))
+        } else {
+            minimumCenterSamples = nil
+        }
+        let windows = windowProcessor.append(
+            segment.samples,
+            allowPartialChunk: allowPartialWindows,
+            minimumCenterSamples: minimumCenterSamples
+        )
+        for window in windows {
+            await processWindow(window, offsetOverride: nil)
+        }
+    }
+
+    private func handleSilenceGap(count: Int, cumulativeDroppedSamples: Int) async {
+        guard count > 0 else { return }
+        windowProcessor.advanceBySilence(count)
+        let previousOffset = cumulativeVadDroppedSamples
+        if windowProcessor.hasBufferedAudio() {
+            let windows = windowProcessor.append([], allowPartialChunk: true, minimumCenterSamples: 1)
+            for window in windows {
+                await processWindow(window, offsetOverride: previousOffset)
+            }
+        }
+        cumulativeVadDroppedSamples = cumulativeDroppedSamples
     }
 
     /// Flush any remaining audio at end of stream (no right-context requirement)
     private func flushRemaining() async {
-        let chunk = config.chunkSamples
-        let left = config.leftContextSamples
-        let sampleRate = config.asrConfig.sampleRate
-
-        var currentAbsEnd = bufferStartIndex + sampleBuffer.count
-        while currentAbsEnd > nextWindowCenterStart {  // process until we exhaust
-            // If we have less than a chunk ahead, process the final partial chunk
-            let availableAhead = currentAbsEnd - nextWindowCenterStart
-            if availableAhead <= 0 { break }
-            let effectiveChunk = min(chunk, availableAhead)
-
-            let leftStartAbs = max(0, nextWindowCenterStart - left)
-            let rightEndAbs = nextWindowCenterStart + effectiveChunk
-            let startIdx = max(leftStartAbs - bufferStartIndex, 0)
-            let endIdx = max(rightEndAbs - bufferStartIndex, startIdx)
-            if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
-
-            let window = Array(sampleBuffer[startIdx..<endIdx])
-            await processWindow(window, windowStartSample: leftStartAbs)
-
-            nextWindowCenterStart += effectiveChunk
-
-            // Trim
-            let trimToAbs = max(0, nextWindowCenterStart - left)
-            let dropCount = max(0, trimToAbs - bufferStartIndex)
-            if dropCount > 0 && dropCount <= sampleBuffer.count {
-                sampleBuffer.removeFirst(dropCount)
-                bufferStartIndex += dropCount
-            }
-
-            currentAbsEnd = bufferStartIndex + sampleBuffer.count
+        let windows = windowProcessor.flushRemaining()
+        for window in windows {
+            await processWindow(window, offsetOverride: nil)
         }
     }
 
     /// Process a single assembled window: [left, chunk, right]
-    private func processWindow(_ windowSamples: [Float], windowStartSample: Int) async {
+    private func processWindow(
+        _ window: StreamingWindow,
+        offsetOverride: Int?
+    ) async {
         guard let asrManager = asrManager else { return }
 
         do {
             let chunkStartTime = Date()
 
-            // Start frame offset is now handled by decoder's timeJump mechanism
+            let cumulativeOffset = offsetOverride ?? cumulativeVadDroppedSamples
+            let parameters = buildChunkParameters(for: window, additionalOffsetSamples: cumulativeOffset)
 
-            // Call AsrManager directly with deduplication
             let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
-                windowSamples,
+                window.samples,
                 source: audioSource,
-                previousTokens: accumulatedTokens
-            )
-
-            let adjustedTimestamps = Self.applyGlobalFrameOffset(
-                to: timestamps,
-                windowStartSample: windowStartSample
+                previousTokens: tokenAccumulator.tokens,
+                parameters: parameters
             )
 
             // Update state
-            accumulatedTokens.append(contentsOf: tokens)
-            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
+            tokenAccumulator.append(tokens)
+            lastProcessedFrame = max(lastProcessedFrame, timestamps.max() ?? lastProcessedFrame)
             segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1
+            recordChunkProcessingTime(processingTime)
+            #if DEBUG
+            let energy = window.samples.reduce(0) { $0 + abs($1) }
+            let energyString = String(format: "%.3f", energy)
+            logger.debug(
+                "Processed streaming window \(segmentIndex) centerStart=\(window.centerStartSample) samples=\(window.samples.count) energy=\(energyString) newTokens=\(tokens.count) totalTokens=\(tokenAccumulator.totalCount) trimmed=\(tokenAccumulator.trimmedTotalCount)"
+            )
+            #endif
 
             // Convert only the current chunk tokens to text for clean incremental updates
             // The final result will use all accumulated tokens for proper deduplication
             let interim = asrManager.processTranscriptionResult(
                 tokenIds: tokens,  // Only current chunk tokens for progress updates
-                timestamps: adjustedTimestamps,
+                timestamps: timestamps,
                 confidences: confidences,
                 encoderSequenceLength: 0,
-                audioSamples: windowSamples,
+                audioSamples: window.samples,
                 processingTime: processingTime
             )
 
-            logger.debug(
-                "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
+            let nowMs = currentStreamTimestampMs()
+            let uid = stabilizerUID(for: audioSource)
+            let output = stabilizerSink.emitterUpdate(
+                uid: uid,
+                accumulatedTokens: tokenAccumulator.tokens,
+                latestTokens: tokens,
+                latestTokenTimings: interim.tokenTimings ?? [],
+                interimConfidence: interim.confidence,
+                nowMs: nowMs
             )
-
-            // Apply confidence-based confirmation logic (uses configured threshold)
-            await updateTranscriptionState(with: interim)
-
-            // Emit update based on progressive confidence model
-            let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
-            let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
-            let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
-            let shouldConfirm = isHighConfidence && hasMinimumContext
-
-            let update = StreamingTranscriptionUpdate(
-                text: interim.text,
-                isConfirmed: shouldConfirm,
-                confidence: interim.confidence,
-                timestamp: Date(),
-                tokenIds: tokens,
-                tokenTimings: interim.tokenTimings ?? []
+            for update in output.updates {
+                recordFirstTokenLatencyIfNeeded(for: update)
+                updateContinuation?.yield(update)
+            }
+            let trimmed = tokenAccumulator.dropCommittedPrefixIfNeeded(
+                totalCommitted: output.totalCommittedCount
             )
-
-            updateContinuation?.yield(update)
+            if trimmed > 0 {
+                stabilizerSink.discardCommittedTokenPrefix(trimmed, uid: uid)
+            }
 
         } catch {
             let streamingError = StreamingAsrError.modelProcessingFailed(error)
@@ -366,41 +517,6 @@ public actor StreamingAsrManager {
 
             // Attempt error recovery
             await attemptErrorRecovery(error: streamingError)
-        }
-    }
-
-    /// Update transcription state based on confidence and context duration
-    private func updateTranscriptionState(with result: ASRResult) async {
-        let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
-        let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
-        let isHighConfidence = Double(result.confidence) >= config.confirmationThreshold
-
-        // Progressive confidence model:
-        // 1. Always show text immediately as volatile for responsiveness
-        // 2. Only confirm text when we have both high confidence AND sufficient context
-        let shouldConfirm = isHighConfidence && hasMinimumContext
-
-        if shouldConfirm {
-            // Move volatile text to confirmed and set new text as volatile
-            if !volatileTranscript.isEmpty {
-                var components: [String] = []
-                if !confirmedTranscript.isEmpty {
-                    components.append(confirmedTranscript)
-                }
-                components.append(volatileTranscript)
-                confirmedTranscript = components.joined(separator: " ")
-            }
-            volatileTranscript = result.text
-            logger.debug(
-                "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(result.text)'"
-            )
-        } else {
-            // Only update volatile text (hypothesis)
-            volatileTranscript = result.text
-            let reason =
-                !hasMinimumContext
-                ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
-            logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
         }
     }
 
@@ -415,6 +531,53 @@ public actor StreamingAsrManager {
         guard frameOffset != 0 else { return timestamps }
 
         return timestamps.map { $0 + frameOffset }
+    }
+
+    private func stabilizerUID(for source: AudioSource) -> Int {
+        switch source {
+        case .microphone:
+            return 0
+        case .system:
+            return 1
+        }
+    }
+
+    private func currentStreamTimestampMs() -> Int {
+        guard let startTime else {
+            return Int(Date().timeIntervalSince1970 * 1000.0)
+        }
+        return Int(Date().timeIntervalSince(startTime) * 1000.0)
+    }
+
+    private func flushStabilizerOnStreamEnd() {
+        let uid = stabilizerUID(for: audioSource)
+        let nowMs = currentStreamTimestampMs()
+        guard let result = stabilizerSink.flush(uid: uid, nowMs: nowMs) else { return }
+        let output = stabilizerSink.makeUpdates(
+            result: result,
+            accumulatedTokens: tokenAccumulator.tokens,
+            latestTokens: [],
+            latestTokenTimings: [],
+            interimConfidence: 1.0,
+            timestamp: Date()
+        )
+        for update in output.updates {
+            recordFirstTokenLatencyIfNeeded(for: update)
+            updateContinuation?.yield(update)
+        }
+        let trimmed = tokenAccumulator.dropCommittedPrefixIfNeeded(
+            totalCommitted: output.totalCommittedCount
+        )
+        if trimmed > 0 {
+            stabilizerSink.discardCommittedTokenPrefix(trimmed, uid: uid)
+        }
+    }
+
+    private func finalizeStabilizerAfterStreamEnd() {
+        flushStabilizerOnStreamEnd()
+        stabilizerSink.finalizeAfterStreamEnd(logger: logger)
+        let uid = stabilizerUID(for: audioSource)
+        stabilizerSink.cleanupState(uid: uid)
     }
 
     /// Attempt to recover from processing errors
@@ -458,6 +621,7 @@ public actor StreamingAsrManager {
             do {
                 try await asrManager.resetDecoderState(for: audioSource)
                 logger.info("Successfully reset decoder state during error recovery")
+                stabilizerSink.refreshVocabulary(using: asrManager, logger: logger)
             } catch {
                 logger.error("Failed to reset decoder state during recovery: \(error)")
 
@@ -467,6 +631,7 @@ public actor StreamingAsrManager {
                     let newAsrManager = AsrManager(config: config.asrConfig)
                     try await newAsrManager.initialize(models: models)
                     self.asrManager = newAsrManager
+                    stabilizerSink.refreshVocabulary(using: newAsrManager, logger: logger)
                     logger.info("Successfully reinitialized ASR manager during error recovery")
                 } catch {
                     logger.error("Failed to reinitialize ASR manager during recovery: \(error)")
@@ -474,153 +639,5 @@ public actor StreamingAsrManager {
             }
         }
     }
-}
 
-/// Configuration for StreamingAsrManager
-@available(macOS 13.0, iOS 16.0, *)
-public struct StreamingAsrConfig: Sendable {
-    /// Main chunk size for stable transcription (seconds). Should be 10-11s for best quality
-    public let chunkSeconds: TimeInterval
-    /// Quick hypothesis chunk size for immediate feedback (seconds). Typical: 1.0s
-    public let hypothesisChunkSeconds: TimeInterval
-    /// Left context appended to each window (seconds). Typical: 10.0s
-    public let leftContextSeconds: TimeInterval
-    /// Right context lookahead (seconds). Typical: 2.0s (adds latency)
-    public let rightContextSeconds: TimeInterval
-    /// Minimum audio duration before confirming text (seconds). Should be ~10s
-    public let minContextForConfirmation: TimeInterval
-
-    /// Confidence threshold for promoting volatile text to confirmed (0.0...1.0)
-    public let confirmationThreshold: Double
-
-    /// Default configuration aligned with previous API expectations
-    public static let `default` = StreamingAsrConfig(
-        chunkSeconds: 15.0,
-        hypothesisChunkSeconds: 2.0,
-        leftContextSeconds: 10.0,
-        rightContextSeconds: 2.0,
-        minContextForConfirmation: 10.0,
-        confirmationThreshold: 0.85
-    )
-
-    /// Optimized streaming configuration: Dual-track processing for best experience
-    /// Uses ChunkProcessor's proven 11-2-2 approach for stable transcription
-    /// Plus quick hypothesis updates for immediate feedback
-    public static let streaming = StreamingAsrConfig(
-        chunkSeconds: 11.0,  // Match ChunkProcessor for stable transcription
-        hypothesisChunkSeconds: 1.0,  // Quick hypothesis updates
-        leftContextSeconds: 2.0,  // Match ChunkProcessor left context
-        rightContextSeconds: 2.0,  // Match ChunkProcessor right context
-        minContextForConfirmation: 10.0,  // Need sufficient context before confirming
-        confirmationThreshold: 0.80  // Higher threshold for more stable confirmations
-    )
-
-    public init(
-        chunkSeconds: TimeInterval = 10.0,
-        hypothesisChunkSeconds: TimeInterval = 1.0,
-        leftContextSeconds: TimeInterval = 2.0,
-        rightContextSeconds: TimeInterval = 2.0,
-        minContextForConfirmation: TimeInterval = 10.0,
-        confirmationThreshold: Double = 0.85
-    ) {
-        self.chunkSeconds = chunkSeconds
-        self.hypothesisChunkSeconds = hypothesisChunkSeconds
-        self.leftContextSeconds = leftContextSeconds
-        self.rightContextSeconds = rightContextSeconds
-        self.minContextForConfirmation = minContextForConfirmation
-        self.confirmationThreshold = confirmationThreshold
-    }
-
-    /// Backward-compatible convenience initializer used by tests (chunkDuration label)
-    public init(
-        confirmationThreshold: Double = 0.85,
-        chunkDuration: TimeInterval
-    ) {
-        self.init(
-            chunkSeconds: chunkDuration,
-            hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
-            leftContextSeconds: 10.0,
-            rightContextSeconds: 2.0,
-            minContextForConfirmation: 10.0,
-            confirmationThreshold: confirmationThreshold
-        )
-    }
-
-    /// Custom configuration factory expected by tests
-    public static func custom(
-        chunkDuration: TimeInterval,
-        confirmationThreshold: Double
-    ) -> StreamingAsrConfig {
-        StreamingAsrConfig(
-            chunkSeconds: chunkDuration,
-            hypothesisChunkSeconds: min(1.0, chunkDuration / 2.0),  // Default to half chunk duration
-            leftContextSeconds: 10.0,
-            rightContextSeconds: 2.0,
-            minContextForConfirmation: 10.0,
-            confirmationThreshold: confirmationThreshold
-        )
-    }
-
-    // Internal ASR configuration
-    var asrConfig: ASRConfig {
-        ASRConfig(
-            sampleRate: 16000,
-            tdtConfig: TdtConfig()
-        )
-    }
-
-    // Sample counts at 16 kHz
-    var chunkSamples: Int { Int(chunkSeconds * 16000) }
-    var hypothesisChunkSamples: Int { Int(hypothesisChunkSeconds * 16000) }
-    var leftContextSamples: Int { Int(leftContextSeconds * 16000) }
-    var rightContextSamples: Int { Int(rightContextSeconds * 16000) }
-    var minContextForConfirmationSamples: Int { Int(minContextForConfirmation * 16000) }
-
-    // Backward-compat convenience for existing call-sites/tests
-    var chunkDuration: TimeInterval { chunkSeconds }
-    var bufferCapacity: Int { Int(15.0 * 16000) }
-    var chunkSizeInSamples: Int { chunkSamples }
-}
-
-/// Transcription update from streaming ASR
-@available(macOS 13.0, iOS 16.0, *)
-public struct StreamingTranscriptionUpdate: Sendable {
-    /// The transcribed text
-    public let text: String
-
-    /// Whether this text is confirmed (high confidence) or volatile (may change)
-    public let isConfirmed: Bool
-
-    /// Confidence score (0.0 - 1.0)
-    public let confidence: Float
-
-    /// Timestamp of this update
-    public let timestamp: Date
-
-    /// Raw token identifiers emitted for this update
-    public let tokenIds: [Int]
-
-    /// Token-level timing information aligned with the decoded text
-    public let tokenTimings: [TokenTiming]
-
-    /// Human-readable tokens (normalized) for this update
-    public var tokens: [String] {
-        tokenTimings.map(\.token)
-    }
-
-    public init(
-        text: String,
-        isConfirmed: Bool,
-        confidence: Float,
-        timestamp: Date,
-        tokenIds: [Int] = [],
-        tokenTimings: [TokenTiming] = []
-    ) {
-        self.text = text
-        self.isConfirmed = isConfirmed
-        self.confidence = confidence
-        self.timestamp = timestamp
-        self.tokenIds = tokenIds
-        self.tokenTimings = tokenTimings
-    }
 }
