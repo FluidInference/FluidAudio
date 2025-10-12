@@ -54,6 +54,12 @@ struct OfflineSegmentationProcessor {
         let probabilityThresholds: [Float] = [0.50, 0.70, 0.80, 0.90, 0.95, 0.98, 0.99, 0.995, 0.999]
         var probabilityThresholdCounts = Array(repeating: 0, count: probabilityThresholds.count)
         let emptyClassIndex = 0
+        let onsetThreshold = config.speechOnsetThreshold
+        let offsetThreshold = config.speechOffsetThreshold
+        var hysteresisCarry = [Bool](repeating: false, count: speakerCount)
+        var minOnFrameCount = 0
+        var minOffFrameCount = 0
+        var durationFramesResolved = false
 
         let offsets = Array(stride(from: 0, to: totalSamples, by: stepSize))
         guard !offsets.isEmpty else {
@@ -149,6 +155,17 @@ struct OfflineSegmentationProcessor {
 
                 frameDuration = config.windowDuration / Double(frames)
                 numFrames = frames
+                if !durationFramesResolved, frameDuration > 0 {
+                    minOnFrameCount = frameCount(
+                        for: config.segmentation.minDurationOn,
+                        frameDuration: frameDuration
+                    )
+                    minOffFrameCount = frameCount(
+                        for: config.segmentation.minDurationOff,
+                        frameDuration: frameDuration
+                    )
+                    durationFramesResolved = true
+                }
 
                 if classes > powerset.count {
                     logger.error(
@@ -171,8 +188,12 @@ struct OfflineSegmentationProcessor {
                         count: frames
                     )
 
-                    var chunkWeights = Array(
+                    var chunkSpeakerProbs = Array(
                         repeating: Array(repeating: Float.zero, count: speakerCount),
+                        count: frames
+                    )
+                    var chunkBinaryMask = Array(
+                        repeating: Array(repeating: false, count: speakerCount),
                         count: frames
                     )
 
@@ -181,6 +202,7 @@ struct OfflineSegmentationProcessor {
                     var frameLogits = [Float](repeating: 0, count: classes)
                     var logProbabilityBuffer = [Float](repeating: 0, count: classes)
                     var probabilityBuffer = [Float](repeating: 0, count: classes)
+                    var speakerStates = hysteresisCarry
 
                     for frameIndex in 0..<frames {
                         let start = baseIndex + frameIndex * classes
@@ -262,14 +284,75 @@ struct OfflineSegmentationProcessor {
                             }
                         }
 
-                        var frameWeights = [Float](repeating: 0, count: speakerCount)
-                        for speaker in winningSpeakers where speaker < speakerCount {
-                            frameWeights[speaker] = 1.0
+                        var speakerProbabilities = [Float](repeating: 0, count: speakerCount)
+                        let limit = min(classes, powerset.count)
+                        if limit > 0 {
+                            for cls in 0..<limit {
+                                let probability = probabilityBuffer[cls]
+                                guard probability > 0 else { continue }
+                                for speaker in powerset[cls] where speaker < speakerCount {
+                                    if probability > speakerProbabilities[speaker] {
+                                        speakerProbabilities[speaker] = probability
+                                    }
+                                }
+                            }
                         }
+                        chunkSpeakerProbs[frameIndex] = speakerProbabilities
 
-                        chunkWeights[frameIndex] = frameWeights
+                        for speaker in 0..<speakerCount {
+                            let probability = speakerProbabilities[speaker]
+                            var active = speakerStates[speaker]
+                            if active {
+                                if probability < offsetThreshold {
+                                    active = false
+                                }
+                            } else {
+                                if probability >= onsetThreshold {
+                                    active = true
+                                }
+                            }
+                            speakerStates[speaker] = active
+                            chunkBinaryMask[frameIndex][speaker] = active
+                        }
+                    }
 
-                        if frameWeights.contains(where: { $0 > 0 }) {
+                    if minOnFrameCount > 1 || minOffFrameCount > 0 {
+                        for speaker in 0..<speakerCount {
+                            var maskColumn = chunkBinaryMask.map { $0[speaker] }
+                            applyMinimumDurations(
+                                mask: &maskColumn,
+                                minOnFrames: minOnFrameCount,
+                                minOffFrames: minOffFrameCount
+                            )
+                            for frameIndex in 0..<frames {
+                                chunkBinaryMask[frameIndex][speaker] = maskColumn[frameIndex]
+                            }
+                        }
+                    }
+
+                    if frames > 0 {
+                        for speaker in 0..<speakerCount {
+                            speakerStates[speaker] = chunkBinaryMask[frames - 1][speaker]
+                        }
+                    }
+
+                    var chunkWeights = Array(
+                        repeating: Array(repeating: Float.zero, count: speakerCount),
+                        count: frames
+                    )
+
+                    for frameIndex in 0..<frames {
+                        var frameHasSpeech = false
+                        for speaker in 0..<speakerCount {
+                            guard chunkBinaryMask[frameIndex][speaker] else { continue }
+                            let probability = chunkSpeakerProbs[frameIndex][speaker]
+                            let weight = probability > 0 ? probability : max(offsetThreshold, Float.zero)
+                            chunkWeights[frameIndex][speaker] = weight
+                            if weight > 0 {
+                                frameHasSpeech = true
+                            }
+                        }
+                        if frameHasSpeech {
                             speechFrameCount += 1
                         }
                     }
@@ -278,15 +361,16 @@ struct OfflineSegmentationProcessor {
                     weightChunks.append(chunkWeights)
 
                     if globalChunkIndex == 0 {
-                        let speakerCoverage = chunkWeights.reduce(into: Array(repeating: 0, count: speakerCount)) {
+                        let speakerCoverage = chunkBinaryMask.reduce(into: Array(repeating: 0, count: speakerCount)) {
                             counts, frame in
-                            for (index, value) in frame.enumerated() where value > 0 {
+                            for (index, isActive) in frame.enumerated() where isActive {
                                 counts[index] += 1
                             }
                         }
                         logger.debug("Chunk 0 speaker frame counts: \(speakerCoverage)")
                     }
 
+                    hysteresisCarry = speakerStates
                     globalChunkIndex += 1
                 }
             }
@@ -356,5 +440,72 @@ struct OfflineSegmentationProcessor {
             chunkOffsets: chunkOffsets,
             frameDuration: frameDuration
         )
+    }
+
+    private func frameCount(for duration: Double, frameDuration: Double) -> Int {
+        guard duration > 0, frameDuration > 0 else { return 0 }
+        return max(1, Int(ceil(duration / frameDuration)))
+    }
+
+    private func applyMinimumDurations(
+        mask: inout [Bool],
+        minOnFrames: Int,
+        minOffFrames: Int
+    ) {
+        if minOnFrames > 1 {
+            removeShortActivations(&mask, minFrames: minOnFrames)
+        }
+        if minOffFrames > 0 {
+            fillShortGaps(&mask, maxGapFrames: minOffFrames)
+        }
+    }
+
+    private func removeShortActivations(_ mask: inout [Bool], minFrames: Int) {
+        guard minFrames > 1, !mask.isEmpty else { return }
+
+        var start: Int? = nil
+        for index in 0..<mask.count {
+            if mask[index] {
+                if start == nil {
+                    start = index
+                }
+            } else if let segmentStart = start {
+                let length = index - segmentStart
+                if length < minFrames {
+                    for position in segmentStart..<index {
+                        mask[position] = false
+                    }
+                }
+                start = nil
+            }
+        }
+
+        if let segmentStart = start {
+            let length = mask.count - segmentStart
+            if length < minFrames {
+                for position in segmentStart..<mask.count {
+                    mask[position] = false
+                }
+            }
+        }
+    }
+
+    private func fillShortGaps(_ mask: inout [Bool], maxGapFrames: Int) {
+        guard maxGapFrames > 0, !mask.isEmpty else { return }
+
+        var previousActive: Int? = nil
+        for index in 0..<mask.count {
+            if mask[index] {
+                if let previous = previousActive {
+                    let gapLength = index - previous - 1
+                    if gapLength > 0, gapLength <= maxGapFrames {
+                        for position in (previous + 1)..<index {
+                            mask[position] = true
+                        }
+                    }
+                }
+                previousActive = index
+            }
+        }
     }
 }

@@ -39,6 +39,7 @@ public struct OfflineDiarizerConfig: Sendable {
     public struct Segmentation: Sendable {
         public var windowDurationSeconds: Double
         public var sampleRate: Int
+        public var minDurationOn: Double
         public var minDurationOff: Double
         public var stepRatio: Double
         public var speechOnsetThreshold: Float
@@ -50,10 +51,11 @@ public struct OfflineDiarizerConfig: Sendable {
         public static let community = Segmentation(
             windowDurationSeconds: 10.0,
             sampleRate: 16_000,
+            minDurationOn: 0.0,
             minDurationOff: 0.0,
             stepRatio: 0.1,
-            speechOnsetThreshold: 0.0,
-            speechOffsetThreshold: 0.0,
+            speechOnsetThreshold: 0.5,
+            speechOffsetThreshold: 0.5,
             speakerOnsetThreshold: 0.0,
             speakerOffsetThreshold: 0.0,
             maxEmptyClassProbability: 1.0
@@ -62,6 +64,7 @@ public struct OfflineDiarizerConfig: Sendable {
         public init(
             windowDurationSeconds: Double,
             sampleRate: Int,
+            minDurationOn: Double,
             minDurationOff: Double,
             stepRatio: Double,
             speechOnsetThreshold: Float,
@@ -72,6 +75,7 @@ public struct OfflineDiarizerConfig: Sendable {
         ) {
             self.windowDurationSeconds = windowDurationSeconds
             self.sampleRate = sampleRate
+            self.minDurationOn = minDurationOn
             self.minDurationOff = minDurationOff
             self.stepRatio = stepRatio
             self.speechOnsetThreshold = speechOnsetThreshold
@@ -214,6 +218,7 @@ public struct OfflineDiarizerConfig: Sendable {
         segmentationOnsetThreshold: Float = Segmentation.community.speakerOnsetThreshold,
         segmentationOffsetThreshold: Float = Segmentation.community.speakerOffsetThreshold,
         maxEmptyClassProbability: Float = Segmentation.community.maxEmptyClassProbability,
+        segmentationMinDurationOn: Double = Segmentation.community.minDurationOn,
         segmentationMinDurationOff: Double = Segmentation.community.minDurationOff,
         maxVBxIterations: Int = VBx.community.maxIterations,
         convergenceTolerance: Double = VBx.community.convergenceTolerance,
@@ -223,6 +228,7 @@ public struct OfflineDiarizerConfig: Sendable {
             segmentation: Segmentation(
                 windowDurationSeconds: windowDuration,
                 sampleRate: sampleRate,
+                minDurationOn: segmentationMinDurationOn,
                 minDurationOff: segmentationMinDurationOff,
                 stepRatio: segmentationStepRatio,
                 speechOnsetThreshold: speechOnsetThreshold,
@@ -335,6 +341,12 @@ public struct OfflineDiarizerConfig: Sendable {
         guard postProcessing.minGapDurationSeconds >= 0 else {
             throw OfflineDiarizationError.invalidConfiguration(
                 "minGapDuration must be >= 0"
+            )
+        }
+
+        guard segmentation.minDurationOn >= 0 else {
+            throw OfflineDiarizationError.invalidConfiguration(
+                "segmentation.minDurationOn must be >= 0"
             )
         }
 
@@ -480,6 +492,11 @@ public struct OfflineDiarizerConfig: Sendable {
     public var maxEmptyClassProbability: Float {
         get { segmentation.maxEmptyClassProbability }
         set { segmentation.maxEmptyClassProbability = newValue }
+    }
+
+    public var segmentationMinDurationOn: Double {
+        get { segmentation.minDurationOn }
+        set { segmentation.minDurationOn = newValue }
     }
 
     public var segmentationMinDurationOff: Double {

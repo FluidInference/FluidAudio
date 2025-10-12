@@ -335,8 +335,12 @@ struct OfflineReconstruction {
 
     private func sanitize(segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
         var ordered = segments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
+        let minimumDuration = max(
+            Float(config.minSegmentDuration),
+            Float(config.segmentationMinDurationOn)
+        )
         ordered = ordered.filter {
-            ($0.endTimeSeconds - $0.startTimeSeconds) >= Float(config.minSegmentDuration)
+            ($0.endTimeSeconds - $0.startTimeSeconds) >= minimumDuration
         }
 
         if config.embeddingExcludeOverlap {
