@@ -6,8 +6,6 @@ import OSLog
 public final class OfflineDiarizerManager {
     private let logger = AppLogger(category: "OfflineDiarizer")
     private let config: OfflineDiarizerConfig
-    private let cleanFrameRatioThreshold = 0.2
-    private let presenceThreshold: Float = 0.5
 
     private var models: OfflineDiarizerModels?
 
@@ -62,23 +60,21 @@ public final class OfflineDiarizerManager {
 
         let clusteringStart = Date()
         let trainingIndices = selectTrainingEmbeddings(
-            timedEmbeddings: timedEmbeddings,
-            segmentation: segmentation
+            timedEmbeddings: timedEmbeddings
         )
 
         let trainingEmbeddings = trainingIndices.map { embeddingFeatures[$0] }
         let trainingRho = trainingIndices.map { rhoFeatures[$0] }
 
         logger.debug(
-            "Clustering will use \(trainingEmbeddings.count)/\(timedEmbeddings.count) embeddings (clean frames ≥ 20%)"
+            "Clustering will use \(trainingEmbeddings.count)/\(timedEmbeddings.count) embeddings (NaN filtered)"
         )
 
         let initialClusters: [Int]
         if trainingEmbeddings.count >= 2 {
             initialClusters = AHCClustering().cluster(
                 embeddingFeatures: trainingEmbeddings,
-                threshold: config.clusteringThreshold,
-                minClusterSize: config.minClusterSize
+                threshold: config.clusteringThreshold
             )
         } else {
             initialClusters = Array(repeating: 0, count: trainingEmbeddings.count)
@@ -170,8 +166,7 @@ public final class OfflineDiarizerManager {
     }
 
     private func selectTrainingEmbeddings(
-        timedEmbeddings: [TimedEmbedding],
-        segmentation: SegmentationOutput
+        timedEmbeddings: [TimedEmbedding]
     ) -> [Int] {
         var selected: [Int] = []
         selected.reserveCapacity(timedEmbeddings.count)
@@ -182,18 +177,7 @@ public final class OfflineDiarizerManager {
                 continue
             }
 
-            guard
-                let ratio = cleanFrameRatio(
-                    for: embedding,
-                    segmentation: segmentation
-                )
-            else {
-                continue
-            }
-
-            if ratio >= cleanFrameRatioThreshold {
-                selected.append(index)
-            }
+            selected.append(index)
         }
 
         if selected.isEmpty {
@@ -201,46 +185,6 @@ public final class OfflineDiarizerManager {
         }
 
         return selected
-    }
-
-    private func cleanFrameRatio(
-        for embedding: TimedEmbedding,
-        segmentation: SegmentationOutput
-    ) -> Double? {
-        guard
-            embedding.chunkIndex >= 0,
-            embedding.chunkIndex < segmentation.speakerWeights.count
-        else {
-            return nil
-        }
-
-        let chunkWeights = segmentation.speakerWeights[embedding.chunkIndex]
-        guard !chunkWeights.isEmpty else { return nil }
-
-        var cleanFrames = 0
-        var activeFrames = 0
-
-        for frame in chunkWeights {
-            guard embedding.speakerIndex < frame.count else { continue }
-            let value = frame[embedding.speakerIndex]
-            if value > presenceThreshold {
-                activeFrames += 1
-                var hasOverlap = false
-                for (speakerIdx, other) in frame.enumerated() where speakerIdx != embedding.speakerIndex {
-                    if other > presenceThreshold {
-                        hasOverlap = true
-                        break
-                    }
-                }
-                if !hasOverlap {
-                    cleanFrames += 1
-                }
-            }
-        }
-
-        guard !chunkWeights.isEmpty else { return nil }
-        guard activeFrames > 0 else { return nil }
-        return Double(cleanFrames) / Double(chunkWeights.count)
     }
 
     private func computeCentroids(

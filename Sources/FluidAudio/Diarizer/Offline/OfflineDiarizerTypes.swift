@@ -111,25 +111,28 @@ public struct OfflineDiarizerConfig: Sendable {
     public struct Clustering: Sendable {
         /// Euclidean distance threshold for unit-normalized embeddings.
         public var threshold: Double
-        public var minClusterSize: Int
+        /// VBx warm-start parameters (Fa controls precision, Fb controls recall)
         public var warmStartFa: Double
         public var warmStartFb: Double
 
+        // NOTE: minClusterSize is NOT used in community-1 (VBx-based pipeline).
+        // VBx is designed to handle 100+ under-clustered initial assignments from AHC
+        // and naturally merge them during Bayesian refinement. Pre-merging small clusters
+        // with minClusterSize enforcement (used in pyannote 3.1 AHC-only pipeline)
+        // is counterproductive for VBx and loses speaker distinctions.
+
         public static let community = Clustering(
-            threshold: 0.7045654963945799,
-            minClusterSize: 12,
+            threshold: 0.6,
             warmStartFa: 0.07,
             warmStartFb: 0.8
         )
 
         public init(
             threshold: Double,
-            minClusterSize: Int,
             warmStartFa: Double,
             warmStartFb: Double
         ) {
             self.threshold = threshold
-            self.minClusterSize = minClusterSize
             self.warmStartFa = warmStartFa
             self.warmStartFb = warmStartFb
         }
@@ -202,7 +205,6 @@ public struct OfflineDiarizerConfig: Sendable {
 
     public init(
         clusteringThreshold: Double = Clustering.community.threshold,
-        minClusterSize: Int = Clustering.community.minClusterSize,
         Fa: Double = Clustering.community.warmStartFa,
         Fb: Double = Clustering.community.warmStartFb,
         loopProbability: Double = VBx.community.loopProbability,
@@ -244,7 +246,6 @@ public struct OfflineDiarizerConfig: Sendable {
             ),
             clustering: Clustering(
                 threshold: clusteringThreshold,
-                minClusterSize: minClusterSize,
                 warmStartFa: Fa,
                 warmStartFb: Fb
             ),
@@ -273,12 +274,6 @@ public struct OfflineDiarizerConfig: Sendable {
         guard clustering.threshold > 0, clustering.threshold <= maxClusteringThreshold else {
             throw OfflineDiarizationError.invalidConfiguration(
                 "clustering.threshold must be within (0, sqrt(2)], got \(clustering.threshold)"
-            )
-        }
-
-        guard clustering.minClusterSize >= 1 else {
-            throw OfflineDiarizationError.invalidConfiguration(
-                "clustering.minClusterSize must be >= 1, got \(clustering.minClusterSize)"
             )
         }
 
@@ -396,11 +391,6 @@ public struct OfflineDiarizerConfig: Sendable {
     public var clusteringThreshold: Double {
         get { clustering.threshold }
         set { clustering.threshold = newValue }
-    }
-
-    public var minClusterSize: Int {
-        get { clustering.minClusterSize }
-        set { clustering.minClusterSize = newValue }
     }
 
     public var Fa: Double {

@@ -9,8 +9,7 @@ struct AHCClustering {
 
     func cluster(
         embeddingFeatures: [[Double]],
-        threshold: Double,
-        minClusterSize _: Int
+        threshold: Double
     ) -> [Int] {
         let count = embeddingFeatures.count
         guard count > 0 else { return [] }
