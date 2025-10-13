@@ -26,7 +26,7 @@ let package = Package(
         .target(
             name: "FluidAudio",
             dependencies: [
-                "ESpeakNG",
+                "ESpeakNG"
             ],
             path: "Sources/FluidAudio",
             exclude: []
