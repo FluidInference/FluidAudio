@@ -91,14 +91,29 @@ final class EspeakG2P {
     private static func frameworkBundledDataPath() -> URL? {
         let logger = staticLogger
 
-        // The espeak-ng-data.bundle should be in the ESpeakNG.framework's Resources
-        guard let bundle = Bundle(identifier: "com.kokoro.espeakng") else {
-            logger.warning("Could not find ESpeakNG framework bundle (com.kokoro.espeakng)")
+        // Try to find ESpeakNG.framework bundle by identifier first
+        var bundle = Bundle(identifier: "com.kokoro.espeakng")
+
+        // If not found by identifier, search in the main bundle's Frameworks directory
+        if bundle == nil {
+            let mainBundle = Bundle.main
+            if let frameworksPath = mainBundle.privateFrameworksPath {
+                let frameworkPath = (frameworksPath as NSString).appendingPathComponent("ESpeakNG.framework")
+                bundle = Bundle(path: frameworkPath)
+                if bundle != nil {
+                    logger.info("Found ESpeakNG framework at: \(frameworkPath)")
+                }
+            }
+        }
+
+        guard let espeakBundle = bundle else {
+            logger.warning("Could not find ESpeakNG framework bundle")
             return nil
         }
 
-        guard let bundleURL = bundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
-            logger.warning("Could not find espeak-ng-data.bundle in ESpeakNG framework")
+        guard let bundleURL = espeakBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
+            logger.warning("Could not find espeak-ng-data.bundle in ESpeakNG framework Resources")
+            logger.warning("Searched in: \(espeakBundle.resourcePath ?? "unknown")")
             return nil
         }
 
