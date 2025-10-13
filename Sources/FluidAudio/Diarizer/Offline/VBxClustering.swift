@@ -52,14 +52,22 @@ struct VBxClustering {
         let histogram = initialClusters.reduce(into: [:]) { partialResult, value in
             partialResult[value, default: 0] += 1
         }
-        print("[VBx] Initial clusters count: \(speakerCount) histogram: \(histogram)")
+        logger.debug("VBx warm start clusters: \(speakerCount) histogram: \(histogram)")
 
         var featureBuffer = [Double](repeating: 0, count: frameCount * dimension)
-        for (index, frame) in rhoFeatures.enumerated() {
-            featureBuffer.replaceSubrange(
-                index * dimension..<(index + 1) * dimension,
-                with: frame
-            )
+        featureBuffer.withUnsafeMutableBufferPointer { bufferPtr in
+            guard let baseAddress = bufferPtr.baseAddress else { return }
+            for (index, frame) in rhoFeatures.enumerated() {
+                let destination = baseAddress.advanced(by: index * dimension)
+                frame.withUnsafeBufferPointer { source in
+                    guard let sourceBase = source.baseAddress else { return }
+                    memcpy(
+                        destination,
+                        sourceBase,
+                        dimension * MemoryLayout<Double>.size
+                    )
+                }
+            }
         }
 
         var initialGamma = [Double](repeating: 0, count: frameCount * speakerCount)
@@ -97,7 +105,11 @@ struct VBxClustering {
         }
 
         let elboHistory = result.elbos
-        print("[VBx] piOut stats: max=\(result.pi.max() ?? 0), min=\(result.pi.min() ?? 0), count=\(result.pi.count)")
+        if let maxPi = result.pi.max(), let minPi = result.pi.min() {
+            logger.debug("VBx mixture weights – min: \(minPi), max: \(maxPi), count: \(result.pi.count)")
+        } else {
+            logger.debug("VBx mixture weights unavailable")
+        }
 
         return VBxOutput(
             gamma: gammaMatrix,
@@ -124,53 +136,54 @@ struct VBxClustering {
     ) -> (gamma: [Double], pi: [Double], elbos: [Double]) {
         var gamma = initialGamma
 
+        let speakerLength = vDSP_Length(speakerCount)
+        let dimensionLength = vDSP_Length(dimension)
+        let onesFrame = [Double](repeating: 1.0, count: frameCount)
+        var rowBuffer = [Double](repeating: 0, count: speakerCount)
+
         if initSmoothing >= 0.0 {
-            var rowBuffer = [Double](repeating: 0, count: speakerCount)
-            for t in 0..<frameCount {
-                let start = t * speakerCount
-                var maxValue = -Double.greatestFiniteMagnitude
-                for s in 0..<speakerCount {
-                    let value = gamma[start + s] * initSmoothing
-                    rowBuffer[s] = value
-                    if value > maxValue {
-                        maxValue = value
-                    }
-                }
-                var sumExp = 0.0
-                for s in 0..<speakerCount {
-                    let expValue = exp(rowBuffer[s] - maxValue)
-                    rowBuffer[s] = expValue
-                    sumExp += expValue
-                }
-                if sumExp <= 0 || !sumExp.isFinite {
-                    let uniform = 1.0 / Double(speakerCount)
-                    for s in 0..<speakerCount {
-                        gamma[start + s] = uniform
-                    }
-                } else {
-                    let invSum = 1.0 / sumExp
-                    for s in 0..<speakerCount {
-                        gamma[start + s] = rowBuffer[s] * invSum
+            gamma.withUnsafeMutableBufferPointer { gammaPtr in
+                rowBuffer.withUnsafeMutableBufferPointer { bufferPtr in
+                    guard
+                        let gammaBase = gammaPtr.baseAddress,
+                        let scratch = bufferPtr.baseAddress
+                    else { return }
+                    for t in 0..<frameCount {
+                        let row = gammaBase.advanced(by: t * speakerCount)
+                        var multiplier = initSmoothing
+                        vDSP_vsmulD(row, 1, &multiplier, scratch, 1, speakerLength)
+                        var maxValue = -Double.greatestFiniteMagnitude
+                        vDSP_maxvD(scratch, 1, &maxValue, speakerLength)
+                        var shift = -maxValue
+                        vDSP_vsaddD(scratch, 1, &shift, scratch, 1, speakerLength)
+                        var count = Int32(speakerCount)
+                        vvexp(scratch, scratch, &count)
+                        var sumExp = 0.0
+                        vDSP_sveD(scratch, 1, &sumExp, speakerLength)
+                        if sumExp <= 0.0 || !sumExp.isFinite {
+                            var uniform = 1.0 / Double(speakerCount)
+                            vDSP_vfillD(&uniform, row, 1, speakerLength)
+                        } else {
+                            var invSum = 1.0 / sumExp
+                            vDSP_vsmulD(scratch, 1, &invSum, row, 1, speakerLength)
+                        }
                     }
                 }
             }
         }
 
-        for t in 0..<frameCount {
-            let start = t * speakerCount
-            var sum = 0.0
-            for s in 0..<speakerCount {
-                sum += gamma[start + s]
-            }
-            if sum <= 0 || !sum.isFinite {
-                let uniform = 1.0 / Double(speakerCount)
-                for s in 0..<speakerCount {
-                    gamma[start + s] = uniform
-                }
-            } else {
-                let inv = 1.0 / sum
-                for s in 0..<speakerCount {
-                    gamma[start + s] *= inv
+        gamma.withUnsafeMutableBufferPointer { gammaPtr in
+            guard let gammaBase = gammaPtr.baseAddress else { return }
+            for t in 0..<frameCount {
+                let row = gammaBase.advanced(by: t * speakerCount)
+                var sum = 0.0
+                vDSP_sveD(row, 1, &sum, speakerLength)
+                if sum <= 0.0 || !sum.isFinite {
+                    var uniform = 1.0 / Double(speakerCount)
+                    vDSP_vfillD(&uniform, row, 1, speakerLength)
+                } else {
+                    var inv = 1.0 / sum
+                    vDSP_vsmulD(row, 1, &inv, row, 1, speakerLength)
                 }
             }
         }
@@ -181,21 +194,45 @@ struct VBxClustering {
         let sqrtPhi = phiClamped.map { sqrt($0) }
 
         var rho = [Double](repeating: 0, count: features.count)
-        for t in 0..<frameCount {
-            for d in 0..<dimension {
-                rho[t * dimension + d] = features[t * dimension + d] * sqrtPhi[d]
+        features.withUnsafeBufferPointer { featurePtr in
+            rho.withUnsafeMutableBufferPointer { rhoPtr in
+                sqrtPhi.withUnsafeBufferPointer { sqrtPtr in
+                    guard
+                        let featureBase = featurePtr.baseAddress,
+                        let rhoBase = rhoPtr.baseAddress,
+                        let sqrtBase = sqrtPtr.baseAddress
+                    else { return }
+                    for t in 0..<frameCount {
+                        let offset = t * dimension
+                        vDSP_vmulD(
+                            featureBase.advanced(by: offset),
+                            1,
+                            sqrtBase,
+                            1,
+                            rhoBase.advanced(by: offset),
+                            1,
+                            dimensionLength
+                        )
+                    }
+                }
             }
         }
 
         var G = [Double](repeating: 0, count: frameCount)
         let logConstant = Double(dimension) * log(2.0 * Double.pi)
-        for t in 0..<frameCount {
-            var sumSq = 0.0
-            for d in 0..<dimension {
-                let value = features[t * dimension + d]
-                sumSq += value * value
+        features.withUnsafeBufferPointer { featurePtr in
+            guard let featureBase = featurePtr.baseAddress else { return }
+            for t in 0..<frameCount {
+                let offset = t * dimension
+                var sumSq: Double = 0
+                vDSP_svesqD(
+                    featureBase.advanced(by: offset),
+                    1,
+                    &sumSq,
+                    dimensionLength
+                )
+                G[t] = -0.5 * (sumSq + logConstant)
             }
-            G[t] = -0.5 * (sumSq + logConstant)
         }
 
         let ratio = Fa / Fb
@@ -205,8 +242,12 @@ struct VBxClustering {
         var phiTerms = [Double](repeating: 0, count: speakerCount)
         var gammaSum = [Double](repeating: 0, count: speakerCount)
         var logP = [Double](repeating: 0, count: frameCount * speakerCount)
-        var rowBuffer = [Double](repeating: 0, count: speakerCount)
+        var phiScratch = [Double](repeating: 0, count: dimension)
+        var phiOffset = [Double](repeating: 0, count: speakerCount)
+        var logInv = [Double](repeating: 0, count: speakerCount * dimension)
         var elbos = [Double](repeating: 0, count: max(maxIterations, 1))
+        let alphaCount = alpha.count
+        let invLCount = invL.count
 
         var previousElbo = -Double.greatestFiniteMagnitude
         var iterations = 0
@@ -214,11 +255,29 @@ struct VBxClustering {
         for iteration in 0..<maxIterations {
             iterations = iteration + 1
 
-            gammaSum.replaceSubrange(0..<speakerCount, with: repeatElement(0, count: speakerCount))
-            for t in 0..<frameCount {
-                let start = t * speakerCount
-                for s in 0..<speakerCount {
-                    gammaSum[s] += gamma[start + s]
+            gamma.withUnsafeBufferPointer { gammaPtr in
+                onesFrame.withUnsafeBufferPointer { onesPtr in
+                    gammaSum.withUnsafeMutableBufferPointer { sumPtr in
+                        guard
+                            let gammaBase = gammaPtr.baseAddress,
+                            let onesBase = onesPtr.baseAddress,
+                            let sumBase = sumPtr.baseAddress
+                        else { return }
+                        cblas_dgemv(
+                            CblasRowMajor,
+                            CblasTrans,
+                            Int32(frameCount),
+                            Int32(speakerCount),
+                            1.0,
+                            gammaBase,
+                            Int32(speakerCount),
+                            onesBase,
+                            1,
+                            0.0,
+                            sumBase,
+                            1
+                        )
+                    }
                 }
             }
 
@@ -254,19 +313,80 @@ struct VBxClustering {
                 }
             }
 
-            for idx in 0..<temp.count {
-                alpha[idx] = ratio * invL[idx] * temp[idx]
+            alpha.withUnsafeMutableBufferPointer { alphaPtr in
+                invL.withUnsafeBufferPointer { invPtr in
+                    temp.withUnsafeBufferPointer { tempPtr in
+                        guard
+                            let alphaBase = alphaPtr.baseAddress,
+                            let invBase = invPtr.baseAddress,
+                            let tempBase = tempPtr.baseAddress
+                        else { return }
+                        vDSP_vmulD(
+                            tempBase,
+                            1,
+                            invBase,
+                            1,
+                            alphaBase,
+                            1,
+                            vDSP_Length(alphaCount)
+                        )
+                        var ratioScalar = ratio
+                        vDSP_vsmulD(
+                            alphaBase,
+                            1,
+                            &ratioScalar,
+                            alphaBase,
+                            1,
+                            vDSP_Length(alphaCount)
+                        )
+                    }
+                }
             }
 
-            for s in 0..<speakerCount {
-                var sum = 0.0
-                for d in 0..<dimension {
-                    let idx = s * dimension + d
-                    let inv = invL[idx]
-                    let a = alpha[idx]
-                    sum += (inv + a * a) * phiClamped[d]
+            alpha.withUnsafeBufferPointer { alphaPtr in
+                invL.withUnsafeBufferPointer { invPtr in
+                    phiClamped.withUnsafeBufferPointer { phiPtr in
+                        phiScratch.withUnsafeMutableBufferPointer { scratchPtr in
+                            guard
+                                let alphaBase = alphaPtr.baseAddress,
+                                let invBase = invPtr.baseAddress,
+                                let phiBase = phiPtr.baseAddress,
+                                let scratchBase = scratchPtr.baseAddress
+                            else { return }
+                            for s in 0..<speakerCount {
+                                let offset = s * dimension
+                                vDSP_vsqD(
+                                    alphaBase.advanced(by: offset),
+                                    1,
+                                    scratchBase,
+                                    1,
+                                    dimensionLength
+                                )
+                                vDSP_vaddD(
+                                    scratchBase,
+                                    1,
+                                    invBase.advanced(by: offset),
+                                    1,
+                                    scratchBase,
+                                    1,
+                                    dimensionLength
+                                )
+                                vDSP_vmulD(
+                                    scratchBase,
+                                    1,
+                                    phiBase,
+                                    1,
+                                    scratchBase,
+                                    1,
+                                    dimensionLength
+                                )
+                                var sum: Double = 0
+                                vDSP_sveD(scratchBase, 1, &sum, dimensionLength)
+                                phiTerms[s] = sum
+                            }
+                        }
+                    }
                 }
-                phiTerms[s] = sum
             }
 
             rho.withUnsafeBufferPointer { rhoPtr in
@@ -292,72 +412,193 @@ struct VBxClustering {
                 }
             }
 
-            for t in 0..<frameCount {
-                let g = G[t]
-                let rowStart = t * speakerCount
-                for s in 0..<speakerCount {
-                    logP[rowStart + s] = Fa * (logP[rowStart + s] - 0.5 * phiTerms[s] + g)
+            phiTerms.withUnsafeBufferPointer { phiPtr in
+                phiOffset.withUnsafeMutableBufferPointer { offsetPtr in
+                    guard
+                        let phiBase = phiPtr.baseAddress,
+                        let offsetBase = offsetPtr.baseAddress
+                    else { return }
+                    var negativeHalf: Double = -0.5
+                    vDSP_vsmulD(
+                        phiBase,
+                        1,
+                        &negativeHalf,
+                        offsetBase,
+                        1,
+                        speakerLength
+                    )
                 }
             }
 
-            let eps = 1e-8
+            phiOffset.withUnsafeBufferPointer { offsetPtr in
+                logP.withUnsafeMutableBufferPointer { logPtr in
+                    guard
+                        let offsetBase = offsetPtr.baseAddress,
+                        let logBase = logPtr.baseAddress
+                    else { return }
+                    for t in 0..<frameCount {
+                        let row = logBase.advanced(by: t * speakerCount)
+                        vDSP_vaddD(row, 1, offsetBase, 1, row, 1, speakerLength)
+                        var g = G[t]
+                        vDSP_vsaddD(row, 1, &g, row, 1, speakerLength)
+                        var faScale = Fa
+                        vDSP_vsmulD(row, 1, &faScale, row, 1, speakerLength)
+                    }
+                }
+            }
+
             var logLikelihood = 0.0
-            for t in 0..<frameCount {
-                let rowStart = t * speakerCount
-                var rowMax = -Double.greatestFiniteMagnitude
-                for s in 0..<speakerCount {
-                    let value = logP[rowStart + s] + log(max(pi[s], eps))
-                    rowBuffer[s] = value
-                    if value > rowMax {
-                        rowMax = value
-                    }
-                }
-
-                var sumExp = 0.0
-                for s in 0..<speakerCount {
-                    let expValue = exp(rowBuffer[s] - rowMax)
-                    rowBuffer[s] = expValue
-                    sumExp += expValue
-                }
-
-                if sumExp <= 0.0 || !sumExp.isFinite {
-                    let uniform = 1.0 / Double(speakerCount)
-                    for s in 0..<speakerCount {
-                        gamma[rowStart + s] = uniform
-                    }
-                    logLikelihood += rowMax
-                } else {
-                    let invSum = 1.0 / sumExp
-                    for s in 0..<speakerCount {
-                        gamma[rowStart + s] = rowBuffer[s] * invSum
-                    }
-                    logLikelihood += rowMax + log(sumExp)
+            var logPi = [Double](repeating: 0, count: speakerCount)
+            pi.withUnsafeBufferPointer { piPtr in
+                logPi.withUnsafeMutableBufferPointer { logPtr in
+                    guard
+                        let piBase = piPtr.baseAddress,
+                        let logBase = logPtr.baseAddress
+                    else { return }
+                    var threshold = 1e-8
+                    vDSP_vthrD(
+                        piBase,
+                        1,
+                        &threshold,
+                        logBase,
+                        1,
+                        speakerLength
+                    )
+                    var count = Int32(speakerCount)
+                    vvlog(logBase, logBase, &count)
                 }
             }
 
-            pi = [Double](repeating: 0, count: speakerCount)
-            for t in 0..<frameCount {
-                let rowStart = t * speakerCount
-                for s in 0..<speakerCount {
-                    pi[s] += gamma[rowStart + s]
+            rowBuffer.withUnsafeMutableBufferPointer { bufferPtr in
+                gamma.withUnsafeMutableBufferPointer { gammaPtr in
+                    logP.withUnsafeBufferPointer { logPtr in
+                        logPi.withUnsafeBufferPointer { logPiPtr in
+                            guard
+                                let scratch = bufferPtr.baseAddress,
+                                let gammaBase = gammaPtr.baseAddress,
+                                let logBase = logPtr.baseAddress,
+                                let logPiBase = logPiPtr.baseAddress
+                            else { return }
+                            for t in 0..<frameCount {
+                                let rowOffset = t * speakerCount
+                                let gammaRow = gammaBase.advanced(by: rowOffset)
+                                vDSP_mmovD(
+                                    logBase.advanced(by: rowOffset),
+                                    scratch,
+                                    speakerLength,
+                                    1,
+                                    speakerLength,
+                                    1
+                                )
+                                vDSP_vaddD(
+                                    scratch,
+                                    1,
+                                    logPiBase,
+                                    1,
+                                    scratch,
+                                    1,
+                                    speakerLength
+                                )
+                                var rowMax = -Double.greatestFiniteMagnitude
+                                vDSP_maxvD(scratch, 1, &rowMax, speakerLength)
+                                var shift = -rowMax
+                                vDSP_vsaddD(scratch, 1, &shift, scratch, 1, speakerLength)
+                                var count = Int32(speakerCount)
+                                vvexp(scratch, scratch, &count)
+                                var sumExp = 0.0
+                                vDSP_sveD(scratch, 1, &sumExp, speakerLength)
+                                if sumExp <= 0.0 || !sumExp.isFinite {
+                                    var uniform = 1.0 / Double(speakerCount)
+                                    vDSP_vfillD(&uniform, gammaRow, 1, speakerLength)
+                                    logLikelihood += rowMax
+                                } else {
+                                    var invSum = 1.0 / sumExp
+                                    vDSP_vsmulD(
+                                        scratch,
+                                        1,
+                                        &invSum,
+                                        gammaRow,
+                                        1,
+                                        speakerLength
+                                    )
+                                    logLikelihood += rowMax + log(sumExp)
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            let piSum = pi.reduce(0, +)
-            if piSum > 0 && piSum.isFinite {
-                let inv = 1.0 / piSum
-                for s in 0..<speakerCount {
-                    pi[s] *= inv
+
+            gamma.withUnsafeBufferPointer { gammaPtr in
+                onesFrame.withUnsafeBufferPointer { onesPtr in
+                    pi.withUnsafeMutableBufferPointer { piPtr in
+                        guard
+                            let gammaBase = gammaPtr.baseAddress,
+                            let onesBase = onesPtr.baseAddress,
+                            let piBase = piPtr.baseAddress
+                        else { return }
+                        cblas_dgemv(
+                            CblasRowMajor,
+                            CblasTrans,
+                            Int32(frameCount),
+                            Int32(speakerCount),
+                            1.0,
+                            gammaBase,
+                            Int32(speakerCount),
+                            onesBase,
+                            1,
+                            0.0,
+                            piBase,
+                            1
+                        )
+                    }
+                }
+            }
+
+            var piSum = 0.0
+            pi.withUnsafeBufferPointer { piPtr in
+                guard let piBase = piPtr.baseAddress else { return }
+                vDSP_sveD(piBase, 1, &piSum, speakerLength)
+            }
+            if piSum > 0.0 && piSum.isFinite {
+                var inv = 1.0 / piSum
+                pi.withUnsafeMutableBufferPointer { piPtr in
+                    guard let piBase = piPtr.baseAddress else { return }
+                    vDSP_vsmulD(piBase, 1, &inv, piBase, 1, speakerLength)
                 }
             } else {
-                let uniform = 1.0 / Double(speakerCount)
-                pi = [Double](repeating: uniform, count: speakerCount)
+                var uniform = 1.0 / Double(speakerCount)
+                pi.withUnsafeMutableBufferPointer { piPtr in
+                    guard let piBase = piPtr.baseAddress else { return }
+                    vDSP_vfillD(&uniform, piBase, 1, speakerLength)
+                }
+            }
+
+            var sumLogInv = 0.0
+            var sumInv = 0.0
+            var sumAlphaSq = 0.0
+
+            invL.withUnsafeBufferPointer { invPtr in
+                logInv.withUnsafeMutableBufferPointer { logPtr in
+                    guard
+                        let invBase = invPtr.baseAddress,
+                        let logBase = logPtr.baseAddress
+                    else { return }
+                    logBase.update(from: invBase, count: invLCount)
+                    var count = Int32(invLCount)
+                    vvlog(logBase, logBase, &count)
+                    vDSP_sveD(logBase, 1, &sumLogInv, vDSP_Length(invLCount))
+                    vDSP_sveD(invBase, 1, &sumInv, vDSP_Length(invLCount))
+                }
+            }
+
+            alpha.withUnsafeBufferPointer { alphaPtr in
+                guard let alphaBase = alphaPtr.baseAddress else { return }
+                vDSP_svesqD(alphaBase, 1, &sumAlphaSq, vDSP_Length(alphaCount))
             }
 
             var elbo = logLikelihood
-            for idx in 0..<invL.count {
-                let inv = max(invL[idx], 1e-12)
-                elbo += Fb * 0.5 * (log(inv) - inv - alpha[idx] * alpha[idx] + 1.0)
-            }
+            elbo += Fb * 0.5 * (sumLogInv - sumInv - sumAlphaSq + Double(invLCount))
 
             if iteration < elbos.count {
                 elbos[iteration] = elbo

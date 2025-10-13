@@ -2,10 +2,15 @@ import Accelerate
 import CoreML
 import Foundation
 import OSLog
+import os.signpost
 
 @available(macOS 13.0, iOS 16.0, *)
 struct OfflineSegmentationProcessor {
     private let logger = AppLogger(category: "OfflineSegmentation")
+    private let signposter = OSSignposter(
+        subsystem: "com.fluidaudio.diarization",
+        category: .pointsOfInterest
+    )
     private let memoryOptimizer = ANEMemoryOptimizer()
 
     private let powerset: [[Int]] = [
@@ -118,7 +123,9 @@ struct OfflineSegmentationProcessor {
                     audioArray.prefetchToNeuralEngine()
                 }
 
+                let predictionState = signposter.beginInterval("Segmentation Model Prediction")
                 let output = try segmentationModel.prediction(from: provider, options: options)
+                signposter.endInterval("Segmentation Model Prediction", predictionState)
 
                 let logitsArray: MLMultiArray
                 if let segments = output.featureValue(for: "segments")?.multiArrayValue {
@@ -256,14 +263,6 @@ struct OfflineSegmentationProcessor {
                         let winningProbability = probabilityBuffer[winningClass]
                         let emptyProbability =
                             emptyClassIndex < probabilityBuffer.count ? probabilityBuffer[emptyClassIndex] : 0
-
-                        if globalChunkIndex == 0, frameIndex < 30 {
-                            let formattedWinning = String(format: "%.3f", winningProbability)
-                            let formattedEmpty = String(format: "%.3f", emptyProbability)
-                            logger.debug(
-                                "Frame \(frameIndex) winningClass=\(winningClass) prob=\(formattedWinning) empty=\(formattedEmpty)"
-                            )
-                        }
 
                         if !winningSpeakers.isEmpty {
                             winningProbabilitySum += Double(winningProbability)

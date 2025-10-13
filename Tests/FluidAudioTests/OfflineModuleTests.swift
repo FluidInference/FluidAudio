@@ -284,11 +284,10 @@ final class ModelWarmupTests: XCTestCase {
             return
         }
 
-        let weights = lastInvocation["weights"]
-        XCTAssertEqual(weights?.shape.map { $0.intValue }, [1, weightFrames])
-
-        let audio = lastInvocation["audio"]
-        XCTAssertEqual(audio?.shape.map { $0.intValue }, [1, 1, 160_000])
+        let totalElements = 160_000 + weightFrames
+        let combined = lastInvocation["audio_and_weights"]
+        XCTAssertNotNil(combined)
+        XCTAssertEqual(combined?.shape.map { $0.intValue }, [1, 1, 1, totalElements])
     }
 
     // MARK: - Helpers

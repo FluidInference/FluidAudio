@@ -1,3 +1,4 @@
+import Accelerate
 import CoreML
 import Foundation
 import OSLog
@@ -7,6 +8,7 @@ public final class DiarizerManager {
     internal let logger = AppLogger(category: "Diarizer")
     internal let config: DiarizerConfig
     private var models: DiarizerModels?
+    private var chunkBuffer: [Float] = []
 
     /// Public getter for segmentation model (for streaming)
     public var segmentationModel: MLModel? {
@@ -213,20 +215,43 @@ public final class DiarizerManager {
 
         let chunkSize = sampleRate * 10
         let chunkCount = chunk.distance(from: chunk.startIndex, to: chunk.endIndex)
+        let copyCount = min(chunkCount, chunkSize)
 
-        let paddedChunk: ArraySlice<Float>
-        if chunkCount < chunkSize {
-            var padded = Array(repeating: 0.0 as Float, count: chunkSize)
-            for (idx, element) in chunk.enumerated() {
-                padded[idx] = element
-            }
-            paddedChunk = padded[...]
-        } else if let slice = chunk as? ArraySlice<Float> {
-            paddedChunk = slice
-        } else {
-            // Convert to ArraySlice for other collection types
-            paddedChunk = Array(chunk)[...]
+        if chunkBuffer.count != chunkSize {
+            chunkBuffer = [Float](repeating: 0.0, count: chunkSize)
         }
+
+        chunkBuffer.withUnsafeMutableBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            vDSP_vclr(baseAddress, 1, vDSP_Length(chunkSize))
+
+            guard copyCount > 0 else { return }
+
+            let copied =
+                chunk.withContiguousStorageIfAvailable { storage -> Bool in
+                    storage.withUnsafeBufferPointer { src in
+                        vDSP_mmov(
+                            src.baseAddress!,
+                            baseAddress,
+                            vDSP_Length(copyCount),
+                            vDSP_Length(1),
+                            vDSP_Length(1),
+                            vDSP_Length(chunkSize)
+                        )
+                    }
+                    return true
+                } ?? false
+
+            if !copied {
+                var index = chunk.startIndex
+                for i in 0..<copyCount {
+                    baseAddress.advanced(by: i).pointee = chunk[index]
+                    index = chunk.index(after: index)
+                }
+            }
+        }
+
+        let paddedChunk: ArraySlice<Float> = chunkBuffer[0..<chunkSize]
 
         let (binarizedSegments, _) = try segmentationProcessor.getSegments(
             audioChunk: paddedChunk,

@@ -6,38 +6,27 @@ import Foundation
 struct ResultsFormatter {
 
     static func printResults(_ result: ProcessingResult) async {
-        print("📊 Diarization Results:")
-        print("   Audio File: \(result.audioFile)")
-        print("   Duration: \(String(format: "%.1f", result.durationSeconds))s")
-        print("   Processing Time: \(String(format: "%.1f", result.processingTimeSeconds))s")
+        print("Diarization Results:")
+        print("Audio File: \(result.audioFile)")
+        print("Duration: \(String(format: "%.1f", result.durationSeconds))s")
+        print("Processing Time: \(String(format: "%.1f", result.processingTimeSeconds))s")
         let rtfx = result.realTimeFactor
-        print("   Speed Factor (RTFx): \(String(format: "%.2f", rtfx))x")
-        print("   Detected Speakers: \(result.speakerCount)")
+        print("Speed Factor (RTFx): \(String(format: "%.2f", rtfx))x")
+        print("Detected Speakers: \(result.speakerCount)")
         if let metrics = result.metrics {
             print(
-                "   DER: \(String(format: "%.1f", metrics.der))% (Miss="
+                "DER: \(String(format: "%.1f", metrics.der))% (Miss="
                     + "\(String(format: "%.1f", metrics.missRate))%, FA="
                     + "\(String(format: "%.1f", metrics.falseAlarmRate))%, SE="
                     + "\(String(format: "%.1f", metrics.speakerErrorRate))%, JER="
                     + "\(String(format: "%.1f", metrics.jer))%)"
             )
             if !metrics.speakerMapping.isEmpty {
-                print("   Speaker Mapping:")
+                print("Speaker Mapping:")
                 for (pred, truth) in metrics.speakerMapping.sorted(by: { $0.key < $1.key }) {
                     print("      \(pred) → \(truth)")
                 }
             }
-        }
-        print("🎤 Speaker Segments:")
-
-        for (index, segment) in result.segments.enumerated() {
-            let startTime = formatTime(segment.startTimeSeconds)
-            let endTime = formatTime(segment.endTimeSeconds)
-            let duration = segment.endTimeSeconds - segment.startTimeSeconds
-
-            print(
-                "   \(index + 1). \(segment.speakerId): \(startTime) - \(endTime) (\(String(format: "%.1f", duration))s)"
-            )
         }
     }
 

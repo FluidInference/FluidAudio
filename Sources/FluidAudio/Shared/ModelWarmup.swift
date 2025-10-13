@@ -52,6 +52,24 @@ enum ModelWarmup {
     ) throws {
         precondition(weightFrames > 0, "weightFrames must be positive")
 
+        let totalElements = audioSamples + weightFrames
+        do {
+            let combinedArray = try MLMultiArray(
+                shape: [1, 1, 1, NSNumber(value: totalElements)],
+                dataType: .float32
+            )
+            combinedArray.resetToZeros()
+
+            let provider = try MLDictionaryFeatureProvider(dictionary: [
+                "audio_and_weights": MLFeatureValue(multiArray: combinedArray)
+            ])
+
+            _ = try model.prediction(from: provider)
+            return
+        } catch {
+            // Fall through to legacy dual-input warmup for older embedding models.
+        }
+
         let audioArray = try MLMultiArray(
             shape: [1, 1, NSNumber(value: audioSamples)],
             dataType: .float32

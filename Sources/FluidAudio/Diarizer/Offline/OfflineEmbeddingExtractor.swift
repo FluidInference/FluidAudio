@@ -10,9 +10,11 @@ struct OfflineEmbeddingExtractor {
     private let config: OfflineDiarizerConfig
     private let logger = AppLogger(category: "OfflineEmbedding")
     private let memoryOptimizer = ANEMemoryOptimizer()
-
+    private let combinedFeatureName: String
     private let audioSampleCount: Int
     private let weightFrameCount: Int
+    private let combinedElementCount: Int
+    private let modelBatchLimit: Int
     private let embeddingOutputName: String
 
     init(
@@ -24,20 +26,32 @@ struct OfflineEmbeddingExtractor {
         self.pldaTransform = pldaTransform
         self.config = config
 
-        let audioConstraint = embeddingModel.modelDescription.inputDescriptionsByName["audio"]?.multiArrayConstraint
-        let weightsConstraint = embeddingModel.modelDescription.inputDescriptionsByName["weights"]?.multiArrayConstraint
+        let inputDescriptions = embeddingModel.modelDescription.inputDescriptionsByName
 
-        self.audioSampleCount = OfflineEmbeddingExtractor.resolveElementCount(
-            from: audioConstraint,
-            fallback: config.samplesPerWindow
-        )
-        self.weightFrameCount = OfflineEmbeddingExtractor.resolveElementCount(
-            from: weightsConstraint,
-            fallback: 589
-        )
+        guard let combinedEntry = OfflineEmbeddingExtractor.findFeature(
+            preferring: ["audio_and_weights"],
+            in: inputDescriptions
+        ), let constraint = combinedEntry.value.multiArrayConstraint
+        else {
+            logger.error("Embedding model missing combined audio_and_weights input; offline pipeline requires packed input")
+            preconditionFailure("Combined audio_and_weights input is required for OfflineEmbeddingExtractor")
+        }
 
-        if let name = embeddingModel.modelDescription.outputDescriptionsByName.keys.first(where: { $0 == "embedding" })
-        {
+        self.combinedFeatureName = combinedEntry.key
+
+        let totalElements = OfflineEmbeddingExtractor.resolveElementCount(
+            from: constraint,
+            fallback: config.samplesPerWindow + 589
+        )
+        self.combinedElementCount = totalElements
+
+        let configuredAudioSamples = config.samplesPerWindow
+        self.audioSampleCount = min(configuredAudioSamples, totalElements)
+        self.weightFrameCount = max(1, totalElements - audioSampleCount)
+
+        self.modelBatchLimit = max(1, min(config.embeddingBatchSize, 32))
+
+        if let name = embeddingModel.modelDescription.outputDescriptionsByName.keys.first(where: { $0 == "embedding" }) {
             self.embeddingOutputName = name
         } else if let name = embeddingModel.modelDescription.outputDescriptionsByName.keys.first(where: {
             $0.contains("embedding")
@@ -49,7 +63,7 @@ struct OfflineEmbeddingExtractor {
         }
 
         logger.debug(
-            "Offline embedding model resolved input shapes audio=\(audioSampleCount), weights=\(weightFrameCount), output=\(embeddingOutputName)"
+            "Offline embedding model using combined input \(combinedFeatureName) -> elements=\(combinedElementCount), audioSamples=\(audioSampleCount), weights=\(weightFrameCount), maxBatch=\(modelBatchLimit), output=\(embeddingOutputName)"
         )
     }
 
@@ -84,7 +98,7 @@ struct OfflineEmbeddingExtractor {
             let embedding256: [Float]
         }
 
-        let maxPLDABatch = max(1, min(config.embeddingBatchSize, 32))
+        let maxPLDABatch = max(1, min(config.embeddingBatchSize, modelBatchLimit))
         var pendingEmbeddings: [[Float]] = []
         var pendingMetadata: [PendingEmbedding] = []
         pendingEmbeddings.reserveCapacity(maxPLDABatch)
@@ -139,7 +153,6 @@ struct OfflineEmbeddingExtractor {
             }
 
             let chunkAudio = Array(audio[clampedStartSample..<endSample])
-            let audioArray = try prepareAudioArray(chunk: chunkAudio, chunkSize: chunkSize)
 
             guard segmentation.speakerWeights.indices.contains(chunkIndex) else {
                 continue
@@ -219,11 +232,12 @@ struct OfflineEmbeddingExtractor {
                     continue
                 }
 
-                let weightsArray = try prepareWeightsArray(mask: resampledMask)
-                let embedding256 = try runEmbeddingModel(
-                    audioArray: audioArray,
-                    weightsArray: weightsArray
+                let combinedInput = try prepareCombinedInput(
+                    chunk: chunkAudio,
+                    chunkSize: chunkSize,
+                    weights: resampledMask
                 )
+                let embedding256 = try runEmbeddingModel(combinedArray: combinedInput)
 
                 let firstActive = maskToUse.firstIndex(where: { $0 > overlapThreshold }) ?? 0
                 let lastActive = maskToUse.lastIndex(where: { $0 > overlapThreshold }) ?? firstActive
@@ -268,67 +282,64 @@ struct OfflineEmbeddingExtractor {
         return embeddings
     }
 
-    private func prepareAudioArray(chunk: [Float], chunkSize: Int) throws -> MLMultiArray {
-        let shape: [NSNumber] = [1, 1, NSNumber(value: audioSampleCount)]
-        let array = try memoryOptimizer.createAlignedArray(
+    private func prepareCombinedInput(
+        chunk: [Float],
+        chunkSize: Int,
+        weights: [Float]
+    ) throws -> MLMultiArray {
+        let shape: [NSNumber] = [1, 1, 1, NSNumber(value: combinedElementCount)]
+        let array = try memoryOptimizer.getPooledBuffer(
+            key: "offline_embedding_combined_\(combinedElementCount)",
             shape: shape,
             dataType: .float32
         )
         let pointer = array.dataPointer.assumingMemoryBound(to: Float.self)
 
         var zero: Float = 0
-        vDSP_vfill(&zero, pointer, 1, vDSP_Length(audioSampleCount))
+        vDSP_vfill(&zero, pointer, 1, vDSP_Length(combinedElementCount))
 
-        chunk.withUnsafeBufferPointer { buffer in
-            vDSP_mmov(
-                buffer.baseAddress!,
-                pointer,
-                vDSP_Length(min(buffer.count, chunkSize)),
-                1,
-                vDSP_Length(min(buffer.count, chunkSize)),
-                1
-            )
+        let audioCount = min(chunk.count, chunkSize, audioSampleCount)
+        if audioCount > 0 {
+            chunk.withUnsafeBufferPointer { buffer in
+                vDSP_mmov(
+                    buffer.baseAddress!,
+                    pointer,
+                    vDSP_Length(audioCount),
+                    1,
+                    vDSP_Length(audioCount),
+                    1
+                )
+            }
         }
 
-        return array
-    }
-
-    private func prepareWeightsArray(mask: [Float]) throws -> MLMultiArray {
-        let shape: [NSNumber] = [1, NSNumber(value: weightFrameCount)]
-        let array = try memoryOptimizer.createAlignedArray(
-            shape: shape,
-            dataType: .float32
-        )
-        let pointer = array.dataPointer.assumingMemoryBound(to: Float.self)
-
-        mask.withUnsafeBufferPointer { buffer in
-            vDSP_mmov(
-                buffer.baseAddress!,
-                pointer,
-                vDSP_Length(weightFrameCount),
-                1,
-                vDSP_Length(weightFrameCount),
-                1
-            )
+        let weightCount = min(weights.count, weightFrameCount)
+        if weightCount > 0 {
+            weights.withUnsafeBufferPointer { buffer in
+                vDSP_mmov(
+                    buffer.baseAddress!,
+                    pointer.advanced(by: audioSampleCount),
+                    vDSP_Length(weightCount),
+                    1,
+                    vDSP_Length(weightCount),
+                    1
+                )
+            }
         }
 
         return array
     }
 
     private func runEmbeddingModel(
-        audioArray: MLMultiArray,
-        weightsArray: MLMultiArray
+        combinedArray: MLMultiArray
     ) throws -> [Float] {
         let provider = ZeroCopyDiarizerFeatureProvider(
             features: [
-                "audio": MLFeatureValue(multiArray: audioArray),
-                "weights": MLFeatureValue(multiArray: weightsArray),
+                combinedFeatureName: MLFeatureValue(multiArray: combinedArray),
             ]
         )
         let options = MLPredictionOptions()
         if #available(macOS 14.0, iOS 17.0, *) {
-            audioArray.prefetchToNeuralEngine()
-            weightsArray.prefetchToNeuralEngine()
+            combinedArray.prefetchToNeuralEngine()
         }
 
         let output = try embeddingModel.prediction(from: provider, options: options)
@@ -363,5 +374,21 @@ struct OfflineEmbeddingExtractor {
         }
 
         return fallback
+    }
+
+    private static func findFeature(
+        preferring preferredNames: [String],
+        in descriptions: [String: MLFeatureDescription]
+    ) -> (key: String, value: MLFeatureDescription)? {
+        for name in preferredNames {
+            if let direct = descriptions[name] {
+                return (name, direct)
+            }
+            if let match = descriptions.first(where: { $0.key.compare(name, options: [.caseInsensitive]) == .orderedSame })
+            {
+                return match
+            }
+        }
+        return descriptions.first
     }
 }

@@ -44,21 +44,15 @@ public struct OfflineDiarizerConfig: Sendable {
         public var stepRatio: Double
         public var speechOnsetThreshold: Float
         public var speechOffsetThreshold: Float
-        public var speakerOnsetThreshold: Float
-        public var speakerOffsetThreshold: Float
-        public var maxEmptyClassProbability: Float
 
         public static let community = Segmentation(
             windowDurationSeconds: 10.0,
             sampleRate: 16_000,
             minDurationOn: 0.0,
             minDurationOff: 0.0,
-            stepRatio: 0.1,
+            stepRatio: 0.2,
             speechOnsetThreshold: 0.5,
-            speechOffsetThreshold: 0.5,
-            speakerOnsetThreshold: 0.0,
-            speakerOffsetThreshold: 0.0,
-            maxEmptyClassProbability: 1.0
+            speechOffsetThreshold: 0.5
         )
 
         public init(
@@ -68,10 +62,7 @@ public struct OfflineDiarizerConfig: Sendable {
             minDurationOff: Double,
             stepRatio: Double,
             speechOnsetThreshold: Float,
-            speechOffsetThreshold: Float,
-            speakerOnsetThreshold: Float,
-            speakerOffsetThreshold: Float,
-            maxEmptyClassProbability: Float
+            speechOffsetThreshold: Float
         ) {
             self.windowDurationSeconds = windowDurationSeconds
             self.sampleRate = sampleRate
@@ -80,9 +71,6 @@ public struct OfflineDiarizerConfig: Sendable {
             self.stepRatio = stepRatio
             self.speechOnsetThreshold = speechOnsetThreshold
             self.speechOffsetThreshold = speechOffsetThreshold
-            self.speakerOnsetThreshold = speakerOnsetThreshold
-            self.speakerOffsetThreshold = speakerOffsetThreshold
-            self.maxEmptyClassProbability = maxEmptyClassProbability
         }
     }
 
@@ -94,7 +82,7 @@ public struct OfflineDiarizerConfig: Sendable {
         public static let community = Embedding(
             batchSize: 32,
             excludeOverlap: true,
-            minSegmentDurationSeconds: 0.5
+            minSegmentDurationSeconds: 1
         )
 
         public init(
@@ -111,6 +99,7 @@ public struct OfflineDiarizerConfig: Sendable {
     public struct Clustering: Sendable {
         /// Euclidean distance threshold for unit-normalized embeddings.
         public var threshold: Double
+
         /// VBx warm-start parameters (Fa controls precision, Fb controls recall)
         public var warmStartFa: Double
         public var warmStartFb: Double
@@ -123,6 +112,7 @@ public struct OfflineDiarizerConfig: Sendable {
 
         public static let community = Clustering(
             threshold: 0.6,
+            // Default 0.07
             warmStartFa: 0.07,
             warmStartFb: 0.8
         )
@@ -139,22 +129,19 @@ public struct OfflineDiarizerConfig: Sendable {
     }
 
     public struct VBx: Sendable {
-        public var loopProbability: Double
         public var maxIterations: Int
         public var convergenceTolerance: Double
 
+        // Default values from pyannote.community-1
         public static let community = VBx(
-            loopProbability: 0.98,
             maxIterations: 20,
             convergenceTolerance: 1e-4
         )
 
         public init(
-            loopProbability: Double,
             maxIterations: Int,
             convergenceTolerance: Double
         ) {
-            self.loopProbability = loopProbability
             self.maxIterations = maxIterations
             self.convergenceTolerance = convergenceTolerance
         }
@@ -207,7 +194,6 @@ public struct OfflineDiarizerConfig: Sendable {
         clusteringThreshold: Double = Clustering.community.threshold,
         Fa: Double = Clustering.community.warmStartFa,
         Fb: Double = Clustering.community.warmStartFb,
-        loopProbability: Double = VBx.community.loopProbability,
         windowDuration: Double = Segmentation.community.windowDurationSeconds,
         sampleRate: Int = Segmentation.community.sampleRate,
         segmentationStepRatio: Double = Segmentation.community.stepRatio,
@@ -217,9 +203,6 @@ public struct OfflineDiarizerConfig: Sendable {
         minGapDuration: Double = PostProcessing.community.minGapDurationSeconds,
         speechOnsetThreshold: Float = Segmentation.community.speechOnsetThreshold,
         speechOffsetThreshold: Float = Segmentation.community.speechOffsetThreshold,
-        segmentationOnsetThreshold: Float = Segmentation.community.speakerOnsetThreshold,
-        segmentationOffsetThreshold: Float = Segmentation.community.speakerOffsetThreshold,
-        maxEmptyClassProbability: Float = Segmentation.community.maxEmptyClassProbability,
         segmentationMinDurationOn: Double = Segmentation.community.minDurationOn,
         segmentationMinDurationOff: Double = Segmentation.community.minDurationOff,
         maxVBxIterations: Int = VBx.community.maxIterations,
@@ -234,10 +217,7 @@ public struct OfflineDiarizerConfig: Sendable {
                 minDurationOff: segmentationMinDurationOff,
                 stepRatio: segmentationStepRatio,
                 speechOnsetThreshold: speechOnsetThreshold,
-                speechOffsetThreshold: speechOffsetThreshold,
-                speakerOnsetThreshold: segmentationOnsetThreshold,
-                speakerOffsetThreshold: segmentationOffsetThreshold,
-                maxEmptyClassProbability: maxEmptyClassProbability
+                speechOffsetThreshold: speechOffsetThreshold
             ),
             embedding: Embedding(
                 batchSize: embeddingBatchSize,
@@ -250,7 +230,6 @@ public struct OfflineDiarizerConfig: Sendable {
                 warmStartFb: Fb
             ),
             vbx: VBx(
-                loopProbability: loopProbability,
                 maxIterations: maxVBxIterations,
                 convergenceTolerance: convergenceTolerance
             ),
@@ -280,12 +259,6 @@ public struct OfflineDiarizerConfig: Sendable {
         guard clustering.warmStartFa > 0, clustering.warmStartFb > 0 else {
             throw OfflineDiarizationError.invalidConfiguration(
                 "clustering warm-start Fa/Fb must be positive (Fa=\(clustering.warmStartFa), Fb=\(clustering.warmStartFb))"
-            )
-        }
-
-        guard vbx.loopProbability > 0, vbx.loopProbability <= 1 else {
-            throw OfflineDiarizationError.invalidConfiguration(
-                "vbx.loopProbability must be within (0, 1], got \(vbx.loopProbability)"
             )
         }
 
@@ -365,27 +338,6 @@ public struct OfflineDiarizerConfig: Sendable {
             )
         }
 
-        guard segmentation.speakerOnsetThreshold >= 0, segmentation.speakerOnsetThreshold <= 1 else {
-            throw OfflineDiarizationError.invalidConfiguration(
-                "segmentationOnsetThreshold must be within [0, 1], got \(segmentation.speakerOnsetThreshold)"
-            )
-        }
-
-        guard segmentation.speakerOffsetThreshold >= 0,
-            segmentation.speakerOffsetThreshold <= segmentation.speakerOnsetThreshold
-        else {
-            throw OfflineDiarizationError.invalidConfiguration(
-                "segmentationOffsetThreshold must be within [0, segmentationOnsetThreshold], got \(segmentation.speakerOffsetThreshold)"
-            )
-        }
-
-        guard segmentation.maxEmptyClassProbability >= 0,
-            segmentation.maxEmptyClassProbability <= 1
-        else {
-            throw OfflineDiarizationError.invalidConfiguration(
-                "maxEmptyClassProbability must be within [0, 1], got \(segmentation.maxEmptyClassProbability)"
-            )
-        }
     }
 
     public var clusteringThreshold: Double {
@@ -401,11 +353,6 @@ public struct OfflineDiarizerConfig: Sendable {
     public var Fb: Double {
         get { clustering.warmStartFb }
         set { clustering.warmStartFb = newValue }
-    }
-
-    public var loopProbability: Double {
-        get { vbx.loopProbability }
-        set { vbx.loopProbability = newValue }
     }
 
     public var windowDuration: Double {
@@ -467,21 +414,6 @@ public struct OfflineDiarizerConfig: Sendable {
     public var speechOffsetThreshold: Float {
         get { segmentation.speechOffsetThreshold }
         set { segmentation.speechOffsetThreshold = newValue }
-    }
-
-    public var segmentationOnsetThreshold: Float {
-        get { segmentation.speakerOnsetThreshold }
-        set { segmentation.speakerOnsetThreshold = newValue }
-    }
-
-    public var segmentationOffsetThreshold: Float {
-        get { segmentation.speakerOffsetThreshold }
-        set { segmentation.speakerOffsetThreshold = newValue }
-    }
-
-    public var maxEmptyClassProbability: Float {
-        get { segmentation.maxEmptyClassProbability }
-        set { segmentation.maxEmptyClassProbability = newValue }
     }
 
     public var segmentationMinDurationOn: Double {

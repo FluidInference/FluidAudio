@@ -14,6 +14,8 @@ enum WeightInterpolation {
         private let rightIndices: [Int]
         private let leftWeights: [Float]
         private let rightWeights: [Float]
+        private let maxInputIndex: Int
+        private let outputLength: Int
 
         init(inputLength: Int, outputLength: Int) {
             precondition(inputLength > 0 && outputLength > 0, "Lengths must be positive")
@@ -22,6 +24,7 @@ enum WeightInterpolation {
             var right: [Int] = []
             var lWeights: [Float] = []
             var rWeights: [Float] = []
+            var maxIndex = 0
 
             let scale = Float(outputLength) / Float(inputLength)
             left.reserveCapacity(outputLength)
@@ -39,6 +42,8 @@ enum WeightInterpolation {
                 let weightRight = clamped - Float(leftIndex)
                 let weightLeft = 1 - weightRight
 
+                maxIndex = max(maxIndex, rightIndex)
+
                 left.append(leftIndex)
                 right.append(rightIndex)
                 lWeights.append(weightLeft)
@@ -49,22 +54,46 @@ enum WeightInterpolation {
             self.rightIndices = right
             self.leftWeights = lWeights
             self.rightWeights = rWeights
+            self.maxInputIndex = maxIndex
+            self.outputLength = outputLength
         }
 
         func interpolate(_ input: [Float]) -> [Float] {
             guard !input.isEmpty else { return [] }
-            precondition(
-                input.count > (leftIndices.max() ?? -1),
-                "Input shorter than interpolation map"
-            )
+            precondition(input.count > maxInputIndex, "Input shorter than interpolation map")
 
-            var output = [Float](repeating: 0, count: leftIndices.count)
-            for index in 0..<leftIndices.count {
+            var output = [Float](repeating: 0, count: outputLength)
+            for index in 0..<outputLength {
                 let leftValue = input[leftIndices[index]]
                 let rightValue = input[rightIndices[index]]
                 output[index] = leftValue * leftWeights[index] + rightValue * rightWeights[index]
             }
             return output
+        }
+
+        func interpolate(_ input: [Float], into output: inout [Float]) {
+            guard !input.isEmpty else {
+                if output.count == outputLength {
+                    for index in 0..<outputLength {
+                        output[index] = 0
+                    }
+                } else {
+                    output = [Float](repeating: 0, count: outputLength)
+                }
+                return
+            }
+
+            precondition(input.count > maxInputIndex, "Input shorter than interpolation map")
+
+            if output.count != outputLength {
+                output = [Float](repeating: 0, count: outputLength)
+            }
+
+            for index in 0..<outputLength {
+                let leftValue = input[leftIndices[index]]
+                let rightValue = input[rightIndices[index]]
+                output[index] = leftValue * leftWeights[index] + rightValue * rightWeights[index]
+            }
         }
     }
 
