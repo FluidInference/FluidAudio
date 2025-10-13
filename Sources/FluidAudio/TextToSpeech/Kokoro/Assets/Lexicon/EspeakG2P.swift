@@ -94,26 +94,37 @@ final class EspeakG2P {
         // Try to find ESpeakNG.framework bundle by identifier first
         var bundle = Bundle(identifier: "com.kokoro.espeakng")
 
-        // If not found by identifier, search in the main bundle's Frameworks directory
+        // If not found by identifier, search in common locations
         if bundle == nil {
-            let mainBundle = Bundle.main
-            if let frameworksPath = mainBundle.privateFrameworksPath {
-                let frameworkPath = (frameworksPath as NSString).appendingPathComponent("ESpeakNG.framework")
-                bundle = Bundle(path: frameworkPath)
-                if bundle != nil {
+            let searchPaths: [String] = [
+                // App bundle Frameworks
+                Bundle.main.privateFrameworksPath,
+                // SPM build output (relative to executable)
+                Bundle.main.bundlePath,
+                // Current working directory (for tests)
+                FileManager.default.currentDirectoryPath
+            ].compactMap { $0 }
+
+            for basePath in searchPaths {
+                let frameworkPath = (basePath as NSString).appendingPathComponent("ESpeakNG.framework")
+                if let found = Bundle(path: frameworkPath) {
+                    bundle = found
                     logger.info("Found ESpeakNG framework at: \(frameworkPath)")
+                    break
                 }
             }
         }
 
         guard let espeakBundle = bundle else {
             logger.warning("Could not find ESpeakNG framework bundle")
+            logger.warning("Searched in: \(Bundle.main.bundlePath)")
             return nil
         }
 
         guard let bundleURL = espeakBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
             logger.warning("Could not find espeak-ng-data.bundle in ESpeakNG framework Resources")
-            logger.warning("Searched in: \(espeakBundle.resourcePath ?? "unknown")")
+            logger.warning("Framework path: \(espeakBundle.bundlePath)")
+            logger.warning("Resource path: \(espeakBundle.resourcePath ?? "nil")")
             return nil
         }
 
