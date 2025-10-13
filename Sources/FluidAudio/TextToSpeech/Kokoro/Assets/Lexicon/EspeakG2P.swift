@@ -96,14 +96,19 @@ final class EspeakG2P {
 
         // If not found by identifier, search in common locations
         if bundle == nil {
-            let searchPaths: [String] = [
-                // App bundle Frameworks
-                Bundle.main.privateFrameworksPath,
-                // SPM build output (relative to executable)
-                Bundle.main.bundlePath,
-                // Current working directory (for tests)
-                FileManager.default.currentDirectoryPath
-            ].compactMap { $0 }
+            var searchPaths: [String] = []
+
+            // App bundle Frameworks directory
+            if let fwPath = Bundle.main.privateFrameworksPath {
+                searchPaths.append(fwPath)
+            }
+
+            // Directory containing the executable (for SPM command-line tools)
+            let executableDir = Bundle.main.bundleURL.deletingLastPathComponent().path
+            searchPaths.append(executableDir)
+
+            // Current working directory (for tests)
+            searchPaths.append(FileManager.default.currentDirectoryPath)
 
             for basePath in searchPaths {
                 let frameworkPath = (basePath as NSString).appendingPathComponent("ESpeakNG.framework")
