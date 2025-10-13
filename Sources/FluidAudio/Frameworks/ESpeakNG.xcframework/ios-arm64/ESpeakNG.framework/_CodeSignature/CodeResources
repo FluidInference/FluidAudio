@@ -4,10 +4,6 @@
 <dict>
 	<key>files</key>
 	<dict>
-		<key>Resources/Info.plist</key>
-		<data>
-		bac0bAAQDGQj8M3Xq0/ArwE+HPo=
-		</data>
 		<key>Resources/espeak-ng-data.bundle/espeak-ng-data/af_dict</key>
 		<data>
 		UjUMk3B8FZlBFuca1QTxKJfm/Xw=
@@ -2089,13 +2085,6 @@
 			<key>hash2</key>
 			<data>
 			xHe/fEDv99IJFCPuqPfhg5TMatLnk6CIdMkJM54XbW4=
-			</data>
-		</dict>
-		<key>Resources/Info.plist</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			fWtDPZ2wF0KiSJ23O2WuyPpFcNNFVRYv/zIxQV67fqI=
 			</data>
 		</dict>
 		<key>Resources/espeak-ng-data.bundle/espeak-ng-data/af_dict</key>
