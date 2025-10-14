@@ -26,14 +26,14 @@ swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 # Streaming with stabilized output and VAD gating to skip silence
 swift run fluidaudio transcribe audio.wav --streaming \
   --stabilize-profile low-latency
-
-This mode auto-downloads and runs the VAD Core ML model so silence is trimmed before decoding. For architecture details and tuning tips see [ASR/StabilizedStreaming](ASR/StabilizedStreaming.md).
-
-Stabilizer flags:
-- Stabilization is always active; profiles adjust window size, boundaries, and wait budgets.
-- `--stabilize-profile <balanced|low-latency|high-stability>` selects one of the tuned presets.
-- `--stabilize-debug` writes per-chunk JSONL traces to a temporary file for analysis.
 ```
+
+### Streaming flags (`transcribe`)
+
+- `--streaming` enables the stabilized pipeline and defaults to the balanced preset.
+- `--stabilize-profile <balanced|low-latency|high-stability>` selects tuned presets that map to the `StreamingStabilizerProfile` cases described in the API docs.
+- `--stabilize-debug` dumps per-window JSONL traces for post-mortem analysis.
+- Pair with `--model-version v2` when you only need English and want higher recall.
 
 ## Diarization
 

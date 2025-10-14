@@ -95,3 +95,39 @@ Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 mult
 - Real-time factor: ~120x on M4 Pro (processes 1min audio in 0.5s)
 - Languages: 25 European languages supported
 - Streaming: Available via `StreamingAsrManager` (beta)
+
+### StreamingAsrManager (stabilized streaming)
+
+`StreamingAsrManager` coordinates audio ingestion, optional VAD gating, streaming window assembly, decoder calls, and the stabilization layer.
+
+**Key Methods:**
+- `start(models:source:) async throws` — Supply downloaded `AsrModels` and begin a session (sets up queues, downloads VAD if enabled).
+- `streamAudio(_ buffer: AVAudioPCMBuffer)` — Enqueue microphone/file buffers; automatically resamples to 16 kHz mono.
+- `transcriptionUpdates` — Async stream of `StreamingTranscriptionUpdate` values (volatile + confirmed tiers).
+- `finish() async throws -> String` — Flush pending audio, stop the session, and return the final transcript.
+- `reset()` / `cancel()` — Tear down state without committing pending audio.
+
+**Metrics & State:**
+- `volatileTranscript` / `confirmedTranscript` expose rolling text.
+- `metricsSnapshot()` returns `StreamingAsrEngineMetrics` (chunk timings, latency, counts) for diagnostics.
+
+### Streaming configuration types
+
+- `StreamingAsrConfig`: Controls chunk sizing and integrations.
+  - `chunkSeconds` / `leftContextSeconds` / `rightContextSeconds` — Decoder window sizing (defaults: 11.2 / 1.6 / 1.6 for `.streaming` preset).
+  - `stabilizer` — `StreamingStabilizerConfig` instance (see below).
+  - `vad` — `StreamingVadConfig` (`.default` enables Silero VAD gating; `.disabled` skips it).
+  - Convenience presets: `.default` (legacy 15s / 10s / 2s) and `.streaming` (balanced latency + stability).
+
+- `StreamingStabilizerConfig`: Governs how hypotheses are promoted.
+  - Fields: `windowSize`, `emitWordBoundaries`, `maxWaitMilliseconds`, `tokenizerKind`, `debugDumpEnabled`.
+  - Presets: `.preset(.balanced | .lowLatency | .highStability)` provide tuned trade-offs.
+  - `withMaxWaitMilliseconds(_:)`, `withDebugDumpEnabled(_:)`, `withTokenizerKind(_:)` supply fluent overrides.
+
+- `StreamingVadConfig`: Wraps VAD enablement + segmentation knobs.
+  - Fields: `isEnabled`, `vadConfig` (threshold defaults to `0.30`), `segmentationConfig` (padding + minimum speech durations).
+  - Use `.default` for auto-managed Silero VAD or `.disabled` to stream raw audio.
+
+- `StreamingTranscriptionUpdate`: Delivered through `transcriptionUpdates`.
+  - Fields: `text`, `isConfirmed`, `confidence`, `timestamp`, `tokenIds`, and `tokenTimings` (for karaoke/highlighting).
+  - `tokens` helper converts timing entries into normalized strings.

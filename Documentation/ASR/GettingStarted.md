@@ -44,6 +44,50 @@ Task {
 
 Working offline? Follow the [Manual Model Loading guide](ManualModelLoading.md) to stage the CoreML bundles and call `AsrModels.load` without triggering HuggingFace downloads.
 
+### Streaming (stabilized + VAD-gated)
+
+```swift
+import AVFoundation
+import FluidAudio
+
+@available(macOS 13.0, iOS 16.0, *)
+func startStreaming() async throws {
+    // 1) Download and load the streaming-capable ASR models
+    let models = try await AsrModels.downloadAndLoad()
+    // 2) Use the preset tuned for balanced latency and stability
+    let streamingAsr = StreamingAsrManager(config: .streaming)
+    try await streamingAsr.start(models: models, source: .microphone)
+
+    // 3) Capture audio and push buffers into the streaming pipeline
+    let engine = AVAudioEngine()
+    let inputNode = engine.inputNode
+    let format = inputNode.outputFormat(forBus: 0)
+    let bufferSize: AVAudioFrameCount = 4096
+
+    inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { buffer, _ in
+        Task(priority: .userInitiated) {
+            await streamingAsr.streamAudio(buffer)
+        }
+    }
+
+    engine.prepare()
+    try engine.start()
+
+    // 4) Handle volatile + confirmed updates in real time
+    Task.detached {
+        for await update in await streamingAsr.transcriptionUpdates {
+            if update.isConfirmed {
+                print("✅ \(update.text)")
+            } else {
+                print("… \(update.text)")
+            }
+        }
+    }
+}
+```
+
+The `.streaming` preset enables the built-in Silero VAD so silence is trimmed before decoding. Read [Stabilized Streaming](StabilizedStreaming.md) for configuration knobs, stabilization internals, and debugging tips.
+
 ## CLI
 
 ```bash
@@ -68,4 +112,7 @@ swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 # Download LibriSpeech test sets
 swift run fluidaudio download --dataset librispeech-test-clean
 swift run fluidaudio download --dataset librispeech-test-other
+
+# Streaming transcription with stabilized output and VAD gating
+swift run fluidaudio transcribe audio.wav --streaming --stabilize-profile balanced
 ```
