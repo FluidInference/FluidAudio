@@ -397,8 +397,9 @@ public actor StreamingAsrManager {
     ) async {
         guard !segment.samples.isEmpty else { return }
         cumulativeVadDroppedSamples = segment.cumulativeDroppedSamples
+        let shouldAllowPartialChunk = allowPartialWindows && segment.isSpeechOnset
         let minimumCenterSamples: Int?
-        if allowPartialWindows {
+        if shouldAllowPartialChunk {
             let sampleRate: Double
             if config.chunkSeconds > 0 {
                 sampleRate = Double(config.chunkSamples) / config.chunkSeconds
@@ -406,15 +407,13 @@ public actor StreamingAsrManager {
                 sampleRate = 16_000.0
             }
             let onsetSeconds = max(1.0, min(2.0, config.chunkSeconds / 4.0))
-            let continuationSeconds = max(onsetSeconds, min(3.0, config.chunkSeconds / 3.0))
-            let targetSeconds = segment.isSpeechOnset ? onsetSeconds : continuationSeconds
-            minimumCenterSamples = max(1, Int(targetSeconds * sampleRate))
+            minimumCenterSamples = max(1, Int(onsetSeconds * sampleRate))
         } else {
             minimumCenterSamples = nil
         }
         let windows = windowProcessor.append(
             segment.samples,
-            allowPartialChunk: allowPartialWindows,
+            allowPartialChunk: shouldAllowPartialChunk,
             minimumCenterSamples: minimumCenterSamples
         )
         for window in windows {

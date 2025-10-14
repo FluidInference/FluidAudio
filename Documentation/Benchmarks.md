@@ -43,22 +43,22 @@ Peak memory usage (process-wide): 0.359 GB
 
 
 swift run fluidaudio asr-benchmark --max-files all  --test-streaming
-[12:46:46.024] [INFO] [FluidAudio.Benchmark] 2620 files per dataset • Test runtime: 6m 49s • 10/13/2025, 12:46 PM EDT
-[12:46:46.024] [INFO] [FluidAudio.Benchmark] --- Benchmark Results ---
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Dataset: librispeech test-clean
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Files processed: 2620
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Average WER: 2.6%
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Median WER: 0.0%
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Average CER: 1.1%
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Overall RTFx: 139.7x (19452.5s / 139.3s)
-
-[12:46:46.024] [INFO] [FluidAudio.Benchmark] --- Streaming Metrics ---
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Decoder chunk duration: 11.2s
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Total chunks processed: 3167
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Avg chunk processing time: 0.043s
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Max chunk processing time: 0.099s
-[12:46:46.024] [INFO] [FluidAudio.Benchmark]    Avg first token latency: 0.055s
-Peak memory usage (process-wide): 0.390 GB
+[11:20:34.227] [INFO] [FluidAudio.Benchmark] 2620 files per dataset • Test runtime: 4m 38s • 10/14/2025, 11:20 AM EDT
+[11:20:34.227] [INFO] [FluidAudio.Benchmark] --- Benchmark Results ---
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Dataset: librispeech test-clean
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Files processed: 2620
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Average WER: 2.9%
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Median WER: 0.0%
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Average CER: 1.3%
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Overall RTFx: 139.0x (19452.5s / 139.9s)
+[11:20:34.227] [INFO] [FluidAudio.Benchmark] --- Streaming Metrics ---
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Decoder chunk duration: 11.2s
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Total chunks processed: 3248
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Avg chunk processing time: 0.042s
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Max chunk processing time: 0.084s
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Avg first token latency: 0.073s
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Avg first confirmed token latency: 0.084s
+Peak memory usage (process-wide): 0.483 GB
 
 ```
 

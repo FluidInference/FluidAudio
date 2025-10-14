@@ -188,7 +188,8 @@ public class ASRBenchmark {
             "🔍   Using streaming config (chunk=\(StreamingAsrConfig.streaming.chunkSeconds)s, left=\(StreamingAsrConfig.streaming.leftContextSeconds)s, right=\(StreamingAsrConfig.streaming.rightContextSeconds)s)"
         )
 
-        let streamingAsr = StreamingAsrManager(config: .streaming)
+        let streamingConfig = StreamingAsrConfig.streaming.withVad(.disabled)
+        let streamingAsr = StreamingAsrManager(config: streamingConfig)
         try await streamingAsr.start(models: models, source: .system)
 
         let chunkDuration: TimeInterval = 0.5  // Align with CLI streaming simulation cadence

@@ -61,6 +61,9 @@ struct StreamingWindowProcessor {
     }
 
     mutating func flushRemaining() -> [StreamingWindow] {
+        if virtualTrailingSilence < config.rightContextSamples {
+            virtualTrailingSilence = config.rightContextSamples
+        }
         return drainWindows(
             allowPartialChunk: true,
             minimumCenterSamples: 1,
