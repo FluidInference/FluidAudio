@@ -1,6 +1,6 @@
 ![banner.png](banner.png)
 
-# FluidAudio - Speaker diarization, voice-activity-detection and transcription with CoreML
+# FluidAudio - Transcription, Text-to-speech, VAD, Speaker diarization
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
