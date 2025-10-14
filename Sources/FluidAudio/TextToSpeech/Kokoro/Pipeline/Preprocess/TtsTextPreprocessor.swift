@@ -61,10 +61,10 @@ enum TtsTextPreprocessor {
         // 7. Handle common abbreviations and symbols
         processed = processCommonAbbreviations(processed)
 
-        // 8. Handle alias replacement
+        // 8. Handle alias replacement [LOL](laugh out loud)
         processed = processAliasReplacement(processed)
 
-        // 9. Handle phonetic replacement
+        // 9. Handle phonetic replacement [Kokoro](/kˈOkəɹO/)
         let phoneticResult = processPhoneticReplacement(processed)
         processed = phoneticResult.text
 
@@ -401,61 +401,33 @@ enum TtsTextPreprocessor {
         var overrides: [TtsPhoneticOverride] = []
         overrides.reserveCapacity(4)
 
-        var output = String()
-        output.reserveCapacity(text.count)
+        var accumulator = WordAccumulator(
+            expectedScalarCount: text.unicodeScalars.count,
+            apostrophes: phoneticApostropheCharacters
+        )
 
         let end = text.endIndex
         var index = text.startIndex
-        var inWord = false
-        var completedWords = 0
-
-        func finalizeCurrentWord() {
-            if inWord {
-                completedWords += 1
-                inWord = false
-            }
-        }
-
-        func appendCharacter(_ character: Character) {
-            output.append(character)
-            if isWordCharacter(character) {
-                if !inWord {
-                    inWord = true
-                }
-            } else {
-                if inWord {
-                    completedWords += 1
-                    inWord = false
-                }
-            }
-        }
-
-        func appendString<S: Sequence>(_ sequence: S) where S.Element == Character {
-            for character in sequence {
-                appendCharacter(character)
-            }
-        }
 
         while index < end {
             let character = text[index]
             if character == "[" {
                 if let parsed = parsePhoneticSpan(in: text, startingAt: index) {
-                    if inWord {
-                        finalizeCurrentWord()
-                    }
-
                     let (word, raw, tokens, scalarTokens, nextIndex) = parsed
-                    let trimmedWord = word.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmedWord.isEmpty {
-                        let overrideIndex = completedWords
-                        appendString(trimmedWord)
+                    let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let normalizedWord = normalizeAliasWord(trimmed)
+
+                    if !normalizedWord.isEmpty {
+                        accumulator.finalizeCurrentWord()
+                        let overrideIndex = accumulator.completedWords
+                        accumulator.append(text: normalizedWord)
                         overrides.append(
                             TtsPhoneticOverride(
                                 wordIndex: overrideIndex,
                                 tokens: tokens,
                                 scalarTokens: scalarTokens,
                                 raw: raw,
-                                word: trimmedWord
+                                word: normalizedWord
                             )
                         )
                         index = nextIndex
@@ -463,17 +435,17 @@ enum TtsTextPreprocessor {
                     }
                 }
 
-                appendCharacter(character)
+                accumulator.append(character: character)
                 index = text.index(after: index)
                 continue
             }
 
-            appendCharacter(character)
+            accumulator.append(character: character)
             index = text.index(after: index)
         }
 
-        finalizeCurrentWord()
-        return (output, overrides)
+        accumulator.finalizeCurrentWord()
+        return (accumulator.rendered(), overrides)
     }
 
     private static func parsePhoneticSpan(
@@ -544,8 +516,8 @@ enum TtsTextPreprocessor {
         return ([trimmed], scalarTokens)
     }
 
-    private static func isWordCharacter(_ character: Character) -> Bool {
-        character.isLetter || character.isNumber || phoneticApostropheCharacters.contains(character)
+    private static func normalizeAliasWord(_ value: String) -> String {
+        value.precomposedStringWithCanonicalMapping
     }
 
     private static func isPhoneticReplacement(_ value: String) -> Bool {
@@ -553,10 +525,94 @@ enum TtsTextPreprocessor {
         return value.first == "/" && value.last == "/"
     }
 
+    private struct WordAccumulator {
+        private var scalars: [UnicodeScalar]
+        private(set) var completedWords: Int = 0
+        private var inWord = false
+        private let apostrophes: Set<Character>
+
+        init(expectedScalarCount: Int, apostrophes: Set<Character>) {
+            self.scalars = []
+            self.scalars.reserveCapacity(max(expectedScalarCount, 0))
+            self.apostrophes = apostrophes
+        }
+
+        mutating func append(character: Character) {
+            updateWordState(for: character)
+            scalars.append(contentsOf: character.unicodeScalars)
+        }
+
+        mutating func append<T: StringProtocol>(text: T) {
+            for character in text {
+                append(character: character)
+            }
+        }
+
+        mutating func finalizeCurrentWord() {
+            if inWord {
+                completedWords += 1
+                inWord = false
+            }
+        }
+
+        func rendered() -> String {
+            String(String.UnicodeScalarView(scalars))
+        }
+
+        private mutating func updateWordState(for character: Character) {
+            if Self.isWordLike(character, apostrophes: apostrophes) {
+                if !inWord {
+                    inWord = true
+                }
+                return
+            }
+
+            if inWord && Self.isCombiningMark(character) {
+                return
+            }
+
+            finalizeCurrentWord()
+        }
+
+        private static func isWordLike(_ character: Character, apostrophes: Set<Character>) -> Bool {
+            if character.isLetter || character.isNumber || apostrophes.contains(character) {
+                return true
+            }
+
+            if isEmoji(character) {
+                return true
+            }
+
+            return false
+        }
+
+        private static func isCombiningMark(_ character: Character) -> Bool {
+            character.unicodeScalars.allSatisfy { scalar in
+                switch scalar.properties.generalCategory {
+                case .nonspacingMark, .spacingMark, .enclosingMark:
+                    return true
+                default:
+                    return false
+                }
+            }
+        }
+
+        private static func isEmoji(_ character: Character) -> Bool {
+            character.unicodeScalars.contains { scalar in
+                scalar.properties.isEmojiPresentation || scalar.properties.isEmoji
+            }
+        }
+    }
+
     // MARK: - Constants
 
+    private static let aliasWordMaxLength = 256
+    private static let aliasReplacementMaxLength = 512
+
     private static let aliasRegex: NSRegularExpression = {
-        try! NSRegularExpression(pattern: #"\[[^\[\]]+\]\(\s*([^\)]+?)\s*\)"#, options: [])
+        let pattern =
+            "\\[[^\\[\\]]{1,\(aliasWordMaxLength)}\\]\\(\\s*([^\\)]{1,\(aliasReplacementMaxLength)}?)\\s*\\)"
+        return try! NSRegularExpression(pattern: pattern, options: [])
     }()
 
     private static let phoneticApostropheCharacters: Set<Character> = ["'", "’", "ʼ", "‛", "‵", "′"]
