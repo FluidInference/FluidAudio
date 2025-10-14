@@ -91,14 +91,45 @@ final class EspeakG2P {
     private static func frameworkBundledDataPath() -> URL? {
         let logger = staticLogger
 
-        // The espeak-ng-data.bundle should be in the ESpeakNG.framework's Resources
-        guard let bundle = Bundle(identifier: "com.kokoro.espeakng") else {
-            logger.warning("Could not find ESpeakNG framework bundle (com.kokoro.espeakng)")
+        // Try to find ESpeakNG.framework bundle by identifier first
+        var bundle = Bundle(identifier: "com.kokoro.espeakng")
+
+        // If not found by identifier, search in common locations
+        if bundle == nil {
+            var searchPaths: [String] = []
+
+            // App bundle Frameworks directory
+            if let fwPath = Bundle.main.privateFrameworksPath {
+                searchPaths.append(fwPath)
+            }
+
+            // Directory containing the executable (for SPM command-line tools)
+            let executableDir = Bundle.main.bundleURL.deletingLastPathComponent().path
+            searchPaths.append(executableDir)
+
+            // Current working directory (for tests)
+            searchPaths.append(FileManager.default.currentDirectoryPath)
+
+            for basePath in searchPaths {
+                let frameworkPath = (basePath as NSString).appendingPathComponent("ESpeakNG.framework")
+                if let found = Bundle(path: frameworkPath) {
+                    bundle = found
+                    logger.info("Found ESpeakNG framework at: \(frameworkPath)")
+                    break
+                }
+            }
+        }
+
+        guard let espeakBundle = bundle else {
+            logger.warning("Could not find ESpeakNG framework bundle")
+            logger.warning("Searched in: \(Bundle.main.bundlePath)")
             return nil
         }
 
-        guard let bundleURL = bundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
-            logger.warning("Could not find espeak-ng-data.bundle in ESpeakNG framework")
+        guard let bundleURL = espeakBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
+            logger.warning("Could not find espeak-ng-data.bundle in ESpeakNG framework Resources")
+            logger.warning("Framework path: \(espeakBundle.bundlePath)")
+            logger.warning("Resource path: \(espeakBundle.resourcePath ?? "nil")")
             return nil
         }
 
