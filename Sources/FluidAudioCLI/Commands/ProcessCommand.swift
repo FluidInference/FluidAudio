@@ -9,8 +9,6 @@ var standardError = FileHandle.standardError
 enum ProcessCommand {
     private static let logger = AppLogger(category: "Process")
     static func run(arguments: [String]) async {
-        fputs("DEBUG: ProcessCommand.run called with \(arguments.count) arguments\n", stderr)
-        fflush(stderr)
         guard !arguments.isEmpty else {
             fputs("ERROR: No audio file specified\n", stderr)
             fflush(stderr)
@@ -65,8 +63,6 @@ enum ProcessCommand {
         }
 
         // Validate mode
-        fputs("DEBUG: Validating mode: \(mode)\n", stderr)
-        fflush(stderr)
         guard mode == "streaming" || mode == "offline" else {
             fputs("ERROR: Invalid mode: \(mode)\n", stderr)
             fflush(stderr)
@@ -75,8 +71,6 @@ enum ProcessCommand {
             exit(1)
         }
 
-        fputs("DEBUG: Mode validated, starting processing\n", stderr)
-        fflush(stderr)
         logger.info("🎵 Processing audio file (\(mode.uppercased()) MODE): \(audioFile)")
         logger.info("   Clustering threshold: \(threshold)")
 
@@ -125,7 +119,8 @@ enum ProcessCommand {
                     segments: result.segments,
                     speakerCount: result.speakerDatabase?.count ?? 0,
                     config: config,
-                    metrics: nil
+                    metrics: nil,
+                    timings: result.timings
                 )
 
                 // Output results
@@ -142,41 +137,42 @@ enum ProcessCommand {
             }
         } else {
             // Offline mode - use OfflineDiarizerManager
-            fputs("DEBUG: Entering offline mode\n", stderr)
-            fflush(stderr)
             do {
-                fputs("DEBUG: Getting model directory\n", stderr)
-                fflush(stderr)
                 let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
-                fputs("DEBUG: Model dir: \(modelDir.path)\n", stderr)
-                fflush(stderr)
                 let offlineConfig = OfflineDiarizerConfig(
                     clusteringThreshold: Double(threshold),
                     embeddingExportPath: embeddingExportPath
                 )
-                fputs("DEBUG: Creating OfflineDiarizerManager\n", stderr)
-                fflush(stderr)
                 let manager = OfflineDiarizerManager(config: offlineConfig)
 
-                fputs("DEBUG: Loading models\n", stderr)
-                fflush(stderr)
                 let models = try await OfflineDiarizerModels.load(from: modelDir)
                 manager.initialize(models: models)
 
-                fputs("DEBUG: Manager initialized successfully\n", stderr)
-                fflush(stderr)
                 logger.info("Offline manager initialized")
 
-                // Load and process audio file
-                let audioSamples = try AudioConverter().resampleAudioFile(path: audioFile)
-                logger.info("Loaded audio: \(audioSamples.count) samples")
+                // Load and process audio file without materializing the full sample buffer.
+                let audioURL = URL(fileURLWithPath: audioFile)
+                let factory = StreamingAudioSourceFactory()
+                let targetSampleRate = offlineConfig.segmentation.sampleRate
+                let diskSourceResult = try factory.makeDiskBackedSource(
+                    from: audioURL,
+                    targetSampleRate: targetSampleRate
+                )
+                let diskSource = diskSourceResult.source
+                defer { diskSource.cleanup() }
+                let loadDurationText = String(format: "%.2f", diskSourceResult.loadDuration)
+                logger.info(
+                    "Prepared disk-backed audio source: \(diskSource.sampleCount) samples (\(loadDurationText)s)")
 
                 let startTime = Date()
-                let result = try await manager.process(audio: audioSamples)
+                let result = try await manager.process(
+                    audioSource: diskSource,
+                    audioLoadingSeconds: diskSourceResult.loadDuration
+                )
                 let processingTime = Date().timeIntervalSince(startTime)
 
-                let duration = Float(audioSamples.count) / 16000.0
-                let rtfx = duration / Float(processingTime)
+                let durationSeconds = Double(diskSource.sampleCount) / Double(targetSampleRate)
+                let rtfx = durationSeconds / processingTime
 
                 logger.info("Diarization completed in \(String(format: "%.1f", processingTime))s")
                 logger.info("   Real-time factor (RTFx): \(String(format: "%.2f", rtfx))x")
@@ -193,6 +189,7 @@ enum ProcessCommand {
                             predicted: result.segments,
                             groundTruth: groundTruth,
                             frameSize: 0.01,
+                            audioDurationSeconds: durationSeconds,
                             logger: logger
                         )
                     } catch {
@@ -203,13 +200,14 @@ enum ProcessCommand {
                 // Create simplified output for offline mode
                 let output = ProcessingResult(
                     audioFile: audioFile,
-                    durationSeconds: duration,
+                    durationSeconds: Float(durationSeconds),
                     processingTimeSeconds: processingTime,
-                    realTimeFactor: rtfx,
+                    realTimeFactor: Float(rtfx),
                     segments: result.segments,
                     speakerCount: speakerCount,
                     config: nil,
-                    metrics: metrics
+                    metrics: metrics,
+                    timings: result.timings
                 )
 
                 // Output results

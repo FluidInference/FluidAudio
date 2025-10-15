@@ -21,20 +21,40 @@ struct OfflineSegmentationProcessor {
         [0, 1],
         [0, 2],
         [1, 2],
+        [0, 1, 2],
     ]
 
     func process(
         audioSamples: [Float],
         segmentationModel: MLModel,
-        config: OfflineDiarizerConfig
-    ) throws -> SegmentationOutput {
+        config: OfflineDiarizerConfig,
+        chunkHandler: SegmentationChunkHandler? = nil
+    ) async throws -> SegmentationOutput {
         guard !audioSamples.isEmpty else {
+            throw OfflineDiarizationError.noSpeechDetected
+        }
+
+        return try await process(
+            audioSource: ArrayAudioSampleSource(samples: audioSamples),
+            segmentationModel: segmentationModel,
+            config: config,
+            chunkHandler: chunkHandler
+        )
+    }
+
+    func process(
+        audioSource: StreamingAudioSampleSource,
+        segmentationModel: MLModel,
+        config: OfflineDiarizerConfig,
+        chunkHandler: SegmentationChunkHandler? = nil
+    ) async throws -> SegmentationOutput {
+        let totalSamples = audioSource.sampleCount
+        guard totalSamples > 0 else {
             throw OfflineDiarizationError.noSpeechDetected
         }
 
         let chunkSize = config.samplesPerWindow
         let stepSize = config.samplesPerStep
-        let totalSamples = audioSamples.count
 
         var logProbChunks: [[[Float]]] = []
         var weightChunks: [[[Float]]] = []
@@ -42,8 +62,15 @@ struct OfflineSegmentationProcessor {
         var frameDuration: Double = 0
         var numFrames = 0
         let speakerCount = 3
+        let speakerClassIndices: [[Int]] = (0..<speakerCount).map { speaker in
+            powerset.enumerated().compactMap { index, combination in
+                combination.contains(speaker) ? index : nil
+            }
+        }
         var classHistogram = Array(repeating: 0, count: powerset.count)
         var classProbabilitySums = Array(repeating: Float.zero, count: powerset.count)
+        let chunkCallback = chunkHandler
+        var chunkEmissionEnabled = chunkCallback != nil
 
         logger.debug(
             "Offline segmentation: chunkSize=\(chunkSize), stepSize=\(stepSize), totalSamples=\(totalSamples)"
@@ -60,319 +87,376 @@ struct OfflineSegmentationProcessor {
         var probabilityThresholdCounts = Array(repeating: 0, count: probabilityThresholds.count)
         let emptyClassIndex = 0
         let onsetThreshold = config.speechOnsetThreshold
-        let offsetThreshold = config.speechOffsetThreshold
-        var hysteresisCarry = [Bool](repeating: false, count: speakerCount)
-        var minOnFrameCount = 0
-        var minOffFrameCount = 0
-        var durationFramesResolved = false
-
-        let offsets = Array(stride(from: 0, to: totalSamples, by: stepSize))
-        guard !offsets.isEmpty else {
-            throw OfflineDiarizationError.processingFailed("Segmentation produced no analysis windows")
-        }
 
         let batchCapacity = 32
         var globalChunkIndex = 0
 
-        try audioSamples.withUnsafeBufferPointer { audioPointer in
-            for batchStart in stride(from: 0, to: offsets.count, by: batchCapacity) {
-                let batchCount = min(batchCapacity, offsets.count - batchStart)
-                let shape: [NSNumber] = [
-                    NSNumber(value: batchCount),
-                    1,
-                    NSNumber(value: chunkSize),
-                ]
-                let audioArray = try memoryOptimizer.createAlignedArray(
-                    shape: shape,
-                    dataType: .float32
-                )
+        let clock = ContinuousClock()
+        var prepareDuration: Duration = .zero
+        var predictionDuration: Duration = .zero
+        var preparedWindowCount = 0
+        var slidingWindow = [Float](repeating: 0, count: chunkSize)
+        var previousOffset: Int?
+        let reuseEnabled = stepSize < chunkSize
 
-                let ptr = audioArray.dataPointer.assumingMemoryBound(to: Float.self)
-                vDSP_vclr(ptr, 1, vDSP_Length(batchCount * chunkSize))
+        @Sendable
+        func performWarmup() async throws {
+            let warmupShape: [NSNumber] = [1, 1, NSNumber(value: chunkSize)]
+            let warmupKey = "offline_segmentation_warmup_\(chunkSize)"
+            let warmupArray = try memoryOptimizer.getPooledBuffer(
+                key: warmupKey,
+                shape: warmupShape,
+                dataType: .float32
+            )
+            let warmupPointer = warmupArray.dataPointer.assumingMemoryBound(to: Float.self)
+            vDSP_vclr(warmupPointer, 1, vDSP_Length(chunkSize))
 
-                var batchOffsets: [Int] = []
-                batchOffsets.reserveCapacity(batchCount)
+            let warmupProvider = ZeroCopyDiarizerFeatureProvider(
+                features: ["audio": MLFeatureValue(multiArray: warmupArray)]
+            )
+            let warmupOptions = MLPredictionOptions()
+            if #available(macOS 14.0, iOS 17.0, *) {
+                warmupArray.prefetchToNeuralEngine()
+            }
+            _ = try await segmentationModel.prediction(from: warmupProvider, options: warmupOptions)
+        }
 
-                for localIndex in 0..<batchCount {
-                    let offset = offsets[batchStart + localIndex]
-                    batchOffsets.append(offset)
+        func populateWindow(
+            destination: UnsafeMutablePointer<Float>,
+            offset: Int
+        ) throws {
+            let availableForWindow = max(0, min(chunkSize, totalSamples - offset))
 
-                    let chunkEnd = min(offset + chunkSize, totalSamples)
-                    let chunkLength = chunkEnd - offset
-                    guard chunkLength > 0 else {
-                        continue
-                    }
-
-                    let destination = ptr.advanced(by: localIndex * chunkSize)
-                    vDSP_mmov(
-                        audioPointer.baseAddress!.advanced(by: offset),
-                        destination,
-                        vDSP_Length(chunkLength),
-                        1,
-                        vDSP_Length(chunkLength),
-                        1
-                    )
-                }
-
-                let provider = ZeroCopyDiarizerFeatureProvider(
-                    features: ["audio": MLFeatureValue(multiArray: audioArray)]
-                )
-
-                let options = MLPredictionOptions()
-                if #available(macOS 14.0, iOS 17.0, *) {
-                    audioArray.prefetchToNeuralEngine()
-                }
-
-                let predictionState = signposter.beginInterval("Segmentation Model Prediction")
-                let output = try segmentationModel.prediction(from: provider, options: options)
-                signposter.endInterval("Segmentation Model Prediction", predictionState)
-
-                let logitsArray: MLMultiArray
-                if let segments = output.featureValue(for: "segments")?.multiArrayValue {
-                    logitsArray = segments
-                } else if let logProbs = output.featureValue(for: "log_probs")?.multiArrayValue {
-                    logitsArray = logProbs
-                } else if let fallback = output.featureNames.compactMap({ name -> MLMultiArray? in
-                    output.featureValue(for: name)?.multiArrayValue
-                }).first {
-                    logitsArray = fallback
-                } else {
-                    let available = Array(output.featureNames)
-                    throw OfflineDiarizationError.processingFailed(
-                        "Segmentation model missing expected multiarray output. Available: \(available)"
-                    )
-                }
-
-                let logitsShape = logitsArray.shape.map { $0.intValue }
-                let (batchSize, frames, classes): (Int, Int, Int)
-                switch logitsShape.count {
-                case 3:
-                    batchSize = logitsShape[0]
-                    frames = logitsShape[1]
-                    classes = logitsShape[2]
-                case 2:
-                    batchSize = 1
-                    frames = logitsShape[0]
-                    classes = logitsShape[1]
-                default:
-                    throw OfflineDiarizationError.processingFailed(
-                        "Unexpected segmentation output shape \(logitsShape)"
-                    )
-                }
-
-                frameDuration = config.windowDuration / Double(frames)
-                numFrames = frames
-                if !durationFramesResolved, frameDuration > 0 {
-                    minOnFrameCount = frameCount(
-                        for: config.segmentation.minDurationOn,
-                        frameDuration: frameDuration
-                    )
-                    minOffFrameCount = frameCount(
-                        for: config.segmentation.minDurationOff,
-                        frameDuration: frameDuration
-                    )
-                    durationFramesResolved = true
-                }
-
-                if classes > powerset.count {
-                    logger.error(
-                        "Segmentation model returned \(classes) classes but only \(powerset.count) powerset entries available"
-                    )
-                }
-
-                let logitsPointer = logitsArray.dataPointer.assumingMemoryBound(to: Float.self)
-
-                for localIndex in 0..<batchCount {
-                    if localIndex >= batchSize {
-                        break
-                    }
-
-                    let offset = batchOffsets[localIndex]
-                    chunkOffsets.append(Double(offset) / Double(config.sampleRate))
-
-                    var chunkLogProbs = Array(
-                        repeating: Array(repeating: Float.zero, count: classes),
-                        count: frames
-                    )
-
-                    var chunkSpeakerProbs = Array(
-                        repeating: Array(repeating: Float.zero, count: speakerCount),
-                        count: frames
-                    )
-                    var chunkBinaryMask = Array(
-                        repeating: Array(repeating: false, count: speakerCount),
-                        count: frames
-                    )
-
-                    let baseIndex = localIndex * frames * classes
-
-                    var frameLogits = [Float](repeating: 0, count: classes)
-                    var logProbabilityBuffer = [Float](repeating: 0, count: classes)
-                    var probabilityBuffer = [Float](repeating: 0, count: classes)
-                    var speakerStates = hysteresisCarry
-
-                    for frameIndex in 0..<frames {
-                        let start = baseIndex + frameIndex * classes
-                        frameLogits.withUnsafeMutableBufferPointer { destination in
-                            destination.baseAddress!.update(from: logitsPointer.advanced(by: start), count: classes)
-                        }
-
-                        var bestIndex = 0
-                        var bestValue = -Float.greatestFiniteMagnitude
-                        for cls in 0..<classes {
-                            let value = frameLogits[cls]
-                            if value > bestValue {
-                                bestValue = value
-                                bestIndex = cls
-                            }
-                        }
-
-                        let logSumExp = VDSPOperations.logSumExp(frameLogits)
-                        var shift = -logSumExp
-                        vDSP_vsadd(
-                            frameLogits,
-                            1,
-                            &shift,
-                            &logProbabilityBuffer,
-                            1,
-                            vDSP_Length(classes)
+            if
+                reuseEnabled,
+                let lastOffset = previousOffset,
+                offset == lastOffset + stepSize
+            {
+                try slidingWindow.withUnsafeMutableBufferPointer { pointer in
+                    guard let base = pointer.baseAddress else { return }
+                    let reuseCount = max(0, chunkSize - stepSize)
+                    if reuseCount > 0 {
+                        memmove(
+                            base,
+                            base.advanced(by: stepSize),
+                            reuseCount * MemoryLayout<Float>.stride
                         )
-
-                        probabilityBuffer = logProbabilityBuffer
-                        probabilityBuffer.withUnsafeMutableBufferPointer { pointer in
-                            var count = Int32(classes)
-                            vvexpf(pointer.baseAddress!, pointer.baseAddress!, &count)
-                        }
-
-                        chunkLogProbs[frameIndex].withUnsafeMutableBufferPointer { destination in
-                            logProbabilityBuffer.withUnsafeBufferPointer { source in
-                                destination.baseAddress!.update(from: source.baseAddress!, count: classes)
-                            }
-                        }
-
-                        for cls in 0..<min(classes, classProbabilitySums.count) {
-                            classProbabilitySums[cls] += probabilityBuffer[cls]
-                        }
-
-                        if bestIndex < classHistogram.count {
-                            classHistogram[bestIndex] += 1
-                        }
-
-                        let winningClass = min(bestIndex, powerset.count - 1)
-                        let winningSpeakers = powerset[winningClass].filter { $0 < speakerCount }
-                        let winningProbability = probabilityBuffer[winningClass]
-                        let emptyProbability =
-                            emptyClassIndex < probabilityBuffer.count ? probabilityBuffer[emptyClassIndex] : 0
-
-                        if !winningSpeakers.isEmpty {
-                            winningProbabilitySum += Double(winningProbability)
-                            winningProbabilityCount += 1
-                            if winningProbability < winningProbabilityMin {
-                                winningProbabilityMin = winningProbability
-                            }
-                            if winningProbability > winningProbabilityMax {
-                                winningProbabilityMax = winningProbability
-                            }
-                            emptyClassProbabilitySum += Double(emptyProbability)
-                            emptyClassProbabilityCount += 1
-
-                            for (index, threshold) in probabilityThresholds.enumerated() {
-                                if winningProbability >= threshold {
-                                    probabilityThresholdCounts[index] += 1
-                                }
-                            }
-                        }
-
-                        var speakerProbabilities = [Float](repeating: 0, count: speakerCount)
-                        let limit = min(classes, powerset.count)
-                        if limit > 0 {
-                            for cls in 0..<limit {
-                                let probability = probabilityBuffer[cls]
-                                guard probability > 0 else { continue }
-                                for speaker in powerset[cls] where speaker < speakerCount {
-                                    if probability > speakerProbabilities[speaker] {
-                                        speakerProbabilities[speaker] = probability
-                                    }
-                                }
-                            }
-                        }
-                        chunkSpeakerProbs[frameIndex] = speakerProbabilities
-
-                        for speaker in 0..<speakerCount {
-                            let probability = speakerProbabilities[speaker]
-                            var active = speakerStates[speaker]
-                            if active {
-                                if probability < offsetThreshold {
-                                    active = false
-                                }
-                            } else {
-                                if probability >= onsetThreshold {
-                                    active = true
-                                }
-                            }
-                            speakerStates[speaker] = active
-                            chunkBinaryMask[frameIndex][speaker] = active
-                        }
                     }
 
-                    if minOnFrameCount > 1 || minOffFrameCount > 0 {
-                        for speaker in 0..<speakerCount {
-                            var maskColumn = chunkBinaryMask.map { $0[speaker] }
-                            applyMinimumDurations(
-                                mask: &maskColumn,
-                                minOnFrames: minOnFrameCount,
-                                minOffFrames: minOffFrameCount
+                    let samplesNeeded = chunkSize - reuseCount
+                    if samplesNeeded > 0 {
+                        let tailOffset = offset + reuseCount
+                        let available = max(
+                            0,
+                            min(samplesNeeded, totalSamples - tailOffset)
+                        )
+                        if available > 0 {
+                            try audioSource.copySamples(
+                                into: base.advanced(by: reuseCount),
+                                offset: tailOffset,
+                                count: available
                             )
-                            for frameIndex in 0..<frames {
-                                chunkBinaryMask[frameIndex][speaker] = maskColumn[frameIndex]
-                            }
+                        }
+                        if available < samplesNeeded {
+                            vDSP_vclr(
+                                base.advanced(by: reuseCount + available),
+                                1,
+                                vDSP_Length(samplesNeeded - available)
+                            )
                         }
                     }
-
-                    if frames > 0 {
-                        for speaker in 0..<speakerCount {
-                            speakerStates[speaker] = chunkBinaryMask[frames - 1][speaker]
-                        }
+                }
+            } else {
+                try slidingWindow.withUnsafeMutableBufferPointer { pointer in
+                    guard let base = pointer.baseAddress else { return }
+                    if availableForWindow > 0 {
+                        try audioSource.copySamples(
+                            into: base,
+                            offset: offset,
+                            count: availableForWindow
+                        )
                     }
-
-                    var chunkWeights = Array(
-                        repeating: Array(repeating: Float.zero, count: speakerCount),
-                        count: frames
-                    )
-
-                    for frameIndex in 0..<frames {
-                        var frameHasSpeech = false
-                        for speaker in 0..<speakerCount {
-                            guard chunkBinaryMask[frameIndex][speaker] else { continue }
-                            let probability = chunkSpeakerProbs[frameIndex][speaker]
-                            let weight = probability > 0 ? probability : max(offsetThreshold, Float.zero)
-                            chunkWeights[frameIndex][speaker] = weight
-                            if weight > 0 {
-                                frameHasSpeech = true
-                            }
-                        }
-                        if frameHasSpeech {
-                            speechFrameCount += 1
-                        }
+                    if availableForWindow < chunkSize {
+                        vDSP_vclr(
+                            base.advanced(by: availableForWindow),
+                            1,
+                            vDSP_Length(chunkSize - availableForWindow)
+                        )
                     }
-
-                    logProbChunks.append(chunkLogProbs)
-                    weightChunks.append(chunkWeights)
-
-                    if globalChunkIndex == 0 {
-                        let speakerCoverage = chunkBinaryMask.reduce(into: Array(repeating: 0, count: speakerCount)) {
-                            counts, frame in
-                            for (index, isActive) in frame.enumerated() where isActive {
-                                counts[index] += 1
-                            }
-                        }
-                        logger.debug("Chunk 0 speaker frame counts: \(speakerCoverage)")
-                    }
-
-                    hysteresisCarry = speakerStates
-                    globalChunkIndex += 1
                 }
             }
+
+            slidingWindow.withUnsafeBufferPointer { pointer in
+                guard let base = pointer.baseAddress else { return }
+                destination.update(from: base, count: chunkSize)
+            }
+            previousOffset = offset
+        }
+
+        var processedAnyBatch = false
+        var offsetIterator = stride(from: 0, to: totalSamples, by: stepSize).makeIterator()
+        var batchOffsets: [Int] = []
+        batchOffsets.reserveCapacity(batchCapacity)
+
+        do {
+            try await performWarmup()
+        } catch {
+            logger.debug("Segmentation warmup skipped due to error: \(error.localizedDescription)")
+        }
+
+        while true {
+            try Task.checkCancellation()
+
+            batchOffsets.removeAll(keepingCapacity: true)
+            for _ in 0..<batchCapacity {
+                guard let offset = offsetIterator.next() else { break }
+                batchOffsets.append(offset)
+            }
+
+            if batchOffsets.isEmpty {
+                break
+            }
+
+            processedAnyBatch = true
+            let batchCount = batchOffsets.count
+            let shape: [NSNumber] = [
+                NSNumber(value: batchCount),
+                1,
+                NSNumber(value: chunkSize),
+            ]
+            let bufferKey = "offline_segmentation_audio_\(batchCount)_\(chunkSize)"
+            let audioArray = try memoryOptimizer.getPooledBuffer(
+                key: bufferKey,
+                shape: shape,
+                dataType: .float32
+            )
+
+            let ptr = audioArray.dataPointer.assumingMemoryBound(to: Float.self)
+
+            let prepareStart = clock.now
+            for (localIndex, offset) in batchOffsets.enumerated() {
+                let destination = ptr.advanced(by: localIndex * chunkSize)
+                try populateWindow(destination: destination, offset: offset)
+            }
+            prepareDuration += prepareStart.duration(to: clock.now)
+            preparedWindowCount += batchOffsets.count
+
+            let provider = ZeroCopyDiarizerFeatureProvider(
+                features: ["audio": MLFeatureValue(multiArray: audioArray)]
+            )
+
+            let options = MLPredictionOptions()
+            if #available(macOS 14.0, iOS 17.0, *) {
+                audioArray.prefetchToNeuralEngine()
+            }
+
+            let predictionState = signposter.beginInterval("Segmentation Model Prediction")
+            try Task.checkCancellation()
+            let predictionStart = clock.now
+            let output = try await segmentationModel.prediction(from: provider, options: options)
+            predictionDuration += predictionStart.duration(to: clock.now)
+            signposter.endInterval("Segmentation Model Prediction", predictionState)
+
+            let logitsArray: MLMultiArray
+            if let segments = output.featureValue(for: "segments")?.multiArrayValue {
+                logitsArray = segments
+            } else if let logProbs = output.featureValue(for: "log_probs")?.multiArrayValue {
+                logitsArray = logProbs
+            } else if let fallback = output.featureNames.compactMap({ name -> MLMultiArray? in
+                output.featureValue(for: name)?.multiArrayValue
+            }).first {
+                logitsArray = fallback
+            } else {
+                let available = Array(output.featureNames)
+                throw OfflineDiarizationError.processingFailed(
+                    "Segmentation model missing expected multiarray output. Available: \(available)"
+                )
+            }
+
+            let logitsShape = logitsArray.shape.map { $0.intValue }
+            let (batchSize, frames, classes): (Int, Int, Int)
+            switch logitsShape.count {
+            case 3:
+                batchSize = logitsShape[0]
+                frames = logitsShape[1]
+                classes = logitsShape[2]
+            case 2:
+                batchSize = 1
+                frames = logitsShape[0]
+                classes = logitsShape[1]
+            default:
+                throw OfflineDiarizationError.processingFailed(
+                    "Unexpected segmentation output shape \(logitsShape)"
+                )
+            }
+
+            frameDuration = config.windowDuration / Double(frames)
+            numFrames = frames
+
+            if classes > powerset.count {
+                logger.error(
+                    "Segmentation model returned \(classes) classes but only \(powerset.count) powerset entries available"
+                )
+            }
+
+            let logitsPointer = logitsArray.dataPointer.assumingMemoryBound(to: Float.self)
+
+            for localIndex in 0..<batchCount {
+                if localIndex >= batchSize {
+                    break
+                }
+
+                let offset = batchOffsets[localIndex]
+                chunkOffsets.append(Double(offset) / Double(config.sampleRate))
+
+                var chunkLogProbs = Array(
+                    repeating: Array(repeating: Float.zero, count: classes),
+                    count: frames
+                )
+
+                var chunkSpeakerProbs = Array(
+                    repeating: Array(repeating: Float.zero, count: speakerCount),
+                    count: frames
+                )
+
+                let baseIndex = localIndex * frames * classes
+
+                var frameLogits = [Float](repeating: 0, count: classes)
+                var logProbabilityBuffer = [Float](repeating: 0, count: classes)
+                var probabilityBuffer = [Float](repeating: 0, count: classes)
+
+                for frameIndex in 0..<frames {
+                    let start = baseIndex + frameIndex * classes
+                    frameLogits.withUnsafeMutableBufferPointer { destination in
+                        destination.baseAddress!.update(from: logitsPointer.advanced(by: start), count: classes)
+                    }
+
+                    var bestIndex = 0
+                    var bestValue = -Float.greatestFiniteMagnitude
+                    for cls in 0..<classes {
+                        let value = frameLogits[cls]
+                        if value > bestValue {
+                            bestValue = value
+                            bestIndex = cls
+                        }
+                    }
+
+                    let logSumExp = VDSPOperations.logSumExp(frameLogits)
+                    var shift = -logSumExp
+                    vDSP_vsadd(
+                        frameLogits,
+                        1,
+                        &shift,
+                        &logProbabilityBuffer,
+                        1,
+                        vDSP_Length(classes)
+                    )
+
+                    probabilityBuffer = logProbabilityBuffer
+                    probabilityBuffer.withUnsafeMutableBufferPointer { pointer in
+                        var count = Int32(classes)
+                        vvexpf(pointer.baseAddress!, pointer.baseAddress!, &count)
+                    }
+
+                    chunkLogProbs[frameIndex].withUnsafeMutableBufferPointer { destination in
+                        logProbabilityBuffer.withUnsafeBufferPointer { source in
+                            destination.baseAddress!.update(from: source.baseAddress!, count: classes)
+                        }
+                    }
+
+                    for cls in 0..<min(classes, classProbabilitySums.count) {
+                        classProbabilitySums[cls] += probabilityBuffer[cls]
+                    }
+
+                    if bestIndex < classHistogram.count {
+                        classHistogram[bestIndex] += 1
+                    }
+
+                    let winningClass = min(bestIndex, powerset.count - 1)
+                    let winningSpeakers = powerset[winningClass].filter { $0 < speakerCount }
+                    let winningProbability = probabilityBuffer[winningClass]
+                    let emptyProbability =
+                        emptyClassIndex < probabilityBuffer.count ? probabilityBuffer[emptyClassIndex] : 0
+
+                    if !winningSpeakers.isEmpty {
+                        winningProbabilitySum += Double(winningProbability)
+                        winningProbabilityCount += 1
+                        if winningProbability < winningProbabilityMin {
+                            winningProbabilityMin = winningProbability
+                        }
+                        if winningProbability > winningProbabilityMax {
+                            winningProbabilityMax = winningProbability
+                        }
+                        emptyClassProbabilitySum += Double(emptyProbability)
+                        emptyClassProbabilityCount += 1
+
+                        for (index, threshold) in probabilityThresholds.enumerated() {
+                            if winningProbability >= threshold {
+                                probabilityThresholdCounts[index] += 1
+                            }
+                        }
+                    }
+
+                    var speakerActivations = [Float](repeating: 0, count: speakerCount)
+                    for speaker in 0..<speakerCount {
+                        var sum: Float = 0
+                        for classIndex in speakerClassIndices[speaker] where classIndex < probabilityBuffer.count {
+                            sum += probabilityBuffer[classIndex]
+                        }
+                        speakerActivations[speaker] = min(max(sum, 0), 1)
+                    }
+                    chunkSpeakerProbs[frameIndex] = speakerActivations
+
+                    let speechProbability = max(0, min(1, 1 - emptyProbability))
+                    if speechProbability >= onsetThreshold {
+                        speechFrameCount += 1
+                    }
+                }
+
+                var chunkWeights = Array(
+                    repeating: Array(repeating: Float.zero, count: speakerCount),
+                    count: frames
+                )
+
+                // Pyannote community-1 powerset models provide powerset probabilities that we marginalize
+                // into per-speaker activity weights for each frame (0...1).
+                for frameIndex in 0..<frames {
+                    chunkWeights[frameIndex] = chunkSpeakerProbs[frameIndex]
+                }
+
+                logProbChunks.append(chunkLogProbs)
+                weightChunks.append(chunkWeights)
+
+                if chunkEmissionEnabled, let chunkCallback {
+                    let chunkOffsetSeconds = chunkOffsets.last ?? Double(offset) / Double(config.sampleRate)
+                    let chunk = SegmentationChunk(
+                        chunkIndex: globalChunkIndex,
+                        chunkOffsetSeconds: chunkOffsetSeconds,
+                        frameDuration: frameDuration,
+                        logProbs: chunkLogProbs,
+                        speakerWeights: chunkWeights
+                    )
+                    if chunkCallback(chunk) == .stop {
+                        chunkEmissionEnabled = false
+                    }
+                }
+
+                if globalChunkIndex == 0 {
+                    let speakerCoverage = chunkSpeakerProbs.reduce(into: Array(repeating: 0, count: speakerCount)) {
+                        counts, frame in
+                        for (index, probability) in frame.enumerated() where probability >= onsetThreshold {
+                            counts[index] += 1
+                        }
+                    }
+                    logger.debug("Chunk 0 speaker frame counts: \(speakerCoverage)")
+                }
+
+                globalChunkIndex += 1
+            }
+        }
+
+        guard processedAnyBatch else {
+            throw OfflineDiarizationError.processingFailed("Segmentation produced no analysis windows")
         }
 
         let totalFrames = classHistogram.reduce(0, +)
@@ -430,6 +514,25 @@ struct OfflineSegmentationProcessor {
             )
         }
 
+        if preparedWindowCount > 0 {
+            let prepareMs = Self.milliseconds(from: prepareDuration)
+            let predictionMs = Self.milliseconds(from: predictionDuration)
+            let preparePerWindow = prepareMs / Double(preparedWindowCount)
+            let predictionPerWindow = predictionMs / Double(preparedWindowCount)
+            let prepareTotalString = String(format: "%.2f", prepareMs)
+            let prepareWindowString = String(format: "%.4f", preparePerWindow)
+            let predictionTotalString = String(format: "%.2f", predictionMs)
+            let predictionWindowString = String(format: "%.4f", predictionPerWindow)
+            let message =
+                """
+                Segmentation timings: windows=\(preparedWindowCount) \
+                prepareTotal=\(prepareTotalString)ms (perWindow=\(prepareWindowString)ms) \
+                predictionTotal=\(predictionTotalString)ms (perWindow=\(predictionWindowString)ms)
+                """
+            logger.debug(message)
+            Self.emitProfileLog(message)
+        }
+
         return SegmentationOutput(
             logProbs: logProbChunks,
             speakerWeights: weightChunks,
@@ -441,70 +544,21 @@ struct OfflineSegmentationProcessor {
         )
     }
 
-    private func frameCount(for duration: Double, frameDuration: Double) -> Int {
-        guard duration > 0, frameDuration > 0 else { return 0 }
-        return max(1, Int(ceil(duration / frameDuration)))
+}
+
+@available(macOS 13.0, iOS 16.0, *)
+private extension OfflineSegmentationProcessor {
+    static func milliseconds(from duration: Duration) -> Double {
+        let components = duration.components
+        let secondsMs = Double(components.seconds) * 1_000
+        let attosecondsMs = Double(components.attoseconds) / 1_000_000_000_000_000.0
+        return secondsMs + attosecondsMs
     }
 
-    private func applyMinimumDurations(
-        mask: inout [Bool],
-        minOnFrames: Int,
-        minOffFrames: Int
-    ) {
-        if minOnFrames > 1 {
-            removeShortActivations(&mask, minFrames: minOnFrames)
-        }
-        if minOffFrames > 0 {
-            fillShortGaps(&mask, maxGapFrames: minOffFrames)
-        }
-    }
-
-    private func removeShortActivations(_ mask: inout [Bool], minFrames: Int) {
-        guard minFrames > 1, !mask.isEmpty else { return }
-
-        var start: Int? = nil
-        for index in 0..<mask.count {
-            if mask[index] {
-                if start == nil {
-                    start = index
-                }
-            } else if let segmentStart = start {
-                let length = index - segmentStart
-                if length < minFrames {
-                    for position in segmentStart..<index {
-                        mask[position] = false
-                    }
-                }
-                start = nil
-            }
-        }
-
-        if let segmentStart = start {
-            let length = mask.count - segmentStart
-            if length < minFrames {
-                for position in segmentStart..<mask.count {
-                    mask[position] = false
-                }
-            }
-        }
-    }
-
-    private func fillShortGaps(_ mask: inout [Bool], maxGapFrames: Int) {
-        guard maxGapFrames > 0, !mask.isEmpty else { return }
-
-        var previousActive: Int? = nil
-        for index in 0..<mask.count {
-            if mask[index] {
-                if let previous = previousActive {
-                    let gapLength = index - previous - 1
-                    if gapLength > 0, gapLength <= maxGapFrames {
-                        for position in (previous + 1)..<index {
-                            mask[position] = true
-                        }
-                    }
-                }
-                previousActive = index
-            }
+    static func emitProfileLog(_ message: String) {
+        let line = "[Profiling] \(message)\n"
+        if let data = line.data(using: .utf8) {
+            FileHandle.standardError.write(data)
         }
     }
 }

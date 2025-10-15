@@ -28,6 +28,10 @@ struct ResultsFormatter {
                 }
             }
         }
+        if let timings = result.timings {
+            print("")
+            printSingleRunTimings(timings, durationSeconds: result.durationSeconds)
+        }
     }
 
     static func saveResults(_ result: ProcessingResult, to file: String) async throws {
@@ -37,6 +41,49 @@ struct ResultsFormatter {
 
         let data = try encoder.encode(result)
         try data.write(to: URL(fileURLWithPath: file))
+    }
+
+    private static func printSingleRunTimings(
+        _ timings: PipelineTimings,
+        durationSeconds: Float
+    ) {
+        let stages: [(String, TimeInterval)] = [
+            ("Model Download", timings.modelDownloadSeconds),
+            ("Model Compilation", timings.modelCompilationSeconds),
+            ("Audio Loading", timings.audioLoadingSeconds),
+            ("Segmentation", timings.segmentationSeconds),
+            ("Embedding Extraction", timings.embeddingExtractionSeconds),
+            ("Speaker Clustering", timings.speakerClusteringSeconds),
+            ("Post Processing", timings.postProcessingSeconds),
+        ]
+
+        let total = timings.totalProcessingSeconds
+        let totalAudioMinutes = Double(durationSeconds) / 60.0
+        print("⏱️  Pipeline Timing Breakdown")
+        let separator = String(repeating: "=", count: 95)
+        print(separator)
+        print("│ Stage                 │   Time   │ Percentage │ Per Audio Minute │")
+        let headerSeparator = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
+        print(headerSeparator)
+
+        for (stageName, stageTime) in stages {
+            let stageNamePadded = stageName.padding(toLength: 19, withPad: " ", startingAt: 0)
+            let timeStr = String(format: "%.3fs", stageTime).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
+            let percentage = total > 0 ? (stageTime / total) * 100 : 0
+            let percentageStr = String(format: "%.1f%%", percentage).padding(
+                toLength: 10, withPad: " ", startingAt: 0)
+            let perMinute = totalAudioMinutes > 0 ? stageTime / totalAudioMinutes : 0
+            let perMinuteStr = String(format: "%.3fs/min", perMinute).padding(
+                toLength: 16, withPad: " ", startingAt: 0)
+
+            print("│ \(stageNamePadded) │ \(timeStr) │ \(percentageStr) │ \(perMinuteStr) │")
+        }
+
+        let footerSeparator = "└───────────────────────┴──────────┴────────────┴──────────────────┘"
+        print(footerSeparator)
+        let totalText = String(format: "%.3f", total)
+        print("Bottleneck Stage: \(timings.bottleneckStage)  •  Total Processing: \(totalText)s")
     }
 
     static func saveBenchmarkResults(_ summary: BenchmarkSummary, to file: String) async throws {

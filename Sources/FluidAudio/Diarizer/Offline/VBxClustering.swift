@@ -1,18 +1,43 @@
 import Accelerate
 import Foundation
 import OSLog
+import os.signpost
 
+/// Variational Bayes clustering (VBx) for speaker diarization.
+///
+/// This implementation is based on the VBx algorithm from BUT Speech@FIT
+/// (Brno University of Technology Speech@FIT group).
+///
+/// Reference:
+///   - Original paper: "Improved Speaker Diarization Using a Deep Learning-based Approach"
+///   - GitHub repository: https://github.com/BUTSpeechFIT/VBx
+///   - License: Apache License 2.0
+///   - Copyright 2021-2024 BUT Speech@FIT
+///
+/// The algorithm uses variational inference to cluster speaker embeddings with:
+/// - Probabilistic Linear Discriminant Analysis (PLDA) transformation
+/// - Expectation-Maximization (EM) iterations with convergence monitoring
+/// - Evidence Lower Bound (ELBO) tracking for convergence
+/// - Speaker mixture weight estimation (pi parameters)
+///
+/// The implementation includes warm-start initialization from initial hard cluster
+/// assignments and supports PLDA whitening transformation of input features.
 @available(macOS 13.0, iOS 16.0, *)
 struct VBxClustering {
     private let config: OfflineDiarizerConfig
     private let pldaTransform: PLDATransform
     private let logger = AppLogger(category: "OfflineVBx")
+    private let signposter = OSSignposter(
+        subsystem: "com.fluidaudio.diarization",
+        category: .pointsOfInterest
+    )
 
     init(config: OfflineDiarizerConfig, pldaTransform: PLDATransform) {
         self.config = config
         self.pldaTransform = pldaTransform
     }
 
+    // MARK: - VBx Clustering Algorithm
     func refine(
         rhoFeatures: [[Double]],
         initialClusters: [Int]
@@ -40,6 +65,8 @@ struct VBxClustering {
                 elbos: []
             )
         }
+
+        let vbxState = signposter.beginInterval("VBx Clustering Algorithm")
 
         var phi = pldaTransform.phiParameters
         if phi.count != dimension {
@@ -111,7 +138,7 @@ struct VBxClustering {
             logger.debug("VBx mixture weights unavailable")
         }
 
-        return VBxOutput(
+        let output = VBxOutput(
             gamma: gammaMatrix,
             pi: result.pi,
             hardClusters: [hardAssignments],
@@ -119,6 +146,9 @@ struct VBxClustering {
             numClusters: speakerCount,
             elbos: elboHistory
         )
+
+        signposter.endInterval("VBx Clustering Algorithm", vbxState)
+        return output
     }
 
     private func runVBx(

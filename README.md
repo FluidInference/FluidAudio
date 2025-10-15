@@ -29,6 +29,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for transcription; supports all 25 European languages
 - **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
+- **Offline VBx Pipeline**: Full pyannote-style segmentation → WeSpeaker embeddings → VBx clustering, mirrored in the CLI and guarded by CI
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
 - **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
@@ -173,6 +174,56 @@ For diarization streaming see [Documentation/SpeakerDiarization.md](Documentatio
 swift run fluidaudio diarization-benchmark --single-file ES2004a \
   --chunk-seconds 3 --overlap-seconds 2
 ```
+
+### Offline VBx Pipeline
+
+> Requires macOS 14 / iOS 17 or later. The offline stack uses native C++ clustering and AsyncStream coordination that are unavailable on older OS releases.
+
+The offline controller mirrors the pyannote Community-1 reference pipeline (powerset segmentation + WeSpeaker + VBx). Use it when you need DER parity with the desktop exporter or want to benchmark the full batched flow:
+
+```swift
+import FluidAudio
+
+let config = OfflineDiarizerConfig()
+let manager = OfflineDiarizerManager(config: config)
+try await manager.prepareModels()  // Downloads + compiles Core ML bundles if they are missing
+
+let samples = try AudioConverter().resampleAudioFile(path: "meeting.wav")
+let result = try await manager.process(audio: samples)
+
+for segment in result.segments {
+    print("\(segment.speakerId) \(segment.startTimeSeconds)s → \(segment.endTimeSeconds)s")
+}
+```
+
+For long meetings prefer the streaming helper to avoid materializing the full buffer:
+
+```swift
+let factory = StreamingAudioSourceFactory()
+let prepared = try factory.makeDiskBackedSource(
+    from: URL(fileURLWithPath: "meeting.wav"),
+    targetSampleRate: config.segmentation.sampleRate
+)
+let source = prepared.source
+defer { source.cleanup() }
+
+let streamResult = try await manager.process(
+    audioSource: source,
+    audioLoadingSeconds: prepared.loadDuration
+)
+```
+
+```bash
+# Process a meeting with full VBx clustering
+swift run fluidaudio process ~/FluidAudioDatasets/ami_official/sdm/ES2004a.Mix-Headset.wav \
+  --mode offline --threshold 0.6 --output es2004a_offline.json
+
+# Run the AMI single-file benchmark with automatic downloads
+swift run fluidaudio diarization-benchmark --mode offline --auto-download \
+  --single-file ES2004a --threshold 0.6 --output offline_results.json
+```
+
+`offline_results.json` contains DER/JER/RTFx along with timing breakdowns for segmentation, embedding extraction, and VBx clustering. CI now runs this workflow on every PR to ensure the offline models stay healthy and the Hugging Face assets remain accessible.
 
 ### CLI
 
@@ -355,6 +406,12 @@ Make a PR if you want to add your app!
 | **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | Comparison of different local ASR, including one of the first verions of FluidAudio's ASR models |
 | **[Starling](https://github.com/Ryandonofrio3/Starling)** | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
 | **[BoltAI](https://boltai.com/)** | Write content 10x faster using parakeet models |
+
+## Continuous Integration
+
+- `tests.yml`: Default build matrix covering SwiftPM tests and an iOS archive smoke test.
+- `diarizer-benchmark.yml`: Runs the streaming diarization benchmark on ES2004a for regression tracking.
+- `offline-pipeline.yml`: Executes the VBx offline pipeline end-to-end (`fluidaudio diarization-benchmark --mode offline`) and fails if DER/JER drift beyond guardrails or if models fail to download. Use this workflow as a reference for provisioning model caches in your own CI.
 
 ## Everything Else
 

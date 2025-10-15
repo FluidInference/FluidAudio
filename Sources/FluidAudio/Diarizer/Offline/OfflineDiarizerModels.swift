@@ -2,9 +2,10 @@
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
+@available(macOS 14.0, iOS 17.0, *)
 public struct OfflineDiarizerModels: Sendable {
     public let segmentationModel: MLModel
+    public let fbankModel: MLModel
     public let embeddingModel: MLModel
     public let pldaRhoModel: MLModel
     public let pldaPsi: [Double]
@@ -52,6 +53,7 @@ public struct OfflineDiarizerModels: Sendable {
 
     public init(
         segmentationModel: MLModel,
+        fbankModel: MLModel,
         embeddingModel: MLModel,
         pldaRhoModel: MLModel,
         pldaPsi: [Double],
@@ -59,6 +61,7 @@ public struct OfflineDiarizerModels: Sendable {
         compilationDuration: TimeInterval
     ) {
         self.segmentationModel = segmentationModel
+        self.fbankModel = fbankModel
         self.embeddingModel = embeddingModel
         self.pldaRhoModel = pldaRhoModel
         self.pldaPsi = pldaPsi
@@ -90,40 +93,76 @@ public struct OfflineDiarizerModels: Sendable {
         logger.info("Loading offline diarization models from \(modelsDirectory.path)")
 
         let loadStart = Date()
-        let config = configuration ?? defaultConfiguration()
+        let inferenceComputeUnits: MLComputeUnits = .all
 
-        let requiredNames = Array(ModelNames.OfflineDiarizer.requiredModels)
-        let loadedModels = try await DownloadUtils.loadModels(
+        let segmentationAndEmbeddingNames: [String] = [
+            ModelNames.OfflineDiarizer.segmentationPath,
+            ModelNames.OfflineDiarizer.embeddingPath,
+            ModelNames.OfflineDiarizer.pldaRhoPath,
+        ]
+
+        let segmentationEmbeddingModels = try await DownloadUtils.loadModels(
             .diarizer,
-            modelNames: requiredNames,
+            modelNames: segmentationAndEmbeddingNames,
             directory: modelsDirectory,
-            computeUnits: config.computeUnits,
+            computeUnits: inferenceComputeUnits,
             variant: "offline"
         )
 
-        guard let segmentation = loadedModels[ModelNames.OfflineDiarizer.segmentationPath] else {
+        guard let segmentation = segmentationEmbeddingModels[ModelNames.OfflineDiarizer.segmentationPath] else {
             throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.segmentation)
         }
-        guard let embedding = loadedModels[ModelNames.OfflineDiarizer.embeddingPath] else {
+        guard let embedding = segmentationEmbeddingModels[ModelNames.OfflineDiarizer.embeddingPath] else {
             throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.embedding)
         }
-        guard let plda = loadedModels[ModelNames.OfflineDiarizer.pldaRhoPath] else {
+        guard let plda = segmentationEmbeddingModels[ModelNames.OfflineDiarizer.pldaRhoPath] else {
             throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.pldaRho)
+        }
+
+        let fbankComputeUnits: MLComputeUnits = .cpuOnly
+        let fbankModels = try await DownloadUtils.loadModels(
+            .diarizer,
+            modelNames: [ModelNames.OfflineDiarizer.fbankPath],
+            directory: modelsDirectory,
+            computeUnits: fbankComputeUnits,
+            variant: "offline"
+        )
+        guard let fbank = fbankModels[ModelNames.OfflineDiarizer.fbankPath] else {
+            throw OfflineDiarizationError.modelNotLoaded(ModelNames.OfflineDiarizer.fbank)
         }
 
         let pldaPsi = try loadPLDAPsi(from: modelsDirectory)
         let compilationDuration = Date().timeIntervalSince(loadStart)
+        let compileString = String(format: "%.3f", compilationDuration)
         logger.info(
-            "Offline diarization models ready (compile: \(String(format: "%.3f", compilationDuration))s)"
+            "Offline diarization models ready (compile: \(compileString)s, computeUnits: segmentation/embedding/plda=\(inferenceComputeUnits.label), fbank=\(fbankComputeUnits.label))"
         )
 
         return OfflineDiarizerModels(
             segmentationModel: segmentation,
+            fbankModel: fbank,
             embeddingModel: embedding,
             pldaRhoModel: plda,
             pldaPsi: pldaPsi,
             downloadDuration: 0,
             compilationDuration: compilationDuration
         )
+    }
+}
+
+extension MLComputeUnits {
+    fileprivate var label: String {
+        switch self {
+        case .cpuOnly:
+            return ".cpuOnly"
+        case .cpuAndGPU:
+            return ".cpuAndGPU"
+        case .cpuAndNeuralEngine:
+            return ".cpuAndNeuralEngine"
+        case .all:
+            return ".all"
+        @unknown default:
+            return ".unknown"
+        }
     }
 }

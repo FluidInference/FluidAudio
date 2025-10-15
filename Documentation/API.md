@@ -35,13 +35,19 @@ Main class for speaker diarization and "who spoke when" analysis.
 ### OfflineDiarizerManager
 Full batch pipeline that mirrors the pyannote/Core ML exporter (powerset segmentation + VBx clustering).
 
+> Requires macOS 14 / iOS 17 or later because the manager relies on Swift Concurrency features and C++ clustering shims that are unavailable on older OS releases.
+
 **Key Methods:**
 - `init(config: OfflineDiarizerConfig = .default)`
   - Creates manager with configuration
+- `prepareModels(directory:configuration:forceRedownload:) async throws`
+  - Downloads / compiles the Core ML bundles as needed and records timing metadata. Call once before processing when you don't already have `OfflineDiarizerModels`.
 - `initialize(models: OfflineDiarizerModels)`
-  - Initializes with models containing segmentation, embedding, and PLDA components
+  - Initializes with models containing segmentation, embedding, and PLDA components (useful when you hydrate the bundles yourself).
 - `process(audio: [Float]) async throws -> DiarizationResult`
   - Runs the full 10 s window pipeline: segmentation → soft mask interpolation → embedding → VBx → timeline reconstruction.
+- `process(audioSource: StreamingAudioSampleSource, audioLoadingSeconds: TimeInterval) async throws -> DiarizationResult`
+  - Streams audio from disk-backed sources without materializing the entire buffer in memory. Pair with `StreamingAudioSourceFactory` for large meetings.
 
 **Supporting Types:**
 - `OfflineDiarizerConfig`
@@ -53,11 +59,13 @@ Full batch pipeline that mirrors the pyannote/Core ML exporter (powerset segment
 - `WeightInterpolation`
   - Reimplements `scipy.ndimage.zoom` (half-pixel offsets) so 589-frame weights align with the embedding model’s pooling stride.
 - `EmbeddingRunner`
-  - Batches audio + weights, resamples masks, and emits 256-d L2-normalized embeddings.
+  - Runs the FBANK frontend + embedding backend, resamples masks to 589 frames, and emits 256-d L2-normalized embeddings.
 - `PLDAScoring` / `VBxClustering`
   - Apply the exported PLDA transforms and iterative VBx refinement to group embeddings into speakers.
 - `TimelineReconstruction`
   - Derives timestamps directly from the segmentation frame count and `OfflineDiarizerConfig.windowDuration`, then enforces minimum gap/duration constraints.
+- `StreamingAudioSourceFactory`
+  - Creates disk-backed or in-memory `StreamingAudioSampleSource` instances so large meetings never require fully materialized `[Float]` buffers.
 
 Use `OfflineDiarizerManager` when you need offline DER parity or want to run the new CLI offline mode (`fluidaudio process --mode offline`, `fluidaudio diarization-benchmark --mode offline`).
 

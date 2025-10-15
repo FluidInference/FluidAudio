@@ -1,12 +1,14 @@
 import Accelerate
 import CoreML
 import Foundation
+import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
+@available(macOS 14.0, iOS 17.0, *)
 public struct PLDATransform {
     private let pldaRhoModel: MLModel
     private let psi: [Double]
     private let memoryOptimizer = ANEMemoryOptimizer()
+    private let logger = AppLogger(category: "OfflinePLDA")
 
     private let embeddingDimension = 256
     private let rhoDimension = 128
@@ -21,7 +23,7 @@ public struct PLDATransform {
 
     /// Transform a sequence of 256-dimensional embeddings into 128-dimensional
     /// PLDA-space rho features using the Core ML model exported from Pyannote.
-    public func transform(_ embeddings: [[Float]]) throws -> [[Double]] {
+    public func transform(_ embeddings: [[Float]]) async throws -> [[Double]] {
         guard !embeddings.isEmpty else { return [] }
 
         for embedding in embeddings {
@@ -35,11 +37,18 @@ public struct PLDATransform {
         var results: [[Double]] = []
         results.reserveCapacity(embeddings.count)
 
+        do {
+            try await performWarmup()
+        } catch {
+            logger.debug("PLDA warmup skipped due to error: \(error.localizedDescription)")
+        }
+
         var startIndex = 0
         while startIndex < embeddings.count {
+            try Task.checkCancellation()
             let endIndex = min(startIndex + maxBatchSize, embeddings.count)
             let batch = embeddings[startIndex..<endIndex]
-            let batchResults = try transformBatch(batch)
+            let batchResults = try await transformBatch(batch)
             results.append(contentsOf: batchResults)
             startIndex = endIndex
         }
@@ -48,13 +57,13 @@ public struct PLDATransform {
     }
 
     /// Convenience wrapper for single-embedding transform.
-    public func transform(_ embedding: [Float]) throws -> [Double] {
+    public func transform(_ embedding: [Float]) async throws -> [Double] {
         guard embedding.count == embeddingDimension else {
             throw OfflineDiarizationError.invalidConfiguration(
                 "Expected \(embeddingDimension)-dim embedding, got \(embedding.count)"
             )
         }
-        let transformed = try transform([embedding])
+        let transformed = try await transform([embedding])
         return transformed.first ?? []
     }
 
@@ -105,7 +114,7 @@ public struct PLDATransform {
         return dot / magnitude
     }
 
-    private func transformBatch(_ embeddings: ArraySlice<[Float]>) throws -> [[Double]] {
+    private func transformBatch(_ embeddings: ArraySlice<[Float]>) async throws -> [[Double]] {
         guard !embeddings.isEmpty else { return [] }
         guard embeddings.count <= maxBatchSize else {
             throw OfflineDiarizationError.invalidBatchSize(
@@ -117,6 +126,8 @@ public struct PLDATransform {
         let inputArray = try memoryOptimizer.createAlignedArray(shape: shape, dataType: .float32)
         let pointer = inputArray.dataPointer.assumingMemoryBound(to: Float.self)
 
+        let clock = ContinuousClock()
+        let copyInStart = clock.now
         for (batchIndex, embedding) in embeddings.enumerated() {
             let base = batchIndex * embeddingDimension
             embedding.withUnsafeBufferPointer { buffer in
@@ -130,17 +141,17 @@ public struct PLDATransform {
                 )
             }
         }
+        _ = copyInStart.duration(to: clock.now)
 
         let provider = ZeroCopyDiarizerFeatureProvider(
             features: ["embeddings": MLFeatureValue(multiArray: inputArray)]
         )
         let options = MLPredictionOptions()
+        inputArray.prefetchToNeuralEngine()
 
-        if #available(macOS 14.0, iOS 17.0, *) {
-            inputArray.prefetchToNeuralEngine()
-        }
-
-        let output = try pldaRhoModel.prediction(from: provider, options: options)
+        let predictionStart = clock.now
+        let output = try await pldaRhoModel.prediction(from: provider, options: options)
+        _ = predictionStart.duration(to: clock.now)
 
         guard let rhoArray = output.featureValue(for: "rho")?.multiArrayValue else {
             throw OfflineDiarizationError.processingFailed("PldaRho model did not produce rho output")
@@ -150,15 +161,45 @@ public struct PLDATransform {
         var results: [[Double]] = []
         results.reserveCapacity(embeddings.count)
 
-        for batchIndex in 0..<embeddings.count {
-            var rho = [Double](repeating: 0, count: rhoDimension)
-            let base = batchIndex * rhoDimension
-            for d in 0..<rhoDimension {
-                rho[d] = Double(rhoPointer[base + d])
-            }
-            results.append(rho)
+        let totalRhoCount = embeddings.count * rhoDimension
+        var rhoScratch = [Double](repeating: 0, count: totalRhoCount)
+
+        let copyOutStart = clock.now
+        let floatPointer = UnsafePointer<Float>(rhoPointer)
+        let sourceBuffer = UnsafeBufferPointer(start: floatPointer, count: totalRhoCount)
+        rhoScratch.withUnsafeMutableBufferPointer { dest in
+            guard let destBase = dest.baseAddress else { return }
+            var destinationBuffer = UnsafeMutableBufferPointer(start: destBase, count: totalRhoCount)
+            vDSP.convertElements(of: sourceBuffer, to: &destinationBuffer)
         }
 
+        for batchIndex in 0..<embeddings.count {
+            let start = batchIndex * rhoDimension
+            let end = start + rhoDimension
+            let rhoSlice = Array(rhoScratch[start..<end])
+            results.append(rhoSlice)
+        }
+        _ = copyOutStart.duration(to: clock.now)
+
         return results
+    }
+
+    private func performWarmup() async throws {
+        let warmupShape: [NSNumber] = [1, NSNumber(value: embeddingDimension)]
+        let warmupKey = "offline_plda_warmup_embedding_\(embeddingDimension)"
+        let warmupArray = try memoryOptimizer.getPooledBuffer(
+            key: warmupKey,
+            shape: warmupShape,
+            dataType: .float32
+        )
+        let pointer = warmupArray.dataPointer.assumingMemoryBound(to: Float.self)
+        vDSP_vclr(pointer, 1, vDSP_Length(warmupArray.count))
+
+        let provider = ZeroCopyDiarizerFeatureProvider(
+            features: ["embeddings": MLFeatureValue(multiArray: warmupArray)]
+        )
+        let options = MLPredictionOptions()
+        warmupArray.prefetchToNeuralEngine()
+        _ = try await pldaRhoModel.prediction(from: provider, options: options)
     }
 }

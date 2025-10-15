@@ -61,20 +61,24 @@ public enum ModelNames {
     public enum OfflineDiarizer {
         public static let subfolder = "speaker-diarization-offline"
         public static let segmentation = "Segmentation"
+        public static let fbank = "FBank"
         public static let embedding = "Embedding"
         public static let pldaRho = "PldaRho"
 
         public static let segmentationFile = segmentation + ".mlmodelc"
+        public static let fbankFile = fbank + ".mlmodelc"
         public static let embeddingFile = embedding + ".mlmodelc"
         public static let pldaRhoFile = pldaRho + ".mlmodelc"
 
         // Full paths including subfolder (for DownloadUtils)
         public static let segmentationPath = subfolder + "/" + segmentationFile
+        public static let fbankPath = subfolder + "/" + fbankFile
         public static let embeddingPath = subfolder + "/" + embeddingFile
         public static let pldaRhoPath = subfolder + "/" + pldaRhoFile
 
         public static let requiredModels: Set<String> = [
             segmentationPath,
+            fbankPath,
             embeddingPath,
             pldaRhoPath,
         ]

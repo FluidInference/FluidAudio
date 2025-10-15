@@ -3,7 +3,7 @@ import Foundation
 @available(macOS 13.0, iOS 16.0, *)
 struct OfflineReconstruction {
     private let config: OfflineDiarizerConfig
-    private let presenceThreshold: Float = 0.5
+    private let logger = AppLogger(category: "OfflineReconstruction")
 
     private struct Accumulator {
         var start: Double
@@ -47,8 +47,8 @@ struct OfflineReconstruction {
             repeating: Array(repeating: 0.0, count: clusterCount),
             count: totalFrames
         )
-        var speakerCountSums = [Double](repeating: 0, count: totalFrames)
-        var speakerCountContribs = [Double](repeating: 0, count: totalFrames)
+        var expectedCountSums = [Double](repeating: 0, count: totalFrames)
+        var expectedCountWeights = [Double](repeating: 0, count: totalFrames)
 
         for chunkIndex in 0..<segmentation.numChunks {
             guard chunkIndex < segmentation.speakerWeights.count else { continue }
@@ -81,6 +81,12 @@ struct OfflineReconstruction {
                     }
                 }
 
+                let expectedCount = weights.reduce(0.0) { partialSum, value in
+                    partialSum + Double(value)
+                }
+                expectedCountSums[globalFrame] += expectedCount
+                expectedCountWeights[globalFrame] += 1
+
                 for cluster in 0..<clusterCount {
                     let value = frameActivations[cluster]
                     if value > 0 {
@@ -88,38 +94,42 @@ struct OfflineReconstruction {
                         activationCounts[globalFrame][cluster] += 1
                     }
                 }
-
-                let activeSpeakers = weights.filter { $0 > presenceThreshold }
-                speakerCountSums[globalFrame] += Double(activeSpeakers.count)
-                speakerCountContribs[globalFrame] += 1
             }
         }
 
+        var activationAverages = Array(
+            repeating: Array(repeating: 0.0, count: clusterCount),
+            count: totalFrames
+        )
         for frame in 0..<totalFrames {
             for cluster in 0..<clusterCount {
                 let count = activationCounts[frame][cluster]
                 if count > 0 {
-                    activationSums[frame][cluster] /= count
-                } else {
-                    activationSums[frame][cluster] = 0
+                    activationAverages[frame][cluster] = activationSums[frame][cluster] / count
                 }
             }
         }
 
         var speakerCountPerFrame = [Int](repeating: 0, count: totalFrames)
+        var speakerCountHistogram: [Int: Int] = [:]
+        let maxAllowedSpeakers = min(clusterCount, segmentation.numSpeakers)
         for frame in 0..<totalFrames {
-            if speakerCountContribs[frame] > 0 {
-                let average = speakerCountSums[frame] / speakerCountContribs[frame]
-                let rounded = Int(average.rounded())
-                speakerCountPerFrame[frame] = min(clusterCount, max(0, rounded))
-            }
+            let weight = expectedCountWeights[frame]
+            guard weight > 0 else { continue }
+            var rounded = Int((expectedCountSums[frame] / weight).rounded(.toNearestOrEven))
+            if rounded < 0 { rounded = 0 }
+            if rounded > maxAllowedSpeakers { rounded = maxAllowedSpeakers }
+            speakerCountPerFrame[frame] = rounded
+            speakerCountHistogram[rounded, default: 0] += 1
+        }
 
-            if speakerCountPerFrame[frame] == 0 {
-                let hasActivity = activationSums[frame].contains { $0 > 1e-3 }
-                if hasActivity {
-                    speakerCountPerFrame[frame] = 1
-                }
-            }
+        if !speakerCountHistogram.isEmpty {
+            let histogramString =
+                speakerCountHistogram
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key):\($0.value)" }
+                .joined(separator: ", ")
+            logger.debug("Speaker-count histogram \(histogramString)")
         }
 
         var perFrameClusters = [[Int]](repeating: [], count: totalFrames)
@@ -138,7 +148,7 @@ struct OfflineReconstruction {
             let frameStart = Double(frameIndex) * frameDuration
             let frameEnd = frameStart + frameDuration
             let activeClusters = Set(perFrameClusters[frameIndex])
-            let scores = activationSums[frameIndex]
+            let averageScores = activationAverages[frameIndex]
 
             for (cluster, accumulator) in activeSegments where !activeClusters.contains(cluster) {
                 appendSegment(
@@ -152,7 +162,7 @@ struct OfflineReconstruction {
             activeSegments = activeSegments.filter { activeClusters.contains($0.key) }
 
             for cluster in activeClusters {
-                let score = scores.indices.contains(cluster) ? scores[cluster] : 0
+                let score = averageScores.indices.contains(cluster) ? averageScores[cluster] : 0
                 if var existing = activeSegments[cluster] {
                     existing.end = frameEnd
                     existing.scoreSum += score

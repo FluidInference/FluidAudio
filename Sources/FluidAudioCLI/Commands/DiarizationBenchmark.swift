@@ -650,6 +650,7 @@ enum StreamDiarizationBenchmark {
                 predicted: result.segments,
                 groundTruth: groundTruth,
                 frameSize: 0.01,
+                audioDurationSeconds: totalDuration,
                 logger: logger
             )
 

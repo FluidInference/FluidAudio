@@ -53,6 +53,7 @@ FluidAudio is a comprehensive Swift framework for local, low-latency audio proce
 - **Error handling**: Use proper Swift error handling, no force unwrapping in production
 - **Documentation**: Triple-slash comments (`///`) for public APIs
 - **Thread safety**: Use actors, `@MainActor`, or proper locking - never `@unchecked Sendable`
+- **Control flow**: Prefer flattened if statements with early returns/continues over nested if statements. Use guard statements and inverted conditions to exit early. Nested if statements should be absolutely avoided to improve readability and reduce cognitive complexity.
 
 ## Current Performance Status
 

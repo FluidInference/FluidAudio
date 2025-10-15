@@ -52,6 +52,10 @@ swift run fluidaudio process meeting.wav --mode streaming --threshold 0.7
 swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
 ```
 
+- `--mode offline` switches the CLI to `OfflineDiarizerManager`, running the full VBx pipeline with PLDA refinement. Expect DER ≈ 18–20 % on AMI-SDM with threshold 0.6.
+- Add `--rttm /path/to/ground_truth.rttm` to `process` to compute DER/JER in-place, or `--export-embeddings embeddings.json` for debugging speaker vectors.
+- GitHub Actions workflow `offline-pipeline.yml` replays `fluidaudio diarization-benchmark --mode offline --single-file ES2004a` on every PR so failures in model downloads or clustering logic are caught early.
+
 ## VAD
 
 ```bash

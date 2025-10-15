@@ -2,11 +2,17 @@ import Accelerate
 import FastClusterWrapper
 import Foundation
 import OSLog
+import os.signpost
 
 @available(macOS 13.0, iOS 16.0, *)
 struct AHCClustering {
     private let logger = AppLogger(category: "OfflineAHC")
+    private let signposter = OSSignposter(
+        subsystem: "com.fluidaudio.diarization",
+        category: .pointsOfInterest
+    )
 
+    // MARK: - Agglomerative Hierarchical Clustering
     func cluster(
         embeddingFeatures: [[Double]],
         threshold: Double
@@ -20,10 +26,13 @@ struct AHCClustering {
             return [0]
         }
 
+        let ahcState = signposter.beginInterval("Agglomerative Hierarchical Clustering")
+
         let normalized = normalizeFeatures(embeddingFeatures, dimension: dimension)
         let dendrogramLength = (count - 1) * 4
         var dendrogram = [Double](repeating: 0, count: dendrogramLength)
 
+        // MARK: - Fastcluster FFI Boundary
         let status = normalized.withUnsafeBufferPointer { normalizedPointer in
             dendrogram.withUnsafeMutableBufferPointer { dendrogramPointer in
                 fastcluster_compute_centroid_linkage(
@@ -48,9 +57,12 @@ struct AHCClustering {
             distanceThreshold: distanceThreshold
         )
 
-        return remapClusterIds(assignments)
+        let result = remapClusterIds(assignments)
+        signposter.endInterval("Agglomerative Hierarchical Clustering", ahcState)
+        return result
     }
 
+    // MARK: - L2 Feature Normalization
     private func normalizeFeatures(_ features: [[Double]], dimension: Int) -> [Double] {
         var normalized = [Double](repeating: 0, count: features.count * dimension)
 
@@ -88,6 +100,7 @@ struct AHCClustering {
         return normalized
     }
 
+    // MARK: - Similarity-to-Distance Conversion
     private func convertThresholdToDistance(_ similarity: Double) -> Double {
         guard !similarity.isNaN else { return Double.infinity }
         if similarity < -1.0 || similarity > 1.0 {
@@ -97,6 +110,7 @@ struct AHCClustering {
         return sqrt(max(0, 2.0 - 2.0 * clamped))
     }
 
+    // MARK: - Dendrogram Parsing & Threshold-Based Cluster Assignment
     private func assignmentsFromDendrogram(
         _ dendrogram: [Double],
         count: Int,
@@ -172,6 +186,7 @@ struct AHCClustering {
         return assignments
     }
 
+    // MARK: - Cluster ID Remapping
     private func remapClusterIds(_ assignments: [Int]) -> [Int] {
         var mapping: [Int: Int] = [:]
         var nextId = 0

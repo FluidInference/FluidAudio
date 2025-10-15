@@ -50,6 +50,7 @@ public struct OfflineDiarizerConfig: Sendable {
             sampleRate: 16_000,
             minDurationOn: 0.0,
             minDurationOff: 0.0,
+            // This with 1.0 min speech duration gives us ~1.4% worse DER but 2x the speed.
             stepRatio: 0.2,
             speechOnsetThreshold: 0.5,
             speechOffsetThreshold: 0.5
@@ -82,7 +83,7 @@ public struct OfflineDiarizerConfig: Sendable {
         public static let community = Embedding(
             batchSize: 32,
             excludeOverlap: true,
-            minSegmentDurationSeconds: 1
+            minSegmentDurationSeconds: 1.0
         )
 
         public init(
@@ -475,6 +476,37 @@ public struct SegmentationOutput: Sendable {
         self.frameDuration = frameDuration
     }
 }
+
+/// Incremental segmentation chunk emitted while the model processes audio.
+@available(macOS 13.0, iOS 16.0, *)
+public struct SegmentationChunk: Sendable {
+    public let chunkIndex: Int
+    public let chunkOffsetSeconds: Double
+    public let frameDuration: Double
+    public let logProbs: [[Float]]
+    public let speakerWeights: [[Float]]
+
+    public init(
+        chunkIndex: Int,
+        chunkOffsetSeconds: Double,
+        frameDuration: Double,
+        logProbs: [[Float]],
+        speakerWeights: [[Float]]
+    ) {
+        self.chunkIndex = chunkIndex
+        self.chunkOffsetSeconds = chunkOffsetSeconds
+        self.frameDuration = frameDuration
+        self.logProbs = logProbs
+        self.speakerWeights = speakerWeights
+    }
+}
+
+enum SegmentationChunkContinuation: Sendable {
+    case `continue`
+    case stop
+}
+
+typealias SegmentationChunkHandler = @Sendable (SegmentationChunk) -> SegmentationChunkContinuation
 
 /// Result returned by the VBx refinement step.
 @available(macOS 13.0, iOS 16.0, *)

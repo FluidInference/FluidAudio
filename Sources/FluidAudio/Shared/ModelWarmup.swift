@@ -52,6 +52,59 @@ enum ModelWarmup {
     ) throws {
         precondition(weightFrames > 0, "weightFrames must be positive")
 
+        do {
+            let inputs = model.modelDescription.inputDescriptionsByName
+            let featureShape: [Int]
+            if let fbank = inputs.first(where: { $0.key.caseInsensitiveCompare("fbank_features") == .orderedSame })?
+                .value.multiArrayConstraint?.shape
+            {
+                let mapped = fbank.map { $0.intValue }
+                if !mapped.isEmpty, mapped.allSatisfy({ $0 > 0 }) {
+                    featureShape = mapped
+                } else {
+                    featureShape = [1, 1, 80, 998]
+                }
+            } else {
+                featureShape = [1, 1, 80, 998]
+            }
+
+            let weightsShape: [Int]
+            if let weights = inputs.first(where: { $0.key.caseInsensitiveCompare("weights") == .orderedSame })?
+                .value.multiArrayConstraint?.shape
+            {
+                let mapped = weights.map { $0.intValue }
+                if !mapped.isEmpty, mapped.allSatisfy({ $0 > 0 }) {
+                    weightsShape = mapped
+                } else {
+                    weightsShape = [1, weightFrames]
+                }
+            } else {
+                weightsShape = [1, weightFrames]
+            }
+
+            let featureArray = try MLMultiArray(
+                shape: featureShape.map { NSNumber(value: $0) },
+                dataType: .float32
+            )
+            featureArray.resetToZeros()
+
+            let weightArray = try MLMultiArray(
+                shape: weightsShape.map { NSNumber(value: $0) },
+                dataType: .float32
+            )
+            weightArray.resetToZeros()
+
+            let provider = try MLDictionaryFeatureProvider(dictionary: [
+                "fbank_features": MLFeatureValue(multiArray: featureArray),
+                "weights": MLFeatureValue(multiArray: weightArray),
+            ])
+
+            _ = try model.prediction(from: provider)
+            return
+        } catch {
+            // Fall back to combined legacy interface.
+        }
+
         let totalElements = audioSamples + weightFrames
         do {
             let combinedArray = try MLMultiArray(

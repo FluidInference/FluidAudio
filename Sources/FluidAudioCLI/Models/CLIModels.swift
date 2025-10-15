@@ -13,12 +13,14 @@ struct ProcessingResult: Codable {
     let speakerCount: Int
     let config: DiarizerConfig?
     let metrics: DiarizationMetrics?
+    let timings: PipelineTimings?
     let timestamp: Date
 
     init(
         audioFile: String, durationSeconds: Float, processingTimeSeconds: TimeInterval,
         realTimeFactor: Float, segments: [TimedSpeakerSegment], speakerCount: Int,
-        config: DiarizerConfig?, metrics: DiarizationMetrics? = nil
+        config: DiarizerConfig?, metrics: DiarizationMetrics? = nil,
+        timings: PipelineTimings? = nil
     ) {
         self.audioFile = audioFile
         self.durationSeconds = durationSeconds
@@ -28,6 +30,7 @@ struct ProcessingResult: Codable {
         self.speakerCount = speakerCount
         self.config = config
         self.metrics = metrics
+        self.timings = timings
         self.timestamp = Date()
     }
 }

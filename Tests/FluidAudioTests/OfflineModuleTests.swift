@@ -152,7 +152,6 @@ final class OfflineDiarizerConfigTests: XCTestCase {
         let config = OfflineDiarizerConfig.default
 
         XCTAssertEqual(config.clusteringThreshold, 0.6, accuracy: 1e-12)
-        XCTAssertEqual(config.minClusterSize, 12)
         XCTAssertEqual(config.Fa, 0.07)
         XCTAssertEqual(config.Fb, 0.8)
         XCTAssertEqual(config.maxVBxIterations, 20)
@@ -186,16 +185,16 @@ final class OfflineDiarizerConfigTests: XCTestCase {
         }
     }
 
-    func testValidateThrowsForInvalidMinClusterSize() {
+    func testValidateThrowsForInvalidSegmentationMinDurationOn() {
         var config = OfflineDiarizerConfig()
-        config.minClusterSize = 0
+        config.segmentationMinDurationOn = -0.5
 
         XCTAssertThrowsError(try config.validate()) { error in
             guard case OfflineDiarizationError.invalidConfiguration(let message) = error else {
                 XCTFail("Expected invalidConfiguration, got \(error)")
                 return
             }
-            XCTAssertTrue(message.contains("minClusterSize"))
+            XCTAssertTrue(message.contains("segmentation.minDurationOn"))
         }
     }
 }
@@ -273,7 +272,7 @@ final class ModelWarmupTests: XCTestCase {
         }
     }
 
-    func testWarmupEmbeddingModelRespectsWeightFrameCount() throws {
+    func testWarmupEmbeddingModelUsesFbankInputsWhenAvailable() throws {
         let model = WarmupMockModel()
         let weightFrames = 64
 
@@ -284,21 +283,50 @@ final class ModelWarmupTests: XCTestCase {
             return
         }
 
-        let totalElements = 160_000 + weightFrames
-        let combined = lastInvocation["audio_and_weights"]
-        XCTAssertNotNil(combined)
-        XCTAssertEqual(combined?.shape.map { $0.intValue }, [1, 1, 1, totalElements])
+        let features = lastInvocation["fbank_features"]
+        let weights = lastInvocation["weights"]
+        XCTAssertNotNil(features)
+        XCTAssertNotNil(weights)
+
+        XCTAssertEqual(features?.shape.map { $0.intValue }, [1, 1, 80, 998])
+        XCTAssertEqual(weights?.shape.map { $0.intValue }, [1, weightFrames])
+    }
+
+    func testWarmupEmbeddingModelFallsBackToCombinedWhenFbankFails() throws {
+        let model = WarmupMockModel()
+        model.failureKeys = ["fbank_features"]
+        let weightFrames = 32
+
+        try ModelWarmup.warmupEmbeddingModel(model, weightFrames: weightFrames)
+
+        // Expect two invocations: failed FBANK attempt then combined fallback.
+        XCTAssertEqual(model.receivedInputs.count, 2)
+
+        guard let lastInvocation = model.receivedInputs.last else {
+            XCTFail("Expected fallback invocation")
+            return
+        }
+
+        XCTAssertNotNil(lastInvocation["audio_and_weights"])
+        XCTAssertNil(lastInvocation["fbank_features"])
     }
 
     // MARK: - Helpers
 
     private final class WarmupMockModel: MLModel {
         private(set) var receivedInputs: [[String: MLMultiArray]] = []
+        var failureKeys: Set<String> = []
 
         override func prediction(
             from input: MLFeatureProvider,
             options: MLPredictionOptions = MLPredictionOptions()
         ) throws -> MLFeatureProvider {
+            for name in input.featureNames {
+                if failureKeys.contains(name) {
+                    throw MockError.simulatedFailure
+                }
+            }
+
             var captured: [String: MLMultiArray] = [:]
             for name in input.featureNames {
                 if let array = input.featureValue(for: name)?.multiArrayValue {
@@ -310,6 +338,10 @@ final class ModelWarmupTests: XCTestCase {
             return try MLDictionaryFeatureProvider(dictionary: [
                 "output": MLFeatureValue(double: 0.0)
             ])
+        }
+
+        private enum MockError: Error {
+            case simulatedFailure
         }
     }
 }

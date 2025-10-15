@@ -1,8 +1,9 @@
+import Accelerate
 import CoreML
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
+@available(macOS 14.0, iOS 17.0, *)
 public final class OfflineDiarizerManager {
     private let logger = AppLogger(category: "OfflineDiarizer")
     private let config: OfflineDiarizerConfig
@@ -18,38 +19,170 @@ public final class OfflineDiarizerManager {
         logger.info("Offline diarizer models initialized")
     }
 
+    /// Ensure offline diarizer models are available, downloading and compiling them when needed.
+    /// - Parameters:
+    ///   - directory: Custom cache directory. Defaults to `OfflineDiarizerModels.defaultModelsDirectory()`.
+    ///   - configuration: Optional CoreML configuration to use during compilation.
+    ///   - forceRedownload: When `true`, the cached repo is deleted before attempting to load.
+    public func prepareModels(
+        directory: URL? = nil,
+        configuration: MLModelConfiguration? = nil,
+        forceRedownload: Bool = false
+    ) async throws {
+        if !forceRedownload, models != nil {
+            logger.debug("Offline diarizer models already prepared; skipping load")
+            return
+        }
+
+        let targetDirectory =
+            directory?.standardizedFileURL
+            ?? OfflineDiarizerModels.defaultModelsDirectory().standardizedFileURL
+
+        if forceRedownload {
+            do {
+                try purgeDiarizerRepo(at: targetDirectory)
+            } catch {
+                logger.warning(
+                    "Failed to purge diarizer cache during forced reload: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            let loadedModels = try await OfflineDiarizerModels.load(
+                from: targetDirectory,
+                configuration: configuration
+            )
+            initialize(models: loadedModels)
+            await prewarmModelsIfNeeded(loadedModels)
+            logger.info("Offline diarizer models loaded from \(targetDirectory.path)")
+        } catch {
+            logger.error(
+                "Initial offline diarizer model load failed: \(error.localizedDescription)")
+            logger.info("Attempting fallback download and compilation")
+
+            do {
+                try purgeDiarizerRepo(at: targetDirectory)
+            } catch {
+                logger.warning(
+                    "Failed to remove cached diarizer repo before fallback: \(error.localizedDescription)")
+            }
+
+            let fallbackStart = Date()
+
+            do {
+                let reloadedModels = try await OfflineDiarizerModels.load(
+                    from: targetDirectory,
+                    configuration: configuration
+                )
+                let downloadDuration = Date().timeIntervalSince(fallbackStart)
+                let normalizedModels = Self.wrapModels(
+                    reloadedModels,
+                    downloadDuration: downloadDuration,
+                    compilationDuration: reloadedModels.compilationDuration
+                )
+                initialize(models: normalizedModels)
+                await prewarmModelsIfNeeded(normalizedModels)
+
+                let durationText = String(format: "%.2f", downloadDuration)
+                logger.info(
+                    "Fallback download + compile completed in \(durationText)s at \(targetDirectory.path)")
+            } catch {
+                logger.error(
+                    "Fallback offline diarizer model load failed: \(error.localizedDescription)")
+                throw error
+            }
+        }
+    }
+
     public func process(audio: [Float]) async throws -> DiarizationResult {
+        try await process(
+            audioSource: ArrayAudioSampleSource(samples: audio),
+            audioLoadingSeconds: 0
+        )
+    }
+
+    public func process(
+        audioSource: StreamingAudioSampleSource,
+        audioLoadingSeconds: TimeInterval
+    ) async throws -> DiarizationResult {
         try config.validate()
+        if models == nil {
+            try await prepareModels()
+        }
+
         guard let models else {
             throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
         }
 
         let totalStart = Date()
 
-        let segmentationProcessor = OfflineSegmentationProcessor()
-        let segmentationStart = Date()
-        let segmentation = try segmentationProcessor.process(
-            audioSamples: audio,
-            segmentationModel: models.segmentationModel,
-            config: config
-        )
-        let segmentationTime = Date().timeIntervalSince(segmentationStart)
-        logger.debug("Segmentation completed in \(segmentationTime)s")
+        let streamPair = AsyncThrowingStream<SegmentationChunk, Error>.makeStream()
+        let chunkStream = streamPair.stream
+        let chunkContinuation = streamPair.continuation
+
+        let segmentationTask = Task(priority: .userInitiated) { () throws -> (SegmentationOutput, TimeInterval) in
+            let processor = OfflineSegmentationProcessor()
+            let start = Date()
+            do {
+                let segmentation = try await processor.process(
+                    audioSource: audioSource,
+                    segmentationModel: models.segmentationModel,
+                    config: config,
+                    chunkHandler: { chunk in
+                        switch chunkContinuation.yield(chunk) {
+                        case .enqueued, .dropped:
+                            return .continue
+                        case .terminated:
+                            return .stop
+                        @unknown default:
+                            return .stop
+                        }
+                    }
+                )
+                chunkContinuation.finish()
+                return (segmentation, Date().timeIntervalSince(start))
+            } catch {
+                chunkContinuation.finish(throwing: error)
+                throw error
+            }
+        }
+
+        let embeddingTask = Task(priority: .userInitiated) { () throws -> ([TimedEmbedding], TimeInterval) in
+            let extractor = OfflineEmbeddingExtractor(
+                fbankModel: models.fbankModel,
+                embeddingModel: models.embeddingModel,
+                pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
+                config: config
+            )
+            let start = Date()
+            let embeddings = try await extractor.extractEmbeddings(
+                audioSource: audioSource,
+                segmentationStream: chunkStream
+            )
+            return (embeddings, Date().timeIntervalSince(start))
+        }
+
+        let segmentationResult: (SegmentationOutput, TimeInterval)
+        let embeddingResult: ([TimedEmbedding], TimeInterval)
+        do {
+            async let awaitedSegmentation = segmentationTask.value
+            async let awaitedEmbeddings = embeddingTask.value
+            segmentationResult = try await awaitedSegmentation
+            embeddingResult = try await awaitedEmbeddings
+        } catch {
+            segmentationTask.cancel()
+            embeddingTask.cancel()
+            chunkContinuation.finish(throwing: error)
+            throw error
+        }
+
+        let (segmentation, segmentationTime) = segmentationResult
+        logger.debug("Segmentation completed in \(segmentationTime)s (async)")
+
+        let (timedEmbeddings, embeddingTime) = embeddingResult
+        logger.debug("Embedding extraction produced \(timedEmbeddings.count) vectors in \(embeddingTime)s (async)")
 
         let pldaTransform = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
-        let embeddingExtractor = OfflineEmbeddingExtractor(
-            embeddingModel: models.embeddingModel,
-            pldaTransform: pldaTransform,
-            config: config
-        )
-
-        let embeddingStart = Date()
-        let timedEmbeddings = try embeddingExtractor.extractEmbeddings(
-            audio: audio,
-            segmentation: segmentation
-        )
-        let embeddingTime = Date().timeIntervalSince(embeddingStart)
-        logger.debug("Embedding extraction produced \(timedEmbeddings.count) vectors in \(embeddingTime)s")
 
         guard !timedEmbeddings.isEmpty else {
             throw OfflineDiarizationError.noSpeechDetected
@@ -151,7 +284,7 @@ public final class OfflineDiarizerManager {
         let timings = PipelineTimings(
             modelDownloadSeconds: models.downloadDuration,
             modelCompilationSeconds: models.compilationDuration,
-            audioLoadingSeconds: 0,
+            audioLoadingSeconds: audioLoadingSeconds,
             segmentationSeconds: segmentationTime,
             embeddingExtractionSeconds: embeddingTime,
             speakerClusteringSeconds: clusteringTime,
@@ -162,6 +295,97 @@ public final class OfflineDiarizerManager {
             segments: segments,
             speakerDatabase: speakerDatabase,
             timings: timings
+        )
+    }
+
+    private func purgeDiarizerRepo(at baseDirectory: URL) throws {
+        let repoDirectory = baseDirectory.appendingPathComponent(
+            Repo.diarizer.folderName,
+            isDirectory: true
+        )
+        if FileManager.default.fileExists(atPath: repoDirectory.path) {
+            try FileManager.default.removeItem(at: repoDirectory)
+        }
+    }
+
+    private static func wrapModels(
+        _ models: OfflineDiarizerModels,
+        downloadDuration: TimeInterval,
+        compilationDuration: TimeInterval
+    ) -> OfflineDiarizerModels {
+        OfflineDiarizerModels(
+            segmentationModel: models.segmentationModel,
+            fbankModel: models.fbankModel,
+            embeddingModel: models.embeddingModel,
+            pldaRhoModel: models.pldaRhoModel,
+            pldaPsi: models.pldaPsi,
+            downloadDuration: downloadDuration,
+            compilationDuration: compilationDuration
+        )
+    }
+
+    private func prewarmModelsIfNeeded(_ models: OfflineDiarizerModels) async {
+        do {
+            let start = Date()
+            try prewarmSegmentationModel(models.segmentationModel)
+            let elapsed = Date().timeIntervalSince(start)
+            let elapsedString = String(format: "%.3f", elapsed)
+            logger.debug("Segmentation model prewarmed in \(elapsedString)s")
+        } catch {
+            logger.debug("Segmentation prewarm skipped: \(error.localizedDescription)")
+        }
+
+        do {
+            let start = Date()
+            try await prewarmEmbeddingStack(models: models)
+            let elapsed = Date().timeIntervalSince(start)
+            let elapsedString = String(format: "%.3f", elapsed)
+            logger.debug("Embedding stack prewarmed in \(elapsedString)s")
+        } catch {
+            logger.debug("Embedding prewarm skipped: \(error.localizedDescription)")
+        }
+    }
+
+    private func prewarmSegmentationModel(_ model: MLModel) throws {
+        let shape: [NSNumber] = [
+            1,
+            1,
+            NSNumber(value: config.samplesPerWindow),
+        ]
+        let array = try MLMultiArray(shape: shape, dataType: .float32)
+        let pointer = array.dataPointer.assumingMemoryBound(to: Float.self)
+        vDSP_vclr(pointer, 1, vDSP_Length(array.count))
+
+        let provider = ZeroCopyDiarizerFeatureProvider(
+            features: ["audio": MLFeatureValue(multiArray: array)]
+        )
+        let options = MLPredictionOptions()
+        array.prefetchToNeuralEngine()
+        _ = try model.prediction(from: provider, options: options)
+    }
+
+    private func prewarmEmbeddingStack(models: OfflineDiarizerModels) async throws {
+        let extractor = OfflineEmbeddingExtractor(
+            fbankModel: models.fbankModel,
+            embeddingModel: models.embeddingModel,
+            pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
+            config: config
+        )
+
+        let dummyAudio = [Float](repeating: 0, count: config.samplesPerWindow)
+        let dummySegmentation = SegmentationOutput(
+            logProbs: [[[0]]],
+            speakerWeights: [[[1.0]]],
+            numChunks: 1,
+            numFrames: 1,
+            numSpeakers: 1,
+            chunkOffsets: [0],
+            frameDuration: max(1e-3, config.windowDuration)
+        )
+
+        _ = try await extractor.extractEmbeddings(
+            audio: dummyAudio,
+            segmentation: dummySegmentation
         )
     }
 

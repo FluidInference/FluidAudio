@@ -26,8 +26,8 @@ let package = Package(
         .target(
             name: "FluidAudio",
             dependencies: [
-                "ESpeakNG"
-                "FastClusterWrapper",
+                "ESpeakNG",
+                "FastClusterWrapper"
             ],
             path: "Sources/FluidAudio",
             exclude: ["Frameworks"],

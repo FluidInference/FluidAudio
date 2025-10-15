@@ -222,26 +222,33 @@ swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --thresh
 [23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
 ```
 
-
 ## Speaker Diarization
 
-### Offline VBx (pyannote community-1)
+The offline version uses the community-1 model, the online version uses the legacy speaker-diarization-3.1 model.
 
-The offline controller mirrors the pyannote Community-1 pipeline (powerset segmentation + WeSpeaker + VBx).
+### Offline diarzing pipeline
 
-```bash
-swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6 --auto-download
-```
+For slightly ~1.2% worse DER we default to a higher step ratio segmentation duration than the baseline community-1 pipeline. This allows us to get nearly ~2x the speed (as expected because we're processing 1/2 of the embeddings). For highly critical use cases, one may should use step ratio = 0.1 and minSegmentDurationSeconds = 0.0
 
-- Default configuration (`OfflineDiarizerConfig.default`) matches the exporter values: threshold = 0.6, minimum cluster size 12, `Fa=0.07`, `Fb=0.8`, 10 s windows.
-- Segmentation emits 589 frames per 10 s chunk; soft weights stay in probability space before being resampled with the `scipy.ndimage.zoom`-compatible helper.
-- On an M4 Pro, the offline pipeline typically processes AMI-SDM at ~5.2× real time (RTFx ≈ 5.2) with DER ≈ 18–19 %, in line with the original pyannote numbers.
-- Enable `--debug` to collect `PipelineTimings` and per-speaker embeddings for post-analysis.
-
-For quick spot checks on a single file without the benchmark harness:
+Running on the full voxconverse benchmark:
 
 ```bash
-swift run fluidaudio process ES2004a.Mix-Headset.wav --mode offline --threshold 0.6 --debug --output es2004a_offline.json
+StepRatio = 0.2, minSegmentDurationSeconds= 1.0
+Average DER: 15.07% | Median DER: 10.70% | Average JER: 39.40% | Median JER: 40.95% (collar=0.25s, ignoreOverlap=True)
+Average RTFx: 122.06 (from 232 clips)
+Completed. New results: 232, Skipped existing: 0, Total attempted: 232
+Step Ratio 2, min turation 1.0
+
+
+StepRatio = 0.1, minSegmentDurationSeconds= 0
+Average DER: 13.89% | Median DER: 10.49% | Average JER: 42.84% | Median JER: 43.30% (collar=0.25s, ignoreOverlap=True)
+Average RTFx: 64.75 (from 232 clips)
+Completed. New results: 232, Skipped existing: 0, Total attempted: 232
+Step Ratio 1, min duration 0 (edited) 
 ```
 
-The JSON output matches the streaming format (list of `TimedSpeakerSegment`s) so you can diff results between streaming and offline runs.
+Note that the baseline pytorch version is ~11% DER, we lost some precision dropping down to fp16 precision in order to run most of the emebdding model on neural engine. But as a result, we significantly out perform the baseline `mps` backend as well. the pyannote-community-1 on cpu is ~1.5-2 RTFx, on mps, it's ~20-25 RTFx.
+
+### Streaming/online Diarization
+
+This is more tricky and honestly a lot more fragile to clustering. Expect +10-15% worse DER for the streaming implementation. Only use this when you critically need realtime streaming speaker diarization. In most cases, offline is more than enough for most applications.
