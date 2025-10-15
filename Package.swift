@@ -29,8 +29,8 @@ let package = Package(
                 "ESpeakNG"
             ],
             path: "Sources/FluidAudio",
-            exclude: []
-        ),
+            exclude: ["Frameworks"]
+	),
         .executableTarget(
             name: "FluidAudioCLI",
             dependencies: ["FluidAudio"],
