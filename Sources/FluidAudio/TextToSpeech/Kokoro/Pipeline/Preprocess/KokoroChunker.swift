@@ -21,6 +21,16 @@ enum KokoroChunker {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroChunker")
     private static let decimalDigits = CharacterSet.decimalDigits
     private static let apostropheCharacters: Set<Character> = ["'", "’", "ʼ", "‛", "‵", "′"]
+
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        if character.isLetter || character.isNumber || apostropheCharacters.contains(character) {
+            return true
+        }
+
+        return character.unicodeScalars.contains { scalar in
+            scalar.properties.isEmojiPresentation || scalar.properties.isEmoji
+        }
+    }
     /// Public entry point used by `KokoroSynthesizer`
     static func chunk(
         text: String,
@@ -93,7 +103,8 @@ enum KokoroChunker {
             segmentsByPunctuations.append(segment)
         }
 
-        var sortedOverrides = phoneticOverrides
+        let sortedOverrides =
+            phoneticOverrides
             .enumerated()
             .sorted { lhs, rhs in
                 if lhs.element.wordIndex == rhs.element.wordIndex {
@@ -102,7 +113,7 @@ enum KokoroChunker {
                 return lhs.element.wordIndex < rhs.element.wordIndex
             }
             .map { $0.element }
-        var overrideCursor = 0
+        var overrideIndex = 0
 
         var globalWordIndex = 0
         var chunks: [TextChunk] = []
@@ -117,13 +128,13 @@ enum KokoroChunker {
                 capacity: capacity,
                 wordIndex: &globalWordIndex,
                 overrides: sortedOverrides,
-                overrideCursor: &overrideCursor
+                overrideIndex: &overrideIndex
             )
             chunks.append(contentsOf: built)
         }
 
-        if overrideCursor < sortedOverrides.count {
-            let remaining = sortedOverrides[overrideCursor...]
+        if overrideIndex < sortedOverrides.count {
+            let remaining = sortedOverrides[overrideIndex...]
             let sample = remaining.prefix(5).map { $0.word }
             logger.warning("Unused phonetic overrides for words: \(sample.joined(separator: ", "))")
         }
@@ -258,7 +269,7 @@ enum KokoroChunker {
         capacity: Int,
         wordIndex: inout Int,
         overrides: [TtsPhoneticOverride],
-        overrideCursor: inout Int
+        overrideIndex: inout Int
     ) -> [TextChunk] {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return [] }
@@ -307,14 +318,14 @@ enum KokoroChunker {
                 }
 
                 var resolved: [String]? = nil
-                if overrideCursor < overrides.count {
-                    while overrideCursor < overrides.count {
-                        let candidate = overrides[overrideCursor]
+                if overrideIndex < overrides.count {
+                    while overrideIndex < overrides.count {
+                        let candidate = overrides[overrideIndex]
                         if candidate.wordIndex < wordIndex {
                             logger.warning(
                                 "Skipping stale phonetic override for word: \(candidate.word) (index \(candidate.wordIndex))"
                             )
-                            overrideCursor += 1
+                            overrideIndex += 1
                             continue
                         }
                         if candidate.wordIndex == wordIndex {
@@ -326,7 +337,7 @@ enum KokoroChunker {
                             } else {
                                 resolved = overrideTokens
                             }
-                            overrideCursor += 1
+                            overrideIndex += 1
                         }
                         break
                     }
@@ -423,12 +434,17 @@ enum KokoroChunker {
                 continue
             }
 
-            if ch.isLetter || ch.isNumber || apostropheCharacters.contains(ch) {
-                currentWord.append(apostropheCharacters.contains(ch) ? "'" : ch)
-            } else {
-                flushWord()
-                atoms.append(AtomToken(text: String(ch), kind: .punctuation(String(ch))))
+            if isWordCharacter(ch) {
+                if apostropheCharacters.contains(ch) {
+                    currentWord.append("'")
+                } else {
+                    currentWord.append(ch)
+                }
+                continue
             }
+
+            flushWord()
+            atoms.append(AtomToken(text: String(ch), kind: .punctuation(String(ch))))
         }
 
         flushWord()
@@ -439,7 +455,7 @@ enum KokoroChunker {
         _ override: TtsPhoneticOverride,
         allowed: Set<String>
     ) -> [String] {
-        var tokens = override.tokens.filter { allowed.contains($0) }
+        let tokens = override.tokens.filter { allowed.contains($0) }
         if !tokens.isEmpty {
             return tokens
         }
