@@ -21,6 +21,16 @@ enum KokoroChunker {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroChunker")
     private static let decimalDigits = CharacterSet.decimalDigits
     private static let apostropheCharacters: Set<Character> = ["'", "’", "ʼ", "‛", "‵", "′"]
+
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        if character.isLetter || character.isNumber || apostropheCharacters.contains(character) {
+            return true
+        }
+
+        return character.unicodeScalars.contains { scalar in
+            scalar.properties.isEmojiPresentation || scalar.properties.isEmoji
+        }
+    }
     /// Public entry point used by `KokoroSynthesizer`
     static func chunk(
         text: String,
@@ -28,7 +38,8 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         targetTokens: Int,
         hasLanguageToken: Bool,
-        allowedPhonemes: Set<String>
+        allowedPhonemes: Set<String>,
+        phoneticOverrides: [TtsPhoneticOverride]
     ) -> [TextChunk] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -92,14 +103,40 @@ enum KokoroChunker {
             segmentsByPunctuations.append(segment)
         }
 
-        let chunks = segmentsByPunctuations.flatMap { chunkText in
-            buildChunks(
+        let sortedOverrides =
+            phoneticOverrides
+            .enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.wordIndex == rhs.element.wordIndex {
+                    return lhs.offset < rhs.offset
+                }
+                return lhs.element.wordIndex < rhs.element.wordIndex
+            }
+            .map { $0.element }
+        var overrideIndex = 0
+
+        var globalWordIndex = 0
+        var chunks: [TextChunk] = []
+        chunks.reserveCapacity(segmentsByPunctuations.count)
+
+        for chunkText in segmentsByPunctuations {
+            let built = buildChunks(
                 from: chunkText,
                 lexicon: wordToPhonemes,
                 caseSensitiveLexicon: caseSensitiveLexicon,
                 allowed: allowedPhonemes,
-                capacity: capacity
+                capacity: capacity,
+                wordIndex: &globalWordIndex,
+                overrides: sortedOverrides,
+                overrideIndex: &overrideIndex
             )
+            chunks.append(contentsOf: built)
+        }
+
+        if overrideIndex < sortedOverrides.count {
+            let remaining = sortedOverrides[overrideIndex...]
+            let sample = remaining.prefix(5).map { $0.word }
+            logger.warning("Unused phonetic overrides for words: \(sample.joined(separator: ", "))")
         }
 
         return chunks
@@ -229,7 +266,10 @@ enum KokoroChunker {
         lexicon: [String: [String]],
         caseSensitiveLexicon: [String: [String]],
         allowed: Set<String>,
-        capacity: Int
+        capacity: Int,
+        wordIndex: inout Int,
+        overrides: [TtsPhoneticOverride],
+        overrideIndex: inout Int
     ) -> [TextChunk] {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return [] }
@@ -272,22 +312,60 @@ enum KokoroChunker {
             switch atom.kind {
             case .word(let original):
                 let normalized = normalize(original)
-                guard !normalized.isEmpty else { continue }
-
-                guard
-                    let resolved = resolvePhonemes(
-                        for: original,
-                        normalized: normalized,
-                        lexicon: lexicon,
-                        caseSensitiveLexicon: caseSensitiveLexicon,
-                        allowed: allowed,
-                        missing: &missing
-                    )
-                else {
+                if normalized.isEmpty {
+                    wordIndex += 1
                     continue
                 }
 
-                var tokenCost = resolved.count
+                var resolved: [String]? = nil
+                if overrideIndex < overrides.count {
+                    while overrideIndex < overrides.count {
+                        let candidate = overrides[overrideIndex]
+                        if candidate.wordIndex < wordIndex {
+                            logger.warning(
+                                "Skipping stale phonetic override for word: \(candidate.word) (index \(candidate.wordIndex))"
+                            )
+                            overrideIndex += 1
+                            continue
+                        }
+                        if candidate.wordIndex == wordIndex {
+                            let overrideTokens = resolveOverride(candidate, allowed: allowed)
+                            if overrideTokens.isEmpty {
+                                logger.warning(
+                                    "Phonetic override for word index \(wordIndex) (word: \(candidate.word)) produced no valid tokens; falling back to lexicon"
+                                )
+                            } else {
+                                resolved = overrideTokens
+                            }
+                            overrideIndex += 1
+                        }
+                        break
+                    }
+                }
+
+                if resolved == nil {
+                    guard
+                        let fallback = resolvePhonemes(
+                            for: original,
+                            normalized: normalized,
+                            lexicon: lexicon,
+                            caseSensitiveLexicon: caseSensitiveLexicon,
+                            allowed: allowed,
+                            missing: &missing
+                        )
+                    else {
+                        wordIndex += 1
+                        continue
+                    }
+                    resolved = fallback
+                }
+
+                guard let resolvedPhonemes = resolved, !resolvedPhonemes.isEmpty else {
+                    wordIndex += 1
+                    continue
+                }
+
+                var tokenCost = resolvedPhonemes.count
                 if needsWordSeparator {
                     tokenCost += 1
                 }
@@ -301,11 +379,12 @@ enum KokoroChunker {
                     chunkTokenCount += 1
                 }
 
-                chunkPhonemes.append(contentsOf: resolved)
-                chunkTokenCount += resolved.count
+                chunkPhonemes.append(contentsOf: resolvedPhonemes)
+                chunkTokenCount += resolvedPhonemes.count
                 chunkWords.append(original)
                 chunkAtoms.append(original)
                 needsWordSeparator = true
+                wordIndex += 1
 
             case .punctuation(let symbol):
                 guard allowed.contains(symbol) else { continue }
@@ -355,16 +434,45 @@ enum KokoroChunker {
                 continue
             }
 
-            if ch.isLetter || ch.isNumber || apostropheCharacters.contains(ch) {
-                currentWord.append(apostropheCharacters.contains(ch) ? "'" : ch)
-            } else {
-                flushWord()
-                atoms.append(AtomToken(text: String(ch), kind: .punctuation(String(ch))))
+            if isWordCharacter(ch) {
+                if apostropheCharacters.contains(ch) {
+                    currentWord.append("'")
+                } else {
+                    currentWord.append(ch)
+                }
+                continue
             }
+
+            flushWord()
+            atoms.append(AtomToken(text: String(ch), kind: .punctuation(String(ch))))
         }
 
         flushWord()
         return atoms
+    }
+
+    private static func resolveOverride(
+        _ override: TtsPhoneticOverride,
+        allowed: Set<String>
+    ) -> [String] {
+        let tokens = override.tokens.filter { allowed.contains($0) }
+        if !tokens.isEmpty {
+            return tokens
+        }
+
+        let mappedFromTokens = PhonemeMapper.mapIPA(override.tokens, allowed: allowed)
+        if !mappedFromTokens.isEmpty {
+            return mappedFromTokens
+        }
+
+        if !override.scalarTokens.isEmpty {
+            let mappedScalars = PhonemeMapper.mapIPA(override.scalarTokens, allowed: allowed)
+            if !mappedScalars.isEmpty {
+                return mappedScalars
+            }
+        }
+
+        return []
     }
 
     private static func resolvePhonemes(
