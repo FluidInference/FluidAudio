@@ -241,6 +241,18 @@ final class MLArrayCacheTests: XCTestCase {
         XCTAssertNotNil(finalArray)
     }
 
+    func testGetArrayDoesNotReuseActiveBuffer() async throws {
+        let shape: [NSNumber] = [1, 64]
+
+        let array1 = try await cache.getArray(shape: shape, dataType: .float32)
+        let array2 = try await cache.getArray(shape: shape, dataType: .float32)
+
+        XCTAssertFalse(array1 === array2, "Cache should not hand out the same array while it is still borrowed")
+
+        await cache.returnArray(array1)
+        await cache.returnArray(array2)
+    }
+
     // Removed performance test - can cause timing issues
 
     // MARK: - Global Cache Tests
@@ -255,4 +267,5 @@ final class MLArrayCacheTests: XCTestCase {
         // Return to shared cache
         await sharedMLArrayCache.returnArray(array)
     }
+
 }

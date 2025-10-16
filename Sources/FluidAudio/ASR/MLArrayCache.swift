@@ -27,7 +27,11 @@ actor MLArrayCache {
 
         // Check if we have a cached array
         if var arrays = cache[key], !arrays.isEmpty {
-            return arrays.removeLast()
+            // Never return the same buffer twice while it is still in use; keep the trimmed bucket so we only
+            // hand out arrays that callers have explicitly returned to the cache.
+            let array = arrays.removeLast()
+            cache[key] = arrays
+            return array
         }
 
         return try ANEOptimizer.createANEAlignedArray(shape: shape, dataType: dataType)
