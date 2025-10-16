@@ -5,7 +5,7 @@ let package = Package(
     name: "FluidAudioExample",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17)
+        .iOS(.v17),
     ],
     products: [
         .executable(
