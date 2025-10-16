@@ -452,6 +452,9 @@ public actor StreamingAsrManager {
         do {
             let chunkStartTime = Date()
 
+            // `offsetOverride` is supplied when we surface buffered windows after a VAD-induced gap;
+            // otherwise we continue using `cumulativeVadDroppedSamples`, which tracks the running total
+            // of dropped samples so timestamps stay aligned with the original audio timeline.
             let cumulativeOffset = offsetOverride ?? cumulativeVadDroppedSamples
             let parameters = buildChunkParameters(for: window, additionalOffsetSamples: cumulativeOffset)
 
@@ -541,6 +544,7 @@ public actor StreamingAsrManager {
         }
     }
 
+    /// Millisecond offset relative to `startTime` (stream start). Falls back to wall clock when unset.
     private func currentStreamTimestampMs() -> Int {
         guard let startTime else {
             return Int(Date().timeIntervalSince1970 * 1000.0)

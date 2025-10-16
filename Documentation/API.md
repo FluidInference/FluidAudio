@@ -52,13 +52,13 @@ Voice activity detection using the Silero VAD Core ML model with 256 ms unified 
 - `VadManager.sampleRate = 16000`
 
 **Configuration (`VadConfig`):**
-- `threshold: Float` — Decision threshold (0.0–1.0). Default: `0.30`.
+- `threshold: Float` — Decision threshold (0.0–1.0). Default: `0.85`.
 - `debugMode: Bool` — Extra logging for benchmarking and troubleshooting. Default: `false`.
 - `computeUnits: MLComputeUnits` — Core ML compute target. Default: `.cpuAndNeuralEngine`.
 
 Recommended threshold ranges depend on your acoustic conditions:
-- Clean speech: 0.30–0.40 (raise for stricter gating)
-- Noisy or far-field content: 0.20–0.30 (maximize recall; expect more false positives)
+- Clean speech: 0.7–0.9
+- Noisy or mixed content: 0.3–0.6 (higher recall, more false positives)
 
 **Performance:**
 - Optimized for Apple Neural Engine (ANE) with aligned `MLMultiArray` buffers, silent-frame short-circuiting, and recurrent state reuse (hidden/cell/context) for sequential inference.
@@ -125,7 +125,7 @@ Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 mult
   - `withMaxWaitMilliseconds(_:)`, `withDebugDumpEnabled(_:)`, `withTokenizerKind(_:)` supply fluent overrides for advanced tuning.
 
 - `StreamingVadConfig`: Wraps VAD enablement + segmentation knobs.
-  - Fields: `isEnabled`, `vadConfig` (threshold defaults to `0.30`), `segmentationConfig` (padding + minimum speech durations).
+  - Fields: `isEnabled`, `vadConfig` (auto-initialized streaming sessions default to `threshold = 0.30`), `segmentationConfig` (padding + minimum speech durations).
   - Use `.default` for auto-managed Silero VAD or `.disabled` to stream raw audio.
 
 - `StreamingTranscriptionUpdate`: Delivered through `transcriptionUpdates`.

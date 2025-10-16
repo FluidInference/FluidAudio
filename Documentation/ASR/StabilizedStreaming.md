@@ -14,6 +14,19 @@ The stabilizer is always active inside `StreamingAsrManager`; stream consumers t
 
 ## Pipeline overview
 
+```mermaid
+flowchart LR
+    audio[Audio source\n(microphone / file / stream)] --> ingestion[Audio ingestion\nStreamingAsrManager]
+    ingestion --> vad[VAD gating\nStreamingVadPipeline]
+    vad --> window[Window assembly\nStreamingWindowProcessor]
+    window --> decoder[Decoder step\nAsrManager.transcribeStreamingChunk]
+    decoder --> stabilizer[Stabilization layer\nStreamingStabilizerSink]
+    stabilizer --> volatile[Volatile updates\n(instant UI drafts)]
+    stabilizer --> confirmed[Confirmed updates\n(stable transcript)]
+    volatile --> ui[Subscribers / UI layers]
+    confirmed --> ui
+```
+
 1. **Audio ingestion** – `StreamingAsrManager` accepts `AVAudioPCMBuffer` frames from any source (microphone, file, custom stream) and resamples everything to 16 kHz mono.
 2. **VAD gating** – `StreamingVadPipeline` runs the Core ML Silero VAD model (downloaded automatically) to drop silence and pre-speech padding before decoding.
 3. **Window assembly** – `StreamingWindowProcessor` stitches left / main / right contexts so the decoder sees a consistent timeline.
