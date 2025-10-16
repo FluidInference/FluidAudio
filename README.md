@@ -1,6 +1,6 @@
 ![banner.png](banner.png)
 
-# FluidAudio - Speaker diarization, voice-activity-detection and transcription with CoreML
+# FluidAudio - Transcription, Text-to-speech, VAD, Speaker diarization with CoreML Models
 
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20iOS-blue.svg)](https://developer.apple.com)
@@ -401,6 +401,8 @@ Make a PR if you want to add your app!
 | **[Altic/Fluid](https://github.com/altic-dev/Fluid-oss)** | Voice-to-text dictation app for macOS with AI enhancement. |
 | **[Paraspeech](https://paraspeech.com)** | AI powered voice to text. Fully offline. No subscriptions. |
 | **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | Comparison of different local ASR, including one of the first verions of FluidAudio's ASR models |
+| **[Starling](https://github.com/Ryandonofrio3/Starling)** | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
+| **[BoltAI](https://boltai.com/)** | Write content 10x faster using parakeet models |
 
 ## Everything Else
 

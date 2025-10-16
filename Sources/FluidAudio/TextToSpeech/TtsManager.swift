@@ -103,8 +103,8 @@ public final class TtSManager {
 
         try await prepareLexiconAssetsIfNeeded()
 
-        let preprocessedText = TtsTextPreprocessor.preprocess(text)
-        let cleanedText = try KokoroSynthesizer.sanitizeInput(preprocessedText)
+        let preprocessing = TtsTextPreprocessor.preprocessDetailed(text)
+        let cleanedText = try KokoroSynthesizer.sanitizeInput(preprocessing.text)
         let selectedVoice = resolveVoice(voice, speakerId: speakerId)
         try await ensureVoiceEmbeddingIfNeeded(for: selectedVoice)
 
@@ -114,7 +114,8 @@ public final class TtSManager {
                     text: cleanedText,
                     voice: selectedVoice,
                     voiceSpeed: voiceSpeed,
-                    variantPreference: variantPreference
+                    variantPreference: variantPreference,
+                    phoneticOverrides: preprocessing.phoneticOverrides
                 )
             }
         }
