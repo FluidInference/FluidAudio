@@ -21,7 +21,7 @@ extension MLModel {
             }
         }
         #else
-        return try prediction(from: input, options: options)
+        return try prediction(fromFeatures: input, options: options)
         #endif
     }
 }
