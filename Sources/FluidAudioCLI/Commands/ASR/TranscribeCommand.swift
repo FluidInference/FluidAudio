@@ -146,16 +146,6 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
-            case "--no-stabilize":
-                logger.error("`--no-stabilize` is no longer supported now that streaming stabilization is always on.")
-                exit(1)
-            case "--stabilize":
-                logger.info("`--stabilize` is deprecated; stabilized streaming is always enabled.")
-            case "--stabilize-profile":
-                logger.error(
-                    "`--stabilize-profile` has been removed. Streaming now always uses the high-stability configuration."
-                )
-                exit(1)
             case "--stabilize-debug":
                 stabilizerDebug = true
             default:
@@ -496,7 +486,6 @@ enum TranscribeCommand {
                 --metadata         Show confidence, start time, and end time in results
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
                 --stabilize-debug   Write stabilizer JSONL debug traces to a temp file
-                --stabilize         Deprecated alias (stabilization is always enabled)
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)
@@ -506,7 +495,6 @@ enum TranscribeCommand {
 
             Notes:
             - Stabilized streaming always uses the high-stability configuration for best accuracy.
-            - The --no-stabilize flag remains unsupported because stabilization is required for streaming quality.
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results
