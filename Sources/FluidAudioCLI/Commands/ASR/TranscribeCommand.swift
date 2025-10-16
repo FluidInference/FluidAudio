@@ -152,7 +152,9 @@ enum TranscribeCommand {
             case "--stabilize":
                 logger.info("`--stabilize` is deprecated; stabilized streaming is always enabled.")
             case "--stabilize-profile":
-                logger.error("`--stabilize-profile` has been removed. Streaming now always uses the high-stability configuration.")
+                logger.error(
+                    "`--stabilize-profile` has been removed. Streaming now always uses the high-stability configuration."
+                )
                 exit(1)
             case "--stabilize-debug":
                 stabilizerDebug = true

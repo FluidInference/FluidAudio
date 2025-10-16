@@ -9,7 +9,7 @@ struct ContentView: View {
         .wav,
         .aiff,
         .mpeg4Audio,
-        UTType(filenameExtension: "mp3")
+        UTType(filenameExtension: "mp3"),
     ].compactMap { $0 }
 
     var body: some View {
@@ -83,8 +83,10 @@ struct ContentView: View {
             Text("FluidAudio Streaming Example")
                 .font(.largeTitle.weight(.semibold))
 
-            Text("Upload audio, watch streaming transcripts stabilize in real time, then hand the result to Kokoro for playback.")
-                .foregroundStyle(.secondary)
+            Text(
+                "Upload audio, watch streaming transcripts stabilize in real time, then hand the result to Kokoro for playback."
+            )
+            .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
                 if viewModel.stage.isBusy {
@@ -190,7 +192,9 @@ private struct MetricsCard: View {
     let metadata: ExampleTranscriptionMetadata
 
     var body: some View {
-        StepCard(number: 3, title: "Session Metrics", caption: "Quick telemetry captured from the stabilized streaming run.") {
+        StepCard(
+            number: 3, title: "Session Metrics", caption: "Quick telemetry captured from the stabilized streaming run."
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 MetricsGrid {
                     MetricItem(
@@ -243,7 +247,7 @@ private struct MetricsGrid<Content: View>: View {
     var body: some View {
         let columns = [
             GridItem(.flexible(), spacing: 16),
-            GridItem(.flexible(), spacing: 16)
+            GridItem(.flexible(), spacing: 16),
         ]
         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
             content

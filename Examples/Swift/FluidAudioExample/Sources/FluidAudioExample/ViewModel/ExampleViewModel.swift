@@ -47,7 +47,7 @@ final class ExampleViewModel: ObservableObject {
         }
 
         var errorMessage: String? {
-            if case let .error(message) = self {
+            if case .error(let message) = self {
                 return message
             }
             return nil
