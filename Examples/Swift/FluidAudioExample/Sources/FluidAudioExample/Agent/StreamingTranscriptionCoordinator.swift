@@ -56,7 +56,7 @@ actor StreamingTranscriptionCoordinator {
             let wallTime = Date().timeIntervalSince(startTime)
             let metrics = await manager.metricsSnapshot()
 
-            await cleanupAfterCompletion()
+            await clearActiveSession()
 
             return StreamingTranscriptionResult(
                 transcript: transcript,
@@ -79,11 +79,6 @@ actor StreamingTranscriptionCoordinator {
         await clearActiveSession()
     }
 
-    private func cleanupAfterCompletion() async {
-        updateTask?.cancel()
-        updateTask = nil
-        streamingManager = nil
-    }
 
     private func clearActiveSession() async {
         updateTask?.cancel()
