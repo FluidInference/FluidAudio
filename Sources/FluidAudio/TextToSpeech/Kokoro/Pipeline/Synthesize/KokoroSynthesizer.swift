@@ -63,7 +63,8 @@ public struct KokoroSynthesizer {
     private static func chunkText(
         _ text: String,
         vocabulary: [String: Int32],
-        longVariantTokenBudget: Int
+        longVariantTokenBudget: Int,
+        phoneticOverrides: [TtsPhoneticOverride]
     ) async throws -> [TextChunk] {
         try await loadSimplePhonemeDictionary()
         let hasLang = false
@@ -74,7 +75,8 @@ public struct KokoroSynthesizer {
             caseSensitiveLexicon: lexicons.caseSensitive,
             targetTokens: longVariantTokenBudget,
             hasLanguageToken: hasLang,
-            allowedPhonemes: Set(vocabulary.keys)
+            allowedPhonemes: Set(vocabulary.keys),
+            phoneticOverrides: phoneticOverrides
         )
     }
 
@@ -401,14 +403,16 @@ public struct KokoroSynthesizer {
         text: String,
         voice: String = TtsConstants.recommendedVoice,
         voiceSpeed: Float = 1.0,
-        variantPreference: ModelNames.TTS.Variant? = nil
+        variantPreference: ModelNames.TTS.Variant? = nil,
+        phoneticOverrides: [TtsPhoneticOverride] = []
     ) async throws -> Data {
         let startTime = Date()
         let result = try await synthesizeDetailed(
             text: text,
             voice: voice,
             voiceSpeed: voiceSpeed,
-            variantPreference: variantPreference
+            variantPreference: variantPreference,
+            phoneticOverrides: phoneticOverrides
         )
         let totalTime = Date().timeIntervalSince(startTime)
         Self.logger.info("Total synthesis time: \(String(format: "%.3f", totalTime))s for \(text.count) characters")
@@ -420,7 +424,8 @@ public struct KokoroSynthesizer {
         text: String,
         voice: String = TtsConstants.recommendedVoice,
         voiceSpeed: Float = 1.0,
-        variantPreference: ModelNames.TTS.Variant? = nil
+        variantPreference: ModelNames.TTS.Variant? = nil,
+        phoneticOverrides: [TtsPhoneticOverride] = []
     ) async throws -> SynthesisResult {
 
         logger.info("Starting synthesis: '\(text)'")
@@ -450,7 +455,8 @@ public struct KokoroSynthesizer {
         let chunks = try await chunkText(
             text,
             vocabulary: vocabulary,
-            longVariantTokenBudget: capacities.long
+            longVariantTokenBudget: capacities.long,
+            phoneticOverrides: phoneticOverrides
         )
         guard !chunks.isEmpty else {
             throw TTSError.processingFailed("No valid words found in text")

@@ -35,7 +35,8 @@ final class KokoroChunkerTests: XCTestCase {
             caseSensitiveLexicon: caseSensitiveLexicon,
             targetTokens: 120,
             hasLanguageToken: false,
-            allowedPhonemes: allowed
+            allowedPhonemes: allowed,
+            phoneticOverrides: []
         )
 
         XCTAssertEqual(chunks.count, 1)
@@ -70,7 +71,8 @@ final class KokoroChunkerTests: XCTestCase {
             caseSensitiveLexicon: [:],
             targetTokens: 20,
             hasLanguageToken: false,
-            allowedPhonemes: allowed
+            allowedPhonemes: allowed,
+            phoneticOverrides: []
         )
 
         XCTAssertGreaterThan(chunks.count, 1, "Expected run-on text to be split under tight token budget")
@@ -78,5 +80,44 @@ final class KokoroChunkerTests: XCTestCase {
             XCTAssertFalse(chunk.words.isEmpty)
             XCTAssertLessThanOrEqual(chunk.phonemes.count, 6)
         }
+    }
+
+    func testEmojiDoesNotDesynchronizeOverrideIndices() {
+        let text = "Hello 😊 [Kokoro](/k o k o ɹ o/)"
+
+        let preprocessing = TtsTextPreprocessor.preprocessDetailed(text)
+        XCTAssertEqual(preprocessing.phoneticOverrides.count, 1, "Expected a single phonetic override")
+        XCTAssertEqual(
+            preprocessing.phoneticOverrides.first?.wordIndex,
+            2,
+            "Emoji should advance the word index so the override lands on Kokoro"
+        )
+
+        let lexicon: [String: [String]] = [
+            "hello": ["h", "e", "l", "o"]
+        ]
+        let allowed: Set<String> = ["h", "e", "l", "o", "k", "ɹ", " "]
+
+        let chunks = KokoroChunker.chunk(
+            text: preprocessing.text,
+            wordToPhonemes: lexicon,
+            caseSensitiveLexicon: [:],
+            targetTokens: 32,
+            hasLanguageToken: false,
+            allowedPhonemes: allowed,
+            phoneticOverrides: preprocessing.phoneticOverrides
+        )
+
+        guard let chunk = chunks.first else {
+            XCTFail("Expected at least one chunk")
+            return
+        }
+
+        XCTAssertTrue(chunk.words.contains("Kokoro"))
+        XCTAssertEqual(
+            Array(chunk.phonemes.suffix(6)),
+            ["k", "o", "k", "o", "ɹ", "o"],
+            "Override phonemes should be applied after the emoji"
+        )
     }
 }
