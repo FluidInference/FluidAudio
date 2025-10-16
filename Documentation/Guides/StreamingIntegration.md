@@ -17,15 +17,13 @@ This checklist distills the stabilized streaming pipeline so automation agents (
 
 2. **Configure streaming**
    ```swift
-   var config = StreamingAsrConfig.streaming  // Balanced stabilization preset
+   var config = StreamingAsrConfig.streaming  // 11.2 s chunk, 1.6 s overlap, VAD enabled.
    config = config.withStabilizer(
-       StreamingStabilizerConfig
-           .preset(.lowLatency)
-           .withMaxWaitMilliseconds(650)
+       StreamingStabilizerConfig()  // High-stability defaults (4-window, 1.2 s wait)
+           .withMaxWaitMilliseconds(1_500)  // Optional override
    )
    ```
-   - `.streaming` preset = 11.2 s chunk, 1.6 s overlap, VAD enabled.
-   - Use `.default` when you need backwards compatibility with the old API.
+   - Use `.default` when you need backwards compatibility with the legacy chunk sizing.
 
 3. **Reuse or inject VAD**
    - Let `StreamingAsrManager` manage VAD for you (`config.vad = .default`), or
@@ -75,11 +73,10 @@ This checklist distills the stabilized streaming pipeline so automation agents (
    ```
    - `finish()` flushes pending chunks, closes the async stream, and returns the merged transcript.
 
-## Stabilization Profiles
-- `.balanced` (default) – 3-window consensus, waits up to 800 ms to confirm.
-- `.lowLatency` – commits quickly (2-window consensus, 450 ms max wait) at the cost of small rewinds.
-- `.highStability` – slows confirmation (4-window consensus, 1.2 s wait) for the cleanest text.
-- Toggle via CLI (`--stabilize-profile`) or in code (`StreamingStabilizerConfig.preset(_)`).
+## Stabilization Defaults
+- Streaming stabilization always uses the high-stability configuration (4-window consensus, 1.2 s confirmation wait) to maximize accuracy.
+- Customize advanced scenarios by constructing `StreamingStabilizerConfig` directly (`windowSize`, `maxWaitMilliseconds`, tokenizer).
+- CLI integration adopts the same defaults; use `--stabilize-debug` to capture JSONL traces for tuning.
 
 ## Observability & Debugging
 - `streamingAsr.metricsSnapshot()` → quick look at chunk counts, average processing time, and latency.

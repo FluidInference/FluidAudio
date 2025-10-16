@@ -182,8 +182,7 @@ swift run fluidaudio transcribe audio.wav
 swift run fluidaudio transcribe audio.wav --model-version v2
 
 # Streaming transcription with stabilized output and VAD gating
-swift run fluidaudio transcribe audio.wav --streaming \
-  --stabilize-profile balanced
+swift run fluidaudio transcribe audio.wav --streaming
 ```
 
 ## Speaker Diarization

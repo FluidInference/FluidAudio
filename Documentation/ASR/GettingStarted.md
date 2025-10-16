@@ -114,5 +114,5 @@ swift run fluidaudio download --dataset librispeech-test-clean
 swift run fluidaudio download --dataset librispeech-test-other
 
 # Streaming transcription with stabilized output and VAD gating
-swift run fluidaudio transcribe audio.wav --streaming --stabilize-profile balanced
+swift run fluidaudio transcribe audio.wav --streaming
 ```

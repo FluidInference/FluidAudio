@@ -69,14 +69,13 @@ The injected manager is reused across sessions and `StreamingAsrManager` will sk
 
 - `chunkSeconds` – primary streaming window size used for decoding and stabilization.
 - `leftContextSeconds` & `rightContextSeconds` – overlap passed to the decoder.
-- `stabilizer` – a `StreamingStabilizerConfig` (or preset) that sets the agreement window, word-boundary policy, and max wait budget.
+- `stabilizer` – a `StreamingStabilizerConfig` that sets the agreement window, word-boundary policy, and max wait budget.
 - `vad` – a `StreamingVadConfig` to enable/disable gating and tweak segmentation thresholds.
 
 ```swift
 var config = StreamingAsrConfig.streaming
 config = config.withStabilizer(
-    StreamingStabilizerConfig
-        .preset(.highStability)
+    StreamingStabilizerConfig()
         .withMaxWaitMilliseconds(900)
         .withDebugDumpEnabled(true)  // Writes per-window JSONL traces
 )
@@ -97,6 +96,6 @@ When adjusting latencies, remember that the stabilizer waits for enough consensu
 
 ## CLI usage and further reading
 
-- The `swift run fluidaudio transcribe --streaming` command uses the same stabilized pipeline and VAD gating. Use `--stabilize-profile` to switch between `balanced`, `low-latency`, and `high-stability` presets. See the [CLI guide](../CLI.md#asr) for invocation examples.
+- The `swift run fluidaudio transcribe --streaming` command uses the same stabilized pipeline and VAD gating with the high-stability defaults. See the [CLI guide](../CLI.md#asr) for invocation examples.
 - The README's [ASR Quick Start](../../README.md#asr-quick-start) includes end-to-end Swift sample code for microphone streaming.
 - Dive into the implementation in `Sources/FluidAudio/ASR/Streaming/` (notably `StreamingAsrManager.swift`, `StreamingVadPipeline.swift`, and `StreamingStabilizerSink.swift`) to explore internals or contribute enhancements.

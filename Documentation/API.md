@@ -121,8 +121,8 @@ Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 mult
 
 - `StreamingStabilizerConfig`: Governs how hypotheses are promoted.
   - Fields: `windowSize`, `emitWordBoundaries`, `maxWaitMilliseconds`, `tokenizerKind`, `debugDumpEnabled`.
-  - Presets: `.preset(.balanced | .lowLatency | .highStability)` provide tuned trade-offs.
-  - `withMaxWaitMilliseconds(_:)`, `withDebugDumpEnabled(_:)`, `withTokenizerKind(_:)` supply fluent overrides.
+  - Default initializer matches the high-stability 4-window / 1.2 s wait configuration for maximum accuracy.
+  - `withMaxWaitMilliseconds(_:)`, `withDebugDumpEnabled(_:)`, `withTokenizerKind(_:)` supply fluent overrides for advanced tuning.
 
 - `StreamingVadConfig`: Wraps VAD enablement + segmentation knobs.
   - Fields: `isEnabled`, `vadConfig` (threshold defaults to `0.30`), `segmentationConfig` (padding + minimum speech durations).

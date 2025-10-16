@@ -120,7 +120,6 @@ enum TranscribeCommand {
         var streamingMode = false
         var showMetadata = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
-        var stabilizerProfile: StreamingStabilizerProfile = .balanced
         var stabilizerDebug = false
 
         // Parse options
@@ -153,21 +152,8 @@ enum TranscribeCommand {
             case "--stabilize":
                 logger.info("`--stabilize` is deprecated; stabilized streaming is always enabled.")
             case "--stabilize-profile":
-                if i + 1 < arguments.count {
-                    let value = arguments[i + 1].lowercased()
-                    if let parsed = StreamingStabilizerProfile(rawValue: value) {
-                        stabilizerProfile = parsed
-                        i += 1
-                    } else {
-                        logger.error(
-                            "Unknown stabilizer profile: \(arguments[i + 1]). Expected one of: \(StreamingStabilizerProfile.allCases.map { $0.rawValue }.joined(separator: ", "))"
-                        )
-                        exit(1)
-                    }
-                } else {
-                    logger.error("--stabilize-profile requires a value (balanced|low-latency|high-stability)")
-                    exit(1)
-                }
+                logger.error("`--stabilize-profile` has been removed. Streaming now always uses the high-stability configuration.")
+                exit(1)
             case "--stabilize-debug":
                 stabilizerDebug = true
             default:
@@ -176,7 +162,7 @@ enum TranscribeCommand {
             i += 1
         }
 
-        var stabilizerConfig = StreamingStabilizerConfig.preset(stabilizerProfile)
+        var stabilizerConfig = StreamingStabilizerConfig()
         if stabilizerDebug {
             stabilizerConfig = stabilizerConfig.withDebugDumpEnabled(true)
         }
@@ -189,8 +175,7 @@ enum TranscribeCommand {
                 audioFile: audioFile,
                 showMetadata: showMetadata,
                 modelVersion: modelVersion,
-                stabilizer: stabilizerConfig,
-                profile: stabilizerProfile
+                stabilizer: stabilizerConfig
             )
         } else {
             logger.info("Using batch mode with direct processing\n")
@@ -300,14 +285,13 @@ enum TranscribeCommand {
         audioFile: String,
         showMetadata: Bool,
         modelVersion: AsrModelVersion,
-        stabilizer: StreamingStabilizerConfig,
-        profile: StreamingStabilizerProfile
+        stabilizer: StreamingStabilizerConfig
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming.withStabilizer(stabilizer)
 
         logger.info(
-            "Stabilized streaming enabled using '\\(profile.rawValue)' profile (K=\(stabilizer.windowSize), boundary=\(stabilizer.emitWordBoundaries), maxWait=\(stabilizer.maxWaitMilliseconds)ms)"
+            "Stabilized streaming enabled (K=\(stabilizer.windowSize), boundary=\(stabilizer.emitWordBoundaries), maxWait=\(stabilizer.maxWaitMilliseconds)ms)"
         )
         if stabilizer.debugDumpEnabled {
             logger.info("Stabilizer debug dump will be captured for this session.")
@@ -509,8 +493,6 @@ enum TranscribeCommand {
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
-                --stabilize-profile <balanced|low-latency|high-stability>
-                                   Choose predefined stabilization behavior (default: balanced)
                 --stabilize-debug   Write stabilizer JSONL debug traces to a temp file
                 --stabilize         Deprecated alias (stabilization is always enabled)
 
@@ -521,9 +503,8 @@ enum TranscribeCommand {
                 fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
 
             Notes:
-            - Stabilized streaming is always active. The --no-stabilize flag is no longer supported.
-            - Use --stabilize-profile to switch between presets:
-              balanced (default), low-latency, or high-stability.
+            - Stabilized streaming always uses the high-stability configuration for best accuracy.
+            - The --no-stabilize flag remains unsupported because stabilization is required for streaming quality.
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results

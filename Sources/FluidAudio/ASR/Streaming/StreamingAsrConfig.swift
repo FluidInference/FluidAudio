@@ -30,7 +30,7 @@ public struct StreamingAsrConfig: Sendable {
         chunkSeconds: 11.2,  // Match ChunkProcessor center duration
         leftContextSeconds: 1.6,  // Align overlap with ChunkProcessor
         rightContextSeconds: 1.6,  // Align overlap with ChunkProcessor
-        stabilizer: StreamingStabilizerConfig.preset(.highStability),
+        stabilizer: StreamingStabilizerConfig(),
         vad: .default
     )
 
