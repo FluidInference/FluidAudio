@@ -22,7 +22,15 @@ swift run fluidaudio asr-benchmark --subset test-clean --max-files 50 --model-ve
 
 # Multilingual ASR (FLEURS) benchmark
 swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+# Streaming with stabilized output and VAD gating to skip silence
+swift run fluidaudio transcribe audio.wav --streaming
 ```
+
+### Streaming flags (`transcribe`)
+
+- `--streaming` enables the stabilized pipeline using the high-stability configuration by default.
+- Pair with `--model-version v2` when you only need English and want higher recall.
 
 ## Diarization
 

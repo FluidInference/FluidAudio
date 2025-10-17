@@ -27,10 +27,7 @@ final class StreamingAsrManagerTests: XCTestCase {
     }
 
     func testInitializationWithCustomConfig() async throws {
-        let config = StreamingAsrConfig(
-            confirmationThreshold: 0.9,
-            chunkDuration: 10.0,
-        )
+        let config = StreamingAsrConfig(chunkDuration: 10.0)
         let manager = StreamingAsrManager(config: config)
         let volatileTranscript = await manager.volatileTranscript
         let confirmedTranscript = await manager.confirmedTranscript
@@ -44,7 +41,6 @@ final class StreamingAsrManagerTests: XCTestCase {
     func testConfigPresets() {
         // Test default config
         let defaultConfig = StreamingAsrConfig.default
-        XCTAssertEqual(defaultConfig.confirmationThreshold, 0.85)
         XCTAssertEqual(defaultConfig.chunkDuration, 15.0)
     }
 
@@ -211,12 +207,10 @@ final class StreamingAsrManagerTests: XCTestCase {
 
     func testCustomConfigurationFactory() {
         let customConfig = StreamingAsrConfig.custom(
-            chunkDuration: 7.5,
-            confirmationThreshold: 0.8,
+            chunkDuration: 7.5
         )
 
         XCTAssertEqual(customConfig.chunkDuration, 7.5)
-        XCTAssertEqual(customConfig.confirmationThreshold, 0.8)
     }
 
     // MARK: - Performance Tests

@@ -315,7 +315,7 @@ final class TdtDecoderChunkTests: XCTestCase {
         var decoderState = try createMockDecoderState(lastToken: 7883, timeJump: 5)  // period token
 
         // Test punctuation token clearing logic
-        let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
+        let punctuationTokens = ASRConstants.punctuationTokenIds
         let lastToken = decoderState.lastToken!
 
         XCTAssertTrue(punctuationTokens.contains(lastToken), "Test token should be punctuation")

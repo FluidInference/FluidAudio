@@ -4,8 +4,8 @@ import PackageDescription
 let package = Package(
     name: "FluidAudio",
     platforms: [
-        .macOS(.v13),
-        .iOS(.v16),
+        .macOS(.v14),
+        .iOS(.v17),
     ],
     products: [
         .library(

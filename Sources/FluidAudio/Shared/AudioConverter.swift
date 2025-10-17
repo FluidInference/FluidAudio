@@ -107,7 +107,6 @@ final public class AudioConverter {
         }
 
         var error: NSError?
-        let inputSampleCount = Int(buffer.frameLength)
 
         // First pass: convert main data
         let firstOut = try makeOutputBuffer(estimatedOutputFrames)
@@ -123,11 +122,6 @@ final public class AudioConverter {
             if out.frameLength > 0 { aggregated.append(contentsOf: extractFloatArray(from: out)) }
             if status == .endOfStream { break }
         }
-
-        let outputSampleCount = aggregated.count
-        logger.debug(
-            "Audio conversion: \(inputSampleCount) samples → \(outputSampleCount) samples, ratio: \(Double(outputSampleCount)/Double(inputSampleCount))"
-        )
 
         return aggregated
     }

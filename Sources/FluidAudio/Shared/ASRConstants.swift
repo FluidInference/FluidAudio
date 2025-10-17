@@ -2,6 +2,9 @@ import Foundation
 
 /// Constants for ASR audio processing and frame calculations
 public enum ASRConstants {
+    /// Target sample rate for all ASR pipelines (16 kHz mono).
+    public static let sampleRate: Int = 16_000
+
     /// Mel-spectrogram hop size in samples (10ms at 16kHz)
     public static let melHopSize: Int = 160
 
@@ -20,6 +23,20 @@ public enum ASRConstants {
 
     /// WER threshold for detailed error analysis in benchmarks
     public static let highWERThreshold: Double = 0.15
+
+    /// SentencePiece punctuation token IDs across supported Parakeet vocabularies
+    public static let punctuationTokenIds: Set<Int> = [
+        // Parakeet TDT v3
+        7877,  // comma
+        7883,  // period
+        7956,  // question mark
+        8020,  // exclamation mark
+        // Parakeet TDT v2
+        839,  // comma
+        841,  // period
+        854,  // question mark
+        885,  // exclamation mark
+    ]
 
     /// Calculate encoder frames from audio samples using proper ceiling division
     /// - Parameter samples: Number of audio samples

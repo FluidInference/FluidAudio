@@ -29,17 +29,35 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 ```
 
 ```text
-[02:01:49.655] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 2s • 09/25/2025, 2:01 AM EDT
-[02:01:49.655] [INFO] [Benchmark] --- Benchmark Results ---
-[02:01:49.655] [INFO] [Benchmark]    Dataset: librispeech test-clean
-[02:01:49.655] [INFO] [Benchmark]    Files processed: 2620
-[02:01:49.655] [INFO] [Benchmark]    Average WER: 2.6%
-[02:01:49.655] [INFO] [Benchmark]    Median WER: 0.0%
-[02:01:49.655] [INFO] [Benchmark]    Average CER: 1.1%
-[02:01:49.655] [INFO] [Benchmark]    Median RTFx: 137.8x
-[02:01:49.655] [INFO] [Benchmark]    Overall RTFx: 153.4x (19452.5s / 126.8s)
-[02:01:49.655] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
-[02:01:49.655] [INFO] [Benchmark] ASR benchmark completed successfully
+[12:39:04.210] [INFO] [FluidAudio.Benchmark] 2620 files per dataset • Test runtime: 3m 8s • 10/13/2025, 12:39 PM EDT
+[12:39:04.210] [INFO] [FluidAudio.Benchmark] --- Benchmark Results ---
+[12:39:04.210] [INFO] [FluidAudio.Benchmark]    Dataset: librispeech test-clean
+[12:39:04.210] [INFO] [FluidAudio.Benchmark]    Files processed: 2620
+[12:39:04.210] [INFO] [FluidAudio.Benchmark]    Average WER: 2.6%
+[12:39:04.210] [INFO] [FluidAudio.Benchmark]    Median WER: 0.0%
+[12:39:04.210] [INFO] [FluidAudio.Benchmark]    Average CER: 1.1%
+[12:39:04.210] [INFO] [FluidAudio.Benchmark]    Overall RTFx: 146.2x (19452.5s / 133.0s)
+[12:39:04.210] [INFO] [FluidAudio.Benchmark] Results saved to: asr_benchmark_results.json
+[12:39:04.210] [INFO] [FluidAudio.Benchmark] ASR benchmark completed successfully
+Peak memory usage (process-wide): 0.359 GB
+
+
+swift run fluidaudio asr-benchmark --max-files all  --test-streaming
+[11:20:34.227] [INFO] [FluidAudio.Benchmark] 2620 files per dataset • Test runtime: 4m 38s • 10/14/2025, 11:20 AM EDT
+[11:20:34.227] [INFO] [FluidAudio.Benchmark] --- Benchmark Results ---
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Dataset: librispeech test-clean
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Files processed: 2620
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Average WER: 2.9%
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Median WER: 0.0%
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Average CER: 1.3%
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Overall RTFx: 139.0x (19452.5s / 139.9s)
+[11:20:34.227] [INFO] [FluidAudio.Benchmark] --- Streaming Metrics ---
+[21:10:00.850] [INFO] [FluidAudio.Benchmark]    Decoder chunk duration: 11.2s
+[21:10:00.850] [INFO] [FluidAudio.Benchmark]    Avg first token latency: 0.084s
+[21:10:00.850] [INFO] [FluidAudio.Benchmark]    Avg first confirmed token latency: 0.084s
+[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Avg first confirmed token latency: 0.084s
+Peak memory usage (process-wide): 0.483 GB
+
 ```
 
 `swift run fluidaudio asr-benchmark --max-files all --model-version v2`
@@ -175,7 +193,7 @@ Model is nearly identical to the base model in terms of quality, perforamnce wis
 Dataset: https://github.com/Lab41/VOiCES-subset
 
 ```text
-swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.85
+swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.30
 ...
 Timing Statistics:
 [18:56:31.208] [INFO] [VAD]    Total processing time: 0.29s
