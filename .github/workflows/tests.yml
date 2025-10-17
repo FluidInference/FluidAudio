@@ -41,6 +41,9 @@ jobs:
       - name: List available simulators
         run: xcrun simctl list devices available
 
+      - name: Install iOS platform support
+        run: sudo xcodebuild -downloadPlatform iOS
+
       - name: Build for iOS
         run: |
           xcodebuild -scheme FluidAudio \
