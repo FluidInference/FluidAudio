@@ -45,6 +45,20 @@ jobs:
         with:
           xcode-version: '16'
 
+      - name: Select Xcode command line tools
+        run: sudo xcode-select -switch /Applications/Xcode_16.4.app
+
+      - name: Boot iOS Simulator
+        run: |
+          SIMULATOR_ID=$(xcrun simctl list devices available | grep 'iPhone' | grep -v 'unavailable' | head -n 1 | awk -F '[()]' '{print $2}')
+          if [ -z "$SIMULATOR_ID" ]; then
+            echo "No available iPhone simulator found."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+
       - name: List available simulators
         run: xcrun simctl list devices available
 
@@ -71,6 +85,20 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16'
+
+      - name: Select Xcode command line tools
+        run: sudo xcode-select -switch /Applications/Xcode_16.4.app
+
+      - name: Boot iOS Simulator
+        run: |
+          SIMULATOR_ID=$(xcrun simctl list devices available | grep 'iPhone' | grep -v 'unavailable' | head -n 1 | awk -F '[()]' '{print $2}')
+          if [ -z "$SIMULATOR_ID" ]; then
+            echo "No available iPhone simulator found."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
       - name: Build FluidAudioExample (macOS)
         working-directory: Examples/Swift/FluidAudioExample
