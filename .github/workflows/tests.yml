@@ -79,6 +79,10 @@ jobs:
       - name: Install iOS platform support
         run: sudo xcodebuild -downloadPlatform iOS
 
+      - name: Generate Xcode workspace
+        working-directory: Examples/Swift/FluidAudioExample
+        run: swift package generate-xcodeproj
+
       - name: Build FluidAudioExample (iOS)
         working-directory: Examples/Swift/FluidAudioExample
         run: |
