@@ -86,8 +86,13 @@ final class StabilizedStreamingEmitter {
         if extendsCommittedPrefix {
             let appendedCount = max(0, tokenIds.count - commitCount)
             if appendedCount > 0 {
-                let canQuickCommit =
-                    timeSincePreviousUpdate >= config.quickCommitThresholdMs || repeatedHypothesis
+                let canQuickCommit: Bool
+                if config.emitWordBoundaries {
+                    canQuickCommit = repeatedHypothesis
+                } else {
+                    canQuickCommit =
+                        timeSincePreviousUpdate >= config.quickCommitThresholdMs || repeatedHypothesis
+                }
                 if canQuickCommit {
                     let candidatePrefix = Array(tokenIds.prefix(commitCount + appendedCount))
                     let quickCommitCount = determineCommitCount(
