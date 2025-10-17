@@ -52,11 +52,9 @@ swift run fluidaudio asr-benchmark --max-files all  --test-streaming
 [11:20:34.227] [INFO] [FluidAudio.Benchmark]    Average CER: 1.3%
 [11:20:34.227] [INFO] [FluidAudio.Benchmark]    Overall RTFx: 139.0x (19452.5s / 139.9s)
 [11:20:34.227] [INFO] [FluidAudio.Benchmark] --- Streaming Metrics ---
-[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Decoder chunk duration: 11.2s
-[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Total chunks processed: 3248
-[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Avg chunk processing time: 0.042s
-[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Max chunk processing time: 0.084s
-[11:20:34.227] [INFO] [FluidAudio.Benchmark]    Avg first token latency: 0.073s
+[21:10:00.850] [INFO] [FluidAudio.Benchmark]    Decoder chunk duration: 11.2s
+[21:10:00.850] [INFO] [FluidAudio.Benchmark]    Avg first token latency: 0.084s
+[21:10:00.850] [INFO] [FluidAudio.Benchmark]    Avg first confirmed token latency: 0.084s
 [11:20:34.227] [INFO] [FluidAudio.Benchmark]    Avg first confirmed token latency: 0.084s
 Peak memory usage (process-wide): 0.483 GB
 
