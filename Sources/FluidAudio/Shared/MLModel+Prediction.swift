@@ -21,7 +21,14 @@ extension MLModel {
             }
         }
         #else
-        return try await prediction(from: input, options: options)
+        return try await withCheckedThrowingContinuation { continuation in
+            do {
+                let result = try prediction(from: input, options: options)
+                continuation.resume(returning: result)
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
         #endif
     }
 }

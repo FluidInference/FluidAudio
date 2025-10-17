@@ -30,12 +30,14 @@ final class StabilizedStreamingEmitter {
         var firstSeen: [Int: Int] = [:]
         var startTimestampMs: Int?
         var firstCommitLatencyMs: Int?
+        var lastUpdateTimestampMs: Int?
     }
 
     private struct InternalConfig {
         let windowSize: Int
         let emitWordBoundaries: Bool
         let maxWaitMilliseconds: Int
+        let quickCommitThresholdMs: Int
     }
 
     private let config: InternalConfig
@@ -46,7 +48,8 @@ final class StabilizedStreamingEmitter {
         self.config = InternalConfig(
             windowSize: config.sanitizedWindowSize,
             emitWordBoundaries: config.emitWordBoundaries,
-            maxWaitMilliseconds: config.sanitizedMaxWait
+            maxWaitMilliseconds: config.sanitizedMaxWait,
+            quickCommitThresholdMs: Self.makeQuickCommitThreshold(maxWait: config.sanitizedMaxWait)
         )
         self.decodeToken = tokenDecoder
     }
@@ -58,20 +61,44 @@ final class StabilizedStreamingEmitter {
             state.startTimestampMs = nowMs
         }
 
+        let previousCommittedCount = state.committed.count
+        let extendsCommittedPrefix = tokenIds.starts(with: state.committed)
+        let repeatedHypothesis = tokenIds == state.lastHypothesis && !state.lastHypothesis.isEmpty
+        let timeSincePreviousUpdate = state.lastUpdateTimestampMs.map { nowMs - $0 } ?? Int.max
+
         updateRingBuffer(&state, with: tokenIds)
         updateFirstSeen(&state, with: tokenIds, nowMs: nowMs)
 
         let stablePrefix = longestCommonPrefix(for: state.ringBuffer)
-        let committedCount = state.committed.count
-        var commitCount = committedCount
+        var commitCount = previousCommittedCount
 
-        if stablePrefix.count > committedCount {
+        if stablePrefix.count > previousCommittedCount {
             commitCount = determineCommitCount(
-                currentCommitted: committedCount,
+                currentCommitted: previousCommittedCount,
                 stablePrefix: stablePrefix,
                 state: state,
                 nowMs: nowMs
             )
+        }
+
+        // Consider promoting newly appended tokens when the hypothesis simply extends the previous
+        // committed prefix and either enough time has elapsed or we received a repeated hypothesis.
+        if extendsCommittedPrefix {
+            let appendedCount = max(0, tokenIds.count - commitCount)
+            if appendedCount > 0 {
+                let canQuickCommit =
+                    timeSincePreviousUpdate >= config.quickCommitThresholdMs || repeatedHypothesis
+                if canQuickCommit {
+                    let candidatePrefix = Array(tokenIds.prefix(commitCount + appendedCount))
+                    let quickCommitCount = determineCommitCount(
+                        currentCommitted: commitCount,
+                        stablePrefix: candidatePrefix,
+                        state: state,
+                        nowMs: nowMs
+                    )
+                    commitCount = max(commitCount, quickCommitCount)
+                }
+            }
         }
 
         let withheldCount = max(0, stablePrefix.count - commitCount)
@@ -80,11 +107,11 @@ final class StabilizedStreamingEmitter {
         var latencyMeasurements: [StabilizedTokenLatency] = []
         var firstCommitLatency: Int? = nil
 
-        if commitCount > committedCount {
-            newlyCommitted = Array(stablePrefix[committedCount..<commitCount])
+        if commitCount > previousCommittedCount {
+            newlyCommitted = Array(tokenIds[previousCommittedCount..<commitCount])
             latencyMeasurements = recordLatencies(
                 state: state,
-                committedRange: committedCount..<commitCount,
+                committedRange: previousCommittedCount..<commitCount,
                 nowMs: nowMs
             )
             if state.firstCommitLatencyMs == nil {
@@ -98,10 +125,11 @@ final class StabilizedStreamingEmitter {
         }
 
         if commitCount > state.committed.count {
-            state.committed = Array(stablePrefix.prefix(commitCount))
+            state.committed = Array(tokenIds.prefix(commitCount))
         }
 
         state.lastHypothesis = tokenIds
+        state.lastUpdateTimestampMs = nowMs
 
         states[uid] = state
 
@@ -201,6 +229,11 @@ final class StabilizedStreamingEmitter {
 
     func updateTokenDecoder(_ decoder: @escaping TokenDecoder) {
         decodeToken = decoder
+    }
+
+    private static func makeQuickCommitThreshold(maxWait: Int) -> Int {
+        let baseline = max(1, maxWait / 16)
+        return max(40, baseline)
     }
 
     private func updateRingBuffer(_ state: inout StreamState, with tokens: [Int]) {
@@ -310,6 +343,14 @@ final class StabilizedStreamingEmitter {
             {
                 boundaryIndex = nextIndex
             }
+        }
+
+        if boundaryIndex <= currentlyCommitted,
+            let lastTokenId = stablePrefix.last,
+            let lastToken = decodeToken(lastTokenId),
+            startsNewWord(lastToken) || isBoundaryToken(lastToken)
+        {
+            boundaryIndex = stablePrefix.count
         }
 
         return boundaryIndex
