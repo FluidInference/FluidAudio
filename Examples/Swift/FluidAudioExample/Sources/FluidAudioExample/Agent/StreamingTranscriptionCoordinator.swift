@@ -15,6 +15,8 @@ actor StreamingTranscriptionCoordinator {
         channels: 1,
         interleaved: false
     )!
+    private var firstTokenLatency: TimeInterval?
+    private var firstConfirmedTokenLatency: TimeInterval?
 
     init(config: StreamingAsrConfig = .streaming) {
         self.config = config
@@ -32,15 +34,6 @@ actor StreamingTranscriptionCoordinator {
 
         try await manager.start(models: models, source: .system)
 
-        updateTask = Task {
-            let updates = await manager.transcriptionUpdates
-            for await update in updates {
-                await MainActor.run {
-                    onUpdate(update)
-                }
-            }
-        }
-
         do {
             let samples = try audioConverter.resampleAudioFile(url)
             guard !samples.isEmpty else {
@@ -48,13 +41,27 @@ actor StreamingTranscriptionCoordinator {
             }
 
             let audioDuration = Double(samples.count) / targetFormat.sampleRate
-            let startTime = Date()
+            let streamingStart = Date()
+            firstTokenLatency = nil
+            firstConfirmedTokenLatency = nil
+
+            updateTask = Task { [weak self, streamingStart, manager] in
+                let updates = await manager.transcriptionUpdates
+                for await update in updates {
+                    guard let coordinator = self else { break }
+                    await coordinator.recordLatencies(for: update, startedAt: streamingStart)
+                    await onUpdate(update)
+                }
+            }
 
             try await streamSamples(samples, into: manager)
             try await Task.sleep(nanoseconds: 250_000_000)
             let transcript = try await manager.finish()
-            let wallTime = Date().timeIntervalSince(startTime)
-            let metrics = await manager.metricsSnapshot()
+            let wallTime = Date().timeIntervalSince(streamingStart)
+            let latencySnapshot = (
+                firstTokenLatency,
+                firstConfirmedTokenLatency
+            )
 
             await clearActiveSession()
 
@@ -62,7 +69,8 @@ actor StreamingTranscriptionCoordinator {
                 transcript: transcript,
                 wallClockSeconds: wallTime,
                 audioSeconds: audioDuration,
-                metrics: metrics
+                firstTokenLatency: latencySnapshot.0,
+                firstConfirmedTokenLatency: latencySnapshot.1
             )
         } catch {
             updateTask?.cancel()
@@ -79,10 +87,26 @@ actor StreamingTranscriptionCoordinator {
         await clearActiveSession()
     }
 
+    private func recordLatencies(for update: StreamingTranscriptionUpdate, startedAt startTime: Date) {
+        let normalized = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        let latency = update.timestamp.timeIntervalSince(startTime)
+        guard latency.isFinite else { return }
+
+        if firstTokenLatency == nil {
+            firstTokenLatency = max(0, latency)
+        }
+        if update.isConfirmed, firstConfirmedTokenLatency == nil {
+            firstConfirmedTokenLatency = max(0, latency)
+        }
+    }
 
     private func clearActiveSession() async {
         updateTask?.cancel()
         updateTask = nil
+        firstTokenLatency = nil
+        firstConfirmedTokenLatency = nil
 
         if let manager = streamingManager {
             await manager.cancel()
@@ -150,5 +174,6 @@ struct StreamingTranscriptionResult {
     let transcript: String
     let wallClockSeconds: TimeInterval
     let audioSeconds: TimeInterval
-    let metrics: StreamingAsrEngineMetrics
+    let firstTokenLatency: TimeInterval?
+    let firstConfirmedTokenLatency: TimeInterval?
 }

@@ -2,19 +2,29 @@ import CoreML
 import Foundation
 import OSLog
 
+internal enum StreamingDeduplication {
+    /// Allow up to ~30 tokens (≈2.4s) of overlap before we strip duplicates.
+    static let maxOverlapTokens: Int = 30
+}
+
 extension AsrManager {
 
+    /// Streaming decoder inputs that tweak context-length alignment and offset bookkeeping.
     internal struct StreamingChunkParameters {
+        /// Explicit encoder frame count for the chunk; nil derives it from the sample length.
         let actualAudioFrames: Int?
+        /// Positive or negative tweak applied to align decoder context between chunks.
         let contextFrameAdjustment: Int
+        /// Flag set when no further chunks are expected, allowing final decoder flush.
         let isLastChunk: Bool
+        /// Offset that accounts for prior audio when stitching streaming timestamps.
         let globalFrameOffset: Int
 
         static let `default` = StreamingChunkParameters(
-            actualAudioFrames: nil,
-            contextFrameAdjustment: 0,
-            isLastChunk: false,
-            globalFrameOffset: 0
+            actualAudioFrames: nil,  // Let the pipeline infer frames from chunk length.
+            contextFrameAdjustment: 0,  // No context shift when using default behavior.
+            isLastChunk: false,  // Streaming keeps decoder state open for additional chunks.
+            globalFrameOffset: 0  // Timestamping starts at the beginning of the session.
         )
     }
 
@@ -185,10 +195,11 @@ extension AsrManager {
 
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {
+            // Streaming chunks overlap by ~2 seconds; allow a matching span before deduping.
             let (deduped, removedCount) = removeDuplicateTokenSequence(
                 previous: previousTokens,
                 current: hypothesis.ySequence,
-                maxOverlap: 30
+                maxOverlap: StreamingDeduplication.maxOverlapTokens
             )
             let adjustedTimestamps =
                 removedCount > 0 ? Array(hypothesis.timestamps.dropFirst(removedCount)) : hypothesis.timestamps
@@ -395,8 +406,9 @@ extension AsrManager {
         }
 
         // Check for suffix-prefix overlap: end of previous matches beginning of current
+        let overlapLimit = max(0, maxOverlap)
         let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
-        let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first 12 tokens of current
+        let maxMatchLength = min(overlapLimit, workingCurrent.count)  // first N tokens of current
 
         guard maxSearchLength >= 2 && maxMatchLength >= 2 else {
             return (workingCurrent, removedCount)

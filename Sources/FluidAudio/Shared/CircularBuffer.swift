@@ -125,16 +125,13 @@ struct CircularBuffer<Element: AdditiveArithmetic & ExpressibleByIntegerLiteral 
 
     private func copyRangeInternal(start: Int, length: Int) -> [Element] {
         guard length > 0 else { return [] }
+        precondition(capacity > 0, "CircularBuffer has zero capacity while copying a non-empty range")
         var result: [Element] = []
         result.reserveCapacity(length)
 
-        var remaining = length
-        var currentIndex = incrementedIndex(from: head, by: start)
-        while remaining > 0 {
-            let contiguousCount = min(remaining, capacity - currentIndex)
-            result.append(contentsOf: storage[currentIndex..<(currentIndex + contiguousCount)])
-            remaining -= contiguousCount
-            currentIndex = (currentIndex + contiguousCount) % capacity
+        for offset in 0..<length {
+            let physicalIndex = incrementedIndex(from: head, by: start + offset)
+            result.append(storage[physicalIndex])
         }
 
         return result
@@ -158,8 +155,12 @@ struct CircularBuffer<Element: AdditiveArithmetic & ExpressibleByIntegerLiteral 
     }
 
     private static func nextPowerOfTwo(_ value: Int) -> Int {
+        precondition(value > 0, "nextPowerOfTwo requires a positive value.")
         var power = 1
         while power < value {
+            if power > Int.max / 2 {
+                return Int.max
+            }
             power <<= 1
         }
         return power

@@ -2,17 +2,6 @@ import AVFoundation
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
-public struct StreamingAsrEngineMetrics: Sendable {
-    public let chunkCount: Int
-    public let totalChunkProcessingTime: TimeInterval
-    public let averageChunkProcessingTime: TimeInterval?
-    public let maxChunkProcessingTime: TimeInterval?
-    public let minChunkProcessingTime: TimeInterval?
-    public let firstTokenLatency: TimeInterval?
-    public let firstConfirmedTokenLatency: TimeInterval?
-}
-
 /// A high-level streaming ASR manager that provides a simple API for real-time transcription
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
 @available(macOS 13.0, iOS 16.0, *)
@@ -61,11 +50,6 @@ public actor StreamingAsrManager {
 
     // Metrics
     private var startTime: Date?
-    private var processedChunks: Int = 0
-    private var totalChunkProcessingTime: TimeInterval = 0
-    private var maxChunkProcessingTime: TimeInterval = 0
-    private var minChunkProcessingTime: TimeInterval = .infinity
-    private var firstTokenLatencySeconds: TimeInterval?
 
     /// Initialize the streaming ASR manager
     /// - Parameter config: Configuration for streaming behavior
@@ -139,12 +123,7 @@ public actor StreamingAsrManager {
         lastProcessedFrame = 0
         tokenAccumulator.reset()
         stabilizerSink.resetTranscripts()
-        processedChunks = 0
         cumulativeVadDroppedSamples = 0
-        totalChunkProcessingTime = 0
-        maxChunkProcessingTime = 0
-        minChunkProcessingTime = .infinity
-        firstTokenLatencySeconds = nil
 
         startTime = Date()
 
@@ -208,6 +187,8 @@ public actor StreamingAsrManager {
         // Signal end of input
         inputBuilder.finish()
 
+        defer { finishUpdateStreamIfActive() }
+
         // Wait for recognition task to complete
         do {
             try await recognizerTask?.value
@@ -248,9 +229,7 @@ public actor StreamingAsrManager {
     /// Reset the transcriber for a new session
     public func reset() async throws {
         stabilizerSink.resetTranscripts()
-        processedChunks = 0
         startTime = Date()
-        firstTokenLatencySeconds = nil
         windowProcessor.reset()
 
         // Reset decoder state for the current audio source
@@ -270,9 +249,6 @@ public actor StreamingAsrManager {
 
         await resetVadState()
         cumulativeVadDroppedSamples = 0
-        totalChunkProcessingTime = 0
-        maxChunkProcessingTime = 0
-        minChunkProcessingTime = .infinity
 
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -281,7 +257,7 @@ public actor StreamingAsrManager {
     public func cancel() async {
         inputBuilder.finish()
         recognizerTask?.cancel()
-        updateContinuation?.finish()
+        finishUpdateStreamIfActive()
 
         finalizeStabilizerAfterStreamEnd()
 
@@ -295,48 +271,10 @@ public actor StreamingAsrManager {
         updateContinuation = nil
     }
 
-    public func metricsSnapshot() -> StreamingAsrEngineMetrics {
-        let average: TimeInterval?
-        if processedChunks > 0 && totalChunkProcessingTime > 0 {
-            average = totalChunkProcessingTime / Double(processedChunks)
-        } else {
-            average = nil
-        }
-
-        let minValue = processedChunks > 0 && minChunkProcessingTime.isFinite ? minChunkProcessingTime : nil
-        let maxValue = processedChunks > 0 && maxChunkProcessingTime > 0 ? maxChunkProcessingTime : nil
-        let stabilizerMetrics = stabilizerSink.metricsSnapshot()
-
-        return StreamingAsrEngineMetrics(
-            chunkCount: processedChunks,
-            totalChunkProcessingTime: totalChunkProcessingTime,
-            averageChunkProcessingTime: average,
-            maxChunkProcessingTime: maxValue,
-            minChunkProcessingTime: minValue,
-            firstTokenLatency: firstTokenLatencySeconds,
-            firstConfirmedTokenLatency: stabilizerMetrics.firstCommitLatencySeconds
-        )
-    }
-
-    private func recordChunkProcessingTime(_ duration: TimeInterval) {
-        guard duration.isFinite else { return }
-        totalChunkProcessingTime += duration
-        if duration > maxChunkProcessingTime {
-            maxChunkProcessingTime = duration
-        }
-        if duration < minChunkProcessingTime {
-            minChunkProcessingTime = duration
-        }
-    }
-
-    private func recordFirstTokenLatencyIfNeeded(for update: StreamingTranscriptionUpdate) {
-        guard firstTokenLatencySeconds == nil else { return }
-        guard let startTime else { return }
-        let normalized = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
-        let latency = update.timestamp.timeIntervalSince(startTime)
-        guard latency.isFinite else { return }
-        firstTokenLatencySeconds = max(0, latency)
+    private func finishUpdateStreamIfActive() {
+        guard let continuation = updateContinuation else { return }
+        continuation.finish()
+        clearUpdateContinuation()
     }
 
     private func buildChunkParameters(
@@ -404,7 +342,7 @@ public actor StreamingAsrManager {
             if config.chunkSeconds > 0 {
                 sampleRate = Double(config.chunkSamples) / config.chunkSeconds
             } else {
-                sampleRate = 16_000.0
+                sampleRate = Double(ASRConstants.sampleRate)
             }
             let onsetSeconds = max(1.0, min(2.0, config.chunkSeconds / 4.0))
             minimumCenterSamples = max(1, Int(onsetSeconds * sampleRate))
@@ -471,8 +409,6 @@ public actor StreamingAsrManager {
             segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
-            processedChunks += 1
-            recordChunkProcessingTime(processingTime)
             #if DEBUG
             let energy = window.samples.reduce(0) { $0 + abs($1) }
             let energyString = String(format: "%.3f", energy)
@@ -503,7 +439,6 @@ public actor StreamingAsrManager {
                 nowMs: nowMs
             )
             for update in output.updates {
-                recordFirstTokenLatencyIfNeeded(for: update)
                 updateContinuation?.yield(update)
             }
             let trimmed = tokenAccumulator.dropCommittedPrefixIfNeeded(
@@ -565,7 +500,6 @@ public actor StreamingAsrManager {
             timestamp: Date()
         )
         for update in output.updates {
-            recordFirstTokenLatencyIfNeeded(for: update)
             updateContinuation?.yield(update)
         }
         let trimmed = tokenAccumulator.dropCommittedPrefixIfNeeded(

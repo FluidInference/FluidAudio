@@ -34,29 +34,17 @@ public struct ASRMetrics: Sendable {
 
 /// Streaming-specific metrics for ASR benchmarking
 public struct StreamingMetrics: Sendable {
-    public let avgChunkProcessingTime: Double  // Average time to process each chunk
-    public let maxChunkProcessingTime: Double  // Maximum time to process any chunk
-    public let minChunkProcessingTime: Double  // Minimum time to process any chunk
-    public let totalChunks: Int  // Total number of chunks processed
     public let firstTokenLatency: Double?  // Time to first token (if measurable)
     public let firstConfirmedTokenLatency: Double?  // Time to first confirmed token commit (if measurable)
     public let streamingRTFx: Double  // Streaming real-time factor
     public let chunkDuration: Double  // Configured chunk duration in seconds
 
     public init(
-        avgChunkProcessingTime: Double,
-        maxChunkProcessingTime: Double,
-        minChunkProcessingTime: Double,
-        totalChunks: Int,
         firstTokenLatency: Double? = nil,
         firstConfirmedTokenLatency: Double? = nil,
         streamingRTFx: Double,
         chunkDuration: Double
     ) {
-        self.avgChunkProcessingTime = avgChunkProcessingTime
-        self.maxChunkProcessingTime = maxChunkProcessingTime
-        self.minChunkProcessingTime = minChunkProcessingTime
-        self.totalChunks = totalChunks
         self.firstTokenLatency = firstTokenLatency
         self.firstConfirmedTokenLatency = firstConfirmedTokenLatency
         self.streamingRTFx = streamingRTFx

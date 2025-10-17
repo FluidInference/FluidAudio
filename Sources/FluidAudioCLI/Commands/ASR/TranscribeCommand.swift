@@ -120,7 +120,6 @@ enum TranscribeCommand {
         var streamingMode = false
         var showMetadata = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
-        var stabilizerDebug = false
 
         // Parse options
         var i = 1
@@ -146,18 +145,13 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
-            case "--stabilize-debug":
-                stabilizerDebug = true
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        var stabilizerConfig = StreamingStabilizerConfig()
-        if stabilizerDebug {
-            stabilizerConfig = stabilizerConfig.withDebugDumpEnabled(true)
-        }
+        let stabilizerConfig = StreamingStabilizerConfig()
 
         if streamingMode {
             logger.info(
@@ -285,9 +279,6 @@ enum TranscribeCommand {
         logger.info(
             "Stabilized streaming enabled (K=\(stabilizer.windowSize), boundary=\(stabilizer.emitWordBoundaries), maxWait=\(stabilizer.maxWaitMilliseconds)ms)"
         )
-        if stabilizer.debugDumpEnabled {
-            logger.info("Stabilizer debug dump will be captured for this session.")
-        }
 
         // Create StreamingAsrManager
         let streamingAsr = StreamingAsrManager(config: config)
@@ -485,7 +476,6 @@ enum TranscribeCommand {
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
-                --stabilize-debug   Write stabilizer JSONL debug traces to a temp file
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)

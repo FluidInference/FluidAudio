@@ -20,8 +20,7 @@ final class StreamingStabilizerSinkTests: XCTestCase {
             committedTokens: [1],
             firstCommitLatencyMs: nil,
             tokenLatencies: [],
-            withheldStableTokenCount: 0,
-            debugRecords: []
+            withheldStableTokenCount: 0
         )
 
         let firstOutput = sink.makeUpdates(
@@ -44,8 +43,7 @@ final class StreamingStabilizerSinkTests: XCTestCase {
             committedTokens: [2],
             firstCommitLatencyMs: nil,
             tokenLatencies: [],
-            withheldStableTokenCount: 0,
-            debugRecords: []
+            withheldStableTokenCount: 0
         )
 
         let secondOutput = sink.makeUpdates(

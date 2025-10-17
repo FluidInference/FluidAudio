@@ -109,7 +109,7 @@ Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 mult
 
 **Metrics & State:**
 - `volatileTranscript` / `confirmedTranscript` expose rolling text.
-- `metricsSnapshot()` returns `StreamingAsrEngineMetrics` (chunk timings, latency, counts) for diagnostics.
+- `StreamingTranscriptionUpdate.timestamp` lets you derive first-token latency by comparing against your stream start time.
 
 ### Streaming configuration types
 
@@ -120,9 +120,9 @@ Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 mult
   - Convenience presets: `.default` (legacy 15s / 10s / 2s) and `.streaming` (balanced latency + stability).
 
 - `StreamingStabilizerConfig`: Governs how hypotheses are promoted.
-  - Fields: `windowSize`, `emitWordBoundaries`, `maxWaitMilliseconds`, `tokenizerKind`, `debugDumpEnabled`.
+  - Fields: `windowSize`, `emitWordBoundaries`, `maxWaitMilliseconds`.
   - Default initializer matches the high-stability 4-window / 1.2 s wait configuration for maximum accuracy.
-  - `withMaxWaitMilliseconds(_:)`, `withDebugDumpEnabled(_:)`, `withTokenizerKind(_:)` supply fluent overrides for advanced tuning.
+  - `withMaxWaitMilliseconds(_:)` supplies a fluent override for advanced tuning.
 
 - `StreamingVadConfig`: Wraps VAD enablement + segmentation knobs.
   - Fields: `isEnabled`, `vadConfig` (auto-initialized streaming sessions default to `threshold = 0.30`), `segmentationConfig` (padding + minimum speech durations).

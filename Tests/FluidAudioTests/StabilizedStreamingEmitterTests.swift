@@ -9,14 +9,12 @@ final class StabilizedStreamingEmitterTests: XCTestCase {
     private func makeEmitter(
         windowSize: Int = 3,
         boundary: Bool = true,
-        maxWait: Int = 800,
-        debug: Bool = false
+        maxWait: Int = 800
     ) -> StabilizedStreamingEmitter {
         let config = StreamingStabilizerConfig(
             windowSize: windowSize,
             emitWordBoundaries: boundary,
-            maxWaitMilliseconds: maxWait,
-            debugDumpEnabled: debug
+            maxWaitMilliseconds: maxWait
         )
         return StabilizedStreamingEmitter(
             config: config,
@@ -28,20 +26,24 @@ final class StabilizedStreamingEmitterTests: XCTestCase {
     func test_lcp_two_sequences_basic() {
         let emitter = makeEmitter(windowSize: 2, boundary: false)
         let first = emitter.update(uid: 0, tokenIds: [1, 3], nowMs: 0)
-        XCTAssertTrue(first.committedTokens.isEmpty)
+        XCTAssertEqual(first.committedTokens, [1, 3])
+        XCTAssertEqual(first.withheldStableTokenCount, 0)
 
         let second = emitter.update(uid: 0, tokenIds: [1, 3, 4], nowMs: 60)
-        XCTAssertEqual(second.committedTokens, [1, 3])
+        XCTAssertEqual(second.committedTokens, [4])
         XCTAssertEqual(second.withheldStableTokenCount, 0)
     }
 
     func test_lcp_multiple_sequences_noise_in_last() {
         let emitter = makeEmitter(windowSize: 3, boundary: false)
-        _ = emitter.update(uid: 0, tokenIds: [1, 3, 8], nowMs: 0)
-        _ = emitter.update(uid: 0, tokenIds: [1, 3, 8, 4], nowMs: 40)
+        let first = emitter.update(uid: 0, tokenIds: [1, 3, 8], nowMs: 0)
+        XCTAssertEqual(first.committedTokens, [1, 3, 8])
+        XCTAssertEqual(first.withheldStableTokenCount, 0)
+        let second = emitter.update(uid: 0, tokenIds: [1, 3, 8, 4], nowMs: 40)
+        XCTAssertTrue(second.committedTokens.isEmpty)
         let third = emitter.update(uid: 0, tokenIds: [1, 3, 19, 4], nowMs: 80)
 
-        XCTAssertEqual(third.committedTokens, [1, 3])
+        XCTAssertTrue(third.committedTokens.isEmpty)
         XCTAssertEqual(third.withheldStableTokenCount, 0)
     }
 
@@ -81,14 +83,15 @@ final class StabilizedStreamingEmitterTests: XCTestCase {
         _ = emitter.update(uid: 0, tokenIds: [1, 3], nowMs: 0)
         _ = emitter.update(uid: 0, tokenIds: [1, 3, 8], nowMs: 40)
         let flush = emitter.flush(uid: 0, nowMs: 80)
-        XCTAssertEqual(flush.committedTokens, [3, 8])
+        XCTAssertEqual(flush.committedTokens, [8])
     }
 
     func test_update_idempotent_when_no_change() {
         let emitter = makeEmitter(windowSize: 2, boundary: false)
-        _ = emitter.update(uid: 0, tokenIds: [1, 3], nowMs: 0)
+        let first = emitter.update(uid: 0, tokenIds: [1, 3], nowMs: 0)
+        XCTAssertEqual(first.committedTokens, [1, 3])
         let second = emitter.update(uid: 0, tokenIds: [1, 3, 4], nowMs: 40)
-        XCTAssertEqual(second.committedTokens, [1, 3])
+        XCTAssertTrue(second.committedTokens.isEmpty)
 
         let third = emitter.update(uid: 0, tokenIds: [1, 3, 4], nowMs: 80)
         XCTAssertEqual(third.committedTokens, [4])
@@ -99,11 +102,12 @@ final class StabilizedStreamingEmitterTests: XCTestCase {
 
     func test_reset_clears_state() {
         let emitter = makeEmitter(windowSize: 2, boundary: false)
-        _ = emitter.update(uid: 0, tokenIds: [1, 3], nowMs: 0)
+        let first = emitter.update(uid: 0, tokenIds: [1, 3], nowMs: 0)
+        XCTAssertEqual(first.committedTokens, [1, 3])
         _ = emitter.update(uid: 0, tokenIds: [1, 3, 4], nowMs: 40)
         emitter.reset(uid: 0)
         let afterReset = emitter.update(uid: 0, tokenIds: [1, 3, 4], nowMs: 80)
-        XCTAssertTrue(afterReset.committedTokens.isEmpty, "Should require new history after reset")
+        XCTAssertEqual(afterReset.committedTokens, [1, 3, 4], "Reset should clear commit history so tokens emit again")
     }
 
     func test_sentencepiece_boundary_markers_behavior() {

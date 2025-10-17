@@ -8,29 +8,40 @@ struct StreamingWindow {
     let isFinalChunk: Bool
 }
 
+/// Maintains a rolling audio buffer and emits chunked windows with left/right context padding for streaming ASR.
 struct StreamingWindowProcessor {
     /// Minimum chunk duration for partial windows during streaming onset (seconds).
     /// Lower values reduce first-token latency but may impact accuracy.
     private static let minimumPartialChunkSeconds: Double = 3.0
 
     /// Minimum reserved capacity for the streaming buffer (samples).
-    /// Matches 256 ms at 16 kHz to keep reallocations off the hot path.
-    private static let bufferPreallocationFloor: Int = 4096
+    /// Matches the VAD chunk size (256 ms at 16 kHz) to keep reallocations off the hot path.
+    private static let bufferPreallocationFloor: Int = VadManager.chunkSize
 
+    /// Caller-provided chunk, context, stabilizer, and VAD configuration.
     private let config: StreamingAsrConfig
+    /// Circular buffer that owns the streaming samples currently in-flight.
     private var sampleBuffer: CircularBuffer<Float>
-    private var bufferStartIndex: Int = 0  // Absolute index of sampleBuffer[0].
-    private var nextWindowCenterStart: Int = 0  // Absolute index where next chunk (center) begins.
+    /// Absolute sample index of `sampleBuffer[0]`; advances as we drop consumed audio.
+    private var bufferStartIndex: Int = 0
+    /// Absolute sample index where the next window's center region should begin.
+    private var nextWindowCenterStart: Int = 0
+    /// Logical silence appended to preserve right context when no real samples are available yet.
     private var virtualTrailingSilence: Int = 0
+    /// Silence duration observed before the first real samples arrive; released once audio starts.
     private var pendingLeadingSilence: Int = 0
+    /// Partial chunk floor (samples) used when we emit early windows during VAD onset.
     private let partialChunkMinimum: Int
 
+    /// Prepares the processor with the desired chunk/context sizes and computes partial-window thresholds.
     init(config: StreamingAsrConfig) {
         self.config = config
         let requiredCapacity = config.chunkSamples + config.leftContextSamples + config.rightContextSamples
+        // Preallocate enough space for the largest window plus context to keep buffer mutations cheap.
         let initialCapacity = max(requiredCapacity, Self.bufferPreallocationFloor)
         self.sampleBuffer = CircularBuffer(initialCapacity: initialCapacity)
-        let minimumSamples = Int(Self.minimumPartialChunkSeconds * 16000.0)
+        let minimumSamples = Int(Self.minimumPartialChunkSeconds * Double(ASRConstants.sampleRate))
+        // Clamp partial windows to a safe range: ≥3s (or half chunk) but never exceeding the full chunk size.
         self.partialChunkMinimum = min(config.chunkSamples, max(minimumSamples, config.chunkSamples / 2))
     }
 
@@ -110,10 +121,12 @@ struct StreamingWindowProcessor {
                 : nextWindowCenterStart + chunk + right
 
             let startIndex = max(leftStartAbs - bufferStartIndex, 0)
+            let rawEndIndex = rightEndAbs - bufferStartIndex
+            // Clamp to `startIndex` to avoid negative spans while right-context silence is still virtual.
             let endIndex =
                 allowPartialChunk
-                ? max(rightEndAbs - bufferStartIndex, startIndex)
-                : rightEndAbs - bufferStartIndex
+                ? max(rawEndIndex, startIndex)
+                : max(rawEndIndex, startIndex)
 
             if startIndex < 0 || endIndex < startIndex { break }
 

@@ -30,7 +30,6 @@ swift run fluidaudio transcribe audio.wav --streaming
 ### Streaming flags (`transcribe`)
 
 - `--streaming` enables the stabilized pipeline using the high-stability configuration by default.
-- `--stabilize-debug` dumps per-window JSONL traces for post-mortem analysis.
 - Pair with `--model-version v2` when you only need English and want higher recall.
 
 ## Diarization

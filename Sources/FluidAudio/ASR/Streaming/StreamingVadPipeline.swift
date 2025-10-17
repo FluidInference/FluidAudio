@@ -36,6 +36,7 @@ final class StreamingVadPipeline {
     private var wasAutoInitialized: Bool = false
     private var totalDroppedSamples: Int = 0
     private let overflowSampleHardLimit: Int
+    private let preSpeechSampleLimit: Int  // Maximum buffered lead-in samples before we emit overflow.
 
     init(config: StreamingAsrConfig, injectedManager: VadManager?) {
         self.config = config
@@ -44,6 +45,10 @@ final class StreamingVadPipeline {
         self.residualBuffer = CircularBuffer(initialCapacity: Self.residualPreallocationSamples)
         self.preSpeechBuffer = CircularBuffer(initialCapacity: Self.preSpeechPreallocationSamples)
         self.overflowSampleHardLimit = Int(Self.overflowHardLimitSeconds * Double(VadManager.sampleRate))
+        let paddingSamples = Int(config.vad.segmentationConfig.speechPadding * Double(VadManager.sampleRate))
+        let leftContext = config.leftContextSamples
+        let baseline = max(paddingSamples, leftContext)
+        self.preSpeechSampleLimit = baseline + VadManager.chunkSize  // Preserve left-context while allowing one extra chunk for padding.
     }
 
     var isEnabled: Bool {
@@ -123,14 +128,7 @@ final class StreamingVadPipeline {
             let chunk = residualBuffer.popFirst(chunkSize)
 
             preSpeechBuffer.append(contentsOf: chunk)
-            if preSpeechBuffer.count > preSpeechSampleLimit {
-                let overflow = preSpeechBuffer.count - preSpeechSampleLimit
-                if overflow > 0 {
-                    overflowBuffer.append(contentsOf: preSpeechBuffer.copyPrefix(overflow))
-                    preSpeechBuffer.dropFirst(overflow)
-                    await enforceOverflowLimit(handler: segmentHandler)
-                }
-            }
+            await trimPreSpeechOverflowIfNeeded(handler: segmentHandler)
 
             do {
                 let result = try await activeManager.processStreamingChunk(
@@ -141,6 +139,9 @@ final class StreamingVadPipeline {
                 )
                 state = result.state
 
+                // VAD reported a speech onset. Reconstruct the lead-in by emitting any overflow
+                // samples first, then replaying buffered pre-speech audio so the ASR chunk has
+                // proper context (avoids trimming breaths/consonants).
                 if let event = result.event, event.kind == .speechStart {
                     let bufferCountBefore = preSpeechBuffer.count
                     let chunkEndSample = result.state.processedSamples
@@ -151,54 +152,69 @@ final class StreamingVadPipeline {
                         recoveredSamples.append(contentsOf: overflowBuffer)
                         overflowBuffer.removeAll(keepingCapacity: true)
                     }
-                    if emitCount > 0 {
-                        let startIndex = bufferCountBefore - emitCount
-                        let droppedPrefix = startIndex
-                        if droppedPrefix > 0 {
-                            await emitSilence(
-                                count: droppedPrefix,
-                                handler: segmentHandler
-                            )
+                    guard emitCount > 0 else {
+                        if !recoveredSamples.isEmpty {
+                            await emitSpeechSegment(recoveredSamples, isSpeechOnset: true, handler: segmentHandler)
+                            if bufferCountBefore > 0 {
+                                await emitSilence(
+                                    count: bufferCountBefore,
+                                    handler: segmentHandler
+                                )
+                            }
+                            speechActive = true
+                            preSpeechBuffer.removeAll(keepingCapacity: true)
+                            continue
                         }
-                        let recovered = preSpeechBuffer.copyRange(startIndex..<bufferCountBefore)
-                        recoveredSamples.append(contentsOf: recovered)
-                        let segment = recoveredSamples
-                        await emitSpeechSegment(segment, isSpeechOnset: true, handler: segmentHandler)
-                    } else if !recoveredSamples.isEmpty {
-                        await emitSpeechSegment(recoveredSamples, isSpeechOnset: true, handler: segmentHandler)
+
                         if bufferCountBefore > 0 {
                             await emitSilence(
                                 count: bufferCountBefore,
                                 handler: segmentHandler
                             )
                         }
-                    } else if bufferCountBefore > 0 {
+                        speechActive = true
+                        preSpeechBuffer.removeAll(keepingCapacity: true)
+                        continue
+                    }
+
+                    let startIndex = bufferCountBefore - emitCount
+                    let droppedPrefix = startIndex
+                    if droppedPrefix > 0 {
                         await emitSilence(
-                            count: bufferCountBefore,
+                            count: droppedPrefix,
                             handler: segmentHandler
                         )
                     }
+                    let recovered = preSpeechBuffer.copyRange(startIndex..<bufferCountBefore)
+                    recoveredSamples.append(contentsOf: recovered)
+                    await emitSpeechSegment(recoveredSamples, isSpeechOnset: true, handler: segmentHandler)
                     speechActive = true
                     preSpeechBuffer.removeAll(keepingCapacity: true)
-                } else if speechActive {
-                    if preSpeechBuffer.count > 0 {
-                        let segment = preSpeechBuffer.asArray()
-                        preSpeechBuffer.removeAll(keepingCapacity: true)
-                        await emitSpeechSegment(segment, isSpeechOnset: false, handler: segmentHandler)
-                    }
+                    continue
+                }
+
+                if speechActive, preSpeechBuffer.count > 0 {
+                    // Speech already active: flush whatever we buffered while waiting for classifier.
+                    let segment = preSpeechBuffer.asArray()
+                    preSpeechBuffer.removeAll(keepingCapacity: true)
+                    await emitSpeechSegment(segment, isSpeechOnset: false, handler: segmentHandler)
                 }
 
                 if let event = result.event, event.kind == .speechEnd {
                     speechActive = false
                     let padSamples = Int(segmentation.speechPadding * Double(VadManager.sampleRate))
-                    if padSamples > 0 {
-                        let tailCount = min(padSamples, chunk.count)
-                        if tailCount > 0 {
-                            let tail = Array(chunk.suffix(tailCount))
-                            preSpeechBuffer.removeAll(keepingCapacity: true)
-                            preSpeechBuffer.append(contentsOf: tail)
-                        }
+                    if padSamples <= 0 {
+                        continue
                     }
+
+                    let tailCount = min(padSamples, chunk.count)
+                    if tailCount <= 0 {
+                        continue
+                    }
+
+                    let tail = Array(chunk.suffix(tailCount))
+                    preSpeechBuffer.removeAll(keepingCapacity: true)
+                    preSpeechBuffer.append(contentsOf: tail)
                 }
             } catch {
                 logger.error(
@@ -268,13 +284,6 @@ final class StreamingVadPipeline {
         manager
     }
 
-    private var preSpeechSampleLimit: Int {
-        let paddingSamples = Int(config.vad.segmentationConfig.speechPadding * Double(VadManager.sampleRate))
-        let leftContext = config.leftContextSamples
-        let baseline = max(paddingSamples, leftContext)
-        return baseline + VadManager.chunkSize
-    }
-
     private func emitSpeechSegment(
         _ segment: [Float],
         isSpeechOnset: Bool,
@@ -301,6 +310,16 @@ final class StreamingVadPipeline {
         await handler(
             .silence(samples: count, cumulativeDroppedSamples: totalDroppedSamples)
         )
+    }
+
+    private func trimPreSpeechOverflowIfNeeded(
+        handler: @Sendable (StreamingVadEvent) async -> Void
+    ) async {
+        let overflow = preSpeechBuffer.count - preSpeechSampleLimit
+        guard overflow > 0 else { return }
+        overflowBuffer.append(contentsOf: preSpeechBuffer.copyPrefix(overflow))
+        preSpeechBuffer.dropFirst(overflow)
+        await enforceOverflowLimit(handler: handler)
     }
 
     private func enforceOverflowLimit(

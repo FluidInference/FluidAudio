@@ -90,7 +90,6 @@ var config = StreamingAsrConfig.streaming
 config = config.withStabilizer(
     StreamingStabilizerConfig()
         .withMaxWaitMilliseconds(900)
-        .withDebugDumpEnabled(true)  // Writes per-window JSONL traces
 )
 config = config.withVad(
     StreamingVadConfig(

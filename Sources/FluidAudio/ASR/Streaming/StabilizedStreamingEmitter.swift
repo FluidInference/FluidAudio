@@ -16,16 +16,6 @@ struct StabilizedUpdateResult: Sendable, Equatable {
     let tokenLatencies: [StabilizedTokenLatency]
     /// Count of stable tokens withheld due to boundary rules.
     let withheldStableTokenCount: Int
-    /// Debug records describing the state transition (empty when debug disabled).
-    let debugRecords: [StabilizerDebugRecord]
-}
-
-@available(macOS 13.0, iOS 16.0, *)
-struct StabilizerDebugRecord: Sendable, Equatable {
-    let timestampMs: Int
-    let latestHypothesis: [Int]
-    let stablePrefix: [Int]
-    let committed: [Int]
 }
 
 @available(macOS 13.0, iOS 16.0, *)
@@ -40,15 +30,12 @@ final class StabilizedStreamingEmitter {
         var firstSeen: [Int: Int] = [:]
         var startTimestampMs: Int?
         var firstCommitLatencyMs: Int?
-        var debugRecords: [StabilizerDebugRecord] = []
     }
 
     private struct InternalConfig {
         let windowSize: Int
         let emitWordBoundaries: Bool
         let maxWaitMilliseconds: Int
-        let enableDebugDump: Bool
-        let tokenizerKind: StreamingStabilizerConfig.TokenizerKind
     }
 
     private let config: InternalConfig
@@ -59,9 +46,7 @@ final class StabilizedStreamingEmitter {
         self.config = InternalConfig(
             windowSize: config.sanitizedWindowSize,
             emitWordBoundaries: config.emitWordBoundaries,
-            maxWaitMilliseconds: config.sanitizedMaxWait,
-            enableDebugDump: config.debugDumpEnabled,
-            tokenizerKind: config.tokenizerKind
+            maxWaitMilliseconds: config.sanitizedMaxWait
         )
         self.decodeToken = tokenDecoder
     }
@@ -69,6 +54,7 @@ final class StabilizedStreamingEmitter {
     func update(uid: Int, tokenIds: [Int], nowMs: Int) -> StabilizedUpdateResult {
         var state = states[uid, default: StreamState()]
         if state.startTimestampMs == nil {
+            // Capture the first stream-relative timestamp to report latencies consistently.
             state.startTimestampMs = nowMs
         }
 
@@ -76,20 +62,19 @@ final class StabilizedStreamingEmitter {
         updateFirstSeen(&state, with: tokenIds, nowMs: nowMs)
 
         let stablePrefix = longestCommonPrefix(for: state.ringBuffer)
-        let hasSufficientHistory = state.ringBuffer.count >= config.windowSize
         let committedCount = state.committed.count
-        var commitCount = hasSufficientHistory ? stablePrefix.count : committedCount
-        var withheldCount = hasSufficientHistory ? max(0, commitCount - committedCount) : 0
+        var commitCount = committedCount
 
-        if commitCount > committedCount {
+        if stablePrefix.count > committedCount {
             commitCount = determineCommitCount(
                 currentCommitted: committedCount,
                 stablePrefix: stablePrefix,
                 state: state,
                 nowMs: nowMs
             )
-            withheldCount = max(0, stablePrefix.count - commitCount)
         }
+
+        let withheldCount = max(0, stablePrefix.count - commitCount)
 
         let newlyCommitted: [Int]
         var latencyMeasurements: [StabilizedTokenLatency] = []
@@ -103,8 +88,10 @@ final class StabilizedStreamingEmitter {
                 nowMs: nowMs
             )
             if state.firstCommitLatencyMs == nil {
-                firstCommitLatency = nowMs
-                state.firstCommitLatencyMs = nowMs
+                let startTimestamp = state.startTimestampMs ?? nowMs
+                let latency = max(0, nowMs - startTimestamp)
+                firstCommitLatency = latency
+                state.firstCommitLatencyMs = latency
             }
         } else {
             newlyCommitted = []
@@ -116,26 +103,13 @@ final class StabilizedStreamingEmitter {
 
         state.lastHypothesis = tokenIds
 
-        var debugRecords: [StabilizerDebugRecord] = []
-        if config.enableDebugDump {
-            let record = StabilizerDebugRecord(
-                timestampMs: nowMs,
-                latestHypothesis: tokenIds,
-                stablePrefix: stablePrefix,
-                committed: state.committed
-            )
-            state.debugRecords.append(record)
-            debugRecords = [record]
-        }
-
         states[uid] = state
 
         return StabilizedUpdateResult(
             committedTokens: newlyCommitted,
             firstCommitLatencyMs: firstCommitLatency,
             tokenLatencies: latencyMeasurements,
-            withheldStableTokenCount: withheldCount,
-            debugRecords: debugRecords
+            withheldStableTokenCount: withheldCount
         )
     }
 
@@ -145,21 +119,18 @@ final class StabilizedStreamingEmitter {
                 committedTokens: [],
                 firstCommitLatencyMs: nil,
                 tokenLatencies: [],
-                withheldStableTokenCount: 0,
-                debugRecords: []
+                withheldStableTokenCount: 0
             )
         }
 
         let totalCount = state.lastHypothesis.count
         let committedCount = state.committed.count
         guard totalCount > committedCount else {
-            let records = config.enableDebugDump ? state.debugRecords : []
             return StabilizedUpdateResult(
                 committedTokens: [],
                 firstCommitLatencyMs: nil,
                 tokenLatencies: [],
-                withheldStableTokenCount: 0,
-                debugRecords: records
+                withheldStableTokenCount: 0
             )
         }
 
@@ -172,31 +143,21 @@ final class StabilizedStreamingEmitter {
 
         var firstCommitLatency: Int?
         if !newlyCommitted.isEmpty, state.firstCommitLatencyMs == nil {
-            firstCommitLatency = nowMs
-            state.firstCommitLatencyMs = nowMs
+            let startTimestamp = state.startTimestampMs ?? nowMs
+            let latency = max(0, nowMs - startTimestamp)
+            firstCommitLatency = latency
+            state.firstCommitLatencyMs = latency
         }
 
         state.committed = state.lastHypothesis
 
-        var debugRecords: [StabilizerDebugRecord] = []
-        if config.enableDebugDump {
-            let record = StabilizerDebugRecord(
-                timestampMs: nowMs,
-                latestHypothesis: state.lastHypothesis,
-                stablePrefix: state.lastHypothesis,
-                committed: state.committed
-            )
-            state.debugRecords.append(record)
-            debugRecords = [record]
-        }
         states[uid] = state
 
         return StabilizedUpdateResult(
             committedTokens: newlyCommitted,
             firstCommitLatencyMs: firstCommitLatency,
             tokenLatencies: latencies,
-            withheldStableTokenCount: 0,
-            debugRecords: debugRecords
+            withheldStableTokenCount: 0
         )
     }
 
@@ -206,16 +167,6 @@ final class StabilizedStreamingEmitter {
 
     func cleanupState(for uid: Int) {
         states.removeValue(forKey: uid)
-    }
-
-    func drainDebugRecords(for uid: Int) -> [StabilizerDebugRecord] {
-        guard config.enableDebugDump, var state = states[uid] else {
-            return []
-        }
-        let records = state.debugRecords
-        state.debugRecords.removeAll(keepingCapacity: false)
-        states[uid] = state
-        return records
     }
 
     func discardCommittedPrefix(uid: Int, count: Int) {
@@ -242,17 +193,6 @@ final class StabilizedStreamingEmitter {
                 state.firstSeen.keys
                     .filter { $0 >= state.lastHypothesis.count }
                     .forEach { state.firstSeen.removeValue(forKey: $0) }
-            }
-        }
-
-        if config.enableDebugDump, !state.debugRecords.isEmpty {
-            state.debugRecords = state.debugRecords.map { record in
-                StabilizerDebugRecord(
-                    timestampMs: record.timestampMs,
-                    latestHypothesis: dropPrefix(record.latestHypothesis, by: count),
-                    stablePrefix: dropPrefix(record.stablePrefix, by: count),
-                    committed: dropPrefix(record.committed, by: count)
-                )
             }
         }
 
@@ -291,15 +231,13 @@ final class StabilizedStreamingEmitter {
             }
         }
         // Remove trailing entries if new hypothesis shorter.
-        state.firstSeen.keys
-            .filter { $0 >= tokens.count }
-            .forEach { state.firstSeen.removeValue(forKey: $0) }
+        state.firstSeen = state.firstSeen.filter { $0.key < tokens.count }
     }
 
     private func dropPrefix(_ array: [Int], by count: Int) -> [Int] {
         guard count > 0 else { return array }
         guard count < array.count else { return [] }
-        return Array(array[count..<array.count])
+        return Array(array.dropFirst(count))
     }
 
     private func longestCommonPrefix(for sequences: [[Int]]) -> [Int] {
@@ -378,12 +316,7 @@ final class StabilizedStreamingEmitter {
     }
 
     private func startsNewWord(_ token: String) -> Bool {
-        switch config.tokenizerKind {
-        case .sentencePiece, .bytePairEncoding:
-            return token.hasPrefix("▁")
-        case .wordPiece:
-            return !token.hasPrefix("##") && token != "'"
-        }
+        token.hasPrefix("▁")
     }
 
     private func isBoundaryToken(_ token: String) -> Bool {
@@ -393,9 +326,6 @@ final class StabilizedStreamingEmitter {
         let punctuation: Set<Character> = [".", ",", ";", ":", "!", "?", "…", "-", "—"]
         if let last = token.last, punctuation.contains(last) {
             return true
-        }
-        if config.tokenizerKind == .wordPiece, token == "'" {
-            return false
         }
         return false
     }

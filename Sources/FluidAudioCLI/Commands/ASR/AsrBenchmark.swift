@@ -202,6 +202,24 @@ public class ASRBenchmark {
         )!
 
         let streamingStart = Date()
+        let latencyTask = Task { () -> (Double?, Double?) in
+            var firstTokenLatency: Double?
+            var firstConfirmedTokenLatency: Double?
+            let updates = await streamingAsr.transcriptionUpdates
+            for await update in updates {
+                let normalized = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalized.isEmpty else { continue }
+
+                let latency = update.timestamp.timeIntervalSince(streamingStart)
+                if firstTokenLatency == nil, latency.isFinite {
+                    firstTokenLatency = max(0, latency)
+                }
+                if update.isConfirmed, firstConfirmedTokenLatency == nil, latency.isFinite {
+                    firstConfirmedTokenLatency = max(0, latency)
+                }
+            }
+            return (firstTokenLatency, firstConfirmedTokenLatency)
+        }
 
         var position = 0
         while position < audioSamples.count {
@@ -226,24 +244,22 @@ public class ASRBenchmark {
             position += chunkSamples
         }
 
-        let finalText = try await streamingAsr.finish()
-        let metricsSnapshot = await streamingAsr.metricsSnapshot()
-        let fallbackProcessingTime = Date().timeIntervalSince(streamingStart)
+        let finalText: String
+        do {
+            finalText = try await streamingAsr.finish()
+        } catch {
+            latencyTask.cancel()
+            throw error
+        }
 
-        let totalProcessingTime =
-            metricsSnapshot.totalChunkProcessingTime > 0
-            ? metricsSnapshot.totalChunkProcessingTime
-            : fallbackProcessingTime
+        let (firstTokenLatency, firstConfirmedTokenLatency) = await latencyTask.value
+        let totalProcessingTime = Date().timeIntervalSince(streamingStart)
 
         let metrics = calculateASRMetrics(hypothesis: finalText, reference: file.transcript)
 
         let streamingMetrics = StreamingMetrics(
-            avgChunkProcessingTime: metricsSnapshot.averageChunkProcessingTime ?? 0,
-            maxChunkProcessingTime: metricsSnapshot.maxChunkProcessingTime ?? 0,
-            minChunkProcessingTime: metricsSnapshot.minChunkProcessingTime ?? 0,
-            totalChunks: metricsSnapshot.chunkCount,
-            firstTokenLatency: metricsSnapshot.firstTokenLatency,
-            firstConfirmedTokenLatency: metricsSnapshot.firstConfirmedTokenLatency,
+            firstTokenLatency: firstTokenLatency,
+            firstConfirmedTokenLatency: firstConfirmedTokenLatency,
             streamingRTFx: totalProcessingTime > 0 ? audioLength / totalProcessingTime : 0,
             chunkDuration: StreamingAsrConfig.streaming.chunkSeconds
         )
@@ -848,20 +864,16 @@ extension ASRBenchmark {
 
             var aggregateStreamingSummary:
                 (
-                    avgChunkTime: Double,
-                    maxChunkTime: Double,
-                    totalChunks: Int,
-                    avgFirstTokenLatency: Double?,
-                    avgFirstConfirmedLatency: Double?
+                    averageRTFx: Double,
+                    averageFirstTokenLatency: Double?,
+                    averageFirstConfirmedLatency: Double?
                 )?
 
             if config.testStreaming {
                 let streamingResults = results.compactMap { $0.streamingMetrics }
                 if !streamingResults.isEmpty {
-                    let avgChunkTime =
-                        streamingResults.map { $0.avgChunkProcessingTime }.reduce(0, +) / Double(streamingResults.count)
-                    let maxChunkTime = streamingResults.map { $0.maxChunkProcessingTime }.max() ?? 0
-                    let totalChunks = streamingResults.map { $0.totalChunks }.reduce(0, +)
+                    let avgRTFx =
+                        streamingResults.map { $0.streamingRTFx }.reduce(0, +) / Double(streamingResults.count)
                     let firstTokenLatencies = streamingResults.compactMap { $0.firstTokenLatency }
                     let firstConfirmedLatencies = streamingResults.compactMap { $0.firstConfirmedTokenLatency }
                     let avgFirstTokenLatency =
@@ -874,11 +886,9 @@ extension ASRBenchmark {
                         : firstConfirmedLatencies.reduce(0, +) / Double(firstConfirmedLatencies.count)
 
                     aggregateStreamingSummary = (
-                        avgChunkTime: avgChunkTime,
-                        maxChunkTime: maxChunkTime,
-                        totalChunks: totalChunks,
-                        avgFirstTokenLatency: avgFirstTokenLatency,
-                        avgFirstConfirmedLatency: avgFirstConfirmedLatency
+                        averageRTFx: avgRTFx,
+                        averageFirstTokenLatency: avgFirstTokenLatency,
+                        averageFirstConfirmedLatency: avgFirstConfirmedLatency
                     )
                 }
             }
@@ -914,14 +924,12 @@ extension ASRBenchmark {
             // Add streaming summary if available
             if let streamingSummary = aggregateStreamingSummary {
                 var streamingSummaryDict: [String: Any] = [
-                    "avgChunkProcessingTime": streamingSummary.avgChunkTime,
-                    "maxChunkProcessingTime": streamingSummary.maxChunkTime,
-                    "totalChunksProcessed": streamingSummary.totalChunks,
+                    "averageStreamingRTFx": streamingSummary.averageRTFx
                 ]
-                if let firstLatency = streamingSummary.avgFirstTokenLatency {
+                if let firstLatency = streamingSummary.averageFirstTokenLatency {
                     streamingSummaryDict["avgFirstTokenLatency"] = firstLatency
                 }
-                if let confirmedLatency = streamingSummary.avgFirstConfirmedLatency {
+                if let confirmedLatency = streamingSummary.averageFirstConfirmedLatency {
                     streamingSummaryDict["avgFirstConfirmedTokenLatency"] = confirmedLatency
                 }
                 summaryDict["streaming"] = streamingSummaryDict
@@ -946,10 +954,6 @@ extension ASRBenchmark {
                         // Add streaming metrics if available
                         if let streamingMetrics = result.streamingMetrics {
                             resultDict["streamingMetrics"] = [
-                                "avgChunkProcessingTime": streamingMetrics.avgChunkProcessingTime,
-                                "maxChunkProcessingTime": streamingMetrics.maxChunkProcessingTime,
-                                "minChunkProcessingTime": streamingMetrics.minChunkProcessingTime,
-                                "totalChunks": streamingMetrics.totalChunks,
                                 "firstTokenLatency": streamingMetrics.firstTokenLatency as Any,
                                 "firstConfirmedTokenLatency": streamingMetrics.firstConfirmedTokenLatency as Any,
                                 "streamingRTFx": streamingMetrics.streamingRTFx,
@@ -987,17 +991,13 @@ extension ASRBenchmark {
                 logger.info(
                     "   Decoder chunk duration: \(StreamingAsrConfig.streaming.chunkSeconds)s"
                 )
-                logger.info("   Total chunks processed: \(streamingSummary.totalChunks)")
                 logger.info(
-                    "   Avg chunk processing time: \(String(format: "%.3f", streamingSummary.avgChunkTime))s"
+                    "   Average streaming RTFx: \(String(format: "%.2f", streamingSummary.averageRTFx))x"
                 )
-                logger.info(
-                    "   Max chunk processing time: \(String(format: "%.3f", streamingSummary.maxChunkTime))s"
-                )
-                if let firstLatency = streamingSummary.avgFirstTokenLatency {
+                if let firstLatency = streamingSummary.averageFirstTokenLatency {
                     logger.info("   Avg first token latency: \(String(format: "%.3f", firstLatency))s")
                 }
-                if let confirmedLatency = streamingSummary.avgFirstConfirmedLatency {
+                if let confirmedLatency = streamingSummary.averageFirstConfirmedLatency {
                     logger.info(
                         "   Avg first confirmed token latency: \(String(format: "%.3f", confirmedLatency))s"
                     )
@@ -1042,10 +1042,9 @@ extension ASRBenchmark {
             Streaming Mode:
                 When --test-streaming is enabled, the benchmark simulates real-time streaming
                 by processing audio in chunks. This measures:
-                - Per-chunk processing latency
                 - First token latency
+                - First confirmed token latency
                 - Streaming real-time factor (RTFx)
-                - Min/max/average chunk processing times
 
             Examples:
                 # Basic benchmark on test-clean subset

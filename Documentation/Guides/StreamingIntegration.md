@@ -76,12 +76,10 @@ This checklist distills the stabilized streaming pipeline so automation agents (
 ## Stabilization Defaults
 - Streaming stabilization always uses the high-stability configuration (4-window consensus, 1.2 s confirmation wait) to maximize accuracy.
 - Customize advanced scenarios by constructing `StreamingStabilizerConfig` directly (`windowSize`, `maxWaitMilliseconds`, tokenizer).
-- CLI integration adopts the same defaults; use `--stabilize-debug` to capture JSONL traces for tuning.
 
 ## Observability & Debugging
-- `streamingAsr.metricsSnapshot()` → quick look at chunk counts, average processing time, and latency.
-- `.withDebugDumpEnabled(true)` on the stabilizer writes JSONL traces per chunk to `~/Library/Logs/FluidAudio`.
-- CLI users can run `swift run fluidaudio transcribe audio.wav --streaming --stabilize-debug` to collect per-window traces.
+- Track latency by comparing each `StreamingTranscriptionUpdate.timestamp` with your stream start time (the CLI prints the first-token latency using the same approach).
+- Log confirmed segments from `transcriptionUpdates` to audit stabilization behaviour over time.
 
 ## Common Pitfalls
 - **Clipping leading words:** Ensure VAD `speechPadding` ≥ 0.2 s when trimming silence aggressively.

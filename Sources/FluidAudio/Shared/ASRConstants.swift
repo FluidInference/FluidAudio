@@ -2,6 +2,9 @@ import Foundation
 
 /// Constants for ASR audio processing and frame calculations
 public enum ASRConstants {
+    /// Target sample rate for all ASR pipelines (16 kHz mono).
+    public static let sampleRate: Int = 16_000
+
     /// Mel-spectrogram hop size in samples (10ms at 16kHz)
     public static let melHopSize: Int = 160
 

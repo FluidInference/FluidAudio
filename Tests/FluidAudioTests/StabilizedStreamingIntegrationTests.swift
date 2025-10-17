@@ -10,8 +10,7 @@ final class StabilizedStreamingIntegrationTests: XCTestCase {
         let config = StreamingStabilizerConfig(
             windowSize: 2,
             emitWordBoundaries: true,
-            maxWaitMilliseconds: 800,
-            debugDumpEnabled: false
+            maxWaitMilliseconds: 800
         )
         let sequences = incrementalSequences()
         let timestamps = [400, 480, 520, 600, 680, 760, 820]
@@ -28,8 +27,7 @@ final class StabilizedStreamingIntegrationTests: XCTestCase {
         let config = StreamingStabilizerConfig(
             windowSize: 2,
             emitWordBoundaries: true,
-            maxWaitMilliseconds: 1200,
-            debugDumpEnabled: false
+            maxWaitMilliseconds: 1200
         )
         let sequences = incrementalSequences()
         let timestamps = [800, 900, 960, 1040, 1200, 1320, 1400]
@@ -45,8 +43,7 @@ final class StabilizedStreamingIntegrationTests: XCTestCase {
         let config = StreamingStabilizerConfig(
             windowSize: 2,
             emitWordBoundaries: true,
-            maxWaitMilliseconds: 600,
-            debugDumpEnabled: false
+            maxWaitMilliseconds: 600
         )
         let sequences = incrementalSequences()
         let chunkMs = 280
@@ -61,30 +58,6 @@ final class StabilizedStreamingIntegrationTests: XCTestCase {
         }
         let expected = chunkMs + rightMs
         XCTAssertLessThanOrEqual(abs(latency - expected), chunkMs + rightMs)
-    }
-
-    func test_debug_dump_writes_per_chunk_logs_when_enabled() {
-        let config = StreamingStabilizerConfig(
-            windowSize: 2,
-            emitWordBoundaries: true,
-            maxWaitMilliseconds: 400,
-            debugDumpEnabled: true
-        )
-        let emitter = StabilizedStreamingEmitter(
-            config: config,
-            tokenDecoder: { [unowned self] token in
-                self.tokenizer.decode(token)
-            })
-        let sequences = Array(incrementalSequences().prefix(4))
-        var recordsCount = 0
-        for (index, sequence) in sequences.enumerated() {
-            let result = emitter.update(uid: 0, tokenIds: sequence, nowMs: index * 200)
-            recordsCount += result.debugRecords.count
-            XCTAssertEqual(result.debugRecords.count, 1)
-        }
-        let drained = emitter.drainDebugRecords(for: 0)
-        XCTAssertEqual(drained.count, sequences.count)
-        XCTAssertEqual(recordsCount, sequences.count)
     }
 
     // MARK: - Helpers

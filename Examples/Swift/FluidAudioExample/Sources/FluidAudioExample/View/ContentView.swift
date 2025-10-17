@@ -217,10 +217,6 @@ private struct MetricsCard: View {
                         title: "First Token",
                         value: formatOptionalSeconds(metadata.firstTokenLatency)
                     )
-                    MetricItem(
-                        title: "Chunks Processed",
-                        value: "\(metadata.chunkCount)"
-                    )
                 }
             }
         }

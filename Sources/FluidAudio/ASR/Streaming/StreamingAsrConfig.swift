@@ -3,6 +3,9 @@ import Foundation
 /// Configuration for `StreamingAsrManager`.
 @available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAsrConfig: Sendable {
+    private static let streamingSampleRate: Int = ASRConstants.sampleRate
+    private static let legacyBufferDurationSeconds: TimeInterval = 15.0
+
     /// Main chunk size for stable transcription (seconds). Should be 10-11s for best quality.
     public let chunkSeconds: TimeInterval
     /// Left context appended to each window (seconds). Typical: 10.0s.
@@ -76,19 +79,19 @@ public struct StreamingAsrConfig: Sendable {
 
     var asrConfig: ASRConfig {
         ASRConfig(
-            sampleRate: 16000,
+            sampleRate: Self.streamingSampleRate,
             tdtConfig: TdtConfig()
         )
     }
 
     /// Sample counts at 16 kHz.
-    var chunkSamples: Int { Int(chunkSeconds * 16000) }
-    var leftContextSamples: Int { Int(leftContextSeconds * 16000) }
-    var rightContextSamples: Int { Int(rightContextSeconds * 16000) }
+    var chunkSamples: Int { Int(chunkSeconds * Double(Self.streamingSampleRate)) }
+    var leftContextSamples: Int { Int(leftContextSeconds * Double(Self.streamingSampleRate)) }
+    var rightContextSamples: Int { Int(rightContextSeconds * Double(Self.streamingSampleRate)) }
 
     /// Backward-compatibility conveniences for existing call-sites/tests.
     var chunkDuration: TimeInterval { chunkSeconds }
-    var bufferCapacity: Int { Int(15.0 * 16000) }
+    var bufferCapacity: Int { Int(Self.legacyBufferDurationSeconds * Double(Self.streamingSampleRate)) }
     var chunkSizeInSamples: Int { chunkSamples }
 
     public func withStabilizer(_ stabilizer: StreamingStabilizerConfig) -> StreamingAsrConfig {
@@ -127,7 +130,7 @@ public struct StreamingVadConfig: Sendable {
 
     public init(
         isEnabled: Bool = true,
-        vadConfig: VadConfig = .default,
+        vadConfig: VadConfig = VadConfig(threshold: 0.30),
         segmentationConfig: VadSegmentationConfig = .default
     ) {
         self.isEnabled = isEnabled

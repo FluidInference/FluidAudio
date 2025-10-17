@@ -163,9 +163,8 @@ final class ExampleViewModel: ObservableObject {
             metadata = ExampleTranscriptionMetadata(
                 wallClockSeconds: result.wallClockSeconds,
                 audioSeconds: result.audioSeconds,
-                firstTokenLatency: result.metrics.firstTokenLatency,
-                firstConfirmedTokenLatency: result.metrics.firstConfirmedTokenLatency,
-                chunkCount: result.metrics.chunkCount,
+                firstTokenLatency: result.firstTokenLatency,
+                firstConfirmedTokenLatency: result.firstConfirmedTokenLatency,
                 wordCount: Self.wordCount(in: result.transcript)
             )
             stage = .ready
@@ -285,7 +284,6 @@ struct ExampleTranscriptionMetadata {
     let audioSeconds: TimeInterval
     let firstTokenLatency: TimeInterval?
     let firstConfirmedTokenLatency: TimeInterval?
-    let chunkCount: Int
     let wordCount: Int
 
     var realTimeFactor: Double? {
