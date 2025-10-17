@@ -83,7 +83,7 @@ import FluidAudio
 
 Task {
     let manager = try await VadManager(
-        config: VadConfig(threshold: 0.30)
+        config: VadConfig(threshold: 0.75)
     )
 
     // Convert any supported file to 16 kHz mono Float32
