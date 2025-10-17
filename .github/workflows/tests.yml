@@ -67,18 +67,17 @@ jobs:
         working-directory: Examples/Swift/FluidAudioExample
         run: swift build
 
-      - name: Install iOS simulator platform support
+      - name: Install iOS platform support
         run: |
           sudo xcode-select -s /Applications/Xcode_16.app
           sudo xcodebuild -downloadPlatform iOS
-          sudo xcodebuild -downloadPlatform "iOS Simulator"
 
-      - name: Build FluidAudioExample (iOS Simulator)
+      - name: Build FluidAudioExample (iOS)
         working-directory: Examples/Swift/FluidAudioExample
         run: |
           xcodebuild \
             -workspace .swiftpm/xcode/package.xcworkspace \
             -scheme FluidAudioExample \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath $PWD/.build/DerivedData \
             build
