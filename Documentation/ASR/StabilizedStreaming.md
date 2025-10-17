@@ -16,13 +16,13 @@ The stabilizer is always active inside `StreamingAsrManager`; stream consumers t
 
 ```mermaid
 flowchart LR
-    audio[Audio source\n(microphone / file / stream)] --> ingestion[Audio ingestion\nStreamingAsrManager]
-    ingestion --> vad[VAD gating\nStreamingVadPipeline]
-    vad --> window[Window assembly\nStreamingWindowProcessor]
-    window --> decoder[Decoder step\nAsrManager.transcribeStreamingChunk]
-    decoder --> stabilizer[Stabilization layer\nStreamingStabilizerSink]
-    stabilizer --> volatile[Volatile updates\n(instant UI drafts)]
-    stabilizer --> confirmed[Confirmed updates\n(stable transcript)]
+    audio[Audio source<br/>(microphone / file / stream)] --> ingestion[Audio ingestion<br/>StreamingAsrManager]
+    ingestion --> vad[VAD gating<br/>StreamingVadPipeline]
+    vad --> window[Window assembly<br/>StreamingWindowProcessor]
+    window --> decoder[Decoder step<br/>AsrManager.transcribeStreamingChunk]
+    decoder --> stabilizer[Stabilization layer<br/>StreamingStabilizerSink]
+    stabilizer --> volatile[Volatile updates<br/>(instant UI drafts)]
+    stabilizer --> confirmed[Confirmed updates<br/>(stable transcript)]
     volatile --> ui[Subscribers / UI layers]
     confirmed --> ui
 ```
