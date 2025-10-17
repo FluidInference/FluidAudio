@@ -107,18 +107,15 @@ jobs:
       - name: Install iOS platform support
         run: sudo xcodebuild -downloadPlatform iOS
 
-      - name: Generate Xcode workspace
-        working-directory: Examples/Swift/FluidAudioExample
-        run: swift package generate-xcodeproj
-
       - name: Build FluidAudioExample (iOS)
         working-directory: Examples/Swift/FluidAudioExample
         run: |
           xcodebuild \
-            -workspace .swiftpm/xcode/package.xcworkspace \
             -scheme FluidAudioExample \
             -destination 'generic/platform=iOS' \
+            -sdk iphoneos \
             -derivedDataPath $PWD/.build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             build
