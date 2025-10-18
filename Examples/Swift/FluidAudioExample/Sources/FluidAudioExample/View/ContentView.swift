@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var viewModel: ExampleViewModel
     @State private var showingImporter = false
+    @State private var inputSource: InputSource = .file
     private let supportedTypes: [UTType] = [
         .audio,
         .wav,
@@ -14,14 +15,15 @@ struct ContentView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xxl) {
                 header
                 stepCards
                 streamingTranscript
                 playbackControls
             }
-            .padding(24)
+            .padding(DesignSpacing.xl)
         }
+        .background(DesignColors.background)
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: supportedTypes) { result in
             switch result {
             case .success(let url):
@@ -33,189 +35,278 @@ struct ContentView: View {
     }
 
     private var stepCards: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            StepCard(number: 1, title: "Choose Audio File", caption: "Select a local clip to stream.") {
-                HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(viewModel.selectedFileName)
-                            .font(.body.monospaced())
-                            .foregroundStyle(viewModel.selectedFileURL == nil ? .secondary : .primary)
-                        Text("Supported formats: WAV, MP3, AIFF, M4A. Larger files will take longer to stream.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.lg) {
+            ModernStepCard(number: 1, title: "Choose Input Source", caption: "Select where to stream from.") {
+                VStack(alignment: .leading, spacing: DesignSpacing.md) {
+                    Menu {
+                        Button(action: {
+                            inputSource = .microphone
+                        }) {
+                            Label("Microphone", systemImage: "mic.fill")
+                        }
+
+                        Button(action: {
+                            inputSource = .file
+                            showingImporter = true
+                        }) {
+                            Label("Audio File", systemImage: "folder")
+                        }
+                    } label: {
+                        HStack(spacing: DesignSpacing.md) {
+                            Image(systemName: inputSource == .microphone ? "mic.fill" : "folder")
+                                .foregroundColor(DesignColors.accent)
+
+                            Text(inputSource == .microphone ? "Microphone" : "Audio File")
+                                .bodyText()
+
+                            Spacer()
+
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(DesignColors.textSecondary)
+                        }
+                        .padding(DesignSpacing.md)
+                        .frame(maxWidth: .infinity)
+                        .background(DesignColors.secondaryBackground)
+                        .cornerRadius(DesignRadius.medium)
                     }
-                    Spacer()
-                    Button(action: { showingImporter = true }) {
-                        Label("Choose Audio…", systemImage: "folder")
+
+                    if inputSource == .file {
+                        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+                            Text(viewModel.selectedFileName)
+                                .font(DesignTypography.monospaceBody)
+                                .foregroundColor(viewModel.selectedFileURL == nil ? DesignColors.textSecondary : DesignColors.text)
+
+                            Text("Supported: WAV, MP3, AIFF, M4A")
+                                .secondaryText()
+                        }
                     }
                 }
             }
 
-            StepCard(
+            ModernStepCard(
                 number: 2,
                 title: "Stream & Transcribe",
-                caption: "Run stabilized streaming ASR over the selected audio."
+                caption: inputSource == .microphone ? "Start listening with microphone." : "Start streaming transcription."
             ) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Button(action: viewModel.startTranscription) {
-                        Label("Start Streaming", systemImage: "waveform")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!viewModel.canStartTranscription)
+                VStack(alignment: .leading, spacing: DesignSpacing.md) {
+                    HStack(spacing: DesignSpacing.md) {
+                        ModernButton(
+                            inputSource == .microphone ? "Start Listening" : "Start Streaming",
+                            icon: inputSource == .microphone ? "mic.fill" : "waveform",
+                            isLoading: viewModel.stage == .streaming,
+                            isDisabled: inputSource == .file ? !viewModel.canStartTranscription : !viewModel.canStartMicrophoneStream
+                        ) {
+                            if inputSource == .microphone {
+                                viewModel.startMicrophoneTranscription()
+                            } else {
+                                viewModel.startTranscription()
+                            }
+                        }
 
-                    Text(viewModel.statusText)
-                        .font(.footnote)
-                        .foregroundStyle(
-                            viewModel.stage.errorMessage == nil ? Color.secondary : Color.red
-                        )
+                        if viewModel.isMicrophoneStreaming {
+                            ModernButton(
+                                "Stop",
+                                icon: "stop.circle",
+                                style: .secondary
+                            ) {
+                                viewModel.stopMicrophoneTranscription()
+                            }
+                        }
+                    }
+
+                    if inputSource == .microphone {
+                        let status = microphoneStatusMessage
+                        StatusBadge(status: status)
+
+                        if viewModel.isMicrophoneStreaming {
+                            WaveformIndicator(isRecording: true)
+                                .frame(height: 24)
+                        }
+                    } else if let status = fileStatusMessage {
+                        StatusBadge(status: status)
+                    }
                 }
             }
 
             if let metadata = viewModel.metadata {
-                MetricsCard(metadata: metadata)
+                ModernMetricsCard(metadata: metadata)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            } else if viewModel.stage.isBusy {
+                SkeletonCardLoader()
             }
         }
     }
 
+    private var fileStatusMessage: StatusBadge.StatusType? {
+        if viewModel.isMicrophoneStreaming {
+            return .idle
+        }
+
+        if let error = viewModel.stage.errorMessage,
+            !error.lowercased().contains("microphone")
+        {
+            return .error(error)
+        }
+
+        if viewModel.selectedFileURL != nil,
+            viewModel.stage.isBusy
+        {
+            return .loading
+        }
+
+        return nil
+    }
+
+    private var microphoneStatusMessage: StatusBadge.StatusType {
+        if let error = viewModel.stage.errorMessage,
+            error.lowercased().contains("microphone")
+        {
+            return .error(error)
+        }
+
+        if viewModel.stage == .requestingMicrophone {
+            return .loading
+        }
+
+        if viewModel.isMicrophoneStreaming {
+            return .recording
+        }
+
+        return .idle
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("FluidAudio Streaming Example")
-                .font(.largeTitle.weight(.semibold))
+        VStack(alignment: .leading, spacing: DesignSpacing.md) {
+            Text("FluidAudio Streaming")
+                .font(DesignTypography.displayMedium)
+                .foregroundColor(DesignColors.text)
 
             Text(
-                "Upload audio, watch streaming transcripts stabilize in real time, then hand the result to Kokoro for playback."
+                "Upload audio or speak live, watch streaming transcripts stabilize in real time, then hand the result to Kokoro for playback."
             )
-            .foregroundStyle(.secondary)
+            .secondaryText()
+            .lineLimit(3)
 
-            HStack(spacing: 12) {
-                if viewModel.stage.isBusy {
+            if viewModel.stage.isBusy {
+                HStack(spacing: DesignSpacing.md) {
                     ProgressView()
-                        .progressViewStyle(.circular)
-                }
+                        .scaleEffect(0.85)
 
-                Text(viewModel.statusText)
-                    .foregroundStyle(
-                        viewModel.stage.errorMessage == nil ? Color.secondary : Color.red
-                    )
+                    Text(viewModel.statusText)
+                        .secondaryText()
+
+                    Spacer()
+                }
             }
         }
     }
 
     private var streamingTranscript: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.md) {
             Text("Live Transcript")
-                .font(.headline)
+                .font(DesignTypography.headingMedium)
+                .foregroundColor(DesignColors.text)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: DesignSpacing.lg) {
                     if viewModel.displayTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("No transcription yet. Start the stream to see real-time updates.")
-                            .foregroundStyle(.secondary)
+                            .secondaryText()
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, DesignSpacing.xl)
                     } else {
                         Text(viewModel.displayTranscript)
+                            .bodyText()
+                            .lineSpacing(4)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundStyle(viewModel.stage == .streaming ? .primary : .primary)
+                            .transition(.opacity)
                     }
                 }
-                .padding()
+                .padding(DesignSpacing.lg)
             }
             .frame(minHeight: 180)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+            .background(DesignColors.card)
+            .cornerRadius(DesignRadius.medium)
+            .shadow(
+                color: DesignElevation.small.color,
+                radius: DesignElevation.small.radius,
+                x: DesignElevation.small.x,
+                y: DesignElevation.small.y
             )
         }
     }
 
     private var playbackControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Kokoro Playback")
-                .font(.headline)
+        ModernStepCard(
+            number: 3,
+            title: "Kokoro Playback",
+            caption: "Convert transcript to speech with text-to-speech synthesis."
+        ) {
+            VStack(alignment: .leading, spacing: DesignSpacing.md) {
+                HStack(spacing: DesignSpacing.md) {
+                    ModernButton(
+                        "Read Aloud",
+                        icon: "play.circle",
+                        isLoading: viewModel.stage == .synthesizing || viewModel.stage == .playing,
+                        isDisabled: !viewModel.canPlayTranscript
+                    ) {
+                        viewModel.readTranscriptAloud()
+                    }
 
-            HStack(spacing: 16) {
-                Button(action: viewModel.readTranscriptAloud) {
-                    Label("Read Back with Kokoro", systemImage: "play.circle")
-                }
-                .disabled(!viewModel.canPlayTranscript)
-
-                if viewModel.isPlaybackActive {
-                    Button(action: viewModel.stopPlayback) {
-                        Label("Stop Playback", systemImage: "stop.circle")
+                    if viewModel.isPlaybackActive {
+                        ModernButton(
+                            "Stop",
+                            icon: "stop.circle",
+                            style: .secondary
+                        ) {
+                            viewModel.stopPlayback()
+                        }
                     }
                 }
-            }
 
-            Text("First run downloads Kokoro models and lexicons. Playback uses the default FluidAudio voice.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                Text("First run downloads Kokoro models. Uses the default FluidAudio voice.")
+                    .secondaryText()
+            }
         }
     }
 }
 
-private struct StepCard<Content: View>: View {
-    let number: Int
-    let title: String
-    let caption: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("\(number)")
-                    .font(.headline.weight(.semibold))
-                    .padding(8)
-                    .background(
-                        Circle()
-                            .fill(Color.accentColor.opacity(0.12))
-                    )
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-                    Text(caption)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            content
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.secondary.opacity(0.06))
-        )
+extension ContentView {
+    private enum InputSource: Hashable {
+        case file
+        case microphone
     }
 }
 
-private struct MetricsCard: View {
+private struct ModernMetricsCard: View {
     let metadata: ExampleTranscriptionMetadata
 
     var body: some View {
-        StepCard(
-            number: 3, title: "Session Metrics", caption: "Quick telemetry captured from the stabilized streaming run."
+        ModernStepCard(
+            number: 3, title: "Session Metrics", caption: "Quick telemetry from the streaming run."
         ) {
-            VStack(alignment: .leading, spacing: 12) {
-                MetricsGrid {
-                    MetricItem(
+            VStack(alignment: .leading, spacing: DesignSpacing.lg) {
+                ModernMetricsGrid {
+                    ModernMetricCard(
                         title: "Processing Time",
-                        value: formatSeconds(metadata.wallClockSeconds)
+                        value: formatSeconds(metadata.wallClockSeconds),
+                        icon: "timer"
                     )
-                    MetricItem(
-                        title: "First Confirmed Token",
-                        value: formatOptionalSeconds(metadata.firstConfirmedTokenLatency)
+                    ModernMetricCard(
+                        title: "Inference Speed",
+                        value: formatSpeedup(metadata),
+                        icon: "bolt.fill"
                     )
-                    MetricItem(
-                        title: "Real-Time Factor",
-                        value: formatRTF(metadata.realTimeFactor)
-                    )
-                    MetricItem(
-                        title: "Word Count",
-                        value: "\(metadata.wordCount)"
-                    )
-                    MetricItem(
+                    ModernMetricCard(
                         title: "First Token",
-                        value: formatOptionalSeconds(metadata.firstTokenLatency)
+                        value: formatOptionalSeconds(metadata.firstTokenLatency),
+                        icon: "hare"
+                    )
+                    ModernMetricCard(
+                        title: "Word Count",
+                        value: "\(metadata.wordCount)",
+                        icon: "textformat"
                     )
                 }
             }
@@ -231,43 +322,9 @@ private struct MetricsCard: View {
         return formatSeconds(value)
     }
 
-    private func formatRTF(_ value: Double?) -> String {
-        guard let value else { return "n/a" }
-        return String(format: "%.2fx", value)
-    }
-}
-
-private struct MetricsGrid<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        let columns = [
-            GridItem(.flexible(), spacing: 16),
-            GridItem(.flexible(), spacing: 16),
-        ]
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            content
-        }
-    }
-}
-
-private struct MetricItem: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.secondary.opacity(0.08))
-        )
+    private func formatSpeedup(_ metadata: ExampleTranscriptionMetadata) -> String {
+        guard metadata.wallClockSeconds > 0 else { return "n/a" }
+        let speedup = metadata.audioSeconds / metadata.wallClockSeconds
+        return String(format: "%.1fx faster", speedup)
     }
 }

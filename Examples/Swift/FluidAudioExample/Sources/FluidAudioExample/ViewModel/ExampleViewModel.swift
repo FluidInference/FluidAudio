@@ -9,6 +9,7 @@ final class ExampleViewModel: ObservableObject {
     enum Stage: Equatable {
         case idle
         case preparingModels
+        case requestingMicrophone
         case streaming
         case finishing
         case ready
@@ -22,6 +23,8 @@ final class ExampleViewModel: ObservableObject {
                 return "Select an audio file to begin"
             case .preparingModels:
                 return "Downloading & warming models…"
+            case .requestingMicrophone:
+                return "Requesting microphone access…"
             case .streaming:
                 return "Streaming transcription…"
             case .finishing:
@@ -41,7 +44,7 @@ final class ExampleViewModel: ObservableObject {
             switch self {
             case .idle, .ready, .error:
                 return false
-            case .preparingModels, .streaming, .finishing, .synthesizing, .playing:
+            case .preparingModels, .requestingMicrophone, .streaming, .finishing, .synthesizing, .playing:
                 return true
             }
         }
@@ -61,14 +64,17 @@ final class ExampleViewModel: ObservableObject {
     @Published private(set) var volatileText: String = ""
     @Published private(set) var transcript: String = ""
     @Published private(set) var isPlaybackActive = false
+    @Published private(set) var isMicrophoneStreaming = false
     @Published private(set) var metadata: ExampleTranscriptionMetadata?
 
     private let transcriptionCoordinator = StreamingTranscriptionCoordinator()
     private let playbackController = PlaybackController()
+    private lazy var microphoneController = MicrophoneStreamingController(coordinator: transcriptionCoordinator)
     private var asrModels: AsrModels?
     private var ttsManager: TtSManager?
     private var transcriptionTask: Task<Void, Never>?
     private var playbackTask: Task<Void, Never>?
+    private var microphoneTask: Task<Void, Never>?
 
     var statusText: String {
         if let error = stage.errorMessage {
@@ -79,6 +85,14 @@ final class ExampleViewModel: ObservableObject {
 
     var canStartTranscription: Bool {
         selectedFileURL != nil && !stage.isBusy
+    }
+
+    var canStartMicrophoneStream: Bool {
+        !stage.isBusy && !isMicrophoneStreaming
+    }
+
+    var canStopMicrophoneStream: Bool {
+        isMicrophoneStreaming && stage == .streaming
     }
 
     var canPlayTranscript: Bool {
@@ -110,6 +124,26 @@ final class ExampleViewModel: ObservableObject {
         transcriptionTask?.cancel()
         transcriptionTask = Task { [weak self] in
             await self?.runTranscription(for: audioURL)
+        }
+    }
+
+    func startMicrophoneTranscription() {
+        guard canStartMicrophoneStream else { return }
+
+        cancelActivePipeline(resetStage: false)
+
+        microphoneTask?.cancel()
+        microphoneTask = Task { [weak self] in
+            await self?.runMicrophoneStreaming()
+        }
+    }
+
+    func stopMicrophoneTranscription() {
+        guard canStopMicrophoneStream else { return }
+
+        microphoneTask?.cancel()
+        microphoneTask = Task { [weak self] in
+            await self?.finishMicrophoneStreaming()
         }
     }
 
@@ -218,6 +252,90 @@ final class ExampleViewModel: ObservableObject {
         playbackTask = nil
     }
 
+    private func runMicrophoneStreaming() async {
+        defer { microphoneTask = nil }
+
+        stage = .requestingMicrophone
+        confirmedText = ""
+        volatileText = ""
+        transcript = ""
+        metadata = nil
+
+        do {
+            let permissionGranted = await microphoneController.requestPermissionIfNeeded()
+            try Task.checkCancellation()
+
+            guard permissionGranted else {
+                stage = .error(
+                    "Microphone access was denied. Enable access in Settings to stream live audio."
+                )
+                return
+            }
+
+            stage = .preparingModels
+
+            let models = try await ensureAsrModels()
+            try Task.checkCancellation()
+
+            try await microphoneController.startStreaming(
+                models: models,
+                onUpdate: { [weak self] update in
+                    guard let self else { return }
+                    self.handle(update: update)
+                },
+                skipPermissionCheck: true
+            )
+
+            try Task.checkCancellation()
+
+            isMicrophoneStreaming = true
+            stage = .streaming
+        } catch is CancellationError {
+            isMicrophoneStreaming = false
+            if stage != .ready {
+                stage = .idle
+            }
+        } catch {
+            isMicrophoneStreaming = false
+            stage = .error(readableMessage(for: error))
+        }
+    }
+
+    private func finishMicrophoneStreaming() async {
+        defer { microphoneTask = nil }
+
+        stage = .finishing
+
+        do {
+            let result = try await microphoneController.stopStreaming()
+            try Task.checkCancellation()
+
+            confirmedText = result.transcript
+            volatileText = ""
+            transcript = result.transcript
+            metadata = ExampleTranscriptionMetadata(
+                wallClockSeconds: result.wallClockSeconds,
+                audioSeconds: result.audioSeconds,
+                firstTokenLatency: result.firstTokenLatency,
+                firstConfirmedTokenLatency: result.firstConfirmedTokenLatency,
+                wordCount: Self.wordCount(in: result.transcript)
+            )
+
+            isMicrophoneStreaming = false
+            stage = .ready
+        } catch is CancellationError {
+            isMicrophoneStreaming = false
+            if transcript.isEmpty {
+                stage = .idle
+            } else {
+                stage = .ready
+            }
+        } catch {
+            isMicrophoneStreaming = false
+            stage = .error(readableMessage(for: error))
+        }
+    }
+
     private func ensureAsrModels() async throws -> AsrModels {
         if let cachedModels = asrModels {
             return cachedModels
@@ -250,17 +368,29 @@ final class ExampleViewModel: ObservableObject {
         }
     }
 
-    private func cancelActivePipeline() {
+    private func cancelActivePipeline(resetStage: Bool = true) {
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        microphoneTask?.cancel()
+        microphoneTask = nil
         playbackTask?.cancel()
         playbackTask = nil
         playbackController.stop()
         isPlaybackActive = false
         metadata = nil
+        let wasMicrophoneStreaming = isMicrophoneStreaming
+        isMicrophoneStreaming = false
 
         Task {
-            await transcriptionCoordinator.cancelActiveSession()
+            if wasMicrophoneStreaming {
+                await microphoneController.cancel()
+            } else {
+                await transcriptionCoordinator.cancelActiveSession()
+            }
+        }
+
+        if resetStage {
+            stage = .idle
         }
     }
 
