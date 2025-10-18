@@ -1,5 +1,5 @@
-import AVFoundation
 import AVFAudio
+import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -12,9 +12,9 @@ final class MicrophoneStreamingController {
     private var engineRunning = false
     private let tapBufferSize: AVAudioFrameCount = 4_096
     private let finalizationDelayNanoseconds: UInt64 = 250_000_000
-#if os(iOS)
+    #if os(iOS)
     private var audioSessionActivated = false
-#endif
+    #endif
 
     init(coordinator: StreamingTranscriptionCoordinator) {
         self.coordinator = coordinator

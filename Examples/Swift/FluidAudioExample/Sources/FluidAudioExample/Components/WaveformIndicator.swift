@@ -55,7 +55,7 @@ struct WaveformVisualization: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 3) {
-            ForEach(0 ..< displayBars.count, id: \.self) { index in
+            ForEach(0..<displayBars.count, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 2)
                     .fill(DesignColors.accent.opacity(0.6))
                     .frame(height: displayBars[index] * 32)

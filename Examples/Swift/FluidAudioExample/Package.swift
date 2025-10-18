@@ -3,7 +3,8 @@ import Foundation
 import PackageDescription
 
 let packageDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-let exampleResourcesDirectory = packageDirectory
+let exampleResourcesDirectory =
+    packageDirectory
     .appendingPathComponent("Sources/FluidAudioExample/Resources")
 let infoPlistPath = exampleResourcesDirectory.appendingPathComponent("AppInfo.plist").path
 
@@ -37,7 +38,7 @@ let package = Package(
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
-                    "-Xlinker", infoPlistPath
+                    "-Xlinker", infoPlistPath,
                 ])
             ]
         )

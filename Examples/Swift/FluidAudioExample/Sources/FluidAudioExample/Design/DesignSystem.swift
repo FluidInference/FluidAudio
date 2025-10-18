@@ -11,13 +11,13 @@ struct DesignColors {
     static let textSecondary = Color(red: 0.6, green: 0.6, blue: 0.6)
     static let textTertiary = Color(red: 0.75, green: 0.75, blue: 0.75)
 
-    static let accent = Color(red: 0.0, green: 0.5, blue: 1.0) // Modern blue
+    static let accent = Color(red: 0.0, green: 0.5, blue: 1.0)  // Modern blue
     static let accentLight = Color(red: 0.9, green: 0.95, blue: 1.0)
     static let success = Color(red: 0.2, green: 0.8, blue: 0.4)
     static let warning = Color(red: 1.0, green: 0.8, blue: 0.0)
     static let error = Color(red: 1.0, green: 0.3, blue: 0.3)
 
-    static let recording = Color(red: 0.95, green: 0.2, blue: 0.2) // Red pulse for recording
+    static let recording = Color(red: 0.95, green: 0.2, blue: 0.2)  // Red pulse for recording
 }
 
 // MARK: - Spacing
@@ -128,7 +128,9 @@ extension View {
         self
             .background(DesignColors.card)
             .cornerRadius(DesignRadius.medium)
-            .shadow(color: DesignElevation.small.color, radius: DesignElevation.small.radius, x: DesignElevation.small.x, y: DesignElevation.small.y)
+            .shadow(
+                color: DesignElevation.small.color, radius: DesignElevation.small.radius, x: DesignElevation.small.x,
+                y: DesignElevation.small.y)
     }
 
     func headingText() -> some View {

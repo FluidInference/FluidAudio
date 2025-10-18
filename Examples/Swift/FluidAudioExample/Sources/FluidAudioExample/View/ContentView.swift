@@ -75,7 +75,8 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: DesignSpacing.sm) {
                             Text(viewModel.selectedFileName)
                                 .font(DesignTypography.monospaceBody)
-                                .foregroundColor(viewModel.selectedFileURL == nil ? DesignColors.textSecondary : DesignColors.text)
+                                .foregroundColor(
+                                    viewModel.selectedFileURL == nil ? DesignColors.textSecondary : DesignColors.text)
 
                             Text("Supported: WAV, MP3, AIFF, M4A")
                                 .secondaryText()
@@ -87,7 +88,8 @@ struct ContentView: View {
             ModernStepCard(
                 number: 2,
                 title: "Stream & Transcribe",
-                caption: inputSource == .microphone ? "Start listening with microphone." : "Start streaming transcription."
+                caption: inputSource == .microphone
+                    ? "Start listening with microphone." : "Start streaming transcription."
             ) {
                 VStack(alignment: .leading, spacing: DesignSpacing.md) {
                     HStack(spacing: DesignSpacing.md) {
@@ -95,7 +97,8 @@ struct ContentView: View {
                             inputSource == .microphone ? "Start Listening" : "Start Streaming",
                             icon: inputSource == .microphone ? "mic.fill" : "waveform",
                             isLoading: viewModel.stage == .streaming,
-                            isDisabled: inputSource == .file ? !viewModel.canStartTranscription : !viewModel.canStartMicrophoneStream
+                            isDisabled: inputSource == .file
+                                ? !viewModel.canStartTranscription : !viewModel.canStartMicrophoneStream
                         ) {
                             if inputSource == .microphone {
                                 viewModel.startMicrophoneTranscription()
