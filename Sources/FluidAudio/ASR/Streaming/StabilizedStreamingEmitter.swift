@@ -24,13 +24,17 @@ final class StabilizedStreamingEmitter {
     typealias TokenDecoder = (Int) -> String?
 
     private struct StreamState {
-        var ringBuffer: [[Int]] = []
+        var ringBuffer: FixedCapacityRingBuffer<[Int]>
         var committed: [Int] = []
         var lastHypothesis: [Int] = []
         var firstSeen: [Int: Int] = [:]
         var startTimestampMs: Int?
         var firstCommitLatencyMs: Int?
         var lastUpdateTimestampMs: Int?
+
+        init(windowSize: Int) {
+            ringBuffer = FixedCapacityRingBuffer(capacity: windowSize)
+        }
     }
 
     private struct InternalConfig {
@@ -55,7 +59,7 @@ final class StabilizedStreamingEmitter {
     }
 
     func update(uid: Int, tokenIds: [Int], nowMs: Int) -> StabilizedUpdateResult {
-        var state = states[uid, default: StreamState()]
+        var state = states[uid] ?? StreamState(windowSize: config.windowSize)
         if state.startTimestampMs == nil {
             // Capture the first stream-relative timestamp to report latencies consistently.
             state.startTimestampMs = nowMs
@@ -209,9 +213,15 @@ final class StabilizedStreamingEmitter {
         state.lastHypothesis = dropPrefix(state.lastHypothesis, by: count)
 
         if !state.ringBuffer.isEmpty {
-            state.ringBuffer = state.ringBuffer
-                .map { dropPrefix($0, by: count) }
-                .filter { !$0.isEmpty }
+            var trimmedSequences: [[Int]] = []
+            trimmedSequences.reserveCapacity(state.ringBuffer.count)
+            for sequence in state.ringBuffer {
+                let trimmed = dropPrefix(sequence, by: count)
+                if !trimmed.isEmpty {
+                    trimmedSequences.append(trimmed)
+                }
+            }
+            state.ringBuffer.assign(from: trimmedSequences)
         }
 
         if !state.firstSeen.isEmpty {
@@ -243,9 +253,6 @@ final class StabilizedStreamingEmitter {
 
     private func updateRingBuffer(_ state: inout StreamState, with tokens: [Int]) {
         state.ringBuffer.append(tokens)
-        if state.ringBuffer.count > config.windowSize {
-            state.ringBuffer.removeFirst(state.ringBuffer.count - config.windowSize)
-        }
     }
 
     private func updateFirstSeen(_ state: inout StreamState, with tokens: [Int], nowMs: Int) {
@@ -278,9 +285,11 @@ final class StabilizedStreamingEmitter {
         return Array(array.dropFirst(count))
     }
 
-    private func longestCommonPrefix(for sequences: [[Int]]) -> [Int] {
-        guard var prefix = sequences.first else { return [] }
-        for sequence in sequences.dropFirst() {
+    private func longestCommonPrefix(for sequences: FixedCapacityRingBuffer<[Int]>) -> [Int] {
+        var iterator = sequences.makeIterator()
+        guard let firstSequence = iterator.next() else { return [] }
+        var prefix = firstSequence
+        while let sequence = iterator.next() {
             var matchCount = 0
             let compareCount = min(prefix.count, sequence.count)
             while matchCount < compareCount, prefix[matchCount] == sequence[matchCount] {

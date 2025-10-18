@@ -22,15 +22,18 @@ actor AudioBuffer {
     private var writePosition: Int = 0
     private var readPosition: Int = 0
     private var count: Int = 0
+    private static let maxProcessedChunkHistory = 10
 
     /// Chunk information for tracking processed segments
-    private struct ChunkInfo {
+    private struct ChunkInfo: Sendable {
         let startSample: Int
         let endSample: Int
         let timestamp: Date
     }
 
-    private var processedChunks: [ChunkInfo] = []
+    private var processedChunks = FixedCapacityRingBuffer<ChunkInfo>(
+        capacity: AudioBuffer.maxProcessedChunkHistory
+    )
 
     init(capacity: Int) {
         self.capacity = capacity
@@ -106,11 +109,6 @@ actor AudioBuffer {
                 endSample: readPosition,
                 timestamp: Date()
             ))
-
-        // Keep only recent chunk info (last 10 chunks)
-        if processedChunks.count > 10 {
-            processedChunks.removeFirst()
-        }
 
         return chunk
     }
