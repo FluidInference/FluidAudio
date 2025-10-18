@@ -98,14 +98,11 @@ extension KokoroSynthesizer {
 
         if !oov.isEmpty {
             let sample = Set(oov).sorted().prefix(5).joined(separator: ", ")
-            guard EspeakG2P.isAvailable else {
+            do {
+                try EspeakG2P.ensureResourcesAvailable()
+            } catch {
                 throw TTSError.processingFailed(
-                    "G2P (eSpeak NG) not included in this build but required for OOV words: \(sample)."
-                )
-            }
-            guard EspeakG2P.isDataAvailable() else {
-                throw TTSError.processingFailed(
-                    "G2P (eSpeak NG) data missing but required for OOV words: \(sample). Ensure the eSpeak NG data bundle is available in the models cache (use TtsResourceDownloader.ensureEspeakDataBundle)."
+                    "G2P (eSpeak NG) unavailable but required for OOV words (\(sample)): \(error.localizedDescription)"
                 )
             }
         }

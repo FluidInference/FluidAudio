@@ -4,8 +4,8 @@ import PackageDescription
 let package = Package(
     name: "FluidAudio",
     platforms: [
-        .macOS(.v13),
-        .iOS(.v16),
+        .macOS(.v14),
+        .iOS(.v17),
     ],
     products: [
         .library(
@@ -14,6 +14,10 @@ let package = Package(
         ),
         .executable(
             name: "fluidaudio",
+            targets: ["FluidAudioCLI"]
+        ),
+        .executable(
+            name: "tts",
             targets: ["FluidAudioCLI"]
         ),
     ],
@@ -29,7 +33,7 @@ let package = Package(
                 "ESpeakNG"
             ],
             path: "Sources/FluidAudio",
-            exclude: []
+            exclude: ["Frameworks"]
         ),
         .executableTarget(
             name: "FluidAudioCLI",

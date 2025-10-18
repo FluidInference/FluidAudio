@@ -5,6 +5,29 @@ import Foundation
 /// Uses espeak_TextToPhonemes with IPA mode.
 @available(macOS 13.0, iOS 16.0, *)
 final class EspeakG2P {
+    enum EspeakG2PError: Error, LocalizedError {
+        case frameworkBundleMissing
+        case dataBundleMissing
+        case voicesDirectoryMissing
+        case initializationFailed(code: Int32)
+        case voiceSelectionFailed(voice: String, error: espeak_ERROR)
+
+        var errorDescription: String? {
+            switch self {
+            case .frameworkBundleMissing:
+                return "ESpeakNG.framework is not bundled with this build."
+            case .dataBundleMissing:
+                return "espeak-ng-data.bundle is missing from the ESpeakNG framework resources."
+            case .voicesDirectoryMissing:
+                return "eSpeak NG voices directory is missing inside espeak-ng-data.bundle."
+            case .initializationFailed(let code):
+                return "eSpeak NG initialization failed with status code \(code)."
+            case .voiceSelectionFailed(let voice, let error):
+                return "Failed to select eSpeak NG voice \(voice) (status code \(error.rawValue))."
+            }
+        }
+    }
+
     static let shared = EspeakG2P()
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
 
@@ -22,13 +45,9 @@ final class EspeakG2P {
         }
     }
 
-    static var isAvailable: Bool {
-        true
-    }
-
-    func phonemize(word: String, espeakVoice: String = "en-us") -> [String]? {
-        return queue.sync {
-            guard initializeIfNeeded(espeakVoice: espeakVoice) else { return nil }
+    func phonemize(word: String, espeakVoice: String = "en-us") throws -> [String]? {
+        return try queue.sync {
+            try initializeIfNeeded(espeakVoice: espeakVoice)
             return word.withCString { cstr -> [String]? in
                 var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
                 let modeIPA = Int32(espeakPHONEMES_IPA)
@@ -37,115 +56,76 @@ final class EspeakG2P {
                     logger.warning("espeak_TextToPhonemes returned nil for word: \(word)")
                     return nil
                 }
-                // eSpeak returns a static buffer that doesn't need to be freed
-                let s = String(cString: outPtr)
-                if s.isEmpty { return nil }
-                // Split by whitespace for word-level phonemes, otherwise Unicode scalars for character-level
-                if s.contains(where: { $0.isWhitespace }) {
-                    return s.split { $0.isWhitespace }.map { String($0) }
+                let phonemeString = String(cString: outPtr)
+                if phonemeString.isEmpty { return nil }
+                if phonemeString.contains(where: { $0.isWhitespace }) {
+                    return phonemeString.split { $0.isWhitespace }.map { String($0) }
                 } else {
-                    return s.unicodeScalars.map { String($0) }
+                    return phonemeString.unicodeScalars.map { String($0) }
                 }
             }
         }
     }
 
-    private func initializeIfNeeded(espeakVoice: String = "en-us") -> Bool {
+    private func initializeIfNeeded(espeakVoice: String = "en-us") throws {
         if initialized {
             if espeakVoice != currentVoice {
                 let result = espeakVoice.withCString { espeak_SetVoiceByName($0) }
-                if result != EE_OK {
+                guard result == EE_OK else {
                     logger.error("Failed to set voice to \(espeakVoice), error code: \(result)")
-                    return false
+                    throw EspeakG2PError.voiceSelectionFailed(voice: espeakVoice, error: result)
                 }
                 currentVoice = espeakVoice
             }
-            return true
+            return
         }
 
-        guard let dataDir = Self.frameworkBundledDataPath() else {
-            logger.warning("eSpeak NG data bundle not found in ESpeakNG.xcframework; disabling G2P")
-            return false
-        }
-
+        let dataDir = try Self.ensureResourcesAvailable()
         logger.info("Using eSpeak NG data from framework: \(dataDir.path)")
         let rc: Int32 = dataDir.path.withCString { espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0, $0, 0) }
 
         guard rc >= 0 else {
             logger.error("eSpeak NG initialization failed (rc=\(rc))")
-            return false
+            throw EspeakG2PError.initializationFailed(code: rc)
         }
         let voiceResult = espeakVoice.withCString { espeak_SetVoiceByName($0) }
-        if voiceResult != EE_OK {
+        guard voiceResult == EE_OK else {
             logger.error("Failed to set initial voice to \(espeakVoice), error code: \(voiceResult)")
             espeak_Terminate()
-            return false
+            throw EspeakG2PError.voiceSelectionFailed(voice: espeakVoice, error: voiceResult)
         }
         currentVoice = espeakVoice
         initialized = true
-        return true
     }
 
     private static let staticLogger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
 
-    private static func frameworkBundledDataPath() -> URL? {
-        let logger = staticLogger
+    @discardableResult
+    static func ensureResourcesAvailable() throws -> URL {
+        let url = try frameworkBundledDataPath()
+        staticLogger.info("eSpeak NG data directory: \(url.path)")
+        return url
+    }
 
-        // Try to find ESpeakNG.framework bundle by identifier first
-        var bundle = Bundle(identifier: "com.kokoro.espeakng")
-
-        // If not found by identifier, search in common locations
-        if bundle == nil {
-            var searchPaths: [String] = []
-
-            // App bundle Frameworks directory
-            if let fwPath = Bundle.main.privateFrameworksPath {
-                searchPaths.append(fwPath)
-            }
-
-            // Directory containing the executable (for SPM command-line tools)
-            let executableDir = Bundle.main.bundleURL.deletingLastPathComponent().path
-            searchPaths.append(executableDir)
-
-            // Current working directory (for tests)
-            searchPaths.append(FileManager.default.currentDirectoryPath)
-
-            for basePath in searchPaths {
-                let frameworkPath = (basePath as NSString).appendingPathComponent("ESpeakNG.framework")
-                if let found = Bundle(path: frameworkPath) {
-                    bundle = found
-                    logger.info("Found ESpeakNG framework at: \(frameworkPath)")
-                    break
-                }
-            }
-        }
-
-        guard let espeakBundle = bundle else {
-            logger.warning("Could not find ESpeakNG framework bundle")
-            logger.warning("Searched in: \(Bundle.main.bundlePath)")
-            return nil
+    private static func frameworkBundledDataPath() throws -> URL {
+        guard let espeakBundle = Bundle(identifier: "com.kokoro.espeakng") else {
+            staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
+            throw EspeakG2PError.frameworkBundleMissing
         }
 
         guard let bundleURL = espeakBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
-            logger.warning("Could not find espeak-ng-data.bundle in ESpeakNG framework Resources")
-            logger.warning("Framework path: \(espeakBundle.bundlePath)")
-            logger.warning("Resource path: \(espeakBundle.resourcePath ?? "nil")")
-            return nil
+            staticLogger.error("espeak-ng-data.bundle missing from ESpeakNG.framework resources at \(espeakBundle.bundlePath)")
+            throw EspeakG2PError.dataBundleMissing
         }
 
         let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
         let voicesPath = dataDir.appendingPathComponent("voices")
 
-        if FileManager.default.fileExists(atPath: voicesPath.path) {
-            logger.info("Found eSpeak data at: \(dataDir.path)")
-            return dataDir
+        guard FileManager.default.fileExists(atPath: voicesPath.path) else {
+            staticLogger.error("espeak-ng-data.bundle found but voices directory missing at \(voicesPath.path)")
+            throw EspeakG2PError.voicesDirectoryMissing
         }
 
-        logger.error("espeak-ng-data.bundle found but voices directory missing")
-        return nil
-    }
-
-    static func isDataAvailable() -> Bool {
-        return frameworkBundledDataPath() != nil
+        return dataDir
     }
 }
