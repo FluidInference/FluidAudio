@@ -15,6 +15,7 @@ This document outlines the systematic approach used for code reviews in FluidAud
 3. Identify new vs modified files
 4. Review documentation changes first (they often explain intent)
 5. Map out new component relationships
+6. Capture the user-facing intent in a few sentences (latency goals, quality targets, UX impact) so findings stay anchored to outcomes
 
 **Example from realtime-asr-2:**
 
@@ -38,12 +39,14 @@ git diff --stat origin/main...HEAD
 - Single responsibility principle adherence
 - Proper dependency injection
 - Actor/class boundary decisions
+- Configuration defaults that match documented operating assumptions (thresholds, latency budgets, hardware targets)
 
 **Detection Strategy:**
 
 - Draw mental component diagram
 - Look for tight coupling (too many dependencies)
 - Check if components could be reused independently
+- Compare presets/configuration builders against documentation and benchmarks to ensure they remain aligned
 
 **Red Flags:**
 
@@ -77,6 +80,7 @@ actor StreamingAsrManager {
 - Sendable conformance (NO `@unchecked Sendable`)
 - Race condition potential
 - Deadlock risks
+- Unsafe micro-optimizations that erode isolation or bypass actor guarantees
 
 **Detection Strategy:**
 
@@ -216,6 +220,7 @@ func process(...) async {  // Line 75
 // - Extract VAD processing
 // - Extract buffer management
 // - Extract event handling
+// If decomposition is impossible, require a doc comment summarizing invariants and stabilization guarantees.
 ```
 
 **Thresholds:**
@@ -253,6 +258,8 @@ if preSpeechBuffer.count > preSpeechSampleLimit  // What's the limit?
 // GOOD: Named constants with documentation
 /// VAD chunk size aligned with model input requirements (512ms at 16kHz)
 static let vadChunkSize: Int = 8192
+/// Default threshold derived from measured recall/precision tradeoffs in the streaming pipeline
+static let defaultVadThreshold: Float = Self.recommendedThreshold
 ```
 
 #### 4.3 State Complexity Analysis
@@ -295,6 +302,47 @@ struct StreamingState {
     var startTime: Date?
 }
 ```
+
+---
+
+#### 4.4 Duplication & API Coherence
+
+**Strategy:**
+
+1. Search for nearly identical helpers or lifecycle methods
+2. Compare builder/option naming across related types
+3. Ensure any shared cleanup logic lives in a single well-tested path
+4. Confirm public APIs follow consistent verb prefixes (`enable`, `set`, `with`) project-wide
+
+**Detection Pattern:**
+
+```bash
+# Surface similar functions
+rg "clearActive" -n
+rg "cleanupAfter" -n
+```
+
+```swift
+// RED FLAG: Divergent implementations
+func clearSessionResources() { /* cancels manager */ }
+func finalizeSession() { /* similar but forgets to cancel */ }
+
+// Preferred: Consolidate into one entry point so every code path releases resources correctly.
+```
+
+**Red Flags:**
+
+- Two functions performing near-identical teardown or setup duties
+- Public API methods mixing naming styles (`withX`, `setY`, `enableZ`) without rationale
+- Builders exposing options that drift from documented defaults
+- Copy-pasted logic that diverges over time
+- Terminology that introduces parallel concepts without clear contrast (e.g., `pending` vs `virtual` silence states)
+
+**Remediation:**
+
+- Extract shared logic into a dedicated helper
+- Align naming with project conventions (see swift-format rules)
+- Add targeted documentation explaining why any remaining duplication is intentional
 
 ---
 
@@ -343,6 +391,7 @@ do {
 2. Calculate time complexity
 3. Check for unnecessary copies
 4. Look for N² operations
+5. Weigh low-level optimizations against concurrency guarantees; avoid trading actor safety for marginal wins
 
 **Detection Pattern:**
 
@@ -375,6 +424,7 @@ while residualBuffer.count >= chunkSize {
 2. Check for unnecessary copies
 3. Verify buffer reuse
 4. Look for string concatenation patterns
+5. Flag expensive computed properties or analytics that recalculate on every access instead of caching when state is stable
 
 **Detection Pattern:**
 
@@ -428,6 +478,7 @@ find Tests -name "*Tests.swift"
 - [ ] Memory behavior tested (for accumulators)
 - [ ] Cleanup tested (reset, cancel)
 - [ ] Integration tests for component interactions
+- [ ] CI workflows updated to cover new scenarios (platforms, build variants, dependencies)
 
 **Specific Gaps in realtime-asr-2:**
 
@@ -522,6 +573,9 @@ Use this checklist for systematic code reviews:
 - [ ] Error paths are handled properly
 - [ ] No silent failures (`try?` without recovery)
 - [ ] Edge cases are handled (empty, null, max values)
+- [ ] Paired collections (timings vs tokens, frames vs timestamps) are validated for matching lengths before use
+- [ ] Optional collaborators (emitters, delegates) are either reliable or their absence is logged and handled
+- [ ] Loops and sliding windows have explicit termination conditions and guard against negative offsets
 
 ### Performance
 
