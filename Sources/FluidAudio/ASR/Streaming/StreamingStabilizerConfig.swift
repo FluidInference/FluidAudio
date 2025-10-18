@@ -23,7 +23,7 @@ public struct StreamingStabilizerConfig: Sendable, Equatable {
 @available(macOS 13.0, iOS 16.0, *)
 extension StreamingStabilizerConfig {
     /// Prioritizes stability by requiring a four-window consensus and full word-boundary trimming.
-    public static let highAccuracy = StreamingStabilizerConfig()
+    public static let `default` = StreamingStabilizerConfig()
 
     /// Prefers shorter latency by shrinking the consensus window and wait budget.
     public static let lowLatency = StreamingStabilizerConfig(windowSize: 3, maxWaitMilliseconds: 600)
