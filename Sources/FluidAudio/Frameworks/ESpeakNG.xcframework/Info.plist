@@ -20,7 +20,7 @@
 		</dict>
 		<dict>
 			<key>BinaryPath</key>
-			<string>ESPeakNG.framework/ESPeakNG</string>
+			<string>ESPeakNG.framework/Versions/A/ESPeakNG</string>
 			<key>LibraryIdentifier</key>
 			<string>macos-arm64</string>
 			<key>LibraryPath</key>
