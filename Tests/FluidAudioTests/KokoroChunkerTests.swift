@@ -29,15 +29,21 @@ final class KokoroChunkerTests: XCTestCase {
             "C.I.A": ["C", "I", "A"],
         ]
 
-        let chunks = KokoroChunker.chunk(
-            text: text,
-            wordToPhonemes: lowerLexicon,
-            caseSensitiveLexicon: caseSensitiveLexicon,
-            targetTokens: 120,
-            hasLanguageToken: false,
-            allowedPhonemes: allowed,
-            phoneticOverrides: []
-        )
+        let chunks: [TextChunk]
+        do {
+            chunks = try KokoroChunker.chunk(
+                text: text,
+                wordToPhonemes: lowerLexicon,
+                caseSensitiveLexicon: caseSensitiveLexicon,
+                targetTokens: 120,
+                hasLanguageToken: false,
+                allowedPhonemes: allowed,
+                phoneticOverrides: []
+            )
+        } catch {
+            XCTFail("Chunker threw unexpected error: \(error)")
+            return
+        }
 
         XCTAssertEqual(chunks.count, 1)
         guard let chunk = chunks.first else {
@@ -65,15 +71,21 @@ final class KokoroChunkerTests: XCTestCase {
 
         let allowed: Set<String> = ["a", "b", "g", "d", "e", "z", "h", "t", " "]
 
-        let chunks = KokoroChunker.chunk(
-            text: text,
-            wordToPhonemes: lexicon,
-            caseSensitiveLexicon: [:],
-            targetTokens: 20,
-            hasLanguageToken: false,
-            allowedPhonemes: allowed,
-            phoneticOverrides: []
-        )
+        let chunks: [TextChunk]
+        do {
+            chunks = try KokoroChunker.chunk(
+                text: text,
+                wordToPhonemes: lexicon,
+                caseSensitiveLexicon: [:],
+                targetTokens: 20,
+                hasLanguageToken: false,
+                allowedPhonemes: allowed,
+                phoneticOverrides: []
+            )
+        } catch {
+            XCTFail("Chunker threw unexpected error: \(error)")
+            return
+        }
 
         XCTAssertGreaterThan(chunks.count, 1, "Expected run-on text to be split under tight token budget")
         chunks.forEach { chunk in
@@ -98,15 +110,21 @@ final class KokoroChunkerTests: XCTestCase {
         ]
         let allowed: Set<String> = ["h", "e", "l", "o", "k", "ɹ", " "]
 
-        let chunks = KokoroChunker.chunk(
-            text: preprocessing.text,
-            wordToPhonemes: lexicon,
-            caseSensitiveLexicon: [:],
-            targetTokens: 32,
-            hasLanguageToken: false,
-            allowedPhonemes: allowed,
-            phoneticOverrides: preprocessing.phoneticOverrides
-        )
+        let chunks: [TextChunk]
+        do {
+            chunks = try KokoroChunker.chunk(
+                text: preprocessing.text,
+                wordToPhonemes: lexicon,
+                caseSensitiveLexicon: [:],
+                targetTokens: 32,
+                hasLanguageToken: false,
+                allowedPhonemes: allowed,
+                phoneticOverrides: preprocessing.phoneticOverrides
+            )
+        } catch {
+            XCTFail("Chunker threw unexpected error: \(error)")
+            return
+        }
 
         guard let chunk = chunks.first else {
             XCTFail("Expected at least one chunk")

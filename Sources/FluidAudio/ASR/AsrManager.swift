@@ -170,7 +170,6 @@ public final class AsrManager {
             cellState: decoderState.cellState
         )
 
-        // Compat helper awaits async prediction when available without breaking older SDKs.
         let initDecoderOutput = try await decoderModel.compatPrediction(
             from: initDecoderInput,
             options: predictionOptions
