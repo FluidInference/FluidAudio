@@ -170,7 +170,7 @@ public final class AsrManager {
             cellState: decoderState.cellState
         )
 
-        let initDecoderOutput = try await decoderModel.prediction(
+        let initDecoderOutput = try await decoderModel.compatPrediction(
             from: initDecoderInput,
             options: predictionOptions
         )

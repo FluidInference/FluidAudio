@@ -167,7 +167,7 @@ public struct TtsModels {
             ])
 
             let options: MLPredictionOptions = optimizedPredictionOptions()
-            _ = try await model.prediction(from: features, options: options)
+            _ = try await model.compatPrediction(from: features, options: options)
         } catch {
             logger.warning(
                 "Warm-up prediction failed for variant \(variantDescription(variant)): \(error.localizedDescription)"
