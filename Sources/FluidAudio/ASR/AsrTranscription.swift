@@ -57,7 +57,7 @@ extension AsrManager {
             throw ASRError.notInitialized
         }
 
-        let preprocessorOutput = try await preprocessorModel.compatPrediction(
+        let preprocessorOutput = try await preprocessorModel.prediction(
             from: preprocessorInput,
             options: predictionOptions
         )
@@ -68,7 +68,7 @@ extension AsrManager {
             originalInput: preprocessorInput
         )
 
-        let encoderOutputProvider = try await encoderModel.compatPrediction(
+        let encoderOutputProvider = try await encoderModel.prediction(
             from: encoderInput,
             options: predictionOptions
         )

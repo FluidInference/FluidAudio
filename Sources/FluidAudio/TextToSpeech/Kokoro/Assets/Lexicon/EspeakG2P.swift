@@ -114,7 +114,8 @@ final class EspeakG2P {
         }
 
         guard let bundleURL = espeakBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
-            staticLogger.error("espeak-ng-data.bundle missing from ESpeakNG.framework resources at \(espeakBundle.bundlePath)")
+            staticLogger.error(
+                "espeak-ng-data.bundle missing from ESpeakNG.framework resources at \(espeakBundle.bundlePath)")
             throw EspeakG2PError.dataBundleMissing
         }
 
