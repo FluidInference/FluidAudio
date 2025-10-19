@@ -15,7 +15,7 @@ let package = Package(
         .executable(
             name: "fluidaudio",
             targets: ["FluidAudioCLI"]
-        ),
+        )
     ],
     dependencies: [],
     targets: [
@@ -29,13 +29,13 @@ let package = Package(
                 "ESpeakNG"
             ],
             path: "Sources/FluidAudio",
-            exclude: [],
             swiftSettings: [
                 .unsafeFlags([
                     "-Xcc", "-DACCELERATE_NEW_LAPACK",
                     "-Xcc", "-DACCELERATE_LAPACK_ILP64",
                 ])
-            ]
+            ],
+            exclude: ["Frameworks"]
         ),
         .executableTarget(
             name: "FluidAudioCLI",

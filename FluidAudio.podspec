@@ -35,11 +35,25 @@ Pod::Spec.new do |spec|
   # macOS builds include: ASR, Diarization, VAD, and TTS with ESpeakNG support.
   spec.osx.vendored_frameworks = "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
   spec.osx.frameworks = "CoreML", "AVFoundation", "Accelerate", "Cocoa"
+  spec.osx.pod_target_xcconfig = {
+    'ARCHS[sdk=macosx*]' => 'arm64',
+    'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
+  }
+  spec.osx.user_target_xcconfig = {
+    'ARCHS[sdk=macosx*]' => 'arm64',
+    'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
+  }
+
 
   spec.swift_versions = ["5.10"]
 
   # Enable module definition for proper framework imports
+  spec.user_target_xcconfig = {
+    'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
+  }
+
   spec.pod_target_xcconfig = {
-    'DEFINES_MODULE' => 'YES'
+    'DEFINES_MODULE' => 'YES',
+    'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
   }
 end
