@@ -31,7 +31,7 @@ struct WaveformIndicator: View {
                 startPulse()
             }
         }
-        .onChange(of: isRecording) { newValue in
+        .onChange(of: isRecording) { _, newValue in
             if newValue {
                 startPulse()
             } else {
@@ -68,7 +68,7 @@ struct WaveformVisualization: View {
                 startAnimation()
             }
         }
-        .onChange(of: isRecording) { newValue in
+        .onChange(of: isRecording) { _, newValue in
             if newValue {
                 startAnimation()
             }

@@ -27,6 +27,7 @@ struct ContentView: View {
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: supportedTypes) { result in
             switch result {
             case .success(let url):
+                inputSource = .file
                 viewModel.selectFile(url)
             case .failure(let error):
                 NSLog("Audio selection failed: \(error.localizedDescription)")
@@ -39,46 +40,49 @@ struct ContentView: View {
             ModernStepCard(number: 1, title: "Choose Input Source", caption: "Select where to stream from.") {
                 VStack(alignment: .leading, spacing: DesignSpacing.md) {
                     Menu {
-                        Button(action: {
-                            inputSource = .microphone
-                        }) {
-                            Label("Microphone", systemImage: "mic.fill")
-                        }
-
-                        Button(action: {
-                            inputSource = .file
-                            showingImporter = true
-                        }) {
-                            Label("Audio File", systemImage: "folder")
+                        ForEach(InputSource.allCases, id: \.self) { source in
+                            Button {
+                                inputSource = source
+                            } label: {
+                                InputSourceMenuItem(
+                                    source: source,
+                                    isSelected: source == inputSource
+                                )
+                            }
                         }
                     } label: {
-                        HStack(spacing: DesignSpacing.md) {
-                            Image(systemName: inputSource == .microphone ? "mic.fill" : "folder")
-                                .foregroundColor(DesignColors.accent)
-
-                            Text(inputSource == .microphone ? "Microphone" : "Audio File")
-                                .bodyText()
-
-                            Spacer()
-
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(DesignColors.textSecondary)
-                        }
-                        .padding(DesignSpacing.md)
-                        .frame(maxWidth: .infinity)
-                        .background(DesignColors.secondaryBackground)
-                        .cornerRadius(DesignRadius.medium)
+                        InputSourceMenuLabel(source: inputSource)
                     }
 
                     if inputSource == .file {
-                        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
-                            Text(viewModel.selectedFileName)
-                                .font(DesignTypography.monospaceBody)
-                                .foregroundColor(
-                                    viewModel.selectedFileURL == nil ? DesignColors.textSecondary : DesignColors.text)
+                        VStack(alignment: .leading, spacing: DesignSpacing.md) {
+                            ModernButton(
+                                viewModel.selectedFileURL == nil ? "Choose Audio File" : "Select Different File",
+                                icon: "folder",
+                                style: .secondary,
+                                isDisabled: viewModel.stage.isBusy
+                            ) {
+                                showingImporter = true
+                            }
 
-                            Text("Supported: WAV, MP3, AIFF, M4A")
+                            VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+                                Text(viewModel.selectedFileName)
+                                    .font(DesignTypography.monospaceBody)
+                                    .foregroundColor(
+                                        viewModel.selectedFileURL == nil
+                                            ? DesignColors.textSecondary : DesignColors.text)
+
+                                Text("Supported: WAV, MP3, AIFF, M4A")
+                                    .secondaryText()
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: DesignSpacing.sm) {
+                            Label("Use your system input for live streaming.", systemImage: "mic.fill")
+                                .bodyText()
+                                .foregroundColor(DesignColors.text)
+
+                            Text("We will request microphone access the first time you start streaming.")
                                 .secondaryText()
                         }
                     }
@@ -223,6 +227,7 @@ struct ContentView: View {
                             .bodyText()
                             .lineSpacing(4)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
                             .transition(.opacity)
                     }
                 }
@@ -276,9 +281,81 @@ struct ContentView: View {
 }
 
 extension ContentView {
-    private enum InputSource: Hashable {
+    enum InputSource: String, CaseIterable, Hashable {
         case file
         case microphone
+
+        var title: String {
+            switch self {
+            case .file:
+                return "Audio File"
+            case .microphone:
+                return "Microphone"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .file:
+                return "folder"
+            case .microphone:
+                return "mic.fill"
+            }
+        }
+    }
+}
+
+private struct InputSourceMenuLabel: View {
+    let source: ContentView.InputSource
+
+    var body: some View {
+        HStack(spacing: DesignSpacing.md) {
+            Image(systemName: source.symbolName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(DesignColors.accent)
+
+            Text(source.title)
+                .font(DesignTypography.labelLarge)
+                .foregroundColor(DesignColors.accent)
+
+            Spacer()
+
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(DesignColors.accent)
+        }
+        .padding(DesignSpacing.md)
+        .frame(maxWidth: .infinity)
+        .background(DesignColors.accentLight.opacity(0.65))
+        .cornerRadius(DesignRadius.medium)
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignRadius.medium)
+                .stroke(DesignColors.accent.opacity(0.35), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: DesignRadius.medium))
+    }
+}
+
+private struct InputSourceMenuItem: View {
+    let source: ContentView.InputSource
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: DesignSpacing.md) {
+            Image(systemName: source.symbolName)
+                .foregroundColor(DesignColors.text)
+
+            Text(source.title)
+                .foregroundColor(DesignColors.text)
+
+            Spacer()
+
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .foregroundColor(DesignColors.accent)
+            }
+        }
+        .font(DesignTypography.bodyMedium)
     }
 }
 

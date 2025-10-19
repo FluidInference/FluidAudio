@@ -77,8 +77,8 @@ struct StatusBadge: View {
                 startAnimation()
             }
         }
-        .onChange(of: status) { _ in
-            if status == .loading || status == .recording {
+        .onChange(of: status) { _, newStatus in
+            if newStatus == .loading || newStatus == .recording {
                 startAnimation()
             } else {
                 isAnimating = false
