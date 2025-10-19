@@ -69,7 +69,7 @@ public struct KokoroSynthesizer {
         try await loadSimplePhonemeDictionary()
         let hasLang = false
         let lexicons = await lexiconCache.lexicons()
-        return KokoroChunker.chunk(
+        return try KokoroChunker.chunk(
             text: text,
             wordToPhonemes: lexicons.word,
             caseSensitiveLexicon: lexicons.caseSensitive,

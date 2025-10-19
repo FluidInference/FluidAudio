@@ -99,6 +99,8 @@ FluidAudioDatasets/
 Resources/
 !Sources/FluidAudio/Resources/
 !Sources/FluidAudio/Resources/**
+!Sources/FluidAudio/Frameworks/ESPeakNG.xcframework/**/Resources/
+!Sources/FluidAudio/Frameworks/ESPeakNG.xcframework/**/Resources/**
 scripts/
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/

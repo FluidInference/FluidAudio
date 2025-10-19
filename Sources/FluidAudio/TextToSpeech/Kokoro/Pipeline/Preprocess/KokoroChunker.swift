@@ -40,7 +40,7 @@ enum KokoroChunker {
         hasLanguageToken: Bool,
         allowedPhonemes: Set<String>,
         phoneticOverrides: [TtsPhoneticOverride]
-    ) -> [TextChunk] {
+    ) throws -> [TextChunk] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
@@ -60,7 +60,7 @@ enum KokoroChunker {
             return []
         }
 
-        let mergedSentences = mergeShortSentences(
+        let mergedSentences = try mergeShortSentences(
             refinedSentences,
             lexicon: wordToPhonemes,
             caseSensitiveLexicon: caseSensitiveLexicon,
@@ -74,7 +74,7 @@ enum KokoroChunker {
         segmentsByPunctuations.reserveCapacity(segmentsByPeriods.count)
 
         for (periodIndex, segment) in segmentsByPeriods.enumerated() {
-            let count = tokenCountForSegment(
+            let count = try tokenCountForSegment(
                 for: segment,
                 lexicon: wordToPhonemes,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -84,7 +84,7 @@ enum KokoroChunker {
 
             if count > capacity {
                 let fragments = splitByPunctuation(segment)
-                let reassembled = reassembleFragments(
+                let reassembled = try reassembleFragments(
                     fragments,
                     lexicon: wordToPhonemes,
                     caseSensitiveLexicon: caseSensitiveLexicon,
@@ -120,7 +120,7 @@ enum KokoroChunker {
         chunks.reserveCapacity(segmentsByPunctuations.count)
 
         for chunkText in segmentsByPunctuations {
-            let built = buildChunks(
+            let built = try buildChunks(
                 from: chunkText,
                 lexicon: wordToPhonemes,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -181,7 +181,7 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         allowed: Set<String>,
         capacity: Int
-    ) -> [String] {
+    ) throws -> [String] {
         guard !sentences.isEmpty else { return [] }
 
         let threshold = max(1, min(capacity, TtsConstants.shortSentenceMergeTokenThreshold))
@@ -203,7 +203,7 @@ enum KokoroChunker {
             let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
-            let sentenceTokens = tokenCountForSegment(
+            let sentenceTokens = try tokenCountForSegment(
                 for: trimmed,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -231,7 +231,7 @@ enum KokoroChunker {
             }
 
             let candidate = appendSegment(buffer, with: trimmed)
-            let candidateTokens = tokenCountForSegment(
+            let candidateTokens = try tokenCountForSegment(
                 for: candidate,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -270,7 +270,7 @@ enum KokoroChunker {
         wordIndex: inout Int,
         overrides: [TtsPhoneticOverride],
         overrideIndex: inout Int
-    ) -> [TextChunk] {
+    ) throws -> [TextChunk] {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return [] }
 
@@ -345,7 +345,7 @@ enum KokoroChunker {
 
                 if resolved == nil {
                     guard
-                        let fallback = resolvePhonemes(
+                        let fallback = try resolvePhonemes(
                             for: original,
                             normalized: normalized,
                             lexicon: lexicon,
@@ -482,7 +482,7 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         allowed: Set<String>,
         missing: inout Set<String>
-    ) -> [String]? {
+    ) throws -> [String]? {
         var phonemes = caseSensitiveLexicon[original]
 
         if phonemes == nil, let exactNormalized = caseSensitiveLexicon[normalized] {
@@ -493,7 +493,7 @@ enum KokoroChunker {
             phonemes = lexicon[normalized]
         }
 
-        if phonemes == nil, let ipa = EspeakG2P.shared.phonemize(word: normalized) {
+        if phonemes == nil, let ipa = try EspeakG2P.shared.phonemize(word: normalized) {
             let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
             if !mapped.isEmpty {
                 phonemes = mapped
@@ -510,7 +510,7 @@ enum KokoroChunker {
             for spelled in spelledTokens {
                 var segment = lexicon[spelled]
 
-                if segment == nil, let ipa = EspeakG2P.shared.phonemize(word: spelled) {
+                if segment == nil, let ipa = try EspeakG2P.shared.phonemize(word: spelled) {
                     let mapped = PhonemeMapper.mapIPA(ipa, allowed: allowed)
                     if !mapped.isEmpty {
                         segment = mapped
@@ -574,7 +574,7 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         allowed: Set<String>,
         capacity: Int
-    ) -> Int {
+    ) throws -> Int {
         let atoms = tokenizeAtoms(text)
         guard !atoms.isEmpty else { return 0 }
 
@@ -589,7 +589,7 @@ enum KokoroChunker {
                 let normalized = normalize(original)
                 guard !normalized.isEmpty else { continue }
                 guard
-                    let phonemes = resolvePhonemes(
+                    let phonemes = try resolvePhonemes(
                         for: original,
                         normalized: normalized,
                         lexicon: lexicon,
@@ -625,7 +625,7 @@ enum KokoroChunker {
         caseSensitiveLexicon: [String: [String]],
         allowed: Set<String>,
         capacity: Int
-    ) -> [String] {
+    ) throws -> [String] {
         guard !fragments.isEmpty else { return [] }
 
         var assembled: [String] = []
@@ -647,7 +647,7 @@ enum KokoroChunker {
                 current.isEmpty
                 ? trimmedFragment
                 : appendSegment(current, with: trimmedFragment)
-            let candidateTokens = tokenCountForSegment(
+            let candidateTokens = try tokenCountForSegment(
                 for: candidate,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
@@ -660,7 +660,7 @@ enum KokoroChunker {
             } else {
                 flushCurrent()
                 current = trimmedFragment
-                let fragmentTokens = tokenCountForSegment(
+                let fragmentTokens = try tokenCountForSegment(
                     for: current,
                     lexicon: lexicon,
                     caseSensitiveLexicon: caseSensitiveLexicon,
