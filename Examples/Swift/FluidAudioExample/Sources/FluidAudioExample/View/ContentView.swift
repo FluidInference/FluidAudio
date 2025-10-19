@@ -39,19 +39,16 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: DesignSpacing.lg) {
             ModernStepCard(number: 1, title: "Choose Input Source", caption: "Select where to stream from.") {
                 VStack(alignment: .leading, spacing: DesignSpacing.md) {
-                    Menu {
+                    HStack(spacing: DesignSpacing.md) {
                         ForEach(InputSource.allCases, id: \.self) { source in
-                            Button {
+                            InputSourceButton(
+                                source: source,
+                                isSelected: inputSource == source,
+                                isDisabled: viewModel.stage.isBusy
+                            ) {
                                 inputSource = source
-                            } label: {
-                                InputSourceMenuItem(
-                                    source: source,
-                                    isSelected: source == inputSource
-                                )
                             }
                         }
-                    } label: {
-                        InputSourceMenuLabel(source: inputSource)
                     }
 
                     if inputSource == .file {
@@ -223,12 +220,27 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, DesignSpacing.xl)
                     } else {
-                        Text(viewModel.displayTranscript)
+                        if viewModel.stage == .streaming {
+                            let snapshot = viewModel.liveSnapshot
+                            (
+                                Text(snapshot.confirmedText)
+                                    .foregroundColor(DesignColors.text)
+                                + Text(snapshot.volatileText)
+                                    .foregroundColor(DesignColors.textSecondary)
+                            )
                             .bodyText()
                             .lineSpacing(4)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                             .transition(.opacity)
+                        } else {
+                            Text(viewModel.displayTranscript)
+                                .bodyText()
+                                .lineSpacing(4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                                .transition(.opacity)
+                        }
                     }
                 }
                 .padding(DesignSpacing.lg)
@@ -305,57 +317,54 @@ extension ContentView {
     }
 }
 
-private struct InputSourceMenuLabel: View {
-    let source: ContentView.InputSource
-
-    var body: some View {
-        HStack(spacing: DesignSpacing.md) {
-            Image(systemName: source.symbolName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(DesignColors.accent)
-
-            Text(source.title)
-                .font(DesignTypography.labelLarge)
-                .foregroundColor(DesignColors.accent)
-
-            Spacer()
-
-            Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(DesignColors.accent)
-        }
-        .padding(DesignSpacing.md)
-        .frame(maxWidth: .infinity)
-        .background(DesignColors.accentLight.opacity(0.65))
-        .cornerRadius(DesignRadius.medium)
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignRadius.medium)
-                .stroke(DesignColors.accent.opacity(0.35), lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: DesignRadius.medium))
-    }
-}
-
-private struct InputSourceMenuItem: View {
+private struct InputSourceButton: View {
     let source: ContentView.InputSource
     let isSelected: Bool
+    let isDisabled: Bool
+    let action: () -> Void
 
     var body: some View {
-        HStack(spacing: DesignSpacing.md) {
-            Image(systemName: source.symbolName)
-                .foregroundColor(DesignColors.text)
+        Button(action: action) {
+            VStack(spacing: DesignSpacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? DesignColors.accent : DesignColors.card)
+                        .frame(width: 56, height: 56)
+                        .shadow(
+                            color: isSelected ? DesignColors.accent.opacity(0.3) : Color.clear,
+                            radius: 8,
+                            x: 0,
+                            y: 4
+                        )
 
-            Text(source.title)
-                .foregroundColor(DesignColors.text)
+                    Image(systemName: source.symbolName)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(isSelected ? .white : DesignColors.textSecondary)
+                }
 
-            Spacer()
-
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .foregroundColor(DesignColors.accent)
+                Text(source.title)
+                    .font(DesignTypography.labelLarge)
+                    .foregroundColor(isSelected ? DesignColors.accent : DesignColors.text)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, DesignSpacing.lg)
+            .padding(.horizontal, DesignSpacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: DesignRadius.medium)
+                    .fill(isSelected ? DesignColors.accentLight.opacity(0.15) : DesignColors.card)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignRadius.medium)
+                    .stroke(
+                        isSelected ? DesignColors.accent : DesignColors.border,
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
         }
-        .font(DesignTypography.bodyMedium)
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.5 : 1.0)
+        .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
 }
 

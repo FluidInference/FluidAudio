@@ -1,0 +1,546 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C72E09362EA5616700A3A4D5 /* AppInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = C72E092C2EA5616700A3A4D5 /* AppInfo.plist */; };
+		C72E09382EA5616700A3A4D5 /* FluidAudioExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E091E2EA5616700A3A4D5 /* FluidAudioExampleApp.swift */; };
+		C72E09392EA5616700A3A4D5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E092E2EA5616700A3A4D5 /* ContentView.swift */; };
+		C72E093A2EA5616700A3A4D5 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E092A2EA5616700A3A4D5 /* DesignSystem.swift */; };
+		C72E093C2EA5616700A3A4D5 /* ExampleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09302EA5616700A3A4D5 /* ExampleViewModel.swift */; };
+		C72E093D2EA5616700A3A4D5 /* ModernStepCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09252EA5616700A3A4D5 /* ModernStepCard.swift */; };
+		C72E093E2EA5616700A3A4D5 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09272EA5616700A3A4D5 /* StatusBadge.swift */; };
+		C72E093F2EA5616700A3A4D5 /* PlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09212EA5616700A3A4D5 /* PlaybackController.swift */; };
+		C72E09402EA5616700A3A4D5 /* SkeletonLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09262EA5616700A3A4D5 /* SkeletonLoader.swift */; };
+		C72E09412EA5616700A3A4D5 /* StreamingTranscriptionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E091C2EA5616700A3A4D5 /* StreamingTranscriptionCoordinator.swift */; };
+		C72E09422EA5616700A3A4D5 /* ModernButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09242EA5616700A3A4D5 /* ModernButton.swift */; };
+		C72E09432EA5616700A3A4D5 /* MicrophoneStreamingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09202EA5616700A3A4D5 /* MicrophoneStreamingController.swift */; };
+		C72E09442EA5616700A3A4D5 /* WaveformIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09282EA5616700A3A4D5 /* WaveformIndicator.swift */; };
+		C72E09452EA5616700A3A4D5 /* MetricCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72E09232EA5616700A3A4D5 /* MetricCard.swift */; };
+		C72E09482EA561A800A3A4D5 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = C72E09472EA561A800A3A4D5 /* FluidAudio */; };
+		C72E094A2EA56A1900A3A4D5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C72E09492EA56A1900A3A4D5 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		C72E091A2EA5616700A3A4D5 /* FluidAudioExample.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = FluidAudioExample.xcodeproj; sourceTree = "<group>"; };
+		C72E091C2EA5616700A3A4D5 /* StreamingTranscriptionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTranscriptionCoordinator.swift; sourceTree = "<group>"; };
+		C72E091E2EA5616700A3A4D5 /* FluidAudioExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluidAudioExampleApp.swift; sourceTree = "<group>"; };
+		C72E09202EA5616700A3A4D5 /* MicrophoneStreamingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneStreamingController.swift; sourceTree = "<group>"; };
+		C72E09212EA5616700A3A4D5 /* PlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackController.swift; sourceTree = "<group>"; };
+		C72E09232EA5616700A3A4D5 /* MetricCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricCard.swift; sourceTree = "<group>"; };
+		C72E09242EA5616700A3A4D5 /* ModernButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModernButton.swift; sourceTree = "<group>"; };
+		C72E09252EA5616700A3A4D5 /* ModernStepCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModernStepCard.swift; sourceTree = "<group>"; };
+		C72E09262EA5616700A3A4D5 /* SkeletonLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonLoader.swift; sourceTree = "<group>"; };
+		C72E09272EA5616700A3A4D5 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
+		C72E09282EA5616700A3A4D5 /* WaveformIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformIndicator.swift; sourceTree = "<group>"; };
+		C72E092A2EA5616700A3A4D5 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		C72E092C2EA5616700A3A4D5 /* AppInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = AppInfo.plist; sourceTree = "<group>"; };
+		C72E092E2EA5616700A3A4D5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		C72E09302EA5616700A3A4D5 /* ExampleViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExampleViewModel.swift; sourceTree = "<group>"; };
+		C72E09492EA56A1900A3A4D5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C7AB25552EA55D1F00E459E3 /* FluidAudioExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FluidAudioExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C7AB25522EA55D1F00E459E3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C72E09482EA561A800A3A4D5 /* FluidAudio in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		C72E091D2EA5616700A3A4D5 /* Agent */ = {
+			isa = PBXGroup;
+			children = (
+				C72E091C2EA5616700A3A4D5 /* StreamingTranscriptionCoordinator.swift */,
+			);
+			path = Agent;
+			sourceTree = "<group>";
+		};
+		C72E091F2EA5616700A3A4D5 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				C72E091E2EA5616700A3A4D5 /* FluidAudioExampleApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		C72E09222EA5616700A3A4D5 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				C72E09202EA5616700A3A4D5 /* MicrophoneStreamingController.swift */,
+				C72E09212EA5616700A3A4D5 /* PlaybackController.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		C72E09292EA5616700A3A4D5 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				C72E09232EA5616700A3A4D5 /* MetricCard.swift */,
+				C72E09242EA5616700A3A4D5 /* ModernButton.swift */,
+				C72E09252EA5616700A3A4D5 /* ModernStepCard.swift */,
+				C72E09262EA5616700A3A4D5 /* SkeletonLoader.swift */,
+				C72E09272EA5616700A3A4D5 /* StatusBadge.swift */,
+				C72E09282EA5616700A3A4D5 /* WaveformIndicator.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		C72E092B2EA5616700A3A4D5 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				C72E092A2EA5616700A3A4D5 /* DesignSystem.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		C72E092D2EA5616700A3A4D5 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C72E092C2EA5616700A3A4D5 /* AppInfo.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		C72E092F2EA5616700A3A4D5 /* View */ = {
+			isa = PBXGroup;
+			children = (
+				C72E092E2EA5616700A3A4D5 /* ContentView.swift */,
+			);
+			path = View;
+			sourceTree = "<group>";
+		};
+		C72E09312EA5616700A3A4D5 /* ViewModel */ = {
+			isa = PBXGroup;
+			children = (
+				C72E09302EA5616700A3A4D5 /* ExampleViewModel.swift */,
+			);
+			path = ViewModel;
+			sourceTree = "<group>";
+		};
+		C72E09322EA5616700A3A4D5 /* FluidAudioExample */ = {
+			isa = PBXGroup;
+			children = (
+				C72E091D2EA5616700A3A4D5 /* Agent */,
+				C72E091F2EA5616700A3A4D5 /* App */,
+				C72E09222EA5616700A3A4D5 /* Audio */,
+				C72E09292EA5616700A3A4D5 /* Components */,
+				C72E092B2EA5616700A3A4D5 /* Design */,
+				C72E092D2EA5616700A3A4D5 /* Resources */,
+				C72E092F2EA5616700A3A4D5 /* View */,
+				C72E09312EA5616700A3A4D5 /* ViewModel */,
+			);
+			path = FluidAudioExample;
+			sourceTree = "<group>";
+		};
+		C72E09332EA5616700A3A4D5 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				C72E09322EA5616700A3A4D5 /* FluidAudioExample */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		C72E09342EA5616700A3A4D5 /* Products */ = {
+			isa = PBXGroup;
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C7AB254C2EA55D1F00E459E3 = {
+			isa = PBXGroup;
+			children = (
+				C72E09492EA56A1900A3A4D5 /* Assets.xcassets */,
+				C72E091A2EA5616700A3A4D5 /* FluidAudioExample.xcodeproj */,
+				C72E09332EA5616700A3A4D5 /* Sources */,
+				C7AB25562EA55D1F00E459E3 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C7AB25562EA55D1F00E459E3 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C7AB25552EA55D1F00E459E3 /* FluidAudioExample.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C7AB25542EA55D1F00E459E3 /* FluidAudioExample */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C7AB25782EA55D2000E459E3 /* Build configuration list for PBXNativeTarget "FluidAudioExample" */;
+			buildPhases = (
+				C7AB25512EA55D1F00E459E3 /* Sources */,
+				C7AB25522EA55D1F00E459E3 /* Frameworks */,
+				C7AB25532EA55D1F00E459E3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FluidAudioExample;
+			packageProductDependencies = (
+				C72E09472EA561A800A3A4D5 /* FluidAudio */,
+			);
+			productName = FluidAudioExample;
+			productReference = C7AB25552EA55D1F00E459E3 /* FluidAudioExample.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C7AB254D2EA55D1F00E459E3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					C7AB25542EA55D1F00E459E3 = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+				};
+			};
+			buildConfigurationList = C7AB25502EA55D1F00E459E3 /* Build configuration list for PBXProject "FluidAudioExample" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C7AB254C2EA55D1F00E459E3;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C72E09462EA561A800A3A4D5 /* XCLocalSwiftPackageReference "../../../../FluidAudio-asr-optimizations" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C7AB25562EA55D1F00E459E3 /* Products */;
+			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = C72E09342EA5616700A3A4D5 /* Products */;
+					ProjectRef = C72E091A2EA5616700A3A4D5 /* FluidAudioExample.xcodeproj */;
+				},
+			);
+			projectRoot = "";
+			targets = (
+				C7AB25542EA55D1F00E459E3 /* FluidAudioExample */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C7AB25532EA55D1F00E459E3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C72E09362EA5616700A3A4D5 /* AppInfo.plist in Resources */,
+				C72E094A2EA56A1900A3A4D5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C7AB25512EA55D1F00E459E3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C72E09382EA5616700A3A4D5 /* FluidAudioExampleApp.swift in Sources */,
+				C72E09392EA5616700A3A4D5 /* ContentView.swift in Sources */,
+				C72E093A2EA5616700A3A4D5 /* DesignSystem.swift in Sources */,
+				C72E093C2EA5616700A3A4D5 /* ExampleViewModel.swift in Sources */,
+				C72E093D2EA5616700A3A4D5 /* ModernStepCard.swift in Sources */,
+				C72E093E2EA5616700A3A4D5 /* StatusBadge.swift in Sources */,
+				C72E093F2EA5616700A3A4D5 /* PlaybackController.swift in Sources */,
+				C72E09402EA5616700A3A4D5 /* SkeletonLoader.swift in Sources */,
+				C72E09412EA5616700A3A4D5 /* StreamingTranscriptionCoordinator.swift in Sources */,
+				C72E09422EA5616700A3A4D5 /* ModernButton.swift in Sources */,
+				C72E09432EA5616700A3A4D5 /* MicrophoneStreamingController.swift in Sources */,
+				C72E09442EA5616700A3A4D5 /* WaveformIndicator.swift in Sources */,
+				C72E09452EA5616700A3A4D5 /* MetricCard.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		C7AB25762EA55D2000E459E3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 4JK3Y2W2NW;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		C7AB25772EA55D2000E459E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 4JK3Y2W2NW;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		C7AB25792EA55D2000E459E3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4JK3Y2W2NW;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = FluidAudioExample;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = plus.inference.FluidAudioExample;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		C7AB257A2EA55D2000E459E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4JK3Y2W2NW;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = FluidAudioExample;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = plus.inference.FluidAudioExample;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C7AB25502EA55D1F00E459E3 /* Build configuration list for PBXProject "FluidAudioExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C7AB25762EA55D2000E459E3 /* Debug */,
+				C7AB25772EA55D2000E459E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C7AB25782EA55D2000E459E3 /* Build configuration list for PBXNativeTarget "FluidAudioExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C7AB25792EA55D2000E459E3 /* Debug */,
+				C7AB257A2EA55D2000E459E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C72E09462EA561A800A3A4D5 /* XCLocalSwiftPackageReference "../../../../FluidAudio-asr-optimizations" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../../../FluidAudio-asr-optimizations";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C72E09472EA561A800A3A4D5 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FluidAudio;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = C7AB254D2EA55D1F00E459E3 /* Project object */;
+}

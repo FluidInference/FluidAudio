@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 import FluidAudio
 import Foundation
+import OSLog
 
 @MainActor
 final class ExampleViewModel: ObservableObject {
@@ -57,7 +58,22 @@ final class ExampleViewModel: ObservableObject {
         }
     }
 
-    @Published private(set) var stage: Stage = .idle
+    @Published private(set) var stage: Stage = .idle {
+        didSet {
+            guard oldValue != self.stage else { return }
+            let previousLabel = oldValue.label
+            let currentLabel = self.stage.label
+            logger.debug("Stage transition \(previousLabel) -> \(currentLabel)")
+            if self.stage == .streaming {
+                if self.streamingStartTime == nil {
+                    self.streamingStartTime = Date()
+                    logger.info("Streaming session started")
+                }
+            } else if self.stage == .idle || self.stage == .ready {
+                self.streamingStartTime = nil
+            }
+        }
+    }
     @Published private(set) var selectedFileURL: URL?
     @Published private(set) var selectedFileName: String = "No file selected"
     @Published private(set) var confirmedText: String = ""
@@ -66,6 +82,8 @@ final class ExampleViewModel: ObservableObject {
     @Published private(set) var isPlaybackActive = false
     @Published private(set) var isMicrophoneStreaming = false
     @Published private(set) var metadata: ExampleTranscriptionMetadata?
+    @Published private(set) var liveSnapshot: StreamingTranscriptSnapshot = .empty
+    private var securityScopedFileURL: URL?
 
     private let transcriptionCoordinator = StreamingTranscriptionCoordinator()
     private let playbackController = PlaybackController()
@@ -75,6 +93,14 @@ final class ExampleViewModel: ObservableObject {
     private var transcriptionTask: Task<Void, Never>?
     private var playbackTask: Task<Void, Never>?
     private var microphoneTask: Task<Void, Never>?
+    private let logger = Logger(subsystem: "com.fluidaudio.example", category: "Streaming")
+    private var confirmedUpdateCount: Int = 0
+    private var volatileUpdateCount: Int = 0
+    private var streamingStartTime: Date?
+    private let uiUpdateInterval: TimeInterval = 0.15
+    private var pendingSnapshot: StreamingTranscriptSnapshot?
+    private var snapshotUpdateTask: Task<Void, Never>?
+    private var lastSnapshotTimestamp: Date = .distantPast
 
     var statusText: String {
         if let error = stage.errorMessage {
@@ -102,13 +128,21 @@ final class ExampleViewModel: ObservableObject {
 
     var displayTranscript: String {
         if stage == .streaming {
-            return confirmedText + volatileText
+            return liveSnapshot.confirmedText + liveSnapshot.volatileText
         }
         return transcript.isEmpty ? confirmedText : transcript
     }
 
     func selectFile(_ url: URL) {
         cancelActivePipeline()
+        stopAccessingSelectedFile()
+
+        if url.startAccessingSecurityScopedResource() {
+            securityScopedFileURL = url
+        } else {
+            securityScopedFileURL = nil
+        }
+
         selectedFileURL = url
         selectedFileName = url.lastPathComponent
         stage = .idle
@@ -166,6 +200,7 @@ final class ExampleViewModel: ObservableObject {
     }
 
     private func runTranscription(for url: URL) async {
+        resetStreamingStateCounters()
         stage = .preparingModels
         confirmedText = ""
         volatileText = ""
@@ -201,10 +236,13 @@ final class ExampleViewModel: ObservableObject {
                 firstConfirmedTokenLatency: result.firstConfirmedTokenLatency,
                 wordCount: Self.wordCount(in: result.transcript)
             )
+            logStreamingSummary(reason: "file stream completed")
             stage = .ready
         } catch is CancellationError {
+            logStreamingSummary(reason: "file stream cancelled")
             stage = .idle
         } catch {
+            logStreamingSummary(reason: "file stream failed: \(readableMessage(for: error))")
             stage = .error(readableMessage(for: error))
         }
 
@@ -253,6 +291,7 @@ final class ExampleViewModel: ObservableObject {
     }
 
     private func runMicrophoneStreaming() async {
+        resetStreamingStateCounters()
         defer { microphoneTask = nil }
 
         stage = .requestingMicrophone
@@ -297,6 +336,7 @@ final class ExampleViewModel: ObservableObject {
             }
         } catch {
             isMicrophoneStreaming = false
+            logStreamingSummary(reason: "microphone stream failed: \(readableMessage(for: error))")
             stage = .error(readableMessage(for: error))
         }
     }
@@ -322,9 +362,11 @@ final class ExampleViewModel: ObservableObject {
             )
 
             isMicrophoneStreaming = false
+            logStreamingSummary(reason: "microphone stream completed")
             stage = .ready
         } catch is CancellationError {
             isMicrophoneStreaming = false
+            logStreamingSummary(reason: "microphone stream cancelled")
             if transcript.isEmpty {
                 stage = .idle
             } else {
@@ -358,14 +400,42 @@ final class ExampleViewModel: ObservableObject {
     }
 
     private func handle(update: StreamingTranscriptionUpdate) {
+        let sanitizedPreview = update.text.replacingOccurrences(of: "\n", with: " ")
+        let preview = String(sanitizedPreview.prefix(80))
+        let elapsed = streamingStartTime.map { update.timestamp.timeIntervalSince($0) }
+
         if update.isConfirmed {
-            if !update.text.isEmpty {
-                confirmedText.append(update.text)
+            self.confirmedUpdateCount += 1
+            if let elapsed {
+                logger.debug(
+                    "Confirmed update #\(self.confirmedUpdateCount, privacy: .public) len=\(update.text.count, privacy: .public) elapsed=\(elapsed, format: .fixed(precision: 3))s preview=\"\(preview, privacy: .public)\""
+                )
+            } else {
+                logger.debug(
+                    "Confirmed update #\(self.confirmedUpdateCount, privacy: .public) len=\(update.text.count, privacy: .public) preview=\"\(preview, privacy: .public)\""
+                )
             }
-            volatileText = ""
+            if !update.text.isEmpty {
+                self.confirmedText.append(update.text)
+            }
+            self.volatileText = ""
         } else {
-            volatileText = update.text
+            self.volatileUpdateCount += 1
+            if let elapsed {
+                logger.debug(
+                    "Volatile update #\(self.volatileUpdateCount, privacy: .public) len=\(update.text.count, privacy: .public) elapsed=\(elapsed, format: .fixed(precision: 3))s preview=\"\(preview, privacy: .public)\""
+                )
+            } else {
+                logger.debug(
+                    "Volatile update #\(self.volatileUpdateCount, privacy: .public) len=\(update.text.count, privacy: .public) preview=\"\(preview, privacy: .public)\""
+                )
+            }
+            if self.volatileUpdateCount == 1 {
+                logger.info("First volatile token surfaced at ~\(elapsed ?? 0.0, format: .fixed(precision: 3))s")
+            }
+            self.volatileText = update.text
         }
+        self.scheduleSnapshotUpdate()
     }
 
     private func cancelActivePipeline(resetStage: Bool = true) {
@@ -392,6 +462,18 @@ final class ExampleViewModel: ObservableObject {
         if resetStage {
             stage = .idle
         }
+        resetStreamingStateCounters()
+    }
+
+    deinit {
+        stopAccessingSelectedFile()
+    }
+
+    private func stopAccessingSelectedFile() {
+        if let url = securityScopedFileURL {
+            url.stopAccessingSecurityScopedResource()
+            securityScopedFileURL = nil
+        }
     }
 
     private func readableMessage(for error: Error) -> String {
@@ -407,6 +489,59 @@ final class ExampleViewModel: ObservableObject {
         let words = text.split { $0.isWhitespace || $0.isNewline }
         return words.count
     }
+
+    private func resetStreamingStateCounters() {
+        self.confirmedUpdateCount = 0
+        self.volatileUpdateCount = 0
+        self.streamingStartTime = nil
+        self.pendingSnapshot = nil
+        snapshotUpdateTask?.cancel()
+        snapshotUpdateTask = nil
+        liveSnapshot = StreamingTranscriptSnapshot(confirmedText: confirmedText, volatileText: volatileText)
+    }
+
+    private func logStreamingSummary(reason: String) {
+        logger.info(
+            "Streaming session finished (\(reason, privacy: .public)); confirmedUpdates=\(self.confirmedUpdateCount, privacy: .public) volatileUpdates=\(self.volatileUpdateCount, privacy: .public)"
+        )
+        resetStreamingStateCounters()
+    }
+
+    private func scheduleSnapshotUpdate() {
+        let snapshot = StreamingTranscriptSnapshot(confirmedText: confirmedText, volatileText: volatileText)
+        pendingSnapshot = snapshot
+        guard snapshotUpdateTask == nil else { return }
+
+        snapshotUpdateTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.snapshotUpdateTask = nil }
+
+            while !Task.isCancelled {
+                guard let nextSnapshot = self.pendingSnapshot else { break }
+                self.pendingSnapshot = nil
+
+                let now = Date()
+                let elapsed = now.timeIntervalSince(self.lastSnapshotTimestamp)
+                if elapsed < self.uiUpdateInterval {
+                    let wait = self.uiUpdateInterval - elapsed
+                    let delay = UInt64(wait * 1_000_000_000)
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch {
+                        break
+                    }
+                }
+
+                self.lastSnapshotTimestamp = Date()
+                self.liveSnapshot = nextSnapshot
+            }
+
+            if let remaining = self.pendingSnapshot {
+                self.pendingSnapshot = remaining
+                self.scheduleSnapshotUpdate()
+            }
+        }
+    }
 }
 
 struct ExampleTranscriptionMetadata {
@@ -420,4 +555,11 @@ struct ExampleTranscriptionMetadata {
         guard audioSeconds > 0 else { return nil }
         return wallClockSeconds / audioSeconds
     }
+}
+
+struct StreamingTranscriptSnapshot: Equatable {
+    let confirmedText: String
+    let volatileText: String
+
+    static let empty = StreamingTranscriptSnapshot(confirmedText: "", volatileText: "")
 }
