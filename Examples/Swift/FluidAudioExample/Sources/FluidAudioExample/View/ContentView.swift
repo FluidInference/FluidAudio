@@ -182,27 +182,42 @@ struct ContentView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.md) {
-            Text("FluidAudio Streaming")
-                .font(DesignTypography.displayMedium)
-                .foregroundColor(DesignColors.text)
+            HStack(alignment: .center) {
+                Text("FluidAudio Streaming")
+                    .font(DesignTypography.displayMedium)
+                    .foregroundColor(DesignColors.text)
+
+                Spacer()
+
+                if viewModel.stage.isBusy {
+                    HStack(spacing: DesignSpacing.sm) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+
+                        Text(viewModel.statusText)
+                            .font(DesignTypography.labelSmall)
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, DesignSpacing.md)
+                    .padding(.vertical, DesignSpacing.sm)
+                    .background(
+                        Capsule()
+                            .fill(DesignColors.accent)
+                    )
+                    .shadow(
+                        color: DesignColors.accent.opacity(0.4),
+                        radius: 8,
+                        x: 0,
+                        y: 4
+                    )
+                }
+            }
 
             Text(
                 "Upload audio or speak live, watch streaming transcripts stabilize in real time, then hand the result to Kokoro for playback."
             )
             .secondaryText()
             .lineLimit(3)
-
-            if viewModel.stage.isBusy {
-                HStack(spacing: DesignSpacing.md) {
-                    ProgressView()
-                        .scaleEffect(0.85)
-
-                    Text(viewModel.statusText)
-                        .secondaryText()
-
-                    Spacer()
-                }
-            }
         }
     }
 

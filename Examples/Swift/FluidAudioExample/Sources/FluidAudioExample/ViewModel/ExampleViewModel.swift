@@ -466,7 +466,9 @@ final class ExampleViewModel: ObservableObject {
     }
 
     deinit {
-        stopAccessingSelectedFile()
+        if let url = securityScopedFileURL {
+            url.stopAccessingSecurityScopedResource()
+        }
     }
 
     private func stopAccessingSelectedFile() {
