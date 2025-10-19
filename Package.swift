@@ -29,7 +29,13 @@ let package = Package(
                 "ESpeakNG"
             ],
             path: "Sources/FluidAudio",
-            exclude: []
+            exclude: [],
+            swiftSettings: [
+                .unsafeFlags([
+                    "-Xcc", "-DACCELERATE_NEW_LAPACK",
+                    "-Xcc", "-DACCELERATE_LAPACK_ILP64",
+                ])
+            ]
         ),
         .executableTarget(
             name: "FluidAudioCLI",
