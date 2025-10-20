@@ -525,7 +525,8 @@ struct OfflineEmbeddingExtractor {
             guard !chunkSpeakerWeights.isEmpty else { continue }
 
             let frameDuration = resolveFrameDuration(chunk)
-            let chunkOffsetSeconds = chunk.chunkOffsetSeconds.isFinite
+            let chunkOffsetSeconds =
+                chunk.chunkOffsetSeconds.isFinite
                 ? chunk.chunkOffsetSeconds
                 : Double(chunk.chunkIndex) * config.windowDuration
 
@@ -615,8 +616,6 @@ struct OfflineEmbeddingExtractor {
 
         return embeddings
     }
-
-
 
     private func runFbankModel(
         audioArray: MLMultiArray

@@ -52,14 +52,16 @@ struct DiarizationMetrics: Codable {
         speakerErrorRate = try container.decode(Float.self, forKey: .speakerErrorRate)
         jer = try container.decode(Float.self, forKey: .jer)
         speakerMapping = try container.decode([String: String].self, forKey: .speakerMapping)
-        evaluationCollarSeconds = try container.decodeIfPresent(
-            Float.self,
-            forKey: .evaluationCollarSeconds
-        ) ?? 0.25
-        evaluationIgnoresOverlap = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .evaluationIgnoresOverlap
-        ) ?? true
+        evaluationCollarSeconds =
+            try container.decodeIfPresent(
+                Float.self,
+                forKey: .evaluationCollarSeconds
+            ) ?? 0.25
+        evaluationIgnoresOverlap =
+            try container.decodeIfPresent(
+                Bool.self,
+                forKey: .evaluationIgnoresOverlap
+            ) ?? true
     }
 }
 
@@ -114,7 +116,8 @@ enum DiarizationMetricsCalculator {
             return zeroMetrics()
         }
 
-        let predictedSegments = predicted
+        let predictedSegments =
+            predicted
             .map {
                 ScoringSegment(
                     start: Double($0.startTimeSeconds),
@@ -124,7 +127,8 @@ enum DiarizationMetricsCalculator {
             }
             .sorted { $0.start < $1.start }
 
-        let groundTruthSegments = groundTruth
+        let groundTruthSegments =
+            groundTruth
             .map {
                 ScoringSegment(
                     start: Double($0.startTimeSeconds),
@@ -185,7 +189,8 @@ enum DiarizationMetricsCalculator {
         var correctlyAssigned = 0.0
         for (predId, truthId) in speakerMapping {
             if let predSegments = predictedBySpeaker[predId],
-               let truthSegments = groundTruthBySpeaker[truthId] {
+                let truthSegments = groundTruthBySpeaker[truthId]
+            {
                 correctlyAssigned += overlapDuration(predSegments, truthSegments)
             }
         }
@@ -316,8 +321,9 @@ enum DiarizationMetricsCalculator {
                 )
                 merged[merged.count - 1] = updated
             } else if let last = merged.last,
-                      last.speaker == segment.speaker,
-                      abs(segment.start - last.end) < 1e-9 {
+                last.speaker == segment.speaker,
+                abs(segment.start - last.end) < 1e-9
+            {
                 let updated = ScoringSegment(
                     start: last.start,
                     end: max(last.end, segment.end),

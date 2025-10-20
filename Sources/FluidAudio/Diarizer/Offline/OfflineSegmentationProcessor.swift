@@ -127,8 +127,7 @@ struct OfflineSegmentationProcessor {
         ) throws {
             let availableForWindow = max(0, min(chunkSize, totalSamples - offset))
 
-            if
-                reuseEnabled,
+            if reuseEnabled,
                 let lastOffset = previousOffset,
                 offset == lastOffset + stepSize
             {
@@ -547,15 +546,15 @@ struct OfflineSegmentationProcessor {
 }
 
 @available(macOS 13.0, iOS 16.0, *)
-private extension OfflineSegmentationProcessor {
-    static func milliseconds(from duration: Duration) -> Double {
+extension OfflineSegmentationProcessor {
+    fileprivate static func milliseconds(from duration: Duration) -> Double {
         let components = duration.components
         let secondsMs = Double(components.seconds) * 1_000
         let attosecondsMs = Double(components.attoseconds) / 1_000_000_000_000_000.0
         return secondsMs + attosecondsMs
     }
 
-    static func emitProfileLog(_ message: String) {
+    fileprivate static func emitProfileLog(_ message: String) {
         let line = "[Profiling] \(message)\n"
         if let data = line.data(using: .utf8) {
             FileHandle.standardError.write(data)
