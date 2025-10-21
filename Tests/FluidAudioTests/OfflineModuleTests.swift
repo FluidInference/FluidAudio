@@ -161,14 +161,14 @@ final class OfflineDiarizerConfigTests: XCTestCase {
     }
 
     func testValidateThrowsForInvalidClusteringThreshold() {
-        let config = OfflineDiarizerConfig(clusteringThreshold: 1.2)
+        let config = OfflineDiarizerConfig(clusteringThreshold: 1.5)
 
         XCTAssertThrowsError(try config.validate()) { error in
             guard case OfflineDiarizationError.invalidConfiguration(let message) = error else {
                 XCTFail("Expected invalidConfiguration, got \(error)")
                 return
             }
-            XCTAssertTrue(message.contains("clusteringThreshold"))
+            XCTAssertTrue(message.contains("clustering.threshold"))
         }
     }
 
@@ -298,8 +298,8 @@ final class ModelWarmupTests: XCTestCase {
 
         try ModelWarmup.warmupEmbeddingModel(model, weightFrames: weightFrames)
 
-        // Expect two invocations: failed FBANK attempt then combined fallback.
-        XCTAssertEqual(model.receivedInputs.count, 2)
+        // Expect one invocation: only the successful combined fallback is recorded
+        XCTAssertEqual(model.receivedInputs.count, 1)
 
         guard let lastInvocation = model.receivedInputs.last else {
             XCTFail("Expected fallback invocation")
