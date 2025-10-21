@@ -112,35 +112,48 @@ struct VBxClustering {
             }
         }
 
-        let result = runVBx(
-            features: featureBuffer,
-            frameCount: frameCount,
-            dimension: dimension,
-            phi: phi,
-            initialGamma: initialGamma,
-            speakerCount: speakerCount,
-            maxIterations: config.vbx.maxIterations,
-            epsilon: config.vbx.convergenceTolerance,
-            Fa: config.clustering.warmStartFa,
-            Fb: config.clustering.warmStartFb,
-            initSmoothing: 7.0
-        )
+        let gammaSource: [Double]
+        let piSource: [Double]
+        let elboHistory: [Double]
 
-        let gammaMatrix = reshapeGamma(result.gamma, frameCount: frameCount, speakerCount: speakerCount)
+        do {
+            let result = try runVBx(
+                features: featureBuffer,
+                frameCount: frameCount,
+                dimension: dimension,
+                phi: phi,
+                initialGamma: initialGamma,
+                speakerCount: speakerCount,
+                maxIterations: config.vbx.maxIterations,
+                epsilon: config.vbx.convergenceTolerance,
+                Fa: config.clustering.warmStartFa,
+                Fb: config.clustering.warmStartFb,
+                initSmoothing: 7.0
+            )
+            gammaSource = result.gamma
+            piSource = result.pi
+            elboHistory = result.elbos
+        } catch {
+            logger.error("VBx failed to prepare BLAS arguments: \(error.localizedDescription)")
+            gammaSource = initialGamma
+            piSource = Array(repeating: 1.0 / Double(speakerCount), count: speakerCount)
+            elboHistory = []
+        }
+
+        let gammaMatrix = reshapeGamma(gammaSource, frameCount: frameCount, speakerCount: speakerCount)
         let hardAssignments = gammaMatrix.map { row -> Int in
             row.enumerated().max(by: { $0.element < $1.element })?.offset ?? 0
         }
 
-        let elboHistory = result.elbos
-        if let maxPi = result.pi.max(), let minPi = result.pi.min() {
-            logger.debug("VBx mixture weights – min: \(minPi), max: \(maxPi), count: \(result.pi.count)")
+        if let maxPi = piSource.max(), let minPi = piSource.min() {
+            logger.debug("VBx mixture weights – min: \(minPi), max: \(maxPi), count: \(piSource.count)")
         } else {
             logger.debug("VBx mixture weights unavailable")
         }
 
         let output = VBxOutput(
             gamma: gammaMatrix,
-            pi: result.pi,
+            pi: piSource,
             hardClusters: [hardAssignments],
             centroids: [],
             numClusters: speakerCount,
@@ -163,8 +176,11 @@ struct VBxClustering {
         Fa: Double,
         Fb: Double,
         initSmoothing: Double
-    ) -> (gamma: [Double], pi: [Double], elbos: [Double]) {
+    ) throws -> (gamma: [Double], pi: [Double], elbos: [Double]) {
         var gamma = initialGamma
+        let frameCountBlas = try makeBlasIndex(frameCount, label: "VBx frame count")
+        let speakerCountBlas = try makeBlasIndex(speakerCount, label: "VBx speaker count")
+        let dimensionBlas = try makeBlasIndex(dimension, label: "VBx feature dimension")
 
         let speakerLength = vDSP_Length(speakerCount)
         let dimensionLength = vDSP_Length(dimension)
@@ -296,11 +312,11 @@ struct VBxClustering {
                         cblas_dgemv(
                             CblasRowMajor,
                             CblasTrans,
-                            Int32(frameCount),
-                            Int32(speakerCount),
+                            frameCountBlas,
+                            speakerCountBlas,
                             1.0,
                             gammaBase,
-                            Int32(speakerCount),
+                            speakerCountBlas,
                             onesBase,
                             1,
                             0.0,
@@ -327,17 +343,17 @@ struct VBxClustering {
                             CblasRowMajor,
                             CblasTrans,
                             CblasNoTrans,
-                            Int32(speakerCount),
-                            Int32(dimension),
-                            Int32(frameCount),
+                            speakerCountBlas,
+                            dimensionBlas,
+                            frameCountBlas,
                             1.0,
                             gammaPtr.baseAddress!,
-                            Int32(speakerCount),
+                            speakerCountBlas,
                             rhoPtr.baseAddress!,
-                            Int32(dimension),
+                            dimensionBlas,
                             0.0,
                             tempPtr.baseAddress!,
-                            Int32(dimension)
+                            dimensionBlas
                         )
                     }
                 }
@@ -426,17 +442,17 @@ struct VBxClustering {
                             CblasRowMajor,
                             CblasNoTrans,
                             CblasTrans,
-                            Int32(frameCount),
-                            Int32(speakerCount),
-                            Int32(dimension),
+                            frameCountBlas,
+                            speakerCountBlas,
+                            dimensionBlas,
                             1.0,
                             rhoPtr.baseAddress!,
-                            Int32(dimension),
+                            dimensionBlas,
                             alphaPtr.baseAddress!,
-                            Int32(dimension),
+                            dimensionBlas,
                             0.0,
                             logPtr.baseAddress!,
-                            Int32(speakerCount)
+                            speakerCountBlas
                         )
                     }
                 }
@@ -570,11 +586,11 @@ struct VBxClustering {
                         cblas_dgemv(
                             CblasRowMajor,
                             CblasTrans,
-                            Int32(frameCount),
-                            Int32(speakerCount),
+                            frameCountBlas,
+                            speakerCountBlas,
                             1.0,
                             gammaBase,
-                            Int32(speakerCount),
+                            speakerCountBlas,
                             onesBase,
                             1,
                             0.0,
