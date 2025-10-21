@@ -1,7 +1,6 @@
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
 actor LexiconAssetManager {
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "LexiconAssetManager")

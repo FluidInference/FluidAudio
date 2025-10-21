@@ -4,7 +4,6 @@ import XCTest
 
 @testable import FluidAudio
 
-@available(macOS 13.0, iOS 16.0, *)
 final class AsrModelsTests: XCTestCase {
 
     // MARK: - Model Names Tests
@@ -260,10 +259,8 @@ final class AsrModelsTests: XCTestCase {
         let options = AsrModels.optimizedPredictionOptions()
         XCTAssertNotNil(options)
 
-        // On macOS 14+, output backings should be configured
-        if #available(macOS 14.0, iOS 17.0, *) {
-            XCTAssertNotNil(options.outputBackings)
-        }
+        // Output backings should be configured
+        XCTAssertNotNil(options.outputBackings)
     }
 
     // Removed testLoadWithANEOptimization - causes crashes when trying to load models

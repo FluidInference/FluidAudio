@@ -1,7 +1,6 @@
 import CoreML
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoderV2 {
 
     private let config: ASRConfig

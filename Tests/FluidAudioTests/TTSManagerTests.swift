@@ -2,7 +2,6 @@ import XCTest
 
 @testable import FluidAudio
 
-@available(macOS 13.0, *)
 final class TtSManagerTests: XCTestCase {
 
     var manager: TtSManager!

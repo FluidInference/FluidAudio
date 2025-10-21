@@ -4,7 +4,6 @@ import FluidAudio
 import Foundation
 
 /// CLI command that surfaces VadManager's segmentation and streaming APIs.
-@available(macOS 13.0, *)
 enum VadAnalyzeCommand {
     private static let logger = AppLogger(category: "VadAnalyze")
 

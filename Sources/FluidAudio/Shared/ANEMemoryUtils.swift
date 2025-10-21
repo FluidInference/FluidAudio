@@ -5,7 +5,6 @@ import Foundation
 import Metal
 
 /// Shared ANE optimization utilities for all ML pipelines
-@available(macOS 13.0, iOS 16.0, *)
 public enum ANEMemoryUtils {
 
     /// ANE requires 64-byte alignment for optimal DMA transfers
@@ -164,7 +163,6 @@ public enum ANEMemoryUtils {
 }
 
 /// Extension for MLMultiArray to add ANE optimization methods
-@available(macOS 13.0, iOS 16.0, *)
 extension MLMultiArray {
 
     /// Check if this array is ANE-aligned

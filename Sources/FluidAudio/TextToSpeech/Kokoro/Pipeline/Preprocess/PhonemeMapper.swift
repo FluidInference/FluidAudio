@@ -1,7 +1,6 @@
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
 enum PhonemeMapper {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "PhonemeMapper")
 

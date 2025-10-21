@@ -76,28 +76,14 @@ struct EncoderFrameView {
         guard hiddenStride != 0 else {
             throw ASRError.processingFailed("Invalid hidden stride: 0")
         }
-        guard let elementCount = Int32(exactly: hiddenSize) else {
-            throw ASRError.processingFailed("Hidden size exceeds supported range")
-        }
-        guard let strideX = Int32(exactly: hiddenStride) else {
-            throw ASRError.processingFailed("Hidden stride exceeds supported range")
-        }
-
         let sourcePointer = UnsafePointer<Float>(frameStart)
-        let destStrideCblas: Int32
-        if destinationStride == 1 {
-            destStrideCblas = 1
-        } else if let stride = Int32(exactly: destinationStride) {
-            destStrideCblas = stride
-        } else {
-            throw ASRError.processingFailed("Destination stride out of range")
-        }
+        let count = try makeBlasIndex(hiddenSize, label: "Hidden size")
+        let incX = try makeBlasIndex(hiddenStride, label: "Hidden stride")
+        let destStrideCblas = try makeBlasIndex(destinationStride, label: "Destination stride")
 
         if hiddenStride == 1 && destinationStride == 1 {
             destination.update(from: sourcePointer, count: hiddenSize)
         } else {
-            let count = elementCount
-            let incX = strideX
             cblas_scopy(count, sourcePointer, incX, destination, destStrideCblas)
         }
     }

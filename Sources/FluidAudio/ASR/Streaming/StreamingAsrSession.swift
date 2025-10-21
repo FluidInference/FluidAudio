@@ -3,7 +3,6 @@ import OSLog
 
 /// A session manager for handling multiple streaming ASR instances with shared model loading
 /// This ensures models are loaded only once and shared across all streams
-@available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrSession {
     private let logger = AppLogger(category: "StreamingSession")
     private var loadedModels: AsrModels?

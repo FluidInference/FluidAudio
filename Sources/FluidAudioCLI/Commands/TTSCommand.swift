@@ -1,7 +1,6 @@
 import FluidAudio
 import Foundation
 
-@available(macOS 13.0, *)
 public struct TTS {
 
     private static let logger = AppLogger(category: "TTSCommand")
@@ -440,7 +439,6 @@ public struct TTS {
     }
 }
 
-@available(macOS 13.0, *)
 extension TTS {
     private struct BenchmarkResult {
         let text: String

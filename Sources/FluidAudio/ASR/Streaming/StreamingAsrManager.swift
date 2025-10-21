@@ -4,7 +4,6 @@ import OSLog
 
 /// A high-level streaming ASR manager that provides a simple API for real-time transcription
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically
-@available(macOS 13.0, iOS 16.0, *)
 public actor StreamingAsrManager {
     private let logger = AppLogger(category: "StreamingASR")
     private let audioConverter: AudioConverter = AudioConverter()
@@ -477,7 +476,6 @@ public actor StreamingAsrManager {
 }
 
 /// Configuration for StreamingAsrManager
-@available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAsrConfig: Sendable {
     /// Main chunk size for stable transcription (seconds). Should be 10-11s for best quality
     public let chunkSeconds: TimeInterval
@@ -583,7 +581,6 @@ public struct StreamingAsrConfig: Sendable {
 }
 
 /// Transcription update from streaming ASR
-@available(macOS 13.0, iOS 16.0, *)
 public struct StreamingTranscriptionUpdate: Sendable {
     /// The transcribed text
     public let text: String

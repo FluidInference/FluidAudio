@@ -4,7 +4,6 @@ import Foundation
 import OSLog
 
 /// Segmentation processor with ANE-aligned memory and zero-copy operations
-@available(macOS 13.0, iOS 16.0, *)
 public struct SegmentationProcessor {
 
     private let logger = AppLogger(category: "Segmentation")
@@ -64,10 +63,8 @@ public struct SegmentationProcessor {
         // Configure optimal prediction options
         let options = MLPredictionOptions()
 
-        // Prefetch to Neural Engine if available
-        if #available(macOS 14.0, iOS 17.0, *) {
-            audioArray.prefetchToNeuralEngine()
-        }
+        // Prefetch to Neural Engine for better performance
+        audioArray.prefetchToNeuralEngine()
 
         let output = try segmentationModel.prediction(from: featureProvider, options: options)
 

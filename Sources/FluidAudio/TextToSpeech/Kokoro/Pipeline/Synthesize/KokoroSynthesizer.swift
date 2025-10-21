@@ -8,7 +8,6 @@ import FoundationNetworking
 #endif
 
 /// Supports both 5s and 15s variants with US English phoneme lexicons
-@available(macOS 13.0, iOS 16.0, *)
 public struct KokoroSynthesizer {
     static let logger = AppLogger(category: "KokoroSynthesizer")
 
