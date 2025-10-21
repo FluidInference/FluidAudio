@@ -2,7 +2,31 @@ import CoreML
 import Foundation
 import OSLog
 
+internal enum StreamingDeduplication {
+    /// Allow up to ~30 tokens (≈2.4s) of overlap before we strip duplicates.
+    static let maxOverlapTokens: Int = 30
+}
+
 extension AsrManager {
+
+    /// Streaming decoder inputs that tweak context-length alignment and offset bookkeeping.
+    internal struct StreamingChunkParameters {
+        /// Explicit encoder frame count for the chunk; nil derives it from the sample length.
+        let actualAudioFrames: Int?
+        /// Positive or negative tweak applied to align decoder context between chunks.
+        let contextFrameAdjustment: Int
+        /// Flag set when no further chunks are expected, allowing final decoder flush.
+        let isLastChunk: Bool
+        /// Offset that accounts for prior audio when stitching streaming timestamps.
+        let globalFrameOffset: Int
+
+        static let `default` = StreamingChunkParameters(
+            actualAudioFrames: nil,  // Let the pipeline infer frames from chunk length.
+            contextFrameAdjustment: 0,  // No context shift when using default behavior.
+            isLastChunk: false,  // Streaming keeps decoder state open for additional chunks.
+            globalFrameOffset: 0  // Timestamping starts at the beginning of the session.
+        )
+    }
 
     internal func transcribeWithState(
         _ audioSamples: [Float], decoderState: inout TdtDecoderState
@@ -143,19 +167,23 @@ extension AsrManager {
     internal func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
-        previousTokens: [Int] = []
+        previousTokens: [Int] = [],
+        parameters: StreamingChunkParameters? = nil
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
 
         let originalLength = chunkSamples.count
         let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
+        let params = parameters ?? .default
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
             originalLength: originalLength,
-            actualAudioFrames: nil,  // Will be calculated from originalLength
+            actualAudioFrames: params.actualAudioFrames,
             decoderState: &state,
-            contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context
+            contextFrameAdjustment: params.contextFrameAdjustment,
+            isLastChunk: params.isLastChunk,
+            globalFrameOffset: params.globalFrameOffset
         )
 
         // Persist updated state back to the source-specific slot
@@ -167,8 +195,12 @@ extension AsrManager {
 
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {
+            // Streaming chunks overlap by ~2 seconds; allow a matching span before deduping.
             let (deduped, removedCount) = removeDuplicateTokenSequence(
-                previous: previousTokens, current: hypothesis.ySequence)
+                previous: previousTokens,
+                current: hypothesis.ySequence,
+                maxOverlap: StreamingDeduplication.maxOverlapTokens
+            )
             let adjustedTimestamps =
                 removedCount > 0 ? Array(hypothesis.timestamps.dropFirst(removedCount)) : hypothesis.timestamps
             let adjustedConfidences =
@@ -359,12 +391,14 @@ extension AsrManager {
     ) -> (deduped: [Int], removedCount: Int) {
 
         // Handle single punctuation token duplicates first
-        let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
+        let punctuationTokens = ASRConstants.punctuationTokenIds
         var workingCurrent = current
         var removedCount = 0
 
-        if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
-            && punctuationTokens.contains(workingCurrent.first!)
+        if let previousLast = previous.last,
+            let currentFirst = workingCurrent.first,
+            previousLast == currentFirst,
+            punctuationTokens.contains(previousLast)
         {
             // Remove the duplicate punctuation token from the beginning of current
             workingCurrent = Array(workingCurrent.dropFirst())
@@ -372,8 +406,9 @@ extension AsrManager {
         }
 
         // Check for suffix-prefix overlap: end of previous matches beginning of current
+        let overlapLimit = max(0, maxOverlap)
         let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
-        let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first 12 tokens of current
+        let maxMatchLength = min(overlapLimit, workingCurrent.count)  // first N tokens of current
 
         guard maxSearchLength >= 2 && maxMatchLength >= 2 else {
             return (workingCurrent, removedCount)

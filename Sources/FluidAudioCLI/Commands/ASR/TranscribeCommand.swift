@@ -94,6 +94,17 @@ actor TranscriptionTracker {
 /// Command to transcribe audio files using batch or streaming mode
 enum TranscribeCommand {
     private static let logger = AppLogger(category: "Transcribe")
+    private static let confirmedColor = "\u{001B}[32m"
+    private static let volatileColor = "\u{001B}[33m"
+    private static let resetColor = "\u{001B}[0m"
+
+    private static func coloredLabel(for update: StreamingTranscriptionUpdate) -> String {
+        if update.isConfirmed {
+            return "\(confirmedColor)CONFIRMED\(resetColor)"
+        } else {
+            return "\(volatileColor)VOLATILE\(resetColor)"
+        }
+    }
 
     static func run(arguments: [String]) async {
         // Parse arguments
@@ -138,12 +149,18 @@ enum TranscribeCommand {
             i += 1
         }
 
+        let stabilizerConfig = StreamingStabilizerConfig()
+
         if streamingMode {
             logger.info(
-                "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
+                "Streaming mode enabled: simulating real-time audio with 500ms chunks.\n"
             )
             await testStreamingTranscription(
-                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+                audioFile: audioFile,
+                showMetadata: showMetadata,
+                modelVersion: modelVersion,
+                stabilizer: stabilizerConfig
+            )
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
@@ -226,15 +243,17 @@ enum TranscribeCommand {
                 logger.info("  Confidence: \(String(format: "%.3f", result.confidence))")
             }
 
-            if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
-                let debugDump = tokenTimings.enumerated().map { index, timing in
-                    let start = String(format: "%.3f", timing.startTime)
-                    let end = String(format: "%.3f", timing.endTime)
-                    let confidence = String(format: "%.3f", timing.confidence)
-                    return
-                        "[\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(start)s, end: \(end)s, conf: \(confidence))"
-                }.joined(separator: ", ")
-                logger.debug("Token timings (count: \(tokenTimings.count)): \(debugDump)")
+            if showMetadata {
+                if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
+                    let debugDump = tokenTimings.enumerated().map { index, timing in
+                        let start = String(format: "%.3f", timing.startTime)
+                        let end = String(format: "%.3f", timing.endTime)
+                        let confidence = String(format: "%.3f", timing.confidence)
+                        return
+                            "[\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(start)s, end: \(end)s, conf: \(confidence))"
+                    }.joined(separator: ", ")
+                    logger.debug("Token timings (count: \(tokenTimings.count)): \(debugDump)")
+                }
             }
 
             // Cleanup
@@ -247,10 +266,17 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String,
+        showMetadata: Bool,
+        modelVersion: AsrModelVersion,
+        stabilizer: StreamingStabilizerConfig
     ) async {
         // Use optimized streaming configuration
-        let config = StreamingAsrConfig.streaming
+        let config = StreamingAsrConfig.streaming.withStabilizer(stabilizer)
+
+        logger.info(
+            "Stabilized streaming enabled (K=\(stabilizer.windowSize), boundary=\(stabilizer.emitWordBoundaries), maxWait=\(stabilizer.maxWaitMilliseconds)ms)"
+        )
 
         // Create StreamingAsrManager
         let streamingAsr = StreamingAsrManager(config: config)
@@ -276,10 +302,10 @@ enum TranscribeCommand {
 
             try audioFileHandle.read(into: buffer)
 
-            // Calculate streaming parameters - align with StreamingAsrConfig chunk size
-            let chunkDuration = config.chunkSeconds  // Use same chunk size as streaming config
+            // Calculate streaming parameters - use small chunks to simulate real-time microphone input
+            // Internal processing uses larger windows (11s), but we feed audio in smaller increments
+            let chunkDuration: TimeInterval = 0.5  // 500ms chunks to simulate realistic streaming
             let samplesPerChunk = Int(chunkDuration * format.sampleRate)
-            let totalDuration = Double(audioFileHandle.length) / format.sampleRate
 
             // Track transcription updates
             let tracker = TranscriptionTracker()
@@ -296,12 +322,12 @@ enum TranscribeCommand {
                     await tracker.record(update: update)
 
                     // Debug: show transcription updates
-                    let updateType = update.isConfirmed ? "CONFIRMED" : "VOLATILE"
+                    let updateLabel = coloredLabel(for: update)
                     if showMetadata {
                         let timestampString = timestampFormatter.string(from: update.timestamp)
                         let timingSummary = streamingTimingSummary(for: update)
                         logger.info(
-                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
+                            "\(updateLabel) '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
                         )
                         logger.info("  \(timingSummary)")
                         if !update.tokenTimings.isEmpty {
@@ -313,7 +339,7 @@ enum TranscribeCommand {
                         }
                     } else {
                         logger.info(
-                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
+                            "\(updateLabel) '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
                     }
 
                     if update.isConfirmed {
@@ -381,19 +407,11 @@ enum TranscribeCommand {
             // Cancel update task
             updateTask.cancel()
 
-            // Show final results with actual processing performance
-            let processingTime = await tracker.getElapsedProcessingTime()
-            let finalRtfx = processingTime > 0 ? totalDuration / processingTime : 0
-
             logger.info("" + String(repeating: "=", count: 50))
             logger.info("STREAMING TRANSCRIPTION RESULTS")
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
             logger.info(finalText)
-            logger.info("Performance:")
-            logger.info("  Audio duration: \(String(format: "%.2f", totalDuration))s")
-            logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
-            logger.info("  RTFx: \(String(format: "%.2f", finalRtfx))x")
 
             if showMetadata {
                 if let snapshot = await tracker.metadataSnapshot() {
@@ -462,6 +480,9 @@ enum TranscribeCommand {
                 fluidaudio transcribe audio.wav --streaming        # Streaming mode
                 fluidaudio transcribe audio.wav --metadata         # Batch mode with metadata
                 fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
+
+            Notes:
+            - Stabilized streaming always uses the high-stability configuration for best accuracy.
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results

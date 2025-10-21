@@ -65,7 +65,10 @@ struct ChunkProcessor {
                 let currentTokens = windowData.map { $0.token }
 
                 let (_, removedCount) = manager.removeDuplicateTokenSequence(
-                    previous: previousTokens, current: currentTokens, maxOverlap: 30)
+                    previous: previousTokens,
+                    current: currentTokens,
+                    maxOverlap: StreamingDeduplication.maxOverlapTokens
+                )
                 // Only keep the non-duplicate portion of window data
                 let adjustedWindowData = Array(windowData.dropFirst(removedCount))
                 allTokenData.append(contentsOf: adjustedWindowData)

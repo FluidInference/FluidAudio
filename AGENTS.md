@@ -44,3 +44,17 @@ swift format --in-place --recursive --configuration .swift-format Sources/ Tests
 ## Mobius Plan
 
 When users ask you to perform tasks that might be more compilcated, make sure you look at PLANS.md and follow the instructions there to plan the change out first and follow the instructions there. The plans should be in a .mobius/ folder and never committed directly to Github
+
+## Code Review Process
+
+When reviewing code or pull requests, follow the comprehensive methodology documented in [REVIEW.md](REVIEW.md). This REVIEW.md file is readonly, do not modify it.
+
+This systematic framework covers:
+
+- **Architecture Analysis**: Component boundaries, concurrency, thread safety
+- **Resource Management**: Memory leaks, unbounded growth, file handle leaks
+- **Code Quality**: Method length, magic numbers, state complexity
+- **Correctness**: Index arithmetic, error paths, edge cases
+- **Performance**: Algorithmic complexity, hot path optimization
+- **Testing Coverage**: Unit tests, integration tests, edge cases
+- **Security**: Resource exhaustion, input validation
