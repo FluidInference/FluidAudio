@@ -45,13 +45,6 @@ Pod::Spec.new do |spec|
     wrapper.pod_target_xcconfig = {
       'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17'
     }
-    wrapper.user_target_xcconfig = {
-      'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
-    }
-    wrapper.osx.pod_target_xcconfig = {
-      'ARCHS[sdk=macosx*]' => 'arm64',
-      'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
-    }
   end
 
   spec.subspec "Core" do |core|
@@ -74,14 +67,6 @@ Pod::Spec.new do |spec|
     # macOS builds include: ASR, Diarization, VAD, and TTS with ESpeakNG support.
     core.osx.vendored_frameworks = "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
     core.osx.frameworks = "CoreML", "AVFoundation", "Accelerate", "Cocoa"
-    core.osx.pod_target_xcconfig = {
-      'ARCHS[sdk=macosx*]' => 'arm64',
-      'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
-    }
-    core.osx.user_target_xcconfig = {
-      'ARCHS[sdk=macosx*]' => 'arm64',
-      'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64'
-    }
   end
 
   spec.default_subspecs = ["Core"]
