@@ -128,22 +128,14 @@ for segment in result.segments {
 }
 ```
 
-For large meetings prefer the streaming source helper to avoid materializing the entire buffer:
+For file-based processing, use the memory-mapped streaming API which automatically handles large audio files efficiently:
 
 ```swift
-let factory = StreamingAudioSourceFactory()
-let prepared = try factory.makeDiskBackedSource(
-    from: URL(fileURLWithPath: "meeting.wav"),
-    targetSampleRate: config.segmentation.sampleRate
-)
-let source = prepared.source
-defer { source.cleanup() }
-
-let streamingResult = try await manager.process(
-    audioSource: source,
-    audioLoadingSeconds: prepared.loadDuration
-)
+let url = URL(fileURLWithPath: "meeting.wav")
+let result = try await manager.process(url)
 ```
+
+The file-based API internally uses memory-mapped streaming to avoid materializing the entire buffer in memory.
 
 The offline controller mirrors the reference pipeline:
 
@@ -177,6 +169,38 @@ swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --th
 Add `--rttm path/to/meeting.rttm` when you have ground-truth annotations to emit DER/JER directly on the console, or `--export-embeddings embeddings.json` to inspect cluster assignments. The GitHub Actions workflow [`offline-pipeline.yml`](../.github/workflows/offline-pipeline.yml) executes the single-file AMI benchmark on every PR, keeping downloads, PLDA transforms, and VBx clustering guard-railed.
 
 Both commands reuse the shared model cache (`OfflineDiarizerModels.defaultModelsDirectory()`) and emit JSON payloads compatible with the streaming pipeline.
+
+#### Advanced: Manual Audio Source Control
+
+For use cases requiring fine-grained control over memory management or audio loading, you can manually construct the audio source using `StreamingAudioSourceFactory`:
+
+```swift
+import FluidAudio
+
+let config = OfflineDiarizerConfig()
+let manager = OfflineDiarizerManager(config: config)
+try await manager.prepareModels()
+
+let factory = StreamingAudioSourceFactory()
+let (source, loadDuration) = try factory.makeDiskBackedSource(
+    from: URL(fileURLWithPath: "meeting.wav"),
+    targetSampleRate: config.segmentation.sampleRate
+)
+defer { source.cleanup() }
+
+let result = try await manager.process(
+    audioSource: source,
+    audioLoadingSeconds: loadDuration
+)
+```
+
+This approach is useful when you need to:
+
+- Process the same file multiple times without reloading
+- Measure audio loading time separately from diarization time
+- Implement custom cleanup or caching logic
+
+For most use cases, the simpler `manager.process(url)` API is recommended.
 
 ## Streaming/Real-time Processing
 

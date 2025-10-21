@@ -41,10 +41,6 @@ public final class DiarizerManager {
         models != nil
     }
 
-    public var initializationTimings: (downloadTime: TimeInterval, compilationTime: TimeInterval) {
-        models.map { ($0.downloadDuration, $0.compilationDuration) } ?? (0, 0)
-    }
-
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
 
@@ -164,7 +160,6 @@ public final class DiarizerManager {
 
         if config.debugMode {
             let timings = PipelineTimings(
-                modelDownloadSeconds: models.downloadDuration,
                 modelCompilationSeconds: models.compilationDuration,
                 audioLoadingSeconds: 0,
                 segmentationSeconds: segmentationTime,

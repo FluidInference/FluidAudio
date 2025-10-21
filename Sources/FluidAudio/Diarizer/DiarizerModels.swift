@@ -14,16 +14,14 @@ public struct DiarizerModels: Sendable {
 
     public let segmentationModel: CoreMLDiarizer.SegmentationModel
     public let embeddingModel: CoreMLDiarizer.EmbeddingModel
-    public let downloadDuration: TimeInterval
     public let compilationDuration: TimeInterval
 
     init(
-        segmentation: MLModel, embedding: MLModel, downloadDuration: TimeInterval = 0,
+        segmentation: MLModel, embedding: MLModel,
         compilationDuration: TimeInterval = 0
     ) {
         self.segmentationModel = segmentation
         self.embeddingModel = embedding
-        self.downloadDuration = downloadDuration
         self.compilationDuration = compilationDuration
     }
 }
@@ -73,14 +71,11 @@ extension DiarizerModels {
 
         let endTime = Date()
         let totalDuration = endTime.timeIntervalSince(startTime)
-        let downloadDuration: TimeInterval = 0  // Models are typically cached
-        let compilationDuration = totalDuration
 
         return DiarizerModels(
             segmentation: segmentationModel,
             embedding: embeddingModel,
-            downloadDuration: downloadDuration,
-            compilationDuration: compilationDuration)
+            compilationDuration: totalDuration)
     }
 
     public static func load(
@@ -145,7 +140,7 @@ extension DiarizerModels {
         let endTime = Date()
         let loadDuration = endTime.timeIntervalSince(startTime)
         return DiarizerModels(
-            segmentation: segmentationModel, embedding: embeddingModel, downloadDuration: 0,
+            segmentation: segmentationModel, embedding: embeddingModel,
             compilationDuration: loadDuration)
     }
 }

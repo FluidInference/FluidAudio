@@ -10,7 +10,6 @@ public struct OfflineDiarizerModels: Sendable {
     public let pldaRhoModel: MLModel
     public let pldaPsi: [Double]
 
-    public let downloadDuration: TimeInterval
     public let compilationDuration: TimeInterval
 
     private static let logger = AppLogger(category: "OfflineDiarizerModels")
@@ -57,7 +56,6 @@ public struct OfflineDiarizerModels: Sendable {
         embeddingModel: MLModel,
         pldaRhoModel: MLModel,
         pldaPsi: [Double],
-        downloadDuration: TimeInterval,
         compilationDuration: TimeInterval
     ) {
         self.segmentationModel = segmentationModel
@@ -65,7 +63,6 @@ public struct OfflineDiarizerModels: Sendable {
         self.embeddingModel = embeddingModel
         self.pldaRhoModel = pldaRhoModel
         self.pldaPsi = pldaPsi
-        self.downloadDuration = downloadDuration
         self.compilationDuration = compilationDuration
     }
 
@@ -144,7 +141,6 @@ public struct OfflineDiarizerModels: Sendable {
             embeddingModel: embedding,
             pldaRhoModel: plda,
             pldaPsi: pldaPsi,
-            downloadDuration: 0,
             compilationDuration: compilationDuration
         )
     }

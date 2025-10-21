@@ -48,7 +48,6 @@ struct ResultsFormatter {
         durationSeconds: Float
     ) {
         let stages: [(String, TimeInterval)] = [
-            ("Model Download", timings.modelDownloadSeconds),
             ("Model Compilation", timings.modelCompilationSeconds),
             ("Audio Loading", timings.audioLoadingSeconds),
             ("Segmentation", timings.segmentationSeconds),
@@ -261,7 +260,6 @@ struct ResultsFormatter {
 
         // Print each stage
         let stages: [(String, TimeInterval)] = [
-            ("Model Download", avgTimings.modelDownloadSeconds),
             ("Model Compilation", avgTimings.modelCompilationSeconds),
             ("Audio Loading", avgTimings.audioLoadingSeconds),
             ("Segmentation", avgTimings.segmentationSeconds),
@@ -307,15 +305,11 @@ struct ResultsFormatter {
             "   Inference Only: \(String(format: "%.3f", avgTimings.totalInferenceSeconds))s (\(String(format: "%.1f", (avgTimings.totalInferenceSeconds / totalAvgTime) * 100))% of total)"
         )
         print(
-            "   Setup Overhead: \(String(format: "%.3f", avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", ((avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds) / totalAvgTime) * 100))% of total)"
+            "   Setup Overhead: \(String(format: "%.3f", avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", (avgTimings.modelCompilationSeconds / totalAvgTime) * 100))% of total)"
         )
 
         // Optimization suggestions
-        if avgTimings.modelDownloadSeconds > avgTimings.totalInferenceSeconds {
-            print(
-                "💡 Optimization Suggestion: Model download is dominating execution time - consider model caching"
-            )
-        } else if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
+        if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
             print(
                 "💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization"
             )
@@ -331,7 +325,6 @@ struct ResultsFormatter {
         let count = Double(results.count)
         guard count > 0 else { return PipelineTimings() }
 
-        let avgModelDownload = results.reduce(0.0) { $0 + $1.timings.modelDownloadSeconds } / count
         let avgModelCompilation =
             results.reduce(0.0) { $0 + $1.timings.modelCompilationSeconds } / count
         let avgAudioLoading = results.reduce(0.0) { $0 + $1.timings.audioLoadingSeconds } / count
@@ -343,7 +336,6 @@ struct ResultsFormatter {
             results.reduce(0.0) { $0 + $1.timings.postProcessingSeconds } / count
 
         return PipelineTimings(
-            modelDownloadSeconds: avgModelDownload,
             modelCompilationSeconds: avgModelCompilation,
             audioLoadingSeconds: avgAudioLoading,
             segmentationSeconds: avgSegmentation,

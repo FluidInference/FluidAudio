@@ -67,23 +67,15 @@ public final class OfflineDiarizerManager {
                     "Failed to remove cached diarizer repo before fallback: \(error.localizedDescription)")
             }
 
-            let fallbackStart = Date()
-
             do {
                 let reloadedModels = try await OfflineDiarizerModels.load(
                     from: targetDirectory,
                     configuration: configuration
                 )
-                let downloadDuration = Date().timeIntervalSince(fallbackStart)
-                let normalizedModels = Self.wrapModels(
-                    reloadedModels,
-                    downloadDuration: downloadDuration,
-                    compilationDuration: reloadedModels.compilationDuration
-                )
-                initialize(models: normalizedModels)
-                await prewarmModelsIfNeeded(normalizedModels)
+                initialize(models: reloadedModels)
+                await prewarmModelsIfNeeded(reloadedModels)
 
-                let durationText = String(format: "%.2f", downloadDuration)
+                let durationText = String(format: "%.2f", reloadedModels.compilationDuration)
                 logger.info(
                     "Fallback download + compile completed in \(durationText)s at \(targetDirectory.path)")
             } catch {
@@ -98,6 +90,24 @@ public final class OfflineDiarizerManager {
         try await process(
             audioSource: ArrayAudioSampleSource(samples: audio),
             audioLoadingSeconds: 0
+        )
+    }
+
+    /// Process audio from a file URL using memory-mapped streaming for efficiency.
+    /// Automatically converts the audio to the target sample rate and processes in chunks.
+    /// - Parameter url: Path to the audio file
+    /// - Returns: Diarization result with speaker segments
+    public func process(_ url: URL) async throws -> DiarizationResult {
+        let factory = StreamingAudioSourceFactory()
+        let (source, loadDuration) = try factory.makeDiskBackedSource(
+            from: url,
+            targetSampleRate: config.segmentation.sampleRate
+        )
+        defer { source.cleanup() }
+
+        return try await process(
+            audioSource: source,
+            audioLoadingSeconds: loadDuration
         )
     }
 
@@ -282,7 +292,6 @@ public final class OfflineDiarizerManager {
 
         let totalProcessing = Date().timeIntervalSince(totalStart)
         let timings = PipelineTimings(
-            modelDownloadSeconds: models.downloadDuration,
             modelCompilationSeconds: models.compilationDuration,
             audioLoadingSeconds: audioLoadingSeconds,
             segmentationSeconds: segmentationTime,
@@ -306,22 +315,6 @@ public final class OfflineDiarizerManager {
         if FileManager.default.fileExists(atPath: repoDirectory.path) {
             try FileManager.default.removeItem(at: repoDirectory)
         }
-    }
-
-    private static func wrapModels(
-        _ models: OfflineDiarizerModels,
-        downloadDuration: TimeInterval,
-        compilationDuration: TimeInterval
-    ) -> OfflineDiarizerModels {
-        OfflineDiarizerModels(
-            segmentationModel: models.segmentationModel,
-            fbankModel: models.fbankModel,
-            embeddingModel: models.embeddingModel,
-            pldaRhoModel: models.pldaRhoModel,
-            pldaPsi: models.pldaPsi,
-            downloadDuration: downloadDuration,
-            compilationDuration: compilationDuration
-        )
     }
 
     private func prewarmModelsIfNeeded(_ models: OfflineDiarizerModels) async {
