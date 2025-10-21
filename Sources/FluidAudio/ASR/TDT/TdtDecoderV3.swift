@@ -676,7 +676,9 @@ internal struct TdtDecoderV3 {
         let destPtr = normalized.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
         let destStrides = normalized.strides.map { $0.intValue }
         let destHiddenStride = destStrides[1]
-        let destStrideCblas = destHiddenStride
+        guard let destStrideCblas = Int32(exactly: destHiddenStride) else {
+            throw ASRError.processingFailed("Decoder destination stride out of range")
+        }
         let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
         let strides = projection.strides.map { $0.intValue }
 
@@ -704,7 +706,12 @@ internal struct TdtDecoderV3 {
         if hiddenStride == 1 && destHiddenStride == 1 {
             destPtr.update(from: startPtr, count: hiddenSize)
         } else {
-            cblas_scopy(hiddenSize, startPtr, hiddenStride, destPtr, destStrideCblas)
+            guard let count = Int32(exactly: hiddenSize),
+                let stride = Int32(exactly: hiddenStride)
+            else {
+                throw ASRError.processingFailed("Decoder projection stride out of range")
+            }
+            cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
         }
 
         return normalized
@@ -753,7 +760,9 @@ internal struct TdtDecoderV3 {
         let destPtr = out.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
         let destStrides = out.strides.map { $0.intValue }
         let destHiddenStride = destStrides[1]
-        let destStrideCblas = destHiddenStride
+        guard let destStrideCblas = Int32(exactly: destHiddenStride) else {
+            throw ASRError.processingFailed("Decoder destination stride out of range")
+        }
 
         let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
         let strides = projection.strides.map { $0.intValue }
@@ -777,7 +786,10 @@ internal struct TdtDecoderV3 {
         if hiddenStride == 1 && destHiddenStride == 1 {
             destPtr.update(from: startPtr, count: hiddenSize)
         } else {
-            cblas_scopy(hiddenSize, startPtr, hiddenStride, destPtr, destStrideCblas)
+            guard let count = Int32(exactly: hiddenSize), let stride = Int32(exactly: hiddenStride) else {
+                throw ASRError.processingFailed("Decoder projection stride out of range")
+            }
+            cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
         }
     }
 
