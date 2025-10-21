@@ -42,16 +42,16 @@ struct AHCClustering {
             dendrogram.withUnsafeMutableBufferPointer { dendrogramPointer in
                 fastcluster_compute_centroid_linkage(
                     normalizedPointer.baseAddress,
-                    numericCast(count),
-                    numericCast(dimension),
+                    count,
+                    dimension,
                     dendrogramPointer.baseAddress,
-                    numericCast(dendrogramLength)
+                    dendrogramLength
                 )
             }
         }
 
         guard status == FASTCLUSTER_WRAPPER_SUCCESS else {
-            logger.error("fastcluster failed with status \(status)")
+            logger.error("fastcluster failed with status \(status.rawValue)")
             return Array(0..<count)
         }
 
