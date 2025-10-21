@@ -30,11 +30,6 @@ import Foundation
 @main
 struct DemoTTS {
     static func main() async {
-        guard #available(macOS 13.0, *) else {
-            print("FluidAudio TTS requires macOS 13 or newer.")
-            return
-        }
-
         let manager = TtSManager()
 
         do {

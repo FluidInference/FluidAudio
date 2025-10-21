@@ -133,7 +133,6 @@ final class CITests: XCTestCase {
 
     // MARK: - CoreML Manager Validation (Without Initialization)
 
-    @available(macOS 13.0, iOS 16.0, *)
     func testManagerBasicValidation() {
         let manager = DiarizerManager()
 

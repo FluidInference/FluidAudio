@@ -1,7 +1,6 @@
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
 extension KokoroSynthesizer {
     actor LexiconCache {
         private var wordToPhonemes: [String: [String]] = [:]

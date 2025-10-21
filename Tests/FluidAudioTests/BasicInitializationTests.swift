@@ -40,7 +40,6 @@ final class BasicInitializationTests: XCTestCase {
 
 // MARK: - CoreML Backend Tests
 
-@available(macOS 13.0, iOS 16.0, *)
 final class CoreMLDiarizerTests: XCTestCase {
 
     func testInitialization() {
@@ -353,7 +352,6 @@ extension CoreMLDiarizerTests {
 
 // MARK: - CoreML Backend Specific Test
 
-@available(macOS 13.0, iOS 16.0, *)
 final class CoreMLBackendIntegrationTests: XCTestCase {
 
     func testDiarizerCreationAndBasicFunctionality() async {

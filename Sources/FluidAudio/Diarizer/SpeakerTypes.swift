@@ -2,7 +2,6 @@ import Foundation
 
 /// Speaker profile representation for tracking speakers across audio
 /// This represents a speaker's identity, not a specific segment
-@available(macOS 13.0, iOS 16.0, *)
 public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     public let id: String
     public var name: String
@@ -171,7 +170,6 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
 }
 
 /// Raw embedding tracking for speaker evolution over time
-@available(macOS 13.0, iOS 16.0, *)
 public struct RawEmbedding: Codable, Sendable {
     public let segmentId: UUID
     public let embedding: [Float]
@@ -185,7 +183,6 @@ public struct RawEmbedding: Codable, Sendable {
 }
 
 /// Sendable speaker data for cross-async boundary usage
-@available(macOS 13.0, iOS 16.0, *)
 public struct SendableSpeaker: Sendable, Identifiable, Hashable {
     public let id: Int
     public let name: String

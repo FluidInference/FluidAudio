@@ -1,6 +1,5 @@
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 extension KokoroSynthesizer {
     public struct TokenCapacities {
         public let short: Int

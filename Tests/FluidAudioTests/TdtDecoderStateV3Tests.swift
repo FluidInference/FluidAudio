@@ -5,7 +5,6 @@ import XCTest
 
 @testable import FluidAudio
 
-@available(macOS 13.0, iOS 16.0, *)
 final class TdtDecoderStateV3Tests: XCTestCase {
 
     private let decoderStateShape: [NSNumber] = [2, 1, NSNumber(value: ASRConstants.decoderHiddenSize)]

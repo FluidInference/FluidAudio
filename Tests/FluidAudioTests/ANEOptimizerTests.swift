@@ -4,7 +4,6 @@ import XCTest
 
 @testable import FluidAudio
 
-@available(macOS 13.0, iOS 16.0, *)
 final class ANEOptimizerTests: XCTestCase {
 
     // MARK: - ANE-Aligned Array Tests
@@ -161,7 +160,6 @@ final class ANEOptimizerTests: XCTestCase {
 
 // MARK: - Zero-Copy Feature Provider Tests
 
-@available(macOS 13.0, iOS 16.0, *)
 final class ZeroCopyFeatureProviderTests: XCTestCase {
 
     func testBasicFeatureProvider() throws {

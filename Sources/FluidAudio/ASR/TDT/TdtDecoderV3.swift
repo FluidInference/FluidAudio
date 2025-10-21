@@ -30,7 +30,6 @@ import CoreML
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoderV3 {
 
     /// Joint model decision for a single encoder/decoder step.
@@ -600,11 +599,9 @@ internal struct TdtDecoderV3 {
         // Fill encoder step with the requested frame
         try encoderFrames.copyFrame(at: timeIndex, into: encoderDestPtr, destinationStride: encoderDestStride)
 
-        // Prefetch arrays for ANE if available
-        if #available(macOS 14.0, iOS 17.0, *) {
-            ANEOptimizer.prefetchToNeuralEngine(encoderStep)
-            ANEOptimizer.prefetchToNeuralEngine(preparedDecoderStep)
-        }
+        // Prefetch arrays for ANE
+        ANEOptimizer.prefetchToNeuralEngine(encoderStep)
+        ANEOptimizer.prefetchToNeuralEngine(preparedDecoderStep)
 
         // Reuse tiny output tensors for joint prediction (provide raw MLMultiArray backings)
         predictionOptions.outputBackings = [
@@ -679,14 +676,7 @@ internal struct TdtDecoderV3 {
         let destPtr = normalized.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
         let destStrides = normalized.strides.map { $0.intValue }
         let destHiddenStride = destStrides[1]
-        let destStrideCblas: Int32
-        if destHiddenStride == 1 {
-            destStrideCblas = 1
-        } else if let stride = Int32(exactly: destHiddenStride) {
-            destStrideCblas = stride
-        } else {
-            throw ASRError.processingFailed("Decoder destination stride out of range")
-        }
+        let destStrideCblas = try makeBlasIndex(destHiddenStride, label: "Decoder destination stride")
         let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
         let strides = projection.strides.map { $0.intValue }
 
@@ -714,11 +704,8 @@ internal struct TdtDecoderV3 {
         if hiddenStride == 1 && destHiddenStride == 1 {
             destPtr.update(from: startPtr, count: hiddenSize)
         } else {
-            guard let count = Int32(exactly: hiddenSize),
-                let stride = Int32(exactly: hiddenStride)
-            else {
-                throw ASRError.processingFailed("Decoder projection stride out of range")
-            }
+            let count = try makeBlasIndex(hiddenSize, label: "Decoder projection length")
+            let stride = try makeBlasIndex(hiddenStride, label: "Decoder projection stride")
             cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
         }
 
@@ -768,14 +755,7 @@ internal struct TdtDecoderV3 {
         let destPtr = out.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
         let destStrides = out.strides.map { $0.intValue }
         let destHiddenStride = destStrides[1]
-        let destStrideCblas: Int32
-        if destHiddenStride == 1 {
-            destStrideCblas = 1
-        } else if let stride = Int32(exactly: destHiddenStride) {
-            destStrideCblas = stride
-        } else {
-            throw ASRError.processingFailed("Decoder destination stride out of range")
-        }
+        let destStrideCblas = try makeBlasIndex(destHiddenStride, label: "Decoder destination stride")
 
         let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
         let strides = projection.strides.map { $0.intValue }
@@ -799,9 +779,8 @@ internal struct TdtDecoderV3 {
         if hiddenStride == 1 && destHiddenStride == 1 {
             destPtr.update(from: startPtr, count: hiddenSize)
         } else {
-            guard let count = Int32(exactly: hiddenSize), let stride = Int32(exactly: hiddenStride) else {
-                throw ASRError.processingFailed("Decoder projection stride out of range")
-            }
+            let count = try makeBlasIndex(hiddenSize, label: "Decoder projection length")
+            let stride = try makeBlasIndex(hiddenStride, label: "Decoder projection stride")
             cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
         }
     }
