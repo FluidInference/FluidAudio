@@ -1,12 +1,13 @@
 import Accelerate
+import Foundation
+import OSLog
+import os.signpost
+
 #if canImport(FastClusterWrapper)
 import FastClusterWrapper
 #elseif canImport(FluidAudio_FastClusterWrapper)
 import FluidAudio_FastClusterWrapper
 #endif
-import Foundation
-import OSLog
-import os.signpost
 
 @available(macOS 13.0, iOS 16.0, *)
 struct AHCClustering {
