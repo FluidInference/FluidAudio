@@ -77,7 +77,7 @@ struct VadBenchmark {
         // Use VadManager with the trained model
         let vadManager = try await VadManager(
             config: VadConfig(
-                threshold: vadThreshold,
+                defaultThreshold: vadThreshold,
                 debugMode: debugMode
             ))
 
