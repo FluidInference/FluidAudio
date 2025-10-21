@@ -27,7 +27,10 @@ final class SpeakerTests: XCTestCase {
 
         XCTAssertEqual(speaker.id, "test1")
         XCTAssertEqual(speaker.name, "Alice")
-        XCTAssertEqual(speaker.currentEmbedding, embedding)
+        let expectedEmbedding = VDSPOperations.l2Normalize(embedding)
+        for (value, expected) in zip(speaker.currentEmbedding, expectedEmbedding) {
+            XCTAssertEqual(value, expected, accuracy: 0.0001)
+        }
         XCTAssertEqual(speaker.duration, 5.0)
         XCTAssertEqual(speaker.updateCount, 1)
         XCTAssertTrue(speaker.rawEmbeddings.isEmpty)
@@ -133,7 +136,10 @@ final class SpeakerTests: XCTestCase {
         )
 
         // Embedding should not have been updated (magnitude too low)
-        XCTAssertEqual(speaker.currentEmbedding, embedding1)
+        let expectedEmbedding = VDSPOperations.l2Normalize(embedding1)
+        for (value, expected) in zip(speaker.currentEmbedding, expectedEmbedding) {
+            XCTAssertEqual(value, expected, accuracy: 0.0001)
+        }
         XCTAssertEqual(speaker.rawEmbeddings.count, 0)  // No raw embedding added
         XCTAssertEqual(speaker.updateCount, 1)  // No update
         XCTAssertEqual(speaker.duration, 0.0)  // Duration NOT updated due to early return
@@ -167,7 +173,7 @@ final class SpeakerTests: XCTestCase {
 
         // First embedding should be from pattern 10 (0-9 were removed)
         let firstEmbedding = speaker.rawEmbeddings.first?.embedding
-        let expectedFirst = createDistinctEmbedding(pattern: 10)
+        let expectedFirst = VDSPOperations.l2Normalize(createDistinctEmbedding(pattern: 10))
         if let firstValue = firstEmbedding?[0] {
             XCTAssertEqual(firstValue, expectedFirst[0], accuracy: 0.001)
         }
@@ -211,9 +217,10 @@ final class SpeakerTests: XCTestCase {
 
         speaker.recalculateMainEmbedding()
 
-        // Average should be (1 + 2 + 3) / 3 = 2.0
-        for value in speaker.currentEmbedding {
-            XCTAssertEqual(value, 2.0, accuracy: 0.001)
+        // Raw embeddings are stored normalized; recalculating should keep the unit-normalized vector.
+        let expectedEmbedding = VDSPOperations.l2Normalize([Float](repeating: 1.0, count: 256))
+        for (value, expected) in zip(speaker.currentEmbedding, expectedEmbedding) {
+            XCTAssertEqual(value, expected, accuracy: 0.0001)
         }
     }
 
@@ -224,8 +231,11 @@ final class SpeakerTests: XCTestCase {
         // No raw embeddings
         speaker.recalculateMainEmbedding()
 
-        // Should keep original embedding
-        XCTAssertEqual(speaker.currentEmbedding, original)
+        // Should keep the previously normalized embedding
+        let expectedEmbedding = VDSPOperations.l2Normalize(original)
+        for (value, expected) in zip(speaker.currentEmbedding, expectedEmbedding) {
+            XCTAssertEqual(value, expected, accuracy: 0.0001)
+        }
     }
 
     // MARK: - Speaker Merging Tests
