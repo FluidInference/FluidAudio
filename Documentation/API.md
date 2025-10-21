@@ -52,11 +52,11 @@ Voice activity detection using the Silero VAD Core ML model with 256 ms unified 
 - `VadManager.sampleRate = 16000`
 
 **Configuration (`VadConfig`):**
-- `threshold: Float` — Decision threshold (0.0–1.0). Default: `0.85`.
+- `defaultThreshold: Float` — Baseline decision threshold (0.0–1.0) used when segmentation does not override. Default: `0.85`.
 - `debugMode: Bool` — Extra logging for benchmarking and troubleshooting. Default: `false`.
 - `computeUnits: MLComputeUnits` — Core ML compute target. Default: `.cpuAndNeuralEngine`.
 
-Recommended threshold ranges depend on your acoustic conditions:
+Recommended `defaultThreshold` ranges depend on your acoustic conditions:
 - Clean speech: 0.7–0.9
 - Noisy/mixed content: 0.3–0.6 (higher recall, more false positives)
 

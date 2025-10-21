@@ -213,7 +213,7 @@ import FluidAudio
 
 Task {
     let manager = try await VadManager(
-        config: VadConfig(threshold: 0.75)
+        config: VadConfig(defaultThreshold: 0.75)
     )
 
     let audioURL = URL(fileURLWithPath: "path/to/audio.wav")

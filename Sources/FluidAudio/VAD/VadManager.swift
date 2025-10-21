@@ -188,7 +188,7 @@ public actor VadManager {
 
         return VadResult(
             probability: rawProbability,
-            isVoiceActive: rawProbability >= config.threshold,
+            isVoiceActive: rawProbability >= config.defaultThreshold,
             processingTime: processingTime,
             outputState: outputState
         )
