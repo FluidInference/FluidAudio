@@ -2,7 +2,6 @@ import AVFoundation
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
 public struct StreamingAudioSourceFactory {
     private let logger = AppLogger(category: "StreamingAudioSourceFactory")
 
@@ -196,7 +195,6 @@ public struct StreamingAudioSourceFactory {
     }
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 public enum StreamingAudioError: Error, LocalizedError {
     case processingFailed(String)
 
@@ -208,7 +206,6 @@ public enum StreamingAudioError: Error, LocalizedError {
     }
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 extension StreamingAudioError {
     fileprivate static func failedToAllocateBuffer(_ name: String, requestedFrames: Int) -> StreamingAudioError {
         .processingFailed("Failed to allocate \(name.lowercased()) buffer (\(requestedFrames) frames)")

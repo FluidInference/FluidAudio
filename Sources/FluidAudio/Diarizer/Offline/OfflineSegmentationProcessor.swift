@@ -4,7 +4,6 @@ import Foundation
 import OSLog
 import os.signpost
 
-@available(macOS 13.0, iOS 16.0, *)
 struct OfflineSegmentationProcessor {
     private let logger = AppLogger(category: "OfflineSegmentation")
     private let signposter = OSSignposter(
@@ -545,7 +544,6 @@ struct OfflineSegmentationProcessor {
 
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 extension OfflineSegmentationProcessor {
     fileprivate static func milliseconds(from duration: Duration) -> Double {
         let components = duration.components

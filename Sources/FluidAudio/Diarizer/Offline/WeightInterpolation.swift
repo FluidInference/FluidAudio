@@ -4,7 +4,6 @@ import Foundation
 /// mapping used by `scipy.ndimage.zoom`. The offline diarization pipeline relies
 /// on these helpers to match the reference implementation produced by the
 /// Pyannote/Core ML exporters when interpolating segmentation masks.
-@available(macOS 13.0, iOS 16.0, *)
 enum WeightInterpolation {
 
     /// Pre-computed interpolation metadata that allows repeated resampling with

@@ -9,7 +9,6 @@ import FastClusterWrapper
 import FluidAudio_FastClusterWrapper
 #endif
 
-@available(macOS 13.0, iOS 16.0, *)
 struct AHCClustering {
     private let logger = AppLogger(category: "OfflineAHC")
     private let signposter = OSSignposter(

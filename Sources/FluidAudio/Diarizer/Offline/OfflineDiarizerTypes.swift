@@ -1,7 +1,6 @@
 import Foundation
 
 /// Errors surfaced by the offline diarization pipeline.
-@available(macOS 13.0, iOS 16.0, *)
 public enum OfflineDiarizationError: Error, LocalizedError {
     case modelNotLoaded(String)
     case invalidConfiguration(String)
@@ -31,7 +30,6 @@ public enum OfflineDiarizationError: Error, LocalizedError {
 /// Configuration values tuned to pyannote's community-1 pipeline.
 /// Groups knobs by pipeline stage while keeping legacy property accessors
 /// to minimize downstream churn.
-@available(macOS 13.0, iOS 16.0, *)
 public struct OfflineDiarizerConfig: Sendable {
 
     /// Segmentation parameters. Threshold fields are ignored by powerset models like community-1 but

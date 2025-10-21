@@ -22,7 +22,6 @@ import os.signpost
 ///
 /// The implementation includes warm-start initialization from initial hard cluster
 /// assignments and supports PLDA whitening transformation of input features.
-@available(macOS 13.0, iOS 16.0, *)
 struct VBxClustering {
     private let config: OfflineDiarizerConfig
     private let pldaTransform: PLDATransform

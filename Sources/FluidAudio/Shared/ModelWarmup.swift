@@ -4,7 +4,6 @@ import Foundation
 
 /// Lightweight helpers that exercise Core ML models with zero-valued inputs to
 /// prime memory allocations before running the offline diarization pipeline.
-@available(macOS 13.0, iOS 16.0, *)
 enum ModelWarmup {
 
     /// Performs a warmup loop for a model with a single MLMultiArray input.

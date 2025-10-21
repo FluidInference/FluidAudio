@@ -53,7 +53,6 @@ private struct OfflineChunkBatchInfo: Sendable {
     }
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 struct OfflineEmbeddingExtractor {
     private let fbankModel: MLModel
     private let embeddingModel: MLModel

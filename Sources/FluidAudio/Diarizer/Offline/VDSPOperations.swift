@@ -5,7 +5,6 @@ import Foundation
 /// pipeline. Centralising this logic keeps the clustering implementation more
 /// readable while guaranteeing we stay away from unsafe pointer juggling in
 /// the hot path.
-@available(macOS 13.0, iOS 16.0, *)
 enum VDSPOperations {
 
     private static let epsilon: Float = 1e-12

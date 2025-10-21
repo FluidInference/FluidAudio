@@ -1,6 +1,5 @@
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 struct OfflineReconstruction {
     private let config: OfflineDiarizerConfig
     private let logger = AppLogger(category: "OfflineReconstruction")

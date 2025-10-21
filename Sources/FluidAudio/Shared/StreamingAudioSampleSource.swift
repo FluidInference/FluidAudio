@@ -1,6 +1,5 @@
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 public protocol StreamingAudioSampleSource: Sendable {
     var sampleCount: Int { get }
     func copySamples(
@@ -10,7 +9,6 @@ public protocol StreamingAudioSampleSource: Sendable {
     ) throws
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 public struct ArrayAudioSampleSource: StreamingAudioSampleSource {
     private let samples: [Float]
 
@@ -41,7 +39,6 @@ public struct ArrayAudioSampleSource: StreamingAudioSampleSource {
     }
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 public struct DiskBackedAudioSampleSource: StreamingAudioSampleSource {
     private let mappedData: Data
     private let floatStride = MemoryLayout<Float>.stride
