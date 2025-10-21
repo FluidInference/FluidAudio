@@ -206,6 +206,8 @@ struct OfflineReconstruction {
                     embedding.count == current.count,
                     "Embedding dimensionality mismatch while accumulating speaker database"
                 )
+                let countIndex = makeBlasIndexOrFatal(embedding.count, label: "speaker embedding length")
+                let unitStride = BlasIndex(1)
                 embedding.withUnsafeBufferPointer { sourcePointer in
                     current.withUnsafeMutableBufferPointer { destinationPointer in
                         guard
@@ -213,12 +215,12 @@ struct OfflineReconstruction {
                             let destinationBase = destinationPointer.baseAddress
                         else { return }
                         cblas_saxpy(
-                            Int(embedding.count),
+                            countIndex,
                             1.0,
                             sourceBase,
-                            1,
+                            unitStride,
                             destinationBase,
-                            1
+                            unitStride
                         )
                     }
                 }

@@ -429,6 +429,8 @@ public final class OfflineDiarizerManager {
                     mapping[speakerIdx] = index
                     var numerator = [Double](repeating: 0, count: dimension)
                     var denominator = 0.0
+                    let dimensionIndex = makeBlasIndexOrFatal(dimension, label: "centroid dimension")
+                    let unitStride = BlasIndex(1)
                     let frameLimit = min(gamma.count, trainingEmbeddings.count)
 
                     for frameIdx in 0..<frameLimit {
@@ -447,12 +449,12 @@ public final class OfflineDiarizerManager {
                                     let destinationBase = destinationPointer.baseAddress
                                 else { return }
                                 cblas_daxpy(
-                                    Int(dimension),
+                                    dimensionIndex,
                                     weight,
                                     sourceBase,
-                                    1,
+                                    unitStride,
                                     destinationBase,
-                                    1
+                                    unitStride
                                 )
                             }
                         }
@@ -493,6 +495,8 @@ public final class OfflineDiarizerManager {
                 "Jagged training embeddings are not supported"
             )
             var entry = grouped[cluster]!
+            let countIndex = makeBlasIndexOrFatal(embedding.count, label: "centroid accumulation length")
+            let unitStride = BlasIndex(1)
             embedding.withUnsafeBufferPointer { sourcePointer in
                 entry.sum.withUnsafeMutableBufferPointer { destinationPointer in
                     guard
@@ -500,12 +504,12 @@ public final class OfflineDiarizerManager {
                         let destinationBase = destinationPointer.baseAddress
                     else { return }
                     cblas_daxpy(
-                        Int(embedding.count),
+                        countIndex,
                         1.0,
                         sourceBase,
-                        1,
+                        unitStride,
                         destinationBase,
-                        1
+                        unitStride
                     )
                 }
             }
@@ -533,6 +537,8 @@ public final class OfflineDiarizerManager {
     private func computeFallbackCentroids(from embeddings: [[Double]]) -> [[Double]] {
         guard let first = embeddings.first else { return [] }
         var accumulator = [Double](repeating: 0, count: first.count)
+        let countIndex = makeBlasIndexOrFatal(first.count, label: "fallback centroid length")
+        let unitStride = BlasIndex(1)
         for vector in embeddings {
             precondition(
                 vector.count == first.count,
@@ -545,12 +551,12 @@ public final class OfflineDiarizerManager {
                         let destinationBase = destinationPointer.baseAddress
                     else { return }
                     cblas_daxpy(
-                        Int(first.count),
+                        countIndex,
                         1.0,
                         sourceBase,
-                        1,
+                        unitStride,
                         destinationBase,
-                        1
+                        unitStride
                     )
                 }
             }
