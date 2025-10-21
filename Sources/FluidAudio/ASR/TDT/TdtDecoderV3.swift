@@ -676,9 +676,7 @@ internal struct TdtDecoderV3 {
         let destPtr = normalized.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
         let destStrides = normalized.strides.map { $0.intValue }
         let destHiddenStride = destStrides[1]
-        guard let destStrideCblas = Int32(exactly: destHiddenStride) else {
-            throw ASRError.processingFailed("Decoder destination stride out of range")
-        }
+        let destStrideCblas = try makeBlasIndex(destHiddenStride, label: "Decoder destination stride")
         let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
         let strides = projection.strides.map { $0.intValue }
 
@@ -706,11 +704,8 @@ internal struct TdtDecoderV3 {
         if hiddenStride == 1 && destHiddenStride == 1 {
             destPtr.update(from: startPtr, count: hiddenSize)
         } else {
-            guard let count = Int32(exactly: hiddenSize),
-                let stride = Int32(exactly: hiddenStride)
-            else {
-                throw ASRError.processingFailed("Decoder projection stride out of range")
-            }
+            let count = try makeBlasIndex(hiddenSize, label: "Decoder projection length")
+            let stride = try makeBlasIndex(hiddenStride, label: "Decoder projection stride")
             cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
         }
 
@@ -760,9 +755,7 @@ internal struct TdtDecoderV3 {
         let destPtr = out.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
         let destStrides = out.strides.map { $0.intValue }
         let destHiddenStride = destStrides[1]
-        guard let destStrideCblas = Int32(exactly: destHiddenStride) else {
-            throw ASRError.processingFailed("Decoder destination stride out of range")
-        }
+        let destStrideCblas = try makeBlasIndex(destHiddenStride, label: "Decoder destination stride")
 
         let sourcePtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
         let strides = projection.strides.map { $0.intValue }
@@ -786,9 +779,8 @@ internal struct TdtDecoderV3 {
         if hiddenStride == 1 && destHiddenStride == 1 {
             destPtr.update(from: startPtr, count: hiddenSize)
         } else {
-            guard let count = Int32(exactly: hiddenSize), let stride = Int32(exactly: hiddenStride) else {
-                throw ASRError.processingFailed("Decoder projection stride out of range")
-            }
+            let count = try makeBlasIndex(hiddenSize, label: "Decoder projection length")
+            let stride = try makeBlasIndex(hiddenStride, label: "Decoder projection stride")
             cblas_scopy(count, startPtr, stride, destPtr, destStrideCblas)
         }
     }

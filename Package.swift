@@ -31,6 +31,8 @@ let package = Package(
             path: "Sources/FluidAudio",
             exclude: ["Frameworks"],
             swiftSettings: [
+                .define("ACCELERATE_NEW_LAPACK"),
+                .define("ACCELERATE_LAPACK_ILP64"),
                 .unsafeFlags([
                     "-Xcc", "-DACCELERATE_NEW_LAPACK",
                     "-Xcc", "-DACCELERATE_LAPACK_ILP64",
