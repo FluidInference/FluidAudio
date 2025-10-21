@@ -9,7 +9,6 @@ import OSLog
 // MARK: - Backward Compatibility
 
 /// Backward compatibility alias for the old config name
-@available(macOS 13.0, iOS 16.0, *)
 public typealias SpeakerDiarizationConfig = DiarizerConfig
 
 /// Backward compatibility alias for the old error type

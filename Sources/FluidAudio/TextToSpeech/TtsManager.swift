@@ -12,7 +12,6 @@ import OSLog
 /// try await manager.initialize()
 /// let audioData = try await manager.synthesize(text: "Hello, world!")
 /// ```
-@available(macOS 13.0, iOS 16.0, *)
 public final class TtSManager {
 
     private let logger = AppLogger(category: "TtSManager")

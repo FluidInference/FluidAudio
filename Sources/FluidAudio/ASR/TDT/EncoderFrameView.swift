@@ -77,12 +77,14 @@ struct EncoderFrameView {
             throw ASRError.processingFailed("Invalid hidden stride: 0")
         }
         let sourcePointer = UnsafePointer<Float>(frameStart)
-        let destStrideCblas = destinationStride
+        let count = try makeBlasIndex(hiddenSize, label: "Hidden size")
+        let incX = try makeBlasIndex(hiddenStride, label: "Hidden stride")
+        let destStrideCblas = try makeBlasIndex(destinationStride, label: "Destination stride")
 
         if hiddenStride == 1 && destinationStride == 1 {
             destination.update(from: sourcePointer, count: hiddenSize)
         } else {
-            cblas_scopy(hiddenSize, sourcePointer, hiddenStride, destination, destStrideCblas)
+            cblas_scopy(count, sourcePointer, incX, destination, destStrideCblas)
         }
     }
 }

@@ -4,7 +4,6 @@ import OSLog
 // MARK: - Standalone Speaker Utilities
 
 /// Utility functions for speaker operations that can be used by external applications
-@available(macOS 13.0, iOS 16.0, *)
 public enum SpeakerUtilities {
 
     private static let logger = AppLogger(category: "SpeakerUtilities")
@@ -477,7 +476,6 @@ public enum SpeakerUtilities {
 }
 
 /// These functions provide additional capabilities beyond core diarization
-@available(macOS 13.0, iOS 16.0, *)
 extension SpeakerManager {
 
     /// Reassign a raw embedding from one speaker to another.

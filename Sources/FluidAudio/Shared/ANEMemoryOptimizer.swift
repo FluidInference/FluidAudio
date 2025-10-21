@@ -4,7 +4,6 @@ import Foundation
 import Metal
 
 /// ANE-optimized memory management for speaker diarization pipeline
-@available(macOS 13.0, iOS 16.0, *)
 public final class ANEMemoryOptimizer {
     // Use shared ANE constants
     public static let aneAlignment = ANEMemoryUtils.aneAlignment
@@ -148,10 +147,8 @@ public final class ANEMemoryOptimizer {
 }
 
 /// Extension for MLMultiArray to enable zero-copy operations
-@available(macOS 13.0, iOS 16.0, *)
 extension MLMultiArray {
     /// Prefetch data to Neural Engine (iOS 17+/macOS 14+)
-    @available(macOS 14.0, iOS 17.0, *)
     public func prefetchToNeuralEngine() {
         // Trigger ANE prefetch by accessing first and last elements
         // This causes the ANE to initiate DMA transfer
@@ -163,7 +160,6 @@ extension MLMultiArray {
 }
 
 /// Zero-copy feature provider for chaining models
-@available(macOS 13.0, iOS 16.0, *)
 public class ZeroCopyDiarizerFeatureProvider: NSObject, MLFeatureProvider {
     private let features: [String: MLFeatureValue]
 

@@ -2,7 +2,6 @@ import Accelerate
 import CoreML
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 extension KokoroSynthesizer {
     struct MultiArrayKey: Hashable {
         let dataTypeRawValue: Int

@@ -26,7 +26,6 @@ public struct ASRPerformanceMetrics: Sendable {
 }
 
 /// Performance monitor for tracking ASR metrics
-@available(macOS 13.0, iOS 16.0, *)
 public actor PerformanceMonitor {
 
     public init() {}
@@ -155,7 +154,6 @@ public struct AggregatedMetrics: Sendable {
 }
 
 /// Extension to AsrManager for performance tracking
-@available(macOS 13.0, iOS 16.0, *)
 extension AsrManager {
     /// Transcribe with performance metrics
     public func transcribeWithMetrics(

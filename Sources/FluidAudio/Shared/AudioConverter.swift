@@ -9,7 +9,6 @@ import OSLog
 /// - Uses `AVAudioConverter` for all sample-rate, sample-format, and channel-count conversions.
 /// - Avoids any manual resampling; only raw sample extraction occurs after conversion.
 /// - Creates a new converter for each operation (stateless).
-@available(macOS 13.0, iOS 16.0, *)
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
@@ -221,7 +220,6 @@ final public class AudioConverter {
 }
 
 // MARK: - WAV Utilities (shared by TTS/ASR)
-@available(macOS 13.0, iOS 16.0, *)
 public enum AudioWAV {
     /// Convert float samples to 16-bit PCM mono WAV at the given sample rate.
     public static func data(from samples: [Float], sampleRate: Double) throws -> Data {
@@ -275,7 +273,6 @@ public enum AudioWAV {
 }
 
 /// Errors that can occur during audio conversion
-@available(macOS 13.0, iOS 16.0, *)
 public enum AudioConverterError: LocalizedError {
     case failedToCreateConverter
     case failedToCreateBuffer

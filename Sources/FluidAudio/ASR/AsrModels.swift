@@ -15,7 +15,6 @@ public enum AsrModelVersion: Sendable {
     }
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 public struct AsrModels: Sendable {
 
     /// Required model names for ASR
@@ -54,7 +53,6 @@ public struct AsrModels: Sendable {
     }
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
 
     private struct ModelSpec {
@@ -281,15 +279,12 @@ extension AsrModels {
         let options = MLPredictionOptions()
 
         // Enable batching for better GPU utilization
-        if #available(macOS 14.0, iOS 17.0, *) {
-            options.outputBackings = [:]  // Reuse output buffers
-        }
+        options.outputBackings = [:]  // Reuse output buffers
 
         return options
     }
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 extension AsrModels {
 
     @discardableResult

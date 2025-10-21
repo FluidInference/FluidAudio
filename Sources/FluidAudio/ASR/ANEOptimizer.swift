@@ -4,7 +4,6 @@ import Foundation
 import Metal
 
 /// Neural Engine optimization utilities for ASR pipeline
-@available(macOS 13.0, iOS 16.0, *)
 public enum ANEOptimizer {
 
     // Use shared ANE constants
@@ -79,7 +78,6 @@ public enum ANEOptimizer {
     }
 
     /// Prefetch data to Neural Engine
-    @available(macOS 14.0, iOS 17.0, *)
     public static func prefetchToNeuralEngine(_ array: MLMultiArray) {
         // Trigger ANE prefetch by accessing first and last elements
         // This causes the ANE to initiate DMA transfer
@@ -137,7 +135,6 @@ public enum ANEOptimizer {
 }
 
 /// Extension for MLFeatureProvider to enable zero-copy chaining
-@available(macOS 13.0, iOS 16.0, *)
 public class ZeroCopyFeatureProvider: NSObject, MLFeatureProvider {
     private let features: [String: MLFeatureValue]
 

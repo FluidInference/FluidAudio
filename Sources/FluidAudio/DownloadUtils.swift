@@ -223,7 +223,6 @@ public class DownloadUtils {
 
     /// Get required model names for a given repository
     /// Uses centralized ModelNames where available to avoid cross‑type coupling
-    @available(macOS 13.0, iOS 16.0, *)
     private static func getRequiredModelNames(for repo: Repo) -> Set<String> {
         switch repo {
         case .vad:

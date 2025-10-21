@@ -4,7 +4,6 @@ import FluidAudio
 import Foundation
 
 /// Thread-safe tracker for transcription updates and audio position
-@available(macOS 13.0, *)
 actor TranscriptionTracker {
     private var volatileUpdates: [String] = []
     private var confirmedUpdates: [String] = []
@@ -93,7 +92,6 @@ actor TranscriptionTracker {
 }
 
 /// Command to transcribe audio files using batch or streaming mode
-@available(macOS 13.0, *)
 enum TranscribeCommand {
     private static let logger = AppLogger(category: "Transcribe")
     private static let confirmedColor = "\u{001B}[32m"

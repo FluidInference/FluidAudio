@@ -6,7 +6,6 @@ import FoundationNetworking
 #endif
 
 /// Minimal vocabulary loader for KokoroDirect backed by an actor for thread safety.
-@available(macOS 13.0, *)
 public actor KokoroVocabulary {
 
     public static let shared = KokoroVocabulary()

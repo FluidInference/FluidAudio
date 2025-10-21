@@ -14,7 +14,6 @@ enum AudioBufferError: Error, LocalizedError {
 }
 
 /// Thread-safe circular audio buffer using Swift concurrency
-@available(macOS 13.0, iOS 16.0, *)
 actor AudioBuffer {
     private let logger = AppLogger(category: "AudioBuffer")
     private var buffer: [Float]
