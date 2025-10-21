@@ -87,7 +87,7 @@ enum VadAnalyzeCommand {
             let samples = try AudioConverter().resampleAudioFile(path: audioPath)
             let manager = try await VadManager(
                 config: VadConfig(
-                    threshold: options.threshold ?? VadConfig.default.threshold,
+                    defaultThreshold: options.threshold ?? VadConfig.default.defaultThreshold,
                     debugMode: options.debug
                 )
             )
