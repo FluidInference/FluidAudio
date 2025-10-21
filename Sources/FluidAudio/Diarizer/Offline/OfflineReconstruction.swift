@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 struct OfflineReconstruction {
@@ -199,14 +200,31 @@ struct OfflineReconstruction {
         var counts: [String: Int] = [:]
 
         for segment in segments {
-            if sums[segment.speakerId] == nil {
-                sums[segment.speakerId] = segment.embedding
-            } else {
-                var current = sums[segment.speakerId]!
-                for index in 0..<current.count {
-                    current[index] += segment.embedding[index]
+            if var current = sums[segment.speakerId] {
+                let embedding = segment.embedding
+                precondition(
+                    embedding.count == current.count,
+                    "Embedding dimensionality mismatch while accumulating speaker database"
+                )
+                embedding.withUnsafeBufferPointer { sourcePointer in
+                    current.withUnsafeMutableBufferPointer { destinationPointer in
+                        guard
+                            let sourceBase = sourcePointer.baseAddress,
+                            let destinationBase = destinationPointer.baseAddress
+                        else { return }
+                        cblas_saxpy(
+                            Int(embedding.count),
+                            1.0,
+                            sourceBase,
+                            1,
+                            destinationBase,
+                            1
+                        )
+                    }
                 }
                 sums[segment.speakerId] = current
+            } else {
+                sums[segment.speakerId] = segment.embedding
             }
             counts[segment.speakerId, default: 0] += 1
         }
@@ -214,7 +232,21 @@ struct OfflineReconstruction {
         var database: [String: [Float]] = [:]
         for (speaker, sum) in sums {
             guard let count = counts[speaker], count > 0 else { continue }
-            database[speaker] = sum.map { $0 / Float(count) }
+            var averaged = sum
+            var scale = 1 / Float(count)
+            let length = averaged.count
+            averaged.withUnsafeMutableBufferPointer { pointer in
+                guard let baseAddress = pointer.baseAddress else { return }
+                vDSP_vsmul(
+                    baseAddress,
+                    1,
+                    &scale,
+                    baseAddress,
+                    1,
+                    vDSP_Length(length)
+                )
+            }
+            database[speaker] = averaged
         }
 
         return database

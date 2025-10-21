@@ -429,14 +429,32 @@ public final class OfflineDiarizerManager {
                     mapping[speakerIdx] = index
                     var numerator = [Double](repeating: 0, count: dimension)
                     var denominator = 0.0
+                    let frameLimit = min(gamma.count, trainingEmbeddings.count)
 
-                    for frameIdx in 0..<min(gamma.count, trainingEmbeddings.count) {
+                    for frameIdx in 0..<frameLimit {
                         let weight = gamma[frameIdx][speakerIdx]
                         guard weight > 0 else { continue }
                         denominator += weight
                         let embedding = trainingEmbeddings[frameIdx]
-                        for dim in 0..<dimension {
-                            numerator[dim] += embedding[dim] * weight
+                        precondition(
+                            embedding.count == dimension,
+                            "Jagged training embeddings are not supported"
+                        )
+                        embedding.withUnsafeBufferPointer { sourcePointer in
+                            numerator.withUnsafeMutableBufferPointer { destinationPointer in
+                                guard
+                                    let sourceBase = sourcePointer.baseAddress,
+                                    let destinationBase = destinationPointer.baseAddress
+                                else { return }
+                                cblas_daxpy(
+                                    Int(dimension),
+                                    weight,
+                                    sourceBase,
+                                    1,
+                                    destinationBase,
+                                    1
+                                )
+                            }
                         }
                     }
 
@@ -470,9 +488,26 @@ public final class OfflineDiarizerManager {
             if grouped[cluster] == nil {
                 grouped[cluster] = (sum: [Double](repeating: 0, count: embedding.count), count: 0)
             }
+            precondition(
+                embedding.count == grouped[cluster]!.sum.count,
+                "Jagged training embeddings are not supported"
+            )
             var entry = grouped[cluster]!
-            for dim in 0..<embedding.count {
-                entry.sum[dim] += embedding[dim]
+            embedding.withUnsafeBufferPointer { sourcePointer in
+                entry.sum.withUnsafeMutableBufferPointer { destinationPointer in
+                    guard
+                        let sourceBase = sourcePointer.baseAddress,
+                        let destinationBase = destinationPointer.baseAddress
+                    else { return }
+                    cblas_daxpy(
+                        Int(embedding.count),
+                        1.0,
+                        sourceBase,
+                        1,
+                        destinationBase,
+                        1
+                    )
+                }
             }
             entry.count += 1
             grouped[cluster] = entry
@@ -497,12 +532,42 @@ public final class OfflineDiarizerManager {
 
     private func computeFallbackCentroids(from embeddings: [[Double]]) -> [[Double]] {
         guard let first = embeddings.first else { return [] }
-        let average = embeddings.reduce(into: [Double](repeating: 0, count: first.count)) { partial, vector in
-            for dim in 0..<vector.count {
-                partial[dim] += vector[dim]
+        var accumulator = [Double](repeating: 0, count: first.count)
+        for vector in embeddings {
+            precondition(
+                vector.count == first.count,
+                "Jagged training embeddings are not supported"
+            )
+            vector.withUnsafeBufferPointer { sourcePointer in
+                accumulator.withUnsafeMutableBufferPointer { destinationPointer in
+                    guard
+                        let sourceBase = sourcePointer.baseAddress,
+                        let destinationBase = destinationPointer.baseAddress
+                    else { return }
+                    cblas_daxpy(
+                        Int(first.count),
+                        1.0,
+                        sourceBase,
+                        1,
+                        destinationBase,
+                        1
+                    )
+                }
             }
-        }.map { $0 / Double(embeddings.count) }
-        return [average]
+        }
+        var scale = 1.0 / Double(embeddings.count)
+        accumulator.withUnsafeMutableBufferPointer { pointer in
+            guard let baseAddress = pointer.baseAddress else { return }
+            vDSP_vsmulD(
+                baseAddress,
+                1,
+                &scale,
+                baseAddress,
+                1,
+                vDSP_Length(first.count)
+            )
+        }
+        return [accumulator]
     }
 
     private func assignEmbeddings(
@@ -531,22 +596,62 @@ public final class OfflineDiarizerManager {
     }
 
     private func normalize(_ vector: [Double]) -> [Double] {
+        guard !vector.isEmpty else { return vector }
         var sumSquares = 0.0
-        for value in vector {
-            sumSquares += value * value
+        vector.withUnsafeBufferPointer { pointer in
+            guard let baseAddress = pointer.baseAddress else { return }
+            vDSP_dotprD(
+                baseAddress,
+                1,
+                baseAddress,
+                1,
+                &sumSquares,
+                vDSP_Length(vector.count)
+            )
         }
         if sumSquares <= 0 {
             return vector
         }
-        let scale = 1.0 / sqrt(sumSquares)
-        return vector.map { $0 * scale }
+        var scale = 1.0 / sqrt(sumSquares)
+        var normalized = [Double](repeating: 0, count: vector.count)
+        vector.withUnsafeBufferPointer { sourcePointer in
+            normalized.withUnsafeMutableBufferPointer { destinationPointer in
+                guard
+                    let sourceBase = sourcePointer.baseAddress,
+                    let destinationBase = destinationPointer.baseAddress
+                else { return }
+                vDSP_vsmulD(
+                    sourceBase,
+                    1,
+                    &scale,
+                    destinationBase,
+                    1,
+                    vDSP_Length(vector.count)
+                )
+            }
+        }
+        return normalized
     }
 
     private func dot(_ lhs: [Double], _ rhs: [Double]) -> Double {
         guard lhs.count == rhs.count else { return 0 }
+        if lhs.isEmpty { return 0 }
         var result = 0.0
-        for (l, r) in zip(lhs, rhs) {
-            result += l * r
+        lhs.withUnsafeBufferPointer { lhsPointer in
+            rhs.withUnsafeBufferPointer { rhsPointer in
+                guard
+                    let lhsBase = lhsPointer.baseAddress,
+                    let rhsBase = rhsPointer.baseAddress
+                else { return }
+                vDSP_dotprD(
+                    lhsBase,
+                    1,
+                    rhsBase,
+                    1,
+                    &result,
+                    vDSP_Length(lhs.count)
+                )
+            }
         }
         return result
     }
