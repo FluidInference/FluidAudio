@@ -5,7 +5,6 @@ import Foundation
 
 /// Streaming diarization benchmark for evaluating real-time performance
 /// Uses first-occurrence speaker mapping for true streaming evaluation
-@available(macOS 13.0, *)
 enum StreamDiarizationBenchmark {
     private static let logger = AppLogger(category: "DiarizationBench")
 

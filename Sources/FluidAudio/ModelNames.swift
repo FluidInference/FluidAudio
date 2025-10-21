@@ -144,7 +144,6 @@ public enum ModelNames {
         }
     }
 
-    @available(macOS 13.0, iOS 16.0, *)
     static func getRequiredModelNames(for repo: Repo) -> Set<String> {
         switch repo {
         case .vad:

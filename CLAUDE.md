@@ -233,7 +233,7 @@ FluidAudio/
 - **10-second chunks**: No significant performance impact
 - **Speaker tracking**: Effective across chunks
 - **DER calculation**: Fixed with optimal speaker mapping (Hungarian algorithm)
-- **Cross-platform**: Supports macOS 13.0+, iOS 16.0+ (library), CLI macOS-only
+- **Cross-platform**: Supports macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
 
 ## Streaming Diarization (Work in Progress)
 
@@ -244,7 +244,7 @@ Develop a custom streaming speaker diarization manager that maintains consistent
 
 ### Requirements
 - **Swift**: 5.10+ (Swift 6+ required for contributors using swift-format)
-- **Platforms**: macOS 13.0+, iOS 16.0+ 
+- **Platforms**: macOS 14.0+, iOS 17.0+ 
 - **Xcode**: Latest stable version for iOS development
 - **Hardware**: Apple Silicon recommended for optimal performance
 

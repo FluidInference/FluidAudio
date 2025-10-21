@@ -131,12 +131,7 @@ Task {
         await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 
     case "tts":
-        if #available(macOS 13.0, *) {
-            await TTS.run(arguments: Array(arguments.dropFirst(2)))
-        } else {
-            print("TTS requires macOS 13.0 or later")
-            exitWithPeakMemory(1)
-        }
+        await TTS.run(arguments: Array(arguments.dropFirst(2)))
 
     case "diarization-benchmark":
         await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))

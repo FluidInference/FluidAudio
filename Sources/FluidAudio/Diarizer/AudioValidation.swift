@@ -1,6 +1,5 @@
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 internal struct AudioValidation {
 
     func validateAudio<C>(_ samples: C) -> AudioValidationResult

@@ -3,7 +3,6 @@ import Foundation
 import os
 
 /// Thread-safe cache for MLMultiArray instances to reduce allocation overhead
-@available(macOS 13.0, iOS 16.0, *)
 actor MLArrayCache {
     private var cache: [CacheKey: [MLMultiArray]] = [:]
     private let maxCacheSize: Int
@@ -99,5 +98,4 @@ actor MLArrayCache {
 }
 
 /// Global shared cache instance
-@available(macOS 13.0, iOS 16.0, *)
 let sharedMLArrayCache = MLArrayCache()

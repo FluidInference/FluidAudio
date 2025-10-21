@@ -7,7 +7,6 @@ public enum CoreMLDiarizer {
     public typealias EmbeddingModel = MLModel
 }
 
-@available(macOS 13.0, iOS 16.0, *)
 public struct DiarizerModels: Sendable {
 
     /// Required model names for Diarizer

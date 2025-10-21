@@ -3,7 +3,6 @@ import XCTest
 @testable import FluidAudio
 
 /// Tests for SpeakerManager functionality
-@available(macOS 13.0, iOS 16.0, *)
 final class SpeakerManagerTests: XCTestCase {
 
     // Helper to create distinct embeddings

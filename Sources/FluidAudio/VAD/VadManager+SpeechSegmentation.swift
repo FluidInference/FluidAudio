@@ -1,7 +1,6 @@
 import Foundation
 
 /// Speech Segmentation functionality for VadManager
-@available(macOS 13.0, iOS 16.0, *)
 extension VadManager {
 
     // MARK: - Speech Segmentation API

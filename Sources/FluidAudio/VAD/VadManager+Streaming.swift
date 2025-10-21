@@ -1,6 +1,5 @@
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 extension VadManager {
 
     /// Construct a fresh streaming state that mirrors Silero's `reset_states` call.

@@ -3,7 +3,6 @@ import XCTest
 
 @testable import FluidAudio
 
-@available(macOS 13.0, iOS 16.0, *)
 final class TdtConfigTests: XCTestCase {
 
     // MARK: - Default Configuration Tests

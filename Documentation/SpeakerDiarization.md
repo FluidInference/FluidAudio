@@ -460,7 +460,7 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a
 
 ## Requirements
 
-- iOS 16.0+ / macOS 13.0+
+- iOS 17.0+ / macOS 14.0+
 - Swift 5.9+
 - ~100MB for Core ML models (downloaded on first use)
 

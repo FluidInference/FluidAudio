@@ -30,7 +30,6 @@ import CoreML
 import Foundation
 import OSLog
 
-@available(macOS 13.0, iOS 16.0, *)
 internal struct TdtDecoderV3 {
 
     /// Joint model decision for a single encoder/decoder step.
@@ -600,11 +599,9 @@ internal struct TdtDecoderV3 {
         // Fill encoder step with the requested frame
         try encoderFrames.copyFrame(at: timeIndex, into: encoderDestPtr, destinationStride: encoderDestStride)
 
-        // Prefetch arrays for ANE if available
-        if #available(macOS 14.0, iOS 17.0, *) {
-            ANEOptimizer.prefetchToNeuralEngine(encoderStep)
-            ANEOptimizer.prefetchToNeuralEngine(preparedDecoderStep)
-        }
+        // Prefetch arrays for ANE
+        ANEOptimizer.prefetchToNeuralEngine(encoderStep)
+        ANEOptimizer.prefetchToNeuralEngine(preparedDecoderStep)
 
         // Reuse tiny output tensors for joint prediction (provide raw MLMultiArray backings)
         predictionOptions.outputBackings = [

@@ -2,7 +2,6 @@ import CoreML
 import Foundation
 import OSLog
 
-@available(macOS 13.0, *)
 public struct TtsModels {
     private let kokoroModels: [ModelNames.TTS.Variant: MLModel]
 
@@ -113,9 +112,7 @@ public struct TtsModels {
     public static func optimizedPredictionOptions() -> MLPredictionOptions {
         let options = MLPredictionOptions()
         // Enable batching for better GPU utilization
-        if #available(macOS 14.0, iOS 17.0, *) {
-            options.outputBackings = [:]  // Reuse output buffers
-        }
+        options.outputBackings = [:]  // Reuse output buffers
         return options
     }
 

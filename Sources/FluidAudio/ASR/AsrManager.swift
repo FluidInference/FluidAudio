@@ -8,7 +8,6 @@ public enum AudioSource: Sendable {
     case system
 }
 
-@available(macOS 13.0, *)
 public final class AsrManager {
 
     internal let logger = AppLogger(category: "ASR")

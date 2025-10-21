@@ -2,7 +2,6 @@ import XCTest
 
 @testable import FluidAudio
 
-@available(macOS 13.0, *)
 final class KokoroChunkerTests: XCTestCase {
 
     private let allowed: Set<String> = ["A", "B", "C", "F", "I", "a", "n", "d", " ", "."]

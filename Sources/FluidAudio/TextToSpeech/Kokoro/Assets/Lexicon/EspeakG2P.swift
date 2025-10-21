@@ -3,7 +3,6 @@ import Foundation
 
 /// Thread-safe wrapper around eSpeak NG C API to get IPA phonemes for a word.
 /// Uses espeak_TextToPhonemes with IPA mode.
-@available(macOS 13.0, iOS 16.0, *)
 final class EspeakG2P {
     enum EspeakG2PError: Error, LocalizedError {
         case frameworkBundleMissing

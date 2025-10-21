@@ -3,7 +3,6 @@ import CoreML
 import OSLog
 
 /// Embedding extractor with ANE-aligned memory and zero-copy operations
-@available(macOS 13.0, iOS 16.0, *)
 public class EmbeddingExtractor {
     private let wespeakerModel: MLModel
     private let logger = AppLogger(category: "EmbeddingExtractor")
@@ -100,11 +99,9 @@ public class EmbeddingExtractor {
 
             // Run model with optimal prediction options
             let options = MLPredictionOptions()
-            if #available(macOS 14.0, iOS 17.0, *) {
-                // Prefetch to Neural Engine for better performance
-                waveformBuffer!.prefetchToNeuralEngine()
-                currentMaskBuffer.prefetchToNeuralEngine()
-            }
+            // Prefetch to Neural Engine for better performance
+            waveformBuffer!.prefetchToNeuralEngine()
+            currentMaskBuffer.prefetchToNeuralEngine()
 
             let output = try wespeakerModel.prediction(from: featureProvider, options: options)
 

@@ -4,7 +4,6 @@ import FluidAudio
 import OSLog
 
 /// LibriSpeech dataset manager and ASR benchmarking
-@available(macOS 13.0, *)
 public class ASRBenchmark {
 
     private let logger = AppLogger(category: "Benchmark")
@@ -681,7 +680,6 @@ extension ASRBenchmark {
 // The WER (Word Error Rate) metrics remain accurate in CI environments.
 
 /// Extension to provide CLI entry point
-@available(macOS 13.0, iOS 16.0, *)
 extension ASRBenchmark {
     public static func runASRBenchmark(arguments: [String]) async {
         // Create a local logger for the static CLI entrypoint

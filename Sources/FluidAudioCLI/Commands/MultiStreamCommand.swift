@@ -4,7 +4,6 @@ import FluidAudio
 import Foundation
 
 /// Command to demonstrate multi-stream ASR with shared model loading
-@available(macOS 13.0, *)
 enum MultiStreamCommand {
     private static let logger = AppLogger(category: "MultiStream")
 

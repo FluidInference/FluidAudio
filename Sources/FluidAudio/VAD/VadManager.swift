@@ -11,7 +11,6 @@ import OSLog
 /// it has not been extensively tested in production environments.
 /// Use with caution in production applications.
 ///
-@available(macOS 13.0, iOS 16.0, *)
 public actor VadManager {
 
     private let logger = AppLogger(category: "VadManager")

@@ -5,7 +5,6 @@ import Foundation
 import OSLog
 
 /// FLEURS multilingual dataset benchmark for ASR evaluation
-@available(macOS 13.0, *)
 public class FLEURSBenchmark {
 
     private let logger = AppLogger(category: "FLEURSBenchmark")
@@ -765,7 +764,6 @@ public class FLEURSBenchmark {
 }
 
 /// CLI entry point for FLEURS benchmark
-@available(macOS 13.0, *)
 extension FLEURSBenchmark {
 
     public static func runCLI(arguments: [String]) async {

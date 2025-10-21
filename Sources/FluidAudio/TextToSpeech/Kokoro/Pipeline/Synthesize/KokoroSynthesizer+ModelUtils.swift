@@ -1,7 +1,6 @@
 import CoreML
 import Foundation
 
-@available(macOS 13.0, iOS 16.0, *)
 extension KokoroSynthesizer {
     public static func ensureRequiredFiles() async throws {
         let assets = try currentLexiconAssets()

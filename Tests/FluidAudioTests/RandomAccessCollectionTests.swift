@@ -2,7 +2,6 @@ import XCTest
 
 @testable import FluidAudio
 
-@available(macOS 13.0, iOS 16.0, *)
 final class RandomAccessCollectionTests: XCTestCase {
 
     // MARK: - Custom Collection Types for Testing
