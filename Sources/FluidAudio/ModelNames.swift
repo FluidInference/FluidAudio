@@ -171,14 +171,14 @@ public enum ModelNames {
         }
     }
 
-    static func getRequiredModelNames(for repo: Repo, varient: String?) -> Set<String> {
+    static func getRequiredModelNames(for repo: Repo, variant: String?) -> Set<String> {
         switch repo {
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
         case .diarizer:
-            if varient == "offline" {
+            if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels
             }
             return ModelNames.Diarizer.requiredModels
