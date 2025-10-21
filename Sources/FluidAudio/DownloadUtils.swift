@@ -246,7 +246,7 @@ public class DownloadUtils {
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
         // Get the required model names for this repo from the appropriate manager
-        let requiredModels = ModelNames.getRequiredModelNames(for: repo, varient: variant)
+        let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
 
         // Download all repository contents
         let files = try await listRepoFiles(repo)
