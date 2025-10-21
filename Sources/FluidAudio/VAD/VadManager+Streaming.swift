@@ -41,7 +41,7 @@ extension VadManager {
         nextState.modelState = modelState
         nextState.processedSamples += chunkSampleCount
 
-        let threshold = self.config.threshold
+        let threshold = config.threshold
         let negativeThreshold = config.effectiveNegativeThreshold(baseThreshold: threshold)
         let speechPadSamples = Int(config.speechPadding * Double(Self.sampleRate))
         let minSilenceSamples = Int(config.minSilenceDuration * Double(Self.sampleRate))
