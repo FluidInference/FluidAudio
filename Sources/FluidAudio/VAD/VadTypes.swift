@@ -2,18 +2,19 @@ import CoreML
 import Foundation
 
 public struct VadConfig: Sendable {
-    public var threshold: Float
+    /// Baseline model probability threshold used when no segmentation override is provided.
+    public var defaultThreshold: Float
     public var debugMode: Bool
     public var computeUnits: MLComputeUnits
 
     public static let `default` = VadConfig()
 
     public init(
-        threshold: Float = 0.85,
+        defaultThreshold: Float = 0.85,
         debugMode: Bool = false,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine
     ) {
-        self.threshold = threshold
+        self.defaultThreshold = defaultThreshold
         self.debugMode = debugMode
         self.computeUnits = computeUnits
     }
