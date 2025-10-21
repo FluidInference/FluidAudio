@@ -1,5 +1,9 @@
 import Accelerate
+#if canImport(FastClusterWrapper)
 import FastClusterWrapper
+#elseif canImport(FluidAudio_FastClusterWrapper)
+import FluidAudio_FastClusterWrapper
+#endif
 import Foundation
 import OSLog
 import os.signpost

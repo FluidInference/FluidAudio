@@ -169,8 +169,7 @@ public final class AsrManager {
             cellState: decoderState.cellState
         )
 
-        try Task.checkCancellation()
-        let initDecoderOutput = try await decoderModel.prediction(
+        let initDecoderOutput = try await decoderModel.compatPrediction(
             from: initDecoderInput,
             options: predictionOptions
         )

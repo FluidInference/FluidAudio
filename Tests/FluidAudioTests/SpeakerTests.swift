@@ -105,10 +105,11 @@ final class SpeakerTests: XCTestCase {
             alpha: 0.8  // 80% old, 20% new
         )
 
-        // The main embedding is recalculated as an average of raw embeddings after adding
-        // Since we have only one raw embedding (0.5), the main embedding becomes 0.5
-        for value in speaker.currentEmbedding {
-            XCTAssertEqual(value, 0.5, accuracy: 0.001)
+        // The speaker stores embeddings in L2-normalized form. With a single raw embedding,
+        // the recalculated main embedding should equal the normalized segment embedding.
+        let expectedEmbedding = VDSPOperations.l2Normalize(embedding2)
+        for (value, expected) in zip(speaker.currentEmbedding, expectedEmbedding) {
+            XCTAssertEqual(value, expected, accuracy: 0.001)
         }
 
         // Verify that the raw embedding was added

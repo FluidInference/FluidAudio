@@ -3,7 +3,6 @@ import Accelerate
 import CoreML
 import Foundation
 import OSLog
-import os.signpost
 
 /// VAD Manager using the trained Silero VAD model
 ///
@@ -15,10 +14,6 @@ import os.signpost
 public actor VadManager {
 
     private let logger = AppLogger(category: "VadManager")
-    private let signposter = OSSignposter(
-        subsystem: "com.fluidaudio.diarization",
-        category: .pointsOfInterest
-    )
     public let config: VadConfig
     private let audioConverter: AudioConverter = AudioConverter()
     private let memoryOptimizer: ANEMemoryOptimizer = ANEMemoryOptimizer()
@@ -259,9 +254,7 @@ public actor VadManager {
                 ])
 
                 // Run prediction
-                let predictionState = signposter.beginInterval("VAD Model Prediction")
                 let output = try model.prediction(from: input)
-                signposter.endInterval("VAD Model Prediction", predictionState)
                 // Extract outputs using flexible name matching (model outputs may include suffixes)
                 guard
                     let vadOutputArray = featureValue(

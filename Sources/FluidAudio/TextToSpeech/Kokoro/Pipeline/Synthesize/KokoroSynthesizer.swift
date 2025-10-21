@@ -323,8 +323,7 @@ public struct KokoroSynthesizer {
         let predictionStart = Date()
         let output: MLFeatureProvider
         do {
-            try Task.checkCancellation()
-            output = try await kokoro.prediction(from: modelInput, options: MLPredictionOptions())
+            output = try await kokoro.compatPrediction(from: modelInput, options: MLPredictionOptions())
         } catch {
             await recycleModelArrays()
             throw error

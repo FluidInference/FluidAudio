@@ -1,0 +1,5 @@
+module FastClusterWrapper {
+    header "FastClusterWrapper.h"
+    requires cplusplus
+    export *
+}
