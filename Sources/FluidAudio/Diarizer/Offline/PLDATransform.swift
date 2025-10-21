@@ -126,8 +126,6 @@ public struct PLDATransform {
         let inputArray = try memoryOptimizer.createAlignedArray(shape: shape, dataType: .float32)
         let pointer = inputArray.dataPointer.assumingMemoryBound(to: Float.self)
 
-        let clock = ContinuousClock()
-        let copyInStart = clock.now
         for (batchIndex, embedding) in embeddings.enumerated() {
             let base = batchIndex * embeddingDimension
             embedding.withUnsafeBufferPointer { buffer in
@@ -141,7 +139,6 @@ public struct PLDATransform {
                 )
             }
         }
-        _ = copyInStart.duration(to: clock.now)
 
         let provider = ZeroCopyDiarizerFeatureProvider(
             features: ["embeddings": MLFeatureValue(multiArray: inputArray)]
@@ -149,9 +146,7 @@ public struct PLDATransform {
         let options = MLPredictionOptions()
         inputArray.prefetchToNeuralEngine()
 
-        let predictionStart = clock.now
         let output = try await pldaRhoModel.prediction(from: provider, options: options)
-        _ = predictionStart.duration(to: clock.now)
 
         guard let rhoArray = output.featureValue(for: "rho")?.multiArrayValue else {
             throw OfflineDiarizationError.processingFailed("PldaRho model did not produce rho output")
@@ -164,7 +159,6 @@ public struct PLDATransform {
         let totalRhoCount = embeddings.count * rhoDimension
         var rhoScratch = [Double](repeating: 0, count: totalRhoCount)
 
-        let copyOutStart = clock.now
         let floatPointer = UnsafePointer<Float>(rhoPointer)
         let sourceBuffer = UnsafeBufferPointer(start: floatPointer, count: totalRhoCount)
         rhoScratch.withUnsafeMutableBufferPointer { dest in
@@ -179,7 +173,6 @@ public struct PLDATransform {
             let rhoSlice = Array(rhoScratch[start..<end])
             results.append(rhoSlice)
         }
-        _ = copyOutStart.duration(to: clock.now)
 
         return results
     }
