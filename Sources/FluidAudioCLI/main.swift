@@ -83,7 +83,7 @@ func logPeakMemoryUsage() {
 
     let peakGigabytes = Double(peakBytes) / 1024.0 / 1024.0 / 1024.0
     let formatted = String(format: "%.3f", peakGigabytes)
-    print(
+    cliLogger.info(
         "Peak memory usage (process-wide): \(formatted) GB"
     )
 }

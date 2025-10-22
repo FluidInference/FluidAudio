@@ -90,4 +90,70 @@ final class VadStreamingTests: XCTestCase {
             XCTAssertEqual(event.time, (expectedSeconds * 100).rounded() / 100)
         }
     }
+
+    func testStreamingRespectsThresholdOverride() async {
+        let vad = VadManager(skipModelLoading: true, config: VadConfig(defaultThreshold: 0.8))
+        let state = VadStreamState.initial()
+        let overrideConfig = VadSegmentationConfig(negativeThreshold: 0.2, negativeThresholdOffset: 0.05)
+
+        // Below derived threshold (0.25) should not trigger speech.
+        let belowResult = await vad.streamingStateMachine(
+            probability: 0.24,
+            chunkSampleCount: VadManager.chunkSize,
+            modelState: state.modelState,
+            state: state,
+            config: overrideConfig,
+            returnSeconds: false,
+            timeResolution: 1
+        )
+        XCTAssertNil(belowResult.event)
+
+        // Crossing the derived threshold should trigger a speech start.
+        let triggerResult = await vad.streamingStateMachine(
+            probability: 0.3,
+            chunkSampleCount: VadManager.chunkSize,
+            modelState: belowResult.state.modelState,
+            state: belowResult.state,
+            config: overrideConfig,
+            returnSeconds: false,
+            timeResolution: 1
+        )
+        XCTAssertEqual(triggerResult.event?.kind, .speechStart)
+        let speechPadSamples = Int(overrideConfig.speechPadding * Double(VadManager.sampleRate))
+        let expectedStart = max(0, VadManager.chunkSize - speechPadSamples)
+        XCTAssertEqual(triggerResult.event?.sampleIndex, expectedStart)
+    }
+
+    func testStreamingUsesDefaultThresholdWithoutOverride() async {
+        let vad = VadManager(skipModelLoading: true, config: VadConfig(defaultThreshold: 0.6))
+        let state = VadStreamState.initial()
+        let defaultConfig = VadSegmentationConfig()
+
+        // below default threshold should not trigger
+        let belowResult = await vad.streamingStateMachine(
+            probability: 0.59,
+            chunkSampleCount: VadManager.chunkSize,
+            modelState: state.modelState,
+            state: state,
+            config: defaultConfig,
+            returnSeconds: false,
+            timeResolution: 1
+        )
+        XCTAssertNil(belowResult.event)
+
+        // Above default threshold should trigger
+        let triggerResult = await vad.streamingStateMachine(
+            probability: 0.7,
+            chunkSampleCount: VadManager.chunkSize,
+            modelState: belowResult.state.modelState,
+            state: belowResult.state,
+            config: defaultConfig,
+            returnSeconds: false,
+            timeResolution: 1
+        )
+        XCTAssertEqual(triggerResult.event?.kind, .speechStart)
+        let speechPadSamples = Int(defaultConfig.speechPadding * Double(VadManager.sampleRate))
+        let expectedStart = max(0, VadManager.chunkSize - speechPadSamples)
+        XCTAssertEqual(triggerResult.event?.sampleIndex, expectedStart)
+    }
 }

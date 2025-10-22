@@ -17,7 +17,7 @@ final class VadTests: XCTestCase {
     func testVadModelLoading() async throws {
         // Test loading the VAD model
         let config = VadConfig(
-            threshold: 0.5,
+            defaultThreshold: 0.5,
             debugMode: true
         )
 
@@ -38,7 +38,7 @@ final class VadTests: XCTestCase {
     func testVadProcessing() async throws {
         // Test processing audio through the model
         let config = VadConfig(
-            threshold: 0.5,
+            defaultThreshold: 0.5,
             debugMode: true
         )
 
@@ -81,7 +81,7 @@ final class VadTests: XCTestCase {
 
     func testVadBatchProcessing() async throws {
         let config = VadConfig(
-            threshold: 0.5,
+            defaultThreshold: 0.5,
             debugMode: false
         )
 
@@ -123,7 +123,7 @@ final class VadTests: XCTestCase {
     }
 
     func testVadStateReset() async throws {
-        let config = VadConfig(threshold: 0.1)
+        let config = VadConfig(defaultThreshold: 0.1)
         let vad: VadManager
         do {
             vad = try await VadManager(config: config)
@@ -147,7 +147,7 @@ final class VadTests: XCTestCase {
 
     func testVadPaddingAndTruncation() async throws {
         let config = VadConfig(
-            threshold: 0.5,
+            defaultThreshold: 0.5,
             debugMode: true
         )
 
@@ -407,11 +407,11 @@ final class VadTests: XCTestCase {
         let chunk = (0..<chunkSize).map { _ in Float.random(in: -0.1...0.1) }
 
         // Test with low threshold
-        let lowThresholdVad = try await VadManager(config: VadConfig(threshold: 0.1))
+        let lowThresholdVad = try await VadManager(config: VadConfig(defaultThreshold: 0.1))
         let lowResult = try await lowThresholdVad.processChunk(chunk)
 
         // Test with high threshold
-        let highThresholdVad = try await VadManager(config: VadConfig(threshold: 0.9))
+        let highThresholdVad = try await VadManager(config: VadConfig(defaultThreshold: 0.9))
         let highResult = try await highThresholdVad.processChunk(chunk)
 
         // With same input, low threshold should be more likely to detect voice
@@ -425,11 +425,11 @@ final class VadTests: XCTestCase {
     }
 
     func testVadConfigurationAccessibility() async throws {
-        let config = VadConfig(threshold: 0.3, debugMode: true)
+        let config = VadConfig(defaultThreshold: 0.3, debugMode: true)
         let vad = try await VadManager(config: config)
 
         let currentConfig = await vad.currentConfig
-        XCTAssertEqual(currentConfig.threshold, 0.3, "Should maintain configured threshold")
+        XCTAssertEqual(currentConfig.defaultThreshold, 0.3, "Should maintain configured threshold")
         XCTAssertEqual(currentConfig.debugMode, true, "Should maintain debug mode")
     }
 

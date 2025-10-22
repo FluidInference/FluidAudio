@@ -81,3 +81,9 @@ public struct VadSegmentationConfig: Sendable {
     }
 }
 ```
+
+The entry threshold for hysteresis defaults to `VadConfig.defaultThreshold`, set when you construct a
+`VadManager`. If you provide a `negativeThreshold`, the streaming helpers derive an entry threshold
+by adding `negativeThresholdOffset` (clamped to 1.0), allowing per-request tuning without rebuilding
+the manager. To change the baseline entry threshold globally, create the manager with a different
+`defaultThreshold`.
