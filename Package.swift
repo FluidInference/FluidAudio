@@ -37,8 +37,8 @@ let package = Package(
                 .unsafeFlags([
                     "-Xcc", "-DACCELERATE_NEW_LAPACK",
                     "-Xcc", "-DACCELERATE_LAPACK_ILP64",
-                ])
-           ]
+                ]),
+            ]
         ),
         .target(
             name: "FastClusterWrapper",

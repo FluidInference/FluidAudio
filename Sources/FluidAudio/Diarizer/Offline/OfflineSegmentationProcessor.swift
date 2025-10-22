@@ -408,10 +408,12 @@ struct OfflineSegmentationProcessor {
                     // Handle case where model outputs fewer classes than powerset entries (e.g., 7 vs 8)
                     let paddedProbabilityBuffer: [Float]
                     if probabilityBuffer.count < powerset.count {
-                        paddedProbabilityBuffer = probabilityBuffer + [Float](
-                            repeating: 0,
-                            count: powerset.count - probabilityBuffer.count
-                        )
+                        paddedProbabilityBuffer =
+                            probabilityBuffer
+                            + [Float](
+                                repeating: 0,
+                                count: powerset.count - probabilityBuffer.count
+                            )
                     } else {
                         paddedProbabilityBuffer = Array(probabilityBuffer.prefix(powerset.count))
                     }
