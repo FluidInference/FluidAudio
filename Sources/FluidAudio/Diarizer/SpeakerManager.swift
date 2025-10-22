@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import OSLog
 
@@ -76,13 +77,15 @@ public class SpeakerManager {
             return nil
         }
 
+        let normalizedEmbedding = VDSPOperations.l2Normalize(embedding)
+
         return queue.sync(flags: .barrier) {
-            let (closestSpeaker, distance) = findClosestSpeaker(to: embedding)
+            let (closestSpeaker, distance) = findClosestSpeaker(to: normalizedEmbedding)
 
             if let speakerId = closestSpeaker, distance < speakerThreshold {
                 updateExistingSpeaker(
                     speakerId: speakerId,
-                    embedding: embedding,
+                    embedding: normalizedEmbedding,
                     duration: speechDuration,
                     distance: distance
                 )
@@ -96,7 +99,7 @@ public class SpeakerManager {
             // Step 3: Create new speaker if duration is sufficient
             if speechDuration >= minSpeechDuration {
                 let newSpeakerId = createNewSpeaker(
-                    embedding: embedding,
+                    embedding: normalizedEmbedding,
                     duration: speechDuration,
                     distanceToClosest: distance
                 )
@@ -142,8 +145,9 @@ public class SpeakerManager {
 
         // Update embedding if quality is good
         if distance < embeddingThreshold {
-            let embeddingMagnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
-            if embeddingMagnitude > 0.1 {
+            var sumSquares: Float = 0
+            vDSP_svesq(embedding, 1, &sumSquares, vDSP_Length(embedding.count))
+            if sumSquares > 0.01 {
                 speaker.updateMainEmbedding(
                     duration: duration,
                     embedding: embedding,
@@ -165,6 +169,7 @@ public class SpeakerManager {
         duration: Float,
         distanceToClosest: Float
     ) -> String {
+        let normalizedEmbedding = VDSPOperations.l2Normalize(embedding)
         let newSpeakerId = String(nextSpeakerId)
         nextSpeakerId += 1
         highestSpeakerId = max(highestSpeakerId, nextSpeakerId - 1)
@@ -173,12 +178,12 @@ public class SpeakerManager {
         let newSpeaker = Speaker(
             id: newSpeakerId,
             name: "Speaker \(newSpeakerId)",  // Default name with number
-            currentEmbedding: embedding,
+            currentEmbedding: normalizedEmbedding,
             duration: duration
         )
 
         // Add initial raw embedding
-        let initialRaw = RawEmbedding(segmentId: UUID(), embedding: embedding, timestamp: Date())
+        let initialRaw = RawEmbedding(segmentId: UUID(), embedding: normalizedEmbedding, timestamp: Date())
         newSpeaker.addRawEmbedding(initialRaw)
 
         speakerDatabase[newSpeakerId] = newSpeaker

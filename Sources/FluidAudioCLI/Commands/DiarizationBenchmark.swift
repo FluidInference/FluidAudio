@@ -36,22 +36,22 @@ enum StreamDiarizationBenchmark {
     static func printUsage() {
         logger.info(
             """
-            Stream Diarization Benchmark Command
+            Diarization Benchmark Command
 
-            Evaluates streaming speaker diarization WITHOUT retroactive speaker remapping.
-            This measures true real-time performance as seen in production systems.
+            Evaluates speaker diarization in either streaming (online) or offline (VBx) mode.
 
             Usage: fluidaudio diarization-benchmark [options]
 
             Options:
+                --mode <streaming|offline>  Diarization mode (default: streaming)
                 --dataset <name>         Dataset to benchmark (default: ami-sdm)
                 --single-file <name>     Process a specific meeting (e.g., ES2004a)
                 --max-files <n>          Maximum number of files to process
-                --chunk-seconds <sec>    Chunk duration for streaming (default: 10.0)
-                --overlap-seconds <sec>  Overlap between chunks (default: 0.0)
+                --chunk-seconds <sec>    Chunk duration for streaming (default: 10.0, streaming only)
+                --overlap-seconds <sec>  Overlap between chunks (default: 0.0, streaming only)
                 --threshold <value>      Clustering threshold (default: 0.7)
-                --assignment-threshold   Threshold for assigning to existing speakers (default: 0.84)
-                --update-threshold       Threshold for updating speaker embeddings (default: 0.56)
+                --assignment-threshold   Threshold for assigning to existing speakers (default: 0.84, streaming only)
+                --update-threshold       Threshold for updating speaker embeddings (default: 0.56, streaming only)
                 --output <file>         Output JSON file for results
                 --csv <file>            Output CSV file for summary
                 --verbose               Enable verbose output
@@ -60,6 +60,10 @@ enum StreamDiarizationBenchmark {
                 --iterations <n>        Number of iterations per file (default: 1)
                 --help                  Show this help message
 
+            Modes:
+                streaming   Online diarization with chunk-based processing (first-occurrence speaker mapping)
+                offline     Batch diarization with VBx clustering (optimal speaker mapping with Hungarian algorithm)
+
             Streaming Modes (via chunk/overlap settings):
                 Real-time:  --chunk-seconds 3 --overlap-seconds 2   (~15-30x RTFx)
                 Balanced:   --chunk-seconds 10 --overlap-seconds 5  (~70x RTFx)
@@ -67,24 +71,27 @@ enum StreamDiarizationBenchmark {
 
             Performance Targets:
                 DER < 30%  (competitive with research systems)
-                RTFx > 1x  (real-time capable)
+                RTFx > 1x  (real-time capable, streaming mode)
 
             Examples:
-                # Benchmark single file with real-time settings
-                fluidaudio diarization-benchmark --single-file ES2004a \\
+                # Offline VBx clustering (research-grade accuracy)
+                fluidaudio diarization-benchmark --mode offline --single-file ES2004a
+
+                # Streaming mode with real-time settings
+                fluidaudio diarization-benchmark --mode streaming --single-file ES2004a \\
                     --chunk-seconds 3 --overlap-seconds 2
 
-                # Full AMI benchmark with balanced settings
-                fluidaudio diarization-benchmark --dataset ami-sdm \\
-                    --chunk-seconds 10 --overlap-seconds 5 --csv results.csv
+                # Full AMI benchmark in offline mode
+                fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --csv results.csv
 
-                # Quick test on 5 files
-                fluidaudio diarization-benchmark --max-files 5 --verbose
+                # Quick test on 5 files (offline)
+                fluidaudio diarization-benchmark --mode offline --max-files 5 --verbose
             """)
     }
 
     static func run(arguments: [String]) async {
         // Parse arguments
+        var mode = "streaming"  // Default to streaming mode
         var dataset = "ami-sdm"
         var singleFile: String?
         var maxFiles: Int?
@@ -103,6 +110,11 @@ enum StreamDiarizationBenchmark {
         var i = 0
         while i < arguments.count {
             switch arguments[i] {
+            case "--mode":
+                if i + 1 < arguments.count {
+                    mode = arguments[i + 1]
+                    i += 1
+                }
             case "--dataset":
                 if i + 1 < arguments.count {
                     dataset = arguments[i + 1]
@@ -175,29 +187,43 @@ enum StreamDiarizationBenchmark {
             i += 1
         }
 
-        // Validate settings
-        let hopSize = max(chunkSeconds - overlapSeconds, 1.0)
-        let overlapRatio = overlapSeconds / chunkSeconds
-
-        logger.info("🚀 Starting Stream Diarization Benchmark")
-        logger.info("   Dataset: \(dataset)")
-        logger.info("   Chunk size: \(chunkSeconds)s")
-        logger.info("   Overlap: \(overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
-        logger.info("   Hop size: \(hopSize)s")
-        logger.info("   Clustering threshold: \(threshold)")
-        logger.info("   Assignment threshold: \(assignmentThreshold)")
-        logger.info("   Update threshold: \(updateThreshold)")
-
-        // Determine streaming mode
-        let mode: String
-        if overlapSeconds == 0 {
-            mode = "Batch (no overlap)"
-        } else if overlapRatio >= 0.6 {
-            mode = "Real-time (high overlap)"
-        } else {
-            mode = "Balanced"
+        // Validate mode
+        guard mode == "streaming" || mode == "offline" else {
+            logger.error("Invalid mode: \(mode). Must be 'streaming' or 'offline'")
+            printUsage()
+            return
         }
-        logger.info("   Mode: \(mode)\n")
+
+        logger.info("🚀 Starting Diarization Benchmark (\(mode.uppercased()) MODE)")
+        logger.info("   Dataset: \(dataset)")
+        logger.info("   Clustering threshold: \(threshold)")
+
+        if mode == "streaming" {
+            // Validate streaming settings
+            let hopSize = max(chunkSeconds - overlapSeconds, 1.0)
+            let overlapRatio = overlapSeconds / chunkSeconds
+
+            logger.info("   Chunk size: \(chunkSeconds)s")
+            logger.info("   Overlap: \(overlapSeconds)s (\(String(format: "%.0f", overlapRatio * 100))%)")
+            logger.info("   Hop size: \(hopSize)s")
+            logger.info("   Assignment threshold: \(assignmentThreshold)")
+            logger.info("   Update threshold: \(updateThreshold)")
+
+            // Determine streaming mode
+            let streamingMode: String
+            if overlapSeconds == 0 {
+                streamingMode = "Batch (no overlap)"
+            } else if overlapRatio >= 0.6 {
+                streamingMode = "Real-time (high overlap)"
+            } else {
+                streamingMode = "Balanced"
+            }
+            logger.info("   Streaming mode: \(streamingMode)")
+        } else {
+            logger.info("   Using VBx clustering with optimal speaker mapping")
+        }
+
+        logger.info("")
 
         // Download dataset if needed
         if autoDownload {
@@ -230,8 +256,22 @@ enum StreamDiarizationBenchmark {
         logger.info("🔧 Initializing models...")
         let modelStartTime = Date()
         let models: DiarizerModels
+        var offlineManager: OfflineDiarizerManager?
+
         do {
             models = try await DiarizerModels.downloadIfNeeded()
+
+            // For offline mode, also initialize the offline manager
+            if mode == "offline" {
+                let modelDir = OfflineDiarizerModels.defaultModelsDirectory()
+                let offlineConfig = OfflineDiarizerConfig(
+                    clusteringThreshold: Double(threshold)
+                )
+                offlineManager = OfflineDiarizerManager(config: offlineConfig)
+                let offlineModels = try await OfflineDiarizerModels.load(from: modelDir)
+                offlineManager?.initialize(models: offlineModels)
+                logger.info("✅ Offline manager initialized")
+            }
         } catch {
             logger.error("❌ Failed to initialize models: \(error)")
             return
@@ -254,18 +294,31 @@ enum StreamDiarizationBenchmark {
                     logger.info("  Iteration \(iteration)/\(iterations)")
                 }
 
-                if let result = await processMeeting(
-                    meetingName: meetingName,
-                    models: models,
-                    modelInitTime: modelInitTime,
-                    chunkSeconds: chunkSeconds,
-                    overlapSeconds: overlapSeconds,
-                    threshold: threshold,
-                    assignmentThreshold: assignmentThreshold,
-                    updateThreshold: updateThreshold,
-                    verbose: verbose,
-                    debugMode: debugMode
-                ) {
+                let result: BenchmarkResult?
+                if mode == "streaming" {
+                    result = await processStreamingMeeting(
+                        meetingName: meetingName,
+                        models: models,
+                        modelInitTime: modelInitTime,
+                        chunkSeconds: chunkSeconds,
+                        overlapSeconds: overlapSeconds,
+                        threshold: threshold,
+                        assignmentThreshold: assignmentThreshold,
+                        updateThreshold: updateThreshold,
+                        verbose: verbose,
+                        debugMode: debugMode
+                    )
+                } else {
+                    result = await processOfflineMeeting(
+                        meetingName: meetingName,
+                        controller: offlineManager!,
+                        modelInitTime: modelInitTime,
+                        verbose: verbose,
+                        debugMode: debugMode
+                    )
+                }
+
+                if let result = result {
                     iterationResults.append(result)
 
                     // Print summary for this iteration
@@ -340,7 +393,7 @@ enum StreamDiarizationBenchmark {
         }
     }
 
-    private static func processMeeting(
+    private static func processStreamingMeeting(
         meetingName: String,
         models: DiarizerModels,
         modelInitTime: Double,
@@ -534,6 +587,104 @@ enum StreamDiarizationBenchmark {
                 segmentationTime: totalSegmentationTime,
                 embeddingTime: totalEmbeddingTime,
                 clusteringTime: totalClusteringTime,
+                totalInferenceTime: totalInferenceTime
+            )
+
+        } catch {
+            logger.error("❌ Error processing \(meetingName): \(error)")
+            return nil
+        }
+    }
+
+    private static func processOfflineMeeting(
+        meetingName: String,
+        controller: OfflineDiarizerManager,
+        modelInitTime: Double,
+        verbose: Bool,
+        debugMode: Bool
+    ) async -> BenchmarkResult? {
+
+        // Load audio
+        let audioPath = getAudioPath(for: meetingName)
+        guard FileManager.default.fileExists(atPath: audioPath) else {
+            logger.error("❌ Audio file not found: \(audioPath)")
+            return nil
+        }
+
+        do {
+            // Track audio loading time
+            let audioLoadStart = Date()
+            let audioData = try await loadAudioFile(at: audioPath)
+            let audioLoadTime = Date().timeIntervalSince(audioLoadStart)
+            let totalDuration = Double(audioData.count) / 16000.0
+
+            if verbose {
+                logger.info("  Audio duration: \(String(format: "%.1f", totalDuration))s")
+                logger.info("  Audio load time: \(String(format: "%.3f", audioLoadTime))s")
+            }
+
+            // Process with offline controller
+            let startTime = Date()
+            let result = try await controller.process(audio: audioData)
+            let totalElapsed = Date().timeIntervalSince(startTime)
+            let finalRTFx = totalDuration / totalElapsed
+
+            if verbose {
+                logger.info("  Processing time: \(String(format: "%.3f", totalElapsed))s")
+                logger.info("  RTFx: \(String(format: "%.1f", finalRTFx))x")
+            }
+
+            // Load ground truth
+            let groundTruth = await AMIParser.loadAMIGroundTruth(
+                for: meetingName,
+                duration: Float(totalDuration)
+            )
+
+            guard !groundTruth.isEmpty else {
+                logger.warning("⚠️ No ground truth found for \(meetingName)")
+                return nil
+            }
+
+            // Calculate metrics with Hungarian algorithm (optimal mapping for offline)
+            let metrics = DiarizationMetricsCalculator.offlineMetrics(
+                predicted: result.segments,
+                groundTruth: groundTruth,
+                frameSize: 0.01,
+                audioDurationSeconds: totalDuration,
+                logger: logger
+            )
+
+            // Extract timing breakdown if available
+            let segmentationTime = result.timings?.segmentationSeconds ?? 0
+            let embeddingTime = result.timings?.embeddingExtractionSeconds ?? 0
+            let clusteringTime = result.timings?.speakerClusteringSeconds ?? 0
+            let totalInferenceTime = segmentationTime + embeddingTime + clusteringTime
+
+            // Count detected speakers
+            let detectedSpeakers = Set(result.segments.map { $0.speakerId }).count
+
+            return BenchmarkResult(
+                meetingName: meetingName,
+                der: metrics.der,
+                missRate: metrics.missRate,
+                falseAlarmRate: metrics.falseAlarmRate,
+                speakerErrorRate: metrics.speakerErrorRate,
+                jer: metrics.jer,
+                rtfx: Float(finalRTFx),
+                processingTime: totalElapsed,
+                chunksProcessed: 1,  // Offline processes entire file at once
+                detectedSpeakers: detectedSpeakers,
+                groundTruthSpeakers: AMIParser.getGroundTruthSpeakerCount(for: meetingName),
+                speakerFragmentation: 1.0,  // No fragmentation in offline mode
+                latency90th: totalElapsed,
+                latency99th: totalElapsed,
+                // Timing breakdown
+                modelDownloadTime: modelInitTime * 0.7,
+                modelCompileTime: modelInitTime * 0.3,
+                audioLoadTime: audioLoadTime,
+                segmentationTime: segmentationTime,
+                embeddingTime: embeddingTime,
+                clusteringTime: clusteringTime,
                 totalInferenceTime: totalInferenceTime
             )
 

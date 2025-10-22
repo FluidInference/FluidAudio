@@ -153,7 +153,8 @@ final class SpeakerManagerTests: XCTestCase {
             let info = manager.getSpeaker(for: id)
             XCTAssertNotNil(info)
             XCTAssertEqual(info?.id, id)
-            XCTAssertEqual(info?.currentEmbedding, embedding)
+            let normalizedExpected = VDSPOperations.l2Normalize(embedding)
+            XCTAssertEqual(info?.currentEmbedding, normalizedExpected)
             XCTAssertEqual(info?.duration, 3.5)
         }
     }
@@ -176,7 +177,8 @@ final class SpeakerManagerTests: XCTestCase {
 
             // Verify the values
             XCTAssertEqual(publicId, id)
-            XCTAssertEqual(publicEmbedding, embedding)
+            let normalizedExpected = VDSPOperations.l2Normalize(embedding)
+            XCTAssertEqual(publicEmbedding, normalizedExpected)
             XCTAssertEqual(publicDuration, 5.0)
             XCTAssertNotNil(publicUpdatedAt)
             XCTAssertEqual(publicUpdateCount, 1)
@@ -350,7 +352,8 @@ final class SpeakerManagerTests: XCTestCase {
         let info = manager.getSpeaker(for: "TestSpeaker1")
         XCTAssertNotNil(info)
         XCTAssertEqual(info?.id, "TestSpeaker1")
-        XCTAssertEqual(info?.currentEmbedding, embedding)
+        let normalizedExpected = VDSPOperations.l2Normalize(embedding)
+        XCTAssertEqual(info?.currentEmbedding, normalizedExpected)
         XCTAssertEqual(info?.duration, 5.0)
         XCTAssertEqual(info?.updateCount, 1)
     }
@@ -417,7 +420,8 @@ final class SpeakerManagerTests: XCTestCase {
         let info = manager.getSpeaker(for: "Alice")
         XCTAssertNotNil(info)
         XCTAssertEqual(info?.id, "Alice")
-        XCTAssertEqual(info?.currentEmbedding, embedding)
+        let normalizedExpected = VDSPOperations.l2Normalize(embedding)
+        XCTAssertEqual(info?.currentEmbedding, normalizedExpected)
         XCTAssertEqual(info?.duration, 7.5)
         XCTAssertEqual(info?.rawEmbeddings.count, 1)
     }

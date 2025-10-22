@@ -58,7 +58,6 @@ public struct DiarizerConfig: Sendable {
 }
 
 public struct PipelineTimings: Sendable, Codable {
-    public let modelDownloadSeconds: TimeInterval
     public let modelCompilationSeconds: TimeInterval
     public let audioLoadingSeconds: TimeInterval
     public let segmentationSeconds: TimeInterval
@@ -69,7 +68,6 @@ public struct PipelineTimings: Sendable, Codable {
     public let totalProcessingSeconds: TimeInterval
 
     public init(
-        modelDownloadSeconds: TimeInterval = 0,
         modelCompilationSeconds: TimeInterval = 0,
         audioLoadingSeconds: TimeInterval = 0,
         segmentationSeconds: TimeInterval = 0,
@@ -77,7 +75,6 @@ public struct PipelineTimings: Sendable, Codable {
         speakerClusteringSeconds: TimeInterval = 0,
         postProcessingSeconds: TimeInterval = 0
     ) {
-        self.modelDownloadSeconds = modelDownloadSeconds
         self.modelCompilationSeconds = modelCompilationSeconds
         self.audioLoadingSeconds = audioLoadingSeconds
         self.segmentationSeconds = segmentationSeconds
@@ -87,7 +84,7 @@ public struct PipelineTimings: Sendable, Codable {
         self.totalInferenceSeconds =
             segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds
         self.totalProcessingSeconds =
-            modelDownloadSeconds + modelCompilationSeconds + audioLoadingSeconds
+            modelCompilationSeconds + audioLoadingSeconds
             + segmentationSeconds + embeddingExtractionSeconds + speakerClusteringSeconds
             + postProcessingSeconds
     }
@@ -98,7 +95,6 @@ public struct PipelineTimings: Sendable, Codable {
         }
 
         return [
-            "Model Download": (modelDownloadSeconds / totalProcessingSeconds) * 100,
             "Model Compilation": (modelCompilationSeconds / totalProcessingSeconds) * 100,
             "Audio Loading": (audioLoadingSeconds / totalProcessingSeconds) * 100,
             "Segmentation": (segmentationSeconds / totalProcessingSeconds) * 100,
@@ -110,7 +106,6 @@ public struct PipelineTimings: Sendable, Codable {
 
     public var bottleneckStage: String {
         let stages = [
-            ("Model Download", modelDownloadSeconds),
             ("Model Compilation", modelCompilationSeconds),
             ("Audio Loading", audioLoadingSeconds),
             ("Segmentation", segmentationSeconds),
@@ -126,10 +121,10 @@ public struct PipelineTimings: Sendable, Codable {
 public struct DiarizationResult: Sendable {
     public let segments: [TimedSpeakerSegment]
 
-    /// Speaker database with embeddings (only populated when debugMode is enabled)
+    /// Speaker database with embeddings (populated by offline pipelines for downstream use)
     public let speakerDatabase: [String: [Float]]?
 
-    /// Performance timings (only populated when debugMode is enabled)
+    /// Performance timings collected during diarization
     public let timings: PipelineTimings?
 
     public init(

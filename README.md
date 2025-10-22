@@ -29,7 +29,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 ## Highlights
 
 - **Automatic Speech Recognition (ASR)**: Parakeet TDT v3 (0.6b) for transcription; supports all 25 European languages
-- **Speaker Diarization**: Speaker separation with speaker clustering via Pyannote models
+- **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
 - **Real-time Processing**: Designed for near real-time workloads but also works for offline processing
@@ -158,13 +158,53 @@ swift run fluidaudio transcribe audio.wav --model-version v2
 
 ## Speaker Diarization
 
-**AMI Benchmark Results** (Single Distant Microphone) using a subset of the files:
 
-- **DER: 17.7%** — Competitive with Powerset BCE 2023 (18.5%)
-- **JER: 28.0%** — Outperforms EEND 2019 (25.3%) and x-vector clustering (28.7%)
-- **RTF: 0.02x** — Real-time processing with 50x speedup
+### Offline Speaker Diarization Pipeline
 
-### Speaker Diarization Quick Start
+Pyannote Community-1 pipeline (powerset segmentation + WeSpeaker + VBx) for offline speaker diarization. Use this for most use cases, see Benchmarkds.md for benchmarks. 
+
+```swift
+import FluidAudio
+
+let config = OfflineDiarizerConfig()
+let manager = OfflineDiarizerManager(config: config)
+try await manager.prepareModels()  // Downloads + compiles Core ML bundles if they are missing
+
+let samples = try AudioConverter().resampleAudioFile(path: "meeting.wav")
+let result = try await manager.process(audio: samples)
+
+for segment in result.segments {
+    print("\(segment.speakerId) \(segment.startTimeSeconds)s → \(segment.endTimeSeconds)s")
+}
+```
+
+For processing audio files, use the file-based API which automatically uses memory-mapped streaming for efficiency:
+
+```swift
+let url = URL(fileURLWithPath: "meeting.wav")
+let result = try await manager.process(url)
+
+for segment in result.segments {
+    print("\(segment.speakerId) \(segment.startTimeSeconds)s → \(segment.endTimeSeconds)s")
+}
+```
+
+```bash
+# Process a meeting with full VBx clustering
+swift run fluidaudio process ~/FluidAudioDatasets/ami_official/sdm/ES2004a.Mix-Headset.wav \
+  --mode offline --threshold 0.6 --output es2004a_offline.json
+
+# Run the AMI single-file benchmark with automatic downloads
+swift run fluidaudio diarization-benchmark --mode offline --auto-download \
+  --single-file ES2004a --threshold 0.6 --output offline_results.json
+```
+
+`offline_results.json` contains DER/JER/RTFx along with timing breakdowns for segmentation, embedding extraction, and VBx clustering. CI now runs this workflow on every PR to ensure the offline models stay healthy and the Hugging Face assets remain accessible.
+
+
+### Streaming/Online Speaker Diarization
+
+Use this if you need to show speaker labels while the transcription is happening, in most use cases, offline should be more than enough.
 
 ```swift
 import FluidAudio
@@ -172,7 +212,7 @@ import FluidAudio
 // Diarize an audio file
 Task {
     let models = try await DiarizerModels.downloadIfNeeded()
-    let diarizer = DiarizerManager()  // Uses optimal defaults (0.7 threshold = 17.7% DER)
+    let diarizer = DiarizerManager() 
     diarizer.initialize(models: models)
 
     // Prepare 16 kHz mono samples (see: Audio Conversion)
@@ -192,6 +232,7 @@ For diarization streaming see [Documentation/SpeakerDiarization.md](Documentatio
 swift run fluidaudio diarization-benchmark --single-file ES2004a \
   --chunk-seconds 3 --overlap-seconds 2
 ```
+
 
 ### CLI
 
@@ -356,6 +397,12 @@ Build requires eSpeak NG headers/libs for the C API discoverable via pkg-config 
   - `swift build -Xcc -I/opt/homebrew/include -Xlinker -L/opt/homebrew/lib`
 - Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
 
+
+## Continuous Integration
+
+- `tests.yml`: Default build matrix covering SwiftPM tests and an iOS archive smoke test.
+- `diarizer-benchmark.yml`: Runs the streaming diarization benchmark on ES2004a for regression tracking.
+- `offline-pipeline.yml`: Executes the VBx offline pipeline end-to-end (`fluidaudio diarization-benchmark --mode offline`) and fails if DER/JER drift beyond guardrails or if models fail to download. Use this workflow as a reference for provisioning model caches in your own CI.
 
 ## Everything Else
 

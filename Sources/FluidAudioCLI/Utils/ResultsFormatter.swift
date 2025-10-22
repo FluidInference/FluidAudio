@@ -6,23 +6,31 @@ import Foundation
 struct ResultsFormatter {
 
     static func printResults(_ result: ProcessingResult) async {
-        print("📊 Diarization Results:")
-        print("   Audio File: \(result.audioFile)")
-        print("   Duration: \(String(format: "%.1f", result.durationSeconds))s")
-        print("   Processing Time: \(String(format: "%.1f", result.processingTimeSeconds))s")
+        print("Diarization Results:")
+        print("Audio File: \(result.audioFile)")
+        print("Duration: \(String(format: "%.1f", result.durationSeconds))s")
+        print("Processing Time: \(String(format: "%.1f", result.processingTimeSeconds))s")
         let rtfx = result.realTimeFactor
-        print("   Speed Factor (RTFx): \(String(format: "%.2f", rtfx))x")
-        print("   Detected Speakers: \(result.speakerCount)")
-        print("🎤 Speaker Segments:")
-
-        for (index, segment) in result.segments.enumerated() {
-            let startTime = formatTime(segment.startTimeSeconds)
-            let endTime = formatTime(segment.endTimeSeconds)
-            let duration = segment.endTimeSeconds - segment.startTimeSeconds
-
+        print("Speed Factor (RTFx): \(String(format: "%.2f", rtfx))x")
+        print("Detected Speakers: \(result.speakerCount)")
+        if let metrics = result.metrics {
             print(
-                "   \(index + 1). \(segment.speakerId): \(startTime) - \(endTime) (\(String(format: "%.1f", duration))s)"
+                "DER: \(String(format: "%.1f", metrics.der))% (Miss="
+                    + "\(String(format: "%.1f", metrics.missRate))%, FA="
+                    + "\(String(format: "%.1f", metrics.falseAlarmRate))%, SE="
+                    + "\(String(format: "%.1f", metrics.speakerErrorRate))%, JER="
+                    + "\(String(format: "%.1f", metrics.jer))%)"
             )
+            if !metrics.speakerMapping.isEmpty {
+                print("Speaker Mapping:")
+                for (pred, truth) in metrics.speakerMapping.sorted(by: { $0.key < $1.key }) {
+                    print("      \(pred) → \(truth)")
+                }
+            }
+        }
+        if let timings = result.timings {
+            print("")
+            printSingleRunTimings(timings, durationSeconds: result.durationSeconds)
         }
     }
 
@@ -33,6 +41,48 @@ struct ResultsFormatter {
 
         let data = try encoder.encode(result)
         try data.write(to: URL(fileURLWithPath: file))
+    }
+
+    private static func printSingleRunTimings(
+        _ timings: PipelineTimings,
+        durationSeconds: Float
+    ) {
+        let stages: [(String, TimeInterval)] = [
+            ("Model Compilation", timings.modelCompilationSeconds),
+            ("Audio Loading", timings.audioLoadingSeconds),
+            ("Segmentation", timings.segmentationSeconds),
+            ("Embedding Extraction", timings.embeddingExtractionSeconds),
+            ("Speaker Clustering", timings.speakerClusteringSeconds),
+            ("Post Processing", timings.postProcessingSeconds),
+        ]
+
+        let total = timings.totalProcessingSeconds
+        let totalAudioMinutes = Double(durationSeconds) / 60.0
+        print("⏱️  Pipeline Timing Breakdown")
+        let separator = String(repeating: "=", count: 95)
+        print(separator)
+        print("│ Stage                 │   Time   │ Percentage │ Per Audio Minute │")
+        let headerSeparator = "├───────────────────────┼──────────┼────────────┼──────────────────┤"
+        print(headerSeparator)
+
+        for (stageName, stageTime) in stages {
+            let stageNamePadded = stageName.padding(toLength: 19, withPad: " ", startingAt: 0)
+            let timeStr = String(format: "%.3fs", stageTime).padding(
+                toLength: 8, withPad: " ", startingAt: 0)
+            let percentage = total > 0 ? (stageTime / total) * 100 : 0
+            let percentageStr = String(format: "%.1f%%", percentage).padding(
+                toLength: 10, withPad: " ", startingAt: 0)
+            let perMinute = totalAudioMinutes > 0 ? stageTime / totalAudioMinutes : 0
+            let perMinuteStr = String(format: "%.3fs/min", perMinute).padding(
+                toLength: 16, withPad: " ", startingAt: 0)
+
+            print("│ \(stageNamePadded) │ \(timeStr) │ \(percentageStr) │ \(perMinuteStr) │")
+        }
+
+        let footerSeparator = "└───────────────────────┴──────────┴────────────┴──────────────────┘"
+        print(footerSeparator)
+        let totalText = String(format: "%.3f", total)
+        print("Bottleneck Stage: \(timings.bottleneckStage)  •  Total Processing: \(totalText)s")
     }
 
     static func saveBenchmarkResults(_ summary: BenchmarkSummary, to file: String) async throws {
@@ -210,7 +260,6 @@ struct ResultsFormatter {
 
         // Print each stage
         let stages: [(String, TimeInterval)] = [
-            ("Model Download", avgTimings.modelDownloadSeconds),
             ("Model Compilation", avgTimings.modelCompilationSeconds),
             ("Audio Loading", avgTimings.audioLoadingSeconds),
             ("Segmentation", avgTimings.segmentationSeconds),
@@ -256,15 +305,11 @@ struct ResultsFormatter {
             "   Inference Only: \(String(format: "%.3f", avgTimings.totalInferenceSeconds))s (\(String(format: "%.1f", (avgTimings.totalInferenceSeconds / totalAvgTime) * 100))% of total)"
         )
         print(
-            "   Setup Overhead: \(String(format: "%.3f", avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", ((avgTimings.modelDownloadSeconds + avgTimings.modelCompilationSeconds) / totalAvgTime) * 100))% of total)"
+            "   Setup Overhead: \(String(format: "%.3f", avgTimings.modelCompilationSeconds))s (\(String(format: "%.1f", (avgTimings.modelCompilationSeconds / totalAvgTime) * 100))% of total)"
         )
 
         // Optimization suggestions
-        if avgTimings.modelDownloadSeconds > avgTimings.totalInferenceSeconds {
-            print(
-                "💡 Optimization Suggestion: Model download is dominating execution time - consider model caching"
-            )
-        } else if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
+        if avgTimings.segmentationSeconds > avgTimings.embeddingExtractionSeconds * 2 {
             print(
                 "💡 Optimization Suggestion: Segmentation is the bottleneck - consider model optimization"
             )
@@ -280,7 +325,6 @@ struct ResultsFormatter {
         let count = Double(results.count)
         guard count > 0 else { return PipelineTimings() }
 
-        let avgModelDownload = results.reduce(0.0) { $0 + $1.timings.modelDownloadSeconds } / count
         let avgModelCompilation =
             results.reduce(0.0) { $0 + $1.timings.modelCompilationSeconds } / count
         let avgAudioLoading = results.reduce(0.0) { $0 + $1.timings.audioLoadingSeconds } / count
@@ -292,7 +336,6 @@ struct ResultsFormatter {
             results.reduce(0.0) { $0 + $1.timings.postProcessingSeconds } / count
 
         return PipelineTimings(
-            modelDownloadSeconds: avgModelDownload,
             modelCompilationSeconds: avgModelCompilation,
             audioLoadingSeconds: avgAudioLoading,
             segmentationSeconds: avgSegmentation,
