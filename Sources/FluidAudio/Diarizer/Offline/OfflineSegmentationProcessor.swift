@@ -66,6 +66,14 @@ struct OfflineSegmentationProcessor {
                 combination.contains(speaker) ? index : nil
             }
         }
+
+        // Pre-compute flat mapping matrix for vectorized speaker activation
+        // Matrix[speaker][class] = 1.0 if speaker in powerset[class], else 0.0
+        let speakerToClassMapping: [[Float]] = (0..<speakerCount).map { speaker in
+            powerset.map { combination in
+                combination.contains(speaker) ? Float(1.0) : Float(0.0)
+            }
+        }
         var classHistogram = Array(repeating: 0, count: powerset.count)
         var classProbabilitySums = Array(repeating: Float.zero, count: powerset.count)
         let chunkCallback = chunkHandler
@@ -395,14 +403,23 @@ struct OfflineSegmentationProcessor {
                         }
                     }
 
-                    var speakerActivations = [Float](repeating: 0, count: speakerCount)
-                    for speaker in 0..<speakerCount {
-                        var sum: Float = 0
-                        for classIndex in speakerClassIndices[speaker] where classIndex < probabilityBuffer.count {
-                            sum += probabilityBuffer[classIndex]
-                        }
-                        speakerActivations[speaker] = min(max(sum, 0), 1)
+                    // Vectorized speaker activation using matrix-vector multiply
+                    // speakerActivations[speaker] = sum of probabilityBuffer[class] where speaker in powerset[class]
+                    // Handle case where model outputs fewer classes than powerset entries (e.g., 7 vs 8)
+                    let paddedProbabilityBuffer: [Float]
+                    if probabilityBuffer.count < powerset.count {
+                        paddedProbabilityBuffer = probabilityBuffer + [Float](
+                            repeating: 0,
+                            count: powerset.count - probabilityBuffer.count
+                        )
+                    } else {
+                        paddedProbabilityBuffer = Array(probabilityBuffer.prefix(powerset.count))
                     }
+
+                    let speakerActivations = VDSPOperations.matrixVectorMultiply(
+                        matrix: speakerToClassMapping,
+                        vector: paddedProbabilityBuffer
+                    ).map { min(max($0, 0), 1) }
                     chunkSpeakerProbs[frameIndex] = speakerActivations
 
                     let speechProbability = max(0, min(1, 1 - emptyProbability))

@@ -102,12 +102,38 @@ struct OfflineReconstruction {
             count: totalFrames
         )
         for frame in 0..<totalFrames {
-            for cluster in 0..<clusterCount {
-                let count = activationCounts[frame][cluster]
-                if count > 0 {
-                    activationAverages[frame][cluster] = activationSums[frame][cluster] / count
+            let sums = activationSums[frame]
+            let counts = activationCounts[frame]
+            var averages = [Double](repeating: 0, count: clusterCount)
+
+            // Vectorized division: averages = sums / counts (where counts > 0)
+            sums.withUnsafeBufferPointer { sumsPtr in
+                counts.withUnsafeBufferPointer { countsPtr in
+                    averages.withUnsafeMutableBufferPointer { averagesPtr in
+                        guard let sumsBase = sumsPtr.baseAddress,
+                            let countsBase = countsPtr.baseAddress,
+                            let averagesBase = averagesPtr.baseAddress
+                        else { return }
+
+                        vDSP_vdivD(
+                            countsBase,
+                            1,
+                            sumsBase,
+                            1,
+                            averagesBase,
+                            1,
+                            vDSP_Length(clusterCount)
+                        )
+                    }
                 }
             }
+
+            // Zero out results where count was 0 (to avoid division by zero artifacts)
+            for cluster in 0..<clusterCount where counts[cluster] == 0 {
+                averages[cluster] = 0
+            }
+
+            activationAverages[frame] = averages
         }
 
         var speakerCountPerFrame = [Int](repeating: 0, count: totalFrames)

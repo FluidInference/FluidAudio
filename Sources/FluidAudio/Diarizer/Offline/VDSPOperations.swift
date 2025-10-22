@@ -36,14 +36,9 @@ enum VDSPOperations {
             return [Float](repeating: 0, count: matrix.count)
         }
 
-        for row in matrix {
+        let flatMatrix = matrix.flatMap { row in
             precondition(row.count == columns, "Jagged matrix not supported")
-        }
-
-        var flatMatrix = [Float]()
-        flatMatrix.reserveCapacity(matrix.count * columns)
-        for row in matrix {
-            flatMatrix.append(contentsOf: row)
+            return row
         }
 
         let rowCount = makeBlasIndexOrFatal(matrix.count, label: "matrix row count")
@@ -99,18 +94,14 @@ enum VDSPOperations {
         let rowsA = a.count
         let columnsB = b.first!.count
 
-        var flatA = [Float]()
-        flatA.reserveCapacity(rowsA * aColumns)
-        for row in a {
+        let flatA = a.flatMap { row in
             precondition(row.count == aColumns, "Jagged matrix not supported")
-            flatA.append(contentsOf: row)
+            return row
         }
 
-        var flatB = [Float]()
-        flatB.reserveCapacity(b.count * columnsB)
-        for row in b {
+        let flatB = b.flatMap { row in
             precondition(row.count == columnsB, "Jagged matrix not supported")
-            flatB.append(contentsOf: row)
+            return row
         }
 
         let rowsAIndex = makeBlasIndexOrFatal(rowsA, label: "matrixMultiply rowsA")
@@ -222,18 +213,14 @@ enum VDSPOperations {
             )
         }
 
-        var flatA = [Float]()
-        flatA.reserveCapacity(rowsA * dimension)
-        for row in a {
+        let flatA = a.flatMap { row in
             precondition(row.count == dimension, "Jagged matrix not supported")
-            flatA.append(contentsOf: row)
+            return row
         }
 
-        var flatB = [Float]()
-        flatB.reserveCapacity(rowsB * dimension)
-        for row in b {
+        let flatB = b.flatMap { row in
             precondition(row.count == dimension, "Jagged matrix not supported")
-            flatB.append(contentsOf: row)
+            return row
         }
 
         var normsA = [Float](repeating: 0, count: rowsA)
