@@ -11,13 +11,16 @@ struct ProcessingResult: Codable {
     let realTimeFactor: Float
     let segments: [TimedSpeakerSegment]
     let speakerCount: Int
-    let config: DiarizerConfig
+    let config: DiarizerConfig?
+    let metrics: DiarizationMetrics?
+    let timings: PipelineTimings?
     let timestamp: Date
 
     init(
         audioFile: String, durationSeconds: Float, processingTimeSeconds: TimeInterval,
         realTimeFactor: Float, segments: [TimedSpeakerSegment], speakerCount: Int,
-        config: DiarizerConfig
+        config: DiarizerConfig?, metrics: DiarizationMetrics? = nil,
+        timings: PipelineTimings? = nil
     ) {
         self.audioFile = audioFile
         self.durationSeconds = durationSeconds
@@ -26,6 +29,8 @@ struct ProcessingResult: Codable {
         self.segments = segments
         self.speakerCount = speakerCount
         self.config = config
+        self.metrics = metrics
+        self.timings = timings
         self.timestamp = Date()
     }
 }
@@ -241,15 +246,6 @@ struct VadBenchmarkResult {
     let processingTime: TimeInterval
     let totalFiles: Int
     let correctPredictions: Int
-}
-
-struct DiarizationMetrics {
-    let der: Float
-    let jer: Float
-    let missRate: Float
-    let falseAlarmRate: Float
-    let speakerErrorRate: Float
-    let mappedSpeakerCount: Int  // Number of predicted speakers that mapped to ground truth
 }
 
 #endif

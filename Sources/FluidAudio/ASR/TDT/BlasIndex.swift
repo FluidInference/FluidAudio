@@ -13,3 +13,11 @@ func makeBlasIndex(_ value: Int, label: String) throws -> BlasIndex {
     }
     return cast
 }
+
+@inline(__always)
+func makeBlasIndexOrFatal(_ value: Int, label: String) -> BlasIndex {
+    guard let cast = BlasIndex(exactly: value) else {
+        preconditionFailure("\(label) exceeds supported BLAS index range (\(value))")
+    }
+    return cast
+}

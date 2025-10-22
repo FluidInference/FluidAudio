@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// Speaker profile representation for tracking speakers across audio
@@ -23,7 +24,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
         let now = Date()
         self.id = id ?? UUID().uuidString
         self.name = name ?? self.id
-        self.currentEmbedding = currentEmbedding
+        self.currentEmbedding = VDSPOperations.l2Normalize(currentEmbedding)
         self.duration = duration
         self.createdAt = createdAt ?? now
         self.updatedAt = updatedAt ?? now
@@ -45,22 +46,26 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     ) {
 
         // Validate embedding quality
-        let embeddingMagnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
-        guard embeddingMagnitude > 0.1 else { return }
+        var sumSquares: Float = 0
+        vDSP_svesq(embedding, 1, &sumSquares, vDSP_Length(embedding.count))
+        guard sumSquares > 0.01 else { return }
+
+        let normalizedEmbedding = VDSPOperations.l2Normalize(embedding)
 
         // Add to raw embeddings
         let rawEmbedding = RawEmbedding(
             segmentId: segmentId,
-            embedding: embedding,
+            embedding: normalizedEmbedding,
             timestamp: Date()
         )
         addRawEmbedding(rawEmbedding)
 
         // Update main embedding using exponential moving average
-        if currentEmbedding.count == embedding.count {
+        if currentEmbedding.count == normalizedEmbedding.count {
             for i in 0..<currentEmbedding.count {
-                currentEmbedding[i] = alpha * currentEmbedding[i] + (1 - alpha) * embedding[i]
+                currentEmbedding[i] = alpha * currentEmbedding[i] + (1 - alpha) * normalizedEmbedding[i]
             }
+            currentEmbedding = VDSPOperations.l2Normalize(currentEmbedding)
         }
 
         // Update metadata
@@ -72,8 +77,9 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     /// Add a raw embedding with FIFO queue management
     public func addRawEmbedding(_ embedding: RawEmbedding) {
         // Validate embedding quality
-        let embeddingMagnitude = sqrt(embedding.embedding.map { $0 * $0 }.reduce(0, +))
-        guard embeddingMagnitude > 0.1 else { return }
+        var sumSquares: Float = 0
+        vDSP_svesq(embedding.embedding, 1, &sumSquares, vDSP_Length(embedding.embedding.count))
+        guard sumSquares > 0.01 else { return }
 
         // Maintain max of 50 raw embeddings (FIFO)
         if rawEmbeddings.count >= 50 {
@@ -124,7 +130,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
                 averageEmbedding[i] /= count
             }
 
-            self.currentEmbedding = averageEmbedding
+            self.currentEmbedding = VDSPOperations.l2Normalize(averageEmbedding)
             self.updatedAt = Date()
         }
     }
@@ -177,7 +183,7 @@ public struct RawEmbedding: Codable, Sendable {
 
     public init(segmentId: UUID = UUID(), embedding: [Float], timestamp: Date = Date()) {
         self.segmentId = segmentId
-        self.embedding = embedding
+        self.embedding = VDSPOperations.l2Normalize(embedding)
         self.timestamp = timestamp
     }
 }

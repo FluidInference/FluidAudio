@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import OSLog
 
@@ -7,6 +8,7 @@ import OSLog
 public enum SpeakerUtilities {
 
     private static let logger = AppLogger(category: "SpeakerUtilities")
+    private static let normalizationTolerance: Float = 1e-3
 
     // MARK: - Configuration
 
@@ -64,25 +66,38 @@ public enum SpeakerUtilities {
         }
 
         var dotProduct: Float = 0
-        var magnitudeA: Float = 0
-        var magnitudeB: Float = 0
+        vDSP_dotpr(a, 1, b, 1, &dotProduct, vDSP_Length(a.count))
 
-        for i in 0..<a.count {
-            dotProduct += a[i] * b[i]
-            magnitudeA += a[i] * a[i]
-            magnitudeB += b[i] * b[i]
-        }
+        var sumSquaresA: Float = 0
+        var sumSquaresB: Float = 0
+        vDSP_svesq(a, 1, &sumSquaresA, vDSP_Length(a.count))
+        vDSP_svesq(b, 1, &sumSquaresB, vDSP_Length(b.count))
 
-        magnitudeA = sqrt(magnitudeA)
-        magnitudeB = sqrt(magnitudeB)
-
-        guard magnitudeA > 0 && magnitudeB > 0 else {
+        guard sumSquaresA > 0 && sumSquaresB > 0 else {
             logger.warning("Zero magnitude embedding detected")
             return Float.infinity
         }
 
-        let similarity = dotProduct / (magnitudeA * magnitudeB)
-        return 1 - similarity
+        let isUnitA = abs(sumSquaresA - 1.0) <= normalizationTolerance
+        let isUnitB = abs(sumSquaresB - 1.0) <= normalizationTolerance
+
+        let similarity: Float
+        if isUnitA && isUnitB {
+            similarity = dotProduct
+        } else {
+            let magnitudeA = sumSquaresA.squareRoot()
+            let magnitudeB = sumSquaresB.squareRoot()
+
+            guard magnitudeA > 0 && magnitudeB > 0 else {
+                logger.warning("Zero magnitude after normalization guard")
+                return Float.infinity
+            }
+
+            similarity = dotProduct / (magnitudeA * magnitudeB)
+        }
+
+        let clampedSimilarity = min(max(similarity, -1.0), 1.0)
+        return 1 - clampedSimilarity
     }
 
     // MARK: - Embedding Validation
@@ -94,7 +109,9 @@ public enum SpeakerUtilities {
             return false
         }
 
-        let magnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
+        var sumSquares: Float = 0
+        vDSP_svesq(embedding, 1, &sumSquares, vDSP_Length(embedding.count))
+        let magnitude = sumSquares.squareRoot()
         guard magnitude > minMagnitude else {
             logger.warning("Low magnitude embedding: \(magnitude)")
             return false
@@ -232,11 +249,12 @@ public enum SpeakerUtilities {
         }
 
         // Create validated parameters
+        let normalizedEmbedding = VDSPOperations.l2Normalize(embedding)
         let params = SpeakerCreationParams(
             id: id,
             name: name,
             duration: duration,
-            embedding: embedding
+            embedding: normalizedEmbedding
         )
 
         return .success(params)
@@ -293,12 +311,15 @@ public enum SpeakerUtilities {
         }
 
         // Calculate exponential moving average
-        var updated = [Float](repeating: 0, count: current.count)
-        for i in 0..<current.count {
-            updated[i] = alpha * current[i] + (1 - alpha) * new[i]
+        let normalizedCurrent = VDSPOperations.l2Normalize(current)
+        let normalizedNew = VDSPOperations.l2Normalize(new)
+
+        var updated = [Float](repeating: 0, count: normalizedCurrent.count)
+        for i in 0..<normalizedCurrent.count {
+            updated[i] = alpha * normalizedCurrent[i] + (1 - alpha) * normalizedNew[i]
         }
 
-        return updated
+        return VDSPOperations.l2Normalize(updated)
     }
 
     // MARK: - Raw Embedding Management
@@ -319,9 +340,10 @@ public enum SpeakerUtilities {
         }
 
         // Create the new raw embedding
+        let normalizedEmbedding = VDSPOperations.l2Normalize(embedding)
         let newEmbedding = RawEmbedding(
             segmentId: segmentId,
-            embedding: embedding,
+            embedding: normalizedEmbedding,
             timestamp: timestamp
         )
 
@@ -385,12 +407,14 @@ public enum SpeakerUtilities {
             return nil
         }
 
+        let normalizedEmbedding = VDSPOperations.l2Normalize(segmentEmbedding)
+
         // Add to raw embeddings
         guard
             let (updatedRaw, shouldRecalc) = addRawEmbedding(
                 to: currentRawEmbeddings,
                 segmentId: segmentId,
-                embedding: segmentEmbedding,
+                embedding: normalizedEmbedding,
                 timestamp: Date()
             )
         else {
@@ -400,7 +424,7 @@ public enum SpeakerUtilities {
         // Update main embedding using exponential moving average
         let updatedMain = updateEmbedding(
             current: currentMainEmbedding,
-            new: segmentEmbedding,
+            new: normalizedEmbedding,
             alpha: alpha
         )
 
@@ -471,7 +495,7 @@ public enum SpeakerUtilities {
             average[i] /= Float(validCount)
         }
 
-        return average
+        return VDSPOperations.l2Normalize(average)
     }
 }
 

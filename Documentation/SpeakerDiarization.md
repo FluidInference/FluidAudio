@@ -107,6 +107,101 @@ let config = DiarizerConfig(
 let diarizer = DiarizerManager(config: config)
 ```
 
+### Offline VBx Pipeline (Batch Diarization)
+
+> Requires macOS 14 / iOS 17 or later. The offline stack uses native C++ clustering and AsyncStream coordination that are unavailable on older OS releases.
+
+When you need full parity with the pyannote/Core ML exporter (powerset segmentation + VBx clustering), use `OfflineDiarizerManager`. It orchestrates segmentation, soft mask interpolation, WeSpeaker embedding extraction, PLDA/VBx clustering, and timeline reconstruction in one place:
+
+```swift
+import FluidAudio
+
+let config = OfflineDiarizerConfig()
+let manager = OfflineDiarizerManager(config: config)
+try await manager.prepareModels()  // Downloads + compiles Core ML bundles when missing
+
+let samples = try AudioConverter().resampleAudioFile(path: "meeting.wav")
+let result = try await manager.process(audio: samples)
+
+for segment in result.segments {
+    print("\(segment.speakerId) → \(segment.startTimeSeconds)s – \(segment.endTimeSeconds)s")
+}
+```
+
+For file-based processing, use the memory-mapped streaming API which automatically handles large audio files efficiently:
+
+```swift
+let url = URL(fileURLWithPath: "meeting.wav")
+let result = try await manager.process(url)
+```
+
+The file-based API internally uses memory-mapped streaming to avoid materializing the entire buffer in memory.
+
+The offline controller mirrors the reference pipeline:
+
+- **Segmentation:** `SegmentationRunner` feeds 10 s/160 k sample chunks through the Core ML segmentation model. Each chunk yields 589 frame-level log probabilities over the 7 local powerset classes.
+- **Binarization:** `Binarization.logProbsToWeights` converts log probabilities to soft VAD weights; binary masks are still available for diagnostics.
+- **Weight interpolation:** `WeightInterpolation` applies the same half-pixel mapping as `scipy.ndimage.zoom`, preserving the Core ML exporter’s alignment when resampling 589-frame masks to the embedding model’s pooling rate.
+- **Embedding extraction:** `EmbeddingRunner` batches audio + resampled weights and returns L2-normalized 256-d embeddings.
+- **VBx clustering:** `VBxClustering` (with `AHCClustering` warm start and `PLDAScoring`) runs the full VBx refinement loop using the JSON parameters exported with the model bundle.
+- **Timeline reconstruction:** `TimelineReconstruction` now derives frame duration from the actual segmentation output and `OfflineDiarizerConfig.windowDuration`, ensuring timestamps stay correct if you swap in models with different hop sizes.
+
+`OfflineDiarizerConfig` groups knobs by pipeline stage:
+
+- `segmentation`: Window length (default 10 s), step ratio, min on/off durations, and sample rate. These must align with the exported Core ML segmentation model.
+- `embedding`: Batch size and overlap handling. Keep `excludeOverlap` enabled for community-1 style powerset outputs.
+- `clustering`: The VBx warm-start threshold plus pyannote's Fa/Fb priors.
+- `vbx`: Max iterations and convergence tolerance for the refinement loop.
+- `postProcessing`: Minimum gap duration when stitching segments back together.
+- `export`: Optional `embeddingsPath` for dumping per-speaker vectors to JSON.
+
+`prepareModels` captures Core ML compilation timings (and download durations when a fresh fetch is needed), so `DiarizationResult.timings` reflects audio loading, segmentation, embedding, clustering, and post-processing costs in one place. Per-speaker embeddings are exposed in `speakerDatabase` for downstream analytics without toggling debug flags.
+
+#### CLI shortcut
+
+The CLI exposes the same controller via `fluidaudio process` and the diarization benchmark tooling:
+
+```bash
+swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
+swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6 --auto-download
+```
+
+Add `--rttm path/to/meeting.rttm` when you have ground-truth annotations to emit DER/JER directly on the console, or `--export-embeddings embeddings.json` to inspect cluster assignments. The GitHub Actions workflow [`offline-pipeline.yml`](../.github/workflows/offline-pipeline.yml) executes the single-file AMI benchmark on every PR, keeping downloads, PLDA transforms, and VBx clustering guard-railed.
+
+Both commands reuse the shared model cache (`OfflineDiarizerModels.defaultModelsDirectory()`) and emit JSON payloads compatible with the streaming pipeline.
+
+#### Advanced: Manual Audio Source Control
+
+For use cases requiring fine-grained control over memory management or audio loading, you can manually construct the audio source using `StreamingAudioSourceFactory`:
+
+```swift
+import FluidAudio
+
+let config = OfflineDiarizerConfig()
+let manager = OfflineDiarizerManager(config: config)
+try await manager.prepareModels()
+
+let factory = StreamingAudioSourceFactory()
+let (source, loadDuration) = try factory.makeDiskBackedSource(
+    from: URL(fileURLWithPath: "meeting.wav"),
+    targetSampleRate: config.segmentation.sampleRate
+)
+defer { source.cleanup() }
+
+let result = try await manager.process(
+    audioSource: source,
+    audioLoadingSeconds: loadDuration
+)
+```
+
+This approach is useful when you need to:
+
+- Process the same file multiple times without reloading
+- Measure audio loading time separately from diarization time
+- Implement custom cleanup or caching logic
+
+For most use cases, the simpler `manager.process(url)` API is recommended.
+
 ## Streaming/Real-time Processing
 
 Process audio in chunks for real-time applications:
@@ -455,8 +550,8 @@ swift run fluidaudio diarization-benchmark --single-file ES2004a
 | Property | Type | Description |
 |----------|------|-------------|
 | `segments` | `[TimedSpeakerSegment]` | Speaker segments with timing |
-| `speakerDatabase` | `[String: [Float]]?` | Speaker embeddings (debug mode) |
-| `timings` | `PipelineTimings?` | Processing timings (debug mode) |
+| `speakerDatabase` | `[String: [Float]]?` | Speaker embeddings keyed by speaker ID |
+| `timings` | `PipelineTimings?` | Processing timings for the diarization pass |
 
 ## Requirements
 

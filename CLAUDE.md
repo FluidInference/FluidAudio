@@ -36,12 +36,24 @@ FluidAudio is a comprehensive Swift framework for local, low-latency audio proce
 - **DO NOT** implement alternatives without asking
 - Only after your approval: Implementation, then explanation of results
 
-### Code Formatting
+### Code Style and Formatting
 
 - **Swift Format**: This project uses swift-format for consistent code style
 - **Configuration**: See `.swift-format` for style rules
 - **Auto-formatting**: PRs are automatically checked for formatting compliance
 - **Local formatting**: Run `swift format --in-place --recursive --configuration .swift-format Sources/ Tests/`
+
+#### Style Guidelines
+- **Line length**: 120 characters
+- **Indentation**: 4 spaces
+- **Import order**: `import CoreML`, `import Foundation`, `import OSLog` (OrderedImports rule)
+- **Naming conventions**:
+  - lowerCamelCase for variables/functions
+  - UpperCamelCase for types
+- **Error handling**: Use proper Swift error handling, no force unwrapping in production
+- **Documentation**: Triple-slash comments (`///`) for public APIs
+- **Thread safety**: Use actors, `@MainActor`, or proper locking - never `@unchecked Sendable`
+- **Control flow**: Prefer flattened if statements with early returns/continues over nested if statements. Use guard statements and inverted conditions to exit early. Nested if statements should be absolutely avoided to improve readability and reduce cognitive complexity.
 
 ## Current Performance Status
 
@@ -262,6 +274,16 @@ The project uses GitHub Actions with the following workflows:
 - **Indentation**: 4 spaces
 - **Formatting Rules**: Automatic via swift-format, CI enforced
 
+## User Preferences
+
+- Never start responses with positive re-affirming text like "You're absolutely right!", "Good change!", "Excellent progress!", or similar
+- Get straight to the point with technical facts
+- For debugging, use print statements and delete them at the end when instructed
+- Never create fallbacks or simplified solutions that don't actually solve the problem
+- Always go for the proper solution over the "simplified" solution
+- When asked to implement something specific, DO IT FIRST before explaining why it might not be optimal - implementation first, explanation second
+- Just do as instructed - don't try to over-do things that aren't asked
+
 ## Development Guidelines
 
 1. **Testing**: Always run benchmarks on multiple files for validation
@@ -271,8 +293,9 @@ The project uses GitHub Actions with the following workflows:
 5. **Thread Safety**: Never use `@unchecked Sendable` - implement proper synchronization
 6. **Follow Instructions**: When the user asks to implement something specific, DO IT FIRST before explaining why it might not be optimal. Implementation first, explanation second.
 7. **Avoid Deprecated Code**: Do not add support for deprecated models or features unless explicitly requested. Keep the codebase clean by only supporting current versions.
-8. **Git Operations**: NEVER run `git push` unless explicitly requested by the user. Only commit when asked.
-8. **Code Formatting**: All code must pass swift-format checks before merge
+8. **Testing Policy**: ONLY add or run tests when explicitly requested by the user
+9. **Git Operations**: NEVER run `git push` unless explicitly requested by the user. Only commit when asked.
+10. **Code Formatting**: All code must pass swift-format checks before merge
 
 ## Next Steps
 
@@ -318,6 +341,3 @@ swift test --filter EdgeCaseTests
 - **VAD CoreML**: [FluidInference/silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml)
 - **ASR Models**: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml)
 - **Test Data**: [alexwengg/musan_mini*](https://huggingface.co/datasets/alexwengg) variants
-- remember to never start with "You're absolutely right!"
-- remember to never start with things like "Good change!" or any positive re-affirming text. Just get straight to the point.
-- remember to not use config debug, for dbeugging just print and then delete at the very end when the user tells you

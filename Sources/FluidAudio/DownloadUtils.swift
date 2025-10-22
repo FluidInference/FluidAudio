@@ -100,7 +100,8 @@ public class DownloadUtils {
         _ repo: Repo,
         modelNames: [String],
         directory: URL,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        variant: String? = nil
     ) async throws -> [String: MLModel] {
         // Ensure host environment is logged for debugging (once per process)
         await SystemInfo.logOnce(using: logger)
@@ -108,7 +109,7 @@ public class DownloadUtils {
             // 1st attempt: normal load
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits)
+                directory: directory, computeUnits: computeUnits, variant: variant)
         } catch {
             // 1st attempt failed → wipe cache to signal redownload
             logger.warning("First load failed: \(error.localizedDescription)")
@@ -119,7 +120,7 @@ public class DownloadUtils {
             // 2nd attempt after fresh download
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits)
+                directory: directory, computeUnits: computeUnits, variant: variant)
         }
     }
 
@@ -134,7 +135,8 @@ public class DownloadUtils {
         _ repo: Repo,
         modelNames: [String],
         directory: URL,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        variant: String? = nil
     ) async throws -> [String: MLModel] {
         // Ensure host environment is logged for debugging (once per process)
         await SystemInfo.logOnce(using: logger)
@@ -145,7 +147,7 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
             logger.info("Models not found in cache at \(repoPath.path)")
-            try await downloadRepo(repo, to: directory)
+            try await downloadRepo(repo, to: directory, variant: variant)
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
         }
@@ -237,14 +239,14 @@ public class DownloadUtils {
     }
 
     /// Download a HuggingFace repository
-    private static func downloadRepo(_ repo: Repo, to directory: URL) async throws {
+    private static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
-        // Get the required model names for this repo
-        let requiredModels = getRequiredModelNames(for: repo)
+        // Get the required model names for this repo from the appropriate manager
+        let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
 
         // Download all repository contents
         let files = try await listRepoFiles(repo)
@@ -252,10 +254,28 @@ public class DownloadUtils {
         for file in files {
             switch file.type {
             case "directory" where file.path.hasSuffix(".mlmodelc"):
-                // Only download if this model is in our required list
-                if requiredModels.contains(file.path) {
+                // Check if this model is required (with or without subfolder prefix)
+                let isRequired =
+                    requiredModels.contains(file.path) || requiredModels.contains { $0.hasSuffix("/" + file.path) }
+
+                if isRequired {
                     logger.info("Downloading required model: \(file.path)")
-                    try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
+
+                    // Find if this should go in a subfolder
+                    if let fullPath = requiredModels.first(where: { $0.hasSuffix("/" + file.path) }),
+                        fullPath.contains("/")
+                    {
+                        // Extract subfolder (e.g., "speaker-diarization-offline/Segmentation.mlmodelc" -> "speaker-diarization-offline")
+                        let subfolder = String(fullPath.split(separator: "/").first!)
+                        let subfolderPath = repoPath.appendingPathComponent(subfolder)
+                        try FileManager.default.createDirectory(at: subfolderPath, withIntermediateDirectories: true)
+
+                        // Download to subfolder
+                        try await downloadModelDirectory(repo: repo, dirPath: file.path, to: subfolderPath)
+                    } else {
+                        // Download to root of repo
+                        try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
+                    }
                 } else {
                     logger.info("Skipping unrequired model: \(file.path)")
                 }

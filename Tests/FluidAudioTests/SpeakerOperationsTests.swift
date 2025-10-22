@@ -215,7 +215,14 @@ final class SpeakerOperationsTests: XCTestCase {
         XCTAssertNotNil(speaker)
         XCTAssertEqual(speaker?.id, "test1")
         XCTAssertEqual(speaker?.name, "Test Speaker")
-        XCTAssertEqual(speaker?.currentEmbedding, embedding)
+        let expectedEmbedding = VDSPOperations.l2Normalize(embedding)
+        if let current = speaker?.currentEmbedding {
+            for (value, expected) in zip(current, expectedEmbedding) {
+                XCTAssertEqual(value, expected, accuracy: 0.0001)
+            }
+        } else {
+            XCTFail("Speaker embedding missing")
+        }
         XCTAssertEqual(speaker?.duration, 5.0)
     }
 
@@ -225,17 +232,25 @@ final class SpeakerOperationsTests: XCTestCase {
         let oldEmb = [Float](repeating: 1.0, count: 256)
         let newEmb = [Float](repeating: 0.5, count: 256)  // Use non-zero values to pass validation
 
+        let alpha: Float = 0.7
         let updated = SpeakerUtilities.updateEmbedding(
             current: oldEmb,
             new: newEmb,
-            alpha: 0.7
+            alpha: alpha
         )
 
         XCTAssertNotNil(updated)
-        // With alpha=0.7: result = 0.7 * 1.0 + 0.3 * 0.5 = 0.85
+        // Embeddings are averaged in normalized space and then renormalized.
         if let updatedValues = updated {
-            for value in updatedValues {
-                XCTAssertEqual(value, 0.85, accuracy: 0.001)
+            let normalizedCurrent = VDSPOperations.l2Normalize(oldEmb)
+            let normalizedNew = VDSPOperations.l2Normalize(newEmb)
+            var combined = [Float](repeating: 0, count: normalizedCurrent.count)
+            for i in 0..<combined.count {
+                combined[i] = alpha * normalizedCurrent[i] + (1 - alpha) * normalizedNew[i]
+            }
+            let expectedValues = VDSPOperations.l2Normalize(combined)
+            for (value, expected) in zip(updatedValues, expectedValues) {
+                XCTAssertEqual(value, expected, accuracy: 0.001)
             }
         }
     }
@@ -383,9 +398,14 @@ final class SpeakerOperationsTests: XCTestCase {
         let average = SpeakerUtilities.averageEmbeddings([emb1, emb2, emb3])
 
         XCTAssertNotNil(average)
-        // Average should be 2.0
-        for value in average! {
-            XCTAssertEqual(value, 2.0, accuracy: 0.001)
+        // Average should reflect normalized mean of normalized embeddings.
+        let expected = VDSPOperations.l2Normalize([Float](repeating: 2.0, count: 256))
+        if let average = average {
+            for (value, expectedValue) in zip(average, expected) {
+                XCTAssertEqual(value, expectedValue, accuracy: 0.001)
+            }
+        } else {
+            XCTFail("Average should not be nil")
         }
     }
 
@@ -402,10 +422,11 @@ final class SpeakerOperationsTests: XCTestCase {
         // Should return average of valid embeddings only (emb1 in this case)
         XCTAssertNotNil(average)
         XCTAssertEqual(average?.count, 256)
-        // Should be 1.0 since only emb1 is valid
+        // Should match the normalized emb1 since only it is valid
         if let avg = average {
-            for value in avg {
-                XCTAssertEqual(value, 1.0, accuracy: 0.001)
+            let expected = VDSPOperations.l2Normalize(emb1)
+            for (value, expectedValue) in zip(avg, expected) {
+                XCTAssertEqual(value, expectedValue, accuracy: 0.001)
             }
         }
     }
