@@ -192,7 +192,7 @@ enum TranscribeCommand {
             logger.info("BATCH TRANSCRIPTION RESULTS")
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
-            logger.info(result.text)
+            print(result.text)
 
             if showMetadata {
                 logger.info("Metadata:")
@@ -389,7 +389,7 @@ enum TranscribeCommand {
             logger.info("STREAMING TRANSCRIPTION RESULTS")
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
-            logger.info(finalText)
+            print(finalText)
             logger.info("Performance:")
             logger.info("  Audio duration: \(String(format: "%.2f", totalDuration))s")
             logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
