@@ -32,6 +32,50 @@ for segment in result.segments {
 }
 ```
 
+## Source Layout
+
+The diarizer module mirrors the three-stage pipeline and its offline counterpart. Files live under `Sources/FluidAudio/Diarizer/`:
+
+```
+Core/
+├── DiarizerManager.swift        # Real-time orchestrator and chunk scheduler
+├── DiarizerTypes.swift          # Public models/configs shared across stages
+└── DiarizerModels.swift         # Core ML bundle management
+
+Segmentation/
+├── SegmentationProcessor.swift  # VAD + powerset segmentation inference
+├── SlidingWindow.swift          # Frame windowing helpers
+└── AudioValidation.swift        # Streaming quality/embedding validation
+
+Extraction/
+└── EmbeddingExtractor.swift     # WeSpeaker embedding inference
+
+Clustering/
+├── SpeakerManager.swift         # Active speaker tracking and assignment
+├── SpeakerTypes.swift           # Speaker/raw embedding representations
+└── SpeakerOperations.swift      # Distance/scoring utilities
+
+Offline/
+├── Core/
+│   ├── OfflineDiarizerManager.swift
+│   ├── OfflineDiarizerTypes.swift
+│   └── OfflineDiarizerModels.swift
+├── Segmentation/
+│   └── OfflineSegmentationProcessor.swift
+├── Extraction/
+│   ├── OfflineEmbeddingExtractor.swift
+│   ├── PLDATransform.swift
+│   └── WeightInterpolation.swift
+├── Clustering/
+│   ├── AHCClustering.swift
+│   └── VBxClustering.swift
+└── Utils/
+    ├── OfflineReconstruction.swift
+    └── VDSPOperations.swift
+```
+
+Use this layout as the reference when adding new diarization capabilities so orchestration, segmentation, embedding extraction, and clustering stay isolated.
+
 ## Manual Model Loading
 
 If you deploy in an offline environment, stage the Core ML bundles manually and skip the automatic HuggingFace downloader.
