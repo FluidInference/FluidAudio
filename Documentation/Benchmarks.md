@@ -11,22 +11,39 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 ```
 
 ```text
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark]
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] English (US)              | 5.5    | 2.5    | 199.0   | 3442.9s  | 350       | -
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] French (France)           | 6.2    | 2.6    | 191.1   | 560.8s   | 52        | 298
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] German (Germany)          | 3.1    | 1.2    | 220.7   | 62.1s    | 5         | -
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] Italian (Italy)           | 4.3    | 2.0    | 216.7   | 743.3s   | 50        | -
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] Russian (Russia)          | 7.5    | 2.6    | 191.9   | 621.2s   | 50        | -
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] Spanish (Spain)           | 5.2    | 2.4    | 211.7   | 586.9s   | 50        | -
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] Ukrainian (Ukraine)       | 7.2    | 2.1    | 187.3   | 528.2s   | 50        | -
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[14:01:26.402] [INFO] [FluidAudio.FLEURSBenchmark] AVERAGE                   | 5.6    | 2.2    | 202.6   | 6545.5s  | 607       | 298
-[14:01:26.409] [INFO] [FluidAudio.Main] Peak memory usage (process-wide): 0.177 GB
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark]
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Bulgarian (Bulgaria)      | 12.9   | 4.1    | 182.9   | 3468.0s  | 350       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Croatian (Croatia)        | 14.2   | 4.3    | 194.3   | 3647.0s  | 350       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Czech (Czechia)           | 12.4   | 4.0    | 204.2   | 4247.4s  | 350       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Danish (Denmark)          | 20.5   | 7.6    | 203.3   | 10579.1s | 930       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Dutch (Netherlands)       | 7.9    | 2.7    | 179.0   | 3337.7s  | 350       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] English (US)              | 5.5    | 2.5    | 196.3   | 3442.9s  | 350       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Estonian (Estonia)        | 20.5   | 4.4    | 212.4   | 10825.4s | 893       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Finnish (Finland)         | 15.4   | 3.4    | 206.8   | 11894.4s | 918       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] French (France)           | 6.2    | 2.3    | 190.1   | 3667.3s  | 350       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] German (Germany)          | 6.9    | 2.5    | 188.0   | 4684.6s  | 350       | -
+[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Greek (Greece)            | 37.1   | 13.8   | 171.6   | 6862.0s  | 650       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Hungarian (Hungary)       | 18.0   | 5.3    | 202.9   | 11050.9s | 905       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Italian (Italy)           | 4.7    | 1.8    | 222.2   | 5098.7s  | 350       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Latvian (Latvia)          | 27.8   | 7.8    | 186.5   | 10218.6s | 851       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Lithuanian (Lithuania)    | 25.3   | 7.1    | 190.3   | 10686.5s | 986       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Maltese (Malta)           | 25.5   | 9.6    | 203.0   | 12770.6s | 926       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Polish (Poland)           | 8.7    | 2.9    | 178.1   | 3409.6s  | 350       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Romanian (Romania)        | 14.6   | 4.8    | 190.5   | 9099.4s  | 883       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Russian (Russia)          | 7.3    | 2.2    | 195.7   | 3974.6s  | 350       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Slovak (Slovakia)         | 13.0   | 4.6    | 211.6   | 4169.6s  | 350       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Slovenian (Slovenia)      | 27.6   | 9.4    | 187.8   | 8173.1s  | 834       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Spanish (Spain)           | 4.6    | 2.2    | 212.1   | 4258.9s  | 350       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Swedish (Sweden)          | 16.9   | 5.1    | 207.6   | 8399.2s  | 759       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Ukrainian (Ukraine)       | 7.4    | 2.5    | 194.2   | 3853.7s  | 350       | -
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] AVERAGE                   | 15.0   | 4.9    | 196.3   | 161819.2 | 14085     | -
+[18:59:33.189] [INFO] [FluidAudio.Main] Peak memory usage (process-wide): 0.486 GB
 ```
 
 ```text
