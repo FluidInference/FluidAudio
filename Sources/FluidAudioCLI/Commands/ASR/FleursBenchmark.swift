@@ -128,6 +128,7 @@ public class FLEURSBenchmark {
                         logger.warning(
                             "Detected \(corruptedFiles.count) corrupted audio files for \(language); removing and re-downloading."
                         )
+
                         for file in corruptedFiles {
                             try? FileManager.default.removeItem(at: file)
                         }
@@ -772,9 +773,9 @@ public class FLEURSBenchmark {
             logger.info("No high WER cases (> \(Int(ASRConstants.highWERThreshold * 100))%) detected.")
             return
         }
-
         logger.info(
             "All High WER Cases (>\(Int(ASRConstants.highWERThreshold * 100))%) Across Languages (sorted by WER):")
+
         logger.info(String(repeating: "=", count: 80))
 
         // Sort all cases by WER descending, then by language
