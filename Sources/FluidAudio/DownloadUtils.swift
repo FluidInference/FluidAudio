@@ -18,6 +18,168 @@ public class DownloadUtils {
         return URLSession(configuration: configuration)
     }()
 
+    private static let huggingFaceUserAgent = "FluidAudio/1.0 (HuggingFaceDownloader)"
+
+    public enum HuggingFaceDownloadError: LocalizedError {
+        case invalidResponse
+        case rateLimited(statusCode: Int, message: String)
+        case unexpectedContent(statusCode: Int, mimeType: String?, snippet: String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .invalidResponse:
+                return "Received an invalid response from Hugging Face."
+            case .rateLimited(_, let message):
+                return "Hugging Face rate limit encountered: \(message)"
+            case .unexpectedContent(_, let mimeType, let snippet):
+                let mimeInfo = mimeType ?? "unknown MIME type"
+                return "Unexpected Hugging Face content (\(mimeInfo)): \(snippet)"
+            }
+        }
+    }
+
+    private static func huggingFaceToken() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        return env["HF_TOKEN"]
+            ?? env["HUGGINGFACEHUB_API_TOKEN"]
+            ?? env["HUGGING_FACE_HUB_TOKEN"]
+    }
+
+    private static func isLikelyHtml(_ data: Data) -> Bool {
+        guard !data.isEmpty,
+            let prefix = String(data: data.prefix(128), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+        else {
+            return false
+        }
+
+        return prefix.hasPrefix("<!doctype html") || prefix.hasPrefix("<html")
+    }
+
+    private static func makeHuggingFaceRequest(for url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(huggingFaceUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = DownloadConfig.default.timeout
+
+        if let token = huggingFaceToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        return request
+    }
+
+    public static func fetchHuggingFaceFile(
+        from url: URL,
+        description: String,
+        maxAttempts: Int = 4,
+        minBackoff: TimeInterval = 1.0
+    ) async throws -> Data {
+        var lastError: Error?
+
+        for attempt in 1...maxAttempts {
+            do {
+                let request = makeHuggingFaceRequest(for: url)
+                let (data, response) = try await sharedSession.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw HuggingFaceDownloadError.invalidResponse
+                }
+
+                if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+                    let message = "HTTP \(httpResponse.statusCode)"
+                    throw HuggingFaceDownloadError.rateLimited(
+                        statusCode: httpResponse.statusCode, message: message)
+                }
+
+                if let mimeType = httpResponse.mimeType?.lowercased(),
+                    mimeType == "text/html"
+                {
+                    let snippet = String(data: data.prefix(256), encoding: .utf8) ?? ""
+                    throw HuggingFaceDownloadError.unexpectedContent(
+                        statusCode: httpResponse.statusCode,
+                        mimeType: mimeType,
+                        snippet: snippet
+                    )
+                }
+
+                if isLikelyHtml(data) {
+                    let snippet = String(data: data.prefix(256), encoding: .utf8) ?? ""
+                    throw HuggingFaceDownloadError.unexpectedContent(
+                        statusCode: httpResponse.statusCode,
+                        mimeType: httpResponse.mimeType,
+                        snippet: snippet
+                    )
+                }
+
+                return data
+
+            } catch let error as HuggingFaceDownloadError {
+                lastError = error
+
+                if attempt == maxAttempts {
+                    break
+                }
+
+                let backoffSeconds = pow(2.0, Double(attempt - 1)) * minBackoff
+                let backoffNanoseconds = UInt64(backoffSeconds * 1_000_000_000)
+                let formattedBackoff = String(format: "%.1f", backoffSeconds)
+
+                switch error {
+                case .rateLimited(let statusCode, _):
+                    if huggingFaceToken() == nil {
+                        logger.warning(
+                            "Rate limit (HTTP \(statusCode)) while downloading \(description). "
+                                + "Set HF_TOKEN or HUGGINGFACEHUB_API_TOKEN for higher limits. "
+                                + "Retrying in \(formattedBackoff)s."
+                        )
+                    } else {
+                        logger.warning(
+                            "Rate limit (HTTP \(statusCode)) while downloading \(description). "
+                                + "Retrying in \(formattedBackoff)s."
+                        )
+                    }
+                case .unexpectedContent(_, _, let snippet):
+                    logger.warning(
+                        "Unexpected content while downloading \(description). "
+                            + "Snippet: \(snippet.prefix(100)). "
+                            + "Retrying in \(formattedBackoff)s."
+                    )
+                case .invalidResponse:
+                    logger.warning(
+                        "Invalid response while downloading \(description). "
+                            + "Retrying in \(formattedBackoff)s."
+                    )
+                }
+
+                try await Task.sleep(nanoseconds: backoffNanoseconds)
+
+            } catch {
+                lastError = error
+
+                if attempt == maxAttempts {
+                    break
+                }
+
+                let backoffSeconds = pow(2.0, Double(attempt - 1)) * minBackoff
+                let backoffNanoseconds = UInt64(backoffSeconds * 1_000_000_000)
+                let formattedBackoff = String(format: "%.1f", backoffSeconds)
+
+                logger.warning(
+                    "Download attempt \(attempt) for \(description) failed: "
+                        + "\(error.localizedDescription). "
+                        + "Retrying in \(formattedBackoff)s."
+                )
+
+                try await Task.sleep(nanoseconds: backoffNanoseconds)
+            }
+        }
+
+        throw lastError ?? HuggingFaceDownloadError.invalidResponse
+    }
+
     private static func configureProxySettings() -> [String: Any]? {
         #if os(macOS)
         var proxyConfig: [String: Any] = [:]
