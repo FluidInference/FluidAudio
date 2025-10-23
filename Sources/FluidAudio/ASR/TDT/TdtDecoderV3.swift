@@ -150,6 +150,10 @@ internal struct TdtDecoderV3 {
         }
         // Use the minimum of encoder sequence length and actual audio frames to avoid processing padding
         let effectiveSequenceLength = min(encoderSequenceLength, actualAudioFrames)
+        let dynamicTokenLimit = max(
+            config.tdtConfig.maxTokensPerChunk,
+            config.tdtConfig.maxTokensPerFrame * max(effectiveSequenceLength, 1)
+        )
 
         // Key variables for frame navigation:
         var safeTimeIndices = min(timeIndices, effectiveSequenceLength - 1)  // Bounds-checked index
@@ -217,16 +221,42 @@ internal struct TdtDecoderV3 {
         // Variables for preventing infinite token emission at same timestamp
         // This handles edge cases where model gets stuck predicting many tokens
         // without advancing through audio (force-blank mechanism)
+        let blankId = config.tdtConfig.blankId  // 8192 for v3 models
+        let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep  // Usually 5-10
+        let maxTokensPerFrame = config.tdtConfig.maxTokensPerFrame  // Guard for zero-skip emissions
         var lastEmissionTimestamp = -1
         var emissionsAtThisTimestamp = 0
-        let maxSymbolsPerStep = config.tdtConfig.maxSymbolsPerStep  // Usually 5-10
+        var tokensAtCurrentFrame = 0
         var tokensProcessedThisChunk = 0  // Track tokens per chunk to prevent runaway decoding
+
+        @inline(__always)
+        func enforceFrameProgress(label: Int, duration: inout Int) {
+            if label != blankId {
+                tokensAtCurrentFrame += 1
+            }
+
+            if duration > 0 {
+                tokensAtCurrentFrame = 0
+            }
+
+            if tokensAtCurrentFrame >= maxTokensPerFrame {
+                tokensAtCurrentFrame = 0
+                if duration == 0 {
+                    duration = 1
+                }
+            }
+
+            if label == blankId && duration == 0 {
+                tokensAtCurrentFrame = 0
+                duration = 1
+            }
+        }
 
         // ===== MAIN DECODING LOOP =====
         // Process each encoder frame until we've consumed all audio
         while activeMask {
             // Use last emitted token for decoder context, or blank if starting
-            var label = hypothesis.lastToken ?? config.tdtConfig.blankId
+            var label = hypothesis.lastToken ?? blankId
             let stateToUse = hypothesis.decState ?? decoderState
 
             // Get decoder output (LSTM hidden state projection)
@@ -241,8 +271,9 @@ internal struct TdtDecoderV3 {
                 decoderResult = (output: provider, newState: stateToUse)
             } else {
                 // No cache - run decoder LSTM
+                let decoderToken = decoderState.predictorOutput == nil ? blankId : label
                 decoderResult = try runDecoder(
-                    token: label,
+                    token: decoderToken,
                     state: stateToUse,
                     model: decoderModel,
                     targetArray: reusableTargetArray,
@@ -279,15 +310,8 @@ internal struct TdtDecoderV3 {
             var duration = try mapDurationBin(
                 decision.durationBin, durationBins: config.tdtConfig.durationBins)
             // Duration prediction logging removed for cleaner output
-
-            let blankId = config.tdtConfig.blankId  // 8192 for v3 models
+            enforceFrameProgress(label: label, duration: &duration)
             var blankMask = (label == blankId)  // Is this a blank (silence) token?
-
-            // CRITICAL FIX: Prevent infinite loops when blank has duration=0
-            // Always advance at least 1 frame to ensure forward progress
-            if blankMask && duration == 0 {
-                duration = 1
-            }
 
             // Advance through audio frames based on predicted duration
             timeIndicesCurrentLabels = timeIndices  // Remember where this token was emitted
@@ -338,13 +362,8 @@ internal struct TdtDecoderV3 {
                 score = clampProbability(innerDecision.probability)
                 duration = try mapDurationBin(
                     innerDecision.durationBin, durationBins: config.tdtConfig.durationBins)
-
+                enforceFrameProgress(label: label, duration: &duration)
                 blankMask = (label == blankId)
-
-                // Same duration=0 fix for inner loop
-                if blankMask && duration == 0 {
-                    duration = 1
-                }
 
                 // Advance and check if we should continue the inner loop
                 timeIndices += duration
@@ -358,7 +377,7 @@ internal struct TdtDecoderV3 {
             if activeMask && label != blankId {
                 // Check per-chunk token limit to prevent runaway decoding
                 tokensProcessedThisChunk += 1
-                if tokensProcessedThisChunk > config.tdtConfig.maxTokensPerChunk {
+                if tokensProcessedThisChunk > dynamicTokenLimit {
                     break
                 }
 
@@ -367,6 +386,9 @@ internal struct TdtDecoderV3 {
                 hypothesis.score += score
                 hypothesis.timestamps.append(timeIndicesCurrentLabels + globalFrameOffset)
                 hypothesis.tokenConfidences.append(score)
+                if config.tdtConfig.includeTokenDuration {
+                    hypothesis.tokenDurations.append(duration)
+                }
                 hypothesis.lastToken = label  // Remember for next iteration
 
                 // CRITICAL: Update decoder LSTM with the new token
@@ -416,7 +438,7 @@ internal struct TdtDecoderV3 {
             var additionalSteps = 0
             var consecutiveBlanks = 0
             let maxConsecutiveBlanks = config.tdtConfig.consecutiveBlankLimit
-            var lastToken = hypothesis.lastToken ?? config.tdtConfig.blankId
+            var lastToken = hypothesis.lastToken ?? blankId
             var finalProcessingTimeIndices = timeIndices
 
             // Continue until we get consecutive blanks or hit max steps
@@ -474,7 +496,7 @@ internal struct TdtDecoderV3 {
                 let duration = try mapDurationBin(
                     decision.durationBin, durationBins: config.tdtConfig.durationBins)
 
-                if token == config.tdtConfig.blankId {
+                if token == blankId {
                     consecutiveBlanks += 1
                 } else {
                     consecutiveBlanks = 0  // Reset on non-blank
@@ -487,6 +509,9 @@ internal struct TdtDecoderV3 {
                         min(finalProcessingTimeIndices, effectiveSequenceLength - 1) + globalFrameOffset
                     hypothesis.timestamps.append(finalTimestamp)
                     hypothesis.tokenConfidences.append(score)
+                    if config.tdtConfig.includeTokenDuration {
+                        hypothesis.tokenDurations.append(duration)
+                    }
                     hypothesis.lastToken = token
 
                     // Update decoder state

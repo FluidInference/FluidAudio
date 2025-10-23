@@ -59,6 +59,7 @@ internal struct TdtDecoderV2 {
         let adaptedTdt = TdtConfig(
             includeTokenDuration: tdt.includeTokenDuration,
             maxSymbolsPerStep: tdt.maxSymbolsPerStep,
+            maxTokensPerFrame: tdt.maxTokensPerFrame,
             durationBins: tdt.durationBins,
             blankId: 1024,
             boundarySearchFrames: tdt.boundarySearchFrames,
