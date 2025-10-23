@@ -18,7 +18,6 @@ public class FLEURSBenchmark {
         "it_it": "Italian (Italy)",  // 3.00% WER
         "fr_fr": "French (France)",  // 5.15% WER
         "de_de": "German (Germany)",  // 5.04% WER
-        "pt_pt": "Portuguese (Portugal)",  // 4.76% WER (FLEURS code)
 
         // Good performance (WER 5-10%)
         "ru_ru": "Russian (Russia)",  // 5.51% WER
