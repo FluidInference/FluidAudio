@@ -68,7 +68,6 @@ jobs:
         run: |
           # The output is now an array, so we need to access the first element
           DER=$(jq '.[0].der' offline_results.json)
-          JER=$(jq '.[0].jer' offline_results.json)
           RTF=$(jq '.[0].rtfx' offline_results.json)
           DURATION="1049"  # ES2004a duration in seconds
           SPEAKER_COUNT=$(jq '.[0].detectedSpeakers' offline_results.json)
@@ -84,7 +83,6 @@ jobs:
           INFERENCE_TIME=$(jq '.[0].timings.totalInferenceSeconds' offline_results.json)
 
           echo "DER=${DER}" >> $GITHUB_OUTPUT
-          echo "JER=${JER}" >> $GITHUB_OUTPUT
           echo "RTF=${RTF}" >> $GITHUB_OUTPUT
           echo "DURATION=${DURATION}" >> $GITHUB_OUTPUT
           echo "SPEAKER_COUNT=${SPEAKER_COUNT}" >> $GITHUB_OUTPUT
@@ -103,7 +101,6 @@ jobs:
         with:
           script: |
             const der = parseFloat('${{ steps.extract.outputs.DER }}');
-            const jer = parseFloat('${{ steps.extract.outputs.JER }}');
             const rtf = parseFloat('${{ steps.extract.outputs.RTF }}');
             const duration = parseFloat('${{ steps.extract.outputs.DURATION }}').toFixed(1);
             const speakerCount = '${{ steps.extract.outputs.SPEAKER_COUNT }}';
@@ -123,7 +120,6 @@ jobs:
             comment += '| Metric | Value | Target | Status | Description |\n';
             comment += '|--------|-------|--------|---------|-------------|\n';
             comment += `| **DER** | **${der.toFixed(1)}%** | <20% | ${der < 20 ? '✅' : '⚠️'} | Diarization Error Rate (lower is better) |\n`;
-            comment += `| **JER** | **${jer.toFixed(1)}%** | <18% | ${jer < 18 ? '✅' : '⚠️'} | Jaccard Error Rate |\n`;
             comment += `| **RTFx** | **${rtf.toFixed(2)}x** | >1.0x | ${rtf > 1.0 ? '✅' : '⚠️'} | Real-Time Factor (higher is faster) |\n\n`;
 
             comment += '### Offline VBx Pipeline Timing Breakdown\n';
