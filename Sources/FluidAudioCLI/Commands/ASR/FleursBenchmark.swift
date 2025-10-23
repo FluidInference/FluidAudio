@@ -18,7 +18,6 @@ public class FLEURSBenchmark {
         "it_it": "Italian (Italy)",  // 3.00% WER
         "fr_fr": "French (France)",  // 5.15% WER
         "de_de": "German (Germany)",  // 5.04% WER
-        "pt_pt": "Portuguese (Portugal)",  // 4.76% WER (FLEURS code)
 
         // Good performance (WER 5-10%)
         "ru_ru": "Russian (Russia)",  // 5.51% WER
@@ -97,7 +96,7 @@ public class FLEURSBenchmark {
 
         for language in languages {
             guard supportedLanguages.keys.contains(language) else {
-                logger.warning("⚠️ Unsupported language: \(language)")
+                logger.warning("Unsupported language: \(language)")
                 continue
             }
 
@@ -108,16 +107,65 @@ public class FLEURSBenchmark {
                 do {
                     let contents = try FileManager.default.contentsOfDirectory(
                         at: languageDir, includingPropertiesForKeys: nil)
-                    if contents.count > 10 {  // Assume downloaded if has files
-                        logger.info("✓ FLEURS \(language) already downloaded")
+                    let audioFiles = contents.filter {
+                        let ext = $0.pathExtension.lowercased()
+                        return ext == "wav" || ext == "flac"
+                    }
+                    var validAudioFiles: [URL] = []
+                    var corruptedFiles: [URL] = []
+                    validAudioFiles.reserveCapacity(audioFiles.count)
+                    corruptedFiles.reserveCapacity(audioFiles.count)
+
+                    for file in audioFiles {
+                        if isValidAudioFile(file) {
+                            validAudioFiles.append(file)
+                        } else {
+                            corruptedFiles.append(file)
+                        }
+                    }
+
+                    if !corruptedFiles.isEmpty {
+                        logger.warning(
+                            "Detected \(corruptedFiles.count) corrupted audio files for \(language); removing and re-downloading."
+                        )
+                        for file in corruptedFiles {
+                            try? FileManager.default.removeItem(at: file)
+                        }
+                    }
+
+                    // Determine how many samples we expect based on available transcripts
+                    var expectedSamples = config.samplesPerLanguage
+                    let transcriptPath = languageDir.appendingPathComponent("\(language).trans.txt")
+                    if FileManager.default.fileExists(atPath: transcriptPath.path) {
+                        let transcriptData = try String(contentsOf: transcriptPath)
+                        let transcriptLines =
+                            transcriptData.components(separatedBy: .newlines).filter { !$0.isEmpty }
+                        if !transcriptLines.isEmpty {
+                            expectedSamples =
+                                config.samplesPerLanguage == Int.max
+                                ? transcriptLines.count
+                                : min(transcriptLines.count, config.samplesPerLanguage)
+                        }
+                    }
+
+                    if corruptedFiles.isEmpty && validAudioFiles.count >= expectedSamples {
+                        logger.info("FLEURS \(language) already downloaded")
                         continue
+                    }
+
+                    if corruptedFiles.isEmpty {
+                        let expectedDescription =
+                            expectedSamples == Int.max ? "the full dataset" : "\(expectedSamples)"
+                        logger.warning(
+                            "Found \(validAudioFiles.count) valid audio files for \(language); expected at least \(expectedDescription). Downloading remaining files."
+                        )
                     }
                 } catch {
                     // Directory exists but empty, re-download
                 }
             }
 
-            logger.info("📥 Downloading FLEURS dataset for \(supportedLanguages[language]!)...")
+            logger.info("Downloading FLEURS dataset for \(supportedLanguages[language]!)...")
 
             // Create language directory
             try FileManager.default.createDirectory(at: languageDir, withIntermediateDirectories: true)
@@ -127,13 +175,22 @@ public class FLEURSBenchmark {
             // For now, we'll create a structure for local testing
             try await downloadLanguageSamples(language: language, targetDir: languageDir)
 
-            logger.info("✓ Downloaded FLEURS \(language)")
+            logger.info("Downloaded FLEURS \(language)")
+        }
+    }
+
+    private func isValidAudioFile(_ url: URL) -> Bool {
+        do {
+            _ = try AVAudioFile(forReading: url)
+            return true
+        } catch {
+            return false
         }
     }
 
     /// Download samples for a specific language
     private func downloadLanguageSamples(language: String, targetDir: URL) async throws {
-        logger.info("  📥 Downloading FLEURS test set for \(language)...")
+        logger.info("Downloading FLEURS test set for \(language)...")
 
         // Check if already downloaded (look for .trans.txt file)
         let transFile = targetDir.appendingPathComponent("\(language).trans.txt")
@@ -142,8 +199,26 @@ public class FLEURSBenchmark {
                 let contents = try String(contentsOf: transFile)
                 let lines = contents.components(separatedBy: .newlines).filter { !$0.isEmpty }
                 if lines.count > 10 {
-                    logger.info("    ✓ Found existing data with \(lines.count) samples")
-                    return
+                    let expectedCount =
+                        config.samplesPerLanguage == Int.max
+                        ? lines.count
+                        : min(lines.count, config.samplesPerLanguage)
+                    let existingAudio =
+                        ((try? FileManager.default.contentsOfDirectory(
+                            at: targetDir, includingPropertiesForKeys: nil
+                        )) ?? [])
+                        .filter {
+                            let ext = $0.pathExtension.lowercased()
+                            return (ext == "wav" || ext == "flac") && isValidAudioFile($0)
+                        }
+                    if existingAudio.count >= expectedCount {
+                        logger.info("Found existing data with \(lines.count) samples")
+                        return
+                    } else {
+                        logger.warning(
+                            "Transcript lists \(lines.count) samples but only \(existingAudio.count) valid audio files found. Re-downloading."
+                        )
+                    }
                 }
             } catch {
                 // File exists but can't read, re-download
@@ -151,7 +226,7 @@ public class FLEURSBenchmark {
         }
 
         // Download from Hugging Face dataset: FluidInference/fleurs
-        logger.info("    📥 Downloading from HuggingFace: FluidInference/fleurs/\(language)...")
+        logger.info("Downloading from HuggingFace: FluidInference/fleurs/\(language)...")
 
         // Use the existing HuggingFace download infrastructure
         let datasetRepo = "FluidInference/fleurs"
@@ -193,12 +268,15 @@ public class FLEURSBenchmark {
                     // Download transcript file
                     let downloadURL = URL(
                         string: "https://huggingface.co/datasets/\(datasetRepo)/resolve/main/\(file.path)")!
-                    let (transData, _) = try await DownloadUtils.sharedSession.data(from: downloadURL)
-                    try transData.write(to: transFile)
+                    let transData = try await DownloadUtils.fetchHuggingFaceFile(
+                        from: downloadURL,
+                        description: "\(language) transcript"
+                    )
+                    try transData.write(to: transFile, options: .atomic)
 
                     let transcriptContent = String(data: transData, encoding: .utf8) ?? ""
                     let lines = transcriptContent.components(separatedBy: .newlines).filter { !$0.isEmpty }
-                    logger.info("    ✓ Downloaded \(lines.count) transcriptions")
+                    logger.info("Downloaded \(lines.count) transcriptions")
                 } else if fileName.hasSuffix(".wav") {
                     audioFiles.append(file.path)
                 }
@@ -216,8 +294,13 @@ public class FLEURSBenchmark {
 
                 // Skip if already exists
                 if FileManager.default.fileExists(atPath: audioFile.path) {
-                    downloadedCount += 1
-                    continue
+                    if isValidAudioFile(audioFile) {
+                        downloadedCount += 1
+                        continue
+                    } else {
+                        logger.warning("Detected corrupted placeholder for \(fileName). Re-downloading.")
+                        try? FileManager.default.removeItem(at: audioFile)
+                    }
                 }
 
                 // Download audio file using HuggingFace infrastructure
@@ -225,23 +308,39 @@ public class FLEURSBenchmark {
                     string: "https://huggingface.co/datasets/\(datasetRepo)/resolve/main/\(audioPath)")!
 
                 do {
-                    let (audioData, _) = try await DownloadUtils.sharedSession.data(from: downloadURL)
-                    try audioData.write(to: audioFile)
+                    let audioData = try await DownloadUtils.fetchHuggingFaceFile(
+                        from: downloadURL,
+                        description: "\(language)/\(fileName)"
+                    )
+                    try audioData.write(to: audioFile, options: .atomic)
+
+                    guard isValidAudioFile(audioFile) else {
+                        try? FileManager.default.removeItem(at: audioFile)
+                        throw NSError(
+                            domain: "FLEURSBenchmark",
+                            code: 2,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "Downloaded data for \(fileName) is not valid audio. "
+                                    + "The server likely returned a rate-limit placeholder."
+                            ]
+                        )
+                    }
                     downloadedCount += 1
 
                     if downloadedCount % 10 == 0 {
-                        logger.info("      Downloaded \(downloadedCount)/\(maxDownload) audio files...")
+                        logger.info("Downloaded \(downloadedCount)/\(maxDownload) audio files...")
                     }
                 } catch {
-                    logger.warning("      ⚠️ Could not download \(fileName): \(error.localizedDescription)")
+                    logger.warning("Could not download \(fileName): \(error.localizedDescription)")
                 }
             }
 
-            logger.info("    ✓ Downloaded \(downloadedCount) audio files")
+            logger.info("Downloaded \(downloadedCount) audio files")
             return
 
         } catch {
-            logger.warning("    ⚠️ Could not download from HuggingFace: \(error)")
+            logger.warning("Could not download from HuggingFace: \(error)")
 
             // Try fallback: Check if user has manually downloaded data
             let audioDir = targetDir.appendingPathComponent("audio")
@@ -265,11 +364,11 @@ public class FLEURSBenchmark {
                         let transcriptContent = transcriptLines.joined(separator: "")
                         try transcriptContent.write(to: transFile, atomically: true, encoding: .utf8)
 
-                        logger.info("    ✓ Found \(audioFiles.count) audio files (no transcriptions)")
+                        logger.info("Found \(audioFiles.count) audio files (no transcriptions)")
                         return
                     }
                 } catch {
-                    logger.warning("  ⚠️ Error reading audio directory: \(error)")
+                    logger.warning("Error reading audio directory: \(error)")
                 }
             }
 
@@ -291,7 +390,7 @@ public class FLEURSBenchmark {
             let languageDir = cacheDir.appendingPathComponent(language)
 
             guard FileManager.default.fileExists(atPath: languageDir.path) else {
-                logger.warning("⚠️ No data found for \(language). Please download first.")
+                logger.warning("No data found for \(language). Please download first.")
                 continue
             }
 
@@ -313,7 +412,7 @@ public class FLEURSBenchmark {
                         }
                     }
                 } catch {
-                    logger.warning("⚠️ Could not read transcriptions for \(language): \(error)")
+                    logger.warning("Could not read transcriptions for \(language): \(error)")
                 }
             }
 
@@ -343,7 +442,7 @@ public class FLEURSBenchmark {
             }
 
             if !filteredAudioFiles.isEmpty {
-                logger.info("  ✓ Loaded \(filteredAudioFiles.count) samples for \(language)")
+                logger.info("Loaded \(filteredAudioFiles.count) samples for \(language)")
             }
         }
 
@@ -399,7 +498,7 @@ public class FLEURSBenchmark {
     public func runMultilingualBenchmark(
         asrManager: AsrManager
     ) async throws -> (results: [LanguageResults], allHighWERCases: [HighWERCase]) {
-        logger.info(" Starting FLEURS Multilingual ASR Benchmark")
+        logger.info("Starting FLEURS Multilingual ASR Benchmark")
         logger.info(String(repeating: "=", count: 50))
 
         var results: [LanguageResults] = []
@@ -412,17 +511,17 @@ public class FLEURSBenchmark {
         let samples = try loadFLEURSSamples(languages: config.languages)
 
         if samples.isEmpty {
-            logger.warning("⚠️ No samples found. Please ensure FLEURS data is available.")
+            logger.warning("No samples found. Please ensure FLEURS data is available.")
             return ([], [])
         }
 
-        logger.info("📊 Processing \(samples.count) samples across \(config.languages.count) languages")
+        logger.info("Processing \(samples.count) samples across \(config.languages.count) languages")
 
         // Group samples by language
         let languageGroups = Dictionary(grouping: samples, by: { $0.language })
 
         for (language, languageSamples) in languageGroups {
-            logger.info("🔤 Processing \(supportedLanguages[language] ?? language)...")
+            logger.info("Processing \(supportedLanguages[language] ?? language)...")
 
             let (languageResult, highWERCases) = try await processLanguageSamples(
                 samples: languageSamples,
@@ -436,7 +535,7 @@ public class FLEURSBenchmark {
             // Print language summary
             let skippedInfo = languageResult.samplesSkipped > 0 ? ", \(languageResult.samplesSkipped) skipped" : ""
             logger.info(
-                "  ✓ \(language): WER=\(String(format: "%.1f", languageResult.wer * 100))%, CER=\(String(format: "%.1f", languageResult.cer * 100))%, RTFx=\(String(format: "%.1f", languageResult.rtfx))x (\(languageResult.samplesProcessed) processed\(skippedInfo))"
+                "\(language): WER=\(String(format: "%.1f", languageResult.wer * 100))%, CER=\(String(format: "%.1f", languageResult.cer * 100))%, RTFx=\(String(format: "%.1f", languageResult.rtfx))x (\(languageResult.samplesProcessed) processed\(skippedInfo))"
             )
         }
 
@@ -462,7 +561,7 @@ public class FLEURSBenchmark {
         for (_, sample) in samples.enumerated() {
             // Skip if audio file doesn't exist
             guard FileManager.default.fileExists(atPath: sample.audioPath) else {
-                logger.warning("  ⚠️ Audio file not found: \(sample.audioPath)")
+                logger.warning("Audio file not found: \(sample.audioPath)")
                 continue
             }
 
@@ -528,7 +627,7 @@ public class FLEURSBenchmark {
                 }
 
             } catch {
-                logger.warning("  ⚠️ Transcription error for \(sample.sampleId): \(error.localizedDescription)")
+                logger.warning("Transcription error for \(sample.sampleId): \(error.localizedDescription)")
             }
         }
 
@@ -670,12 +769,12 @@ public class FLEURSBenchmark {
     /// Print all high WER cases collected across all languages, sorted by WER descending
     public func printAllHighWERCases(_ allHighWERCases: [HighWERCase]) {
         guard !allHighWERCases.isEmpty else {
-            logger.info("✅ No high WER cases (> \(Int(ASRConstants.highWERThreshold * 100))%) detected.")
+            logger.info("No high WER cases (> \(Int(ASRConstants.highWERThreshold * 100))%) detected.")
             return
         }
 
         logger.info(
-            "🔍 All High WER Cases (>\(Int(ASRConstants.highWERThreshold * 100))%) Across Languages (sorted by WER):")
+            "All High WER Cases (>\(Int(ASRConstants.highWERThreshold * 100))%) Across Languages (sorted by WER):")
         logger.info(String(repeating: "=", count: 80))
 
         // Sort all cases by WER descending, then by language
@@ -786,7 +885,12 @@ extension FLEURSBenchmark {
             switch arguments[i] {
             case "--languages":
                 if i + 1 < arguments.count {
-                    languages = arguments[i + 1].split(separator: ",").map(String.init)
+                    let languageArg = arguments[i + 1].lowercased()
+                    if languageArg == "all" {
+                        languages = nil  // Will be set to all languages below
+                    } else {
+                        languages = arguments[i + 1].split(separator: ",").map(String.init)
+                    }
                     i += 1
                 }
             case "--samples":
@@ -842,7 +946,7 @@ extension FLEURSBenchmark {
         let finalLanguages = languages ?? Array(tempBenchmark.supportedLanguages.keys).sorted()
 
         let cliLogger = AppLogger(category: "FLEURSBenchmark")
-        cliLogger.info("🌏 FLEURS Multilingual ASR Benchmark")
+        cliLogger.info("FLEURS Multilingual ASR Benchmark")
         cliLogger.info(String(repeating: "=", count: 50))
         cliLogger.info(
             "Languages: \(finalLanguages.count == tempBenchmark.supportedLanguages.count ? "all (\(finalLanguages.count) languages)" : finalLanguages.joined(separator: ", "))"
@@ -873,7 +977,7 @@ extension FLEURSBenchmark {
             cliLogger.info("Initializing ASR system...")
             let models = try await AsrModels.downloadAndLoad()
             try await asrManager.initialize(models: models)
-            cliLogger.info("✓ ASR system initialized")
+            cliLogger.info("ASR system initialized")
 
             // Run benchmark
             let (results, allHighWERCases) = try await benchmark.runMultilingualBenchmark(asrManager: asrManager)
@@ -882,15 +986,15 @@ extension FLEURSBenchmark {
             try benchmark.saveResults(results, to: outputFile)
 
             benchmark.printAllHighWERCases(allHighWERCases)
-            cliLogger.info("✓ Results saved to \(outputFile)")
+            cliLogger.info("Results saved to \(outputFile)")
             // Print summary
-            cliLogger.info("" + String(repeating: "=", count: 80))
+            cliLogger.info(String(repeating: "=", count: 80))
             cliLogger.info("FLEURS BENCHMARK SUMMARY")
             cliLogger.info(String(repeating: "=", count: 80))
 
             // Check if we have results to display
             guard !results.isEmpty else {
-                cliLogger.warning("⚠️ No results to display - benchmark produced no valid results")
+                cliLogger.warning("No results to display - benchmark produced no valid results")
                 return
             }
 
@@ -955,11 +1059,11 @@ extension FLEURSBenchmark {
                     + totalSkippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
 
             if totalSkipped > 0 {
-                cliLogger.warning("⚠️ Note: \(totalSkipped) samples were skipped due to audio loading errors")
+                cliLogger.warning("Note: \(totalSkipped) samples were skipped due to audio loading errors")
             }
 
         } catch {
-            cliLogger.error("❌ Benchmark failed: \(error)")
+            cliLogger.error("Benchmark failed: \(error)")
             exit(1)
         }
     }
@@ -972,7 +1076,7 @@ extension FLEURSBenchmark {
         supportedLanguages: [String: String]
     ) async {
         let cliLogger = AppLogger(category: "FLEURSBenchmark")
-        cliLogger.info("🎯 FLEURS Single File ASR Test")
+        cliLogger.info("FLEURS Single File ASR Test")
         cliLogger.info(String(repeating: "=", count: 50))
         cliLogger.info("File: \(fileName)")
 
@@ -984,9 +1088,9 @@ extension FLEURSBenchmark {
                 supportedLanguages: supportedLanguages
             )
         else {
-            cliLogger.error("❌ File '\(fileName)' not found in any language directory")
-            cliLogger.info("   Searched in: \(cacheDir)")
-            cliLogger.info("   Supported languages: \(Array(supportedLanguages.keys).sorted().joined(separator: ", "))")
+            cliLogger.error("File '\(fileName)' not found in any language directory")
+            cliLogger.info("Searched in: \(cacheDir)")
+            cliLogger.info("Supported languages: \(Array(supportedLanguages.keys).sorted().joined(separator: ", "))")
             exit(1)
         }
 
@@ -1016,17 +1120,17 @@ extension FLEURSBenchmark {
             cliLogger.info("Initializing ASR system...")
             let models = try await AsrModels.downloadAndLoad()
             try await asrManager.initialize(models: models)
-            cliLogger.info("✓ ASR system initialized")
+            cliLogger.info("ASR system initialized")
 
             // Load the single sample directly
             let sample = try benchmark.loadSingleFLEURSSample(filePath: filePath, language: language)
 
             guard let sample = sample else {
-                cliLogger.error("❌ Could not load sample for file: \(fileName)")
+                cliLogger.error("Could not load sample for file: \(fileName)")
                 exit(1)
             }
 
-            cliLogger.info("📋 Processing single file...")
+            cliLogger.info("Processing single file...")
             cliLogger.info("Sample ID: \(sample.sampleId)")
             if !sample.transcription.isEmpty {
                 cliLogger.info("Reference: \(sample.transcription)")
@@ -1046,7 +1150,7 @@ extension FLEURSBenchmark {
             try benchmark.saveResults([result], to: outputFile)
 
             // Display results
-            cliLogger.info("📊 Results:")
+            cliLogger.info("Results:")
             let werPercent = result.wer * 100
             let cerPercent = result.cer * 100
             let rtfx = result.rtfx
@@ -1061,14 +1165,14 @@ extension FLEURSBenchmark {
 
             // Show high WER case if any
             if let highWERCase = highWERCase {
-                cliLogger.warning("⚠️ High WER detected:")
+                cliLogger.warning("High WER detected:")
                 benchmark.printAllHighWERCases([highWERCase])
             }
 
-            cliLogger.info("✓ Results saved to \(outputFile)")
+            cliLogger.info("Results saved to \(outputFile)")
 
         } catch {
-            cliLogger.error("❌ Single file test failed: \(error)")
+            cliLogger.error("Single file test failed: \(error)")
             exit(1)
         }
     }
