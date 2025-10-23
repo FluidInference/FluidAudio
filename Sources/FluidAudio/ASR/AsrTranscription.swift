@@ -28,6 +28,7 @@ extension AsrManager {
                 timestamps: hypothesis.timestamps,
                 confidences: hypothesis.tokenConfidences,
                 tokenDurations: hypothesis.tokenDurations,
+                timestampSemantics: hypothesis.timestampSemantics,
                 encoderSequenceLength: encoderSequenceLength,
                 audioSamples: audioSamples,
                 processingTime: Date().timeIntervalSince(startTime)
@@ -144,7 +145,14 @@ extension AsrManager {
         _ chunkSamples: [Float],
         source: AudioSource,
         previousTokens: [Int] = []
-    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
+    ) async throws -> (
+        tokens: [Int],
+        timestamps: [Int],
+        confidences: [Float],
+        durations: [Int],
+        semantics: TdtHypothesis.TimestampSemantics,
+        encoderSequenceLength: Int
+    ) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
 
@@ -165,6 +173,12 @@ extension AsrManager {
             systemDecoderState = state
         }
 
+        let durations = normalizedDurations(
+            tokenDurations: hypothesis.tokenDurations,
+            timestamps: hypothesis.timestamps,
+            semantics: hypothesis.timestampSemantics
+        )
+
         // Apply token deduplication if previous tokens are provided
         if !previousTokens.isEmpty && hypothesis.hasTokens {
             let (deduped, removedCount) = removeDuplicateTokenSequence(
@@ -174,11 +188,27 @@ extension AsrManager {
             let adjustedConfidences =
                 removedCount > 0
                 ? Array(hypothesis.tokenConfidences.dropFirst(removedCount)) : hypothesis.tokenConfidences
+            let adjustedDurations =
+                removedCount > 0 ? Array(durations.dropFirst(removedCount)) : durations
 
-            return (deduped, adjustedTimestamps, adjustedConfidences, encLen)
+            return (
+                deduped,
+                adjustedTimestamps,
+                adjustedConfidences,
+                adjustedDurations,
+                hypothesis.timestampSemantics,
+                encLen
+            )
         }
 
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, encLen)
+        return (
+            hypothesis.ySequence,
+            hypothesis.timestamps,
+            hypothesis.tokenConfidences,
+            durations,
+            hypothesis.timestampSemantics,
+            encLen
+        )
     }
 
     internal func processTranscriptionResult(
@@ -186,6 +216,7 @@ extension AsrManager {
         timestamps: [Int] = [],
         confidences: [Float] = [],
         tokenDurations: [Int] = [],
+        timestampSemantics: TdtHypothesis.TimestampSemantics = .start,
         encoderSequenceLength: Int,
         audioSamples: [Float],
         processingTime: TimeInterval,
@@ -197,7 +228,11 @@ extension AsrManager {
 
         // Convert timestamps to TokenTiming objects if provided
         let timingsFromTimestamps = createTokenTimings(
-            from: tokenIds, timestamps: timestamps, confidences: confidences, tokenDurations: tokenDurations)
+            from: tokenIds,
+            timestamps: timestamps,
+            confidences: confidences,
+            tokenDurations: tokenDurations,
+            semantics: timestampSemantics)
 
         // Use existing timings if provided, otherwise use timings from timestamps
         let resultTimings = tokenTimings.isEmpty ? timingsFromTimestamps : finalTimings
@@ -250,7 +285,11 @@ extension AsrManager {
 
     /// Convert frame timestamps to TokenTiming objects
     private func createTokenTimings(
-        from tokenIds: [Int], timestamps: [Int], confidences: [Float], tokenDurations: [Int] = []
+        from tokenIds: [Int],
+        timestamps: [Int],
+        confidences: [Float],
+        tokenDurations: [Int] = [],
+        semantics: TdtHypothesis.TimestampSemantics = .start
     ) -> [TokenTiming] {
         guard
             !tokenIds.isEmpty && !timestamps.isEmpty && tokenIds.count == timestamps.count
@@ -259,12 +298,18 @@ extension AsrManager {
             return []
         }
 
+        let durations = normalizedDurations(
+            tokenDurations: tokenDurations,
+            timestamps: timestamps,
+            semantics: semantics
+        )
+
         var timings: [TokenTiming] = []
 
         // Create combined data for sorting
         let combinedData = zip(
             zip(zip(tokenIds, timestamps), confidences),
-            tokenDurations.isEmpty ? Array(repeating: 0, count: tokenIds.count) : tokenDurations
+            durations
         ).map {
             (tokenId: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
         }
@@ -272,28 +317,27 @@ extension AsrManager {
         // Sort by timestamp to ensure chronological order
         let sortedData = combinedData.sorted { $0.timestamp < $1.timestamp }
 
-        for i in 0..<sortedData.count {
-            let data = sortedData[i]
+        for data in sortedData {
             let tokenId = data.tokenId
-            let frameIndex = data.timestamp
+            let referenceFrame = data.timestamp
+
+            let durationFrames = max(data.duration, 1)
+
+            let startFrame: Int
+            let endFrame: Int
+
+            switch semantics {
+            case .start:
+                startFrame = referenceFrame
+                endFrame = referenceFrame + durationFrames
+            case .end:
+                endFrame = referenceFrame
+                startFrame = max(0, referenceFrame - durationFrames)
+            }
 
             // Convert encoder frame index to time (80ms per frame)
-            let startTime = TimeInterval(frameIndex) * 0.08
-
-            // Calculate end time using actual token duration if available
-            let endTime: TimeInterval
-            if !tokenDurations.isEmpty && data.duration > 0 {
-                // Use actual token duration (convert frames to time: duration * 0.08)
-                let durationInSeconds = TimeInterval(data.duration) * 0.08
-                endTime = startTime + max(durationInSeconds, 0.08)  // Minimum 80ms duration
-            } else if i < sortedData.count - 1 {
-                // Fallback: Use next token's start time as this token's end time
-                let nextStartTime = TimeInterval(sortedData[i + 1].timestamp) * 0.08
-                endTime = max(nextStartTime, startTime + 0.08)  // Ensure end > start
-            } else {
-                // Last token: assume minimum duration
-                endTime = startTime + 0.08
-            }
+            let startTime = TimeInterval(startFrame) * 0.08
+            let endTime = TimeInterval(endFrame) * 0.08
 
             // Validate that end time is after start time
             let validatedEndTime = max(endTime, startTime + 0.001)  // Minimum 1ms gap
@@ -316,6 +360,66 @@ extension AsrManager {
             timings.append(timing)
         }
         return timings
+    }
+
+    private func normalizedDurations(
+        tokenDurations: [Int],
+        timestamps: [Int],
+        semantics: TdtHypothesis.TimestampSemantics
+    ) -> [Int] {
+        guard !timestamps.isEmpty else { return [] }
+
+        var derived = deriveDurationsFromTimestamps(timestamps, semantics: semantics)
+
+        if tokenDurations.count == timestamps.count {
+            for idx in 0..<derived.count {
+                let provided = tokenDurations[idx]
+                if provided > 0 {
+                    derived[idx] = provided
+                }
+            }
+        } else if !tokenDurations.isEmpty {
+            logger.info(
+                "AsrManager: token durations count \(tokenDurations.count) "
+                    + "does not match timestamps \(timestamps.count); using derived durations."
+            )
+            if let lastProvided = tokenDurations.last, lastProvided > 0 {
+                derived[derived.count - 1] = lastProvided
+            }
+        }
+
+        return derived.map { max($0, 1) }
+    }
+
+    private func deriveDurationsFromTimestamps(
+        _ timestamps: [Int],
+        semantics: TdtHypothesis.TimestampSemantics
+    ) -> [Int] {
+        guard !timestamps.isEmpty else { return [] }
+
+        var durations = Array(repeating: 1, count: timestamps.count)
+
+        switch semantics {
+        case .start:
+            for index in 0..<timestamps.count {
+                let current = timestamps[index]
+                if index + 1 < timestamps.count {
+                    let next = timestamps[index + 1]
+                    durations[index] = max(1, next - current)
+                } else {
+                    durations[index] = max(durations[index], 1)
+                }
+            }
+        case .end:
+            var previousEnd = 0
+            for (index, currentEnd) in timestamps.enumerated() {
+                let delta = currentEnd - previousEnd
+                durations[index] = max(1, delta)
+                previousEnd = currentEnd
+            }
+        }
+
+        return durations
     }
 
     /// Slice encoder output to remove left context frames (following NeMo approach)

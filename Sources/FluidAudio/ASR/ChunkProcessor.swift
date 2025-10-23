@@ -24,8 +24,9 @@ struct ChunkProcessor {
     func process(
         using manager: AsrManager, decoderState: inout TdtDecoderState, startTime: Date
     ) async throws -> ASRResult {
-        // Use a combined structure to keep tokens, timestamps, and confidences aligned
-        var allTokenData: [(token: Int, timestamp: Int, confidence: Float)] = []
+        // Use a combined structure to keep tokens, timestamps, confidences, and durations aligned
+        var allTokenData: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = []
+        var activeSemantics: TdtHypothesis.TimestampSemantics?
 
         var centerStart = 0
         var segmentIndex = 0
@@ -36,7 +37,14 @@ struct ChunkProcessor {
 
             // Process chunk with explicit last chunk detection
 
-            let (windowTokens, windowTimestamps, windowConfidences, maxFrame) = try await processWindowWithTokens(
+            let (
+                windowTokens,
+                windowTimestamps,
+                windowConfidences,
+                windowDurations,
+                semantics,
+                maxFrame
+            ) = try await processWindowWithTokens(
                 centerStart: centerStart,
                 segmentIndex: segmentIndex,
                 lastProcessedFrame: lastProcessedFrame,
@@ -51,12 +59,36 @@ struct ChunkProcessor {
             }
 
             // Combine tokens, timestamps, and confidences into aligned tuples
-            guard windowTokens.count == windowTimestamps.count && windowTokens.count == windowConfidences.count else {
-                throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
+            guard
+                windowTokens.count == windowTimestamps.count
+                    && windowTokens.count == windowConfidences.count
+                    && windowTokens.count == windowDurations.count
+            else {
+                throw ASRError.processingFailed("Token, timestamp, confidence, and duration arrays are misaligned")
             }
 
-            let windowData = zip(zip(windowTokens, windowTimestamps), windowConfidences).map {
-                (token: $0.0.0, timestamp: $0.0.1, confidence: $0.1)
+            var effectiveTimestamps = windowTimestamps
+
+            if let existingSemantics = activeSemantics {
+                if existingSemantics != semantics {
+                    logger.warning(
+                        "ChunkProcessor: mixed timestamp semantics detected; converting \(semantics) to \(existingSemantics)."
+                    )
+                    effectiveTimestamps = convert(
+                        timestamps: windowTimestamps,
+                        durations: windowDurations,
+                        from: semantics,
+                        to: existingSemantics
+                    )
+                }
+            } else {
+                activeSemantics = semantics
+            }
+            let windowData = zip(
+                zip(zip(windowTokens, effectiveTimestamps), windowConfidences),
+                windowDurations
+            ).map {
+                (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
             }
 
             // For chunks after the first, check for and remove duplicated token sequences
@@ -85,11 +117,15 @@ struct ChunkProcessor {
         let allTokens = allTokenData.map { $0.token }
         let allTimestamps = allTokenData.map { $0.timestamp }
         let allConfidences = allTokenData.map { $0.confidence }
+        let allDurations = allTokenData.map { $0.duration }
+        let semantics = activeSemantics ?? .start
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
             timestamps: allTimestamps,
             confidences: allConfidences,
+            tokenDurations: allDurations,
+            timestampSemantics: semantics,
             encoderSequenceLength: 0,  // Not relevant for chunk processing
             audioSamples: audioSamples,
             processingTime: Date().timeIntervalSince(startTime)
@@ -103,7 +139,14 @@ struct ChunkProcessor {
         isLastChunk: Bool,
         using manager: AsrManager,
         decoderState: inout TdtDecoderState
-    ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], maxFrame: Int) {
+    ) async throws -> (
+        tokens: [Int],
+        timestamps: [Int],
+        confidences: [Float],
+        durations: [Int],
+        semantics: TdtHypothesis.TimestampSemantics,
+        maxFrame: Int
+    ) {
         let remainingSamples = audioSamples.count - centerStart
 
         // Calculate context and frame adjustment for all chunks
@@ -164,7 +207,7 @@ struct ChunkProcessor {
 
         // If nothing to process, return empty
         if leftStart >= rightEnd {
-            return ([], [], [], 0)
+            return ([], [], [], [], .start, 0)
         }
 
         let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
@@ -189,15 +232,53 @@ struct ChunkProcessor {
         )
 
         if hypothesis.isEmpty || encLen == 0 {
-            return ([], [], [], 0)
+            return ([], [], [], [], hypothesis.timestampSemantics, 0)
         }
 
         // Take all tokens from decoder (it already processed only the relevant frames)
         let filteredTokens = hypothesis.ySequence
         let filteredTimestamps = hypothesis.timestamps
         let filteredConfidences = hypothesis.tokenConfidences
+        let filteredDurations: [Int]
+        if hypothesis.tokenDurations.count == filteredTokens.count {
+            filteredDurations = hypothesis.tokenDurations
+        } else if hypothesis.tokenDurations.isEmpty {
+            filteredDurations = Array(repeating: 0, count: filteredTokens.count)
+        } else {
+            logger.warning(
+                "ChunkProcessor: token duration count \(hypothesis.tokenDurations.count) "
+                    + "mismatch for tokens \(filteredTokens.count); padding with zeros.")
+            filteredDurations = Array(repeating: 0, count: filteredTokens.count)
+        }
         let maxFrame = hypothesis.maxTimestamp
 
-        return (filteredTokens, filteredTimestamps, filteredConfidences, maxFrame)
+        return (
+            filteredTokens,
+            filteredTimestamps,
+            filteredConfidences,
+            filteredDurations,
+            hypothesis.timestampSemantics,
+            maxFrame
+        )
+    }
+
+    private func convert(
+        timestamps: [Int],
+        durations: [Int],
+        from source: TdtHypothesis.TimestampSemantics,
+        to target: TdtHypothesis.TimestampSemantics
+    ) -> [Int] {
+        guard source != target else { return timestamps }
+        guard timestamps.count == durations.count else {
+            logger.warning("ChunkProcessor: cannot convert semantics due to mismatched duration count.")
+            return timestamps
+        }
+
+        switch target {
+        case .start:
+            return zip(timestamps, durations).map { max(0, $0 - max(0, $1)) }
+        case .end:
+            return zip(timestamps, durations).map { $0 + max(0, $1) }
+        }
     }
 }
