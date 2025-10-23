@@ -61,11 +61,6 @@ struct OfflineSegmentationProcessor {
         var frameDuration: Double = 0
         var numFrames = 0
         let speakerCount = 3
-        let speakerClassIndices: [[Int]] = (0..<speakerCount).map { speaker in
-            powerset.enumerated().compactMap { index, combination in
-                combination.contains(speaker) ? index : nil
-            }
-        }
 
         // Pre-compute flat mapping matrix for vectorized speaker activation
         // Matrix[speaker][class] = 1.0 if speaker in powerset[class], else 0.0
