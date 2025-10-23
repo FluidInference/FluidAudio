@@ -31,7 +31,7 @@ Computes agglomerative hierarchical clustering using centroid linkage on the inp
 
 ## Integration
 
-Used by `Sources/FluidAudio/Diarizer/Offline/AHCClustering.swift` to perform speaker embedding clustering, which is a core component of the diarization pipeline.
+Used by `Sources/FluidAudio/Diarizer/Offline/Clustering/AHCClustering.swift` to perform speaker embedding clustering, which is a core component of the diarization pipeline.
 
 ## Source
 
