@@ -11,21 +11,22 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 ```
 
 ```text
-[01:58:26.666] [INFO] [FLEURSBenchmark] ================================================================================
-[01:58:26.666] [INFO] [FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
-[01:58:26.666] [INFO] [FLEURSBenchmark] ================================================================================
-[01:58:26.666] [INFO] [FLEURSBenchmark]
-[01:58:26.666] [INFO] [FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
-[01:58:26.666] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[01:58:26.666] [INFO] [FLEURSBenchmark] English (US)              | 5.7    | 2.8    | 197.8   | 3442.9s  | 350       | -
-[01:58:26.666] [INFO] [FLEURSBenchmark] French (France)           | 6.3    | 3.0    | 191.3   | 560.8s   | 52        | 298
-[01:58:26.667] [INFO] [FLEURSBenchmark] German (Germany)          | 3.1    | 1.2    | 216.7   | 62.1s    | 5         | -
-[01:58:26.667] [INFO] [FLEURSBenchmark] Italian (Italy)           | 4.3    | 2.0    | 213.5   | 743.3s   | 50        | -
-[01:58:26.667] [INFO] [FLEURSBenchmark] Russian (Russia)          | 7.8    | 2.8    | 186.3   | 621.2s   | 50        | -
-[01:58:26.667] [INFO] [FLEURSBenchmark] Spanish (Spain)           | 5.6    | 2.7    | 214.6   | 586.9s   | 50        | -
-[01:58:26.667] [INFO] [FLEURSBenchmark] Ukrainian (Ukraine)       | 7.2    | 2.1    | 192.8   | 528.2s   | 50        | -
-[01:58:26.667] [INFO] [FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[01:58:26.667] [INFO] [FLEURSBenchmark] AVERAGE                   | 5.7    | 2.4    | 201.9   | 6545.5s  | 607       | 298
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark]
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] English (US)              | 5.7    | 2.8    | 196.2   | 3442.9s  | 350       | -
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] French (France)           | 6.3    | 2.6    | 185.4   | 3667.3s  | 350       | -
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] German (Germany)          | 7.1    | 2.8    | 197.3   | 4684.6s  | 350       | -
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] Italian (Italy)           | 4.8    | 1.9    | 215.3   | 5098.7s  | 350       | -
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] Russian (Russia)          | 7.4    | 2.4    | 199.7   | 3974.6s  | 350       | -
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] Spanish (Spain)           | 6.5    | 3.9    | 213.0   | 4258.9s  | 350       | -
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] Ukrainian (Ukraine)       | 7.4    | 2.5    | 193.1   | 3853.7s  | 350       | -
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
+[15:32:20.757] [INFO] [FluidAudio.FLEURSBenchmark] AVERAGE                   | 6.5    | 2.7    | 200.0   | 28980.6s | 2450      | -
+[15:32:20.765] [INFO] [FluidAudio.Main] Peak memory usage (process-wide): 0.487 GB
 ```
 
 ```text

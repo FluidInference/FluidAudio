@@ -132,8 +132,8 @@ public class DownloadUtils {
                     if huggingFaceToken() == nil {
                         logger.warning(
                             "Rate limit (HTTP \(statusCode)) while downloading \(description). "
-                            + "Set HF_TOKEN or HUGGINGFACEHUB_API_TOKEN for higher limits. "
-                            + "Retrying in \(formattedBackoff)s."
+                                + "Set HF_TOKEN or HUGGINGFACEHUB_API_TOKEN for higher limits. "
+                                + "Retrying in \(formattedBackoff)s."
                         )
                     } else {
                         logger.warning(
