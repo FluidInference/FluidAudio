@@ -116,6 +116,7 @@ internal struct TdtDecoderV3 {
             encoderOutput: encoderOutput, validLength: encoderSequenceLength)
 
         var hypothesis = TdtHypothesis(decState: decoderState)
+        hypothesis.timestampSemantics = .start
         hypothesis.lastToken = decoderState.lastToken
 
         // Initialize time tracking for frame navigation
