@@ -92,10 +92,8 @@ struct ChunkProcessor {
             }
             let tokenPreview = windowTokens.prefix(12).map { manager.vocabulary[$0] ?? "?" }.joined()
             let chunkText = windowTokens.map { manager.vocabulary[$0] ?? "?" }.joined()
-            let confidencesPreview = windowConfidences.prefix(12).map { String(format: "%.2f", $0) }.joined(separator: ",")
-            print("[Chunk] index=\(segmentIndex) preview=\(tokenPreview)")
-            print("          confidences=\(confidencesPreview)")
-            print("          text=\(chunkText)")
+            let confidencesPreview = windowConfidences.prefix(12).map { String(format: "%.2f", $0) }.joined(
+                separator: ",")
 
             // For chunks after the first, check for and remove duplicated token sequences
             if segmentIndex > 0 && !allTokenData.isEmpty && !windowData.isEmpty {
@@ -134,7 +132,8 @@ struct ChunkProcessor {
         for entry in confidenceFiltered {
             if let last = filteredTokenData.last,
                 entry.token == last.token,
-                entry.timestamp - last.timestamp <= frameTolerance {
+                entry.timestamp - last.timestamp <= frameTolerance
+            {
                 continue
             }
             filteredTokenData.append(entry)
@@ -239,8 +238,7 @@ struct ChunkProcessor {
             return ([], [], [], [], .start, 0)
         }
 
-            let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
-            print("[Chunk] centerStartSamples=\(centerStart) leftStart=\(leftStart) rightEnd=\(rightEnd) total=\(audioSamples.count)")
+        let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
 
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
@@ -331,7 +329,10 @@ private func collapseRepeatedSequences(
             let end = deduped.count
             let mid = end - patternLength
             let start = mid - patternLength
-            guard start >= 0 else { patternLength -= 1; continue }
+            guard start >= 0 else {
+                patternLength -= 1
+                continue
+            }
 
             let firstSlice = deduped[start..<mid]
             let secondSlice = deduped[mid..<end]

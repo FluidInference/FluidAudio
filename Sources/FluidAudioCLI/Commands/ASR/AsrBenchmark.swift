@@ -1003,7 +1003,6 @@ extension ASRBenchmark {
             )
 
             print("Results saved to: \(outputFile)")
-            print("ASR benchmark completed successfully")
 
         } catch {
             logger.error("ERROR: ASR benchmark failed: \(error)")
