@@ -77,15 +77,12 @@ func fetchPeakMemoryUsageBytes() -> UInt64? {
 
 func logPeakMemoryUsage() {
     guard let peakBytes = fetchPeakMemoryUsageBytes() else {
-        cliLogger.error("Unable to determine peak memory usage")
         return
     }
 
     let peakGigabytes = Double(peakBytes) / 1024.0 / 1024.0 / 1024.0
     let formatted = String(format: "%.3f", peakGigabytes)
-    cliLogger.info(
-        "Peak memory usage (process-wide): \(formatted) GB"
-    )
+    print("Peak memory usage (process-wide): \(formatted) GB")
 }
 
 func exitWithPeakMemory(_ code: Int32) -> Never {
