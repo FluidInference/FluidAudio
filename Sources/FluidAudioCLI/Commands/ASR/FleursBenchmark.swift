@@ -1004,10 +1004,9 @@ extension FLEURSBenchmark {
             let systemInfo = SystemInfo.summary()
 
             print("")
-            print(String(repeating: "=", count: 89))
             print("Timestamp: \(timestamp)")
             print("System: \(systemInfo)")
-            print(String(repeating: "=", count: 89))
+            print("")
 
             // Print table header
             print("")
@@ -1019,7 +1018,6 @@ extension FLEURSBenchmark {
                     + "Duration".padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
                     + "Processed".padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
                     + "Skipped".padding(toLength: 7, withPad: " ", startingAt: 0))
-            print(String(repeating: "-", count: 89))
 
             for result in results.sorted(by: { lhs, rhs in
                 let lhsName = benchmark.supportedLanguages[lhs.language] ?? lhs.language
@@ -1051,8 +1049,6 @@ extension FLEURSBenchmark {
             let totalDuration = results.reduce(0.0) { $0 + $1.totalDuration }
             let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
             let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
-
-            print(String(repeating: "-", count: 89))
             let avgWerStr = String(format: "%.1f", avgWER * 100)
             let avgCerStr = String(format: "%.1f", avgCER * 100)
             let avgRtfxStr = String(format: "%.1f", avgRTFx)
