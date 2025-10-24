@@ -90,6 +90,12 @@ struct ChunkProcessor {
             ).map {
                 (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
             }
+            let tokenPreview = windowTokens.prefix(12).map { manager.vocabulary[$0] ?? "?" }.joined()
+            let chunkText = windowTokens.map { manager.vocabulary[$0] ?? "?" }.joined()
+            let confidencesPreview = windowConfidences.prefix(12).map { String(format: "%.2f", $0) }.joined(separator: ",")
+            print("[Chunk] index=\(segmentIndex) preview=\(tokenPreview)")
+            print("          confidences=\(confidencesPreview)")
+            print("          text=\(chunkText)")
 
             // For chunks after the first, check for and remove duplicated token sequences
             if segmentIndex > 0 && !allTokenData.isEmpty && !windowData.isEmpty {
@@ -97,7 +103,7 @@ struct ChunkProcessor {
                 let currentTokens = windowData.map { $0.token }
 
                 let (_, removedCount) = manager.removeDuplicateTokenSequence(
-                    previous: previousTokens, current: currentTokens, maxOverlap: 30)
+                    previous: previousTokens, current: currentTokens, maxOverlap: 80)
                 // Only keep the non-duplicate portion of window data
                 let adjustedWindowData = Array(windowData.dropFirst(removedCount))
                 allTokenData.append(contentsOf: adjustedWindowData)
@@ -113,11 +119,34 @@ struct ChunkProcessor {
         // Sort by timestamp to ensure chronological order
         allTokenData.sort { $0.timestamp < $1.timestamp }
 
+        // Remove obviously low-confidence artifacts before deduping
+        let confidenceFloor: Float = 0.2
+        var confidenceFiltered = allTokenData.filter { $0.confidence >= confidenceFloor }
+        if confidenceFiltered.isEmpty {
+            confidenceFiltered = allTokenData
+        }
+
+        // Drop straightforward frame-level duplicates first (<=160ms apart, identical token)
+        let frameTolerance = 2
+        var filteredTokenData: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = []
+        filteredTokenData.reserveCapacity(confidenceFiltered.count)
+
+        for entry in confidenceFiltered {
+            if let last = filteredTokenData.last,
+                entry.token == last.token,
+                entry.timestamp - last.timestamp <= frameTolerance {
+                continue
+            }
+            filteredTokenData.append(entry)
+        }
+
+        filteredTokenData = collapseRepeatedSequences(filteredTokenData)
+
         // Extract sorted arrays
-        let allTokens = allTokenData.map { $0.token }
-        let allTimestamps = allTokenData.map { $0.timestamp }
-        let allConfidences = allTokenData.map { $0.confidence }
-        let allDurations = allTokenData.map { $0.duration }
+        let allTokens = filteredTokenData.map { $0.token }
+        let allTimestamps = filteredTokenData.map { $0.timestamp }
+        let allConfidences = filteredTokenData.map { $0.confidence }
+        let allDurations = filteredTokenData.map { $0.duration }
         let semantics = activeSemantics ?? .start
 
         return manager.processTranscriptionResult(
@@ -210,7 +239,8 @@ struct ChunkProcessor {
             return ([], [], [], [], .start, 0)
         }
 
-        let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
+            let chunkSamples = Array(audioSamples[leftStart..<rightEnd])
+            print("[Chunk] centerStartSamples=\(centerStart) leftStart=\(leftStart) rightEnd=\(rightEnd) total=\(audioSamples.count)")
 
         // Pad to model capacity (15s) if needed; keep track of actual chunk length
         let paddedChunk = manager.padAudioIfNeeded(chunkSamples, targetLength: maxModelSamples)
@@ -281,4 +311,40 @@ struct ChunkProcessor {
             return zip(timestamps, durations).map { $0 + max(0, $1) }
         }
     }
+}
+
+private func collapseRepeatedSequences(
+    _ entries: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
+    maxPatternLength: Int = 6
+) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)] {
+    guard !entries.isEmpty else { return entries }
+
+    var deduped: [(token: Int, timestamp: Int, confidence: Float, duration: Int)] = []
+    deduped.reserveCapacity(entries.count)
+
+    for entry in entries {
+        deduped.append(entry)
+
+        var removed = false
+        var patternLength = min(maxPatternLength, deduped.count / 2)
+        while patternLength >= 1 {
+            let end = deduped.count
+            let mid = end - patternLength
+            let start = mid - patternLength
+            guard start >= 0 else { patternLength -= 1; continue }
+
+            let firstSlice = deduped[start..<mid]
+            let secondSlice = deduped[mid..<end]
+            if firstSlice.elementsEqual(secondSlice, by: { $0.token == $1.token }) {
+                deduped.removeSubrange(mid..<end)
+                removed = true
+                break
+            }
+            patternLength -= 1
+        }
+
+        if removed { continue }
+    }
+
+    return deduped
 }
