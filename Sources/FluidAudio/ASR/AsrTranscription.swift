@@ -13,7 +13,7 @@ extension AsrManager {
         let startTime = Date()
 
         // Route to appropriate processing method based on audio length
-        if audioSamples.count <= 240_000 {
+        if audioSamples.count <= 320_000 {
             let originalLength = audioSamples.count
             let paddedAudio: [Float] = padAudioIfNeeded(audioSamples, targetLength: 240_000)
             let (hypothesis, encoderSequenceLength) = try await executeMLInferenceWithTimings(
@@ -453,16 +453,12 @@ extension AsrManager {
         return slicedArray
     }
 
-    /// Remove duplicate token sequences at the start of the current list that overlap
-    /// with the tail of the previous accumulated tokens. Returns deduplicated current tokens
-    /// and the number of removed leading tokens so caller can drop aligned timestamps.
-    /// Ideally this is not needed. We need to make some more fixes to the TDT decoding logic,
-    /// this should be a temporary workaround.
+    /// Remove duplicate token sequences at chunk boundaries while keeping
+    /// the removal conservative so we don't wipe out fresh content.
     internal func removeDuplicateTokenSequence(
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
 
-        // Handle single punctuation token duplicates first
         let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
         var workingCurrent = current
         var removedCount = 0
@@ -470,54 +466,51 @@ extension AsrManager {
         if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
             && punctuationTokens.contains(workingCurrent.first!)
         {
-            // Remove the duplicate punctuation token from the beginning of current
             workingCurrent = Array(workingCurrent.dropFirst())
             removedCount += 1
         }
 
-        // Check for suffix-prefix overlap: end of previous matches beginning of current
-        let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
-        let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first 12 tokens of current
-
-        guard maxSearchLength >= 2 && maxMatchLength >= 2 else {
-            return (workingCurrent, removedCount)
-        }
-
-        // Search for overlapping sequences from longest to shortest
-        for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
-            // Check if the last `overlapLength` tokens of previous match the first `overlapLength` tokens of current
-            let prevSuffix = Array(previous.suffix(overlapLength))
-            let currPrefix = Array(workingCurrent.prefix(overlapLength))
-
-            if prevSuffix == currPrefix {
-                logger.debug("Found exact suffix-prefix overlap of length \(overlapLength): \(prevSuffix)")
-                let finalRemoved = removedCount + overlapLength
-                return (Array(workingCurrent.dropFirst(overlapLength)), finalRemoved)
+        let cappedOverlap = min(maxOverlap, previous.count, workingCurrent.count)
+        if cappedOverlap > 0 {
+            let previousString = previous.compactMap { vocabulary[$0] }.joined()
+            let searchWindow = String(previousString.suffix(200))
+            var accumulated = ""
+            var sequentialDrop = 0
+            let tolerance = 120
+            for (index, token) in workingCurrent.prefix(cappedOverlap).enumerated() {
+                guard let piece = vocabulary[token] else { break }
+                accumulated += piece
+                if let range = searchWindow.range(of: accumulated, options: .backwards) {
+                    let distanceToEnd = searchWindow.distance(from: range.upperBound, to: searchWindow.endIndex)
+                    if distanceToEnd <= tolerance {
+                        sequentialDrop = index + 1
+                        continue
+                    }
+                }
+                break
             }
-        }
 
-        // Extended search: look for partial overlaps within the sequences
-        // Use boundary search frames from TDT config for NeMo-compatible alignment
-        let boundarySearchFrames = config.tdtConfig.boundarySearchFrames
-        for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
-            let prevStart = max(0, previous.count - maxSearchLength)
-            let prevEnd = previous.count - overlapLength + 1
-            if prevEnd <= prevStart { continue }
+            if sequentialDrop > 0 {
+                removedCount += sequentialDrop
+                workingCurrent = Array(workingCurrent.dropFirst(sequentialDrop))
+                let droppedTokens = current.prefix(sequentialDrop).compactMap { vocabulary[$0] }.joined()
+                let remainingPreview = workingCurrent.prefix(10).compactMap { vocabulary[$0] }.joined()
+                print("[Dedup] sequentialDrop=\(sequentialDrop) dropped=\(droppedTokens) remainingPreview=\(remainingPreview)")
+            }
 
-            for startIndex in prevStart..<prevEnd {
-                let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
-                let currEnd = max(0, workingCurrent.count - overlapLength + 1)
+            let remainingOverlap = min(maxOverlap, previous.count, workingCurrent.count)
+            if remainingOverlap > 0 {
+                for overlapLength in stride(from: remainingOverlap, through: 1, by: -1) {
+                    let prevSuffix = Array(previous.suffix(overlapLength))
+                    let currPrefix = Array(workingCurrent.prefix(overlapLength))
 
-                // Use boundarySearchFrames to limit search window (NeMo tdt_search_boundary pattern)
-                let searchLimit = min(boundarySearchFrames, currEnd)
-                for currentStart in 0..<searchLimit {
-                    let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
-                    if prevSub == currSub {
-                        logger.debug(
-                            "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub) (boundarySearch=\(boundarySearchFrames))"
-                        )
-                        let finalRemoved = removedCount + currentStart + overlapLength
-                        return (Array(workingCurrent.dropFirst(currentStart + overlapLength)), finalRemoved)
+                    if prevSuffix == currPrefix || tokenPiecesMatch(prevSuffix, currPrefix) {
+                        let finalRemoved = removedCount + overlapLength
+                        let trimmed = Array(workingCurrent.dropFirst(overlapLength))
+                        let droppedTokens = workingCurrent.prefix(overlapLength).compactMap { vocabulary[$0] }.joined()
+                        let preview = trimmed.prefix(10).compactMap { vocabulary[$0] }.joined()
+                        print("[Dedup] overlapDrop=\(overlapLength) tokens=\(droppedTokens) preview=\(preview)")
+                        return (trimmed, finalRemoved)
                     }
                 }
             }
@@ -533,4 +526,15 @@ extension AsrManager {
         return 0
     }
 
+    private func tokenPiecesMatch(_ lhs: [Int], _ rhs: [Int]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        if lhs.isEmpty { return false }
+
+        let lhsString = lhs.compactMap { vocabulary[$0] }.joined()
+        let rhsString = rhs.compactMap { vocabulary[$0] }.joined()
+        if lhsString == rhsString { return true }
+        if lhsString.hasSuffix(rhsString) { return true }
+        if rhsString.hasSuffix(lhsString) { return true }
+        return false
+    }
 }
