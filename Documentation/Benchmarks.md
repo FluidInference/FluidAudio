@@ -7,8 +7,9 @@
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml 
 
 ```bash
-swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de,ru_ru,uk_ua --samples all
+swift run fluidaudio fleurs-benchmark --languages all --samples all
 ```
+
 
 ```text
 Timestamp: 2025-10-24 16:06:18
@@ -235,5 +236,33 @@ swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --thresh
 [23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
 ```
 
-
 ## Speaker Diarization
+
+The offline version uses the community-1 model, the online version uses the legacy speaker-diarization-3.1 model.
+
+### Offline diarzing pipeline
+
+For slightly ~1.2% worse DER we default to a higher step ratio segmentation duration than the baseline community-1 pipeline. This allows us to get nearly ~2x the speed (as expected because we're processing 1/2 of the embeddings). For highly critical use cases, one may should use step ratio = 0.1 and minSegmentDurationSeconds = 0.0
+
+Running on the full voxconverse benchmark:
+
+```bash
+StepRatio = 0.2, minSegmentDurationSeconds= 1.0
+Average DER: 15.07% | Median DER: 10.70% | Average JER: 39.40% | Median JER: 40.95% (collar=0.25s, ignoreOverlap=True)
+Average RTFx: 122.06 (from 232 clips)
+Completed. New results: 232, Skipped existing: 0, Total attempted: 232
+Step Ratio 2, min turation 1.0
+
+
+StepRatio = 0.1, minSegmentDurationSeconds= 0
+Average DER: 13.89% | Median DER: 10.49% | Average JER: 42.84% | Median JER: 43.30% (collar=0.25s, ignoreOverlap=True)
+Average RTFx: 64.75 (from 232 clips)
+Completed. New results: 232, Skipped existing: 0, Total attempted: 232
+Step Ratio 1, min duration 0 (edited) 
+```
+
+Note that the baseline pytorch version is ~11% DER, we lost some precision dropping down to fp16 precision in order to run most of the emebdding model on neural engine. But as a result, we significantly out perform the baseline `mps` backend as well. the pyannote-community-1 on cpu is ~1.5-2 RTFx, on mps, it's ~20-25 RTFx.
+
+### Streaming/online Diarization
+
+This is more tricky and honestly a lot more fragile to clustering. Expect +10-15% worse DER for the streaming implementation. Only use this when you critically need realtime streaming speaker diarization. In most cases, offline is more than enough for most applications.
