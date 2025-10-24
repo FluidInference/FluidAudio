@@ -25,6 +25,7 @@ swift format --in-place --recursive --configuration .swift-format Sources/ Tests
 - **NEVER** create dummy/mock models or synthetic audio data - use real models only
 - **NEVER** create simplified versions - implement full solutions or consult first
 - **NEVER** run `git push` unless explicitly requested by user
+- **NEVER** stage or commit changes (git add/git commit) without explicit user approval
 - **ONLY** add or run tests when explicitly requested by the user
 
 ## Code Style (swift-format config)

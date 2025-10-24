@@ -986,10 +986,8 @@ extension ASRBenchmark {
             // Print metadata
             let systemInfo = SystemInfo.summary()
             print("")
-            print(String(repeating: "=", count: 100))
             print("Timestamp: \(dateString)")
             print("System: \(systemInfo)")
-            print(String(repeating: "=", count: 100))
             print("")
 
             print("--- Benchmark Results ---")
