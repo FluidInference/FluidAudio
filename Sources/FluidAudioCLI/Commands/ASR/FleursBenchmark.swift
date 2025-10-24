@@ -79,6 +79,7 @@ public class FLEURSBenchmark {
         let normalizedRef: String
         let normalizedHyp: String
         let wer: Double
+        let cer: Double
         let duration: Double
         let audioPath: String
     }
@@ -128,7 +129,7 @@ public class FLEURSBenchmark {
                         logger.warning(
                             "Detected \(corruptedFiles.count) corrupted audio files for \(language); removing and re-downloading."
                         )
-                        
+
                         for file in corruptedFiles {
                             try? FileManager.default.removeItem(at: file)
                         }
@@ -610,6 +611,7 @@ public class FLEURSBenchmark {
                                 normalizedRef: normalizedRef,
                                 normalizedHyp: normalizedHyp,
                                 wer: metrics.wer,
+                                cer: metrics.cer,
                                 duration: audioDuration,
                                 audioPath: sample.audioPath
                             ))
@@ -788,8 +790,9 @@ public class FLEURSBenchmark {
         for sample in sortedCases {
             let langName = supportedLanguages[sample.language] ?? sample.language
             let werPercent = sample.wer * 100
+            let cerPercent = sample.cer * 100
             logger.info(
-                "Language: \(langName) | File: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
+                "Language: \(langName) | File: \(sample.sampleId) (WER: \(String(format: "%.1f", werPercent))%, CER: \(String(format: "%.1f", cerPercent))%, Duration: \(String(format: "%.2f", sample.duration))s)"
             )
             logger.info("Path: \(sample.audioPath)")
             logger.info(String(repeating: "-", count: 40))
@@ -1279,6 +1282,7 @@ extension FLEURSBenchmark {
                     normalizedRef: normalizedRef,
                     normalizedHyp: normalizedHyp,
                     wer: wer,
+                    cer: cer,
                     duration: audioDuration,
                     audioPath: sample.audioPath
                 )

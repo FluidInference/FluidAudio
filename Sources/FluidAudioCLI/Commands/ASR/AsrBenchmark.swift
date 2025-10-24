@@ -454,8 +454,9 @@ extension ASRBenchmark {
     /// Print detailed analysis for a single file
     private func printSingleFileWERAnalysis(_ result: ASRBenchmarkResult) {
         let werPercent = result.metrics.wer * 100
+        let cerPercent = result.metrics.cer * 100
         logger.info(
-            "File: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
+            "File: \(result.fileName) (WER: \(String(format: "%.1f", werPercent))%, CER: \(String(format: "%.1f", cerPercent))%) (Duration: \(String(format: "%.2f", result.audioLength))s)"
         )
         logger.info(String(repeating: "-", count: 60))
 
