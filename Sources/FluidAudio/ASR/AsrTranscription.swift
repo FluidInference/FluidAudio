@@ -493,9 +493,6 @@ extension AsrManager {
             if sequentialDrop > 0 {
                 removedCount += sequentialDrop
                 workingCurrent = Array(workingCurrent.dropFirst(sequentialDrop))
-                let droppedTokens = current.prefix(sequentialDrop).compactMap { vocabulary[$0] }.joined()
-                let remainingPreview = workingCurrent.prefix(10).compactMap { vocabulary[$0] }.joined()
-                print("[Dedup] sequentialDrop=\(sequentialDrop) dropped=\(droppedTokens) remainingPreview=\(remainingPreview)")
             }
 
             let remainingOverlap = min(maxOverlap, previous.count, workingCurrent.count)
@@ -507,9 +504,6 @@ extension AsrManager {
                     if prevSuffix == currPrefix || tokenPiecesMatch(prevSuffix, currPrefix) {
                         let finalRemoved = removedCount + overlapLength
                         let trimmed = Array(workingCurrent.dropFirst(overlapLength))
-                        let droppedTokens = workingCurrent.prefix(overlapLength).compactMap { vocabulary[$0] }.joined()
-                        let preview = trimmed.prefix(10).compactMap { vocabulary[$0] }.joined()
-                        print("[Dedup] overlapDrop=\(overlapLength) tokens=\(droppedTokens) preview=\(preview)")
                         return (trimmed, finalRemoved)
                     }
                 }

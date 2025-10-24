@@ -305,11 +305,12 @@ public actor StreamingAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
-            let (tokens, timestamps, confidences, durations, semantics, _) = try await asrManager.transcribeStreamingChunk(
-                windowSamples,
-                source: audioSource,
-                previousTokens: accumulatedTokens
-            )
+            let (tokens, timestamps, confidences, durations, semantics, _) =
+                try await asrManager.transcribeStreamingChunk(
+                    windowSamples,
+                    source: audioSource,
+                    previousTokens: accumulatedTokens
+                )
 
             let adjustedTimestamps = Self.applyGlobalFrameOffset(
                 to: timestamps,

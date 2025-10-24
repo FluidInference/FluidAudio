@@ -11,53 +11,52 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 ```
 
 ```text
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] FLEURS BENCHMARK SUMMARY
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] ================================================================================
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark]
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Bulgarian (Bulgaria)      | 12.9   | 4.1    | 182.9   | 3468.0s  | 350       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Croatian (Croatia)        | 14.2   | 4.3    | 194.3   | 3647.0s  | 350       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Czech (Czechia)           | 12.4   | 4.0    | 204.2   | 4247.4s  | 350       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Danish (Denmark)          | 20.5   | 7.6    | 203.3   | 10579.1s | 930       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Dutch (Netherlands)       | 7.9    | 2.7    | 179.0   | 3337.7s  | 350       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] English (US)              | 5.5    | 2.5    | 196.3   | 3442.9s  | 350       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Estonian (Estonia)        | 20.5   | 4.4    | 212.4   | 10825.4s | 893       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Finnish (Finland)         | 15.4   | 3.4    | 206.8   | 11894.4s | 918       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] French (France)           | 6.2    | 2.3    | 190.1   | 3667.3s  | 350       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] German (Germany)          | 6.9    | 2.5    | 188.0   | 4684.6s  | 350       | -
-[18:59:33.179] [INFO] [FluidAudio.FLEURSBenchmark] Greek (Greece)            | 37.1   | 13.8   | 171.6   | 6862.0s  | 650       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Hungarian (Hungary)       | 18.0   | 5.3    | 202.9   | 11050.9s | 905       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Italian (Italy)           | 4.7    | 1.8    | 222.2   | 5098.7s  | 350       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Latvian (Latvia)          | 27.8   | 7.8    | 186.5   | 10218.6s | 851       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Lithuanian (Lithuania)    | 25.3   | 7.1    | 190.3   | 10686.5s | 986       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Maltese (Malta)           | 25.5   | 9.6    | 203.0   | 12770.6s | 926       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Polish (Poland)           | 8.7    | 2.9    | 178.1   | 3409.6s  | 350       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Romanian (Romania)        | 14.6   | 4.8    | 190.5   | 9099.4s  | 883       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Russian (Russia)          | 7.3    | 2.2    | 195.7   | 3974.6s  | 350       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Slovak (Slovakia)         | 13.0   | 4.6    | 211.6   | 4169.6s  | 350       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Slovenian (Slovenia)      | 27.6   | 9.4    | 187.8   | 8173.1s  | 834       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Spanish (Spain)           | 4.6    | 2.2    | 212.1   | 4258.9s  | 350       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Swedish (Sweden)          | 16.9   | 5.1    | 207.6   | 8399.2s  | 759       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] Ukrainian (Ukraine)       | 7.4    | 2.5    | 194.2   | 3853.7s  | 350       | -
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] -----------------------------------------------------------------------------------------
-[18:59:33.180] [INFO] [FluidAudio.FLEURSBenchmark] AVERAGE                   | 15.0   | 4.9    | 196.3   | 161819.2 | 14085     | -
-[18:59:33.189] [INFO] [FluidAudio.Main] Peak memory usage (process-wide): 0.486 GB
+Timestamp: 2025-10-24 16:06:18
+System: macOS Version 26.1 (Build 25B5072a), arch=arm64, chip=Apple M4 Pro, cores=12/12, mem=48 GB, rosetta=false
+
+
+Language                  | WER%   | CER%   | RTFx    | Duration | Processed | Skipped
+Bulgarian (Bulgaria)      | 12.9   | 4.1    | 190.8   | 3139.5s  | 331       | -
+Croatian (Croatia)        | 14.2   | 4.3    | 202.3   | 3161.8s  | 321       | -
+Czech (Czechia)           | 12.4   | 3.9    | 214.0   | 3161.1s  | 286       | -
+Danish (Denmark)          | 20.3   | 7.5    | 212.2   | 8424.6s  | 804       | -
+Dutch (Netherlands)       | 7.7    | 2.6    | 185.0   | 2941.0s  | 327       | -
+English (US)              | 5.4    | 2.5    | 203.2   | 3147.7s  | 333       | -
+Estonian (Estonia)        | 20.1   | 4.2    | 225.4   | 8529.2s  | 756       | -
+Finnish (Finland)         | 15.5   | 3.3    | 221.9   | 8672.8s  | 728       | -
+French (France)           | 6.1    | 2.2    | 196.0   | 3204.5s  | 322       | -
+German (Germany)          | 7.0    | 2.6    | 210.5   | 3615.8s  | 288       | -
+Greek (Greece)            | 36.8   | 13.7   | 179.4   | 5990.8s  | 598       | -
+Hungarian (Hungary)       | 17.2   | 5.1    | 214.3   | 8453.7s  | 751       | -
+Italian (Italy)           | 5.0    | 1.8    | 237.1   | 3606.4s  | 262       | -
+Latvian (Latvia)          | 25.7   | 6.7    | 217.6   | 7933.3s  | 717       | -
+Lithuanian (Lithuania)    | 25.4   | 6.9    | 197.8   | 8946.7s  | 885       | -
+Maltese (Malta)           | 25.3   | 9.3    | 221.4   | 8815.4s  | 692       | -
+Polish (Poland)           | 8.7    | 2.9    | 185.9   | 3057.4s  | 329       | -
+Romanian (Romania)        | 14.8   | 4.8    | 197.7   | 8125.9s  | 824       | -
+Russian (Russia)          | 7.1    | 2.0    | 205.6   | 3378.4s  | 315       | -
+Slovak (Slovakia)         | 12.9   | 4.6    | 227.3   | 3570.4s  | 315       | -
+Slovenian (Slovenia)      | 27.0   | 8.9    | 191.9   | 7450.6s  | 792       | -
+Spanish (Spain)           | 4.1    | 2.1    | 227.0   | 3351.3s  | 297       | -
+Swedish (Sweden)          | 17.0   | 5.0    | 217.9   | 7069.7s  | 681       | -
+Ukrainian (Ukraine)       | 7.1    | 2.3    | 202.1   | 3233.2s  | 313       | -
+AVERAGE                   | 14.8   | 4.7    | 207.7   | 130981.3 | 12267     | -
+Peak memory usage (process-wide): 0.485 GB
 ```
 
 ```text
-[02:01:49.655] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 2s • 09/25/2025, 2:01 AM EDT
-[02:01:49.655] [INFO] [Benchmark] --- Benchmark Results ---
-[02:01:49.655] [INFO] [Benchmark]    Dataset: librispeech test-clean
-[02:01:49.655] [INFO] [Benchmark]    Files processed: 2620
-[02:01:49.655] [INFO] [Benchmark]    Average WER: 2.6%
-[02:01:49.655] [INFO] [Benchmark]    Median WER: 0.0%
-[02:01:49.655] [INFO] [Benchmark]    Average CER: 1.1%
-[02:01:49.655] [INFO] [Benchmark]    Median RTFx: 137.8x
-[02:01:49.655] [INFO] [Benchmark]    Overall RTFx: 153.4x (19452.5s / 126.8s)
-[02:01:49.655] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
-[02:01:49.655] [INFO] [Benchmark] ASR benchmark completed successfully
+Timestamp: 10/24/2025, 4:27 PM EDT
+System: macOS Version 26.1 (Build 25B5072a), arch=arm64, chip=Apple M4 Pro, cores=12/12, mem=48 GB, rosetta=false
+
+--- Benchmark Results ---
+   Dataset: librispeech test-clean
+   Files processed: 2474
+   Average WER: 2.6%
+   Median WER: 0.0%
+   Average CER: 1.1%
+   Median RTFx: 133.7x
+   Overall RTFx: 150.7x (16973.5s / 112.7s)
+Peak memory usage (process-wide): 0.379 GB
 ```
 
 `swift run fluidaudio asr-benchmark --max-files all --model-version v2`
@@ -65,23 +64,19 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 Use v2 if you only need English, it is a bit more accurate
 
 ```text
-ansient day, like music in the air. Ah
-[01:35:16.880] [INFO] [Benchmark] File: 908-157963-0010.flac (WER: 15.4%) (Duration: 6.28s)
-[01:35:16.880] [INFO] [Benchmark] ------------------------------------------------------------
-[01:35:16.894] [INFO] [Benchmark] Normalized Reference: she ceasd and smild in tears then sat down in her silver shrine
-[01:35:16.894] [INFO] [Benchmark] Normalized Hypothesis:        she ceased and smiled in tears then sat down in her silver shrine
-[01:35:16.894] [INFO] [Benchmark] Original Hypothesis:  She ceased and smiled in tears, Then sat down in her silver shrine,
-[01:35:16.894] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 25s • 09/26/2025, 1:35 AM EDT
-[01:35:16.894] [INFO] [Benchmark] --- Benchmark Results ---
-[01:35:16.894] [INFO] [Benchmark]    Dataset: librispeech test-clean
-[01:35:16.894] [INFO] [Benchmark]    Files processed: 2620
-[01:35:16.894] [INFO] [Benchmark]    Average WER: 2.2%
-[01:35:16.894] [INFO] [Benchmark]    Median WER: 0.0%
-[01:35:16.894] [INFO] [Benchmark]    Average CER: 0.7%
-[01:35:16.894] [INFO] [Benchmark]    Median RTFx: 125.6x
-[01:35:16.894] [INFO] [Benchmark]    Overall RTFx: 141.2x (19452.5s / 137.7s)
-[01:35:16.894] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
-[01:35:16.894] [INFO] [Benchmark] ASR benchmark completed successfully
+Timestamp: 10/24/2025, 4:31 PM EDT
+System: macOS Version 26.1 (Build 25B5072a), arch=arm64, chip=Apple M4 Pro, cores=12/12, mem=48 GB, rosetta=false
+
+--- Benchmark Results ---
+   Dataset: librispeech test-clean
+   Files processed: 2474
+   Average WER: 2.2%
+   Median WER: 0.0%
+   Average CER: 0.7%
+   Median RTFx: 123.8x
+   Overall RTFx: 141.2x (16973.5s / 120.2s)
+Results saved to: asr_benchmark_results.json
+Peak memory usage (process-wide): 0.487 GB
 ```
 
 ### ASR Model Compilation
