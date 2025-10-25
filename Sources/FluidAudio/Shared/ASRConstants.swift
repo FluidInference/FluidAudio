@@ -21,6 +21,17 @@ public enum ASRConstants {
     /// WER threshold for detailed error analysis in benchmarks
     public static let highWERThreshold: Double = 0.15
 
+    /// Chunking configuration shared across offline and streaming ASR
+    public static let chunkCenterSeconds: Double = 11.2
+    public static let chunkLeftOverlapSeconds: Double = 2.0
+    public static let chunkRightOverlapSeconds: Double = 1.8
+
+    /// Maximum audio samples the base models accept in a single forward pass (15 seconds @ 16kHz)
+    public static let maxModelSamples: Int = 240_000
+
+    /// Encoder frame capacity corresponding to `maxModelSamples`
+    public static let maxModelEncoderFrames: Int = calculateEncoderFrames(from: maxModelSamples)
+
     /// Calculate encoder frames from audio samples using proper ceiling division
     /// - Parameter samples: Number of audio samples
     /// - Returns: Number of encoder frames
