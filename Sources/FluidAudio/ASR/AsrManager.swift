@@ -51,7 +51,12 @@ public final class AsrManager {
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
-                ([NSNumber(value: 1), NSNumber(value: 240_000)], .float32),
+                (
+                    [
+                        NSNumber(value: 1),
+                        NSNumber(value: ASRConstants.maxModelSamples),
+                    ], .float32
+                ),
                 ([NSNumber(value: 1)], .int32),
                 (
                     [
