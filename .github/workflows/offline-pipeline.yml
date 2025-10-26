@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   benchmark:
-    name: Offline VBx Pipeline Benchmark
+    name: Offline Speaker diarization pipeline
     runs-on: macos-latest
     permissions:
       contents: read
