@@ -142,7 +142,7 @@ jobs:
 
                       # Verify the symlink resolves
                       if [ -d "$framework_dir/Resources" ]; then
-                          local resource_count=$(find "$framework_dir/Resources" -type f | wc -l)
+                          resource_count=$(find "$framework_dir/Resources" -type f | wc -l)
                           echo "  Found $resource_count resource files"
                       fi
                   fi

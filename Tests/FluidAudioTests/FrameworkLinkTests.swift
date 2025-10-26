@@ -23,14 +23,13 @@ final class FrameworkLinkTests: XCTestCase {
     func testFrameworkBinaryResolution() async throws {
         let manager = TtSManager()
 
-        // Attempting to initialize should trigger framework loading
-        // If the framework binary cannot be found or loaded, this will fail with dyld error
-        XCTExpectFailure("Framework initialization may fail in test environment without models", strict: false)
+        XCTExpectFailure("Framework usage may fail in test environment without models", strict: false)
 
         do {
-            try await manager.initializeWithModels()
-            // If we get here, the framework was successfully loaded
-            XCTAssertTrue(manager.isAvailable, "Manager should be available after initialization")
+            // Attempting to use TTS should trigger ESpeakNG framework loading
+            // If the framework binary cannot be found, this will fail with dyld error
+            let audio = try await manager.synthesize(text: "test")
+            XCTAssertGreaterThan(audio.count, 0, "Should generate audio data")
             manager.cleanup()
         } catch {
             // Expected in CI environment due to missing models
