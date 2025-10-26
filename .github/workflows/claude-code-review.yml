@@ -1,8 +1,10 @@
 name: Claude Code Review
 
 on:
+  pull_request:
+    types: [opened, reopened]
   pull_request_target:
-    types: [opened]
+    types: [opened, reopened]
 
 jobs:
   claude-review:
