@@ -128,7 +128,7 @@ public class FLEURSBenchmark {
                         logger.warning(
                             "Detected \(corruptedFiles.count) corrupted audio files for \(language); removing and re-downloading."
                         )
-                        
+
                         for file in corruptedFiles {
                             try? FileManager.default.removeItem(at: file)
                         }
