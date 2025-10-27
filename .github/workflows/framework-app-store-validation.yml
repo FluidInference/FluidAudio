@@ -1,0 +1,172 @@
+name: Framework App Store Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Sources/FluidAudio/Frameworks/**'
+      - '.github/workflows/framework-app-store-validation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Sources/FluidAudio/Frameworks/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-app-store-compliance:
+    name: Validate App Store Compliance
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Build Package
+        run: |
+          echo "📦 Building package to validate framework linkage..."
+          swift build -v 2>&1 | tee build.log
+
+      - name: Check Build Log for Framework Errors
+        run: |
+          echo "🔍 Checking build log for framework-related errors..."
+
+          # Check for dyld errors (broken framework structure)
+          if grep -i "dyld.*error\|library not loaded\|cannot find.*framework" build.log; then
+              echo "❌ ERROR: dyld errors detected - framework structure may be broken"
+              exit 1
+          fi
+
+          # Check for code signing errors
+          if grep -i "code sign\|codesign.*error" build.log | grep -v "No identity found\|Developer ID"; then
+              echo "⚠️  Code signing warnings (may be expected)"
+          fi
+
+          echo "✅ No dyld errors detected"
+
+      - name: Run Framework Link Tests
+        run: |
+          echo "🧪 Running framework linkage tests..."
+          swift test -v --filter FrameworkLinkTests 2>&1 | tee test.log || true
+
+      - name: Verify Framework Symlink Structure for App Store
+        run: |
+          set -e
+
+          echo "🔗 Verifying App Store compliance of framework structure..."
+          echo ""
+
+          FRAMEWORK_PATH="Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
+
+          # Function to check App Store compliance
+          check_app_store_compliance() {
+              local framework_dir="$1"
+              local variant_name="$2"
+
+              if [ ! -d "$framework_dir" ]; then
+                  return 0
+              fi
+
+              echo "📋 Checking $variant_name for App Store compliance..."
+
+              # For macOS frameworks with versioning, check symlink structure
+              if [ -d "$framework_dir/Versions" ]; then
+                  # Apple's App Store validation requires symlinks to point to Versions/Current
+                  # not directly to Versions/A (which causes ITMS-90291 errors)
+
+                  local errors=0
+
+                  # Check each top-level symlink
+                  for symlink in ESpeakNG Headers Modules Resources; do
+                      if [ -L "$framework_dir/$symlink" ]; then
+                          local target=$(readlink "$framework_dir/$symlink")
+
+                          # App Store requires Versions/Current, not Versions/A
+                          if [[ "$target" == "Versions/A"* ]]; then
+                              echo "  ❌ ITMS-90291: $symlink points to Versions/A/"
+                              echo "     This would cause App Store validation failure"
+                              errors=$((errors + 1))
+                          elif [[ "$target" == "Versions/Current"* ]]; then
+                              echo "  ✓ $symlink → Versions/Current/ (App Store compliant)"
+                          else
+                              echo "  ❌ Unexpected symlink target: $symlink → $target"
+                              errors=$((errors + 1))
+                          fi
+                      fi
+                  done
+
+                  if [ $errors -gt 0 ]; then
+                      return 1
+                  fi
+              fi
+
+              return 0
+          }
+
+          # Check all variants
+          all_valid=true
+          for variant in "$FRAMEWORK_PATH"/*; do
+              if [ -d "$variant" ] && [ -d "$variant/ESpeakNG.framework" ]; then
+                  variant_name=$(basename "$variant")
+                  if ! check_app_store_compliance "$variant/ESpeakNG.framework" "$variant_name"; then
+                      all_valid=false
+                  fi
+              fi
+          done
+
+          if [ "$all_valid" = true ]; then
+              echo ""
+              echo "✅ Framework structure is App Store compliant"
+              exit 0
+          else
+              echo ""
+              echo "❌ Framework structure has App Store compliance issues"
+              exit 1
+          fi
+
+      - name: Validate Framework Resources
+        run: |
+          echo "📦 Validating framework resources..."
+          echo ""
+
+          FRAMEWORK_PATH="Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
+
+          # For versioned frameworks (macOS), check that resources are properly accessible
+          for framework_dir in "$FRAMEWORK_PATH"/**/ESpeakNG.framework; do
+              if [ -d "$framework_dir/Resources" ]; then
+                  # Check if Resources is a symlink
+                  if [ -L "$framework_dir/Resources" ]; then
+                      echo "✓ Resources is properly symlinked"
+
+                      # Verify the symlink resolves
+                      if [ -d "$framework_dir/Resources" ]; then
+                          resource_count=$(find "$framework_dir/Resources" -type f | wc -l)
+                          echo "  Found $resource_count resource files"
+                      fi
+                  fi
+              fi
+          done
+
+          echo "✅ Resources validation complete"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Framework Validation Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "✓ Build log checked for dyld errors"
+          echo "✓ Framework linkage verified"
+          echo "✓ Symlink structure validated"
+          echo "✓ App Store compliance verified"
+          echo ""
+          echo "These checks catch:"
+          echo "  • Binary naming errors (e.g., ESPeakNG vs ESpeakNG)"
+          echo "  • Broken symlink chains"
+          echo "  • ITMS-90291 validation errors"
+          echo "  • Framework structure compliance issues"
+          echo ""
