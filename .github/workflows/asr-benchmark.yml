@@ -62,13 +62,13 @@ jobs:
             
             if swift run -c release fluidaudio asr-benchmark \
               --subset "$SUBSET" --max-files "$MAX" \
-              --auto-download --output "$OUTPUT" $EXTRA_ARGS 2>&1 | tee benchmark_log.txt; then
+              --auto-download --output "$OUTPUT" $EXTRA_ARGS > benchmark_log.txt 2>&1; then
               echo "✅ Benchmark $SUBSET completed successfully"
               return 0
             else
               echo "❌ Benchmark $SUBSET FAILED with exit code $?"
-              echo "Last 50 lines of output:"
-              tail -50 benchmark_log.txt
+              echo "Full output:"
+              cat benchmark_log.txt
               # Continue with other benchmarks even if one fails
               return 1
             fi
