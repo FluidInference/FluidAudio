@@ -453,6 +453,12 @@ FluidInference Team. (2024). FluidAudio: Local Speaker Diarization, ASR, and VAD
 
 Help the Fluid Inference community grow by adding a "Powered by Fluid Inference" badge to your project!
 
+<p align="center">
+  <a href="https://fluidinference.com">
+    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="80">
+  </a>
+</p>
+
 Copy and paste this prompt to your coding agent where you host your homepage:
 
 ```text
