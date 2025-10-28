@@ -476,7 +476,7 @@ Or use one of these code snippets:
     <img
       src="https://assets.inference.plus/fi-badge.png"
       alt="Powered by Fluid Inference"
-      height={40}
+      height={80}
     />
   </a>
 </div>
@@ -490,7 +490,7 @@ Or use one of these code snippets:
 ```html
 <div style="text-align: center; padding: 20px;">
   <a href="https://fluidinference.com">
-    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="40">
+    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="80">
   </a>
 </div>
 ```
@@ -503,7 +503,7 @@ Or use one of these code snippets:
 ```markdown
 <p align="center">
   <a href="https://fluidinference.com">
-    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="40">
+    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="80">
   </a>
 </p>
 ```
