@@ -37,7 +37,7 @@ let package = Package(
             path: "Sources/FastClusterWrapper",
             publicHeadersPath: "include",
             cxxSettings: [
-                .cxxLanguageStandard(.cxx17)
+                .unsafeFlags(["-std=c++17"])
             ]
         ),
         .executableTarget(
