@@ -15,12 +15,6 @@ swift run fluidaudio tts "Welcome to FluidAudio text to speech" \
 The first invocation downloads Kokoro models, phoneme dictionaries, and voice embeddings; later runs reuse the
 cached assets.
 
-## Supported architectures
-
-The Kokoro TTS stack is packaged with an `ESpeakNG.xcframework` that supports both Apple Silicon (arm64) and Intel (x86_64) architectures, enabling compatibility with macOS devices of both types.
-
-![./arm64-build.png](arm64-build.png)
-
 ## Swift async usage
 
 ```swift
