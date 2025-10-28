@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>ESpeakNG</string>
+    <string>ESpeak</string>
     <key>CFBundleIdentifier</key>
-    <string>com.kokoro.espeakng</string>
+    <string>com.fluidinference.espeakng</string>
     <key>CFBundleName</key>
     <string>ESpeakNG</string>
     <key>CFBundlePackageType</key>

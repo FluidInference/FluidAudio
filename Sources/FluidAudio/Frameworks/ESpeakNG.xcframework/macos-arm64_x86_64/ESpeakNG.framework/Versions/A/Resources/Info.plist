@@ -5,9 +5,9 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>ESpeakNG</string>
+    <string>ESpeak</string>
     <key>CFBundleIdentifier</key>
-    <string>com.kokoro.espeakng</string>
+    <string>com.fluidinference.espeakng</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
