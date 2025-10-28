@@ -34,7 +34,7 @@ let package = Package(
             swiftSettings: [
                 .define("ACCELERATE_NEW_LAPACK"),
                 .define("ACCELERATE_LAPACK_ILP64"),
-            ]
+exclude: ["Frameworks"]
         ),
         .target(
             name: "FastClusterWrapper",
