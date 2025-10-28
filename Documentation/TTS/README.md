@@ -15,9 +15,9 @@ swift run fluidaudio tts "Welcome to FluidAudio text to speech" \
 The first invocation downloads Kokoro models, phoneme dictionaries, and voice embeddings; later runs reuse the
 cached assets.
 
-## Arm64-only builds
+## Supported architectures
 
-The Kokoro TTS stack is packaged with an `ESPeakNG.xcframework` that only ships arm64 slices. If Xcode reports `found architecture 'arm64', required architecture 'x86_64'`, point the build at an Apple Silicon destination (device or arm64 simulator) or exclude `x86_64` from the build settings. Intel Macs are not supported.
+The Kokoro TTS stack is packaged with an `ESpeakNG.xcframework` that supports both Apple Silicon (arm64) and Intel (x86_64) architectures, enabling compatibility with macOS devices of both types.
 
 ![./arm64-build.png](arm64-build.png)
 
