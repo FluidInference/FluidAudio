@@ -150,7 +150,8 @@ jobs:
           # Check for case sensitivity issues in binary names
           for framework in "$FRAMEWORK_PATH"/**/ESpeakNG.framework/Versions/A; do
               if [ -d "$framework" ]; then
-                  if [ -f "$framework/ESPeakNG" ]; then
+                  # Use ls with grep to check for exact case typo on case-insensitive filesystems
+                  if ls "$framework" 2>/dev/null | grep -x "ESPeakNG" > /dev/null; then
                       echo "❌ ERROR: Found 'ESPeakNG' (typo) instead of 'ESpeakNG'"
                       echo "   This would cause dyld errors at runtime"
                       exit 1

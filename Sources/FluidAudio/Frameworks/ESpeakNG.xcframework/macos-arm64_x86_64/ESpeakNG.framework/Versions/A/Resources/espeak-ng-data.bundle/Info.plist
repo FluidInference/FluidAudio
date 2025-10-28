@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.kokoro.espeakng.data</string>
+    <string>com.fluidinference.espeakng.data</string>
     <key>CFBundleName</key>
     <string>espeak-ng-data</string>
 </dict>
