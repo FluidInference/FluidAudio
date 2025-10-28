@@ -35,7 +35,7 @@ let package = Package(
         .target(
             name: "FastClusterWrapper",
             path: "Sources/FastClusterWrapper",
-            publicHeadersPath: "include",
+            publicHeadersPath: "include"
         ),
         .executableTarget(
             name: "FluidAudioCLI",
