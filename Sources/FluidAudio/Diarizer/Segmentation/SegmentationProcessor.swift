@@ -28,20 +28,14 @@ public struct SegmentationProcessor {
     ) throws -> (segments: [[[Float]]], featureProvider: MLFeatureProvider) {
 
         // Create ANE-aligned audio array
-        let audioShape: [NSNumber] = [1, 1, NSNumber(value: chunkSize)]
-        // Reuse pooled buffer so CoreML keeps a stable backing store during async execution
-        let audioArray = try memoryOptimizer.getPooledBuffer(
-            key: "segmentation_audio_\(chunkSize)",
-            shape: audioShape,
+        let audioArray = try memoryOptimizer.createAlignedArray(
+            shape: [1, 1, NSNumber(value: chunkSize)],
             dataType: .float32
         )
 
         // Use optimized memory copy
         let ptr = audioArray.dataPointer.assumingMemoryBound(to: Float.self)
         let copyCount = min(audioChunk.count, chunkSize)
-
-        // Clear the buffer in case the incoming chunk is shorter than the pooled size
-        vDSP_vclr(ptr, 1, vDSP_Length(chunkSize))
 
         audioChunk.prefix(chunkSize).withUnsafeBufferPointer { buffer in
             // Use vDSP for optimized copy
@@ -53,6 +47,12 @@ public struct SegmentationProcessor {
                 vDSP_Length(1),
                 vDSP_Length(copyCount)
             )
+        }
+
+        // Zero-fill remaining if needed
+        if copyCount < chunkSize {
+            var zero: Float = 0
+            vDSP_vfill(&zero, ptr.advanced(by: copyCount), 1, vDSP_Length(chunkSize - copyCount))
         }
 
         // Create zero-copy feature provider
