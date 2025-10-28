@@ -30,11 +30,7 @@ let package = Package(
                 "FastClusterWrapper",
             ],
             path: "Sources/FluidAudio",
-            exclude: ["Frameworks"],
-            swiftSettings: [
-                .define("ACCELERATE_NEW_LAPACK"),
-                .define("ACCELERATE_LAPACK_ILP64"),
-exclude: ["Frameworks"]
+            exclude: ["Frameworks"]
         ),
         .target(
             name: "FastClusterWrapper",
