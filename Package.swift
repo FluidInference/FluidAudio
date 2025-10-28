@@ -44,9 +44,6 @@ let package = Package(
             name: "FastClusterWrapper",
             path: "Sources/FastClusterWrapper",
             publicHeadersPath: "include",
-            cxxSettings: [
-                .unsafeFlags(["-std=c++17"])
-            ]
         ),
         .executableTarget(
             name: "FluidAudioCLI",
