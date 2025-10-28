@@ -34,10 +34,6 @@ let package = Package(
             swiftSettings: [
                 .define("ACCELERATE_NEW_LAPACK"),
                 .define("ACCELERATE_LAPACK_ILP64"),
-                .unsafeFlags([
-                    "-Xcc", "-DACCELERATE_NEW_LAPACK",
-                    "-Xcc", "-DACCELERATE_LAPACK_ILP64",
-                ]),
             ]
         ),
         .target(
@@ -45,7 +41,7 @@ let package = Package(
             path: "Sources/FastClusterWrapper",
             publicHeadersPath: "include",
             cxxSettings: [
-                .unsafeFlags(["-std=c++17"])
+                .cxxLanguageStandard(.cxx17)
             ]
         ),
         .executableTarget(
