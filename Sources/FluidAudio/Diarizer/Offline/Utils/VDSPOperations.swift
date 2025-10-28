@@ -41,10 +41,6 @@ enum VDSPOperations {
             return row
         }
 
-        let rowCount = makeBlasIndexOrFatal(matrix.count, label: "matrix row count")
-        let columnCount = makeBlasIndexOrFatal(columns, label: "matrix column count")
-        let unitStride = BlasIndex(1)
-
         var result = [Float](repeating: 0, count: matrix.count)
         flatMatrix.withUnsafeBufferPointer { matrixPointer in
             vector.withUnsafeBufferPointer { vectorPointer in
@@ -52,16 +48,16 @@ enum VDSPOperations {
                     cblas_sgemv(
                         CblasRowMajor,
                         CblasNoTrans,
-                        rowCount,
-                        columnCount,
+                        Int32(matrix.count),
+                        Int32(columns),
                         1.0,
                         matrixPointer.baseAddress!,
-                        columnCount,
+                        Int32(columns),
                         vectorPointer.baseAddress!,
-                        unitStride,
+                        1,
                         0.0,
                         resultPointer.baseAddress!,
-                        unitStride
+                        1
                     )
                 }
             }
@@ -104,10 +100,6 @@ enum VDSPOperations {
             return row
         }
 
-        let rowsAIndex = makeBlasIndexOrFatal(rowsA, label: "matrixMultiply rowsA")
-        let columnsBIndex = makeBlasIndexOrFatal(columnsB, label: "matrixMultiply columnsB")
-        let aColumnsIndex = makeBlasIndexOrFatal(aColumns, label: "matrixMultiply columnsA")
-
         var flatResult = [Float](repeating: 0, count: rowsA * columnsB)
         flatA.withUnsafeBufferPointer { aPointer in
             flatB.withUnsafeBufferPointer { bPointer in
@@ -116,17 +108,17 @@ enum VDSPOperations {
                         CblasRowMajor,
                         CblasNoTrans,
                         CblasNoTrans,
-                        rowsAIndex,
-                        columnsBIndex,
-                        aColumnsIndex,
+                        Int32(rowsA),
+                        Int32(columnsB),
+                        Int32(aColumns),
                         1.0,
                         aPointer.baseAddress!,
-                        aColumnsIndex,
+                        Int32(aColumns),
                         bPointer.baseAddress!,
-                        columnsBIndex,
+                        Int32(columnsB),
                         0.0,
                         resultPointer.baseAddress!,
-                        columnsBIndex
+                        Int32(columnsB)
                     )
                 }
             }
@@ -250,10 +242,6 @@ enum VDSPOperations {
             }
         }
 
-        let rowsAIndex = makeBlasIndexOrFatal(rowsA, label: "distance rowsA")
-        let rowsBIndex = makeBlasIndexOrFatal(rowsB, label: "distance rowsB")
-        let dimensionIndex = makeBlasIndexOrFatal(dimension, label: "distance dimension")
-
         var dotProducts = [Float](repeating: 0, count: rowsA * rowsB)
         flatA.withUnsafeBufferPointer { aPointer in
             flatB.withUnsafeBufferPointer { bPointer in
@@ -262,17 +250,17 @@ enum VDSPOperations {
                         CblasRowMajor,
                         CblasNoTrans,
                         CblasTrans,
-                        rowsAIndex,
-                        rowsBIndex,
-                        dimensionIndex,
+                        Int32(rowsA),
+                        Int32(rowsB),
+                        Int32(dimension),
                         1.0,
                         aPointer.baseAddress!,
-                        dimensionIndex,
+                        Int32(dimension),
                         bPointer.baseAddress!,
-                        dimensionIndex,
+                        Int32(dimension),
                         0.0,
                         resultPointer.baseAddress!,
-                        rowsBIndex
+                        Int32(rowsB)
                     )
                 }
             }
