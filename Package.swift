@@ -50,5 +50,6 @@ let package = Package(
             name: "FluidAudioTests",
             dependencies: ["FluidAudio"]
         ),
-    ]
+    ],
+    cxxLanguageStandard: .cxx17
 )
