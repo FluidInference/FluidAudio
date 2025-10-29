@@ -442,9 +442,9 @@ extension ASRBenchmark {
             return
         }
 
-        logger.info("" + String(repeating: "=", count: 80))
+        print("" + String(repeating: "=", count: 80))
         logger.info("📋 Detailed Analysis for Files with WER > \(Int(threshold * 100))%")
-        logger.info(String(repeating: "=", count: 80))
+        print(String(repeating: "=", count: 80))
 
         for result in highWERResults.sorted(by: { $0.metrics.wer > $1.metrics.wer }) {
             printSingleFileWERAnalysis(result)
@@ -865,7 +865,7 @@ extension ASRBenchmark {
 
             // Print streaming metrics if available
             if config.testStreaming {
-                logger.info("--- Streaming Metrics ---")
+                print("--- Streaming Metrics ---")
 
                 // Calculate aggregate streaming metrics
                 let streamingResults = results.compactMap { $0.streamingMetrics }
@@ -878,12 +878,12 @@ extension ASRBenchmark {
                         streamingResults.compactMap { $0.firstTokenLatency }.reduce(0, +)
                         / Double(streamingResults.compactMap { $0.firstTokenLatency }.count)
 
-                    logger.info("   Chunk duration: \(config.streamingChunkDuration)s")
-                    logger.info("   Total chunks processed: \(totalChunks)")
-                    logger.info("   Avg chunk processing time: \(String(format: "%.3f", avgChunkTime))s")
-                    logger.info("   Max chunk processing time: \(String(format: "%.3f", maxChunkTime))s")
+                    print("   Chunk duration: \(config.streamingChunkDuration)s")
+                    print("   Total chunks processed: \(totalChunks)")
+                    print("   Avg chunk processing time: \(String(format: "%.3f", avgChunkTime))s")
+                    print("   Max chunk processing time: \(String(format: "%.3f", maxChunkTime))s")
                     if streamingResults.compactMap({ $0.firstTokenLatency }).count > 0 {
-                        logger.info("   Avg first token latency: \(String(format: "%.3f", avgFirstTokenLatency))s")
+                        print("   Avg first token latency: \(String(format: "%.3f", avgFirstTokenLatency))s")
                     }
                 }
             }
@@ -981,22 +981,22 @@ extension ASRBenchmark {
             // Print detailed analysis for files with high WER
             benchmark.printDetailedWERAnalysis(results)
 
-            logger.info("\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
+            print("\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
 
-            logger.info("--- Benchmark Results ---")
-            logger.info("   Dataset: \(config.dataset) \(config.subset)")
-            logger.info("   Files processed: \(results.count)")
+            print("--- Benchmark Results ---")
+            print("   Dataset: \(config.dataset) \(config.subset)")
+            print("   Files processed: \(results.count)")
 
-            logger.info("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
-            logger.info("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
-            logger.info("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
-            logger.info("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            logger.info(
+            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
+            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
+            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+            print(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
 
-            logger.info("Results saved to: \(outputFile)")
-            logger.info("ASR benchmark completed successfully")
+            print("Results saved to: \(outputFile)")
+            print("ASR benchmark completed successfully")
 
         } catch {
             logger.error("ERROR: ASR benchmark failed: \(error)")
