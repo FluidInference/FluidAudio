@@ -65,23 +65,17 @@ macOS Version 26.1 (Build 25B5072a), arch=arm64, chip=Apple M4 Pro, cores=12/12,
 Use v2 if you only need English, it is a bit more accurate
 
 ```text
-ansient day, like music in the air. Ah
-[01:35:16.880] [INFO] [Benchmark] File: 908-157963-0010.flac (WER: 15.4%) (Duration: 6.28s)
-[01:35:16.880] [INFO] [Benchmark] ------------------------------------------------------------
-[01:35:16.894] [INFO] [Benchmark] Normalized Reference: she ceasd and smild in tears then sat down in her silver shrine
-[01:35:16.894] [INFO] [Benchmark] Normalized Hypothesis:        she ceased and smiled in tears then sat down in her silver shrine
-[01:35:16.894] [INFO] [Benchmark] Original Hypothesis:  She ceased and smiled in tears, Then sat down in her silver shrine,
-[01:35:16.894] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 25s • 09/26/2025, 1:35 AM EDT
-[01:35:16.894] [INFO] [Benchmark] --- Benchmark Results ---
-[01:35:16.894] [INFO] [Benchmark]    Dataset: librispeech test-clean
-[01:35:16.894] [INFO] [Benchmark]    Files processed: 2620
-[01:35:16.894] [INFO] [Benchmark]    Average WER: 2.2%
-[01:35:16.894] [INFO] [Benchmark]    Median WER: 0.0%
-[01:35:16.894] [INFO] [Benchmark]    Average CER: 0.7%
-[01:35:16.894] [INFO] [Benchmark]    Median RTFx: 125.6x
-[01:35:16.894] [INFO] [Benchmark]    Overall RTFx: 141.2x (19452.5s / 137.7s)
-[01:35:16.894] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
-[01:35:16.894] [INFO] [Benchmark] ASR benchmark completed successfully
+2620 files per dataset • Test runtime: 3m 28s • 10/28/2025, 9:12 PM EDT
+--- Benchmark Results ---
+   Dataset: librispeech test-clean
+   Files processed: 2620
+   Average WER: 2.2%
+   Median WER: 0.0%
+   Average CER: 0.7%
+   Median RTFx: 116.1x
+   Overall RTFx: 128.9x (19452.5s / 150.9s)
+Peak memory usage (process-wide): 0.491 GB
+macOS Version 26.1 (Build 25B5072a), arch=arm64, chip=Apple M4 Pro, cores=12/12, mem=48 GB, rosetta=false
 ```
 
 ### ASR Model Compilation
