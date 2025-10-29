@@ -248,7 +248,7 @@ public class DownloadUtils {
     public typealias ProgressHandler = (Double) -> Void
 
     /// Download configuration
-    public struct DownloadConfig {
+    public struct DownloadConfig: Sendable {
         public let timeout: TimeInterval
 
         public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models

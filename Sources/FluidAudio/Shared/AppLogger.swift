@@ -8,7 +8,7 @@ public struct AppLogger: Sendable {
     /// Keep this consistent; categories should vary per component.
     public static let defaultSubsystem: String = "com.fluidinference"
 
-    public enum Level: Int {
+    public enum Level: Int, Sendable {
         case debug = 0
         case info
         case notice
@@ -82,6 +82,9 @@ public struct AppLogger: Sendable {
     }
 
     private func logToConsole(_ level: Level, _ message: String) {
+        let level = level
+        let category = category
+        let message = message
         Task.detached(priority: .utility) {
             await LogConsole.shared.write(level: level, category: category, message: message)
         }

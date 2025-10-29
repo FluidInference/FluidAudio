@@ -3,7 +3,7 @@ import CoreML
 import Foundation
 
 /// Manages LSTM hidden and cell states for the Parakeet decoder
-struct TdtDecoderState {
+struct TdtDecoderState: Sendable {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
     /// Stores the last decoded token from the previous audio chunk.

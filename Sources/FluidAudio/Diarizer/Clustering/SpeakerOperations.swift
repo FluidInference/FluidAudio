@@ -13,7 +13,7 @@ public enum SpeakerUtilities {
     // MARK: - Configuration
 
     /// Platform-specific configuration for speaker assignment
-    public struct AssignmentConfig {
+    public struct AssignmentConfig: Sendable {
         public let maxDistanceForAssignment: Float
         public let maxDistanceForUpdate: Float
         public let minSpeakerDuration: Float
