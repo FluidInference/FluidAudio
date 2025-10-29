@@ -1,0 +1,5 @@
+candidate,mcd_db,mfcc_cos_dtw,lsd_dtw,mfcc_cos_dtw_norm,lsd_dtw_norm,f0_rmse_cents,f0_r_dtw,dur_ref_s,dur_cand_s,dur_abs_s,dur_pct,ecapa_cos,clap_cos,sim_index
+/Users/kikow/brandon/FluidAudioSwift/Documentation/TTS/qualityReport/perf_out/batch_technical_obstacles/onnx.wav,236.932117,0.806230,1.067032,0.776691,1.186993,385.484103,0.647676,10.800000,11.375000,0.575000,0.053241,0.693249,0.943183,0.057626
+/Users/kikow/brandon/FluidAudioSwift/Documentation/TTS/qualityReport/perf_out/batch_technical_obstacles/v24_10s.wav,216.340160,0.885249,0.770674,0.847200,1.056078,423.635465,0.925281,10.800000,9.800000,1.000000,0.092593,0.945632,0.958011,0.940811
+/Users/kikow/brandon/FluidAudioSwift/Documentation/TTS/qualityReport/perf_out/batch_technical_obstacles/v24_15s.wav,262.629659,0.857425,0.890691,0.810040,1.138872,286.277255,0.746891,10.800000,9.800000,1.000000,0.092593,0.910841,0.954658,0.634248
+/Users/kikow/brandon/FluidAudioSwift/Documentation/TTS/qualityReport/perf_out/batch_technical_obstacles/v21_10s.wav,296.274667,0.855910,0.977193,0.817317,1.190201,272.816892,0.749736,10.800000,9.300000,1.500000,0.138889,0.864023,0.898004,0.498408
