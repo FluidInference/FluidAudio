@@ -47,9 +47,6 @@ let package = Package(
             exclude: ["README.md"],
             resources: [
                 .process("Utils/english.json")
-            ],
-            swiftSettings: [
-                .enableUpcomingFeature("StrictConcurrency"),
             ]
         ),
         .testTarget(
