@@ -1,6 +1,6 @@
 import Foundation
 
-public struct TtsPreprocessingResult {
+public struct TtsPreprocessingResult: Sendable {
     public let text: String
     public let phoneticOverrides: [TtsPhoneticOverride]
 

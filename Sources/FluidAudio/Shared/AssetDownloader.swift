@@ -19,12 +19,12 @@ public enum AssetDownloader {
         try FileManager.default.moveItem(at: tempURL, to: destination)
     }
 
-    public enum TransferMode {
+    public enum TransferMode: Sendable {
         case data(DataWriter = AssetDownloader.defaultDataWriter)
         case file(FileMover = AssetDownloader.defaultFileMover)
     }
 
-    public struct Descriptor {
+    public struct Descriptor: Sendable {
         public let description: String
         public let remoteURL: URL
         public let destinationURL: URL

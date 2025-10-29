@@ -125,7 +125,7 @@ public struct ASRBenchmarkConfig: Sendable {
 }
 
 /// LibriSpeech file representation
-public struct LibriSpeechFile {
+public struct LibriSpeechFile: Sendable {
     public let fileName: String
     public let audioPath: URL
     public let transcript: String

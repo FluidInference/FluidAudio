@@ -9,7 +9,7 @@ public protocol StreamingAudioSampleSource: Sendable {
     ) throws
 }
 
-public struct ArrayAudioSampleSource: StreamingAudioSampleSource {
+public struct ArrayAudioSampleSource: StreamingAudioSampleSource, Sendable {
     private let samples: [Float]
 
     public init(samples: [Float]) {
@@ -39,7 +39,7 @@ public struct ArrayAudioSampleSource: StreamingAudioSampleSource {
     }
 }
 
-public struct DiskBackedAudioSampleSource: StreamingAudioSampleSource {
+public struct DiskBackedAudioSampleSource: StreamingAudioSampleSource, Sendable {
     private let mappedData: Data
     private let floatStride = MemoryLayout<Float>.stride
     private let fileURL: URL

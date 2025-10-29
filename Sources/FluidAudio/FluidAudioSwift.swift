@@ -26,6 +26,6 @@ public typealias SpeakerDiarizationError = DiarizerError
 // Types like RawEmbedding and SendableSpeaker are already public in their respective files
 // and will be available when importing FluidAudio module
 
-public struct FluidAudio {
+public struct FluidAudio: Sendable {
     // Empty struct for namespace - all functionality is in the module's types
 }

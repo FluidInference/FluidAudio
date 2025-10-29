@@ -1,7 +1,7 @@
 import Foundation
 
 extension KokoroSynthesizer {
-    public struct TokenCapacities {
+    public struct TokenCapacities: Sendable {
         public let short: Int
         public let long: Int
 

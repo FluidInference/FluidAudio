@@ -128,7 +128,7 @@ public enum SpeakerUtilities {
     // MARK: - Speaker Assignment Decision
 
     /// Decision result for speaker assignment
-    public struct AssignmentDecision {
+    public struct AssignmentDecision: Sendable {
         public let shouldAssign: Bool
         public let shouldUpdate: Bool
         public let confidence: Float
@@ -199,7 +199,7 @@ public enum SpeakerUtilities {
     // MARK: - Speaker Creation
 
     /// Validated speaker creation parameters
-    public struct SpeakerCreationParams {
+    public struct SpeakerCreationParams: Sendable {
         public let id: String
         public let name: String
         public let duration: Float
@@ -379,7 +379,7 @@ public enum SpeakerUtilities {
     // MARK: - Complete Speaker Update Operations
 
     /// Complete speaker update operation including raw tracking
-    public struct SpeakerUpdateResult {
+    public struct SpeakerUpdateResult: Sendable {
         public let updatedMainEmbedding: [Float]?
         public let updatedRawEmbeddings: [RawEmbedding]
         public let updatedDuration: Float

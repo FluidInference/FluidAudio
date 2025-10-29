@@ -1,7 +1,7 @@
 import FluidAudio
 import Foundation
 
-public struct TTS {
+public struct TTS: Sendable {
 
     private static let logger = AppLogger(category: "TTSCommand")
     private static let artifactsDirectoryName = "fluidaudio_cli"
