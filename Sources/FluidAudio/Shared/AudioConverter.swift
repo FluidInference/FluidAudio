@@ -2,6 +2,77 @@ import AVFoundation
 import Accelerate
 import Foundation
 import OSLog
+import os
+
+private struct PCMBufferSnapshot: Sendable {
+    struct Plane: Sendable {
+        let data: Data
+        let byteSize: UInt32
+    }
+
+    let streamDescription: AudioStreamBasicDescription
+    let planes: [Plane]
+    let frameLength: AVAudioFrameCount
+
+    init?(source buffer: AVAudioPCMBuffer) {
+        streamDescription = buffer.format.streamDescription.pointee
+        frameLength = buffer.frameLength
+
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        var collected: [Plane] = []
+        collected.reserveCapacity(audioBuffers.count)
+
+        for audioBuffer in audioBuffers {
+            let byteCount = Int(audioBuffer.mDataByteSize)
+            let planeData: Data
+            if let baseAddress = audioBuffer.mData, byteCount > 0 {
+                planeData = Data(bytes: baseAddress, count: byteCount)
+            } else {
+                planeData = Data()
+            }
+            collected.append(Plane(data: planeData, byteSize: audioBuffer.mDataByteSize))
+        }
+
+        if collected.isEmpty && frameLength > 0 {
+            return nil
+        }
+
+        planes = collected
+    }
+
+    func makeBuffer() -> AVAudioPCMBuffer? {
+        var descriptionCopy = streamDescription
+        guard let format = AVAudioFormat(streamDescription: &descriptionCopy) else {
+            return nil
+        }
+
+        let capacity = max(frameLength, 1)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+            return nil
+        }
+
+        buffer.frameLength = frameLength
+
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        guard audioBuffers.count == planes.count else {
+            return nil
+        }
+
+        for (index, plane) in planes.enumerated() {
+            audioBuffers[index].mDataByteSize = plane.byteSize
+            guard plane.byteSize > 0 else { continue }
+            plane.data.withUnsafeBytes { rawBytes in
+                guard
+                    let srcBase = rawBytes.baseAddress,
+                    let dstBase = audioBuffers[index].mData
+                else { return }
+                memcpy(dstBase, srcBase, rawBytes.count)
+            }
+        }
+
+        return buffer
+    }
+}
 
 /// Converts audio buffers to the format required by ASR (16kHz, mono, Float32).
 ///
@@ -92,17 +163,30 @@ final public class AudioConverter {
         var aggregated: [Float] = []
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
-        // Provide input once, then signal end-of-stream
-        var provided = false
+        guard let snapshot = PCMBufferSnapshot(source: buffer) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+
+        // Provide input once, then signal end-of-stream (guarded for strict concurrency)
+        let inputProvidedFlag = OSAllocatedUnfairLock(initialState: false)
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
-                provided = true
-                status.pointee = .haveData
-                return buffer
-            } else {
+            let shouldProvide = inputProvidedFlag.withLock { state -> Bool in
+                if state {
+                    return false
+                }
+                state = true
+                return true
+            }
+            guard shouldProvide else {
                 status.pointee = .endOfStream
                 return nil
             }
+            guard let nextBuffer = snapshot.makeBuffer() else {
+                status.pointee = .endOfStream
+                return nil
+            }
+            status.pointee = .haveData
+            return nextBuffer
         }
 
         var error: NSError?
