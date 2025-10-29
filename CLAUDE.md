@@ -232,6 +232,9 @@ FluidAudio/
 - **Persistent States**: Decoder states maintained across chunks for streaming
 - **Memory Management**: Automatic cleanup and ANE optimization
 - **Parallel Processing**: Multi-stream support for batch operations
+- **Swift 6 Strict Concurrency Migration** (in progress):
+  - **Completed**: TdtDecoderState, AssignmentConfig, DownloadConfig, AssetDownloader, EspeakG2P
+  - **Remaining**: KokoroSynthesizer mutable state, MLMultiArray non-Sendable issues
 
 ### Model Management
 - **Automatic Downloads**: Models fetched from HuggingFace on first use
@@ -297,11 +300,31 @@ The project uses GitHub Actions with the following workflows:
 9. **Git Operations**: NEVER run `git push` unless explicitly requested by the user. Only commit when asked.
 10. **Code Formatting**: All code must pass swift-format checks before merge
 
+## Swift 6 Concurrency Migration Status
+
+### Completed Fixes
+- **TdtDecoderState** (ASR/TDT/TdtDecoderState.swift): Added `Sendable` conformance for LSTM state across actor boundaries
+- **AssignmentConfig** (Diarizer/Clustering/SpeakerOperations.swift): Added `Sendable` conformance for clustering configuration
+- **DownloadConfig** (DownloadUtils.swift): Added `Sendable` conformance for download settings
+- **AssetDownloader** (Shared/AssetDownloader.swift): Marked `DataWriter` and `FileMover` typealias as `@Sendable`
+- **EspeakG2P** (TextToSpeech/Kokoro/Assets/Lexicon/EspeakG2P.swift): Added `@MainActor` to shared singleton
+
+### Remaining Work
+- **KokoroSynthesizer** (TextToSpeech/Kokoro/Pipeline/Synthesize/KokoroSynthesizer.swift):
+  - Mutable static state: `voiceEmbeddingPayloads`, `voiceEmbeddingVectors` (lines 58-59)
+  - Requires `@MainActor` annotation or actor-based refactoring
+  - Multiple MLMultiArray sending warnings (framework limitation)
+
+### Framework Limitations
+- **MLMultiArray** (CoreML): Does not conform to Sendable - wrap in Sendable types for cross-actor use
+- **Non-Sendable Types**: Create Sendable wrapper structs when passing non-Sendable data across actor boundaries
+
 ## Next Steps
 
-1. **Multi-file validation**: Test optimal config on all AMI files
-2. **Real-world testing**: Validate on non-AMI audio
-3. **Documentation**: Update API documentation
+1. **Complete Swift 6 Migration**: Finish KokoroSynthesizer mutable state handling
+2. **Multi-file validation**: Test optimal config on all AMI files
+3. **Real-world testing**: Validate on non-AMI audio
+4. **Documentation**: Update API documentation
 
 ## Testing Strategy
 

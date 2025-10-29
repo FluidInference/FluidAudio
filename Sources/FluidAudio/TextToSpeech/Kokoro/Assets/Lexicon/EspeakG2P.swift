@@ -3,7 +3,7 @@ import Foundation
 
 /// Thread-safe wrapper around eSpeak NG C API to get IPA phonemes for a word.
 /// Uses espeak_TextToPhonemes with IPA mode.
-final class EspeakG2P {
+actor EspeakG2P {
     enum EspeakG2PError: Error, LocalizedError {
         case frameworkBundleMissing
         case dataBundleMissing
@@ -30,38 +30,33 @@ final class EspeakG2P {
     static let shared = EspeakG2P()
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
 
-    private let queue = DispatchQueue(label: "com.fluidaudio.tts.espeak.g2p")
     private var initialized = false
     private var currentVoice: String = ""
 
     private init() {}
 
     deinit {
-        queue.sync {
-            if initialized {
-                espeak_Terminate()
-            }
+        if initialized {
+            espeak_Terminate()
         }
     }
 
     func phonemize(word: String, espeakVoice: String = "en-us") throws -> [String]? {
-        return try queue.sync {
-            try initializeIfNeeded(espeakVoice: espeakVoice)
-            return word.withCString { cstr -> [String]? in
-                var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
-                let modeIPA = Int32(espeakPHONEMES_IPA)
-                let textmode = Int32(espeakCHARS_AUTO)
-                guard let outPtr = espeak_TextToPhonemes(&raw, textmode, modeIPA) else {
-                    logger.warning("espeak_TextToPhonemes returned nil for word: \(word)")
-                    return nil
-                }
-                let phonemeString = String(cString: outPtr)
-                if phonemeString.isEmpty { return nil }
-                if phonemeString.contains(where: { $0.isWhitespace }) {
-                    return phonemeString.split { $0.isWhitespace }.map { String($0) }
-                } else {
-                    return phonemeString.unicodeScalars.map { String($0) }
-                }
+        try initializeIfNeeded(espeakVoice: espeakVoice)
+        return word.withCString { cstr -> [String]? in
+            var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
+            let modeIPA = Int32(espeakPHONEMES_IPA)
+            let textmode = Int32(espeakCHARS_AUTO)
+            guard let outPtr = espeak_TextToPhonemes(&raw, textmode, modeIPA) else {
+                logger.warning("espeak_TextToPhonemes returned nil for word: \(word)")
+                return nil
+            }
+            let phonemeString = String(cString: outPtr)
+            if phonemeString.isEmpty { return nil }
+            if phonemeString.contains(where: { $0.isWhitespace }) {
+                return phonemeString.split { $0.isWhitespace }.map { String($0) }
+            } else {
+                return phonemeString.unicodeScalars.map { String($0) }
             }
         }
     }
