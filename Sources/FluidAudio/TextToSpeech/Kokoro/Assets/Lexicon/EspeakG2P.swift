@@ -107,7 +107,7 @@ final class EspeakG2P {
     }
 
     private static func frameworkBundledDataPath() throws -> URL {
-        guard let espeakBundle = Bundle(identifier: "com.kokoro.espeakng") else {
+        guard let espeakBundle = Bundle(identifier: "com.fluidinference.espeakng") else {
             staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
             throw EspeakG2PError.frameworkBundleMissing
         }

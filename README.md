@@ -38,7 +38,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Showcase
 
-Make a PR if you want to add your app, please keep it in chronological order. 
+Make a PR if you want to add your app, please keep it in chronological order.
 
 | App | Description |
 | --- | --- |
@@ -53,18 +53,17 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Starling](https://github.com/Ryandonofrio3/Starling)** | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
 | **[BoltAI](https://boltai.com/)** | Write content 10x faster using parakeet models |
 
-
 ## Installation
 
 Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.4"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.6"),
 ],
 ```
 
-**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.4'`
+**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.6'`
 
 Important: When adding FluidAudio as a package dependency, only add the library to your target (not the executable). Select `FluidAudio` library in the package products dialog and add it to your app target.
 
@@ -158,10 +157,9 @@ swift run fluidaudio transcribe audio.wav --model-version v2
 
 ## Speaker Diarization
 
-
 ### Offline Speaker Diarization Pipeline
 
-Pyannote Community-1 pipeline (powerset segmentation + WeSpeaker + VBx) for offline speaker diarization. Use this for most use cases, see Benchmarkds.md for benchmarks. 
+Pyannote Community-1 pipeline (powerset segmentation + WeSpeaker + VBx) for offline speaker diarization. Use this for most use cases, see Benchmarkds.md for benchmarks.
 
 ```swift
 import FluidAudio
@@ -201,7 +199,6 @@ swift run fluidaudio diarization-benchmark --mode offline --auto-download \
 
 `offline_results.json` contains DER/JER/RTFx along with timing breakdowns for segmentation, embedding extraction, and VBx clustering. CI now runs this workflow on every PR to ensure the offline models stay healthy and the Hugging Face assets remain accessible.
 
-
 ### Streaming/Online Speaker Diarization
 
 Use this if you need to show speaker labels while the transcription is happening, in most use cases, offline should be more than enough.
@@ -232,7 +229,6 @@ For diarization streaming see [Documentation/SpeakerDiarization.md](Documentatio
 swift run fluidaudio diarization-benchmark --single-file ES2004a \
   --chunk-seconds 3 --overlap-seconds 2
 ```
-
 
 ### CLI
 
@@ -344,6 +340,7 @@ swift run fluidaudio vad-analyze path/to/audio.wav --streaming
 # Benchmark accuracy/precision trade-offs
 swift run fluidaudio vad-benchmark --num-files 50 --threshold 0.3
 ```
+
 `swift run fluidaudio vad-analyze --help` lists every tuning option, including
 negative-threshold overrides, max-speech splitting, padding, and chunk size.
 Offline mode also reports RTFx using the model's per-chunk processing time.
@@ -359,7 +356,7 @@ Offline mode also reports RTFx using the model's per-chunk processing time.
 
 Requirements (macOS)
 Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
-https://github.com/espeak-ng/espeak-ng/tree/master 
+<https://github.com/espeak-ng/espeak-ng/tree/master>
 
 ### Quick Start (CLI)
 
@@ -372,6 +369,7 @@ swift run fluidaudio tts "Edge-cases: URLs like https://example.com and e-mail t
 ```
 
 Notes
+
 - The TTS pipeline uses a word→phoneme dictionary first; unknown words are phonemized with eSpeak NG (C API) and mapped to the model’s token set.
 - OOV words are printed with their IPA and mapped tokens for visibility during synthesis.
 - We do not prepend any “language token” to avoid leading vowel artifacts.
@@ -393,10 +391,10 @@ Task {
 
 Troubleshooting
 Build requires eSpeak NG headers/libs for the C API discoverable via pkg-config (`espeak-ng`).
+
 - If SwiftPM cannot find headers, build with explicit paths:
   - `swift build -Xcc -I/opt/homebrew/include -Xlinker -L/opt/homebrew/lib`
 - Dictionary and model assets are cached under `~/.cache/fluidaudio/Models/kokoro`.
-
 
 ## Continuous Integration
 
@@ -421,21 +419,21 @@ Apache 2.0 — see `LICENSE` for details.
 
 This project builds upon the excellent work of the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project for speaker diarization algorithms and techniques.
 
-Pyannote: https://github.com/pyannote/pyannote-audio
+Pyannote: <https://github.com/pyannote/pyannote-audio>
 
-Wewpeaker: https://github.com/wenet-e2e/wespeaker
+Wewpeaker: <https://github.com/wenet-e2e/wespeaker>
 
-Parakeet-mlx: https://github.com/senstella/parakeet-mlx
+Parakeet-mlx: <https://github.com/senstella/parakeet-mlx>
 
-silero-vad: https://github.com/snakers4/silero-vad
+silero-vad: <https://github.com/snakers4/silero-vad>
 
-Kokoro-82M: https://huggingface.co/hexgrad/Kokoro-82M
+Kokoro-82M: <https://huggingface.co/hexgrad/Kokoro-82M>
 
 ### Citation
 
 If you use FluidAudio in your work, please cite:
 
-FluidInference Team. (2024). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.7.0) [Computer software]. GitHub. https://github.com/FluidInference/FluidAudio
+FluidInference Team. (2024). FluidAudio: Local Speaker Diarization, ASR, and VAD for Apple Platforms (Version 0.7.0) [Computer software]. GitHub. <https://github.com/FluidInference/FluidAudio>
 
 ```bibtex
 @software{FluidInferenceTeam_FluidAudio_2024,
@@ -448,3 +446,66 @@ FluidInference Team. (2024). FluidAudio: Local Speaker Diarization, ASR, and VAD
   note = {Computer software}
 }
 ```
+
+---
+
+## Show Your Support
+
+Help the Fluid Inference community grow by adding a "Powered by Fluid Inference" badge to your project!
+
+<p align="center">
+  <a href="https://fluidinference.com">
+    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="80">
+  </a>
+</p>
+
+Copy and paste this prompt to your coding agent where you host your homepage:
+
+```text
+Add a centered 'Powered by Fluid Inference' badge to the footer linking to fluidinference.com. Image: https://assets.inference.plus/fi-badge.png. Whitelist the image hostname in your framework's config.
+```
+
+Or use one of these code snippets:
+
+<details>
+<summary>React/Next.js</summary>
+
+```jsx
+<div className="flex justify-center py-8">
+  <a href="https://fluidinference.com">
+    <img
+      src="https://assets.inference.plus/fi-badge.png"
+      alt="Powered by Fluid Inference"
+      height={80}
+    />
+  </a>
+</div>
+```
+
+</details>
+
+<details>
+<summary>HTML</summary>
+
+```html
+<div style="text-align: center; padding: 20px;">
+  <a href="https://fluidinference.com">
+    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="80">
+  </a>
+</div>
+```
+
+</details>
+
+<details>
+<summary>Markdown</summary>
+
+```markdown
+<p align="center">
+  <a href="https://fluidinference.com">
+    <img src="https://assets.inference.plus/fi-badge.png" alt="Powered by Fluid Inference" height="80">
+  </a>
+</p>
+```
+
+</details>

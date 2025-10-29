@@ -5,15 +5,15 @@
     <key>CFBundleExecutable</key>
     <string>ESpeakNG</string>
     <key>CFBundleIdentifier</key>
-    <string>com.kokoro.espeakng</string>
+    <string>com.fluidinference.espeakng</string>
     <key>CFBundleName</key>
     <string>ESpeakNG</string>
     <key>CFBundlePackageType</key>
     <string>FMWK</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.52.1</string>
+    <string>1.52.2</string>
     <key>CFBundleVersion</key>
-    <string>1.52.1</string>
+    <string>1.52.2</string>
     <key>MinimumOSVersion</key>
     <string>17.0</string>
 </dict>
