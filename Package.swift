@@ -30,7 +30,10 @@ let package = Package(
                 "FastClusterWrapper",
             ],
             path: "Sources/FluidAudio",
-            exclude: ["Frameworks"]
+            exclude: ["Frameworks"],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]
         ),
         .target(
             name: "FastClusterWrapper",
@@ -44,11 +47,17 @@ let package = Package(
             exclude: ["README.md"],
             resources: [
                 .process("Utils/english.json")
+            ],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
             ]
         ),
         .testTarget(
             name: "FluidAudioTests",
-            dependencies: ["FluidAudio"]
+            dependencies: ["FluidAudio"],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]
         ),
     ],
     cxxLanguageStandard: .cxx17

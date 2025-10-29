@@ -6,7 +6,7 @@ import OSLog
 public struct AppLogger {
     /// Default subsystem for all loggers in FluidAudio.
     /// Keep this consistent; categories should vary per component.
-    public static var defaultSubsystem: String = "com.fluidinference"
+    public static let defaultSubsystem: String = "com.fluidinference"
 
     public enum Level: Int {
         case debug = 0
