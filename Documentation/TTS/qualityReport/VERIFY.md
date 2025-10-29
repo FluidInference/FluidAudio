@@ -62,8 +62,8 @@ This guide shows the minimal, reproducible steps to fetch required assets, rende
 ## Metric Details (What each means)
 
 - ECAPA speaker cosine (higher):
-  - What: Cosine similarity between speaker embeddings from an ECAPA‑TDNN verifier.
-  - Why: Captures voice/timbre identity; higher means the same speaker “impression.”
+  - What: Cosine similarity between speaker embeddings from an ECAPA‑TDNN verifier (same embedding extraction used in speaker diarization to identify different speakers).
+  - Why: Captures voice/timbre identity; higher means the same speaker "impression."
 
 - MFCC‑cosine DTW (higher):
   - What: Cosine similarity along a Dynamic Time Warping path over MFCCs (c1–c13).

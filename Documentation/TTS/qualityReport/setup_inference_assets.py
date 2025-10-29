@@ -65,33 +65,32 @@ def fetch_coreml_mlpackage(name: str, dest_dir: Path) -> Path:
     return pkg_dir
 
 
-def ensure_onnx(dest: Path) -> Optional[Path]:
-    """Ensure an ONNX model is present at dest.
+def fetch_onnx_model(onnx_model: Path) -> Optional[Path]:
+    """Download ONNX model from official onnx-community HuggingFace repo.
 
-    If dest exists, return it. Otherwise try to unpack a local tarball
-    qualityReport/kokoro-multi-lang-v1_0.tar.bz2 if present.
+    Downloads model.onnx (FP32, 326MB) from onnx-community/Kokoro-82M-v1.0-ONNX.
+    This is the official ONNX export with correct input names (input_ids, style, speed).
+    ONNX inference is optional - the quality report works fine without it.
     """
-    if dest.exists():
-        print(f"[ok] ONNX exists: {dest}")
-        return dest
-    tbz = TTS_DIR / "kokoro-multi-lang-v1_0.tar.bz2"
-    if tbz.exists():
-        print(f"[xz] Extracting {tbz.name}")
-        tmpdir = TTS_DIR / "kokoro-multi-lang-v1_0"
-        ensure_dir(tmpdir)
-        with tarfile.open(tbz, mode="r:bz2") as tf:
-            tf.extractall(tmpdir)
-        # heuristic: copy model.onnx if present
-        cand = tmpdir / "model.onnx"
-        if cand.exists():
-            shutil.copy2(cand, dest)
-            print(f"[ok] Wrote {dest}")
-            return dest
-        else:
-            print(f"[warn] Expected model.onnx in {tmpdir}, not found")
-    else:
-        print("[skip] ONNX tarball not found; you can place it at kokoro-multi-lang-v1_0.tar.bz2 in the qualityReport directory")
-    return None
+    if onnx_model.exists():
+        print(f"[ok] ONNX model exists: {onnx_model}")
+        return onnx_model
+
+    print("[dl] Downloading official ONNX model from onnx-community...")
+    try:
+        src = Path(
+            hf_hub_download(
+                repo_id="onnx-community/Kokoro-82M-ONNX",
+                filename="onnx/model.onnx",  # FP32 for best quality (326 MB)
+            )
+        )
+        shutil.copy2(src, onnx_model)
+        print(f"[ok] Wrote {onnx_model} ({onnx_model.stat().st_size / 1024 / 1024:.1f} MB)")
+        return onnx_model
+    except Exception as e:
+        print(f"[skip] ONNX download failed: {e}")
+        print("[info] ONNX inference is optional. CoreML and PyTorch comparisons will still work.")
+        return None
 
 
 def main() -> None:
@@ -108,8 +107,8 @@ def main() -> None:
     except Exception as e:
         print(f"[info] Optional kokoro_24_10s.mlpackage not fetched: {e}")
 
-    # ONNX
-    ensure_onnx(TTS_DIR / "kokoro-v1.0.onnx")
+    # ONNX (optional - downloads from official onnx-community repo)
+    fetch_onnx_model(TTS_DIR / "kokoro-v1.0.onnx")
 
     print("\n[ok] Assets ready. Try:")
     print("  cd Documentation/TTS/qualityReport && uv run python verify_all.py")

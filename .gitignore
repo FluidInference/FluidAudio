@@ -95,6 +95,7 @@ baseline*.json
 FluidAudioDatasets/
 
 *.wav
+!Documentation/TTS/qualityReport/perf_out/batch_technical_obstacles/*.wav
 *.mp3
 Resources/
 !Sources/FluidAudio/Resources/
@@ -109,3 +110,12 @@ fluidaudio_cli/*
 .vscode/
 
 .mobius/
+
+# TTS Quality Report - Downloaded Models
+Documentation/TTS/qualityReport/*.mlpackage
+Documentation/TTS/qualityReport/voices/
+Documentation/TTS/qualityReport/perf_out/
+!Documentation/TTS/qualityReport/perf_out/batch_technical_obstacles/
+!Documentation/TTS/qualityReport/perf_out/batch_technical_obstacles/*.wav
+Documentation/TTS/qualityReport/*.onnx
+Documentation/TTS/qualityReport/.venv/

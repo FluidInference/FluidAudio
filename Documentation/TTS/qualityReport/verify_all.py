@@ -27,10 +27,10 @@ def _rss_kb() -> int:
 def sh(cmd: list[str]) -> None:
     print("$", " ".join(cmd))
     env = os.environ.copy()
+    repo_root = Path(__file__).resolve().parents[3]
     # Ensure KOKORO_PY_SRC is set for scripts that need the Kokoro package
     if "KOKORO_PY_SRC" not in env:
         # Look for kokoro in common locations
-        repo_root = Path(__file__).resolve().parents[3]
         candidates = [
             repo_root / "kokoro",
             repo_root.parent / "mobius" / "kokoro",
@@ -105,6 +105,8 @@ def main() -> None:
             sh([
                 sys.executable,
                 str(scripts_dir / "run-onnx-infer.py"),
+                "--onnx",
+                str(onnx_path),
                 "--text",
                 TEXT,
                 "--voice",
