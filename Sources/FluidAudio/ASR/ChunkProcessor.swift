@@ -67,25 +67,17 @@ struct ChunkProcessor {
                 throw ASRError.processingFailed("Token, timestamp, confidence, and duration arrays are misaligned")
             }
 
-            var effectiveTimestamps = windowTimestamps
-
             if let existingSemantics = activeSemantics {
-                if existingSemantics != semantics {
-                    logger.warning(
-                        "ChunkProcessor: mixed timestamp semantics detected; converting \(semantics) to \(existingSemantics)."
-                    )
-                    effectiveTimestamps = convert(
-                        timestamps: windowTimestamps,
-                        durations: windowDurations,
-                        from: semantics,
-                        to: existingSemantics
+                guard existingSemantics == semantics else {
+                    throw ASRError.processingFailed(
+                        "ChunkProcessor: inconsistent timestamp semantics; expected \(existingSemantics) but received \(semantics)."
                     )
                 }
             } else {
                 activeSemantics = semantics
             }
             let windowData = zip(
-                zip(zip(windowTokens, effectiveTimestamps), windowConfidences),
+                zip(zip(windowTokens, windowTimestamps), windowConfidences),
                 windowDurations
             ).map {
                 (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
@@ -239,17 +231,13 @@ struct ChunkProcessor {
         let filteredTokens = hypothesis.ySequence
         let filteredTimestamps = hypothesis.timestamps
         let filteredConfidences = hypothesis.tokenConfidences
-        let filteredDurations: [Int]
-        if hypothesis.tokenDurations.count == filteredTokens.count {
-            filteredDurations = hypothesis.tokenDurations
-        } else if hypothesis.tokenDurations.isEmpty {
-            filteredDurations = Array(repeating: 0, count: filteredTokens.count)
-        } else {
-            logger.warning(
+        guard hypothesis.tokenDurations.count == filteredTokens.count else {
+            throw ASRError.processingFailed(
                 "ChunkProcessor: token duration count \(hypothesis.tokenDurations.count) "
-                    + "mismatch for tokens \(filteredTokens.count); padding with zeros.")
-            filteredDurations = Array(repeating: 0, count: filteredTokens.count)
+                    + "mismatch for tokens \(filteredTokens.count)."
+            )
         }
+        let filteredDurations = hypothesis.tokenDurations
         let maxFrame = hypothesis.maxTimestamp
 
         return (
@@ -282,3 +270,19 @@ struct ChunkProcessor {
         }
     }
 }
+
+#if DEBUG
+extension ChunkProcessor {
+
+    /// Test-only helper that forwards to the private semantics conversion logic.
+    /// Allows unit tests to verify timestamp normalization without altering production visibility.
+    internal func convertForTesting(
+        timestamps: [Int],
+        durations: [Int],
+        from source: TdtHypothesis.TimestampSemantics,
+        to target: TdtHypothesis.TimestampSemantics
+    ) -> [Int] {
+        convert(timestamps: timestamps, durations: durations, from: source, to: target)
+    }
+}
+#endif

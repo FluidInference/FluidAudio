@@ -157,6 +157,76 @@ final class AsrTranscriptionTests: XCTestCase {
         }
     }
 
+    func testProcessTranscriptionResultWithEndTimestampSemantics() {
+        let tokenIds = [100, 200]
+        let timestamps = [5, 9]  // Frame indices treated as end positions
+        let durations = [2, 3]  // Explicit duration bins (frames)
+        let audioSamples = Array(repeating: Float(0), count: 32_000)
+
+        let result = manager.processTranscriptionResult(
+            tokenIds: tokenIds,
+            timestamps: timestamps,
+            confidences: [0.9, 0.8],
+            tokenDurations: durations,
+            timestampSemantics: .end,
+            encoderSequenceLength: 40,
+            audioSamples: audioSamples,
+            processingTime: 0.12
+        )
+
+        guard let tokenTimings = result.tokenTimings else {
+            XCTFail("Expected token timings for end semantics conversion")
+            return
+        }
+
+        XCTAssertEqual(tokenTimings.count, 2)
+
+        // First token should start 2 frames before frame 5 (3 -> 5)
+        XCTAssertEqual(tokenTimings[0].startTime, 0.24, accuracy: 0.0001)
+        XCTAssertEqual(tokenTimings[0].endTime, 0.40, accuracy: 0.0001)
+
+        // Second token should start 3 frames before frame 9 (6 -> 9)
+        XCTAssertEqual(tokenTimings[1].startTime, 0.48, accuracy: 0.0001)
+        XCTAssertEqual(tokenTimings[1].endTime, 0.72, accuracy: 0.0001)
+    }
+
+    func testProcessTranscriptionResultDerivesDurationsWhenCountsDiffer() {
+        let tokenIds = [1, 2, 3]
+        let timestamps = [4, 8, 12]  // Frame indices with start semantics
+        let mismatchedDurations = [0, 7]  // Count differs from timestamps
+        let confidences: [Float] = [0.7, 0.8, 0.9]
+        let audioSamples = Array(repeating: Float(0), count: 64_000)
+
+        let result = manager.processTranscriptionResult(
+            tokenIds: tokenIds,
+            timestamps: timestamps,
+            confidences: confidences,
+            tokenDurations: mismatchedDurations,
+            timestampSemantics: .start,
+            encoderSequenceLength: 64,
+            audioSamples: audioSamples,
+            processingTime: 0.2
+        )
+
+        guard let tokenTimings = result.tokenTimings else {
+            XCTFail("Expected token timings for derived duration case")
+            return
+        }
+
+        XCTAssertEqual(tokenTimings.count, 3)
+
+        // Derived duration should use next timestamp for first two tokens (4 frames each)
+        XCTAssertEqual(tokenTimings[0].startTime, 0.32, accuracy: 0.0001)  // Frame 4 * 0.08
+        XCTAssertEqual(tokenTimings[0].endTime, 0.64, accuracy: 0.0001)  // Frame 8 * 0.08
+
+        XCTAssertEqual(tokenTimings[1].startTime, 0.64, accuracy: 0.0001)  // Frame 8 * 0.08
+        XCTAssertEqual(tokenTimings[1].endTime, 0.96, accuracy: 0.0001)  // Frame 12 * 0.08
+
+        // Last duration should be replaced with explicit 7-frame override (12 -> 19)
+        XCTAssertEqual(tokenTimings[2].startTime, 0.96, accuracy: 0.0001)  // Frame 12 * 0.08
+        XCTAssertEqual(tokenTimings[2].endTime, 1.52, accuracy: 0.0001)  // Frame 19 * 0.08
+    }
+
     // MARK: - Chunk Processing Logic Tests
 
     func testChunkCalculations() {

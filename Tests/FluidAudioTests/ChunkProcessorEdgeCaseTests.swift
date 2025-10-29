@@ -316,6 +316,55 @@ final class ChunkProcessorEdgeCaseTests: XCTestCase {
         XCTAssertFalse(shouldNotDeduplicate, "First chunk should not attempt deduplication")
     }
 
+    // MARK: - Timestamp Semantics Conversion Tests
+
+    func testConvertSemanticsEndToStart() {
+        let processor = ChunkProcessor(audioSamples: [])
+        let timestamps = [10, 20]
+        let durations = [2, 3]
+
+        let converted = processor.convertForTesting(
+            timestamps: timestamps,
+            durations: durations,
+            from: .end,
+            to: .start
+        )
+
+        XCTAssertEqual(converted, [8, 17], "End semantics should shift timestamps back by duration")
+    }
+
+    func testConvertSemanticsStartToEnd() {
+        let processor = ChunkProcessor(audioSamples: [])
+        let timestamps = [15, 30]
+        let durations = [4, 2]
+
+        let converted = processor.convertForTesting(
+            timestamps: timestamps,
+            durations: durations,
+            from: .start,
+            to: .end
+        )
+
+        XCTAssertEqual(converted, [19, 32], "Start semantics should push timestamps forward by duration")
+    }
+
+    func testConvertSemanticsWithMismatchedDurations() {
+        let processor = ChunkProcessor(audioSamples: [])
+        let timestamps = [5, 10]
+        let mismatchedDurations = [3]  // Should trigger early return
+
+        let converted = processor.convertForTesting(
+            timestamps: timestamps,
+            durations: mismatchedDurations,
+            from: .end,
+            to: .start
+        )
+
+        XCTAssertEqual(
+            converted, timestamps,
+            "Mismatched duration count should leave timestamps unchanged")
+    }
+
     // MARK: - Validation Tests
 
     func testFinalValidationCalculations() {

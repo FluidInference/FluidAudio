@@ -7,7 +7,7 @@
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml 
 
 ```bash
-swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de,ru_ru,uk_ua --samples all
+swift run fluidaudio fleurs-benchmark --languages all --samples all
 ```
 
 ```text
@@ -47,17 +47,17 @@ swift run fluidaudio fleurs-benchmark --languages en_us,it_it,es_419,fr_fr,de_de
 ```
 
 ```text
-[02:01:49.655] [INFO] [Benchmark] 2620 files per dataset • Test runtime: 3m 2s • 09/25/2025, 2:01 AM EDT
-[02:01:49.655] [INFO] [Benchmark] --- Benchmark Results ---
-[02:01:49.655] [INFO] [Benchmark]    Dataset: librispeech test-clean
-[02:01:49.655] [INFO] [Benchmark]    Files processed: 2620
-[02:01:49.655] [INFO] [Benchmark]    Average WER: 2.6%
-[02:01:49.655] [INFO] [Benchmark]    Median WER: 0.0%
-[02:01:49.655] [INFO] [Benchmark]    Average CER: 1.1%
-[02:01:49.655] [INFO] [Benchmark]    Median RTFx: 137.8x
-[02:01:49.655] [INFO] [Benchmark]    Overall RTFx: 153.4x (19452.5s / 126.8s)
-[02:01:49.655] [INFO] [Benchmark] Results saved to: asr_benchmark_results.json
-[02:01:49.655] [INFO] [Benchmark] ASR benchmark completed successfully
+2620 files per dataset • Test runtime: 2m 47s • 10/28/2025, 8:41 PM EDT
+--- Benchmark Results ---
+   Dataset: librispeech test-clean
+   Files processed: 2620
+   Average WER: 2.6%
+   Median WER: 0.0%
+   Average CER: 1.0%
+   Median RTFx: 138.2x
+   Overall RTFx: 153.0x (19452.5s / 127.1s)
+Peak memory usage (process-wide): 0.359 GB
+macOS Version 26.1 (Build 25B5072a), arch=arm64, chip=Apple M4 Pro, cores=12/12, mem=48 GB, rosetta=false
 ```
 
 `swift run fluidaudio asr-benchmark --max-files all --model-version v2`

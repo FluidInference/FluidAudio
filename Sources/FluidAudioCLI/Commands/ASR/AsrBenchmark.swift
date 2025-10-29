@@ -442,9 +442,7 @@ extension ASRBenchmark {
             return
         }
 
-        print("" + String(repeating: "=", count: 80))
         logger.info("📋 Detailed Analysis for Files with WER > \(Int(threshold * 100))%")
-        print(String(repeating: "=", count: 80))
 
         for result in highWERResults.sorted(by: { $0.metrics.wer > $1.metrics.wer }) {
             printSingleFileWERAnalysis(result)
@@ -994,9 +992,6 @@ extension ASRBenchmark {
             print(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
-
-            print("Results saved to: \(outputFile)")
-            print("ASR benchmark completed successfully")
 
         } catch {
             logger.error("ERROR: ASR benchmark failed: \(error)")

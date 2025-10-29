@@ -926,6 +926,49 @@ internal struct TdtDecoderV3 {
     }
 }
 
+#if DEBUG
+extension TdtDecoderV3 {
+
+    /// Test-only helper that mirrors the internal dynamic token limit calculation.
+    internal func dynamicTokenLimitForTesting(effectiveSequenceLength: Int) -> Int {
+        max(
+            config.tdtConfig.maxTokensPerChunk,
+            config.tdtConfig.maxTokensPerFrame * max(effectiveSequenceLength, 1)
+        )
+    }
+
+    /// Test-only helper for the frame progress enforcement logic.
+    internal func enforceFrameProgressForTesting(
+        currentTokensAtFrame: inout Int,
+        label: Int,
+        duration: inout Int
+    ) {
+        let blankId = config.tdtConfig.blankId
+        let maxTokensPerFrame = config.tdtConfig.maxTokensPerFrame
+
+        if label != blankId {
+            currentTokensAtFrame += 1
+        }
+
+        if duration > 0 {
+            currentTokensAtFrame = 0
+        }
+
+        if currentTokensAtFrame >= maxTokensPerFrame {
+            currentTokensAtFrame = 0
+            if duration == 0 {
+                duration = 1
+            }
+        }
+
+        if label == blankId && duration == 0 {
+            currentTokensAtFrame = 0
+            duration = 1
+        }
+    }
+}
+#endif
+
 extension MLMultiArray {
     /// Fast L2 norm (float32 optimized)
     func l2Normf() -> Float {

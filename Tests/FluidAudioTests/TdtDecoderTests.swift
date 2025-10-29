@@ -200,4 +200,55 @@ final class TdtDecoderV3HelperTests: XCTestCase {
         XCTAssertEqual(hypothesis.lastToken, 100)
     }
 
+    // MARK: - Decoder Safeguard Tests
+
+    func testDynamicTokenLimitScaling() {
+        let smallSequenceLimit = decoder.dynamicTokenLimitForTesting(effectiveSequenceLength: 10)
+        XCTAssertEqual(
+            smallSequenceLimit, config.tdtConfig.maxTokensPerChunk,
+            "Small sequences should be capped by per-chunk limit")
+
+        let largeSequenceLimit = decoder.dynamicTokenLimitForTesting(effectiveSequenceLength: 100)
+        XCTAssertEqual(
+            largeSequenceLimit,
+            config.tdtConfig.maxTokensPerFrame * 100,
+            "Large sequences should scale with per-frame multiplier")
+    }
+
+    func testEnforceFrameProgressLimitsTokensPerFrame() {
+        var tokensAtFrame = config.tdtConfig.maxTokensPerFrame - 1
+        var duration = 0
+
+        decoder.enforceFrameProgressForTesting(
+            currentTokensAtFrame: &tokensAtFrame,
+            label: 42,
+            duration: &duration
+        )
+
+        XCTAssertEqual(tokensAtFrame, 0, "Burst of non-blank tokens should reset frame counter")
+        XCTAssertEqual(duration, 1, "Non-blank bursts must force at least one frame advance")
+
+        tokensAtFrame = 0
+        duration = 0
+        decoder.enforceFrameProgressForTesting(
+            currentTokensAtFrame: &tokensAtFrame,
+            label: config.tdtConfig.blankId,
+            duration: &duration
+        )
+
+        XCTAssertEqual(tokensAtFrame, 0, "Blank tokens keep counter cleared")
+        XCTAssertEqual(duration, 1, "Blank token with zero duration must still advance frame")
+
+        tokensAtFrame = 3
+        duration = 4  // Explicit duration advance
+        decoder.enforceFrameProgressForTesting(
+            currentTokensAtFrame: &tokensAtFrame,
+            label: 100,
+            duration: &duration
+        )
+
+        XCTAssertEqual(tokensAtFrame, 0, "Positive duration should clear frame-local counter")
+        XCTAssertEqual(duration, 4, "Provided duration should remain unchanged when already advancing")
+    }
+
 }
