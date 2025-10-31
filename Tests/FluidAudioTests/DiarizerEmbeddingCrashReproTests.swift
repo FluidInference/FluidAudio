@@ -36,17 +36,39 @@ final class DiarizerEmbeddingCrashReproTests: XCTestCase {
     }
 
     private func loadAudioSamples(named fileName: String) throws -> [Float] {
-        let fileURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent(fileName, isDirectory: false)
+        let resourceURL = try resolveFixtureURL(named: fileName)
+        return try AudioConverter().resampleAudioFile(resourceURL)
+    }
 
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            throw CrashReproError.missingAudioFixture(fileURL.path)
+    private func resolveFixtureURL(named fileName: String) throws -> URL {
+        let nameURL = URL(fileURLWithPath: fileName)
+        let resourceName = nameURL.deletingPathExtension().lastPathComponent
+        let resourceExtension = nameURL.pathExtension.isEmpty ? nil : nameURL.pathExtension
+
+        if let bundleURL = Bundle(for: Self.self).url(
+            forResource: resourceName,
+            withExtension: resourceExtension
+        ) {
+            return bundleURL
         }
 
-        return try AudioConverter().resampleAudioFile(fileURL)
+        let testDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let candidateDirectories: [URL] = [
+            testDirectory.deletingLastPathComponent(),
+            testDirectory,
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
+        ]
+
+        for directory in candidateDirectories {
+            let candidateURL = directory.appendingPathComponent(fileName, isDirectory: false)
+            if FileManager.default.fileExists(atPath: candidateURL.path) {
+                return candidateURL
+            }
+        }
+
+        throw XCTSkip("Skipping concurrency stress test: missing audio fixture \(fileName)")
     }
 }
 
@@ -62,8 +84,4 @@ private actor ErrorRecorder {
     func value() -> Error? {
         storedError
     }
-}
-
-private enum CrashReproError: Error {
-    case missingAudioFixture(String)
 }

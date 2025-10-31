@@ -353,31 +353,38 @@ public final class DiarizerManager {
         minActivityThreshold: Float
     ) throws -> [[Float]]
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
-        var embeddingsResult: [[Float]]?
-        var capturedError: Error?
+        var result: Result<[[Float]], Error>?
         let semaphore = DispatchSemaphore(value: 0)
 
-        Task {
-            do {
-                let result = try await extractor.getEmbeddings(
-                    audio: audio,
-                    masks: masks,
-                    minActivityThreshold: minActivityThreshold
-                )
-                embeddingsResult = result
-            } catch {
-                capturedError = error
+        withUnsafeMutablePointer(to: &result) { resultPointer in
+            // Bridge actor-based async call into the synchronous diarizer pipeline.
+            Task.detached {
+                do {
+                    let embeddings = try await extractor.getEmbeddings(
+                        audio: audio,
+                        masks: masks,
+                        minActivityThreshold: minActivityThreshold
+                    )
+                    resultPointer.pointee = .success(embeddings)
+                } catch {
+                    resultPointer.pointee = .failure(error)
+                }
+                semaphore.signal()
             }
-            semaphore.signal()
+
+            semaphore.wait()
         }
 
-        semaphore.wait()
+        guard let finalResult = result else {
+            return []
+        }
 
-        if let error = capturedError {
+        switch finalResult {
+        case let .success(embeddings):
+            return embeddings
+        case let .failure(error):
             throw error
         }
-
-        return embeddingsResult ?? []
     }
 
     /// Count activity frames per speaker.
