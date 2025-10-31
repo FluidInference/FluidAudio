@@ -35,9 +35,9 @@ extension AsrManager {
             return result
         }
 
-        // ChunkProcessor now uses the passed-in decoder state for continuity
+        // ChunkProcessor handles stateless chunked transcription for long audio
         let processor = ChunkProcessor(audioSamples: audioSamples)
-        return try await processor.process(using: self, decoderState: &decoderState, startTime: startTime)
+        return try await processor.process(using: self, startTime: startTime)
     }
 
     internal func executeMLInferenceWithTimings(
