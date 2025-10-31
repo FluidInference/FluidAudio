@@ -1,81 +1,7 @@
 import Accelerate
 import CoreML
-import Dispatch
 import Foundation
 import Metal
-
-private final class ANEBufferPool {
-
-    private struct Entry {
-        var array: MLMultiArray
-        var leased: Bool
-    }
-
-    private var storage: [String: [Entry]] = [:]
-    private let queue = DispatchQueue(label: "com.fluidaudio.ane-buffer-pool")
-
-    func sharedBuffer(
-        key: String,
-        shape: [NSNumber],
-        dataType: MLMultiArrayDataType,
-        allocator: () throws -> MLMultiArray
-    ) throws -> MLMultiArray {
-        try queue.sync {
-            if let entries = storage[key],
-                let index = entries.firstIndex(where: {
-                    $0.array.shape == shape && $0.array.dataType == dataType
-                })
-            {
-                return entries[index].array
-            }
-
-            let array = try allocator()
-            var entries = storage[key] ?? []
-            entries.append(Entry(array: array, leased: false))
-            storage[key] = entries
-            return array
-        }
-    }
-
-    func leaseBuffer(
-        key: String,
-        shape: [NSNumber],
-        dataType: MLMultiArrayDataType,
-        allocator: () throws -> MLMultiArray
-    ) throws -> (index: Int, array: MLMultiArray) {
-        try queue.sync {
-            if var entries = storage[key],
-                let index = entries.firstIndex(where: {
-                    !$0.leased && $0.array.shape == shape && $0.array.dataType == dataType
-                })
-            {
-                entries[index].leased = true
-                storage[key] = entries
-                return (index, entries[index].array)
-            }
-
-            let array = try allocator()
-            var entries = storage[key] ?? []
-            entries.append(Entry(array: array, leased: true))
-            storage[key] = entries
-            return (entries.count - 1, array)
-        }
-    }
-
-    func releaseLease(key: String, index: Int) {
-        queue.sync {
-            guard var entries = storage[key], entries.indices.contains(index) else { return }
-            entries[index].leased = false
-            storage[key] = entries
-        }
-    }
-
-    func clear() {
-        queue.sync {
-            storage.removeAll()
-        }
-    }
-}
 
 /// ANE-optimized memory management for speaker diarization pipeline
 public final class ANEMemoryOptimizer {
@@ -83,12 +9,13 @@ public final class ANEMemoryOptimizer {
     public static let aneAlignment = ANEMemoryUtils.aneAlignment
     public static let aneTileSize = ANEMemoryUtils.aneTileSize
 
-    private let pool = ANEBufferPool()
+    private var bufferPool: [String: MLMultiArray] = [:]
+    private let bufferLock = NSLock()
 
     public init() {}
 
     /// Create ANE-aligned MLMultiArray with optimized memory layout
-    public nonisolated func createAlignedArray(
+    public func createAlignedArray(
         shape: [NSNumber],
         dataType: MLMultiArrayDataType
     ) throws -> MLMultiArray {
@@ -106,7 +33,7 @@ public final class ANEMemoryOptimizer {
     }
 
     /// Calculate optimal strides for ANE tile processing
-    private nonisolated func calculateOptimalStrides(
+    private func calculateOptimalStrides(
         for shape: [NSNumber],
         dataType: MLMultiArrayDataType
     ) -> [NSNumber] {
@@ -119,21 +46,32 @@ public final class ANEMemoryOptimizer {
         shape: [NSNumber],
         dataType: MLMultiArrayDataType
     ) throws -> MLMultiArray {
-        try pool.sharedBuffer(
-            key: key,
-            shape: shape,
-            dataType: dataType,
-            allocator: { try self.createAlignedArray(shape: shape, dataType: dataType) }
-        )
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+
+        if let existing = bufferPool[key] {
+            // Verify shape matches
+            if existing.shape == shape && existing.dataType == dataType {
+                return existing
+            }
+        }
+
+        // Create new buffer
+        let buffer = try createAlignedArray(shape: shape, dataType: dataType)
+        bufferPool[key] = buffer
+        return buffer
     }
 
     /// Clear buffer pool to free memory
     public func clearBufferPool() {
-        pool.clear()
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+
+        bufferPool.removeAll()
     }
 
     /// Create zero-copy memory view between models
-    public nonisolated func createZeroCopyView(
+    public func createZeroCopyView(
         from sourceArray: MLMultiArray,
         shape: [NSNumber],
         offset: Int = 0
@@ -163,7 +101,7 @@ public final class ANEMemoryOptimizer {
     }
 
     /// Copy data using ANE-optimized memory operations
-    public nonisolated func optimizedCopy<C>(
+    public func optimizedCopy<C>(
         from source: C,
         to destination: MLMultiArray,
         offset: Int = 0
@@ -261,7 +199,7 @@ public final class ZeroCopyDiarizerFeatureProvider: NSObject, MLFeatureProvider 
         waveforms: [MLMultiArray],
         masks: [MLMultiArray]
     ) -> [ZeroCopyDiarizerFeatureProvider] {
-        zip(waveforms, masks).map { waveform, mask in
+        return zip(waveforms, masks).map { waveform, mask in
             ZeroCopyDiarizerFeatureProvider(features: [
                 "waveform": MLFeatureValue(multiArray: waveform),
                 "mask": MLFeatureValue(multiArray: mask),
