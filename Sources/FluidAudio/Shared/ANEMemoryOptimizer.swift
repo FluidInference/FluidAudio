@@ -62,6 +62,14 @@ public final class ANEMemoryOptimizer {
         return buffer
     }
 
+    /// Clear buffer pool to free memory
+    public func clearBufferPool() {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+
+        bufferPool.removeAll()
+    }
+
     /// Create zero-copy memory view between models
     public func createZeroCopyView(
         from sourceArray: MLMultiArray,
@@ -137,13 +145,6 @@ public final class ANEMemoryOptimizer {
         }
     }
 
-    /// Clear buffer pool to free memory
-    public func clearBufferPool() {
-        bufferLock.lock()
-        defer { bufferLock.unlock() }
-
-        bufferPool.removeAll()
-    }
 }
 
 /// Extension for MLMultiArray to enable zero-copy operations
@@ -160,7 +161,7 @@ extension MLMultiArray {
 }
 
 /// Zero-copy feature provider for chaining models
-public class ZeroCopyDiarizerFeatureProvider: NSObject, MLFeatureProvider {
+public final class ZeroCopyDiarizerFeatureProvider: NSObject, MLFeatureProvider {
     private let features: [String: MLFeatureValue]
 
     public init(features: [String: MLFeatureValue]) {

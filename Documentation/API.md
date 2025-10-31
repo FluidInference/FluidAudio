@@ -18,7 +18,7 @@ This page summarizes the primary public APIs across modules. See inline doc comm
 Main class for speaker diarization and "who spoke when" analysis.
 
 **Key Methods:**
-- `performCompleteDiarization(_:sampleRate:) throws -> DiarizerResult`
+- `performCompleteDiarization(_:sampleRate:) throws -> DiarizationResult`
   - Process complete audio file and return speaker segments
   - Parameters: `RandomAccessCollection<Float>` audio samples, sample rate (default: 16000)
   - Returns: `DiarizerResult` with speaker segments and timing

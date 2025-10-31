@@ -8,8 +8,6 @@ public final class DiarizerManager {
     internal let logger = AppLogger(category: "Diarizer")
     internal let config: DiarizerConfig
     private var models: DiarizerModels?
-    private var chunkBuffer: [Float] = []
-
     /// Public getter for segmentation model (for streaming)
     public var segmentationModel: MLModel? {
         return models?.segmentationModel
@@ -126,6 +124,7 @@ public final class DiarizerManager {
         let overlapDuration = Int(config.chunkOverlap.rounded())
         let chunkSize = sampleRate * chunkDuration
         let stepSize = chunkSize - (sampleRate * overlapDuration)
+        var chunkBuffer = [Float](repeating: 0.0, count: max(chunkSize, 1))
 
         var allSegments: [TimedSpeakerSegment] = []
 
@@ -145,7 +144,9 @@ public final class DiarizerManager {
                 chunk,
                 chunkOffset: chunkOffset,
                 models: models,
-                sampleRate: sampleRate
+                sampleRate: sampleRate,
+                chunkSize: chunkSize,
+                chunkBuffer: &chunkBuffer
             )
             allSegments.append(contentsOf: chunkSegments)
 
@@ -203,12 +204,13 @@ public final class DiarizerManager {
         _ chunk: C,
         chunkOffset: Double,
         models: DiarizerModels,
-        sampleRate: Int = 16000
+        sampleRate: Int = 16000,
+        chunkSize: Int,
+        chunkBuffer: inout [Float]
     ) throws -> ([TimedSpeakerSegment], ChunkTimings)
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         let segmentationStartTime = Date()
 
-        let chunkSize = sampleRate * 10
         let chunkCount = chunk.distance(from: chunk.startIndex, to: chunk.endIndex)
         let copyCount = min(chunkCount, chunkSize)
 
@@ -279,7 +281,7 @@ public final class DiarizerManager {
         }
 
         let embeddings = try embeddingExtractor.getEmbeddings(
-            audio: Array(paddedChunk),
+            audio: paddedChunk,
             masks: masks,
             minActivityThreshold: config.minActiveFramesCount
         )
