@@ -3,38 +3,17 @@ import CoreML
 import OSLog
 
 /// Embedding extractor with ANE-aligned memory and zero-copy operations
-public class EmbeddingExtractor {
+public actor EmbeddingExtractor {
     private let wespeakerModel: MLModel
     private let logger = AppLogger(category: "EmbeddingExtractor")
     private let memoryOptimizer = ANEMemoryOptimizer()
 
-    // Pre-allocated ANE-aligned buffers
-    private var waveformBuffer: MLMultiArray?
-    private var maskBuffer: MLMultiArray?
-
-    // Reusable feature providers
-    private var featureProviders: [ZeroCopyDiarizerFeatureProvider] = []
+    private let waveformShape: [NSNumber] = [3, 160_000]
+    private let waveformKey = "wespeaker_waveform_primary"
 
     public init(embeddingModel: MLModel) {
         self.wespeakerModel = embeddingModel
-
-        // Pre-allocate ANE-aligned buffers
-        do {
-            self.waveformBuffer = try memoryOptimizer.createAlignedArray(
-                shape: [3, 160000] as [NSNumber],
-                dataType: .float32
-            )
-
-            self.maskBuffer = try memoryOptimizer.createAlignedArray(
-                shape: [3, 1000] as [NSNumber],  // Typical mask size
-                dataType: .float32
-            )
-        } catch {
-            logger.error("Failed to allocate ANE-aligned buffers: \(error)")
-            // Buffers will remain nil, will be allocated on-demand in getEmbeddings
-        }
-
-        logger.info("EmbeddingExtractor initialized with ANE-aligned buffers")
+        logger.info("EmbeddingExtractor ready with ANE memory optimizer")
     }
 
     /// Extract speaker embeddings using the CoreML embedding model.
@@ -54,17 +33,31 @@ public class EmbeddingExtractor {
         minActivityThreshold: Float = 10.0
     ) throws -> [[Float]]
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
-        // We need to return embeddings for ALL speakers, not just active ones
-        // to maintain compatibility with the rest of the pipeline
-        var embeddings: [[Float]] = []
+        guard let firstMask = masks.first else {
+            return []
+        }
 
-        // Get or create appropriately sized mask buffer
-        let maskShape = [3, masks[0].count] as [NSNumber]
-        let currentMaskBuffer = try memoryOptimizer.getPooledBuffer(
-            key: "wespeaker_mask_\(masks[0].count)",
+        let maskShape = [3, firstMask.count] as [NSNumber]
+        let maskKey = "wespeaker_mask_\(firstMask.count)"
+
+        let waveformLease = try memoryOptimizer.leaseBuffer(
+            key: waveformKey,
+            shape: waveformShape,
+            dataType: .float32
+        )
+
+        let maskLease = try memoryOptimizer.leaseBuffer(
+            key: maskKey,
             shape: maskShape,
             dataType: .float32
         )
+
+        let waveformBuffer = waveformLease.multiArray
+        let maskBuffer = maskLease.multiArray
+
+        // We need to return embeddings for ALL speakers, not just active ones
+        // to maintain compatibility with the rest of the pipeline
+        var embeddings: [[Float]] = []
 
         // Process all speakers but optimize for active ones
         for speakerIdx in 0..<masks.count {
@@ -80,7 +73,7 @@ public class EmbeddingExtractor {
             // Use ANE-optimized copy for audio data
             memoryOptimizer.optimizedCopy(
                 from: audio,
-                to: waveformBuffer!,
+                to: waveformBuffer,
                 offset: 0  // First speaker slot
             )
 
@@ -88,20 +81,20 @@ public class EmbeddingExtractor {
             fillMaskBufferOptimized(
                 masks: masks,
                 speakerIndex: speakerIdx,
-                buffer: currentMaskBuffer
+                buffer: maskBuffer
             )
 
             // Create zero-copy feature provider
             let featureProvider = ZeroCopyDiarizerFeatureProvider(features: [
-                "waveform": MLFeatureValue(multiArray: waveformBuffer!),
-                "mask": MLFeatureValue(multiArray: currentMaskBuffer),
+                "waveform": MLFeatureValue(multiArray: waveformBuffer),
+                "mask": MLFeatureValue(multiArray: maskBuffer),
             ])
 
             // Run model with optimal prediction options
             let options = MLPredictionOptions()
             // Prefetch to Neural Engine for better performance
-            waveformBuffer!.prefetchToNeuralEngine()
-            currentMaskBuffer.prefetchToNeuralEngine()
+            waveformBuffer.prefetchToNeuralEngine()
+            maskBuffer.prefetchToNeuralEngine()
 
             let output = try wespeakerModel.prediction(from: featureProvider, options: options)
 

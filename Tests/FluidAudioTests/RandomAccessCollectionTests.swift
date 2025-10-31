@@ -206,7 +206,7 @@ final class RandomAccessCollectionTests: XCTestCase {
         let audio = ContiguousArray<Float>(repeating: 0.1, count: 160000)
         let masks = [[Float](repeating: 1.0, count: 589)]
 
-        let embeddings = try extractor.getEmbeddings(
+        let embeddings = try await extractor.getEmbeddings(
             audio: audio,
             masks: masks,
             minActivityThreshold: 10.0
@@ -227,7 +227,7 @@ final class RandomAccessCollectionTests: XCTestCase {
         let customBuffer = CustomAudioBuffer(audioData)
         let masks = [[Float](repeating: 1.0, count: 589)]
 
-        let embeddings = try extractor.getEmbeddings(
+        let embeddings = try await extractor.getEmbeddings(
             audio: customBuffer,
             masks: masks,
             minActivityThreshold: 10.0

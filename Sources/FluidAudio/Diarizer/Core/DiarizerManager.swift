@@ -1,5 +1,6 @@
 import Accelerate
 import CoreML
+import Dispatch
 import Foundation
 import OSLog
 
@@ -8,8 +9,6 @@ public final class DiarizerManager {
     internal let logger = AppLogger(category: "Diarizer")
     internal let config: DiarizerConfig
     private var models: DiarizerModels?
-    private var chunkBuffer: [Float] = []
-
     /// Public getter for segmentation model (for streaming)
     public var segmentationModel: MLModel? {
         return models?.segmentationModel
@@ -126,6 +125,7 @@ public final class DiarizerManager {
         let overlapDuration = Int(config.chunkOverlap.rounded())
         let chunkSize = sampleRate * chunkDuration
         let stepSize = chunkSize - (sampleRate * overlapDuration)
+        var chunkBuffer = [Float](repeating: 0.0, count: max(chunkSize, 1))
 
         var allSegments: [TimedSpeakerSegment] = []
 
@@ -145,7 +145,9 @@ public final class DiarizerManager {
                 chunk,
                 chunkOffset: chunkOffset,
                 models: models,
-                sampleRate: sampleRate
+                sampleRate: sampleRate,
+                chunkSize: chunkSize,
+                chunkBuffer: &chunkBuffer
             )
             allSegments.append(contentsOf: chunkSegments)
 
@@ -203,12 +205,13 @@ public final class DiarizerManager {
         _ chunk: C,
         chunkOffset: Double,
         models: DiarizerModels,
-        sampleRate: Int = 16000
+        sampleRate: Int = 16000,
+        chunkSize: Int,
+        chunkBuffer: inout [Float]
     ) throws -> ([TimedSpeakerSegment], ChunkTimings)
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         let segmentationStartTime = Date()
 
-        let chunkSize = sampleRate * 10
         let chunkCount = chunk.distance(from: chunk.startIndex, to: chunk.endIndex)
         let copyCount = min(chunkCount, chunkSize)
 
@@ -278,8 +281,9 @@ public final class DiarizerManager {
             masks.append(speakerMask)
         }
 
-        let embeddings = try embeddingExtractor.getEmbeddings(
-            audio: Array(paddedChunk),
+        let embeddings = try extractEmbeddingsSynchronously(
+            using: embeddingExtractor,
+            audio: paddedChunk,
             masks: masks,
             minActivityThreshold: config.minActiveFramesCount
         )
@@ -340,6 +344,40 @@ public final class DiarizerManager {
         )
 
         return (segments, timings)
+    }
+
+    private func extractEmbeddingsSynchronously<C>(
+        using extractor: EmbeddingExtractor,
+        audio: C,
+        masks: [[Float]],
+        minActivityThreshold: Float
+    ) throws -> [[Float]]
+    where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
+        var embeddingsResult: [[Float]]?
+        var capturedError: Error?
+        let semaphore = DispatchSemaphore(value: 0)
+
+        Task {
+            do {
+                let result = try await extractor.getEmbeddings(
+                    audio: audio,
+                    masks: masks,
+                    minActivityThreshold: minActivityThreshold
+                )
+                embeddingsResult = result
+            } catch {
+                capturedError = error
+            }
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+
+        if let error = capturedError {
+            throw error
+        }
+
+        return embeddingsResult ?? []
     }
 
     /// Count activity frames per speaker.

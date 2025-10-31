@@ -1,7 +1,6 @@
 import AVFoundation
-import XCTest
-
 @preconcurrency @testable import FluidAudio
+import XCTest
 
 final class DiarizerEmbeddingCrashReproTests: XCTestCase {
 
@@ -14,30 +13,26 @@ final class DiarizerEmbeddingCrashReproTests: XCTestCase {
         let manager = DiarizerManager()
         manager.initialize(models: models)
 
-        let queue = DispatchQueue(label: "concurrent-diarizer", qos: .userInitiated, attributes: .concurrent)
-        let group = DispatchGroup()
         let concurrentCalls = 12
 
-        for _ in 0..<concurrentCalls {
-            group.enter()
-            queue.async {
-                autoreleasepool {
+        let errorRecorder = ErrorRecorder()
+
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<concurrentCalls {
+                group.addTask {
                     do {
                         _ = try manager.performCompleteDiarization(audioSamples)
                     } catch {
-                        // We intentionally ignore errors; the crash happens before completion.
+                        await errorRecorder.record(error)
                     }
                 }
-                group.leave()
             }
         }
 
-        await withCheckedContinuation { continuation in
-            group.notify(queue: queue) {
-                continuation.resume()
-            }
+        let capturedError = await errorRecorder.value()
+        if let error = capturedError {
+            XCTFail("Diarization failed under concurrency stress: \(error)")
         }
-
     }
 
     private func loadAudioSamples(named fileName: String) throws -> [Float] {
@@ -52,6 +47,20 @@ final class DiarizerEmbeddingCrashReproTests: XCTestCase {
         }
 
         return try AudioConverter().resampleAudioFile(fileURL)
+    }
+}
+
+private actor ErrorRecorder {
+    private var storedError: Error?
+
+    func record(_ error: Error) {
+        if storedError == nil {
+            storedError = error
+        }
+    }
+
+    func value() -> Error? {
+        storedError
     }
 }
 

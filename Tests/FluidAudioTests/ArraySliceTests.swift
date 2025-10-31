@@ -49,7 +49,7 @@ final class ArraySliceTests: XCTestCase {
         let masks = [[Float](repeating: 1.0, count: 589)]
 
         // Test that extraction works with ArraySlice
-        let embeddings = try extractor.getEmbeddings(
+        let embeddings = try await extractor.getEmbeddings(
             audio: slice,
             masks: masks,
             minActivityThreshold: 10.0
