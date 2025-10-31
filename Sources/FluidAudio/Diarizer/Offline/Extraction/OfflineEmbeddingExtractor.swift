@@ -259,8 +259,7 @@ struct OfflineEmbeddingExtractor {
         var pldaBatchCallCount = 0
 
         func performEmbeddingWarmup() throws {
-            let warmupAudioArray = try memoryOptimizer.getPooledBuffer(
-                key: "offline_embedding_warmup_audio",
+            let warmupAudioArray = try memoryOptimizer.createAlignedArray(
                 shape: fbankInputShape,
                 dataType: .float32
             )
@@ -703,8 +702,7 @@ struct OfflineEmbeddingExtractor {
     private func prepareWeightsInput(
         weights: [Float]
     ) throws -> MLMultiArray {
-        let array = try memoryOptimizer.getPooledBuffer(
-            key: "offline_embedding_weights_\(weightFrameCount)",
+        let array = try memoryOptimizer.createAlignedArray(
             shape: weightInputShape,
             dataType: .float32
         )
