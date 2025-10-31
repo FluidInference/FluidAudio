@@ -3,13 +3,10 @@ import CoreML
 import OSLog
 
 /// Embedding extractor with ANE-aligned memory and zero-copy operations
-public actor EmbeddingExtractor {
+public final class EmbeddingExtractor {
     private let wespeakerModel: MLModel
     private let logger = AppLogger(category: "EmbeddingExtractor")
     private let memoryOptimizer = ANEMemoryOptimizer()
-
-    private let waveformShape: [NSNumber] = [3, 160_000]
-    private let waveformKey = "wespeaker_waveform_primary"
 
     public init(embeddingModel: MLModel) {
         self.wespeakerModel = embeddingModel
@@ -37,23 +34,18 @@ public actor EmbeddingExtractor {
             return []
         }
 
+        let waveformShape = [3, 160_000] as [NSNumber]
         let maskShape = [3, firstMask.count] as [NSNumber]
-        let maskKey = "wespeaker_mask_\(firstMask.count)"
 
-        let waveformLease = try memoryOptimizer.leaseBuffer(
-            key: waveformKey,
+        let waveformBuffer = try memoryOptimizer.createAlignedArray(
             shape: waveformShape,
             dataType: .float32
         )
 
-        let maskLease = try memoryOptimizer.leaseBuffer(
-            key: maskKey,
+        let maskBuffer = try memoryOptimizer.createAlignedArray(
             shape: maskShape,
             dataType: .float32
         )
-
-        let waveformBuffer = waveformLease.multiArray
-        let maskBuffer = maskLease.multiArray
 
         // We need to return embeddings for ALL speakers, not just active ones
         // to maintain compatibility with the rest of the pipeline

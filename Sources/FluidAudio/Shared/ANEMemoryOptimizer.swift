@@ -4,20 +4,6 @@ import Dispatch
 import Foundation
 import Metal
 
-public final class ANEMultiArrayLease {
-    public let multiArray: MLMultiArray
-    private let releaseHandler: @Sendable () -> Void
-
-    init(array: MLMultiArray, releaseHandler: @escaping @Sendable () -> Void) {
-        self.multiArray = array
-        self.releaseHandler = releaseHandler
-    }
-
-    deinit {
-        releaseHandler()
-    }
-}
-
 private final class ANEBufferPool {
 
     private struct Entry {
@@ -139,28 +125,6 @@ public final class ANEMemoryOptimizer {
             dataType: dataType,
             allocator: { try self.createAlignedArray(shape: shape, dataType: dataType) }
         )
-    }
-
-    /// Lease a pooled buffer with deterministic release semantics.
-    ///
-    /// Callers must keep the returned `ANEMultiArrayLease` alive for as long as Core ML
-    /// might retain the underlying multi-array. The lease automatically returns the
-    /// buffer to the pool on deinit.
-    public func leaseBuffer(
-        key: String,
-        shape: [NSNumber],
-        dataType: MLMultiArrayDataType
-    ) throws -> ANEMultiArrayLease {
-        let (index, array) = try pool.leaseBuffer(
-            key: key,
-            shape: shape,
-            dataType: dataType,
-            allocator: { try self.createAlignedArray(shape: shape, dataType: dataType) }
-        )
-
-        return ANEMultiArrayLease(array: array) { [pool] in
-            pool.releaseLease(key: key, index: index)
-        }
     }
 
     /// Clear buffer pool to free memory

@@ -259,21 +259,19 @@ struct OfflineEmbeddingExtractor {
         var pldaBatchCallCount = 0
 
         func performEmbeddingWarmup() throws {
-            let warmupAudioLease = try memoryOptimizer.leaseBuffer(
-                key: "offline_embedding_warmup_audio",
+            let warmupAudioArray = try memoryOptimizer.createAlignedArray(
                 shape: fbankInputShape,
                 dataType: .float32
             )
-            let warmupAudioArray = warmupAudioLease.multiArray
             let warmupAudioPointer = warmupAudioArray.dataPointer.assumingMemoryBound(to: Float.self)
             vDSP_vclr(warmupAudioPointer, 1, vDSP_Length(warmupAudioArray.count))
 
             let warmupFbankFeatures = try runFbankModel(audioArray: warmupAudioArray)
             let zeroWeights = [Float](repeating: 0, count: weightFrameCount)
-            let warmupWeightsLease = try prepareWeightsInput(weights: zeroWeights)
+            let warmupWeightsArray = try prepareWeightsInput(weights: zeroWeights)
             _ = try runEmbeddingModel(
                 fbankFeatures: warmupFbankFeatures,
-                weightsArray: warmupWeightsLease.multiArray
+                weightsArray: warmupWeightsArray
             )
         }
 
@@ -456,10 +454,10 @@ struct OfflineEmbeddingExtractor {
                 }
 
                 let embeddingStart = resampleEnd
-                let weightsLease = try prepareWeightsInput(weights: resampledMask)
+                let weightsArray = try prepareWeightsInput(weights: resampledMask)
                 let embedding256 = try runEmbeddingModel(
                     fbankFeatures: fbankFeatures,
-                    weightsArray: weightsLease.multiArray
+                    weightsArray: weightsArray
                 )
                 let embeddingEnd = clock.now
                 embeddingDuration += embeddingStart.duration(to: embeddingEnd)
@@ -703,13 +701,11 @@ struct OfflineEmbeddingExtractor {
 
     private func prepareWeightsInput(
         weights: [Float]
-    ) throws -> ANEMultiArrayLease {
-        let lease = try memoryOptimizer.leaseBuffer(
-            key: "offline_embedding_weights_\(weightFrameCount)",
+    ) throws -> MLMultiArray {
+        let array = try memoryOptimizer.createAlignedArray(
             shape: weightInputShape,
             dataType: .float32
         )
-        let array = lease.multiArray
 
         let pointer = array.dataPointer.assumingMemoryBound(to: Float.self)
         vDSP_vclr(pointer, 1, vDSP_Length(array.count))
@@ -728,7 +724,7 @@ struct OfflineEmbeddingExtractor {
             }
         }
 
-        return lease
+        return array
     }
 
     private func runEmbeddingModel(

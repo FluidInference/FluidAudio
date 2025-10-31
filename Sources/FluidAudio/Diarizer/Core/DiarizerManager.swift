@@ -1,6 +1,5 @@
 import Accelerate
 import CoreML
-import Dispatch
 import Foundation
 import OSLog
 
@@ -281,8 +280,7 @@ public final class DiarizerManager {
             masks.append(speakerMask)
         }
 
-        let embeddings = try extractEmbeddingsSynchronously(
-            using: embeddingExtractor,
+        let embeddings = try embeddingExtractor.getEmbeddings(
             audio: paddedChunk,
             masks: masks,
             minActivityThreshold: config.minActiveFramesCount
@@ -344,47 +342,6 @@ public final class DiarizerManager {
         )
 
         return (segments, timings)
-    }
-
-    private func extractEmbeddingsSynchronously<C>(
-        using extractor: EmbeddingExtractor,
-        audio: C,
-        masks: [[Float]],
-        minActivityThreshold: Float
-    ) throws -> [[Float]]
-    where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
-        var result: Result<[[Float]], Error>?
-        let semaphore = DispatchSemaphore(value: 0)
-
-        withUnsafeMutablePointer(to: &result) { resultPointer in
-            // Bridge actor-based async call into the synchronous diarizer pipeline.
-            Task.detached {
-                do {
-                    let embeddings = try await extractor.getEmbeddings(
-                        audio: audio,
-                        masks: masks,
-                        minActivityThreshold: minActivityThreshold
-                    )
-                    resultPointer.pointee = .success(embeddings)
-                } catch {
-                    resultPointer.pointee = .failure(error)
-                }
-                semaphore.signal()
-            }
-
-            semaphore.wait()
-        }
-
-        guard let finalResult = result else {
-            return []
-        }
-
-        switch finalResult {
-        case let .success(embeddings):
-            return embeddings
-        case let .failure(error):
-            throw error
-        }
     }
 
     /// Count activity frames per speaker.
