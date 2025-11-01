@@ -71,8 +71,23 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 
 ## Configuration
 
+### Quick Reference
+
+Both solve the same problem: **"I can't reach HuggingFace directly."** They're alternative approaches - pick whichever matches your setup:
+
+| Scenario | Solution | Configuration |
+|----------|----------|---|
+| You have a **local mirror or internal model server** | Use Registry URL override | `REGISTRY_URL=https://your-mirror.com` |
+| You're **behind a corporate firewall** with a proxy that can reach HuggingFace | Use Proxy configuration | `https_proxy=http://proxy.company.com:8080` |
+
+**How they work:**
+- **Registry URL** - App requests from `your-mirror.com` instead of `huggingface.co`
+- **Proxy** - App still requests `huggingface.co`, but traffic routes through proxy to reach it
+
+In most cases, you only need one. (You'd use both only if your mirror is behind the proxy and unreachable without it.)
+
 <details>
-<summary><b>Model Registry URL</b> - Use custom registry/mirror</summary>
+<summary><b>Model Registry URL</b> - Change download destination</summary>
 
 By default, FluidAudio downloads models from HuggingFace. You can override this to use a mirror, local server, or air-gapped environment.
 
@@ -106,9 +121,11 @@ swift run fluidaudio diarization-benchmark --auto-download
 </details>
 
 <details>
-<summary><b>Proxy Configuration</b> - Corporate firewall setup</summary>
+<summary><b>Proxy Configuration</b> - Route downloads through a proxy server</summary>
 
-If you're behind a corporate firewall, set the `https_proxy` environment variable:
+If you're behind a corporate firewall and cannot reach HuggingFace (or your registry) directly, configure a proxy to forward requests:
+
+Set the `https_proxy` environment variable:
 
 ```bash
 export https_proxy=http://proxy.company.com:8080
