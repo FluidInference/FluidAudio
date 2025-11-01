@@ -114,9 +114,10 @@ swift run fluidaudio diarization-benchmark --auto-download
 ```
 
 **Xcode Scheme Configuration:**
-1. Edit Scheme → Run → Arguments Passed On Launch
-2. Add environment variable: `REGISTRY_URL` = `https://your-mirror.example.com`
-3. The custom registry will apply to all debug runs
+1. Edit Scheme → Run → Arguments
+2. Go to **Environment Variables** tab
+3. Click `+` and add: `REGISTRY_URL` = `https://your-mirror.example.com`
+4. The custom registry will apply to all debug runs
 
 </details>
 
@@ -136,9 +137,10 @@ swift run fluidaudio transcribe audio.wav
 ```
 
 **Xcode Scheme Configuration for Proxy:**
-1. Edit Scheme → Run → Arguments → Environment Variables
-2. Add `https_proxy` with your proxy URL
-3. FluidAudio will automatically route downloads through the proxy
+1. Edit Scheme → Run → Arguments
+2. Go to **Environment Variables** tab
+3. Click `+` and add: `https_proxy` = `http://proxy.company.com:8080`
+4. FluidAudio will automatically route downloads through the proxy
 
 </details>
 
