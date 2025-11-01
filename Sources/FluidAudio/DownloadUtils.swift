@@ -7,16 +7,8 @@ public class DownloadUtils {
 
     private static let logger = AppLogger(category: "DownloadUtils")
 
-    public static let sharedSession: URLSession = {
-        let configuration = URLSessionConfiguration.default
-
-        // Configure proxy settings if environment variables are set
-        if let proxyConfig = configureProxySettings() {
-            configuration.connectionProxyDictionary = proxyConfig
-        }
-
-        return URLSession(configuration: configuration)
-    }()
+    /// Shared URLSession with registry and proxy configuration
+    public static let sharedSession: URLSession = ModelRegistry.configuredSession()
 
     private static let huggingFaceUserAgent = "FluidAudio/1.0 (HuggingFaceDownloader)"
 
@@ -178,70 +170,6 @@ public class DownloadUtils {
         }
 
         throw lastError ?? HuggingFaceDownloadError.invalidResponse
-    }
-
-    private static func configureProxySettings() -> [String: Any]? {
-        #if os(macOS)
-        var proxyConfig: [String: Any] = [:]
-        var hasProxyConfig = false
-
-        // Configure HTTPS proxy
-        if let httpsProxy = ProcessInfo.processInfo.environment["https_proxy"],
-            let proxySettings = parseProxyURL(httpsProxy, type: "HTTPS")
-        {
-            proxyConfig.merge(proxySettings) { _, new in new }
-            hasProxyConfig = true
-        }
-
-        // Configure HTTP proxy
-        if let httpProxy = ProcessInfo.processInfo.environment["http_proxy"],
-            let proxySettings = parseProxyURL(httpProxy, type: "HTTP")
-        {
-            proxyConfig.merge(proxySettings) { _, new in new }
-            hasProxyConfig = true
-        }
-
-        return hasProxyConfig ? proxyConfig : nil
-        #else
-        // Proxy configuration not available on iOS
-        return nil
-        #endif
-    }
-
-    private static func parseProxyURL(_ proxyURLString: String, type: String) -> [String: Any]? {
-        #if os(macOS)
-        guard let proxyURL = URL(string: proxyURLString),
-            let host = proxyURL.host,
-            let port = proxyURL.port
-        else {
-            logger.warning("Invalid \(type) proxy URL: \(proxyURLString)")
-            return nil
-        }
-
-        let config: [String: Any]
-        switch type {
-        case "HTTPS":
-            config = [
-                kCFNetworkProxiesHTTPSEnable as String: true,
-                kCFNetworkProxiesHTTPSProxy as String: host,
-                kCFNetworkProxiesHTTPSPort as String: port,
-            ]
-        case "HTTP":
-            config = [
-                kCFNetworkProxiesHTTPEnable as String: true,
-                kCFNetworkProxiesHTTPProxy as String: host,
-                kCFNetworkProxiesHTTPPort as String: port,
-            ]
-        default:
-            return nil
-        }
-
-        logger.info("Configured \(type) proxy: \(host):\(port)")
-        return config
-        #else
-        // Proxy configuration not available on iOS
-        return nil
-        #endif
     }
 
     /// Download progress callback
@@ -468,7 +396,7 @@ public class DownloadUtils {
     /// List files in a HuggingFace repository
     private static func listRepoFiles(_ repo: Repo, path: String = "") async throws -> [RepoFile] {
         let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
-        let apiURL = URL(string: "https://huggingface.co/api/models/\(repo.remotePath)/\(apiPath)")!
+        let apiURL = ModelRegistry.apiModels(repo.remotePath, apiPath)
 
         var request = URLRequest(url: apiURL)
         request.timeoutInterval = 30
@@ -575,8 +503,7 @@ public class DownloadUtils {
         }
 
         // Download URL
-        let downloadURL = URL(
-            string: "https://huggingface.co/\(repo.remotePath)/resolve/main/\(path)")!
+        let downloadURL = ModelRegistry.resolveModel(repo.remotePath, path)
 
         // Download the file (no retries)
         do {

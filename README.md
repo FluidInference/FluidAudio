@@ -69,6 +69,62 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 
 > **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
+## Configuration
+
+<details>
+<summary><b>Model Registry URL</b> - Use custom registry/mirror</summary>
+
+By default, FluidAudio downloads models from HuggingFace. You can override this to use a mirror, local server, or air-gapped environment.
+
+**Programmatic override (recommended for apps):**
+```swift
+import FluidAudio
+
+// Set custom registry before using any managers
+ModelRegistry.baseURL = "https://your-mirror.example.com"
+
+// Models will now download from the custom registry
+let diarizer = DiarizerManager()
+```
+
+**Environment Variables (recommended for CLI/testing):**
+```bash
+# Use custom registry
+export REGISTRY_URL=https://your-mirror.example.com
+swift run fluidaudio transcribe audio.wav
+
+# Or use the MODEL_REGISTRY_URL alias
+export MODEL_REGISTRY_URL=https://models.internal.corp
+swift run fluidaudio diarization-benchmark --auto-download
+```
+
+**Xcode Scheme Configuration:**
+1. Edit Scheme → Run → Arguments Passed On Launch
+2. Add environment variable: `REGISTRY_URL` = `https://your-mirror.example.com`
+3. The custom registry will apply to all debug runs
+
+</details>
+
+<details>
+<summary><b>Proxy Configuration</b> - Corporate firewall setup</summary>
+
+If you're behind a corporate firewall, set the `https_proxy` environment variable:
+
+```bash
+export https_proxy=http://proxy.company.com:8080
+# or for authenticated proxies:
+export https_proxy=http://user:password@proxy.company.com:8080
+
+swift run fluidaudio transcribe audio.wav
+```
+
+**Xcode Scheme Configuration for Proxy:**
+1. Edit Scheme → Run → Arguments → Environment Variables
+2. Add `https_proxy` with your proxy URL
+3. FluidAudio will automatically route downloads through the proxy
+
+</details>
+
 ## Documentation
 
 **[DeepWiki](https://deepwiki.com/FluidInference/FluidAudio)** for auto-generated docs for this repo.

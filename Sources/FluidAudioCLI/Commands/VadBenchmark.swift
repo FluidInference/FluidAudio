@@ -345,7 +345,7 @@ struct VadBenchmark {
 
         // Select repository based on dataset parameter
         let repoName = dataset == "mini100" ? "musan_mini100" : "musan_mini50"
-        let repoBase = "https://huggingface.co/datasets/alexwengg/\(repoName)/resolve/main"
+        let repoBase = ModelRegistry.resolveDataset("alexwengg/\(repoName)", "").absoluteString.dropLast()  // Remove trailing slash
 
         var testFiles: [VadTestFile] = []
 

@@ -4,15 +4,10 @@ import Foundation
 public enum TtsResourceDownloader {
 
     private static let logger = AppLogger(category: "TtsResourceDownloader")
-    private static let kokoroBaseURL = "https://huggingface.co/\(Repo.kokoro.remotePath)/resolve/main"
 
     /// Download a voice embedding JSON file from HuggingFace
     public static func downloadVoiceEmbedding(voice: String) async throws -> Data {
-        let jsonURL = "\(kokoroBaseURL)/voices/\(voice).json"
-
-        guard let url = URL(string: jsonURL) else {
-            throw TTSError.modelNotFound("Invalid URL for voice embedding: \(voice)")
-        }
+        let url = ModelRegistry.resolveModel(Repo.kokoro.remotePath, "voices/\(voice).json")
 
         do {
             let data = try await AssetDownloader.fetchData(
@@ -61,9 +56,7 @@ public enum TtsResourceDownloader {
             return localURL
         }
 
-        guard let remoteURL = URL(string: "\(kokoroBaseURL)/\(filename)") else {
-            throw TTSError.modelNotFound("Invalid URL for \(filename)")
-        }
+        let remoteURL = ModelRegistry.resolveModel(Repo.kokoro.remotePath, filename)
 
         do {
             let descriptor = AssetDownloader.Descriptor(
