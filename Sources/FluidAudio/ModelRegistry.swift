@@ -6,6 +6,20 @@ import OSLog
 public enum ModelRegistry {
     private static let logger = AppLogger(category: "ModelRegistry")
 
+    // MARK: - Error Types
+
+    /// Error thrown when URL construction fails
+    public enum Error: Swift.Error, CustomStringConvertible {
+        case invalidURL(String)
+
+        public var description: String {
+            switch self {
+            case .invalidURL(let urlString):
+                return "Invalid URL construction: \(urlString)"
+            }
+        }
+    }
+
     // MARK: - Registry URL Configuration
 
     private static var _customBaseURL: String?
@@ -28,23 +42,44 @@ public enum ModelRegistry {
     // MARK: - URL Construction
 
     /// Construct API URL for listing model repository contents
-    public static func apiModels(_ repoPath: String, _ apiPath: String) -> URL {
-        URL(string: "\(baseURL)/api/models/\(repoPath)/\(apiPath)")!
+    public static func apiModels(_ repoPath: String, _ apiPath: String) throws -> URL {
+        let urlString = "\(baseURL)/api/models/\(repoPath)/\(apiPath)"
+        guard let url = URL(string: urlString) else {
+            throw Error.invalidURL(urlString)
+        }
+        return url
     }
 
     /// Construct download URL for a model file
-    public static func resolveModel(_ repoPath: String, _ filePath: String) -> URL {
-        URL(string: "\(baseURL)/\(repoPath)/resolve/main/\(filePath)")!
+    public static func resolveModel(_ repoPath: String, _ filePath: String) throws -> URL {
+        let urlString = "\(baseURL)/\(repoPath)/resolve/main/\(filePath)"
+        guard let url = URL(string: urlString) else {
+            throw Error.invalidURL(urlString)
+        }
+        return url
     }
 
     /// Construct API URL for listing dataset contents
-    public static func apiDatasets(_ dataset: String, _ apiPath: String) -> URL {
-        URL(string: "\(baseURL)/api/datasets/\(dataset)/\(apiPath)")!
+    public static func apiDatasets(_ dataset: String, _ apiPath: String) throws -> URL {
+        let urlString = "\(baseURL)/api/datasets/\(dataset)/\(apiPath)"
+        guard let url = URL(string: urlString) else {
+            throw Error.invalidURL(urlString)
+        }
+        return url
     }
 
     /// Construct download URL for a dataset file
-    public static func resolveDataset(_ dataset: String, _ filePath: String) -> URL {
-        URL(string: "\(baseURL)/datasets/\(dataset)/resolve/main/\(filePath)")!
+    public static func resolveDataset(_ dataset: String, _ filePath: String) throws -> URL {
+        let urlString = "\(baseURL)/datasets/\(dataset)/resolve/main/\(filePath)"
+        guard let url = URL(string: urlString) else {
+            throw Error.invalidURL(urlString)
+        }
+        return url
+    }
+
+    /// Construct base URL for dataset directory (without trailing slash)
+    public static func resolveDatasetBase(_ dataset: String) -> String {
+        "\(baseURL)/datasets/\(dataset)/resolve/main"
     }
 
     // MARK: - Session Configuration
@@ -66,14 +101,12 @@ public enum ModelRegistry {
     private static func configureProxySettings() -> [String: Any]? {
         #if os(macOS)
         var proxyConfig: [String: Any] = [:]
-        var hasProxyConfig = false
 
         // Configure HTTPS proxy
         if let httpsProxy = ProcessInfo.processInfo.environment["https_proxy"],
             let proxySettings = parseProxyURL(httpsProxy, type: "HTTPS")
         {
             proxyConfig.merge(proxySettings) { _, new in new }
-            hasProxyConfig = true
         }
 
         // Configure HTTP proxy
@@ -81,10 +114,9 @@ public enum ModelRegistry {
             let proxySettings = parseProxyURL(httpProxy, type: "HTTP")
         {
             proxyConfig.merge(proxySettings) { _, new in new }
-            hasProxyConfig = true
         }
 
-        return hasProxyConfig ? proxyConfig : nil
+        return proxyConfig.isEmpty ? nil : proxyConfig
         #else
         // Proxy configuration not available on iOS
         return nil
@@ -101,26 +133,29 @@ public enum ModelRegistry {
             return nil
         }
 
-        let config: [String: Any]
+        let proxyKey: String
+        let enableKey: String
+        let portKey: String
+
         switch type {
         case "HTTPS":
-            config = [
-                kCFNetworkProxiesHTTPSEnable as String: true,
-                kCFNetworkProxiesHTTPSProxy as String: host,
-                kCFNetworkProxiesHTTPSPort as String: port,
-            ]
+            enableKey = kCFNetworkProxiesHTTPSEnable as String
+            proxyKey = kCFNetworkProxiesHTTPSProxy as String
+            portKey = kCFNetworkProxiesHTTPSPort as String
         case "HTTP":
-            config = [
-                kCFNetworkProxiesHTTPEnable as String: true,
-                kCFNetworkProxiesHTTPProxy as String: host,
-                kCFNetworkProxiesHTTPPort as String: port,
-            ]
+            enableKey = kCFNetworkProxiesHTTPEnable as String
+            proxyKey = kCFNetworkProxiesHTTPProxy as String
+            portKey = kCFNetworkProxiesHTTPPort as String
         default:
             return nil
         }
 
         logger.info("Configured \(type) proxy: \(host):\(port)")
-        return config
+        return [
+            enableKey: true,
+            proxyKey: host,
+            portKey: port,
+        ]
         #else
         // Proxy configuration not available on iOS
         return nil

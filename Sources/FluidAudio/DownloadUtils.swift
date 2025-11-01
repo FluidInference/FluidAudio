@@ -396,7 +396,7 @@ public class DownloadUtils {
     /// List files in a HuggingFace repository
     private static func listRepoFiles(_ repo: Repo, path: String = "") async throws -> [RepoFile] {
         let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
-        let apiURL = ModelRegistry.apiModels(repo.remotePath, apiPath)
+        let apiURL = try ModelRegistry.apiModels(repo.remotePath, apiPath)
 
         var request = URLRequest(url: apiURL)
         request.timeoutInterval = 30
@@ -503,7 +503,7 @@ public class DownloadUtils {
         }
 
         // Download URL
-        let downloadURL = ModelRegistry.resolveModel(repo.remotePath, path)
+        let downloadURL = try ModelRegistry.resolveModel(repo.remotePath, path)
 
         // Download the file (no retries)
         do {

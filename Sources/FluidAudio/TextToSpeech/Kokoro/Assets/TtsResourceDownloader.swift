@@ -7,7 +7,7 @@ public enum TtsResourceDownloader {
 
     /// Download a voice embedding JSON file from HuggingFace
     public static func downloadVoiceEmbedding(voice: String) async throws -> Data {
-        let url = ModelRegistry.resolveModel(Repo.kokoro.remotePath, "voices/\(voice).json")
+        let url = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, "voices/\(voice).json")
 
         do {
             let data = try await AssetDownloader.fetchData(
@@ -56,7 +56,7 @@ public enum TtsResourceDownloader {
             return localURL
         }
 
-        let remoteURL = ModelRegistry.resolveModel(Repo.kokoro.remotePath, filename)
+        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, filename)
 
         do {
             let descriptor = AssetDownloader.Descriptor(

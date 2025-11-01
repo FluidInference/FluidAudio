@@ -78,7 +78,7 @@ public actor KokoroVocabulary {
 
         let fileName = "vocab_index.json"
         let localPath = kokoroDir.appendingPathComponent(fileName)
-        let remoteURL = ModelRegistry.resolveModel(Repo.kokoro.remotePath, fileName)
+        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, fileName)
 
         let descriptor = AssetDownloader.Descriptor(
             description: fileName,

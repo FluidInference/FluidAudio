@@ -231,7 +231,7 @@ public class FLEURSBenchmark {
         // Use the existing HuggingFace download infrastructure
         let datasetRepo = "FluidInference/fleurs"
         // Use the official API with path query to list files in subfolder
-        let apiURL = ModelRegistry.apiDatasets(datasetRepo, "tree/main/\(language)")
+        let apiURL = try ModelRegistry.apiDatasets(datasetRepo, "tree/main/\(language)")
 
         do {
             // List files in the language directory using HuggingFace API
@@ -261,7 +261,7 @@ public class FLEURSBenchmark {
 
                 if fileName == "\(language).trans.txt" {
                     // Download transcript file
-                    let downloadURL = ModelRegistry.resolveDataset(datasetRepo, file.path)
+                    let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, file.path)
                     let transData = try await DownloadUtils.fetchHuggingFaceFile(
                         from: downloadURL,
                         description: "\(language) transcript"
@@ -298,7 +298,7 @@ public class FLEURSBenchmark {
                 }
 
                 // Download audio file using HuggingFace infrastructure
-                let downloadURL = ModelRegistry.resolveDataset(datasetRepo, audioPath)
+                let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, audioPath)
 
                 do {
                     let audioData = try await DownloadUtils.fetchHuggingFaceFile(
