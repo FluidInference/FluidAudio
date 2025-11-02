@@ -4,9 +4,9 @@ Tracks and manages speaker identities across audio chunks for streaming diarizat
 
 ## Overview
 
-`SpeakerManager` maintains an in-memory database of speakers, tracks their voice embeddings, and assigns consistent IDs across audio chunks. It's the core component for speaker identity management in **streaming/online diarization** (`DiarizerManager`).
+`SpeakerManager` maintains an in-memory database of speakers, tracks their voice embeddings, and assigns consistent IDs across audio chunks. It's used by `DiarizerManager` for streaming/real-time speaker diarization.
 
-**Important:** `SpeakerManager` is **NOT** used in offline batch diarization (`OfflineDiarizerManager`). The offline pipeline uses VBx clustering with PLDA scoring for speaker assignment instead of the online speaker tracking approach. See the [Offline vs Online](#offline-vs-online-diarization) section below for details.
+> **Note:** `SpeakerManager` is only compatible with `DiarizerManager` (streaming pipeline). It is not currently supported with `OfflineDiarizerManager`, which uses VBx clustering for speaker assignment.
 
 ## Configuration
 
@@ -329,62 +329,6 @@ if let avgEmbedding = SpeakerUtilities.averageEmbeddings(embeddingArray) {
     // Use averaged embedding
 }
 ```
-
-## Offline vs Online Diarization
-
-### Online/Streaming Diarization (DiarizerManager)
-
-**Uses `SpeakerManager`** for incremental speaker tracking:
-
-```swift
-let diarizer = DiarizerManager()  // Uses SpeakerManager internally
-diarizer.initialize(models: models)
-
-// Process chunks - SpeakerManager maintains consistency
-for chunk in audioChunks {
-    let result = try diarizer.performCompleteDiarization(chunk)
-    // Speaker IDs remain consistent across chunks
-}
-```
-
-**Approach:**
-- Incremental processing of audio chunks
-- Cosine distance matching against existing speakers
-- Exponential moving average for embedding updates
-- Speaker IDs persist across entire stream
-- Suitable for real-time applications
-
-### Offline/Batch Diarization (OfflineDiarizerManager)
-
-**Does NOT use `SpeakerManager`** - uses VBx clustering instead:
-
-```swift
-let offlineDiarizer = OfflineDiarizerManager()
-try await offlineDiarizer.prepareModels()
-
-// Process complete file - VBx clustering assigns speakers
-let result = try await offlineDiarizer.process(audioFile)
-// Speaker assignments from statistical clustering
-```
-
-**Approach:**
-- Processes entire audio file at once
-- Agglomerative Hierarchical Clustering (AHC) warm-start
-- PLDA (Probabilistic Linear Discriminant Analysis) scoring
-- Variational Bayes (VBx) clustering refinement
-- Timeline reconstruction after clustering
-- Optimized for accuracy over latency
-
-### When to Use Which
-
-| Use Case | Manager | Reason |
-|----------|---------|--------|
-| Live microphone capture | `DiarizerManager` | Real-time processing |
-| Streaming audio | `DiarizerManager` | Incremental results |
-| Meeting recordings | `OfflineDiarizerManager` | Higher accuracy |
-| Podcast analysis | `OfflineDiarizerManager` | Batch processing |
-| Real-time transcription | `DiarizerManager` | Low latency needed |
-| Benchmark evaluation | `OfflineDiarizerManager` | DER parity with research |
 
 ## Threading and Concurrency
 
