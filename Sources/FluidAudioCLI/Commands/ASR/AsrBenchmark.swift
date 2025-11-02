@@ -994,10 +994,6 @@ extension ASRBenchmark {
             print(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
-
-            print("Results saved to: \(outputFile)")
-            print("ASR benchmark completed successfully")
-
         } catch {
             logger.error("ERROR: ASR benchmark failed: \(error)")
             exit(1)
