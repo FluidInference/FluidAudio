@@ -6,6 +6,13 @@ struct ChunkProcessor {
     let audioSamples: [Float]
 
     private let logger = AppLogger(category: "ChunkProcessor")
+    private typealias TokenWindow = (token: Int, timestamp: Int, confidence: Float)
+    private struct IndexedToken {
+        let index: Int
+        let token: TokenWindow
+        let start: Double
+        let end: Double
+    }
 
     // Stateless chunking aligned with CoreML reference:
     // - process ~14.96s of audio per window (239,360 samples) to stay under encoder limit
@@ -15,10 +22,8 @@ struct ChunkProcessor {
 
     private var maxModelSamples: Int { 240_000 }  // CoreML encoder capacity (15 seconds)
     private var chunkSamples: Int {
-        // Keep chunk length aligned to encoder frames to maintain integer timestamp offsets
-        let safeSamples = maxModelSamples - ASRConstants.melHopSize
-        let frames = max(safeSamples / ASRConstants.samplesPerEncoderFrame, 1)
-        return frames * ASRConstants.samplesPerEncoderFrame  // 239,360 samples (≈14.96s)
+        // Match CoreML reference chunk length (239,840 samples ≈ 14.99s)
+        max(maxModelSamples - ASRConstants.melHopSize, ASRConstants.samplesPerEncoderFrame)
     }
     private var overlapSamples: Int {
         let requested = Int(overlapSeconds * Double(sampleRate))
@@ -31,8 +36,10 @@ struct ChunkProcessor {
     func process(
         using manager: AsrManager, startTime: Date
     ) async throws -> ASRResult {
-        // Use a combined structure to keep tokens, timestamps, and confidences aligned
-        var allTokenData: [(token: Int, timestamp: Int, confidence: Float)] = []
+        var chunkOutputs: [[TokenWindow]] = []
+        #if DEBUG
+        var chunkDebugLogs: [String] = []
+        #endif
 
         var chunkStart = 0
         var chunkIndex = 0
@@ -66,23 +73,17 @@ struct ChunkProcessor {
                 throw ASRError.processingFailed("Token, timestamp, and confidence arrays are misaligned")
             }
 
-            let windowData = zip(zip(windowTokens, windowTimestamps), windowConfidences).map {
+            let windowData: [TokenWindow] = zip(zip(windowTokens, windowTimestamps), windowConfidences).map {
                 (token: $0.0.0, timestamp: $0.0.1, confidence: $0.1)
             }
-
-            // For chunks after the first, check for and remove duplicated token sequences
-            if chunkIndex > 0 && !allTokenData.isEmpty && !windowData.isEmpty {
-                let previousTokens = allTokenData.map { $0.token }
-                let currentTokens = windowData.map { $0.token }
-
-                let (_, removedCount) = manager.removeDuplicateTokenSequence(
-                    previous: previousTokens, current: currentTokens, maxOverlap: 30)
-                // Only keep the non-duplicate portion of window data
-                let adjustedWindowData = Array(windowData.dropFirst(removedCount))
-                allTokenData.append(contentsOf: adjustedWindowData)
-            } else {
-                allTokenData.append(contentsOf: windowData)
-            }
+            #if DEBUG
+            let tokenStrings = windowTokens.map { manager.vocabulary[$0] ?? "<\( $0 )>" }
+            let chunkText = tokenStrings.joined()
+            let startSeconds = Double(chunkStart) / Double(sampleRate)
+            chunkDebugLogs.append(
+                String(format: "chunk %d @ %.2fs: %@", chunkIndex, startSeconds, chunkText))
+            #endif
+            chunkOutputs.append(windowData)
 
             chunkIndex += 1
 
@@ -93,13 +94,39 @@ struct ChunkProcessor {
             chunkStart += strideSamples
         }
 
-        // Sort by timestamp to ensure chronological order
-        allTokenData.sort { $0.timestamp < $1.timestamp }
+        guard var mergedTokens = chunkOutputs.first else {
+            return manager.processTranscriptionResult(
+                tokenIds: [],
+                timestamps: [],
+                confidences: [],
+                encoderSequenceLength: 0,
+                audioSamples: audioSamples,
+                processingTime: Date().timeIntervalSince(startTime)
+            )
+        }
 
-        // Extract sorted arrays
-        let allTokens = allTokenData.map { $0.token }
-        let allTimestamps = allTokenData.map { $0.timestamp }
-        let allConfidences = allTokenData.map { $0.confidence }
+        if chunkOutputs.count > 1 {
+            let decode: (TokenWindow) -> String = { window in
+                manager.vocabulary[window.token] ?? "<\(window.token)>"
+            }
+            for chunk in chunkOutputs.dropFirst() {
+                mergedTokens = mergeChunks(mergedTokens, chunk, decode: decode)
+            }
+        }
+
+        if mergedTokens.count > 1 {
+            mergedTokens.sort { $0.timestamp < $1.timestamp }
+        }
+
+        #if DEBUG
+        for entry in chunkDebugLogs {
+            logger.debug(entry)
+        }
+        #endif
+
+        let allTokens = mergedTokens.map { $0.token }
+        let allTimestamps = mergedTokens.map { $0.timestamp }
+        let allConfidences = mergedTokens.map { $0.confidence }
 
         return manager.processTranscriptionResult(
             tokenIds: allTokens,
@@ -139,5 +166,256 @@ struct ChunkProcessor {
         }
 
         return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences)
+    }
+
+    private func mergeChunks(
+        _ left: [TokenWindow],
+        _ right: [TokenWindow],
+        decode: ((TokenWindow) -> String)? = nil
+    ) -> [TokenWindow] {
+        if left.isEmpty { return right }
+        if right.isEmpty { return left }
+
+        let frameDuration = Double(ASRConstants.samplesPerEncoderFrame) / Double(sampleRate)
+        let overlapDuration = overlapSeconds
+        let halfOverlapWindow = overlapDuration / 2
+
+        func startTime(of token: TokenWindow) -> Double {
+            Double(token.timestamp) * frameDuration
+        }
+
+        func endTime(of token: TokenWindow) -> Double {
+            startTime(of: token) + frameDuration
+        }
+
+        let leftEndTime = endTime(of: left.last!)
+        let rightStartTime = startTime(of: right.first!)
+
+        if leftEndTime <= rightStartTime {
+            return left + right
+        }
+
+        let overlapLeft: [IndexedToken] = left.enumerated().compactMap { offset, token in
+            let start = startTime(of: token)
+            let end = start + frameDuration
+            guard end > rightStartTime - overlapDuration else { return nil }
+            return IndexedToken(index: offset, token: token, start: start, end: end)
+        }
+
+        let overlapRight: [IndexedToken] = right.enumerated().compactMap { offset, token in
+            let start = startTime(of: token)
+            guard start < leftEndTime + overlapDuration else { return nil }
+            return IndexedToken(index: offset, token: token, start: start, end: start + frameDuration)
+        }
+
+        guard overlapLeft.count >= 2 && overlapRight.count >= 2 else {
+            return mergeByMidpoint(
+                left: left, right: right, leftEndTime: leftEndTime, rightStartTime: rightStartTime,
+                frameDuration: frameDuration)
+        }
+
+        let minimumPairs = max(overlapLeft.count / 2, 1)
+
+        let contiguousPairs = findBestContiguousPairs(
+            overlapLeft: overlapLeft,
+            overlapRight: overlapRight,
+            tolerance: halfOverlapWindow
+        )
+
+        if contiguousPairs.count >= minimumPairs {
+            logger.debug(
+                "Chunk merge using contiguous pairs: matches=\(contiguousPairs.count), overlapLeft=\(overlapLeft.count), overlapRight=\(overlapRight.count)"
+            )
+            return mergeUsingMatches(
+                matches: contiguousPairs,
+                overlapLeft: overlapLeft,
+                overlapRight: overlapRight,
+                left: left,
+                right: right,
+                decode: decode
+            )
+        }
+
+        let lcsPairs = findLongestCommonSubsequencePairs(
+            overlapLeft: overlapLeft,
+            overlapRight: overlapRight,
+            tolerance: halfOverlapWindow
+        )
+
+        guard !lcsPairs.isEmpty else {
+            logger.debug(
+                "Chunk merge fell back to midpoint split: overlapLeft=\(overlapLeft.count), overlapRight=\(overlapRight.count)"
+            )
+            return mergeByMidpoint(
+                left: left, right: right, leftEndTime: leftEndTime, rightStartTime: rightStartTime,
+                frameDuration: frameDuration)
+        }
+
+        logger.debug(
+            "Chunk merge using LCS pairs: matches=\(lcsPairs.count), overlapLeft=\(overlapLeft.count), overlapRight=\(overlapRight.count)"
+        )
+        return mergeUsingMatches(
+            matches: lcsPairs,
+            overlapLeft: overlapLeft,
+            overlapRight: overlapRight,
+            left: left,
+            right: right,
+            decode: decode
+        )
+    }
+
+    private func findBestContiguousPairs(
+        overlapLeft: [IndexedToken],
+        overlapRight: [IndexedToken],
+        tolerance: Double
+    ) -> [(Int, Int)] {
+        var best: [(Int, Int)] = []
+
+        for i in 0..<overlapLeft.count {
+            for j in 0..<overlapRight.count {
+                let leftToken = overlapLeft[i]
+                let rightToken = overlapRight[j]
+
+                if tokensMatch(leftToken, rightToken, tolerance: tolerance) {
+                    var current: [(Int, Int)] = []
+                    var k = i
+                    var l = j
+
+                    while k < overlapLeft.count && l < overlapRight.count {
+                        let nextLeft = overlapLeft[k]
+                        let nextRight = overlapRight[l]
+
+                        if tokensMatch(nextLeft, nextRight, tolerance: tolerance) {
+                            current.append((k, l))
+                            k += 1
+                            l += 1
+                        } else {
+                            break
+                        }
+                    }
+
+                    if current.count > best.count {
+                        best = current
+                    }
+                }
+            }
+        }
+
+        return best
+    }
+
+    private func findLongestCommonSubsequencePairs(
+        overlapLeft: [IndexedToken],
+        overlapRight: [IndexedToken],
+        tolerance: Double
+    ) -> [(Int, Int)] {
+        let leftCount = overlapLeft.count
+        let rightCount = overlapRight.count
+
+        var dp = Array(repeating: Array(repeating: 0, count: rightCount + 1), count: leftCount + 1)
+
+        for i in 1...leftCount {
+            for j in 1...rightCount {
+                if tokensMatch(overlapLeft[i - 1], overlapRight[j - 1], tolerance: tolerance) {
+                    dp[i][j] = dp[i - 1][j - 1] + 1
+                } else {
+                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+                }
+            }
+        }
+
+        var pairs: [(Int, Int)] = []
+        var i = leftCount
+        var j = rightCount
+
+        while i > 0 && j > 0 {
+            if tokensMatch(overlapLeft[i - 1], overlapRight[j - 1], tolerance: tolerance) {
+                pairs.append((i - 1, j - 1))
+                i -= 1
+                j -= 1
+            } else if dp[i - 1][j] > dp[i][j - 1] {
+                i -= 1
+            } else {
+                j -= 1
+            }
+        }
+
+        return pairs.reversed()
+    }
+
+    private func tokensMatch(_ left: IndexedToken, _ right: IndexedToken, tolerance: Double) -> Bool {
+        guard left.token.token == right.token.token else { return false }
+        let timeDifference = abs(left.start - right.start)
+        return timeDifference < tolerance
+    }
+
+    private func mergeUsingMatches(
+        matches: [(Int, Int)],
+        overlapLeft: [IndexedToken],
+        overlapRight: [IndexedToken],
+        left: [TokenWindow],
+        right: [TokenWindow],
+        decode: ((TokenWindow) -> String)?
+    ) -> [TokenWindow] {
+        let leftIndices = matches.map { overlapLeft[$0.0].index }
+        let rightIndices = matches.map { overlapRight[$0.1].index }
+
+        var result: [TokenWindow] = []
+
+        if let firstLeft = leftIndices.first, firstLeft > 0 {
+            result.append(contentsOf: left[..<firstLeft])
+        }
+
+        for idx in 0..<matches.count {
+            let leftIndex = leftIndices[idx]
+            let rightIndex = rightIndices[idx]
+
+            result.append(left[leftIndex])
+
+            guard idx < matches.count - 1 else { continue }
+
+            let nextLeftIndex = leftIndices[idx + 1]
+            let nextRightIndex = rightIndices[idx + 1]
+
+            let gapLeft = nextLeftIndex > leftIndex + 1 ? Array(left[(leftIndex + 1)..<nextLeftIndex]) : []
+            let gapRight = nextRightIndex > rightIndex + 1 ? Array(right[(rightIndex + 1)..<nextRightIndex]) : []
+
+            if !gapLeft.isEmpty || !gapRight.isEmpty {
+                logger.debug(
+                    "Gap resolution between matches: leftGap=\(gapLeft.count) tokens, rightGap=\(gapRight.count) tokens"
+                )
+                if let decode {
+                    let leftPreview = gapLeft.prefix(6).map(decode).joined()
+                    let rightPreview = gapRight.prefix(6).map(decode).joined()
+                    logger.debug("  leftGapPreview=\"\(leftPreview)\"")
+                    logger.debug("  rightGapPreview=\"\(rightPreview)\"")
+                }
+            }
+
+            if gapRight.count > gapLeft.count {
+                result.append(contentsOf: gapRight)
+            } else {
+                result.append(contentsOf: gapLeft)
+            }
+        }
+
+        if let lastRight = rightIndices.last, lastRight + 1 < right.count {
+            result.append(contentsOf: right[(lastRight + 1)...])
+        }
+
+        return result
+    }
+
+    private func mergeByMidpoint(
+        left: [TokenWindow],
+        right: [TokenWindow],
+        leftEndTime: Double,
+        rightStartTime: Double,
+        frameDuration: Double
+    ) -> [TokenWindow] {
+        let cutoff = (leftEndTime + rightStartTime) / 2
+        let trimmedLeft = left.filter { Double($0.timestamp) * frameDuration <= cutoff }
+        let trimmedRight = right.filter { Double($0.timestamp) * frameDuration >= cutoff }
+        return trimmedLeft + trimmedRight
     }
 }

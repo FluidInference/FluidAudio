@@ -983,20 +983,20 @@ extension ASRBenchmark {
 
             logger.info("\(results.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
 
-            logger.info("--- Benchmark Results ---")
-            logger.info("   Dataset: \(config.dataset) \(config.subset)")
-            logger.info("   Files processed: \(results.count)")
+            print("--- Benchmark Results ---")
+            print("   Dataset: \(config.dataset) \(config.subset)")
+            print("   Files processed: \(results.count)")
 
-            logger.info("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
-            logger.info("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
-            logger.info("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
-            logger.info("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
-            logger.info(
+            print("   Average WER: \(String(format: "%.1f", totalWER * 100))%")
+            print("   Median WER: \(String(format: "%.1f", medianWER * 100))%")
+            print("   Average CER: \(String(format: "%.1f", totalCER * 100))%")
+            print("   Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+            print(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
 
-            logger.info("Results saved to: \(outputFile)")
-            logger.info("ASR benchmark completed successfully")
+            print("Results saved to: \(outputFile)")
+            print("ASR benchmark completed successfully")
 
         } catch {
             logger.error("ERROR: ASR benchmark failed: \(error)")
