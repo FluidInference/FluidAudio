@@ -25,6 +25,26 @@ jobs:
         with:
           swift-version: "6.1"
 
+      - name: Cache Swift packages and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-diarizer-${{ hashFiles('Package.swift', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Cache Diarizer models
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/FluidAudio/Models/speaker-diarization-coreml
+          key: ${{ runner.os }}-diarizer-models-${{ hashFiles('Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Cache AMI dataset
+        uses: actions/cache@v4
+        with:
+          path: ~/FluidAudioDatasets/ami_official
+          key: ${{ runner.os }}-ami-dataset-${{ hashFiles('Sources/FluidAudioCLI/DatasetParsers/DatasetDownloader.swift') }}
+
       - name: Build package
         run: swift build
 

@@ -69,6 +69,81 @@ Important: When adding FluidAudio as a package dependency, only add the library 
 
 > **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
+## Configuration
+
+### Quick Reference
+
+Both solve the same problem: **"I can't reach HuggingFace directly."** They're alternative approaches - pick whichever matches your setup:
+
+| Scenario | Solution | Configuration |
+|----------|----------|---|
+| You have a **local mirror or internal model server** | Use Registry URL override | `REGISTRY_URL=https://your-mirror.com` |
+| You're **behind a corporate firewall** with a proxy that can reach HuggingFace | Use Proxy configuration | `https_proxy=http://proxy.company.com:8080` |
+
+**How they work:**
+- **Registry URL** - App requests from `your-mirror.com` instead of `huggingface.co`
+- **Proxy** - App still requests `huggingface.co`, but traffic routes through proxy to reach it
+
+In most cases, you only need one. (You'd use both only if your mirror is behind the proxy and unreachable without it.)
+
+<details>
+<summary><b>Model Registry URL</b> - Change download destination</summary>
+
+By default, FluidAudio downloads models from HuggingFace. You can override this to use a mirror, local server, or air-gapped environment.
+
+**Programmatic override (recommended for apps):**
+```swift
+import FluidAudio
+
+// Set custom registry before using any managers
+ModelRegistry.baseURL = "https://your-mirror.example.com"
+
+// Models will now download from the custom registry
+let diarizer = DiarizerManager()
+```
+
+**Environment Variables (recommended for CLI/testing):**
+```bash
+# Use custom registry
+export REGISTRY_URL=https://your-mirror.example.com
+swift run fluidaudio transcribe audio.wav
+
+# Or use the MODEL_REGISTRY_URL alias
+export MODEL_REGISTRY_URL=https://models.internal.corp
+swift run fluidaudio diarization-benchmark --auto-download
+```
+
+**Xcode Scheme Configuration:**
+1. Edit Scheme → Run → Arguments
+2. Go to **Environment Variables** tab
+3. Click `+` and add: `REGISTRY_URL` = `https://your-mirror.example.com`
+4. The custom registry will apply to all debug runs
+
+</details>
+
+<details>
+<summary><b>Proxy Configuration</b> - Route downloads through a proxy server</summary>
+
+If you're behind a corporate firewall and cannot reach HuggingFace (or your registry) directly, configure a proxy to forward requests:
+
+Set the `https_proxy` environment variable:
+
+```bash
+export https_proxy=http://proxy.company.com:8080
+# or for authenticated proxies:
+export https_proxy=http://user:password@proxy.company.com:8080
+
+swift run fluidaudio transcribe audio.wav
+```
+
+**Xcode Scheme Configuration for Proxy:**
+1. Edit Scheme → Run → Arguments
+2. Go to **Environment Variables** tab
+3. Click `+` and add: `https_proxy` = `http://proxy.company.com:8080`
+4. FluidAudio will automatically route downloads through the proxy
+
+</details>
+
 ## Documentation
 
 **[DeepWiki](https://deepwiki.com/FluidInference/FluidAudio)** for auto-generated docs for this repo.
