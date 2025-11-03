@@ -474,7 +474,7 @@ public final class DiarizerManager {
     }
 
     private func calculateEmbeddingQuality(_ embedding: [Float]) -> Float {
-        let magnitude = sqrt(embedding.map { $0 * $0 }.reduce(0, +))
+        let magnitude = sqrt(vDSP.sumOfSquares(embedding))
         return min(1.0, magnitude / 10.0)
     }
 
