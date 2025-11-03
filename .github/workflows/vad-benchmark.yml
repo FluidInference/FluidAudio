@@ -30,25 +30,25 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-swift-6.1-${{ hashFiles('Package.swift') }}
+          key: ${{ runner.os }}-swift-6.1-${{ hashFiles('Package.swift', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
 
       - name: Cache VAD models
         uses: actions/cache@v4
         with:
           path: ~/Library/Application Support/FluidAudio/Models/silero-vad-coreml
-          key: ${{ runner.os }}-vad-models-v6
+          key: ${{ runner.os }}-vad-models-${{ hashFiles('Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
 
       - name: Cache VOiCES dataset
         uses: actions/cache@v4
         with:
           path: ~/Library/Application Support/FluidAudio/voicesSubset
-          key: ${{ runner.os }}-voices-subset-v1
+          key: ${{ runner.os }}-voices-subset-${{ hashFiles('Sources/FluidAudioCLI/Commands/VadBenchmark.swift') }}
 
       - name: Cache MUSAN noise samples
         uses: actions/cache@v4
         with:
           path: ~/Library/Application Support/FluidAudio/vadDataset
-          key: ${{ runner.os }}-vad-dataset-mini50-v1
+          key: ${{ runner.os }}-vad-dataset-mini50-${{ hashFiles('Sources/FluidAudioCLI/DatasetParsers/DatasetDownloader.swift') }}
 
       - name: Build
         run: swift build -c release

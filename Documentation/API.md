@@ -6,7 +6,12 @@ This page summarizes the primary public APIs across modules. See inline doc comm
 
 **Audio Format:** All modules expect 16kHz mono Float32 audio samples. Use `FluidAudio.AudioConverter` to convert `AVAudioPCMBuffer` or files to 16kHz mono for both CLI and library paths.
 
-**Model Loading:** Models auto-download from HuggingFace on first use. Set `https_proxy` environment variable if behind corporate firewall.
+**Model Registry:** Models auto-download from HuggingFace by default. Customize the registry URL using:
+- `ModelRegistry.baseURL` (programmatic) - recommended for apps
+- `REGISTRY_URL` or `MODEL_REGISTRY_URL` environment variables - recommended for CLI/testing
+- Priority order: programmatic override → env vars → default (HuggingFace)
+
+**Proxy Configuration:** If behind a corporate firewall, set the `https_proxy` (or `http_proxy`) environment variable. Both registry URL and proxy configuration are centralized in `ModelRegistry`.
 
 **Error Handling:** All async methods throw descriptive errors. Use proper error handling in production code.
 
@@ -18,7 +23,7 @@ This page summarizes the primary public APIs across modules. See inline doc comm
 Main class for speaker diarization and "who spoke when" analysis.
 
 **Key Methods:**
-- `performCompleteDiarization(_:sampleRate:) throws -> DiarizerResult`
+- `performCompleteDiarization(_:sampleRate:) throws -> DiarizationResult`
   - Process complete audio file and return speaker segments
   - Parameters: `RandomAccessCollection<Float>` audio samples, sample rate (default: 16000)
   - Returns: `DiarizerResult` with speaker segments and timing

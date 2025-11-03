@@ -76,13 +76,9 @@ public actor KokoroVocabulary {
         let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
         try FileManager.default.createDirectory(at: kokoroDir, withIntermediateDirectories: true)
 
-        let baseURL = "https://huggingface.co/\(Repo.kokoro.remotePath)/resolve/main"
         let fileName = "vocab_index.json"
         let localPath = kokoroDir.appendingPathComponent(fileName)
-
-        guard let remoteURL = URL(string: "\(baseURL)/\(fileName)") else {
-            throw TTSError.downloadFailed("Invalid Kokoro vocabulary URL: \(baseURL)/\(fileName)")
-        }
+        let remoteURL = try ModelRegistry.resolveModel(Repo.kokoro.remotePath, fileName)
 
         let descriptor = AssetDownloader.Descriptor(
             description: fileName,

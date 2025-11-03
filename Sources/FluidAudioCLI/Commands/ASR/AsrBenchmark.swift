@@ -49,9 +49,11 @@ public class ASRBenchmark {
         let downloadURL: String
         switch subset {
         case "test-clean":
-            downloadURL = "https://huggingface.co/datasets/FluidInference/librispeech/resolve/main/test-clean.tar.gz"
+            downloadURL = try ModelRegistry.resolveDataset("FluidInference/librispeech", "test-clean.tar.gz")
+                .absoluteString
         case "test-other":
-            downloadURL = "https://huggingface.co/datasets/FluidInference/librispeech/resolve/main/test-other.tar.gz"
+            downloadURL = try ModelRegistry.resolveDataset("FluidInference/librispeech", "test-other.tar.gz")
+                .absoluteString
         case "dev-clean":
             downloadURL = "https://www.openslr.org/resources/12/dev-clean.tar.gz"
         case "dev-other":
