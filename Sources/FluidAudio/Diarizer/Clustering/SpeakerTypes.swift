@@ -136,6 +136,8 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     }
 
     /// Merge another speaker into this one
+    /// - Parameters:
+    ///   - other: other Speaker to merge
     public func mergeWith(_ other: Speaker, keepName: String? = nil) {
         // Merge raw embeddings
         var allEmbeddings = rawEmbeddings + other.rawEmbeddings
@@ -238,4 +240,15 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
     public static func == (lhs: SendableSpeaker, rhs: SendableSpeaker) -> Bool {
         return lhs.id == rhs.id && lhs.name == rhs.name
     }
+}
+
+public enum SpeakerInitializationMode {
+    /// reset the speaker database and add the new speakers
+    case reset
+    /// merge new speakers whose IDs match with existing ones
+    case merge
+    /// overwrite existing speakers with the same IDs as the new ones
+    case overwrite
+    /// skip speakers whose IDs match existing ones
+    case skip
 }
