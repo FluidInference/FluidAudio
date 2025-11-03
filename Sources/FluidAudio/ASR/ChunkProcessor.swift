@@ -37,9 +37,6 @@ struct ChunkProcessor {
         using manager: AsrManager, startTime: Date
     ) async throws -> ASRResult {
         var chunkOutputs: [[TokenWindow]] = []
-        #if DEBUG
-        var chunkDebugLogs: [String] = []
-        #endif
 
         var chunkStart = 0
         var chunkIndex = 0
@@ -51,7 +48,6 @@ struct ChunkProcessor {
             let chunkEnd = isLastChunk ? audioSamples.count : candidateEnd
 
             if chunkEnd <= chunkStart {
-                logger.warning("ChunkProcessor received empty chunk window, stopping at index \(chunkIndex)")
                 break
             }
 
@@ -76,13 +72,6 @@ struct ChunkProcessor {
             let windowData: [TokenWindow] = zip(zip(windowTokens, windowTimestamps), windowConfidences).map {
                 (token: $0.0.0, timestamp: $0.0.1, confidence: $0.1)
             }
-            #if DEBUG
-            let tokenStrings = windowTokens.map { manager.vocabulary[$0] ?? "<\( $0 )>" }
-            let chunkText = tokenStrings.joined()
-            let startSeconds = Double(chunkStart) / Double(sampleRate)
-            chunkDebugLogs.append(
-                String(format: "chunk %d @ %.2fs: %@", chunkIndex, startSeconds, chunkText))
-            #endif
             chunkOutputs.append(windowData)
 
             chunkIndex += 1
@@ -106,23 +95,14 @@ struct ChunkProcessor {
         }
 
         if chunkOutputs.count > 1 {
-            let decode: (TokenWindow) -> String = { window in
-                manager.vocabulary[window.token] ?? "<\(window.token)>"
-            }
             for chunk in chunkOutputs.dropFirst() {
-                mergedTokens = mergeChunks(mergedTokens, chunk, decode: decode)
+                mergedTokens = mergeChunks(mergedTokens, chunk)
             }
         }
 
         if mergedTokens.count > 1 {
             mergedTokens.sort { $0.timestamp < $1.timestamp }
         }
-
-        #if DEBUG
-        for entry in chunkDebugLogs {
-            logger.debug(entry)
-        }
-        #endif
 
         let allTokens = mergedTokens.map { $0.token }
         let allTimestamps = mergedTokens.map { $0.timestamp }
@@ -170,8 +150,7 @@ struct ChunkProcessor {
 
     private func mergeChunks(
         _ left: [TokenWindow],
-        _ right: [TokenWindow],
-        decode: ((TokenWindow) -> String)? = nil
+        _ right: [TokenWindow]
     ) -> [TokenWindow] {
         if left.isEmpty { return right }
         if right.isEmpty { return left }
@@ -223,16 +202,12 @@ struct ChunkProcessor {
         )
 
         if contiguousPairs.count >= minimumPairs {
-            logger.debug(
-                "Chunk merge using contiguous pairs: matches=\(contiguousPairs.count), overlapLeft=\(overlapLeft.count), overlapRight=\(overlapRight.count)"
-            )
             return mergeUsingMatches(
                 matches: contiguousPairs,
                 overlapLeft: overlapLeft,
                 overlapRight: overlapRight,
                 left: left,
-                right: right,
-                decode: decode
+                right: right
             )
         }
 
@@ -243,24 +218,17 @@ struct ChunkProcessor {
         )
 
         guard !lcsPairs.isEmpty else {
-            logger.debug(
-                "Chunk merge fell back to midpoint split: overlapLeft=\(overlapLeft.count), overlapRight=\(overlapRight.count)"
-            )
             return mergeByMidpoint(
                 left: left, right: right, leftEndTime: leftEndTime, rightStartTime: rightStartTime,
                 frameDuration: frameDuration)
         }
 
-        logger.debug(
-            "Chunk merge using LCS pairs: matches=\(lcsPairs.count), overlapLeft=\(overlapLeft.count), overlapRight=\(overlapRight.count)"
-        )
         return mergeUsingMatches(
             matches: lcsPairs,
             overlapLeft: overlapLeft,
             overlapRight: overlapRight,
             left: left,
-            right: right,
-            decode: decode
+            right: right
         )
     }
 
@@ -354,8 +322,7 @@ struct ChunkProcessor {
         overlapLeft: [IndexedToken],
         overlapRight: [IndexedToken],
         left: [TokenWindow],
-        right: [TokenWindow],
-        decode: ((TokenWindow) -> String)?
+        right: [TokenWindow]
     ) -> [TokenWindow] {
         let leftIndices = matches.map { overlapLeft[$0.0].index }
         let rightIndices = matches.map { overlapRight[$0.1].index }
@@ -379,18 +346,6 @@ struct ChunkProcessor {
 
             let gapLeft = nextLeftIndex > leftIndex + 1 ? Array(left[(leftIndex + 1)..<nextLeftIndex]) : []
             let gapRight = nextRightIndex > rightIndex + 1 ? Array(right[(rightIndex + 1)..<nextRightIndex]) : []
-
-            if !gapLeft.isEmpty || !gapRight.isEmpty {
-                logger.debug(
-                    "Gap resolution between matches: leftGap=\(gapLeft.count) tokens, rightGap=\(gapRight.count) tokens"
-                )
-                if let decode {
-                    let leftPreview = gapLeft.prefix(6).map(decode).joined()
-                    let rightPreview = gapRight.prefix(6).map(decode).joined()
-                    logger.debug("  leftGapPreview=\"\(leftPreview)\"")
-                    logger.debug("  rightGapPreview=\"\(rightPreview)\"")
-                }
-            }
 
             if gapRight.count > gapLeft.count {
                 result.append(contentsOf: gapRight)
