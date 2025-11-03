@@ -52,6 +52,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | Comparison of different local ASR, including one of the first verions of FluidAudio's ASR models |
 | **[Starling](https://github.com/Ryandonofrio3/Starling)** | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
 | **[BoltAI](https://boltai.com/)** | Write content 10x faster using parakeet models |
+| **[Voxeoflow](https://www.voxeoflow.app)** | Mac dictation app with real-time translation. Lightning-fast transcription in over 100 languages, instantly translated to your target language. |
 
 ## Installation
 
