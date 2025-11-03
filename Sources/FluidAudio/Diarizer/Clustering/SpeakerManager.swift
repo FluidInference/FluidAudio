@@ -4,7 +4,7 @@ import OSLog
 
 /// In-memory speaker database for streaming diarization
 /// Tracks speakers across chunks and maintains consistent IDs
-public class SpeakerManager {
+public class SpeakerManager {    
     internal let logger = AppLogger(category: "SpeakerManager")
 
     // Constants
@@ -34,8 +34,16 @@ public class SpeakerManager {
         self.minSpeechDuration = minSpeechDuration
         self.minEmbeddingUpdateDuration = minEmbeddingUpdateDuration
     }
-
-    public func initializeKnownSpeakers(_ speakers: [Speaker]) {
+    
+    /// Add known speakers to the database
+    /// - Parameters:
+    ///   - speakers: list of `Speaker`s to add
+    ///   - mode: mode for handling overlapping ID conflicts. `.reset` will reset the speaker database before initializing new speakers. `.overwrite` will overwrite the old speakers and replace them with the new ones. `.merge` will merge the new speakers with the old ones, keeping the new name. `.skip` will skip new speakers if their ID matches an existing one. (Default: `.skip`)
+    public func initializeKnownSpeakers(_ speakers: [Speaker], mode: SpeakerInitializationMode = .skip) {
+        if mode == .reset {
+            self.reset()
+        }
+        
         queue.sync(flags: .barrier) {
             var maxNumericId = 0
 
@@ -45,8 +53,26 @@ public class SpeakerManager {
                         "Skipping speaker \(speaker.id) - invalid embedding size: \(speaker.currentEmbedding.count)")
                     continue
                 }
-
-                speakerDatabase[speaker.id] = speaker
+                
+                // Check if the speaker ID is uninitialized
+                if self.speakerDatabase[speaker.id] == nil {
+                    speakerDatabase[speaker.id] = speaker
+                } else {
+                    // Handle duplicate speaker
+                    switch mode {
+                    case .reset:
+                        fallthrough
+                    case .overwrite:
+                        logger.warning("Speaker \(speaker.id) is already initialized. Overwriting old speaker.")
+                        speakerDatabase[speaker.id] = speaker
+                    case .merge:
+                        logger.warning("Speaker \(speaker.id) is already initialized. Merging with old speaker.")
+                        speakerDatabase[speaker.id]?.mergeWith(speaker, keepName: speaker.name)
+                    case .skip:
+                        logger.warning("Speaker \(speaker.id) is already initialized. Skipping new speaker.")
+                        continue
+                    }
+                }
 
                 // Try to extract numeric ID if it's a pure number
                 if let numericId = Int(speaker.id) {
@@ -67,10 +93,20 @@ public class SpeakerManager {
         }
     }
 
+    /// Match the embedding to the closest existing speaker if sufficiently similar or create a new one if not.
+    /// - Parameters:
+    ///    - embedding: 256D speaker embedding vector
+    ///    - speechDuration: duration of the speech segment during which this speaker was active
+    ///    - confidence: confidence in the embedding vector being correct
+    ///    - speakerThreshold: the maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
+    ///    - newName: name to assign the speaker if a new one is created (default: `Speaker $id`)
+    ///  - Returns: a `Speaker` object if a match was found or a new one was created. Returns `nil` if an error occured.
     public func assignSpeaker(
         _ embedding: [Float],
         speechDuration: Float,
-        confidence: Float = 1.0
+        confidence: Float = 1.0,
+        speakerThreshold: Float? = nil,
+        newName: String? = nil
     ) -> Speaker? {
         guard !embedding.isEmpty && embedding.count == Self.embeddingSize else {
             logger.error("Invalid embedding size: \(embedding.count)")
@@ -78,7 +114,8 @@ public class SpeakerManager {
         }
 
         let normalizedEmbedding = VDSPOperations.l2Normalize(embedding)
-
+        let speakerThreshold = speakerThreshold ?? self.speakerThreshold
+        
         return queue.sync(flags: .barrier) {
             let (closestSpeaker, distance) = findClosestSpeaker(to: normalizedEmbedding)
 
@@ -116,7 +153,134 @@ public class SpeakerManager {
             return nil
         }
     }
-
+    
+    /// Find the closest existing speaker to an embedding, up to a maximum cosine distance of `speakerThreshold`.
+    /// - Parameters:
+    ///    - embedding: 256D speaker embedding vector
+    ///    - speakerThreshold: the maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
+    ///  - Returns: the ID of the match (if found) and the distance to that match.
+    public func findSpeaker(with embedding: [Float], speakerThreshold: Float? = nil) -> (speaker: String?, distance: Float) {
+        let (closestSpeakerId, minDistance) = findClosestSpeaker(to: embedding)
+        let speakerThreshold = speakerThreshold ?? self.speakerThreshold
+        if let closestSpeakerId, minDistance <= speakerThreshold {
+            return (closestSpeakerId, minDistance)
+        }
+        return (nil, .infinity)
+    }
+    
+    /// Find the closest existing speaker to an embedding, up to a maximum cosine distance of `speakerThreshold`.
+    /// - Parameters:
+    ///    - embedding: 256D speaker embedding vector
+    ///    - speakerThreshold: the maximum cosine distance between `embedding` and another speaker for them to be a match (default: `self.speakerThreshold`)
+    ///  - Returns: a list of the `maxCount` nearest speakers and the distances to them from `embedding`, sorted by descending cosine distances.
+    public func findMatchingSpeakers(with embedding: [Float], speakerThreshold: Float? = nil) -> [(speaker: String, distance: Float)] {
+        var matches: [(speaker: String, distance: Float)] = []
+        let speakerThreshold = speakerThreshold ?? self.speakerThreshold
+        
+        for (speakerId, speaker) in speakerDatabase {
+            let distance = cosineDistance(embedding, speaker.currentEmbedding)
+            if distance <= speakerThreshold {
+                matches.append( (speakerId, distance) )
+            }
+        }
+        matches.sort { $0.distance < $1.distance }
+        return matches
+    }
+    
+    /// Creates a new speaker
+    /// - Parameters:
+    ///    - embedding: 256D speaker embedding vector
+    ///    - duration: the duration for which this speaker has been speaking
+    ///    - name: the name to assign the speaker (default: `Speaker $id`)
+    ///  - Returns: the ID of the new speaker, if successful. Returns `nil` if issues were encountered.
+    public func createNewSpeaker(embedding: [Float],
+                                 duration: Float,
+                                 name: String? = nil) -> String? {
+        guard embedding.count == 256 else {
+            logger.error("Invalid embedding length: \(embedding.count)")
+            return nil
+        }
+        
+        let minDistance = findDistanceToClosestSpeaker(to: embedding)
+        return self.createNewSpeaker(
+            embedding: embedding,
+            duration: duration,
+            distanceToClosest: minDistance,
+            name: name
+        )
+    }
+    
+    /// Merge two speakers in the database.
+    /// - Parameters:
+    ///   - sourceId: ID of the `Speaker` being merged
+    ///   - destinationId: ID of the `Speaker` that absorbs the other one
+    ///   - mergedName: new name for the merged speaker (uses `destination`'s name if not provided)
+    /// - Returns: `true` if merge was successful, `false` if not.
+    public func merge(speaker sourceId: String, into destinationId: String, mergedName: String? = nil) -> Bool {
+        
+        // don't merge a speaker into itself
+        guard sourceId != destinationId else {
+            return false
+        }
+        
+        // ensure both speakers exist
+        guard let speakerToMerge = speakerDatabase[sourceId],
+              let destinationSpeaker = speakerDatabase[destinationId] else {
+            return false
+        }
+        
+        // merge source into destination
+        destinationSpeaker.mergeWith(speakerToMerge, keepName: mergedName)
+        
+        // remove source speaker
+        speakerDatabase.removeValue(forKey: sourceId)
+        return true
+    }
+    
+    /// Remove a speaker from the database
+    /// - Parameters:
+    ///   - speakerID: ID of the speaker being removed
+    public func remove(speaker speakerID: String) {
+        if let speaker = speakerDatabase.removeValue(forKey: speakerID) {
+            logger.info("Removing speaker: \(speakerID)")
+        } else {
+            logger.warning("Failed to remove speaker: \(speakerID) (Speaker not found)")
+        }
+    }
+    
+    /// Remove all speakers that were inactive since a given date
+    public func removeSpeakersInactive(since date: Date) {
+        for (speakerId, speaker) in speakerDatabase where speaker.updatedAt < date {
+            speakerDatabase.removeValue(forKey: speakerId)
+            logger.info("Removing speaker \(speakerId) due to inactivity")
+        }
+    }
+    
+    /// remove speakers that have been inactive for a given duration
+    public func removeSpeakersInactive(for durationInactive: TimeInterval) {
+        let date = Date().addingTimeInterval(-durationInactive)
+        self.removeSpeakersInactive(since: date)
+    }
+    
+    /// remove speakers that meet a certain predicate
+    public func removeAllSpeakers(where predicate: (Speaker) -> Bool) {
+        for (speakerId, speaker) in speakerDatabase where predicate(speaker) {
+            speakerDatabase.removeValue(forKey: speakerId)
+            logger.info("Removing speaker \(speakerId) based on predicate")
+        }
+    }
+    
+    /// find all speakers that meet a certain predicate
+    public func findAllSpeakers(where predicate: (Speaker) -> Bool) -> [String] {
+        return speakerDatabase.filter { predicate($0.value) }.map(\.key)
+    }
+    
+    private func findDistanceToClosestSpeaker(to embedding: [Float]) -> Float {
+        return speakerDatabase.values.reduce(Float.infinity) {
+            min($0, cosineDistance(embedding, $1.currentEmbedding))
+        }
+    }
+    
     private func findClosestSpeaker(to embedding: [Float]) -> (speakerId: String?, distance: Float) {
         var minDistance: Float = Float.infinity
         var closestSpeakerId: String?
@@ -167,17 +331,19 @@ public class SpeakerManager {
     private func createNewSpeaker(
         embedding: [Float],
         duration: Float,
-        distanceToClosest: Float
+        distanceToClosest: Float,
+        name: String? = nil
     ) -> String {
         let normalizedEmbedding = VDSPOperations.l2Normalize(embedding)
         let newSpeakerId = String(nextSpeakerId)
+        let newSpeakerName = name ?? "Speaker \(newSpeakerId)"  // Default name with number if not provided
         nextSpeakerId += 1
         highestSpeakerId = max(highestSpeakerId, nextSpeakerId - 1)
 
         // Create new Speaker object
         let newSpeaker = Speaker(
             id: newSpeakerId,
-            name: "Speaker \(newSpeakerId)",  // Default name with number
+            name: newSpeakerName,
             currentEmbedding: normalizedEmbedding,
             duration: duration
         )
@@ -210,6 +376,13 @@ public class SpeakerManager {
     public func getAllSpeakers() -> [String: Speaker] {
         queue.sync {
             return speakerDatabase
+        }
+    }
+    
+    /// Get list of all speakers.
+    public func getSpeakerList() -> [Speaker] {
+        queue.sync {
+            return [Speaker](speakerDatabase.values)
         }
     }
 
