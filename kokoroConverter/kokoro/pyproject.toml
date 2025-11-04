@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kokoro"
+version = "0.9.4"
+description = "TTS"
+readme = "README.md"
+authors = [
+    { name="hexgrad", email="hello@hexgrad.com" }
+]
+license = { file = "LICENSE" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent"
+]
+requires-python = ">=3.10, <3.14"
+dependencies = [
+    "huggingface_hub",
+    "loguru",
+    "misaki[en]>=0.9.4",
+    "numpy",
+    "torch",
+    "transformers"
+]
+
+[project.scripts]
+kokoro = "kokoro.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["kokoro"]
+only-packages = true
+
+[project.urls]
+Homepage = "https://github.com/hexgrad/kokoro"
+Repository = "https://github.com/hexgrad/kokoro"

@@ -69,18 +69,31 @@ final public class AudioConverter {
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
         let inputFormat = buffer.format
 
-        // For >2 channels, use manual linear resampling since AVAudioConverter has limitations
-        if inputFormat.channelCount > 2 {
-            return try linearResample(buffer, to: format)
+        // Check if we need to normalize problematic formats
+        let needsNormalization = needsAudioNormalization(inputFormat)
+
+        let bufferToConvert: AVAudioPCMBuffer
+        if needsNormalization {
+            logger.info("Normalizing audio: \(inputFormat) → converting to clean mono format")
+            bufferToConvert = try normalizeAudio(buffer)
+        } else {
+            bufferToConvert = buffer
         }
 
-        guard let converter = AVAudioConverter(from: inputFormat, to: format) else {
+        // For >2 channels, use manual linear resampling since AVAudioConverter has limitations
+        if bufferToConvert.format.channelCount > 2 {
+            return try linearResample(bufferToConvert, to: format)
+        }
+
+        guard let converter = AVAudioConverter(from: bufferToConvert.format, to: format) else {
             throw AudioConverterError.failedToCreateConverter
         }
 
         // Estimate first pass capacity and allocate
-        let sampleRateRatio = format.sampleRate / inputFormat.sampleRate
-        let estimatedOutputFrames = AVAudioFrameCount((Double(buffer.frameLength) * sampleRateRatio).rounded(.up))
+        let inputSampleRate = bufferToConvert.format.sampleRate
+        let sampleRateRatio = format.sampleRate / inputSampleRate
+        let estimatedOutputFrames = AVAudioFrameCount(
+            (Double(bufferToConvert.frameLength) * sampleRateRatio).rounded(.up))
 
         func makeOutputBuffer(_ capacity: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
             guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
@@ -106,7 +119,7 @@ final public class AudioConverter {
         }
 
         var error: NSError?
-        let inputSampleCount = Int(buffer.frameLength)
+        let inputSampleCount = Int(bufferToConvert.frameLength)
 
         // First pass: convert main data
         let firstOut = try makeOutputBuffer(estimatedOutputFrames)
@@ -129,6 +142,74 @@ final public class AudioConverter {
         )
 
         return aggregated
+    }
+
+    /// Check if audio format needs normalization for diarization to work properly.
+    /// Problematic formats include stereo audio, non-standard sample rates,
+    /// and formats that confuse AVAudioConverter.
+    private func needsAudioNormalization(_ format: AVAudioFormat) -> Bool {
+        // Check if stereo (diarization models expect mono)
+        if format.channelCount > 1 {
+            logger.debug("Audio has \(format.channelCount) channels, normalizing to mono")
+            return true
+        }
+
+        // Check if sample rate is significantly different from target
+        let sampleRateRatio = format.sampleRate / targetFormat.sampleRate
+        if sampleRateRatio > 3.0 || sampleRateRatio < 0.3 {
+            logger.debug(
+                "Sample rate \(format.sampleRate)Hz significantly differs from target \(targetFormat.sampleRate)Hz")
+            return true
+        }
+
+        // Check for non-PCM formats that might cause issues
+        if format.commonFormat != .pcmFormatFloat32 && format.commonFormat != .pcmFormatInt16 {
+            logger.debug("Non-PCM format detected: \(format.commonFormat), normalizing")
+            return true
+        }
+
+        return false
+    }
+
+    /// Normalize audio buffer to ensure compatibility with diarization models.
+    /// Converts to mono, ensures clean PCM format, and removes problematic metadata.
+    private func normalizeAudio(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
+        let inputFormat = buffer.format
+
+        // Create target format: mono, clean PCM
+        let normalizedFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: inputFormat.sampleRate,
+            channels: 1,
+            interleaved: false
+        )!
+
+        guard let converter = AVAudioConverter(from: inputFormat, to: normalizedFormat) else {
+            throw AudioConverterError.failedToCreateConverter
+        }
+
+        // Allocate output buffer
+        let outputCapacity = AVAudioFrameCount(
+            Double(buffer.frameLength) * (normalizedFormat.sampleRate / inputFormat.sampleRate))
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: normalizedFormat, frameCapacity: outputCapacity) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+
+        // Perform conversion
+        var error: NSError?
+        let status = converter.convert(to: outputBuffer, error: &error) { _, status in
+            status.pointee = .haveData
+            return buffer
+        }
+
+        guard status != .error else {
+            throw AudioConverterError.conversionFailed(error)
+        }
+
+        logger.debug(
+            "Normalized audio: \(inputFormat.channelCount)→\(normalizedFormat.channelCount) channels, \(inputFormat.sampleRate)→\(normalizedFormat.sampleRate)Hz"
+        )
+        return outputBuffer
     }
 
     /// Check if a format already matches the target output format.
