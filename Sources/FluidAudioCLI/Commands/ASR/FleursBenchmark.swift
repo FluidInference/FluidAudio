@@ -51,6 +51,7 @@ public class FLEURSBenchmark {
         let outputFile: String
         let cacheDir: String
         let debugMode: Bool
+        let testStreaming: Bool
     }
 
     public struct FLEURSSample {
@@ -541,6 +542,27 @@ public class FLEURSBenchmark {
         language: String,
         asrManager: AsrManager
     ) async throws -> (LanguageResults, [HighWERCase]) {
+        if config.testStreaming {
+            return try await processLanguageSamplesStreaming(
+                samples: samples,
+                language: language,
+                asrManager: asrManager
+            )
+        } else {
+            return try await processLanguageSamplesOffline(
+                samples: samples,
+                language: language,
+                asrManager: asrManager
+            )
+        }
+    }
+
+    /// Process samples using StreamingAsrManager with 500ms chunks
+    private func processLanguageSamplesStreaming(
+        samples: [FLEURSSample],
+        language: String,
+        asrManager: AsrManager
+    ) async throws -> (LanguageResults, [HighWERCase]) {
         var totalWER = 0.0
         var totalCER = 0.0
         var totalDuration = 0.0
@@ -551,7 +573,156 @@ public class FLEURSBenchmark {
         // Track high WER cases for analysis
         var highWERCases: [HighWERCase] = []
 
-        for (_, sample) in samples.enumerated() {
+        for sample in samples {
+            // Skip if audio file doesn't exist
+            guard FileManager.default.fileExists(atPath: sample.audioPath) else {
+                logger.warning("Audio file not found: \(sample.audioPath)")
+                continue
+            }
+
+            do {
+                // Load audio file
+                let audioFileURL = URL(fileURLWithPath: sample.audioPath)
+                let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
+                let format = audioFileHandle.processingFormat
+                let frameCount = AVAudioFrameCount(audioFileHandle.length)
+
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                    skippedCount += 1
+                    continue
+                }
+
+                try audioFileHandle.read(into: buffer)
+
+                let audioDuration = Double(frameCount) / format.sampleRate
+
+                // Hard-coded 500ms chunks
+                let samplesPerChunk = Int(0.5 * format.sampleRate)
+
+                // Initialize streaming manager with optimized streaming configuration
+                let streamingManager = StreamingAsrManager(config: .streaming)
+                let streamingStartTime = Date()
+
+                try await streamingManager.start()
+
+                // Feed chunks realistically
+                var position = 0
+                while position < Int(frameCount) {
+                    let remainingSamples = Int(frameCount) - position
+                    let chunkSize = min(samplesPerChunk, remainingSamples)
+
+                    // Create a chunk buffer
+                    guard
+                        let chunkBuffer = AVAudioPCMBuffer(
+                            pcmFormat: format,
+                            frameCapacity: AVAudioFrameCount(chunkSize)
+                        )
+                    else {
+                        break
+                    }
+
+                    // Copy samples to chunk
+                    for channel in 0..<Int(format.channelCount) {
+                        if let sourceData = buffer.floatChannelData?[channel],
+                            let destData = chunkBuffer.floatChannelData?[channel]
+                        {
+                            for i in 0..<chunkSize {
+                                destData[i] = sourceData[position + i]
+                            }
+                        }
+                    }
+                    chunkBuffer.frameLength = AVAudioFrameCount(chunkSize)
+
+                    // Stream the chunk
+                    await streamingManager.streamAudio(chunkBuffer)
+
+                    position += chunkSize
+                }
+
+                // Finalize and get results
+                let streamingResult = try await streamingManager.finish()
+                let processingTime = Date().timeIntervalSince(streamingStartTime)
+
+                // Calculate metrics if reference available
+                if !sample.transcription.isEmpty {
+                    let metrics = calculateMetrics(
+                        hypothesis: streamingResult,
+                        reference: sample.transcription
+                    )
+                    totalWER += metrics.wer
+                    totalCER += metrics.cer
+
+                    // Track high WER cases
+                    if metrics.wer > ASRConstants.highWERThreshold {
+                        let normalizedRef = TextNormalizer.normalize(sample.transcription)
+                        let normalizedHyp = TextNormalizer.normalize(streamingResult)
+                        highWERCases.append(
+                            HighWERCase(
+                                language: language,
+                                sampleId: sample.sampleId,
+                                reference: sample.transcription,
+                                hypothesis: streamingResult,
+                                normalizedRef: normalizedRef,
+                                normalizedHyp: normalizedHyp,
+                                wer: metrics.wer,
+                                duration: audioDuration,
+                                audioPath: sample.audioPath
+                            ))
+                    }
+                }
+
+                totalDuration += audioDuration
+                totalProcessingTime += processingTime
+                processedCount += 1
+
+                if config.debugMode {
+                    logger.debug("    Hypothesis: \(streamingResult)")
+                    if !sample.transcription.isEmpty {
+                        logger.debug("    Reference:  \(sample.transcription)")
+                    }
+                }
+
+            } catch {
+                logger.warning("Streaming transcription error for \(sample.sampleId): \(error.localizedDescription)")
+            }
+        }
+
+        // Calculate averages
+        let avgWER = processedCount > 0 ? totalWER / Double(processedCount) : 0.0
+        let avgCER = processedCount > 0 ? totalCER / Double(processedCount) : 0.0
+        let rtfx = totalProcessingTime > 0 ? totalDuration / totalProcessingTime : 0.0
+
+        return (
+            LanguageResults(
+                language: language,
+                wer: avgWER,
+                cer: avgCER,
+                rtfx: rtfx,
+                samplesProcessed: processedCount,
+                samplesSkipped: skippedCount,
+                totalDuration: totalDuration,
+                processingTime: totalProcessingTime
+            ), highWERCases
+        )
+    }
+
+    /// Process samples using offline AsrManager (original method)
+    private func processLanguageSamplesOffline(
+        samples: [FLEURSSample],
+        language: String,
+        asrManager: AsrManager
+    ) async throws -> (LanguageResults, [HighWERCase]) {
+        var totalWER = 0.0
+        var totalCER = 0.0
+        var totalDuration = 0.0
+        var totalProcessingTime = 0.0
+        var processedCount = 0
+        var skippedCount = 0
+
+        // Track high WER cases for analysis
+        var highWERCases: [HighWERCase] = []
+
+        for sample in samples {
             // Skip if audio file doesn't exist
             guard FileManager.default.fileExists(atPath: sample.audioPath) else {
                 logger.warning("Audio file not found: \(sample.audioPath)")
@@ -862,7 +1033,8 @@ extension FLEURSBenchmark {
         // Get instance to access supportedLanguages
         let tempBenchmark = FLEURSBenchmark(
             config: FLEURSConfig(
-                languages: [], samplesPerLanguage: 0, outputFile: "", cacheDir: "", debugMode: false))
+                languages: [], samplesPerLanguage: 0, outputFile: "", cacheDir: "", debugMode: false,
+                testStreaming: false))
 
         var languages: [String]? = nil  // Will be set to all languages if not specified
         var samplesPerLanguage = Int.max  // Default to all samples
@@ -870,6 +1042,7 @@ extension FLEURSBenchmark {
         var cacheDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/FluidAudio/FLEURS").path
         var debugMode = false
+        var testStreaming = false
         var singleFile: String? = nil
 
         // Parse arguments
@@ -913,6 +1086,8 @@ extension FLEURSBenchmark {
                 }
             case "--debug":
                 debugMode = true
+            case "--streaming":
+                testStreaming = true
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -954,7 +1129,8 @@ extension FLEURSBenchmark {
             samplesPerLanguage: samplesPerLanguage,
             outputFile: outputFile,
             cacheDir: cacheDir,
-            debugMode: debugMode
+            debugMode: debugMode,
+            testStreaming: testStreaming
         )
 
         let benchmark = FLEURSBenchmark(config: config)
@@ -1097,7 +1273,8 @@ extension FLEURSBenchmark {
             samplesPerLanguage: 1,
             outputFile: outputFile,
             cacheDir: cacheDir,
-            debugMode: debugMode
+            debugMode: debugMode,
+            testStreaming: false
         )
 
         let benchmark = FLEURSBenchmark(config: config)
@@ -1340,7 +1517,9 @@ extension FLEURSBenchmark {
     private static func printUsage() {
         // Build available languages list dynamically to avoid drift
         let tmp = FLEURSBenchmark(
-            config: FLEURSConfig(languages: [], samplesPerLanguage: 0, outputFile: "", cacheDir: "", debugMode: false)
+            config: FLEURSConfig(
+                languages: [], samplesPerLanguage: 0, outputFile: "", cacheDir: "", debugMode: false,
+                testStreaming: false)
         )
         let langs = Array(tmp.supportedLanguages.keys).sorted()
         let langsJoined = langs.joined(separator: ", ")
@@ -1361,6 +1540,7 @@ extension FLEURSBenchmark {
                 --single-file <filename>  Test a single audio file (auto-detects language)
                 --output <file>          Output JSON file path
                 --cache-dir <path>       Directory for caching FLEURS data
+                --streaming              Enable streaming mode with LocalAgreement-2 (500ms chunks)
                 --debug                  Enable debug logging
                 --help, -h              Show this help message
 

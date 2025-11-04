@@ -18,6 +18,7 @@ public actor StreamingAsrManager {
 
     // ASR components
     private var asrManager: AsrManager?
+    private var localAgreementProcessor: LocalAgreementStreamingProcessor?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 
@@ -25,6 +26,8 @@ public actor StreamingAsrManager {
     private var segmentIndex: Int = 0
     private var lastProcessedFrame: Int = 0
     private var accumulatedTokens: [Int] = []
+    private var accumulatedTimestamps: [Int] = []
+    private var accumulatedConfidences: [Float] = []
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -85,6 +88,13 @@ public actor StreamingAsrManager {
         asrManager = AsrManager(config: config.asrConfig)
         try await asrManager?.initialize(models: models)
 
+        // Initialize LocalAgreement processor for streaming temporal validation
+        let decoder = TdtDecoderV3(config: config.asrConfig)
+        localAgreementProcessor = LocalAgreementStreamingProcessor(
+            decoder: decoder,
+            config: config.asrConfig
+        )
+
         // Reset decoder state for the specific source
         try await asrManager?.resetDecoderState(for: source)
 
@@ -92,6 +102,11 @@ public actor StreamingAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        accumulatedTimestamps.removeAll()
+        accumulatedConfidences.removeAll()
+
+        // Reset LocalAgreement processor state
+        await localAgreementProcessor?.reset()
 
         startTime = Date()
 
@@ -160,11 +175,14 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Convert final accumulated tokens to text (proper way to avoid duplicates)
+        // Finalize LocalAgreement processor and get all confirmed tokens
+        let (finalTokens, _, _) = await localAgreementProcessor?.finalize() ?? ([], [], [])
+
+        // Convert final accumulated tokens to text
         let finalText: String
-        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
+        if let asrManager = asrManager, !finalTokens.isEmpty {
             let finalResult = asrManager.processTranscriptionResult(
-                tokenIds: accumulatedTokens,
+                tokenIds: finalTokens,
                 timestamps: [],
                 confidences: [],  // No per-token confidences needed for final text
                 encoderSequenceLength: 0,
@@ -196,10 +214,15 @@ public actor StreamingAsrManager {
             try await asrManager.resetDecoderState(for: audioSource)
         }
 
+        // Reset LocalAgreement processor state
+        await localAgreementProcessor?.reset()
+
         // Reset sliding window state
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        accumulatedTimestamps.removeAll()
+        accumulatedConfidences.removeAll()
 
         logger.info("StreamingAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -296,47 +319,56 @@ public actor StreamingAsrManager {
     }
 
     /// Process a single assembled window: [left, chunk, right]
+    /// Uses LocalAgreement-2 temporal validation for accurate streaming transcription
     private func processWindow(_ windowSamples: [Float], windowStartSample: Int) async {
-        guard let asrManager = asrManager else { return }
+        guard let asrManager = asrManager, let laProcessor = localAgreementProcessor else { return }
 
         do {
             let chunkStartTime = Date()
 
-            // Start frame offset is now handled by decoder's timeJump mechanism
-
-            // Call AsrManager directly with deduplication
-            let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
-                windowSamples,
-                source: audioSource,
-                previousTokens: accumulatedTokens
+            let windowDurationSeconds = Double(windowSamples.count) / 16000.0
+            let totalBufferedSeconds = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
+            logger.debug(
+                "Processing window [\(segmentIndex)]: WindowSize=\(Int(windowDurationSeconds * 1000))ms, BufferedAudio=\(String(format: "%.1f", totalBufferedSeconds))s, ChunkStartSample=\(windowStartSample)"
             )
 
-            let adjustedTimestamps = Self.applyGlobalFrameOffset(
-                to: timestamps,
-                windowStartSample: windowStartSample
+            // Process chunk with LocalAgreement temporal validation
+            // Compares current chunk output with previous chunk to find agreement
+            let globalFrameOffset = windowStartSample / ASRConstants.samplesPerEncoderFrame
+            let laResult = try await laProcessor.processChunk(
+                audioSamples: windowSamples,
+                asrManager: asrManager,
+                globalFrameOffset: globalFrameOffset
             )
 
-            // Update state
-            accumulatedTokens.append(contentsOf: tokens)
-            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
+            // Confirmed tokens are those agreeing with previous chunk
+            // Provisional tokens are held until next chunk validates them
+            accumulatedTokens.append(contentsOf: laResult.confirmed)
+            accumulatedTimestamps.append(contentsOf: laResult.allTimestamps)
+            accumulatedConfidences.append(contentsOf: laResult.allConfidences)
+
+            lastProcessedFrame = max(lastProcessedFrame, laResult.allTimestamps.max() ?? 0)
             segmentIndex += 1
 
             let processingTime = Date().timeIntervalSince(chunkStartTime)
             processedChunks += 1
 
-            // Convert only the current chunk tokens to text for clean incremental updates
-            // The final result will use all accumulated tokens for proper deduplication
+            // Convert all tokens (confirmed + provisional) to text for streaming updates
+            // Provisional tokens show the current hypothesis that awaits validation
+            let allTokens = laResult.confirmed + laResult.provisional
             let interim = asrManager.processTranscriptionResult(
-                tokenIds: tokens,  // Only current chunk tokens for progress updates
-                timestamps: adjustedTimestamps,
-                confidences: confidences,
+                tokenIds: allTokens,
+                timestamps: laResult.allTimestamps,
+                confidences: laResult.allConfidences,
                 encoderSequenceLength: 0,
                 audioSamples: windowSamples,
                 processingTime: processingTime
             )
 
             logger.debug(
-                "Chunk \(self.processedChunks): '\(interim.text)', time: \(String(format: "%.3f", processingTime))s)"
+                "Chunk \(self.processedChunks): '\(interim.text)', "
+                    + "Confirmed=\(laResult.confirmed.count) Provisional=\(laResult.provisional.count) "
+                    + "time: \(String(format: "%.3f", processingTime))s)"
             )
 
             // Apply confidence-based confirmation logic (uses configured threshold)
@@ -353,7 +385,7 @@ public actor StreamingAsrManager {
                 isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
                 timestamp: Date(),
-                tokenIds: tokens,
+                tokenIds: laResult.confirmed,
                 tokenTimings: interim.tokenTimings ?? []
             )
 
