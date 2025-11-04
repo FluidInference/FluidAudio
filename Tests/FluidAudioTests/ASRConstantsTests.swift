@@ -17,29 +17,22 @@ final class ASRConstantsTests: XCTestCase {
     }
 
     func testCalculateEncoderFramesChunkBoundaries() {
-        // Test frame calculations for chunk processing boundaries
-        let centerSeconds = 11.2
-        let leftContextSeconds = 1.6
-        let rightContextSeconds = 1.6
+        // Test frame calculations for new stateless chunk processing boundaries
+        let chunkSeconds = 14.96  // ~14.96s chunks to stay under 240,000 sample limit
+        let overlapSeconds = 2.0  // 2.0s overlap between chunks
         let sampleRate = 16000
 
-        let centerSamples = Int(centerSeconds * Double(sampleRate))  // 179,200 samples
-        let leftContextSamples = Int(leftContextSeconds * Double(sampleRate))  // 25,600 samples
-        let rightContextSamples = Int(rightContextSeconds * Double(sampleRate))  // 25,600 samples
+        let chunkSamples = Int(chunkSeconds * Double(sampleRate))  // ~239,360 samples
+        let overlapSamples = Int(overlapSeconds * Double(sampleRate))  // 32,000 samples
 
-        let centerFrames = ASRConstants.calculateEncoderFrames(from: centerSamples)
-        let leftContextFrames = ASRConstants.calculateEncoderFrames(from: leftContextSamples)
-        let rightContextFrames = ASRConstants.calculateEncoderFrames(from: rightContextSamples)
+        let chunkFrames = ASRConstants.calculateEncoderFrames(from: chunkSamples)
+        let overlapFrames = ASRConstants.calculateEncoderFrames(from: overlapSamples)
 
-        XCTAssertEqual(centerFrames, 140, "11.2s center should be exactly 140 frames")
-        XCTAssertEqual(leftContextFrames, 20, "1.6s context should be exactly 20 frames")
-        XCTAssertEqual(rightContextFrames, 20, "1.6s context should be exactly 20 frames")
+        XCTAssertEqual(chunkFrames, 187, "~14.96s chunks should be 187 frames")
+        XCTAssertEqual(overlapFrames, 25, "2.0s overlap should be exactly 25 frames")
 
-        // Total chunk with context should be 180 frames (within 15s model limit of 188 frames)
-        let totalChunkSamples = leftContextSamples + centerSamples + rightContextSamples
-        let totalChunkFrames = ASRConstants.calculateEncoderFrames(from: totalChunkSamples)
-        XCTAssertEqual(totalChunkFrames, 180, "Full chunk with context should be 180 frames")
-        XCTAssertLessThan(totalChunkFrames, 188, "Should be within 15s model limit")
+        // Total model capacity is 15s = 188 frames
+        XCTAssertLessThanOrEqual(chunkFrames, 188, "Chunks should be within 15s model limit")
     }
 
     func testCalculateEncoderFramesModelLimits() {
@@ -101,33 +94,33 @@ final class ASRConstantsTests: XCTestCase {
     }
 
     func testFrameCalculationConsistencyWithChunkProcessor() {
-        // Test that frame calculations are consistent with ChunkProcessor expectations
-        let centerSeconds = 11.2
+        // Test that frame calculations are consistent with stateless ChunkProcessor expectations
+        let chunkSeconds = 14.96  // New stateless chunks: ~14.96s
         let sampleRate = 16000
-        let centerSamples = Int(centerSeconds * Double(sampleRate))
-        let centerFrames = ASRConstants.calculateEncoderFrames(from: centerSamples)
+        let chunkSamples = Int(chunkSeconds * Double(sampleRate))
+        let chunkFrames = ASRConstants.calculateEncoderFrames(from: chunkSamples)
 
-        // This should match the comment in ChunkProcessor: "11.2s center = exactly 140 encoder frames"
-        XCTAssertEqual(centerFrames, 140, "Center chunk calculation should match ChunkProcessor expectations")
-
-        // Verify the math: 11.2s * 16000 samples/s / 1280 samples/frame = 140 frames (exact)
-        let expectedFrames = Int(ceil(11.2 * 16000.0 / 1280.0))
-        XCTAssertEqual(centerFrames, expectedFrames, "Frame calculation should match manual math")
+        // This should match the chunk size in new stateless ChunkProcessor
+        // ~14.96s * 16000 / 1280 = ~187 frames
+        let expectedFrames = Int(ceil(14.96 * 16000.0 / 1280.0))
+        XCTAssertEqual(chunkFrames, expectedFrames, "Chunk frame calculation should match ChunkProcessor")
+        XCTAssertEqual(chunkFrames, 187, "~14.96s chunks should be 187 frames")
     }
 
     func testFrameCalculationConsistencyWithTdtDecoder() {
-        // Test frame calculations match TdtDecoder's context adjustment expectations
-        let leftContextSeconds = 1.6
+        // Test frame calculations match new overlap-based merging in ChunkProcessor
+        let overlapSeconds = 2.0  // New stateless approach: 2.0s overlap
         let sampleRate = 16000
-        let leftContextSamples = Int(leftContextSeconds * Double(sampleRate))
-        let leftContextFrames = ASRConstants.calculateEncoderFrames(from: leftContextSamples)
+        let overlapSamples = Int(overlapSeconds * Double(sampleRate))
+        let overlapFrames = ASRConstants.calculateEncoderFrames(from: overlapSamples)
 
-        // This should match the comment in ChunkProcessor: "1.6s context = exactly 20 frames"
-        XCTAssertEqual(leftContextFrames, 20, "Context calculation should match TdtDecoder expectations")
+        // This should match the overlap configuration in stateless ChunkProcessor
+        // 2.0s * 16000 / 1280 = exactly 25 frames
+        XCTAssertEqual(overlapFrames, 25, "2.0s overlap should be exactly 25 frames")
 
-        // Verify: contextFrameAdjustment = -20 for standard overlap
-        let expectedContextAdjustment = -leftContextFrames
-        XCTAssertEqual(expectedContextAdjustment, -20, "Context adjustment should be -20 for standard overlap")
+        // Verify: halfOverlapWindow = overlapSeconds / 2 = 1.0s
+        let halfOverlapWindow = overlapSeconds / 2.0
+        XCTAssertEqual(halfOverlapWindow, 1.0, "Half overlap window should be 1.0s for token matching tolerance")
     }
 
     // MARK: - Edge Case Tests
