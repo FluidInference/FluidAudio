@@ -992,8 +992,8 @@ extension FLEURSBenchmark {
             }
 
             // Print table header
-            cliLogger.info("")
-            cliLogger.info(
+            print("")
+            print(
                 "Language".padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
                     + "WER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                     + "CER%".padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
@@ -1001,7 +1001,7 @@ extension FLEURSBenchmark {
                     + "Duration".padding(toLength: 8, withPad: " ", startingAt: 0) + " | "
                     + "Processed".padding(toLength: 9, withPad: " ", startingAt: 0) + " | "
                     + "Skipped".padding(toLength: 7, withPad: " ", startingAt: 0))
-            cliLogger.info(String(repeating: "-", count: 89))
+            print(String(repeating: "-", count: 89))
 
             for result in results.sorted(by: { lhs, rhs in
                 let lhsName = benchmark.supportedLanguages[lhs.language] ?? lhs.language
@@ -1017,7 +1017,7 @@ extension FLEURSBenchmark {
                 let processedStr = String(result.samplesProcessed)
                 let skippedStr = result.samplesSkipped > 0 ? String(result.samplesSkipped) : "-"
 
-                cliLogger.info(
+                print(
                     truncatedName.padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
                         + werStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                         + cerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
@@ -1034,7 +1034,7 @@ extension FLEURSBenchmark {
             let totalProcessed = results.reduce(0) { $0 + $1.samplesProcessed }
             let totalSkipped = results.reduce(0) { $0 + $1.samplesSkipped }
 
-            cliLogger.info(String(repeating: "-", count: 89))
+            print(String(repeating: "-", count: 89))
             let avgWerStr = String(format: "%.1f", avgWER * 100)
             let avgCerStr = String(format: "%.1f", avgCER * 100)
             let avgRtfxStr = String(format: "%.1f", avgRTFx)
@@ -1042,7 +1042,7 @@ extension FLEURSBenchmark {
             let totalProcessedStr = String(totalProcessed)
             let totalSkippedStr = totalSkipped > 0 ? String(totalSkipped) : "-"
 
-            cliLogger.info(
+            print(
                 "AVERAGE".padding(toLength: 25, withPad: " ", startingAt: 0) + " | "
                     + avgWerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
                     + avgCerStr.padding(toLength: 6, withPad: " ", startingAt: 0) + " | "
@@ -1052,11 +1052,11 @@ extension FLEURSBenchmark {
                     + totalSkippedStr.padding(toLength: 7, withPad: " ", startingAt: 0))
 
             if totalSkipped > 0 {
-                cliLogger.warning("Note: \(totalSkipped) samples were skipped due to audio loading errors")
+                print("Note: \(totalSkipped) samples were skipped due to audio loading errors")
             }
 
         } catch {
-            cliLogger.error("Benchmark failed: \(error)")
+            print("Benchmark failed: \(error)")
             exit(1)
         }
     }

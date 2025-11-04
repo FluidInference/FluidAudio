@@ -261,6 +261,17 @@ public final class AsrManager {
         }
     }
 
+    /// Transcribe audio from an AVAudioPCMBuffer.
+    ///
+    /// Performs speech-to-text transcription on the provided audio buffer. The decoder state is automatically
+    /// reset after transcription completes, ensuring each transcription call is independent. This enables
+    /// efficient batch processing where multiple files are transcribed without state carryover.
+    ///
+    /// - Parameters:
+    ///   - audioBuffer: The audio buffer to transcribe
+    ///   - source: The audio source type (microphone or system audio)
+    /// - Returns: An ASRResult containing the transcribed text and token timings
+    /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
     {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
@@ -270,6 +281,16 @@ public final class AsrManager {
         return result
     }
 
+    /// Transcribe audio from a file URL.
+    ///
+    /// Performs speech-to-text transcription on the audio file at the provided URL. The decoder state is
+    /// automatically reset after transcription completes, ensuring each transcription call is independent.
+    ///
+    /// - Parameters:
+    ///   - url: The URL to the audio file
+    ///   - source: The audio source type (defaults to .system)
+    /// - Returns: An ASRResult containing the transcribed text and token timings
+    /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
     public func transcribe(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
 
@@ -278,6 +299,17 @@ public final class AsrManager {
         return result
     }
 
+    /// Transcribe audio from raw float samples.
+    ///
+    /// Performs speech-to-text transcription on raw audio samples at 16kHz. The decoder state is
+    /// automatically reset after transcription completes, ensuring each transcription call is independent
+    /// and enabling efficient batch processing of multiple audio files.
+    ///
+    /// - Parameters:
+    ///   - audioSamples: Array of 16-bit audio samples at 16kHz
+    ///   - source: The audio source type (microphone or system audio)
+    /// - Returns: An ASRResult containing the transcribed text and token timings
+    /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
         _ audioSamples: [Float],
         source: AudioSource = .microphone
@@ -291,7 +323,8 @@ public final class AsrManager {
             result = try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
         }
 
-        // When batching audio, assume that the state needs to be reset comepletely between calls
+        // Stateless architecture: reset decoder state after each transcription to ensure
+        // independent processing for batch operations without state carryover
         try await self.resetDecoderState()
 
         return result
