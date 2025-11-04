@@ -123,11 +123,6 @@ final public class AudioConverter {
             if status == .endOfStream { break }
         }
 
-        let outputSampleCount = aggregated.count
-        logger.debug(
-            "Audio conversion: \(inputSampleCount) samples → \(outputSampleCount) samples, ratio: \(Double(outputSampleCount)/Double(inputSampleCount))"
-        )
-
         return aggregated
     }
 

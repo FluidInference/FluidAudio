@@ -178,108 +178,103 @@ public class ASRBenchmark {
     ) async throws
         -> ASRBenchmarkResult
     {
-        let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
-        let audioLength = TimeInterval(audioSamples.count) / 16000.0
+        // Load audio file
+        let audioFileURL = URL(fileURLWithPath: file.audioPath.path)
+        let audioFileHandle = try AVAudioFile(forReading: audioFileURL)
+        let format = audioFileHandle.processingFormat
+        let frameCount = AVAudioFrameCount(audioFileHandle.length)
 
-        // Streaming metrics tracking
-        var chunkProcessingTimes: [TimeInterval] = []
-        var firstTokenTime: Date?
-        let overallStartTime = Date()
-
-        // Calculate chunk size in samples (minimum 1 second to ensure reasonable context)
-        let samplesPerChunk = max(Int(config.streamingChunkDuration * 16000.0), 16000)
-
-        logger.info("🔍 Starting streaming simulation for \(file.fileName)")
-        logger.info("🔍   Audio length: \(audioLength)s")
-        logger.info("🔍   Total samples: \(audioSamples.count)")
-        logger.info("🔍   Chunk duration: \(max(self.config.streamingChunkDuration, 1.0))s")
-        logger.info("🔍   Samples per chunk: \(samplesPerChunk)")
-        let totalChunks = (audioSamples.count + samplesPerChunk - 1) / samplesPerChunk
-        logger.info("🔍   Expected total chunks: \(totalChunks)")
-
-        // For streaming, we'll use the full file but measure chunk-by-chunk processing
-        // This simulates how streaming would work with continuous audio
-        var processedSamples = 0
-        var accumulatedText = ""
-
-        // Process the full audio file but track metrics as if streaming
-        while processedSamples < audioSamples.count {
-            let chunkNumber = chunkProcessingTimes.count + 1
-
-            // Calculate how many samples we've "streamed" so far
-            let nextChunkEnd = min(processedSamples + samplesPerChunk, audioSamples.count)
-            let totalSamplesToProcess = nextChunkEnd
-            let chunkSamples = nextChunkEnd - processedSamples
-            let isLastChunk = nextChunkEnd >= audioSamples.count
-
-            logger.debug(
-                "🔍   Processing chunk \(chunkNumber): samples \(processedSamples) to \(nextChunkEnd) (chunkSize=\(chunkSamples), isLast=\(isLastChunk))"
-            )
-
-            // Process all audio up to this point (simulating accumulated streaming)
-            let audioToProcess = Array(audioSamples[0..<totalSamplesToProcess])
-
-            // Measure only inference time for this chunk
-            let chunkInferenceStartTime = Date()
-            let result = try await asrManager.transcribe(audioToProcess, source: .microphone)
-            let chunkInferenceTime = Date().timeIntervalSince(chunkInferenceStartTime)
-
-            // Track first token time
-            if firstTokenTime == nil && !result.text.isEmpty {
-                firstTokenTime = Date()
-            }
-
-            // Update accumulated text
-            let previousText = accumulatedText
-            accumulatedText = result.text
-
-            // Use inference time for RTFx calculations, but keep total chunk time for debugging
-            chunkProcessingTimes.append(chunkInferenceTime)
-
-            let chunkDuration = Double(chunkSamples) / 16000.0
-            logger.debug(
-                "🔍   Chunk \(chunkNumber): processed \(String(format: "%.2f", chunkDuration))s in \(String(format: "%.3f", chunkInferenceTime))s (inference only)"
-            )
-
-            if isLastChunk {
-                logger.debug(
-                    "🔍   FINAL CHUNK \(chunkNumber): text change: '\(previousText)' -> '\(accumulatedText)'")
-                logger.debug("🔍   FINAL CHUNK processing complete")
-            }
-
-            processedSamples = nextChunkEnd
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            throw ASRError.processingFailed("Failed to create audio buffer for \(file.fileName)")
         }
 
-        // Use the final accumulated text
-        let finalText = accumulatedText
-        let metrics = calculateASRMetrics(hypothesis: finalText, reference: file.transcript)
+        try audioFileHandle.read(into: buffer)
 
-        // Use sum of inference times for accurate RTFx calculation
-        let totalInferenceTime = chunkProcessingTimes.reduce(0, +)
-        let firstTokenLatency = firstTokenTime.map { $0.timeIntervalSince(overallStartTime) }
+        let audioLength = Double(frameCount) / format.sampleRate
+
+        // Hard-coded 500ms chunks for streaming simulation
+        let samplesPerChunk = Int(config.streamingChunkDuration * format.sampleRate)
+        let totalChunks = (Int(frameCount) + samplesPerChunk - 1) / samplesPerChunk
+
+        logger.info("🔍 Starting streaming simulation for \(file.fileName)")
+        logger.info("🔍   Audio length: \(String(format: "%.2f", audioLength))s")
+        logger.info("🔍   Chunk duration: \(String(format: "%.0f", config.streamingChunkDuration * 1000))ms")
+        logger.info("🔍   Expected chunks: \(totalChunks)")
+
+        // Initialize streaming manager with optimized streaming configuration
+        let streamingManager = StreamingAsrManager(config: .streaming)
+        let streamingStartTime = Date()
+
+        try await streamingManager.start()
+
+        // Feed chunks to the streaming manager realistically
+        var position = 0
+        var chunkCount = 0
+
+        while position < Int(frameCount) {
+            let remainingSamples = Int(frameCount) - position
+            let chunkSize = min(samplesPerChunk, remainingSamples)
+
+            // Create a chunk buffer
+            guard
+                let chunkBuffer = AVAudioPCMBuffer(
+                    pcmFormat: format,
+                    frameCapacity: AVAudioFrameCount(chunkSize)
+                )
+            else {
+                break
+            }
+
+            // Copy samples to chunk
+            for channel in 0..<Int(format.channelCount) {
+                if let sourceData = buffer.floatChannelData?[channel],
+                    let destData = chunkBuffer.floatChannelData?[channel]
+                {
+                    for i in 0..<chunkSize {
+                        destData[i] = sourceData[position + i]
+                    }
+                }
+            }
+            chunkBuffer.frameLength = AVAudioFrameCount(chunkSize)
+
+            chunkCount += 1
+
+            // Stream the chunk
+            await streamingManager.streamAudio(chunkBuffer)
+
+            position += chunkSize
+
+            let chunkDuration = Double(chunkSize) / format.sampleRate
+            logger.debug(
+                "Chunk \(chunkCount)/\(totalChunks): fed \(String(format: "%.0f", chunkDuration * 1000))ms"
+            )
+        }
+
+        // Finalize and get results
+        let streamingResult = try await streamingManager.finish()
+        let totalProcessingTime = Date().timeIntervalSince(streamingStartTime)
+
+        let metrics = calculateASRMetrics(hypothesis: streamingResult, reference: file.transcript)
 
         // Calculate streaming metrics
-        let avgChunkTime = chunkProcessingTimes.reduce(0, +) / Double(chunkProcessingTimes.count)
-        let maxChunkTime = chunkProcessingTimes.max() ?? 0
-        let minChunkTime = chunkProcessingTimes.min() ?? 0
-        let streamingRTFx = audioLength / totalInferenceTime
+        let rtfx = audioLength / totalProcessingTime
 
         let streamingMetrics = StreamingMetrics(
-            avgChunkProcessingTime: avgChunkTime,
-            maxChunkProcessingTime: maxChunkTime,
-            minChunkProcessingTime: minChunkTime,
-            totalChunks: chunkProcessingTimes.count,
-            firstTokenLatency: firstTokenLatency,
-            streamingRTFx: streamingRTFx,
+            avgChunkProcessingTime: totalProcessingTime / Double(chunkCount),
+            maxChunkProcessingTime: 0,  // Not tracked in streaming manager
+            minChunkProcessingTime: 0,  // Not tracked in streaming manager
+            totalChunks: chunkCount,
+            firstTokenLatency: nil,  // Not tracked in streaming manager
+            streamingRTFx: rtfx,
             chunkDuration: config.streamingChunkDuration
         )
 
         return ASRBenchmarkResult(
             fileName: file.fileName,
-            hypothesis: finalText,
+            hypothesis: streamingResult,
             reference: file.transcript,
             metrics: metrics,
-            processingTime: totalInferenceTime,
+            processingTime: totalProcessingTime,
             audioLength: audioLength,
             streamingMetrics: streamingMetrics
         )
@@ -693,7 +688,7 @@ extension ASRBenchmark {
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
-        var streamingChunkDuration = 10.0
+        var streamingChunkDuration = 0.5  // 500ms hard-coded default
         var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Check for help flag first
@@ -1020,7 +1015,7 @@ extension ASRBenchmark {
                 --auto-download           Automatically download LibriSpeech dataset (default)
                 --no-auto-download        Disable automatic dataset download
                 --test-streaming          Enable streaming simulation mode
-                --chunk-duration <secs>   Chunk duration for streaming mode (default: 0.1s, min: 1.0s)
+                --chunk-duration <secs>   Chunk duration for streaming mode (default: 0.5s)
                 --help, -h               Show this help message
 
             Description:
@@ -1030,11 +1025,11 @@ extension ASRBenchmark {
 
             Streaming Mode:
                 When --test-streaming is enabled, the benchmark simulates real-time streaming
-                by processing audio in chunks. This measures:
+                using StreamingAsrManager with LocalAgreement-2 validation.
+                Default: 500ms chunks (hard-coded). This measures:
                 - Per-chunk processing latency
-                - First token latency
                 - Streaming real-time factor (RTFx)
-                - Min/max/average chunk processing times
+                - LocalAgreement-2 token agreement validation
 
             Examples:
                 # Basic benchmark on test-clean subset

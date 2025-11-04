@@ -91,6 +91,17 @@ actor TranscriptionTracker {
     }
 }
 
+/// Terminal color codes for ANSI output
+enum TerminalColor {
+    static let green = "\u{001B}[32m"  // Confirmed text
+    static let purple = "\u{001B}[35m"  // Volatile text (magenta)
+    static let reset = "\u{001B}[0m"  // Reset color
+
+    static var enabled: Bool {
+        ProcessInfo.processInfo.environment["TERM"] != nil
+    }
+}
+
 /// Command to transcribe audio files using batch or streaming mode
 enum TranscribeCommand {
     private static let logger = AppLogger(category: "Transcribe")
@@ -107,6 +118,7 @@ enum TranscribeCommand {
         var streamingMode = false
         var showMetadata = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
+        var realtimeChunkMs: Int = 500  // Default 500ms chunks for realistic streaming
 
         // Parse options
         var i = 1
@@ -132,6 +144,17 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
+            case "--realtime-chunk-size":
+                if i + 1 < arguments.count {
+                    let sizeStr = arguments[i + 1].lowercased()
+                    if let ms = Int(sizeStr.replacingOccurrences(of: "ms", with: "")) {
+                        realtimeChunkMs = max(10, min(5000, ms))  // Clamp to 10ms-5000ms
+                    } else {
+                        logger.error("Invalid chunk size: \(arguments[i + 1]). Use format like '500ms'")
+                        exit(1)
+                    }
+                    i += 1
+                }
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -140,10 +163,14 @@ enum TranscribeCommand {
 
         if streamingMode {
             logger.info(
-                "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
+                "Streaming mode enabled: simulating real-time audio with \(realtimeChunkMs)ms chunks.\n"
             )
             await testStreamingTranscription(
-                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+                audioFile: audioFile,
+                showMetadata: showMetadata,
+                modelVersion: modelVersion,
+                realtimeChunkMs: realtimeChunkMs
+            )
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
@@ -226,17 +253,6 @@ enum TranscribeCommand {
                 logger.info("  Confidence: \(String(format: "%.3f", result.confidence))")
             }
 
-            if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
-                let debugDump = tokenTimings.enumerated().map { index, timing in
-                    let start = String(format: "%.3f", timing.startTime)
-                    let end = String(format: "%.3f", timing.endTime)
-                    let confidence = String(format: "%.3f", timing.confidence)
-                    return
-                        "[\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(start)s, end: \(end)s, conf: \(confidence))"
-                }.joined(separator: ", ")
-                logger.debug("Token timings (count: \(tokenTimings.count)): \(debugDump)")
-            }
-
             // Cleanup
             asrManager.cleanup()
 
@@ -247,7 +263,10 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String,
+        showMetadata: Bool,
+        modelVersion: AsrModelVersion,
+        realtimeChunkMs: Int
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -276,9 +295,9 @@ enum TranscribeCommand {
 
             try audioFileHandle.read(into: buffer)
 
-            // Calculate streaming parameters - align with StreamingAsrConfig chunk size
-            let chunkDuration = config.chunkSeconds  // Use same chunk size as streaming config
-            let samplesPerChunk = Int(chunkDuration * format.sampleRate)
+            // Calculate streaming parameters - use realistic small chunks for proper simulation
+            let chunkDurationSeconds = Double(realtimeChunkMs) / 1000.0
+            let samplesPerChunk = Int(chunkDurationSeconds * format.sampleRate)
             let totalDuration = Double(audioFileHandle.length) / format.sampleRate
 
             // Track transcription updates
@@ -295,13 +314,16 @@ enum TranscribeCommand {
                 for await update in await streamingAsr.transcriptionUpdates {
                     await tracker.record(update: update)
 
-                    // Debug: show transcription updates
-                    let updateType = update.isConfirmed ? "CONFIRMED" : "VOLATILE"
+                    // Color-coded output: green = confirmed, purple = volatile
+                    let color = update.isConfirmed ? TerminalColor.green : TerminalColor.purple
+                    let coloredText =
+                        TerminalColor.enabled ? "\(color)\(update.text)\(TerminalColor.reset)" : update.text
+
                     if showMetadata {
                         let timestampString = timestampFormatter.string(from: update.timestamp)
                         let timingSummary = streamingTimingSummary(for: update)
                         logger.info(
-                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
+                            "\(coloredText) (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
                         )
                         logger.info("  \(timingSummary)")
                         if !update.tokenTimings.isEmpty {
@@ -313,7 +335,7 @@ enum TranscribeCommand {
                         }
                     } else {
                         logger.info(
-                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
+                            "\(coloredText) (conf: \(String(format: "%.2f", update.confidence)))")
                     }
 
                     if update.isConfirmed {
@@ -324,14 +346,12 @@ enum TranscribeCommand {
                 }
             }
 
-            // Stream audio chunks continuously - no artificial delays
+            // Stream audio chunks with real-time simulation
             var position = 0
 
-            logger.info("Streaming audio continuously (no artificial delays)...")
-            logger.info(
-                "Using \(String(format: "%.1f", chunkDuration))s chunks with \(String(format: "%.1f", config.leftContextSeconds))s left context, \(String(format: "%.1f", config.rightContextSeconds))s right context"
-            )
-            logger.info("Watch for real-time hypothesis updates being replaced by confirmed text\n")
+            logger.info("Streaming audio with real-time simulation (\(realtimeChunkMs)ms chunks)...")
+            logger.info("Waiting \(realtimeChunkMs)ms between chunks to simulate real-time audio arrival")
+            logger.info("Purple text = volatile (awaiting validation), Green text = confirmed by LocalAgreement-2\n")
 
             while position < Int(buffer.frameLength) {
                 let remainingSamples = Int(buffer.frameLength) - position
@@ -363,13 +383,14 @@ enum TranscribeCommand {
                 let audioTimePosition = Double(position) / format.sampleRate
                 await tracker.updateAudioPosition(audioTimePosition)
 
-                // Stream the chunk immediately - no waiting
+                // Stream the chunk
                 await streamingAsr.streamAudio(chunkBuffer)
 
                 position += chunkSize
 
-                // Small yield to allow other tasks to progress
-                await Task.yield()
+                // Simulate real-time audio arrival by waiting chunk duration
+                let chunkDurationNanoseconds = UInt64(chunkDurationSeconds * 1_000_000_000)
+                try await Task.sleep(nanoseconds: chunkDurationNanoseconds)
             }
 
             // Allow brief time for final processing
@@ -452,25 +473,37 @@ enum TranscribeCommand {
                 fluidaudio transcribe <audio_file> [options]
 
             Options:
-                --help, -h         Show this help message
-                --streaming        Use streaming mode with chunk simulation
-                --metadata         Show confidence, start time, and end time in results
-                --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
+                --help, -h              Show this help message
+                --streaming             Use streaming mode with chunk simulation
+                --metadata              Show confidence, start time, and end time in results
+                --model-version <ver>   ASR model version to use: v2 or v3 (default: v3)
+                --realtime-chunk-size   Size of chunks to simulate real-time streaming (default: 500ms)
+                <size>                  Format: e.g., "500ms", "100ms", "2000ms" (range: 10ms-5000ms)
 
             Examples:
-                fluidaudio transcribe audio.wav                    # Batch mode (default)
-                fluidaudio transcribe audio.wav --streaming        # Streaming mode
-                fluidaudio transcribe audio.wav --metadata         # Batch mode with metadata
-                fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
+                fluidaudio transcribe audio.wav                           # Batch mode (default)
+                fluidaudio transcribe audio.wav --streaming               # Streaming mode with 500ms chunks
+                fluidaudio transcribe audio.wav --streaming --metadata    # Streaming with metadata
+                fluidaudio transcribe audio.wav --streaming --realtime-chunk-size 100ms   # Small chunks (more realistic)
+                fluidaudio transcribe audio.wav --streaming --realtime-chunk-size 2000ms  # Larger chunks
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results
             - Processes entire audio file at once
 
             Streaming mode:
-            - Simulates real-time streaming with chunk processing
-            - Shows incremental transcription updates
-            - Uses StreamingAsrManager with sliding window processing
+            - Simulates real-time audio arrival with automatic delays between chunks
+            - Shows incremental transcription updates using LocalAgreement-2 validation
+            - Color-coded output: Purple = volatile (awaiting validation), Green = confirmed
+            - Text evolves from purple to green as LocalAgreement-2 validates tokens
+            - Default 500ms chunks simulate realistic microphone input at real-time speed
+            - Processing happens continuously as audio arrives (with realistic timing)
+
+            Realtime chunk size:
+            - Simulates how audio arrives from a microphone (e.g., 500ms at a time)
+            - Smaller chunks (100-300ms) more closely simulate real microphones
+            - Larger chunks (1000-5000ms) reduce processing frequency
+            - Each chunk waits for its duration before the next arrives (e.g., 500ms wait for 500ms chunk)
 
             Metadata option:
             - Shows confidence score for transcription accuracy
