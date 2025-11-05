@@ -187,7 +187,8 @@ final public class AudioConverter {
         // Check if already in target format
         if inputFormat.sampleRate == normalizedFormat.sampleRate
             && inputFormat.channelCount == normalizedFormat.channelCount
-            && inputFormat.commonFormat == normalizedFormat.commonFormat {
+            && inputFormat.commonFormat == normalizedFormat.commonFormat
+        {
             logger.debug("Audio already normalized, returning as-is")
             return buffer
         }
