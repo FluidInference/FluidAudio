@@ -184,6 +184,14 @@ final public class AudioConverter {
             interleaved: false
         )!
 
+        // Check if already in target format
+        if inputFormat.sampleRate == normalizedFormat.sampleRate
+            && inputFormat.channelCount == normalizedFormat.channelCount
+            && inputFormat.commonFormat == normalizedFormat.commonFormat {
+            logger.debug("Audio already normalized, returning as-is")
+            return buffer
+        }
+
         guard let converter = AVAudioConverter(from: inputFormat, to: normalizedFormat) else {
             throw AudioConverterError.failedToCreateConverter
         }
@@ -197,6 +205,7 @@ final public class AudioConverter {
 
         // Perform conversion
         var error: NSError?
+        var convertedBuffer: AVAudioPCMBuffer?
         let status = converter.convert(to: outputBuffer, error: &error) { _, status in
             status.pointee = .haveData
             return buffer
