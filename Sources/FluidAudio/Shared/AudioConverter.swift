@@ -68,39 +68,28 @@ final public class AudioConverter {
     /// Convert a buffer to the target format.
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
         // For >2 channels, use manual linear resampling since AVAudioConverter has limitations
-        // Skip normalization for multi-channel - let linearResample handle mixdown
         if buffer.format.channelCount > 2 {
             logger.debug("Using linearResample for \(buffer.format.channelCount) channels")
             return try linearResample(buffer, to: format)
         }
 
-        // Convert stereo to mono if needed (diarization models expect mono)
-        // Pass target format to convertToMono to avoid double conversion
-        let bufferToConvert: AVAudioPCMBuffer
-        if buffer.format.channelCount > 1 {
-            bufferToConvert = try convertToMono(buffer, to: format)
-        } else {
-            bufferToConvert = buffer
+        // Early return if already in target format
+        if isTargetFormat(buffer.format) {
+            logger.debug("Audio already in target format, extracting samples")
+            return extractFloatArray(from: buffer)
         }
 
-        // Check if already in target format after conversion
-        if bufferToConvert.format.sampleRate == format.sampleRate
-            && bufferToConvert.format.channelCount == format.channelCount
-            && bufferToConvert.format.commonFormat == format.commonFormat
-        {
-            logger.debug("Audio now in target format, extracting samples")
-            return extractFloatArray(from: bufferToConvert)
-        }
-
-        guard let converter = AVAudioConverter(from: bufferToConvert.format, to: format) else {
+        // AVAudioConverter handles both channel conversion AND resampling in one shot
+        // Stereo 44.1kHz → Mono 16kHz in single conversion!
+        guard let converter = AVAudioConverter(from: buffer.format, to: format) else {
             throw AudioConverterError.failedToCreateConverter
         }
 
         // Estimate first pass capacity and allocate
-        let inputSampleRate = bufferToConvert.format.sampleRate
+        let inputSampleRate = buffer.format.sampleRate
         let sampleRateRatio = format.sampleRate / inputSampleRate
         let estimatedOutputFrames = AVAudioFrameCount(
-            (Double(bufferToConvert.frameLength) * sampleRateRatio).rounded(.up))
+            (Double(buffer.frameLength) * sampleRateRatio).rounded(.up))
 
         func makeOutputBuffer(_ capacity: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
             guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
@@ -118,7 +107,7 @@ final public class AudioConverter {
             if !provided {
                 provided = true
                 status.pointee = .haveData
-                return bufferToConvert
+                return buffer
             } else {
                 status.pointee = .endOfStream
                 return nil
@@ -126,7 +115,7 @@ final public class AudioConverter {
         }
 
         var error: NSError?
-        let inputSampleCount = Int(bufferToConvert.frameLength)
+        let inputSampleCount = Int(buffer.frameLength)
 
         // First pass: convert main data
         let firstOut = try makeOutputBuffer(estimatedOutputFrames)
@@ -149,50 +138,6 @@ final public class AudioConverter {
         )
 
         return aggregated
-    }
-
-    /// Convert stereo buffer to mono.
-    private func convertToMono(_ buffer: AVAudioPCMBuffer, to targetFormat: AVAudioFormat) throws -> AVAudioPCMBuffer {
-        let inputFormat = buffer.format
-        guard inputFormat.channelCount > 1 else {
-            // Already mono, but may need format conversion
-            return buffer
-        }
-
-        // Create mono format at target sample rate (convert directly to final format!)
-        let monoFormat = AVAudioFormat(
-            commonFormat: targetFormat.commonFormat,
-            sampleRate: targetFormat.sampleRate,
-            channels: 1,
-            interleaved: false
-        )!
-
-        guard let converter = AVAudioConverter(from: inputFormat, to: monoFormat) else {
-            throw AudioConverterError.failedToCreateConverter
-        }
-
-        // Calculate output capacity (sample rate may change)
-        let outputCapacity = AVAudioFrameCount(
-            Double(buffer.frameLength) * (monoFormat.sampleRate / inputFormat.sampleRate)
-        )
-
-        // Allocate mono buffer
-        guard let monoBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: outputCapacity) else {
-            throw AudioConverterError.failedToCreateBuffer
-        }
-
-        // Convert to mono AND resample in one step
-        var error: NSError?
-        let status = converter.convert(to: monoBuffer, error: &error) { _, status in
-            status.pointee = .haveData
-            return buffer
-        }
-
-        guard status != .error else {
-            throw AudioConverterError.conversionFailed(error)
-        }
-
-        return monoBuffer
     }
 
     /// Check if a format already matches the target output format.
