@@ -69,7 +69,14 @@ final public class AudioConverter {
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
         let inputFormat = buffer.format
 
-        // Check if we need to normalize problematic formats
+        // For >2 channels, use manual linear resampling since AVAudioConverter has limitations
+        // Skip normalization for multi-channel - let linearResample handle mixdown
+        if buffer.format.channelCount > 2 {
+            logger.debug("Using linearResample for \(buffer.format.channelCount) channels")
+            return try linearResample(buffer, to: format)
+        }
+
+        // Check if we need to normalize problematic formats (stereo, metadata, etc.)
         let needsNormalization = needsAudioNormalization(inputFormat)
 
         let bufferToConvert: AVAudioPCMBuffer
@@ -80,9 +87,12 @@ final public class AudioConverter {
             bufferToConvert = buffer
         }
 
-        // For >2 channels, use manual linear resampling since AVAudioConverter has limitations
-        if bufferToConvert.format.channelCount > 2 {
-            return try linearResample(bufferToConvert, to: format)
+        // Check if already in target format (e.g., normalization converted it)
+        if bufferToConvert.format.sampleRate == format.sampleRate
+            && bufferToConvert.format.channelCount == format.channelCount
+            && bufferToConvert.format.commonFormat == format.commonFormat {
+            logger.debug("Audio already in target format, extracting samples")
+            return extractFloatArray(from: bufferToConvert)
         }
 
         guard let converter = AVAudioConverter(from: bufferToConvert.format, to: format) else {
@@ -111,7 +121,7 @@ final public class AudioConverter {
             if !provided {
                 provided = true
                 status.pointee = .haveData
-                return buffer
+                return bufferToConvert
             } else {
                 status.pointee = .endOfStream
                 return nil
@@ -206,7 +216,6 @@ final public class AudioConverter {
 
         // Perform conversion
         var error: NSError?
-        var convertedBuffer: AVAudioPCMBuffer?
         let status = converter.convert(to: outputBuffer, error: &error) { _, status in
             status.pointee = .haveData
             return buffer
