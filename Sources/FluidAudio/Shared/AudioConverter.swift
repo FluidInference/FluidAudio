@@ -90,7 +90,8 @@ final public class AudioConverter {
         // Check if already in target format (e.g., normalization converted it)
         if bufferToConvert.format.sampleRate == format.sampleRate
             && bufferToConvert.format.channelCount == format.channelCount
-            && bufferToConvert.format.commonFormat == format.commonFormat {
+            && bufferToConvert.format.commonFormat == format.commonFormat
+        {
             logger.debug("Audio already in target format, extracting samples")
             return extractFloatArray(from: bufferToConvert)
         }
