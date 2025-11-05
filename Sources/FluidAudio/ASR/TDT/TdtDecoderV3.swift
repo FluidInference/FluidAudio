@@ -138,8 +138,8 @@ internal struct TdtDecoderV3 {
             // decoder finished exactly at boundary but chunk has physical overlap
             // Need to skip the overlap frames to avoid re-processing
             if prevTimeJump == 0 && contextFrameAdjustment == 0 {
-                // Skip standard overlap (1.6s = 20 frames)
-                timeIndices = 20
+                // Skip standard overlap (2.0s = 25 frames at 0.08s per frame)
+                timeIndices = 25
             } else {
                 timeIndices = max(0, prevTimeJump + contextFrameAdjustment)
             }

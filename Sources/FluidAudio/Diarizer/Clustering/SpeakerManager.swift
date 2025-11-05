@@ -42,7 +42,7 @@ public class SpeakerManager {
     ///   - preservePermanent: whether to avoid overwriting/merging pre-existing permanent speakers
     public func initializeKnownSpeakers(_ speakers: [Speaker], mode: SpeakerInitializationMode = .skip, preservePermanent: Bool = true) {
         if mode == .reset {
-            self.reset()
+            self.reset(keepPermanent: preservePermanent)
         }
         
         queue.sync(flags: .barrier) {
@@ -496,7 +496,8 @@ public class SpeakerManager {
             rawEmbeddings: speaker.rawEmbeddings,
             updateCount: speaker.updateCount,
             createdAt: speaker.createdAt,
-            updatedAt: speaker.updatedAt
+            updatedAt: speaker.updatedAt,
+            isPermanent: speaker.isPermanent
         )
     }
 

@@ -198,10 +198,12 @@ FluidAudio/
 
 #### 1. ASR (Automatic Speech Recognition)
 - **AsrManager**: Main class for speech-to-text processing
-- **TDT (Token Duration Transducer)**: Advanced decoding architecture
-- **Streaming Support**: Real-time processing with persistent decoder states
+- **TDT (Token Duration Transducer)**: Advanced decoding architecture with Token Duration tracking
+- **Architecture**: Stateless processing with automatic decoder state reset after each transcription
+- **Chunking Strategy**: Fixed-size chunks (~14.96s) with 2.0s overlap, stateless decoding per chunk
+- **Token Merging**: Sophisticated algorithm using contiguous pair matching, LCS, or midpoint splitting
 - **Models**: Parakeet TDT v3 (0.6b) supporting 25 European languages
-- **Performance**: ~110x RTF on M4 Pro (0.5s to process 1 minute of audio)
+- **Performance**: ~209.8x RTF on M4 Pro, 55.7% WER improvement with stateless approach
 
 #### 2. Diarization System
 - **DiarizerManager**: Main orchestrator for speaker separation
@@ -229,9 +231,10 @@ FluidAudio/
 
 ### Threading and Concurrency
 - **Actor-based Architecture**: Thread-safe processing without `@unchecked Sendable`
-- **Persistent States**: Decoder states maintained across chunks for streaming
+- **Stateless Decoding**: Each chunk transcribed independently with fresh decoder state
+- **Automatic State Reset**: Decoder state reset after each `transcribe()` call for independent processing
 - **Memory Management**: Automatic cleanup and ANE optimization
-- **Parallel Processing**: Multi-stream support for batch operations
+- **Batch Processing**: Optimized for sequential transcription of multiple files without state carryover
 
 ### Model Management
 - **Automatic Downloads**: Models fetched from HuggingFace on first use
@@ -241,8 +244,12 @@ FluidAudio/
 
 ## Architecture Notes
 
+- **Stateless ASR**: Each chunk transcribed independently with automatic state reset
+- **Chunk-based Processing**: Fixed ~14.96s chunks with 2.0s overlap for merging
+- **Token Merging**: Three-tier strategy (contiguous pairs, LCS, midpoint split) handles chunk boundaries
+- **Quality Improvement**: Stateless approach eliminates context pollution, yielding 55.7% WER reduction
+- **Batch Processing**: Optimized for transcribing multiple files sequentially
 - **Online diarization**: Works well with chunk-based processing
-- **10-second chunks**: No significant performance impact
 - **Speaker tracking**: Effective across chunks
 - **DER calculation**: Fixed with optimal speaker mapping (Hungarian algorithm)
 - **Cross-platform**: Supports macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
