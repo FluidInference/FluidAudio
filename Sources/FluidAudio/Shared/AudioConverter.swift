@@ -67,8 +67,6 @@ final public class AudioConverter {
 
     /// Convert a buffer to the target format.
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [Float] {
-        let inputFormat = buffer.format
-
         // For >2 channels, use manual linear resampling since AVAudioConverter has limitations
         // Skip normalization for multi-channel - let linearResample handle mixdown
         if buffer.format.channelCount > 2 {
@@ -76,24 +74,12 @@ final public class AudioConverter {
             return try linearResample(buffer, to: format)
         }
 
-        // Check if we need to normalize problematic formats (stereo, metadata, etc.)
-        let needsNormalization = needsAudioNormalization(inputFormat)
-
+        // Convert stereo to mono (diarization models expect mono)
         let bufferToConvert: AVAudioPCMBuffer
-        if needsNormalization {
-            logger.info("Normalizing audio: \(inputFormat) → converting to clean mono format")
-            bufferToConvert = try normalizeAudio(buffer)
+        if buffer.format.channelCount > 1 {
+            bufferToConvert = try convertToMono(buffer)
         } else {
             bufferToConvert = buffer
-        }
-
-        // Check if already in target format (e.g., normalization converted it)
-        if bufferToConvert.format.sampleRate == format.sampleRate
-            && bufferToConvert.format.channelCount == format.channelCount
-            && bufferToConvert.format.commonFormat == format.commonFormat
-        {
-            logger.debug("Audio already in target format, extracting samples")
-            return extractFloatArray(from: bufferToConvert)
         }
 
         guard let converter = AVAudioConverter(from: bufferToConvert.format, to: format) else {
@@ -155,69 +141,37 @@ final public class AudioConverter {
         return aggregated
     }
 
-    /// Check if audio format needs normalization for diarization to work properly.
-    /// Problematic formats include stereo audio, non-standard sample rates,
-    /// and formats that confuse AVAudioConverter.
-    private func needsAudioNormalization(_ format: AVAudioFormat) -> Bool {
-        // Check if stereo (diarization models expect mono)
-        if format.channelCount > 1 {
-            logger.debug("Audio has \(format.channelCount) channels, normalizing to mono")
-            return true
-        }
-
-        // Check if sample rate is significantly different from target
-        let sampleRateRatio = format.sampleRate / targetFormat.sampleRate
-        if sampleRateRatio > 3.0 || sampleRateRatio < 0.3 {
-            logger.debug(
-                "Sample rate \(format.sampleRate)Hz significantly differs from target \(targetFormat.sampleRate)Hz")
-            return true
-        }
-
-        // Check for non-PCM formats that might cause issues
-        if format.commonFormat != .pcmFormatFloat32 && format.commonFormat != .pcmFormatInt16 {
-            logger.debug("Non-PCM format detected: \(format.commonFormat), normalizing")
-            return true
-        }
-
-        return false
-    }
-
-    /// Normalize audio buffer to ensure compatibility with diarization models.
-    /// Converts to mono, ensures clean PCM format, and removes problematic metadata.
-    private func normalizeAudio(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
+    /// Convert stereo buffer to mono.
+    private func convertToMono(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
         let inputFormat = buffer.format
-
-        // Create target format: mono, clean PCM
-        let normalizedFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: inputFormat.sampleRate,
-            channels: 1,
-            interleaved: false
-        )!
-
-        // Check if already in target format
-        if inputFormat.sampleRate == normalizedFormat.sampleRate
-            && inputFormat.channelCount == normalizedFormat.channelCount
-            && inputFormat.commonFormat == normalizedFormat.commonFormat
-        {
-            logger.debug("Audio already normalized, returning as-is")
-            return buffer
+        guard inputFormat.channelCount > 1 else {
+            return buffer  // Already mono
         }
 
-        guard let converter = AVAudioConverter(from: inputFormat, to: normalizedFormat) else {
-            throw AudioConverterError.failedToCreateConverter
-        }
-
-        // Allocate output buffer
-        let outputCapacity = AVAudioFrameCount(
-            Double(buffer.frameLength) * (normalizedFormat.sampleRate / inputFormat.sampleRate))
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: normalizedFormat, frameCapacity: outputCapacity) else {
+        // Create mono format at same sample rate
+        guard
+            let monoFormat = AVAudioFormat(
+                commonFormat: inputFormat.commonFormat,
+                sampleRate: inputFormat.sampleRate,
+                channels: 1,
+                interleaved: false
+            )
+        else {
             throw AudioConverterError.failedToCreateBuffer
         }
 
-        // Perform conversion
+        guard let converter = AVAudioConverter(from: inputFormat, to: monoFormat) else {
+            throw AudioConverterError.failedToCreateConverter
+        }
+
+        // Allocate mono buffer
+        guard let monoBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameLength) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+
+        // Convert to mono
         var error: NSError?
-        let status = converter.convert(to: outputBuffer, error: &error) { _, status in
+        let status = converter.convert(to: monoBuffer, error: &error) { _, status in
             status.pointee = .haveData
             return buffer
         }
@@ -226,10 +180,7 @@ final public class AudioConverter {
             throw AudioConverterError.conversionFailed(error)
         }
 
-        logger.debug(
-            "Normalized audio: \(inputFormat.channelCount)→\(normalizedFormat.channelCount) channels, \(inputFormat.sampleRate)→\(normalizedFormat.sampleRate)Hz"
-        )
-        return outputBuffer
+        return monoBuffer
     }
 
     /// Check if a format already matches the target output format.
