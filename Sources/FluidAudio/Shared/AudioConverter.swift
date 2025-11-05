@@ -74,10 +74,10 @@ final public class AudioConverter {
             return try linearResample(buffer, to: format)
         }
 
-        // Check if we need to convert
+        // Convert stereo to mono if needed (diarization models expect mono)
+        // Pass target format to convertToMono to avoid double conversion
         let bufferToConvert: AVAudioPCMBuffer
         if buffer.format.channelCount > 1 {
-            // Convert stereo to mono AND to target format in one step (avoid double conversion)
             bufferToConvert = try convertToMono(buffer, to: format)
         } else {
             bufferToConvert = buffer
@@ -86,7 +86,8 @@ final public class AudioConverter {
         // Check if already in target format after conversion
         if bufferToConvert.format.sampleRate == format.sampleRate
             && bufferToConvert.format.channelCount == format.channelCount
-            && bufferToConvert.format.commonFormat == format.commonFormat {
+            && bufferToConvert.format.commonFormat == format.commonFormat
+        {
             logger.debug("Audio now in target format, extracting samples")
             return extractFloatArray(from: bufferToConvert)
         }
