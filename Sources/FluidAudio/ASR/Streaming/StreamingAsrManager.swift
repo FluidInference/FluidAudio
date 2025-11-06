@@ -533,16 +533,16 @@ public struct StreamingAsrConfig: Sendable {
         confirmationThreshold: 0.85
     )
 
-    /// Optimized streaming configuration: Dual-track processing for best experience
-    /// Uses ChunkProcessor's proven 11-2-2 approach for stable transcription
-    /// Plus quick hypothesis updates for immediate feedback
+    /// Optimized streaming configuration: Frequent processing with circular buffer
+    /// Processes every 1.5 seconds for immediate feedback while maintaining 5s+ context
+    /// for accurate LocalAgreement-2 validation. Buffer is trimmed as text is confirmed.
     public static let streaming = StreamingAsrConfig(
-        chunkSeconds: 11.0,  // Match ChunkProcessor for stable transcription
-        hypothesisChunkSeconds: 1.0,  // Quick hypothesis updates
-        leftContextSeconds: 2.0,  // Match ChunkProcessor left context
-        rightContextSeconds: 2.0,  // Match ChunkProcessor right context
-        minContextForConfirmation: 10.0,  // Need sufficient context before confirming
-        confirmationThreshold: 0.80  // Higher threshold for more stable confirmations
+        chunkSeconds: 1.5,  // Process every 1.5s for immediate feedback (down from 11s)
+        hypothesisChunkSeconds: 1.0,  // Quick hypothesis updates (kept for compatibility)
+        leftContextSeconds: 3.0,  // 3s context for LocalAgreement stability
+        rightContextSeconds: 1.0,  // 1s lookahead (down from 2s) - minimal latency impact
+        minContextForConfirmation: 5.0,  // 5s minimum context before confirming
+        confirmationThreshold: 0.80  // LocalAgreement-2 confidence threshold
     )
 
     public init(

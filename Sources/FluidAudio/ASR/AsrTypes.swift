@@ -89,6 +89,85 @@ public struct TokenTiming: Sendable {
     }
 }
 
+// MARK: - Streaming State
+
+/// Streaming state for VAD-style chunk-by-chunk ASR processing with LocalAgreement validation.
+/// Similar to VadStreamState for low-latency streaming transcription.
+public struct AsrStreamState: Sendable {
+    /// Decoder LSTM state carried forward between chunks (for context continuity)
+    var decoderState: TdtDecoderState
+
+    /// Previous chunk's hypothesis for LocalAgreement-2 temporal comparison
+    var previousHypothesis: TdtHypothesis?
+
+    /// Total audio samples processed (for frame offset calculation)
+    var processedSamples: Int
+
+    /// Accumulated confirmed tokens (stable, validated by LocalAgreement)
+    var confirmedTokens: [Int]
+
+    /// Tokens awaiting validation (provisional, shown as volatile during streaming)
+    var provisionalTokens: [Int]
+
+    /// Initialize streaming state (like VadManager.makeStreamState())
+    static func initial() -> AsrStreamState {
+        AsrStreamState(
+            decoderState: TdtDecoderState.make(),
+            previousHypothesis: nil,
+            processedSamples: 0,
+            confirmedTokens: [],
+            provisionalTokens: []
+        )
+    }
+
+    init(
+        decoderState: TdtDecoderState,
+        previousHypothesis: TdtHypothesis?,
+        processedSamples: Int,
+        confirmedTokens: [Int],
+        provisionalTokens: [Int]
+    ) {
+        self.decoderState = decoderState
+        self.previousHypothesis = previousHypothesis
+        self.processedSamples = processedSamples
+        self.confirmedTokens = confirmedTokens
+        self.provisionalTokens = provisionalTokens
+    }
+}
+
+/// Result of processing a single streaming chunk with LocalAgreement validation.
+/// Contains updated state and confirmed/provisional token split.
+public struct AsrStreamResult: Sendable {
+    /// Updated state for next chunk (carries decoder state, previous hypothesis)
+    public let state: AsrStreamState
+
+    /// Tokens validated by LocalAgreement comparison with previous chunk (green/confirmed)
+    public let confirmed: [Int]
+
+    /// New tokens from current chunk awaiting validation (purple/volatile)
+    public let provisional: [Int]
+
+    /// Timestamps for all tokens in this result
+    public let allTimestamps: [Int]
+
+    /// Confidence scores for all tokens in this result
+    public let allConfidences: [Float]
+
+    init(
+        state: AsrStreamState,
+        confirmed: [Int],
+        provisional: [Int],
+        allTimestamps: [Int],
+        allConfidences: [Float]
+    ) {
+        self.state = state
+        self.confirmed = confirmed
+        self.provisional = provisional
+        self.allTimestamps = allTimestamps
+        self.allConfidences = allConfidences
+    }
+}
+
 // MARK: - Errors
 
 public enum ASRError: Error, LocalizedError {

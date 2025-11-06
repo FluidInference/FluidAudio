@@ -181,7 +181,7 @@ extension AsrManager {
         return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, encLen)
     }
 
-    internal func processTranscriptionResult(
+    public func processTranscriptionResult(
         tokenIds: [Int],
         timestamps: [Int] = [],
         confidences: [Float] = [],
