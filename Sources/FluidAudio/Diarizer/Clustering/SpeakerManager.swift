@@ -69,8 +69,12 @@ public class SpeakerManager {
                             logger.warning("Failed to overwrite Speaker \(speaker.id) because it is permanent. Skipping")
                         }
                     case .merge:
-                        logger.warning("Speaker \(speaker.id) is already initialized. Merging with old speaker.")
-                        oldSpeaker.mergeWith(speaker, keepName: speaker.name)
+                        if !(oldSpeaker.isPermanent && preserveIfPermanent) {
+                            logger.warning("Speaker \(speaker.id) is already initialized. Merging with old speaker.")
+                            oldSpeaker.mergeWith(speaker, keepName: speaker.name)
+                        } else {
+                            logger.warning("Failed to merge Speaker \(speaker.id) into Speaker \(oldSpeaker.id) because the existing speaker is permanent. Skipping")
+                        }
                     case .skip:
                         logger.warning("Speaker \(speaker.id) is already initialized. Skipping new speaker.")
                         continue
