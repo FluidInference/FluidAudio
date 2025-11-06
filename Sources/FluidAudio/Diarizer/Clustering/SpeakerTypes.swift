@@ -269,6 +269,7 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
     }
 }
 
+/// Configuration for handling initializing known speakers
 public enum SpeakerInitializationMode {
     /// Reset the speaker database and add the new speakers
     case reset
@@ -279,4 +280,3 @@ public enum SpeakerInitializationMode {
     /// Skip speakers whose IDs match existing ones
     case skip
 }
-
