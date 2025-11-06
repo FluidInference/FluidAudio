@@ -50,8 +50,7 @@ public class SpeakerManager {
 
             for speaker in speakers {
                 guard speaker.currentEmbedding.count == Self.embeddingSize else {
-                    logger.warning(
-                        "Skipping speaker \(speaker.id) - invalid embedding size: \(speaker.currentEmbedding.count)")
+                    logger.warning("Skipping speaker \(speaker.id) - invalid embedding size: \(speaker.currentEmbedding.count)")
                     continue
                 }
                 
