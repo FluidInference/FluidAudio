@@ -730,7 +730,7 @@ class RealtimeDiarizer {
 | `getSpeakerList()` | `[Speaker]` | Get array of all speakers (debugging) |
 | `hasSpeaker(_:)` | `Bool` | Check if database has a speaker with a given ID |
 | `reset(keepIfPermanent:)` | `Void` | Clear speaker database |
-| `resetPermanentFlag()` | `Void` | Mark all speakers as not permanent |
+| `resetPermanentFlags()` | `Void` | Mark all speakers as not permanent |
 | `getCurrentSpeakerNames()` | `[String]` | Get sorted speaker IDs |
 | `getGlobalSpeakerStats()` | `(Int, Float, Float, Int)` | Aggregate statistics |
 
