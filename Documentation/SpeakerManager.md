@@ -78,7 +78,7 @@ Sometimes, there are already speakers in the database that may have the same ID.
 ```swift
 let alice = Speaker(id: "alice", name: "Alice", currentEmbedding: aliceEmbedding)
 let bob = Speaker(id: "bob", name: "Bob", currentEmbedding: bobEmbedding)
-speakerManager.initializeKnownSpeakers([alice, bob], mode: .overwrite, preservePermanent: false) // replace any speakers with ID "alice" or "bob" with the new speakers, even if the old ones were marked as permanent. 
+speakerManager.initializeKnownSpeakers([alice, bob], mode: .overwrite, preserveIfPermanent: false) // replace any speakers with ID "alice" or "bob" with the new speakers, even if the old ones were marked as permanent. 
 ```
 
 > The `mode` argument dictates how to handle redundant speakers. It is of type `SpeakerInitializationMode`, and can take on one of four values:
@@ -87,7 +87,7 @@ speakerManager.initializeKnownSpeakers([alice, bob], mode: .overwrite, preserveP
 > - `.overwrite`: overwrite existing speakers with the same IDs as the new ones 
 > - `.skip`: skip adding speakers whose IDs match existing ones
 > 
-> The `preservePermanent` argument determines whether existing speakers marked as permanent should be preserved (i.e., not overwritten or merged). It is `true` by default.
+> The `preserveIfPermanent` argument determines whether existing speakers marked as permanent should be preserved (i.e., not overwritten or merged). It is `true` by default.
 
 **Use case:** When you have pre-recorded voice samples of known speakers and want to recognize them by name instead of numeric IDs.
 
@@ -191,6 +191,13 @@ Make the speaker not permanent.
 speakerManager.revokePermanence(from: "alice") // mark "alice" as not permanent
 ```
 
+#### resetPermanentFlags
+Mark all speakers as not permanent.
+
+```swift
+speakerManager.resetPermanentFlags()
+```
+
 ### Speaker Retrieval
 
 #### findSpeaker
@@ -263,6 +270,15 @@ let allSpeakers = speakerManager.getSpeakerList()
 // Returns: [Speaker] - Array of speakers
 ```
 
+#### hasSpeaker
+Check if the speaker database has a speaker with a given ID.
+
+```swift
+if speakerManager.hasSpeaker("alice") {
+    print("Alice was found in the database")
+}
+```
+
 #### speakerCount
 Get the total number of tracked speakers.
 
@@ -285,7 +301,7 @@ Clear all speakers from the database.
 
 ```swift
 speakerManager.reset()
-speakerManager.reset(keepPermanent: true) // remove all non-permanent speakers from the database 
+speakerManager.reset(keepIfPermanent: true) // remove all non-permanent speakers from the database 
 ```
 
 Useful for:
@@ -696,23 +712,25 @@ class RealtimeDiarizer {
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `assignSpeaker(_:speechDuration:confidence:)` | `Speaker?` | Assign/create speaker from embedding |
-| `initializeKnownSpeakers(_:mode:preservePermanent:)` | `Void` | Pre-load known speaker profiles |
+| `initializeKnownSpeakers(_:mode:preserveIfPermanent:)` | `Void` | Pre-load known speaker profiles |
 | `findSpeaker(with:speakerThreshold:)` | `(id: String?, distance: Float)` | Find speaker that matches an embedding |
-| `findMatchingSpeaker(with:speakerThreshold:)` | `[(id: String, distance: Float)]` | Find all speakers that match an embedding |
-| `findSpeakers(where:)` | [String] | Find all speakers that meet a certain predicate
-| findMergeablePairs(speakerThreshold:excludeIfBothPermanent:) | [(speakerToMerge: String, destination: String)] | Find all pairs of very similar speakers |
-| `removeSpeaker(_:keepIfPermanent:)` | `Bool` | Remove a speaker from the database |
-| `removeSpeakersInactive(since:keepIfPermanent:)` | `Bool` | Remove speakers inactive since a given date |
-| `removeSpeakersInactive(for:keepIfPermanent:)` | `Bool` | Remove speakers inactive for a given duration |
-| `removeSpeakers(where:)` | `Bool` | Remove speakers that satisfy a given predicate |
-| `removeSpeakers(where:keepIfPermanent:)` | `Bool` | Remove speakers that satisfy a given predicate |
-| `mergeSpeaker(_:into:mergedName:stopIfPermanent:)` | `Bool` | Merge a speaker into another one |
+| `findMatchingSpeakers(with:speakerThreshold:)` | `[(id: String, distance: Float)]` | Find all speakers that match an embedding |
+| `findSpeakers(where:)` | `[String]` | Find all speakers that meet a certain predicate
+| `findMergeablePairs(speakerThreshold:excludeIfBothPermanent:)` | `[(speakerToMerge: String, destination: String)]` | Find all pairs of very similar speakers |
+| `removeSpeaker(_:keepIfPermanent:)` | `Void` | Remove a speaker from the database |
+| `removeSpeakersInactive(since:keepIfPermanent:)` | `Void` | Remove speakers inactive since a given date |
+| `removeSpeakersInactive(for:keepIfPermanent:)` | `Void` | Remove speakers inactive for a given duration |
+| `removeSpeakers(where:)` | `Void` | Remove speakers that satisfy a given predicate |
+| `removeSpeakers(where:keepIfPermanent:)` | `Void` | Remove speakers that satisfy a given predicate |
+| `mergeSpeaker(_:into:mergedName:stopIfPermanent:)` | `Void` | Merge a speaker into another one |
 | `upsertSpeaker(_:)` | `Void` | Update or insert speaker (from object) |
 | `upsertSpeaker(id:currentEmbedding:duration:...)` | `Void` | Update or insert speaker (from params) |
 | `getSpeaker(for:)` | `Speaker?` | Get speaker by ID |
 | `getAllSpeakers()` | `[String: Speaker]` | Get all speakers (debugging) |
-| `reset()` | `Void` | Clear speaker database |
-| `reassignSegment(segmentId:from:to:)` | `Bool` | Move segment between speakers |
+| `getSpeakerList()` | `[Speaker]` | Get array of all speakers (debugging) |
+| `hasSpeaker(_:)` | `Bool` | Check if database has a speaker with a given ID |
+| `reset(keepIfPermanent:)` | `Void` | Clear speaker database |
+| `resetPermanentFlag()` | `Void` | Mark all speakers as not permanent |
 | `getCurrentSpeakerNames()` | `[String]` | Get sorted speaker IDs |
 | `getGlobalSpeakerStats()` | `(Int, Float, Float, Int)` | Aggregate statistics |
 
@@ -726,6 +744,7 @@ class RealtimeDiarizer {
 | `minEmbeddingUpdateDuration` | `Float` | Min duration to update embeddings (seconds) |
 | `speakerCount` | `Int` | Number of tracked speakers |
 | `speakerIds` | `[String]` | Sorted array of speaker IDs |
+| `permanentSpeakerIds` | `[String]` | Sorted array of speaker IDs of permanent speakers |
 
 ### Speaker Properties
 
@@ -762,6 +781,7 @@ class RealtimeDiarizer {
 | `averageEmbeddings(_:)` | `[Float]?` | Average multiple embeddings |
 | `createSpeaker(id:name:duration:embedding:config:)` | `Speaker?` | Create validated speaker |
 | `updateEmbedding(current:new:alpha:)` | `[Float]?` | EMA update (pure function) |
+| `reassignSegment(segmentId:from:to:)` | `Bool` | Move segment between speakers |
 
 ## See Also
 
