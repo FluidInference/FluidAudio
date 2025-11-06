@@ -611,11 +611,20 @@ public class SpeakerManager {
         queue.sync(flags: .barrier) {
             if !keepIfPermanent {
                 speakerDatabase.removeAll()
+                nextSpeakerId = 1
+                highestSpeakerId = 0
             } else {
                 speakerDatabase = speakerDatabase.filter(\.value.isPermanent)
+                // Recalculate nextSpeakerId and highestSpeakerId based on remaining permanent speakers
+                var maxNumericId = 0
+                for id in speakerDatabase.keys {
+                    if let numericId = Int(id) {
+                        maxNumericId = max(maxNumericId, numericId)
+                    }
+                }
+                highestSpeakerId = maxNumericId
+                nextSpeakerId = maxNumericId + 1
             }
-            nextSpeakerId = 1
-            highestSpeakerId = 0
             logger.info("Speaker database reset")
         }
     }
