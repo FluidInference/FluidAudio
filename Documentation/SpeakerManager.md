@@ -1,3 +1,4 @@
+
 # SpeakerManager API
 
 Tracks and manages speaker identities across audio chunks for streaming diarization.
@@ -73,6 +74,21 @@ let bob = Speaker(id: "bob", name: "Bob", currentEmbedding: bobEmbedding)
 speakerManager.initializeKnownSpeakers([alice, bob])
 ```
 
+Sometimes, there are already speakers in the database that may have the same ID.
+```swift
+let alice = Speaker(id: "alice", name: "Alice", currentEmbedding: aliceEmbedding)
+let bob = Speaker(id: "bob", name: "Bob", currentEmbedding: bobEmbedding)
+speakerManager.initializeKnownSpeakers([alice, bob], mode: .overwrite, preservePermanent: false) // replace any speakers with ID "alice" or "bob" with the new speakers, even if the old ones were marked as permanent. 
+```
+
+> The `mode` argument dictates how to handle redundant speakers. It is of type `SpeakerInitializationMode`, and can take on one of four values:
+> - `.reset`: reset the speaker database and add the new speakers
+> - `.merge`: merge new speakers whose IDs match with existing ones
+> - `.overwrite`: overwrite existing speakers with the same IDs as the new ones 
+> - `.skip`: skip adding speakers whose IDs match existing ones
+> 
+> The `preservePermanent` argument determines whether existing speakers marked as permanent should be preserved (i.e., not overwritten or merged). It is `true` by default.
+
 **Use case:** When you have pre-recorded voice samples of known speakers and want to recognize them by name instead of numeric IDs.
 
 #### upsertSpeaker
@@ -91,6 +107,7 @@ speakerManager.upsertSpeaker(
     updateCount: 5,    // optional
     createdAt: Date(), // optional
     updatedAt: Date()  // optional
+    isPermanent: false // optional
 )
 ```
 
@@ -98,8 +115,129 @@ speakerManager.upsertSpeaker(
 - If speaker ID exists: updates the existing speaker's data
 - If speaker ID is new: inserts as a new speaker
 - Maintains ID uniqueness and tracks numeric IDs for auto-increment
+- If `isPermanent` is true, then the new speaker or the existing speaker will become permanent. This means that the speaker will not be merged or removed without an override.
+
+#### mergeSpeaker
+```swift
+// merge speaker 1 into "alice"
+speakerManager.mergeSpeaker("1", into: "alice") 
+
+// merge speaker 2 into speaker 3 under the name "bob", regardless of whether speaker 2 is permanent.
+speakerManager.mergeSpeaker("2", into: "3", mergedName: "Bob", stopIfPermanent: false)
+```
+
+**Behavior:**
+- Unless `stopIfPermanent` is `false`, the merge will be stopped if the first speaker is permanent.
+- Otherwise: Merges the first speaker into the destination speaker and removes the first speaker from the known speaker database.
+- If `mergedName` is provided, the destination speaker will be renamed. Otherwise, its name will be preserved.
+
+> Note: the `mergedName` argument is optional.
+> Note: `stopIfPermanent` is `true` by default. 
+
+#### removeSpeaker
+Remove a speaker from the database.
+
+```swift
+// remove speaker 1
+speakerManager.removeSpeaker("1") 
+
+// remove "alice" from the known speaker database, even if they are marked as permanent
+speakerManager.removeSpeaker("alice", keepIfPermanent: false) 
+```
+> Note: `keepIfPermanent` is `true` by default.
+
+#### removeSpeakersInactive
+Remove speaker that have been inactive since a certain date or for a certain duration.
+
+```swift
+// remove speakers that have been inactive since `date`
+speakerManager.removeSpeakersInactive(since: date) 
+
+// remove speakers that have been active for 10 seconds, even if they were marked as permanent
+speakerManager.removeSpeakersInactive(for: 10.0, keepIfPermanent: false)
+```
+
+> Note: Both versions of the method have an optional `keepIfPermanent` argument that defaults to `true`.
+
+#### removeAllSpeakers
+Remove all speakers that match a given predicate.
+
+```swift
+// remove all speakers with less than 5 seconds of speaking time
+speakerManager.removeSpeakers(
+    where: { $0.duration < 5.0 },
+    keepIfPermanent: false // also remove permanent speakers (optional)
+)
+
+// Alternate syntax (does NOT remove permanent speakers)
+speakerManager.removeSpeakers {
+    $0.duration < 5.0
+}
+```
+
+> Note: the predicate should take in a `Speaker` object and return a `Bool`.
+
+#### makeSpeakerPermanent
+Make the speaker permanent.
+
+```swift
+speakerManager.makeSpeakerPermanent("alice") // mark "alice" as permanent
+```
+
+#### revokePermanence
+Make the speaker not permanent.
+
+```swift
+speakerManager.revokePermanence(from: "alice") // mark "alice" as not permanent
+```
 
 ### Speaker Retrieval
+
+#### findSpeaker
+Find the best matching speaker to an embedding vector and the cosine distance to them, unless no match is found.
+
+```swift
+let (id, distance) = speakerManager.findSpeaker(with: embedding)
+```
+> Note: there is an optional `speakerThreshold` argument to use a threshold other than the default.
+
+#### findMatchingSpeakers
+Find all speakers within the maximum `speakerThreshold` to an embedding vector.
+
+```swift
+for speaker in speakerManager.findMatchingSpeakers(with: embedding) {
+    print("ID: \(speaker.id), Distance: \(speaker.distance)")
+}
+```
+
+> Note: there is an optional `speakerThreshold` argument to use a threshold other than the default.
+
+#### findSpeakers
+Find all speakers that meet a certain predicate.
+```swift
+// two ways to find all speakers with > 5.0s of speaking time.
+speakerManager.findSpeakers(where: { $0.duration > 5.0 })
+speakerManager.findSpeakers{ $0.duration > 5.0 }
+// Returns an array of IDs corresponding to speakers that meet the predicate.
+```
+
+> Note: the predicate should take in a `Speaker` object and return a `Bool`.
+
+#### findMergeablePairs
+Find all pairs of speakers that might be the same person. Specifically, find the pairs of speakers such that the cosine distance between them is less than the `speakerThreshold`. 
+
+Returns a list of pairs of speaker IDs.
+
+```swift
+let pairs = speakerManager.findMergeablePairs(
+    speakerThreshold = 0.6, // optional
+    excludeIfBothPermanent = true // optional
+)
+
+for pair in pairs {
+    print("Merge Speaker \(pair.speakerToMerge) into Speaker \(pair.destination)")
+}
+```
 
 #### getSpeaker
 Get a specific speaker by ID.
@@ -116,6 +254,13 @@ Get all speakers in the database (for testing/debugging).
 ```swift
 let allSpeakers = speakerManager.getAllSpeakers()
 // Returns: [String: Speaker] - dictionary keyed by speaker ID
+```
+
+#### getSpeakerList
+Get all speakers in the database as an array of speakers (for testing/debugging)
+```swift
+let allSpeakers = speakerManager.getSpeakerList()
+// Returns: [Speaker] - Array of speakers
 ```
 
 #### speakerCount
@@ -140,12 +285,15 @@ Clear all speakers from the database.
 
 ```swift
 speakerManager.reset()
+speakerManager.reset(keepPermanent: true) // remove all non-permanent speakers from the database 
 ```
 
 Useful for:
 - Starting a new session
 - Freeing memory between recordings
 - Resetting speaker tracking
+
+
 
 ## Speaker Enrollment
 
@@ -237,6 +385,7 @@ public final class Speaker: Identifiable, Codable {
     public var updatedAt: Date               // Last update timestamp
     public var updateCount: Int              // Number of updates
     public var rawEmbeddings: [RawEmbedding] // Historical embeddings (max 50)
+    public var isPermanent: Bool             // Permanence flag
 }
 ```
 
@@ -547,7 +696,17 @@ class RealtimeDiarizer {
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `assignSpeaker(_:speechDuration:confidence:)` | `Speaker?` | Assign/create speaker from embedding |
-| `initializeKnownSpeakers(_:)` | `Void` | Pre-load known speaker profiles |
+| `initializeKnownSpeakers(_:mode:preservePermanent:)` | `Void` | Pre-load known speaker profiles |
+| `findSpeaker(with:speakerThreshold:)` | `(id: String?, distance: Float)` | Find speaker that matches an embedding |
+| `findMatchingSpeaker(with:speakerThreshold:)` | `[(id: String, distance: Float)]` | Find all speakers that match an embedding |
+| `findSpeakers(where:)` | [String] | Find all speakers that meet a certain predicate
+| findMergeablePairs(speakerThreshold:excludeIfBothPermanent:) | [(speakerToMerge: String, destination: String)] | Find all pairs of very similar speakers |
+| `removeSpeaker(_:keepIfPermanent:)` | `Bool` | Remove a speaker from the database |
+| `removeSpeakersInactive(since:keepIfPermanent:)` | `Bool` | Remove speakers inactive since a given date |
+| `removeSpeakersInactive(for:keepIfPermanent:)` | `Bool` | Remove speakers inactive for a given duration |
+| `removeSpeakers(where:)` | `Bool` | Remove speakers that satisfy a given predicate |
+| `removeSpeakers(where:keepIfPermanent:)` | `Bool` | Remove speakers that satisfy a given predicate |
+| `mergeSpeaker(_:into:mergedName:stopIfPermanent:)` | `Bool` | Merge a speaker into another one |
 | `upsertSpeaker(_:)` | `Void` | Update or insert speaker (from object) |
 | `upsertSpeaker(id:currentEmbedding:duration:...)` | `Void` | Update or insert speaker (from params) |
 | `getSpeaker(for:)` | `Speaker?` | Get speaker by ID |
@@ -580,6 +739,7 @@ class RealtimeDiarizer {
 | `updatedAt` | `Date` | Last update timestamp |
 | `updateCount` | `Int` | Number of embedding updates |
 | `rawEmbeddings` | `[RawEmbedding]` | Historical embeddings (max 50) |
+| `isPermanent` | `Bool` | Permanence flag |
 
 ### Speaker Methods
 

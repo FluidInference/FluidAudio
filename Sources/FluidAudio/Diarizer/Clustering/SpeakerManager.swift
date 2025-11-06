@@ -164,7 +164,7 @@ public class SpeakerManager {
     ///    - embedding: 256D speaker embedding vector
     ///    - speakerThreshold: the maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
     ///  - Returns: the ID of the match (if found) and the distance to that match.
-    public func findSpeaker(with embedding: [Float], speakerThreshold: Float? = nil) -> (speaker: String?, distance: Float) {
+    public func findSpeaker(with embedding: [Float], speakerThreshold: Float? = nil) -> (id: String?, distance: Float) {
         let (closestSpeakerId, minDistance) = findClosestSpeaker(to: embedding)
         let speakerThreshold = speakerThreshold ?? self.speakerThreshold
         if let closestSpeakerId, minDistance <= speakerThreshold {
@@ -178,8 +178,8 @@ public class SpeakerManager {
     ///    - embedding: 256D speaker embedding vector
     ///    - speakerThreshold: the maximum cosine distance between `embedding` and another speaker for them to be a match (default: `self.speakerThreshold`)
     ///  - Returns: a list of the `maxCount` nearest speakers and the distances to them from `embedding`, sorted by descending cosine distances.
-    public func findMatchingSpeakers(with embedding: [Float], speakerThreshold: Float? = nil) -> [(speaker: String, distance: Float)] {
-        var matches: [(speaker: String, distance: Float)] = []
+    public func findMatchingSpeakers(with embedding: [Float], speakerThreshold: Float? = nil) -> [(id: String, distance: Float)] {
+        var matches: [(id: String, distance: Float)] = []
         let speakerThreshold = speakerThreshold ?? self.speakerThreshold
         
         for (speakerId, speaker) in speakerDatabase {
@@ -192,29 +192,37 @@ public class SpeakerManager {
         return matches
     }
     
-    /// Creates a new speaker
-    /// - Parameters:
-    ///    - embedding: 256D speaker embedding vector
-    ///    - duration: the duration for which this speaker has been speaking
-    ///    - name: the name to assign the speaker (default: `Speaker $id`)
-    ///  - Returns: the ID of the new speaker, if successful. Returns `nil` if issues were encountered.
-    public func createNewSpeaker(embedding: [Float],
-                                 duration: Float,
-                                 name: String? = nil,
-                                 isPermanent: Bool = false) -> String? {
-        guard embedding.count == 256 else {
-            logger.error("Invalid embedding length: \(embedding.count)")
-            return nil
+    /// find all speakers that meet a certain predicate
+    /// - Parameter predicate: the condition that the speakers must meet to be returned
+    /// - Returns: a list of all Speaker IDs corresponding to Speakers that meet the predicate
+    public func findSpeakers(where predicate: (Speaker) -> Bool) -> [String] {
+        return speakerDatabase.filter { predicate($0.value) }.map(\.key)
+    }
+    
+    /// Mark a speaker as permanent
+    /// - Parameter speakerId: the ID of the speaker to mark as permanent
+    /// - returns: `true` if the speaker is now permanent, `false` if not found.
+    public func makeSpeakerPermanent(_ speakerId: String) -> Bool {
+        if let speaker = speakerDatabase[speakerId] {
+            logger.info("Marking speaker \(speakerId) as permanent.")
+            speaker.isPermanent = true
+            return true
         }
-        
-        let minDistance = findDistanceToClosestSpeaker(to: embedding)
-        return self.createNewSpeaker(
-            embedding: embedding,
-            duration: duration,
-            distanceToClosest: minDistance,
-            name: name,
-            isPermanent: isPermanent
-        )
+        logger.warning("Failed to mark speaker \(speakerId) as permanent (speaker not found).")
+        return false
+    }
+    
+    /// Remove a speaker's permanent marker
+    /// - Parameter speakerId: the ID of the speaker to mark as permanent
+    /// - returns: `true` if the speaker is no longer permanent, `false` if not found.
+    public func revokePermanence(from speakerId: String) -> Bool {
+        if let speaker = speakerDatabase[speakerId] {
+            logger.info("Revoking permanence from speaker \(speakerId).")
+            speaker.isPermanent = false
+            return true
+        }
+        logger.warning("Failed to revoke permanence from speaker \(speakerId) (speaker not found).")
+        return false
     }
     
     /// Merge two speakers in the database.
@@ -224,7 +232,7 @@ public class SpeakerManager {
     ///   - mergedName: new name for the merged speaker (uses `destination`'s name if not provided)
     ///   - stopIfPermanent: whether to stop merging if the source speaker is permanent
     /// - Returns: `true` if merge was successful, `false` if not.
-    public func merge(speaker sourceId: String, into destinationId: String, mergedName: String? = nil, stopIfPermanent: Bool = true) -> Bool {
+    public func mergeSpeaker(_ sourceId: String, into destinationId: String, mergedName: String? = nil, stopIfPermanent: Bool = true) -> Bool {
         
         // don't merge a speaker into itself
         guard sourceId != destinationId else {
@@ -250,11 +258,57 @@ public class SpeakerManager {
         return true
     }
     
+    /// Find all pairs of speakers that can be merged
+    /// - Parameters:
+    ///    - speakerThreshold: the max cosine distance between speakers to let them be considered mergeable
+    ///    - excludeIfBothPermanent: whether to exclude speaker pairs where both speakers are permanent
+    /// - Returns: a list of speaker ID pairs that belong to speakers that are similar enough to be merged
+    public func findMergeablePairs(speakerThreshold: Float? = nil, excludeIfBothPermanent: Bool = true) -> [(speakerToMerge: String, destination: String)] {
+        let speakerThreshold = speakerThreshold ?? self.speakerThreshold
+        var pairs: [(speakerToMerge: String, destination: String)] = []
+        
+        for i in (0..<speakerCount) {
+            // get speaker 1
+            guard let speaker1 = speakerDatabase[speakerIds[i]] else {
+                logger.error("ID \(speakerIds[i]) not found in speakerDatabase")
+                continue
+            }
+            
+            for j in (i+1)..<speakerCount {
+                // get speaker 2
+                guard let speaker2 = speakerDatabase[speakerIds[j]] else {
+                    logger.error("ID \(speakerIds[j]) not found in speakerDatabase")
+                    continue
+                }
+                
+                // skip double permanent pairs
+                if excludeIfBothPermanent && speaker1.isPermanent && speaker2.isPermanent {
+                    logger.info("findMergeablePairs: Skipping \(speaker1.id) and \(speaker2.id) as both are permanent")
+                    continue
+                }
+                
+                // determine if they are similar enough
+                let distance = cosineDistance(speaker1.currentEmbedding, speaker2.currentEmbedding)
+                
+                if distance < speakerThreshold {
+                    // prioritize putting speaker1 as the destination for consistency
+                    if !speaker2.isPermanent {
+                        pairs.append((speakerToMerge: speaker2.id, destination: speaker1.id))
+                    } else {
+                        pairs.append((speakerToMerge: speaker1.id, destination: speaker2.id))
+                    }
+                }
+            }
+        }
+        
+        return pairs
+    }
+    
     /// Remove a speaker from the database
     /// - Parameters:
     ///   - speakerID: ID of the speaker being removed
     ///   - keepIfPermanent: whether to stop the removal if the speaker is marked as permanent
-    public func remove(speaker speakerID: String, keepIfPermanent: Bool = true) {
+    public func removeSpeaker(_ speakerID: String, keepIfPermanent: Bool = true) {
         // determine if we should skip the removal due to permanence
         if keepIfPermanent, let speaker = self.speakerDatabase[speakerID], speaker.isPermanent {
             logger.warning("Failed to remove speaker: \(speakerID) (Speaker is permanent)")
@@ -302,7 +356,7 @@ public class SpeakerManager {
     /// - Parameters:
     ///   - predicate: the predicate to determine whether the speaker should be removed
     ///   - keepIfPermanent: whether to stop the removal if the speaker is marked as permanent
-    public func removeAllSpeakers(where predicate: (Speaker) -> Bool, keepIfPermanent: Bool = true) {
+    public func removeSpeakers(where predicate: (Speaker) -> Bool, keepIfPermanent: Bool = true) {
         if keepIfPermanent {
             // don't remove permanent speakers
             for (speakerId, speaker) in speakerDatabase where predicate(speaker) && !speaker.isPermanent {
@@ -317,57 +371,11 @@ public class SpeakerManager {
         }
     }
     
-    /// find all speakers that meet a certain predicate
-    /// - Parameter predicate: the condition that the speakers must meet to be returned
-    /// - Returns: a list of all Speaker IDs corresponding to Speakers that meet the predicate
-    public func findAllSpeakers(where predicate: (Speaker) -> Bool) -> [String] {
-        return speakerDatabase.filter { predicate($0.value) }.map(\.key)
-    }
-    
-    /// Find all pairs of speakers that can be merged
+    /// remove non-permanent speakers that meet a certain predicate
     /// - Parameters:
-    ///    - speakerThreshold: the max cosine distance between speakers to let them be considered mergeable
-    ///    - excludeIfBothPermanent: whether to exclude speaker pairs where both speakers are permanent
-    /// - Returns: a list of speaker ID pairs that belong to speakers that are similar enough to be merged
-    public func findMergeablePairs(speakerThreshold: Float? = nil, excludeIfBothPermanent: Bool = true) -> [(speakerToMerge: String, destination: String)] {
-        let speakerThreshold = speakerThreshold ?? self.speakerThreshold
-        var pairs: [(speakerToMerge: String, destination: String)] = []
-        
-        for i in (0..<speakerCount) {
-            // get speaker 1
-            guard let speaker1 = speakerDatabase[speakerIds[i]] else {
-                logger.error("ID \(speakerIds[i]) not found in speakerDatabase")
-                continue
-            }
-            
-            for j in (i+1)..<speakerCount {
-                // get speaker 2
-                guard let speaker2 = speakerDatabase[speakerIds[j]] else {
-                    logger.error("ID \(speakerIds[j]) not found in speakerDatabase")
-                    continue
-                }
-                
-                // skip double permanent pairs
-                if excludeIfBothPermanent && speaker1.isPermanent && speaker2.isPermanent {
-                    logger.info("findMergeablePairs: Skipping \(speaker1.id) and \(speaker2.id) as both are permanent")
-                    continue
-                }
-                
-                // determine if they are similar enough
-                let distance = cosineDistance(speaker1.currentEmbedding, speaker2.currentEmbedding)
-                
-                if distance < speakerThreshold {
-                    // prioritize putting speaker1 as the destination for consistency
-                    if !speaker2.isPermanent {
-                        pairs.append((speakerToMerge: speaker2.id, destination: speaker1.id))
-                    } else {
-                        pairs.append((speakerToMerge: speaker1.id, destination: speaker2.id))
-                    }
-                }
-            }
-        }
-        
-        return pairs
+    ///   - predicate: the predicate to determine whether the speaker should be removed
+    public func removeSpeakers(where predicate: (Speaker) -> Bool) {
+        removeSpeakers(where: predicate, keepIfPermanent: true)
     }
     
     private func findDistanceToClosestSpeaker(to embedding: [Float]) -> Float {
