@@ -1,0 +1,5 @@
+framework module ESpeakNG {
+    umbrella header "ESpeakNG.h"
+    export *
+    module * { export * }
+}
