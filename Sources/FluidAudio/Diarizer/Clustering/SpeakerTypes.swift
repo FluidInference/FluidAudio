@@ -59,17 +59,18 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
         return SendableSpeaker(from: self)
     }
 
-    /// Update main embedding with new segment data using exponential moving average
+    /// Update main embedding with new segment data using exponential moving average (EMA)
     /// - Parameters:
-    ///   - duration: segment duration
-    ///   - 
+    ///   - duration: Segment duration
+    ///   - embedding: 256D speaker embedding vector
+    ///   - segmentId: The ID of the segment
+    ///   - alpha: EMA blending parameter
     public func updateMainEmbedding(
         duration: Float,
         embedding: [Float],
         segmentId: UUID,
         alpha: Float = 0.9
     ) {
-
         // Validate embedding quality
         var sumSquares: Float = 0
         vDSP_svesq(embedding, 1, &sumSquares, vDSP_Length(embedding.count))
@@ -162,8 +163,8 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
 
     /// Merge another speaker into this one
     /// - Parameters:
-    ///   - other: other Speaker to merge
-    ///   - keepName: the resulting name after the merge
+    ///   - other: Other Speaker to merge
+    ///   - keepName: The resulting name after the merge
     public func mergeWith(_ other: Speaker, keepName: String? = nil) {
         // Merge raw embeddings
         var allEmbeddings = rawEmbeddings + other.rawEmbeddings
@@ -269,13 +270,13 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
 }
 
 public enum SpeakerInitializationMode {
-    /// reset the speaker database and add the new speakers
+    /// Reset the speaker database and add the new speakers
     case reset
-    /// merge new speakers whose IDs match with existing ones
+    /// Merge new speakers whose IDs match with existing ones
     case merge
-    /// overwrite existing speakers with the same IDs as the new ones
+    /// Overwrite existing speakers with the same IDs as the new ones
     case overwrite
-    /// skip speakers whose IDs match existing ones
+    /// Skip speakers whose IDs match existing ones
     case skip
 }
 

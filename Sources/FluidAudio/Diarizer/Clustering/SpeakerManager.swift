@@ -37,9 +37,9 @@ public class SpeakerManager {
     
     /// Add known speakers to the database
     /// - Parameters:
-    ///   - speakers: list of `Speaker`s to add
-    ///   - mode: mode for handling overlapping ID conflicts. `.reset` will reset the speaker database before initializing new speakers. `.overwrite` will overwrite the old speakers and replace them with the new ones. `.merge` will merge the new speakers with the old ones, keeping the new name. `.skip` will skip new speakers if their ID matches an existing one. (Default: `.skip`)
-    ///   - preservePermanent: whether to avoid overwriting/merging pre-existing permanent speakers
+    ///   - speakers: Array of `Speaker`s to add
+    ///   - mode: Mode for handling overlapping ID conflicts. `.reset` will reset the speaker database before initializing new speakers. `.overwrite` will overwrite the old speakers and replace them with the new ones. `.merge` Will merge the new speakers with the old ones, keeping the new name. `.skip` will skip new speakers if their ID matches an existing one. (Default: `.skip`)
+    ///   - preservePermanent: Whether to avoid overwriting/merging pre-existing permanent speakers
     public func initializeKnownSpeakers(_ speakers: [Speaker], mode: SpeakerInitializationMode = .skip, preserveIfPermanent: Bool = true) {
         if mode == .reset {
             self.reset(keepIfPermanent: preserveIfPermanent)
@@ -62,7 +62,7 @@ public class SpeakerManager {
                     case .reset:
                         fallthrough
                     case .overwrite:
-                        if !(oldSpeaker.isPermanent && preservePermanent) {
+                        if !(oldSpeaker.isPermanent && preserveIfPermanent) {
                             logger.warning("Speaker \(speaker.id) is already initialized. Overwriting old speaker.")
                             speakerDatabase[speaker.id] = speaker
                         } else {
@@ -101,11 +101,11 @@ public class SpeakerManager {
     /// Match the embedding to the closest existing speaker if sufficiently similar or create a new one if not.
     /// - Parameters:
     ///    - embedding: 256D speaker embedding vector
-    ///    - speechDuration: duration of the speech segment during which this speaker was active
-    ///    - confidence: confidence in the embedding vector being correct
-    ///    - speakerThreshold: the maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
-    ///    - newName: name to assign the speaker if a new one is created (default: `Speaker $id`)
-    ///  - Returns: a `Speaker` object if a match was found or a new one was created. Returns `nil` if an error occured.
+    ///    - speechDuration: Duration of the speech segment during which this speaker was active
+    ///    - confidence: Confidence in the embedding vector being correct
+    ///    - speakerThreshold: The maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
+    ///    - newName: Name to assign the speaker if a new one is created (default: `Speaker $id`)
+    ///  - Returns: A `Speaker` object if a match was found or a new one was created. Returns `nil` if an error occured.
     public func assignSpeaker(
         _ embedding: [Float],
         speechDuration: Float,
@@ -162,8 +162,8 @@ public class SpeakerManager {
     /// Find the closest existing speaker to an embedding, up to a maximum cosine distance of `speakerThreshold`.
     /// - Parameters:
     ///    - embedding: 256D speaker embedding vector
-    ///    - speakerThreshold: the maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
-    ///  - Returns: the ID of the match (if found) and the distance to that match.
+    ///    - speakerThreshold: Maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
+    ///  - Returns: ID of the match (if found) and the distance to that match.
     public func findSpeaker(with embedding: [Float], speakerThreshold: Float? = nil) -> (id: String?, distance: Float) {
         queue.sync {
             let (closestSpeakerId, minDistance) = findClosestSpeaker(to: embedding)
@@ -178,8 +178,8 @@ public class SpeakerManager {
     /// Find the closest existing speaker to an embedding, up to a maximum cosine distance of `speakerThreshold`.
     /// - Parameters:
     ///    - embedding: 256D speaker embedding vector
-    ///    - speakerThreshold: the maximum cosine distance between `embedding` and another speaker for them to be a match (default: `self.speakerThreshold`)
-    ///  - Returns: a list of the `maxCount` nearest speakers and the distances to them from `embedding`, sorted by descending cosine distances.
+    ///    - speakerThreshold: Maximum cosine distance between `embedding` and another speaker for them to be a match (default: `self.speakerThreshold`)
+    ///  - Returns: Array of the `maxCount` nearest speakers and the distances to them from `embedding`, sorted by descending cosine distances.
     public func findMatchingSpeakers(with embedding: [Float], speakerThreshold: Float? = nil) -> [(id: String, distance: Float)] {
         queue.sync {
             var matches: [(id: String, distance: Float)] = []
@@ -196,9 +196,9 @@ public class SpeakerManager {
         }
     }
     
-    /// find all speakers that meet a certain predicate
-    /// - Parameter predicate: the condition that the speakers must meet to be returned
-    /// - Returns: a list of all Speaker IDs corresponding to Speakers that meet the predicate
+    /// Find all speakers that meet a certain predicate
+    /// - Parameter predicate: Condition the speakers must meet to be returned
+    /// - Returns: A list of all Speaker IDs corresponding to Speakers that meet the predicate
     public func findSpeakers(where predicate: (Speaker) -> Bool) -> [String] {
         queue.sync {
             return speakerDatabase.filter { predicate($0.value) }.map(\.key)
@@ -206,7 +206,7 @@ public class SpeakerManager {
     }
     
     /// Mark a speaker as permanent
-    /// - Parameter speakerId: the ID of the speaker to mark as permanent
+    /// - Parameter speakerId: ID of the speaker to mark as permanent
     public func makeSpeakerPermanent(_ speakerId: String) {
         queue.sync(flags: .barrier) {
             guard let speaker = speakerDatabase[speakerId] else {
@@ -219,10 +219,11 @@ public class SpeakerManager {
     }
     
     /// Remove a speaker's permanent marker
-    /// - Parameter speakerId: the ID of the speaker to mark as permanent
+    /// - Parameter speakerId: ID of the speaker to mark as permanent
     public func revokePermanence(from speakerId: String) {
         queue.sync(flags: .barrier) {
-            guard let speaker = speakerDatabase[speakerId] else {
+            guard let speaker = speaker
+                    base[speakerId] else {
                 logger.warning("Failed to revoke permanence from speaker \(speakerId) (speaker not found).")
                 return
             }
@@ -236,9 +237,9 @@ public class SpeakerManager {
     /// - Parameters:
     ///   - sourceId: ID of the `Speaker` being merged
     ///   - destinationId: ID of the `Speaker` that absorbs the other one
-    ///   - mergedName: new name for the merged speaker (uses `destination`'s name if not provided)
-    ///   - stopIfPermanent: whether to stop merging if the source speaker is permanent
-    /// - Returns: `true` if merge was successful, `false` if not.
+    ///   - mergedName: New name for the merged speaker (uses `destination`'s name if not provided)
+    ///   - stopIfPermanent: Whether to stop merging if the source speaker is permanent
+    /// - Returns: `true` If merge was successful, `false` if not.
     public func mergeSpeaker(_ sourceId: String, into destinationId: String, mergedName: String? = nil, stopIfPermanent: Bool = true) -> Void {
         // don't merge a speaker into itself
         guard sourceId != destinationId else {
@@ -267,9 +268,9 @@ public class SpeakerManager {
     
     /// Find all pairs of speakers that can be merged
     /// - Parameters:
-    ///    - speakerThreshold: the max cosine distance between speakers to let them be considered mergeable
-    ///    - excludeIfBothPermanent: whether to exclude speaker pairs where both speakers are permanent
-    /// - Returns: a list of speaker ID pairs that belong to speakers that are similar enough to be merged
+    ///    - speakerThreshold: Max cosine distance between speakers to let them be considered mergeable
+    ///    - excludeIfBothPermanent: Whether to exclude speaker pairs where both speakers are permanent
+    /// - Returns: Array of speaker ID pairs that belong to speakers that are similar enough to be merged
     public func findMergeablePairs(speakerThreshold: Float? = nil, excludeIfBothPermanent: Bool = true) -> [(speakerToMerge: String, destination: String)] {
         queue.sync {
             let speakerThreshold = speakerThreshold ?? self.speakerThreshold
@@ -317,7 +318,7 @@ public class SpeakerManager {
     /// Remove a speaker from the database
     /// - Parameters:
     ///   - speakerID: ID of the speaker being removed
-    ///   - keepIfPermanent: whether to stop the removal if the speaker is marked as permanent
+    ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
     public func removeSpeaker(_ speakerID: String, keepIfPermanent: Bool = true) {
         queue.sync(flags: .barrier) {
             // determine if we should skip the removal due to permanence
@@ -337,8 +338,8 @@ public class SpeakerManager {
     
     /// Remove all speakers that were inactive since a given `date`
     /// - Parameters:
-    ///   - data: Speakers who have not been active after this date will be removed.
-    ///   - keepIfPermanent: whether to stop the removal if the speaker is marked as permanent
+    ///   - date: Speakers who have not been active after this date will be removed.
+    ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
     public func removeSpeakersInactive(since date: Date, keepIfPermanent: Bool = true) {
         queue.sync(flags: .barrier) {
             if keepIfPermanent {
@@ -357,19 +358,19 @@ public class SpeakerManager {
         }
     }
     
-    /// remove speakers that have been inactive for a given duration
+    /// Remove speakers that have been inactive for a given duration
     /// - Parameters:
     ///   - durationInactive: Minimum duration for which a speaker needs to be inactive to be removed
-    ///   - keepIfPermanent: whether to stop the removal if the speaker is marked as permanent
+    ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
     public func removeSpeakersInactive(for durationInactive: TimeInterval, keepIfPermanent: Bool = true) {
         let date = Date().addingTimeInterval(-durationInactive)
         self.removeSpeakersInactive(since: date, keepIfPermanent: keepIfPermanent)
     }
     
-    /// remove speakers that meet a certain predicate
+    /// Remove speakers that meet a certain predicate
     /// - Parameters:
-    ///   - predicate: the predicate to determine whether the speaker should be removed
-    ///   - keepIfPermanent: whether to stop the removal if the speaker is marked as permanent
+    ///   - predicate: The predicate to determine whether the speaker should be removed
+    ///   - keepIfPermanent: Whether to stop the removal if the speaker is marked as permanent
     public func removeSpeakers(where predicate: (Speaker) -> Bool, keepIfPermanent: Bool = true) {
         queue.sync(flags: .barrier) {
             if keepIfPermanent {
@@ -387,15 +388,15 @@ public class SpeakerManager {
         }
     }
     
-    /// remove non-permanent speakers that meet a certain predicate
+    /// Remove non-permanent speakers that meet a certain predicate
     /// - Parameters:
-    ///   - predicate: the predicate to determine whether the speaker should be removed
+    ///   - predicate: Predicate to determine whether the speaker should be removed
     public func removeSpeakers(where predicate: (Speaker) -> Bool) {
         removeSpeakers(where: predicate, keepIfPermanent: true)
     }
     
     /// Check if the speaker database has a speaker with a given ID.
-    /// - Parameter speakerId: the ID to check
+    /// - Parameter speakerId: ID to check
     /// - Returns: `true` if a speaker is found, `false` if not
     public func hasSpeaker(_ speakerId: String) -> Bool {
         queue.sync {
@@ -548,7 +549,7 @@ public class SpeakerManager {
     ///   - updateCount: Number of updates to this speaker
     ///   - createdAt: Creation timestamp
     ///   - updatedAt: Last update timestamp
-    ///   - isPermanent: whether the speaker should be protected from merges and removals by default
+    ///   - isPermanent: Whether the speaker should be protected from merges and removals by default
     public func upsertSpeaker(
         id: String,
         currentEmbedding: [Float],
@@ -603,7 +604,7 @@ public class SpeakerManager {
     }
 
     /// Reset the speaker database
-    /// - Parameter keepIfPermanent: whether to keep permanent speakers
+    /// - Parameter keepIfPermanent: Whether to keep permanent speakers
     public func reset(keepIfPermanent: Bool = false) {
         queue.sync(flags: .barrier) {
             if !keepIfPermanent {
