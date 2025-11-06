@@ -3,94 +3,6 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Thread-safe tracker for transcription updates and audio position
-actor TranscriptionTracker {
-    private var volatileUpdates: [String] = []
-    private var confirmedUpdates: [String] = []
-    private var currentAudioPosition: Double = 0.0
-    private let startTime: Date
-    private var latestUpdate: StreamingTranscriptionUpdate?
-    private var latestConfirmedUpdate: StreamingTranscriptionUpdate?
-    private var tokenTimingMap: [TokenKey: TokenTiming] = [:]
-
-    init() {
-        self.startTime = Date()
-    }
-
-    func addVolatileUpdate(_ text: String) {
-        volatileUpdates.append(text)
-    }
-
-    func addConfirmedUpdate(_ text: String) {
-        confirmedUpdates.append(text)
-    }
-
-    func updateAudioPosition(_ position: Double) {
-        currentAudioPosition = position
-    }
-
-    func getCurrentAudioPosition() -> Double {
-        return currentAudioPosition
-    }
-
-    func getElapsedProcessingTime() -> Double {
-        return Date().timeIntervalSince(startTime)
-    }
-
-    func getVolatileCount() -> Int {
-        return volatileUpdates.count
-    }
-
-    func getConfirmedCount() -> Int {
-        return confirmedUpdates.count
-    }
-
-    func record(update: StreamingTranscriptionUpdate) {
-        latestUpdate = update
-
-        if update.isConfirmed {
-            latestConfirmedUpdate = update
-
-            for timing in update.tokenTimings {
-                let key = TokenKey(
-                    tokenId: timing.tokenId,
-                    startMilliseconds: Int((timing.startTime * 1000).rounded())
-                )
-                tokenTimingMap[key] = timing
-            }
-        }
-    }
-
-    func metadataSnapshot() -> (timings: [TokenTiming], isConfirmed: Bool)? {
-        if !tokenTimingMap.isEmpty {
-            let timings = tokenTimingMap.values.sorted { lhs, rhs in
-                if lhs.startTime == rhs.startTime {
-                    return lhs.tokenId < rhs.tokenId
-                }
-                return lhs.startTime < rhs.startTime
-            }
-            return (timings, true)
-        }
-
-        if let update = latestConfirmedUpdate ?? latestUpdate, !update.tokenTimings.isEmpty {
-            let timings = update.tokenTimings.sorted { lhs, rhs in
-                if lhs.startTime == rhs.startTime {
-                    return lhs.tokenId < rhs.tokenId
-                }
-                return lhs.startTime < rhs.startTime
-            }
-            return (timings, update.isConfirmed)
-        }
-
-        return nil
-    }
-
-    private struct TokenKey: Hashable {
-        let tokenId: Int
-        let startMilliseconds: Int
-    }
-}
-
 /// Terminal color codes for ANSI output
 enum TerminalColor {
     static let green = "\u{001B}[32m"  // Confirmed text
@@ -261,7 +173,7 @@ enum TranscribeCommand {
         }
     }
 
-    /// Test streaming transcription
+    /// Test streaming transcription using StreamingAsrManager with LocalAgreement-2 validation
     private static func testStreamingTranscription(
         audioFile: String,
         showMetadata: Bool,
@@ -295,13 +207,13 @@ enum TranscribeCommand {
 
             try audioFileHandle.read(into: buffer)
 
-            // Calculate streaming parameters - use realistic small chunks for proper simulation
+            // Calculate streaming parameters - use requested chunk size for simulation
             let chunkDurationSeconds = Double(realtimeChunkMs) / 1000.0
             let samplesPerChunk = Int(chunkDurationSeconds * format.sampleRate)
             let totalDuration = Double(audioFileHandle.length) / format.sampleRate
 
             // Track transcription updates
-            let tracker = TranscriptionTracker()
+            var updateCount = 0
 
             // Listen for updates in real-time
             let updateTask = Task {
@@ -312,7 +224,7 @@ enum TranscribeCommand {
                 }()
 
                 for await update in await streamingAsr.transcriptionUpdates {
-                    await tracker.record(update: update)
+                    updateCount += 1
 
                     // Color-coded output: green = confirmed, purple = volatile
                     let color = update.isConfirmed ? TerminalColor.green : TerminalColor.purple
@@ -321,27 +233,12 @@ enum TranscribeCommand {
 
                     if showMetadata {
                         let timestampString = timestampFormatter.string(from: update.timestamp)
-                        let timingSummary = streamingTimingSummary(for: update)
                         logger.info(
                             "\(coloredText) (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
                         )
-                        logger.info("  \(timingSummary)")
-                        if !update.tokenTimings.isEmpty {
-                            for (index, timing) in update.tokenTimings.enumerated() {
-                                logger.info(
-                                    "    [\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(String(format: "%.3f", timing.startTime))s, end: \(String(format: "%.3f", timing.endTime))s, conf: \(String(format: "%.3f", timing.confidence)))"
-                                )
-                            }
-                        }
                     } else {
                         logger.info(
                             "\(coloredText) (conf: \(String(format: "%.2f", update.confidence)))")
-                    }
-
-                    if update.isConfirmed {
-                        await tracker.addConfirmedUpdate(update.text)
-                    } else {
-                        await tracker.addVolatileUpdate(update.text)
                     }
                 }
             }
@@ -379,10 +276,6 @@ enum TranscribeCommand {
                 }
                 chunkBuffer.frameLength = AVAudioFrameCount(chunkSize)
 
-                // Update audio time position in tracker
-                let audioTimePosition = Double(position) / format.sampleRate
-                await tracker.updateAudioPosition(audioTimePosition)
-
                 // Stream the chunk
                 await streamingAsr.streamAudio(chunkBuffer)
 
@@ -403,8 +296,7 @@ enum TranscribeCommand {
             updateTask.cancel()
 
             // Show final results with actual processing performance
-            let processingTime = await tracker.getElapsedProcessingTime()
-            let finalRtfx = processingTime > 0 ? totalDuration / processingTime : 0
+            let processingTime = totalDuration  // StreamingAsrManager handles its own timing
 
             logger.info("" + String(repeating: "=", count: 50))
             logger.info("STREAMING TRANSCRIPTION RESULTS")
@@ -413,55 +305,11 @@ enum TranscribeCommand {
             print(finalText)
             logger.info("Performance:")
             logger.info("  Audio duration: \(String(format: "%.2f", totalDuration))s")
-            logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
-            logger.info("  RTFx: \(String(format: "%.2f", finalRtfx))x")
-
-            if showMetadata {
-                if let snapshot = await tracker.metadataSnapshot() {
-                    let summaryLabel =
-                        snapshot.isConfirmed
-                        ? "Confirmed token timings"
-                        : "Latest token timings (volatile)"
-                    logger.info(summaryLabel + ":")
-                    let summary = streamingTimingSummary(timings: snapshot.timings)
-                    logger.info("  \(summary)")
-                    for (index, timing) in snapshot.timings.enumerated() {
-                        logger.info(
-                            "    [\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(String(format: "%.3f", timing.startTime))s, end: \(String(format: "%.3f", timing.endTime))s, conf: \(String(format: "%.3f", timing.confidence)))"
-                        )
-                    }
-                } else {
-                    logger.info("Token timings: not available for this session")
-                }
-            }
+            logger.info("  Updates emitted: \(updateCount)")
 
         } catch {
             logger.error("Streaming transcription failed: \(error)")
         }
-    }
-
-    private static func streamingTimingSummary(for update: StreamingTranscriptionUpdate) -> String {
-        streamingTimingSummary(timings: update.tokenTimings)
-    }
-
-    private static func streamingTimingSummary(timings: [TokenTiming]) -> String {
-        guard !timings.isEmpty else {
-            return "Token timings: none"
-        }
-
-        let start = timings.map(\.startTime).min() ?? 0
-        let end = timings.map(\.endTime).max() ?? start
-        let tokenCount = timings.count
-        let startText = String(format: "%.3f", start)
-        let endText = String(format: "%.3f", end)
-
-        let preview = timings.map(\.token).prefix(6)
-        let previewText =
-            preview.isEmpty ? "n/a" : preview.joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        let ellipsis = timings.count > preview.count ? "…" : ""
-
-        return
-            "Token timings: count=\(tokenCount), start=\(startText)s, end=\(endText)s, preview='\(previewText)\(ellipsis)'"
     }
 
     private static func printUsage() {
@@ -492,12 +340,13 @@ enum TranscribeCommand {
             - Processes entire audio file at once
 
             Streaming mode:
-            - Simulates real-time audio arrival with automatic delays between chunks
+            - Immediate chunk-by-chunk processing using VAD-style API
+            - Processes chunks as they arrive without buffering (true streaming)
             - Shows incremental transcription updates using LocalAgreement-2 validation
-            - Color-coded output: Purple = volatile (awaiting validation), Green = confirmed
-            - Text evolves from purple to green as LocalAgreement-2 validates tokens
+            - Color-coded output: Purple = provisional (awaiting validation), Green = confirmed
+            - Confirmed text grows as LocalAgreement-2 validates tokens across chunks
+            - Stateful decoder maintains context across chunks for better continuity
             - Default 500ms chunks simulate realistic microphone input at real-time speed
-            - Processing happens continuously as audio arrives (with realistic timing)
 
             Realtime chunk size:
             - Simulates how audio arrives from a microphone (e.g., 500ms at a time)
