@@ -109,7 +109,7 @@ public class SpeakerManager {
     ///    - confidence: Confidence in the embedding vector being correct
     ///    - speakerThreshold: The maximum cosine distance to an existing speaker to create a new one (uses the default threshold for this `SpeakerManager` object if none is provided)
     ///    - newName: Name to assign the speaker if a new one is created (default: `Speaker $id`)
-    ///  - Returns: A `Speaker` object if a match was found or a new one was created. Returns `nil` if an error occured.
+    ///  - Returns: A `Speaker` object if a match was found or a new one was created. Returns `nil` if an error occurred.
     public func assignSpeaker(
         _ embedding: [Float],
         speechDuration: Float,
@@ -223,11 +223,10 @@ public class SpeakerManager {
     }
     
     /// Remove a speaker's permanent marker
-    /// - Parameter speakerId: ID of the speaker to mark as permanent
+    /// - Parameter speakerId: ID of the speaker from which to remove the permanent marker
     public func revokePermanence(from speakerId: String) {
         queue.sync(flags: .barrier) {
-            guard let speaker = speaker
-                    base[speakerId] else {
+            guard let speaker = speakerDatabase[speakerId] else {
                 logger.warning("Failed to revoke permanence from speaker \(speakerId) (speaker not found).")
                 return
             }
@@ -243,8 +242,7 @@ public class SpeakerManager {
     ///   - destinationId: ID of the `Speaker` that absorbs the other one
     ///   - mergedName: New name for the merged speaker (uses `destination`'s name if not provided)
     ///   - stopIfPermanent: Whether to stop merging if the source speaker is permanent
-    /// - Returns: `true` If merge was successful, `false` if not.
-    public func mergeSpeaker(_ sourceId: String, into destinationId: String, mergedName: String? = nil, stopIfPermanent: Bool = true) -> Void {
+    public func mergeSpeaker(_ sourceId: String, into destinationId: String, mergedName: String? = nil, stopIfPermanent: Bool = true) {
         // don't merge a speaker into itself
         guard sourceId != destinationId else {
             return
