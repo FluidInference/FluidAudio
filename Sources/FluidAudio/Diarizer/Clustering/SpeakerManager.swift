@@ -77,6 +77,7 @@ public class SpeakerManager {
                             logger.warning(
                                 "Failed to merge Speaker \(speaker.id) into Speaker \(oldSpeaker.id) because the existing speaker is permanent. Skipping"
                             )
+                            continue
                         }
                     case .skip:
                         logger.warning("Speaker \(speaker.id) is already initialized. Skipping new speaker.")
