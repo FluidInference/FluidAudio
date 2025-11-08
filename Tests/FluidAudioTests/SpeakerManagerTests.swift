@@ -15,6 +15,10 @@ final class SpeakerManagerTests: XCTestCase {
         return embedding
     }
 
+    private func normalizedEmbedding(pattern: Int) -> [Float] {
+        VDSPOperations.l2Normalize(createDistinctEmbedding(pattern: pattern))
+    }
+
     // MARK: - Basic Operations
 
     func testInitialization() {
@@ -119,6 +123,80 @@ final class SpeakerManagerTests: XCTestCase {
         XCTAssertEqual(assignedSpeaker?.id, "Alice")
     }
 
+    func testInitializeKnownSpeakersPreservesPermanentByDefault() {
+        let manager = SpeakerManager()
+
+        let original = Speaker(
+            id: "Alice",
+            name: "Original",
+            currentEmbedding: createDistinctEmbedding(pattern: 10),
+            duration: 4.0
+        )
+        manager.initializeKnownSpeakers([original])
+        manager.makeSpeakerPermanent("Alice")
+
+        let replacement = Speaker(
+            id: "Alice",
+            name: "Replacement",
+            currentEmbedding: createDistinctEmbedding(pattern: 20),
+            duration: 8.0
+        )
+
+        manager.initializeKnownSpeakers([replacement], mode: .overwrite, preserveIfPermanent: true)
+
+        let stored = manager.getSpeaker(for: "Alice")
+        XCTAssertEqual(stored?.name, "Original")
+        XCTAssertEqual(stored?.duration, 4.0)
+    }
+
+    func testInitializeKnownSpeakersOverwriteCanReplacePermanentWhenAllowed() {
+        let manager = SpeakerManager()
+
+        let original = Speaker(
+            id: "Alice",
+            name: "Original",
+            currentEmbedding: createDistinctEmbedding(pattern: 10),
+            duration: 4.0,
+            isPermanent: true
+        )
+        manager.initializeKnownSpeakers([original])
+
+        let replacement = Speaker(
+            id: "Alice",
+            name: "Replacement",
+            currentEmbedding: createDistinctEmbedding(pattern: 20),
+            duration: 10.0
+        )
+
+        manager.initializeKnownSpeakers([replacement], mode: .overwrite, preserveIfPermanent: false)
+
+        let stored = manager.getSpeaker(for: "Alice")
+        XCTAssertEqual(stored?.name, "Replacement")
+        XCTAssertEqual(stored?.duration, 10.0)
+    }
+
+    func testInitializeKnownSpeakersMergeCombinesDurations() {
+        let manager = SpeakerManager()
+
+        let base = Speaker(
+            id: "Alice",
+            name: "Alice",
+            currentEmbedding: createDistinctEmbedding(pattern: 10),
+            duration: 2.0
+        )
+        let incoming = Speaker(
+            id: "Alice",
+            name: "Alice",
+            currentEmbedding: createDistinctEmbedding(pattern: 11),
+            duration: 3.0
+        )
+
+        manager.initializeKnownSpeakers([base])
+        manager.initializeKnownSpeakers([incoming], mode: .merge)
+
+        XCTAssertEqual(manager.getSpeaker(for: "Alice")?.duration, 5.0)
+    }
+
     func testInvalidEmbeddingSize() {
         let manager = SpeakerManager()
 
@@ -204,6 +282,46 @@ final class SpeakerManagerTests: XCTestCase {
         if let id2 = speaker2?.id {
             XCTAssertNotNil(allInfo[id2])
         }
+    }
+
+    // MARK: - Lookup Helpers
+
+    func testFindSpeakerAndMatchingSpeakers() {
+        let manager = SpeakerManager(speakerThreshold: 0.8)
+
+        manager.upsertSpeaker(id: "A", currentEmbedding: normalizedEmbedding(pattern: 1), duration: 5.0)
+        manager.upsertSpeaker(id: "B", currentEmbedding: normalizedEmbedding(pattern: 2), duration: 5.0)
+
+        let (matchId, distance) = manager.findSpeaker(with: normalizedEmbedding(pattern: 1))
+        XCTAssertEqual(matchId, "A")
+        XCTAssertEqual(distance, 0.0, accuracy: 0.0001)
+
+        let (missingId, missingDistance) = manager.findSpeaker(
+            with: normalizedEmbedding(pattern: 90),
+            speakerThreshold: 0.1
+        )
+        XCTAssertNil(missingId)
+        XCTAssertEqual(missingDistance, .infinity)
+
+        let combined = zip(normalizedEmbedding(pattern: 1), normalizedEmbedding(pattern: 2)).map { ($0 + $1) / 2 }
+        let matches = manager.findMatchingSpeakers(
+            with: VDSPOperations.l2Normalize(combined),
+            speakerThreshold: 2.0
+        )
+
+        XCTAssertEqual(matches.count, 2)
+        XCTAssertLessThanOrEqual(matches[0].distance, matches[1].distance)
+        XCTAssertEqual(Set(matches.map(\.id)), Set(["A", "B"]))
+    }
+
+    func testFindSpeakersWhereFiltersByPredicate() {
+        let manager = SpeakerManager()
+        manager.upsertSpeaker(id: "short", currentEmbedding: normalizedEmbedding(pattern: 10), duration: 1.0)
+        manager.upsertSpeaker(id: "long", currentEmbedding: normalizedEmbedding(pattern: 20), duration: 8.0)
+
+        let filtered = manager.findSpeakers { $0.duration > 5.0 }
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(filtered.first, "long")
     }
 
     // MARK: - Clear Operations
@@ -424,6 +542,118 @@ final class SpeakerManagerTests: XCTestCase {
         XCTAssertEqual(info?.currentEmbedding, normalizedExpected)
         XCTAssertEqual(info?.duration, 7.5)
         XCTAssertEqual(info?.rawEmbeddings.count, 1)
+    }
+
+    // MARK: - Permanence & Merge Operations
+
+    func testMakeAndRevokePermanentSpeakers() throws {
+        let manager = SpeakerManager()
+        let speaker = manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 2.5)
+        let id = try XCTUnwrap(speaker?.id)
+
+        manager.makeSpeakerPermanent(id)
+        XCTAssertTrue(manager.permanentSpeakerIds.contains(id))
+
+        manager.removeSpeaker(id)
+        XCTAssertTrue(manager.hasSpeaker(id))
+
+        manager.revokePermanence(from: id)
+        manager.removeSpeaker(id)
+        XCTAssertFalse(manager.hasSpeaker(id))
+    }
+
+    func testMergeSpeakerRespectsPermanentFlag() throws {
+        let manager = SpeakerManager()
+        let speaker1 = manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 3.0)
+        let speaker2 = manager.assignSpeaker(createDistinctEmbedding(pattern: 2), speechDuration: 4.0)
+
+        let id1 = try XCTUnwrap(speaker1?.id)
+        let id2 = try XCTUnwrap(speaker2?.id)
+
+        manager.makeSpeakerPermanent(id1)
+        manager.mergeSpeaker(id1, into: id2)
+        XCTAssertTrue(manager.hasSpeaker(id1))
+        XCTAssertTrue(manager.hasSpeaker(id2))
+
+        manager.mergeSpeaker(id1, into: id2, mergedName: "Merged Speaker", stopIfPermanent: false)
+        XCTAssertFalse(manager.hasSpeaker(id1))
+        let merged = try XCTUnwrap(manager.getSpeaker(for: id2))
+        XCTAssertEqual(merged.name, "Merged Speaker")
+        XCTAssertEqual(manager.speakerCount, 1)
+        XCTAssertGreaterThan(merged.duration, 4.0)
+    }
+
+    func testFindMergeablePairsRespectsPermanentExclusion() {
+        let manager = SpeakerManager(speakerThreshold: 0.3)
+        let base = normalizedEmbedding(pattern: 1)
+        var close = base
+        close[0] += 0.001
+        close = VDSPOperations.l2Normalize(close)
+        let far = normalizedEmbedding(pattern: 80)
+
+        manager.upsertSpeaker(id: "A", currentEmbedding: base, duration: 5.0)
+        manager.upsertSpeaker(id: "B", currentEmbedding: close, duration: 5.0)
+        manager.upsertSpeaker(id: "C", currentEmbedding: far, duration: 5.0)
+
+        let pairs = manager.findMergeablePairs(speakerThreshold: 0.2)
+        XCTAssertEqual(pairs.count, 1)
+        XCTAssertEqual(Set([pairs[0].speakerToMerge, pairs[0].destination]), Set(["A", "B"]))
+
+        manager.makeSpeakerPermanent("A")
+        manager.makeSpeakerPermanent("B")
+
+        let filtered = manager.findMergeablePairs(speakerThreshold: 0.2, excludeIfBothPermanent: true)
+        XCTAssertTrue(filtered.isEmpty)
+
+        let unfiltered = manager.findMergeablePairs(speakerThreshold: 0.2, excludeIfBothPermanent: false)
+        XCTAssertEqual(unfiltered.count, 1)
+        XCTAssertEqual(Set([unfiltered[0].speakerToMerge, unfiltered[0].destination]), Set(["A", "B"]))
+    }
+
+    // MARK: - Removal & Reset
+
+    func testRemoveSpeakersInactiveAndPredicateVariants() {
+        let manager = SpeakerManager()
+        let now = Date()
+        manager.upsertSpeaker(
+            id: "old",
+            currentEmbedding: normalizedEmbedding(pattern: 3),
+            duration: 2.0,
+            updatedAt: now.addingTimeInterval(-120)
+        )
+        manager.upsertSpeaker(
+            id: "recent",
+            currentEmbedding: normalizedEmbedding(pattern: 4),
+            duration: 2.0,
+            updatedAt: now
+        )
+
+        manager.removeSpeakersInactive(since: now.addingTimeInterval(-60))
+        XCTAssertFalse(manager.hasSpeaker("old"))
+        XCTAssertTrue(manager.hasSpeaker("recent"))
+
+        manager.makeSpeakerPermanent("recent")
+        manager.removeSpeakers { $0.duration <= 2.0 }
+        XCTAssertTrue(manager.hasSpeaker("recent"))
+
+        manager.removeSpeakers(where: { $0.duration <= 2.0 }, keepIfPermanent: false)
+        XCTAssertFalse(manager.hasSpeaker("recent"))
+    }
+
+    func testResetKeepsPermanentSpeakers() throws {
+        let manager = SpeakerManager()
+        let speaker1 = manager.assignSpeaker(createDistinctEmbedding(pattern: 1), speechDuration: 2.0)
+        let speaker2 = manager.assignSpeaker(createDistinctEmbedding(pattern: 2), speechDuration: 2.0)
+
+        let id1 = try XCTUnwrap(speaker1?.id)
+        let id2 = try XCTUnwrap(speaker2?.id)
+
+        manager.makeSpeakerPermanent(id1)
+        manager.reset(keepIfPermanent: true)
+
+        XCTAssertTrue(manager.hasSpeaker(id1))
+        XCTAssertFalse(manager.hasSpeaker(id2))
+        XCTAssertEqual(manager.speakerIds, [id1])
     }
 
     // MARK: - Embedding Update Tests
