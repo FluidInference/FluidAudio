@@ -237,7 +237,7 @@ Returns a list of pairs of speaker IDs.
 
 ```swift
 let pairs = speakerManager.findMergeablePairs(
-    speakerThreshold = 0.6, // optional
+    speakerThreshold: 0.6, // optional
     excludeIfBothPermanent = true // optional
 )
 
