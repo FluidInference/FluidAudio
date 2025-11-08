@@ -291,14 +291,20 @@ final class SpeakerManagerTests: XCTestCase {
 
         manager.upsertSpeaker(id: "A", currentEmbedding: normalizedEmbedding(pattern: 1), duration: 5.0)
         manager.upsertSpeaker(id: "B", currentEmbedding: normalizedEmbedding(pattern: 2), duration: 5.0)
+        
 
         let (matchId, distance) = manager.findSpeaker(with: normalizedEmbedding(pattern: 1))
         XCTAssertEqual(matchId, "A")
         XCTAssertEqual(distance, 0.0, accuracy: 0.0001)
 
+        var orthogonalEmbedding0 = [Float](repeating: 0, count: 256)
+        var orthogonalEmbedding1 = [Float](repeating: 0, count: 256)
+        orthogonalEmbedding0[0] = 1
+        orthogonalEmbedding1[1] = 1
+        manager.upsertSpeaker(id: "C", currentEmbedding: orthogonalEmbedding0, duration: 5.0)
         let (missingId, missingDistance) = manager.findSpeaker(
-            with: normalizedEmbedding(pattern: 90),
-            speakerThreshold: 0.1
+            with: orthogonalEmbedding1,
+            speakerThreshold: 0.5
         )
         XCTAssertNil(missingId)
         XCTAssertEqual(missingDistance, .infinity)
@@ -309,9 +315,9 @@ final class SpeakerManagerTests: XCTestCase {
             speakerThreshold: 2.0
         )
 
-        XCTAssertEqual(matches.count, 2)
+        XCTAssertEqual(matches.count, 3)
         XCTAssertLessThanOrEqual(matches[0].distance, matches[1].distance)
-        XCTAssertEqual(Set(matches.map(\.id)), Set(["A", "B"]))
+        XCTAssertEqual(Set(matches.map(\.id)), Set(["A", "B", "C"]))
     }
 
     func testFindSpeakersWhereFiltersByPredicate() {
