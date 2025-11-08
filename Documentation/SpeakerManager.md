@@ -153,7 +153,7 @@ Remove speakers that have been inactive since a certain date or for a certain du
 // remove speakers that have been inactive since `date`
 speakerManager.removeSpeakersInactive(since: date) 
 
-// remove speakers that have been active for 10 seconds, even if they were marked as permanent
+// remove speakers that have been inactive for 10 seconds, even if they were marked as permanent
 speakerManager.removeSpeakersInactive(for: 10.0, keepIfPermanent: false)
 ```
 
