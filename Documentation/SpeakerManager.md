@@ -147,7 +147,7 @@ speakerManager.removeSpeaker("alice", keepIfPermanent: false)
 > Note: `keepIfPermanent` is `true` by default.
 
 #### removeSpeakersInactive
-Remove speaker that have been inactive since a certain date or for a certain duration.
+Remove speakers that have been inactive since a certain date or for a certain duration.
 
 ```swift
 // remove speakers that have been inactive since `date`
@@ -237,8 +237,8 @@ Returns a list of pairs of speaker IDs.
 
 ```swift
 let pairs = speakerManager.findMergeablePairs(
-    speakerThreshold = 0.6, // optional
-    excludeIfBothPermanent = true // optional
+    speakerThreshold: 0.6, // optional
+    excludeIfBothPermanent: true // optional
 )
 
 for pair in pairs {

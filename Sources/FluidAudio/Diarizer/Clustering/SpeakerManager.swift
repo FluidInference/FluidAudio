@@ -188,7 +188,7 @@ public class SpeakerManager {
     /// - Parameters:
     ///    - embedding: 256D speaker embedding vector
     ///    - speakerThreshold: Maximum cosine distance between `embedding` and another speaker for them to be a match (default: `self.speakerThreshold`)
-    ///  - Returns: Array of the `maxCount` nearest speakers and the distances to them from `embedding`, sorted by descending cosine distances.
+    ///  - Returns: Array of the `maxCount` nearest speakers and the distances to them from `embedding`, sorted by ascending cosine distances (from closest to farthest).
     public func findMatchingSpeakers(
         with embedding: [Float], speakerThreshold: Float? = nil
     ) -> [(id: String, distance: Float)] {
