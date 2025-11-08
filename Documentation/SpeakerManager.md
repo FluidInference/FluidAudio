@@ -147,7 +147,7 @@ speakerManager.removeSpeaker("alice", keepIfPermanent: false)
 > Note: `keepIfPermanent` is `true` by default.
 
 #### removeSpeakersInactive
-Remove speaker that have been inactive since a certain date or for a certain duration.
+Remove speakers that have been inactive since a certain date or for a certain duration.
 
 ```swift
 // remove speakers that have been inactive since `date`
