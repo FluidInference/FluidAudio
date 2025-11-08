@@ -68,6 +68,7 @@ public class SpeakerManager {
                         } else {
                             logger.warning(
                                 "Failed to overwrite Speaker \(speaker.id) because it is permanent. Skipping")
+                            continue
                         }
                     case .merge:
                         if !(oldSpeaker.isPermanent && preserveIfPermanent) {
@@ -77,6 +78,7 @@ public class SpeakerManager {
                             logger.warning(
                                 "Failed to merge Speaker \(speaker.id) into Speaker \(oldSpeaker.id) because the existing speaker is permanent. Skipping"
                             )
+                            continue
                         }
                     case .skip:
                         logger.warning("Speaker \(speaker.id) is already initialized. Skipping new speaker.")
@@ -585,7 +587,7 @@ public class SpeakerManager {
                 existingSpeaker.rawEmbeddings = rawEmbeddings
                 existingSpeaker.updateCount = updateCount
                 existingSpeaker.updatedAt = updatedAt ?? now
-                existingSpeaker.isPermanent = isPermanent
+                existingSpeaker.isPermanent = existingSpeaker.isPermanent || isPermanent
                 // Keep original createdAt and name
 
                 speakerDatabase[id] = existingSpeaker
