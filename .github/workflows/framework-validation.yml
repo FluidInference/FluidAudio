@@ -103,12 +103,12 @@ jobs:
                   echo "  ✓ Info.plist correctly nested inside Resources"
 
                   # Check that the actual binary exists and is valid
-                  local binary_path="$variant_path/Versions/A/ESPeakNG"
+                  local binary_path="$variant_path/Versions/A/ESpeakNG"
                   if [ ! -f "$binary_path" ]; then
                       echo "  ❌ ERROR: Binary not found at $binary_path"
                       return 1
                   fi
-                  echo "  ✓ Binary file exists: Versions/A/ESPeakNG"
+                  echo "  ✓ Binary file exists: Versions/A/ESpeakNG"
 
                   # Verify it's a valid Mach-O binary
                   local file_type
@@ -135,7 +135,7 @@ jobs:
                   echo "  ✓ Flat framework structure detected (iOS)"
 
                   # Check binary exists directly
-                  local binary_path="$variant_path/ESPeakNG"
+                  local binary_path="$variant_path/ESpeakNG"
                   if [ ! -f "$binary_path" ]; then
                       echo "  ❌ ERROR: Binary not found at ESpeakNG"
                       return 1
@@ -184,8 +184,8 @@ jobs:
           for framework in "$FRAMEWORK_PATH"/**/ESpeakNG.framework/Versions/A; do
               if [ -d "$framework" ]; then
                   # Use ls with grep to check for exact case typo on case-insensitive filesystems
-                  if ls "$framework" 2>/dev/null | grep -x "ESPeakNG" > /dev/null; then
-                      echo "❌ ERROR: Found 'ESPeakNG' (typo) instead of 'ESpeakNG'"
+                  if ! ls "$framework" 2>/dev/null | grep -x "ESpeakNG" > /dev/null; then
+                      echo "❌ ERROR: Binary 'ESpeakNG' not found with correct casing"
                       echo "   This would cause dyld errors at runtime"
                       exit 1
                   fi
