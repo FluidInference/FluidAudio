@@ -291,7 +291,6 @@ final class SpeakerManagerTests: XCTestCase {
 
         manager.upsertSpeaker(id: "A", currentEmbedding: normalizedEmbedding(pattern: 1), duration: 5.0)
         manager.upsertSpeaker(id: "B", currentEmbedding: normalizedEmbedding(pattern: 2), duration: 5.0)
-        
 
         let (matchId, distance) = manager.findSpeaker(with: normalizedEmbedding(pattern: 1))
         XCTAssertEqual(matchId, "A")
