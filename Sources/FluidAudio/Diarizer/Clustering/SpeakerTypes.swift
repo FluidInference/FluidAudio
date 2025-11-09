@@ -4,22 +4,43 @@ import Foundation
 /// Speaker profile representation for tracking speakers across audio
 /// This represents a speaker's identity, not a specific segment
 public final class Speaker: Identifiable, Codable, Equatable, Hashable {
+    /// Speaker ID
     public let id: String
+    /// Speaker name
     public var name: String
+    /// Main embedding vector for this speaker's voice
     public var currentEmbedding: [Float]
+    /// Total speech duration for this speaker
     public var duration: Float = 0
+    /// Date that this speaker object was created
     public var createdAt: Date
+    /// Date that this speaker object was last updated
     public var updatedAt: Date
+    /// Number of times the embedding vector was updated
     public var updateCount: Int = 1
+    /// Array of raw embedding vectors
     public var rawEmbeddings: [RawEmbedding] = []
+    /// Whether this speaker can be deleted due to inactivity or merging
+    public var isPermanent: Bool = false
 
+    /// - Parameters:
+    ///   - id: Speaker ID
+    ///   - name: Speaker name
+    ///   - currentEmbedding: Main embedding vector for this speaker's voice
+    ///   - duration: Total speech duration for this speaker
+    ///   - createdAt: Date that this speaker object was last updated
+    ///   - updatedAt: Number of times the embedding vector was updated
+    ///   - updateCount: Array of raw embedding vectors
+    ///   - rawEmbeddings: Array of raw embedding vectors
+    ///   - isPermanent: Whether this speaker can be deleted due to inactivity or merging
     public init(
         id: String? = nil,
         name: String? = nil,
         currentEmbedding: [Float],
         duration: Float = 0,
         createdAt: Date? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        isPermanent: Bool = false
     ) {
         let now = Date()
         self.id = id ?? UUID().uuidString
@@ -30,6 +51,7 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
         self.updatedAt = updatedAt ?? now
         self.updateCount = 1
         self.rawEmbeddings = []
+        self.isPermanent = isPermanent
     }
 
     /// Convert to SendableSpeaker format for cross-boundary usage.
@@ -37,14 +59,18 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
         return SendableSpeaker(from: self)
     }
 
-    /// Update main embedding with new segment data using exponential moving average
+    /// Update main embedding with new segment data using exponential moving average (EMA)
+    /// - Parameters:
+    ///   - duration: Segment duration
+    ///   - embedding: 256D speaker embedding vector
+    ///   - segmentId: The ID of the segment
+    ///   - alpha: EMA blending parameter
     public func updateMainEmbedding(
         duration: Float,
         embedding: [Float],
         segmentId: UUID,
         alpha: Float = 0.9
     ) {
-
         // Validate embedding quality
         var sumSquares: Float = 0
         vDSP_svesq(embedding, 1, &sumSquares, vDSP_Length(embedding.count))
@@ -136,6 +162,9 @@ public final class Speaker: Identifiable, Codable, Equatable, Hashable {
     }
 
     /// Merge another speaker into this one
+    /// - Parameters:
+    ///   - other: Other Speaker to merge
+    ///   - keepName: The resulting name after the merge
     public func mergeWith(_ other: Speaker, keepName: String? = nil) {
         // Merge raw embeddings
         var allEmbeddings = rawEmbeddings + other.rawEmbeddings
@@ -238,4 +267,16 @@ public struct SendableSpeaker: Sendable, Identifiable, Hashable {
     public static func == (lhs: SendableSpeaker, rhs: SendableSpeaker) -> Bool {
         return lhs.id == rhs.id && lhs.name == rhs.name
     }
+}
+
+/// Configuration for handling initializing known speakers
+public enum SpeakerInitializationMode {
+    /// Reset the speaker database and add the new speakers
+    case reset
+    /// Merge new speakers whose IDs match with existing ones
+    case merge
+    /// Overwrite existing speakers with the same IDs as the new ones
+    case overwrite
+    /// Skip speakers whose IDs match existing ones
+    case skip
 }
