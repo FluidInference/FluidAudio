@@ -20,7 +20,7 @@
 		</dict>
 		<dict>
 			<key>BinaryPath</key>
-			<string>ESpeakNG.framework/ESpeakNG</string>
+			<string>ESpeakNG.framework/Versions/A/ESpeakNG</string>
 			<key>LibraryIdentifier</key>
 			<string>ios-arm64_x86_64-maccatalyst</string>
 			<key>LibraryPath</key>
