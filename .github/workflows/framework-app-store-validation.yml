@@ -97,6 +97,19 @@ jobs:
                       fi
                   done
 
+                  local info_current="$framework_dir/Versions/Current/Resources/Info.plist"
+                  local info_symlink="$framework_dir/Resources/Info.plist"
+                  if [ ! -f "$info_current" ]; then
+                      echo "  ❌ Info.plist missing at Versions/Current/Resources/Info.plist"
+                      errors=$((errors + 1))
+                  else
+                      echo "  ✓ Info.plist located at Versions/Current/Resources/Info.plist"
+                  fi
+                  if [ ! -f "$info_symlink" ]; then
+                      echo "  ❌ Resources/Info.plist symlink missing"
+                      errors=$((errors + 1))
+                  fi
+
                   if [ $errors -gt 0 ]; then
                       return 1
                   fi
@@ -133,21 +146,21 @@ jobs:
 
           FRAMEWORK_PATH="Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
 
-          # For versioned frameworks (macOS), check that resources are properly accessible
-          for framework_dir in "$FRAMEWORK_PATH"/**/ESpeakNG.framework; do
-              if [ -d "$framework_dir/Resources" ]; then
-                  # Check if Resources is a symlink
-                  if [ -L "$framework_dir/Resources" ]; then
-                      echo "✓ Resources is properly symlinked"
-
-                      # Verify the symlink resolves
-                      if [ -d "$framework_dir/Resources" ]; then
-                          resource_count=$(find "$framework_dir/Resources" -type f | wc -l)
-                          echo "  Found $resource_count resource files"
-                      fi
-                  fi
+          found_resources=false
+          while IFS= read -r -d '' framework_dir; do
+              found_resources=true
+              if [ -L "$framework_dir/Resources" ]; then
+                  echo "✓ $(basename "$framework_dir") Resources symlink resolves"
+                  resource_count=$(find "$framework_dir/Resources" -type f | wc -l | tr -d '[:space:]')
+                  echo "  Found $resource_count resource files"
+              elif [ -d "$framework_dir/Resources" ]; then
+                  echo "⚠️  $(basename "$framework_dir") has a real Resources directory (expected symlink for versioned frameworks)"
               fi
-          done
+          done < <(find "$FRAMEWORK_PATH" -type d -name "ESpeakNG.framework" -print0)
+
+          if [ "$found_resources" = false ]; then
+              echo "⚠️  No ESpeakNG.framework directories found when validating resources"
+          fi
 
           echo "✅ Resources validation complete"
 

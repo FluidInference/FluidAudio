@@ -31,7 +31,14 @@ jobs:
           # Function to validate a single framework variant
           validate_framework() {
               local variant_path="$1"
-              local variant_name=$(basename $(dirname "$variant_path"))
+              local variant_name=$(basename "$(dirname "$variant_path")")
+              local variant_name_lower=$(echo "$variant_name" | tr '[:upper:]' '[:lower:]')
+              local requires_versioned=false
+
+              # Mac Catalyst and macOS variants must be packaged as versioned bundles
+              if [[ "$variant_name_lower" == *"maccatalyst"* || "$variant_name_lower" == *"macos"* ]]; then
+                  requires_versioned=true
+              fi
 
               if [ ! -d "$variant_path" ]; then
                   echo "⚠️  Skipping $variant_name (not found)"
@@ -40,7 +47,7 @@ jobs:
 
               echo "📦 Validating $variant_name variant..."
 
-              # Check if framework uses versioning (macOS arm64) or flat structure (iOS)
+              # Check if framework uses versioning (macOS / Catalyst) or flat structure (iOS)
               if [ -d "$variant_path/Versions" ]; then
                   echo "  ✓ Versioned framework detected"
 
@@ -52,7 +59,8 @@ jobs:
                   echo "  ✓ Versions/Current symlink exists"
 
                   # Check Versions/Current points to A
-                  local current_target=$(readlink "$variant_path/Versions/Current")
+                  local current_target
+                  current_target=$(readlink "$variant_path/Versions/Current")
                   if [ "$current_target" != "A" ]; then
                       echo "  ❌ ERROR: Versions/Current points to '$current_target' instead of 'A'"
                       return 1
@@ -67,13 +75,32 @@ jobs:
                           return 1
                       fi
 
-                      local target=$(readlink "$variant_path/$symlink")
+                      local target
+                      target=$(readlink "$variant_path/$symlink")
                       if [[ ! "$target" =~ ^Versions/Current/ ]]; then
                           echo "  ❌ ERROR: $symlink points to '$target' instead of Versions/Current/*"
                           return 1
                       fi
                   done
                   echo "  ✓ Top-level symlinks point to Versions/Current/*"
+
+                  # Ensure Info.plist is stored within the versioned resources
+                  local info_plist_versioned="$variant_path/Versions/A/Resources/Info.plist"
+                  local info_plist_current="$variant_path/Versions/Current/Resources/Info.plist"
+                  local info_plist_resources="$variant_path/Resources/Info.plist"
+                  if [ ! -f "$info_plist_versioned" ]; then
+                      echo "  ❌ ERROR: Info.plist missing at Versions/A/Resources/Info.plist"
+                      return 1
+                  fi
+                  if [ ! -f "$info_plist_current" ]; then
+                      echo "  ❌ ERROR: Info.plist missing at Versions/Current/Resources/Info.plist"
+                      return 1
+                  fi
+                  if [ ! -f "$info_plist_resources" ]; then
+                      echo "  ❌ ERROR: Info.plist missing via Resources/Info.plist symlink"
+                      return 1
+                  fi
+                  echo "  ✓ Info.plist correctly nested inside Resources"
 
                   # Check that the actual binary exists and is valid
                   local binary_path="$variant_path/Versions/A/ESpeakNG"
@@ -84,7 +111,8 @@ jobs:
                   echo "  ✓ Binary file exists: Versions/A/ESpeakNG"
 
                   # Verify it's a valid Mach-O binary
-                  local file_type=$(file "$binary_path" | grep -o "Mach-O\|executable")
+                  local file_type
+                  file_type=$(file "$binary_path" | grep -o "Mach-O\|executable")
                   if [ -z "$file_type" ]; then
                       echo "  ❌ ERROR: Binary is not a valid Mach-O file"
                       return 1
@@ -98,6 +126,11 @@ jobs:
                       echo "  ⚠️  Code signature not valid (expected for local builds)"
                   fi
               else
+                  if [ "$requires_versioned" = true ]; then
+                      echo "  ❌ ERROR: $variant_name must use a versioned framework layout (missing Versions/ directory)"
+                      return 1
+                  fi
+
                   # Flat framework structure (iOS)
                   echo "  ✓ Flat framework structure detected (iOS)"
 
@@ -110,7 +143,8 @@ jobs:
                   echo "  ✓ Binary file exists: ESpeakNG"
 
                   # Verify it's a valid Mach-O binary
-                  local file_type=$(file "$binary_path" | grep -o "Mach-O\|executable")
+                  local file_type
+                  file_type=$(file "$binary_path" | grep -o "Mach-O\|executable")
                   if [ -z "$file_type" ]; then
                       echo "  ❌ ERROR: Binary is not a valid Mach-O file"
                       return 1
@@ -121,7 +155,6 @@ jobs:
               echo ""
               return 0
           }
-
           # Validate all framework variants
           all_valid=true
           for variant in "$FRAMEWORK_PATH"/*; do
@@ -147,32 +180,37 @@ jobs:
           echo "🔎 Checking for common framework structure issues..."
           echo ""
 
-          # Check for case sensitivity issues in binary names
-          for framework in "$FRAMEWORK_PATH"/**/ESpeakNG.framework/Versions/A; do
-              if [ -d "$framework" ]; then
-                  # Use ls with grep to check for exact case typo on case-insensitive filesystems
-                  if ls "$framework" 2>/dev/null | grep -x "ESPeakNG" > /dev/null; then
-                      echo "❌ ERROR: Found 'ESPeakNG' (typo) instead of 'ESpeakNG'"
-                      echo "   This would cause dyld errors at runtime"
+          echo "🔠 Verifying binary casing inside versioned frameworks..."
+          found_versioned=false
+          while IFS= read -r -d '' version_dir; do
+              found_versioned=true
+              actual_name=$(python3 -c 'import os, sys; path=sys.argv[1]; target="espeakng"; print(next((n for n in os.listdir(path) if n.lower()==target), ""))' "$version_dir")
+              if [ -z "$actual_name" ]; then
+                  echo "❌ ERROR: No ESpeakNG binary found inside $version_dir"
+                  exit 1
+              fi
+              if [ "$actual_name" != "ESpeakNG" ]; then
+                  echo "❌ ERROR: Binary '$actual_name' found in $version_dir (expected ESpeakNG)"
+                  echo "   This would cause dyld errors on case-sensitive filesystems"
+                  exit 1
+              fi
+          done < <(find "$FRAMEWORK_PATH" -type d -path "*/ESpeakNG.framework/Versions/A" -print0)
+
+          if [ "$found_versioned" = false ]; then
+              echo "  ⚠️  No versioned frameworks found to inspect"
+          else
+              echo "  ✓ Binary casing validated in versioned slices"
+          fi
+
+          echo ""
+          echo "🔗 Checking for broken symlinks..."
+          while IFS= read -r -d '' framework; do
+              while IFS= read -r -d '' link; do
+                  if [ -L "$link" ] && ! [ -e "$link" ]; then
+                      echo "❌ ERROR: Broken symlink: $(basename "$link")"
                       exit 1
                   fi
-              fi
-          done
-
-          echo "✅ No case sensitivity issues found"
-          echo ""
-
-          # Check for broken symlinks
-          echo "🔗 Checking for broken symlinks..."
-          for framework in "$FRAMEWORK_PATH"/**/ESpeakNG.framework; do
-              if [ -d "$framework" ]; then
-                  while IFS= read -r -d '' link; do
-                      if [ -L "$link" ] && ! [ -e "$link" ]; then
-                          echo "❌ ERROR: Broken symlink: $(basename $link)"
-                          exit 1
-                      fi
-                  done < <(find "$framework" -type l -print0)
-              fi
-          done
+              done < <(find "$framework" -type l -print0)
+          done < <(find "$FRAMEWORK_PATH" -type d -name "ESpeakNG.framework" -print0)
 
           echo "✅ All symlinks are valid"
