@@ -13,6 +13,7 @@ public actor KokoroVocabulary {
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroVocabulary")
     private var vocabulary: [String: Int32] = [:]
     private var isLoaded = false
+    private var overrideURL: URL? = nil
 
     /// Get the full vocabulary dictionary, loading it from disk (and downloading if required).
     public func getVocabulary() async throws -> [String: Int32] {
@@ -23,21 +24,31 @@ public actor KokoroVocabulary {
     }
 
     private func loadVocabulary() async throws {
-        let cacheDir = try TtsModels.cacheDirectoryURL()
-        let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
-        let vocabURL = kokoroDir.appendingPathComponent("vocab_index.json")
-
-        if !FileManager.default.fileExists(atPath: vocabURL.path) {
-            logger.info("Vocabulary file not found in cache, downloading...")
-            try await downloadVocabularyFile(to: cacheDir)
-        }
-
         let data: Data
-        do {
-            data = try Data(contentsOf: vocabURL)
-        } catch {
-            logger.error("Failed to read vocabulary at \(vocabURL.path): \(error.localizedDescription)")
-            throw TTSError.processingFailed("Failed to read Kokoro vocabulary: \(error.localizedDescription)")
+        if let overrideURL, FileManager.default.fileExists(atPath: overrideURL.path) {
+            do {
+                data = try Data(contentsOf: overrideURL)
+                logger.info("Loaded vocabulary override from: \(overrideURL.path)")
+            } catch {
+                logger.error("Failed to read override vocabulary at \(overrideURL.path): \(error.localizedDescription)")
+                throw TTSError.processingFailed("Failed to read Kokoro vocabulary override: \(error.localizedDescription)")
+            }
+        } else {
+            let cacheDir = try TtsModels.cacheDirectoryURL()
+            let kokoroDir = cacheDir.appendingPathComponent("Models/kokoro")
+            let vocabURL = kokoroDir.appendingPathComponent("vocab_index.json")
+
+            if !FileManager.default.fileExists(atPath: vocabURL.path) {
+                logger.info("Vocabulary file not found in cache, downloading...")
+                try await downloadVocabularyFile(to: cacheDir)
+            }
+
+            do {
+                data = try Data(contentsOf: vocabURL)
+            } catch {
+                logger.error("Failed to read vocabulary at \(vocabURL.path): \(error.localizedDescription)")
+                throw TTSError.processingFailed("Failed to read Kokoro vocabulary: \(error.localizedDescription)")
+            }
         }
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -93,4 +104,13 @@ public actor KokoroVocabulary {
             throw TTSError.downloadFailed("Failed to obtain Kokoro vocabulary: \(error.localizedDescription)")
         }
     }
+    
+    /// Set an optional override file to load the vocabulary from.
+    /// If set, this file will be used instead of downloading the default vocab_index.json.
+    public func setOverrideURL(_ url: URL?) {
+        overrideURL = url
+        isLoaded = false
+        if let url { logger.info("Vocabulary override set to: \(url.path)") } else { logger.info("Vocabulary override cleared") }
+    }
 }
+    

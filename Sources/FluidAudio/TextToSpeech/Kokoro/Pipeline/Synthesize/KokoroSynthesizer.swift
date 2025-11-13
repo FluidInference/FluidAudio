@@ -757,6 +757,197 @@ public struct KokoroSynthesizer {
         )
     }
 
+    /// Synthesize directly from a Kokoro-zh phoneme string (one codepoint per token).
+    /// This bypasses English lexicon + chunking and is useful for Mandarin.
+    public static func synthesizePhonemeStringDetailed(
+        phonemes: String,
+        voice: String = TtsConstants.recommendedVoice,
+        voiceSpeed: Float = 1.0,
+        variantPreference: ModelNames.TTS.Variant? = .fifteenSecond
+    ) async throws -> SynthesisResult {
+        logger.info("Starting synthesis from phoneme string; length=\(phonemes.count)")
+
+        try await ensureRequiredFiles()
+        if !isVoiceEmbeddingPayloadCached(for: voice) {
+            try? await TtsResourceDownloader.ensureVoiceEmbedding(voice: voice)
+        }
+        try await loadModel(variant: variantPreference)
+
+        let modelCache = try currentModelCache()
+        let vocabulary = try await KokoroVocabulary.shared.getVocabulary()
+        let capacities = try await capacities(for: variantPreference)
+        let lexiconMetrics = await lexiconCache.metrics()
+
+        // Build a single chunk from phoneme codepoints
+        let tokens: [String] = phonemes.map { String($0) }
+        let chunk = TextChunk(
+            words: [],
+            atoms: tokens,
+            phonemes: tokens,
+            totalFrames: 0,
+            pauseAfterMs: 0,
+            text: phonemes
+        )
+        let entries = try buildChunkEntries(
+            from: [chunk],
+            vocabulary: vocabulary,
+            preference: variantPreference,
+            capacities: capacities
+        )
+
+        struct ChunkSynthesisResult: Sendable { let index: Int; let samples: [Float]; let predictionTime: TimeInterval }
+
+        let embeddingDimension = try await modelCache.referenceEmbeddingDimension()
+        let embeddingCache = try prepareVoiceEmbeddingCache(
+            voice: voice,
+            entries: entries,
+            embeddingDimension: embeddingDimension
+        )
+
+        let totalChunks = entries.count
+        let groupedByTargetTokens = Dictionary(grouping: entries, by: { $0.template.targetTokens })
+        let phasesShape: [NSNumber] = [1, 9]
+        try await multiArrayPool.preallocate(shape: phasesShape, dataType: .float32, count: max(1, totalChunks), zeroFill: true)
+        for (targetTokens, group) in groupedByTargetTokens {
+            let shape: [NSNumber] = [1, NSNumber(value: targetTokens)]
+            try await multiArrayPool.preallocate(shape: shape, dataType: .int32, count: max(1, group.count * 2), zeroFill: false)
+        }
+        let refShape: [NSNumber] = [1, NSNumber(value: embeddingDimension)]
+        try await multiArrayPool.preallocate(shape: refShape, dataType: .float32, count: max(1, totalChunks), zeroFill: false)
+
+        let chunkTemplates = entries.map { $0.template }
+        var chunkSampleBuffers = Array(repeating: [Float](), count: totalChunks)
+        var allSamples: [Float] = []
+        let crossfadeMs = 8
+        let samplesPerMillisecond = Double(TtsConstants.audioSampleRate) / 1_000.0
+        let crossfadeN = max(0, Int(Double(crossfadeMs) * samplesPerMillisecond))
+        var totalPredictionTime: TimeInterval = 0
+
+        let chunkOutputs = try await withThrowingTaskGroup(of: ChunkSynthesisResult.self) { group in
+            for (index, entry) in entries.enumerated() {
+                let chunk = entry.chunk
+                let inputIds = entry.inputIds
+                let template = entry.template
+                let chunkIndex = index
+                guard let embeddingData = embeddingCache[inputIds.count] else {
+                    throw TTSError.processingFailed("Missing voice embedding for chunk \(index + 1) with \(inputIds.count) tokens")
+                }
+                let referenceVector = embeddingData.vector
+                group.addTask(priority: .userInitiated) {
+                    let (samples, t) = try await synthesizeChunk(
+                        chunk,
+                        inputIds: inputIds,
+                        variant: template.variant,
+                        targetTokens: template.targetTokens,
+                        referenceVector: referenceVector
+                    )
+                    return ChunkSynthesisResult(index: chunkIndex, samples: samples, predictionTime: t)
+                }
+            }
+            var results: [ChunkSynthesisResult] = []
+            results.reserveCapacity(totalChunks)
+            for try await r in group { results.append(r) }
+            return results
+        }
+
+        let sorted = chunkOutputs.sorted { $0.index < $1.index }
+        var totalFrameCount = 0
+        for output in sorted {
+            let idx = output.index
+            let samples = output.samples
+            chunkSampleBuffers[idx] = samples
+            totalPredictionTime += output.predictionTime
+            if TtsConstants.kokoroFrameSamples > 0 {
+                totalFrameCount += samples.count / TtsConstants.kokoroFrameSamples
+            }
+            if idx == 0 { allSamples.append(contentsOf: samples); continue }
+            let prevPause = entries[idx - 1].chunk.pauseAfterMs
+            if prevPause > 0 {
+                let silenceCount = Int(Double(prevPause) * samplesPerMillisecond)
+                if silenceCount > 0 { allSamples.append(contentsOf: repeatElement(0.0, count: silenceCount)) }
+                allSamples.append(contentsOf: samples)
+            } else {
+                let n = min(crossfadeN, allSamples.count, samples.count)
+                if n > 0 {
+                    let tailStartIndex = allSamples.count - n
+                    var fadeIn = [Float](repeating: 0, count: n)
+                    if n == 1 { fadeIn[0] = 1 } else { var start: Float = 0; var step: Float = 1.0/Float(n-1); vDSP_vramp(&start,&step,&fadeIn,1,vDSP_Length(n)) }
+                    var fadeOut = [Float](repeating: 1, count: n)
+                    // Avoid overlapping in-place access: compute fadeOut = 1 - fadeIn via simple loop
+                    if n == 1 {
+                        fadeOut[0] = 1 - fadeIn[0]
+                    } else {
+                        for j in 0..<n { fadeOut[j] = 1 - fadeIn[j] }
+                    }
+                    allSamples.withUnsafeMutableBufferPointer { allBuf in
+                        let tail = allBuf.baseAddress!.advanced(by: tailStartIndex)
+                        vDSP_vmul(tail, 1, fadeOut, 1, tail, 1, vDSP_Length(n))
+                    }
+                    vDSP_vma(Array(samples[0..<n]), 1, fadeIn, 1, Array(allSamples[(allSamples.count - n)...]), 1, &allSamples[(allSamples.count - n)], 1, vDSP_Length(n))
+                    if samples.count > n { allSamples.append(contentsOf: samples[n...]) }
+                } else {
+                    allSamples.append(contentsOf: samples)
+                }
+            }
+        }
+
+        guard !allSamples.isEmpty else { throw TTSError.processingFailed("Synthesis produced no samples") }
+        var maxMag: Float = 0
+        vDSP_maxmgv(allSamples, 1, &maxMag, vDSP_Length(allSamples.count))
+        if maxMag > 0 {
+            let d = maxMag
+            if d > 0 {
+                let inv = 1.0 / d
+                // Safe element-wise scaling to avoid overlapping accesses
+                for k in allSamples.indices { allSamples[k] *= inv }
+                for idx in chunkSampleBuffers.indices {
+                    var buf = chunkSampleBuffers[idx]
+                    for k in buf.indices { buf[k] *= inv }
+                    chunkSampleBuffers[idx] = buf
+                }
+            }
+        }
+        // If total audio is shorter than 5.0s, trim 4 frames from the end (Mandarin zh guard)
+        do {
+            let fiveSecSamples = Int(5.0 * Double(TtsConstants.audioSampleRate))
+            let trimSamples = TtsConstants.shortVariantGuardFrameCount * TtsConstants.kokoroFrameSamples
+            if allSamples.count > trimSamples, allSamples.count < fiveSecSamples {
+                allSamples.removeLast(trimSamples)
+                if let lastIdx = chunkSampleBuffers.indices.last {
+                    var last = chunkSampleBuffers[lastIdx]
+                    if last.count > trimSamples { last.removeLast(trimSamples) }
+                    chunkSampleBuffers[lastIdx] = last
+                }
+            }
+        }
+        let audioData = try AudioWAV.data(from: allSamples, sampleRate: Double(TtsConstants.audioSampleRate))
+        let chunkInfos = zip(chunkTemplates, chunkSampleBuffers).map { t, s in
+            ChunkInfo(index: t.index, text: t.text, wordCount: t.wordCount, words: t.words, atoms: t.atoms, pauseAfterMs: t.pauseAfterMs, tokenCount: t.tokenCount, samples: s, variant: t.variant)
+        }
+        var footprints: [ModelNames.TTS.Variant: Int] = [:]
+        for v in Set(entries.map { $0.template.variant }) {
+            if let url = try? modelBundleURL(for: v) { footprints[v] = directorySize(at: url) }
+        }
+        let diagnostics = Diagnostics(
+            variantFootprints: footprints,
+            lexiconEntryCount: lexiconMetrics.entryCount,
+            lexiconEstimatedBytes: lexiconMetrics.estimatedBytes,
+            audioSampleBytes: allSamples.count * MemoryLayout<Float>.size,
+            outputWavBytes: audioData.count
+        )
+        let base = SynthesisResult(audio: audioData, chunks: chunkInfos, diagnostics: diagnostics)
+        let factor = max(0.1, voiceSpeed)
+        if abs(factor - 1.0) < 0.01 { return base }
+        let adjustedChunks = base.chunks.map { c -> ChunkInfo in
+            let stretched = adjustSamples(c.samples, factor: factor)
+            return ChunkInfo(index: c.index, text: c.text, wordCount: c.wordCount, words: c.words, atoms: c.atoms, pauseAfterMs: c.pauseAfterMs, tokenCount: c.tokenCount, samples: stretched, variant: c.variant)
+        }
+        let combined = adjustedChunks.flatMap { $0.samples }
+        let adjustedAudio = try AudioWAV.data(from: combined, sampleRate: Double(TtsConstants.audioSampleRate))
+        let updatedDiag = base.diagnostics?.updating(audioSampleBytes: combined.count * MemoryLayout<Float>.size, outputWavBytes: adjustedAudio.count)
+        return SynthesisResult(audio: adjustedAudio, chunks: adjustedChunks, diagnostics: updatedDiag)
+    }
+
     private static func adjustSamples(_ samples: [Float], factor: Float) -> [Float] {
         let clamped = max(0.1, factor)
         if abs(clamped - 1.0) < 0.01 { return samples }
