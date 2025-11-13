@@ -19,18 +19,35 @@ enum TTSZh {
             let arg = arguments[i]
             switch arg {
             case "--help", "-h":
-                print("Usage: fluidaudio tts-zh \"text\" [--output out.wav] [--voice zf_003] [--model-path path] [--voices-dir dir] [--speed 1.0]")
+                print(
+                    "Usage: fluidaudio tts-zh \"text\" [--output out.wav] [--voice zf_003] [--model-path path] [--voices-dir dir] [--speed 1.0]"
+                )
                 return
             case "--output", "-o":
-                if i+1 < arguments.count { output = arguments[i+1]; i += 1 }
+                if i + 1 < arguments.count {
+                    output = arguments[i + 1]
+                    i += 1
+                }
             case "--voice", "-v":
-                if i+1 < arguments.count { voice = arguments[i+1]; i += 1 }
+                if i + 1 < arguments.count {
+                    voice = arguments[i + 1]
+                    i += 1
+                }
             case "--model", "--model-path":
-                if i+1 < arguments.count { modelPath = arguments[i+1]; i += 1 }
+                if i + 1 < arguments.count {
+                    modelPath = arguments[i + 1]
+                    i += 1
+                }
             case "--voices-dir":
-                if i+1 < arguments.count { voicesDir = arguments[i+1]; i += 1 }
+                if i + 1 < arguments.count {
+                    voicesDir = arguments[i + 1]
+                    i += 1
+                }
             case "--speed":
-                if i+1 < arguments.count, let val = Float(arguments[i+1]) { speed = val; i += 1 }
+                if i + 1 < arguments.count, let val = Float(arguments[i + 1]) {
+                    speed = val
+                    i += 1
+                }
             default:
                 if text == nil { text = arg } else { logger.warning("Ignoring unexpected argument '\(arg)'") }
             }
@@ -38,7 +55,9 @@ enum TTSZh {
         }
 
         guard let text = text else {
-            print("Usage: fluidaudio tts-zh \"text\" [--output out.wav] [--voice zf_003] [--model-path path] [--voices-dir dir] [--speed 1.0]")
+            print(
+                "Usage: fluidaudio tts-zh \"text\" [--output out.wav] [--voice zf_003] [--model-path path] [--voices-dir dir] [--speed 1.0]"
+            )
             return
         }
 
@@ -62,7 +81,7 @@ enum TTSZh {
                     cwd.appendingPathComponent("tts-zh/kokoro_v21_zh.mlmodelc"),
                     cwd.appendingPathComponent("build/kokoro_v21_zh_compiled/kokoro_v21_zh.mlmodelc"),
                     cwd.appendingPathComponent("kokoro_v21_zh.mlpackage"),
-                    cwd.appendingPathComponent("tts-zh/kokoro_v21_zh.mlpackage")
+                    cwd.appendingPathComponent("tts-zh/kokoro_v21_zh.mlpackage"),
                 ]
                 if let found = candidates.first(where: { fm.fileExists(atPath: $0.path) }) {
                     modelPath = found.path
@@ -106,7 +125,8 @@ enum TTSZh {
                 extraDirs.append(URL(fileURLWithPath: (dir as NSString).expandingTildeInPath, isDirectory: true))
             }
             if let modelPath {
-                let root = URL(fileURLWithPath: (modelPath as NSString).expandingTildeInPath).deletingLastPathComponent()
+                let root = URL(fileURLWithPath: (modelPath as NSString).expandingTildeInPath)
+                    .deletingLastPathComponent()
                 let sibling = root.appendingPathComponent("voices", isDirectory: true)
                 if FileManager.default.fileExists(atPath: sibling.path) { extraDirs.append(sibling) }
             }
@@ -144,7 +164,8 @@ enum TTSZh {
                 let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
                 return cwd.appendingPathComponent(expanded)
             }()
-            try FileManager.default.createDirectory(at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try detailed.audio.write(to: outURL)
             logger.info("Saved output WAV: \(outURL.path)")
         } catch {

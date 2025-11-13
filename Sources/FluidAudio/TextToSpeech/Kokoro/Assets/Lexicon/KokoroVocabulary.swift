@@ -31,7 +31,8 @@ public actor KokoroVocabulary {
                 logger.info("Loaded vocabulary override from: \(overrideURL.path)")
             } catch {
                 logger.error("Failed to read override vocabulary at \(overrideURL.path): \(error.localizedDescription)")
-                throw TTSError.processingFailed("Failed to read Kokoro vocabulary override: \(error.localizedDescription)")
+                throw TTSError.processingFailed(
+                    "Failed to read Kokoro vocabulary override: \(error.localizedDescription)")
             }
         } else {
             let cacheDir = try TtsModels.cacheDirectoryURL()
@@ -104,13 +105,16 @@ public actor KokoroVocabulary {
             throw TTSError.downloadFailed("Failed to obtain Kokoro vocabulary: \(error.localizedDescription)")
         }
     }
-    
+
     /// Set an optional override file to load the vocabulary from.
     /// If set, this file will be used instead of downloading the default vocab_index.json.
     public func setOverrideURL(_ url: URL?) {
         overrideURL = url
         isLoaded = false
-        if let url { logger.info("Vocabulary override set to: \(url.path)") } else { logger.info("Vocabulary override cleared") }
+        if let url {
+            logger.info("Vocabulary override set to: \(url.path)")
+        } else {
+            logger.info("Vocabulary override cleared")
+        }
     }
 }
-    
