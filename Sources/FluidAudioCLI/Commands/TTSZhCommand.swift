@@ -92,6 +92,14 @@ enum TTSZh {
                 }
             }
 
+            // Ensure zh assets (vocab + char lexicon) in cache as a fallback, and prefer zh vocab override.
+            do {
+                let ensured = try await TtsResourceDownloader.ensureZhAssetsInCache()
+                await KokoroVocabulary.shared.setOverrideURL(ensured.vocabURL)
+            } catch {
+                logger.warning("Failed to ensure zh assets; continuing: \(error.localizedDescription)")
+            }
+
             // Provide extra voices dirs: explicit + sibling voices
             var extraDirs: [URL] = []
             if let dir = voicesDir, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
