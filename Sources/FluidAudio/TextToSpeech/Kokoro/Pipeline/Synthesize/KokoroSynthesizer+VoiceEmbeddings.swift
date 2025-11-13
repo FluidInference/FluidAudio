@@ -24,11 +24,16 @@ extension KokoroSynthesizer {
         cwd: URL,
         voicesDir: URL
     ) -> [URL] {
-        [
-            cwd.appendingPathComponent("voices/\(voiceID).json"),
-            cwd.appendingPathComponent("\(voiceID).json"),
-            voicesDir.appendingPathComponent("\(voiceID).json"),
-        ]
+        var urls: [URL] = []
+        urls.append(cwd.appendingPathComponent("voices/\(voiceID).json"))
+        urls.append(cwd.appendingPathComponent("\(voiceID).json"))
+        // Insert any extra voice directories that callers provided
+        let extras = additionalVoiceDirectories()
+        for dir in extras {
+            urls.append(dir.appendingPathComponent("\(voiceID).json"))
+        }
+        urls.append(voicesDir.appendingPathComponent("\(voiceID).json"))
+        return urls
     }
 
     static func cachedVoiceEmbeddingPayload(
@@ -57,6 +62,25 @@ extension KokoroSynthesizer {
         voiceEmbeddingLock.unlock()
 
         return payload
+    }
+
+    // MARK: - Extra voice directories support
+
+    private static var extraVoiceDirs: [URL] = []
+
+    /// Thread-safe accessor for additional voice directories
+    private static func additionalVoiceDirectories() -> [URL] {
+        voiceEmbeddingLock.lock()
+        let dirs = extraVoiceDirs
+        voiceEmbeddingLock.unlock()
+        return dirs
+    }
+
+    /// Provide additional directories to search for <voice>.json files before falling back to cache.
+    public static func setAdditionalVoiceDirectories(_ dirs: [URL]) {
+        voiceEmbeddingLock.lock()
+        extraVoiceDirs = dirs
+        voiceEmbeddingLock.unlock()
     }
 
     static func cachedVoiceEmbeddingVector(for key: VoiceEmbeddingCacheKey) -> [Float]? {
