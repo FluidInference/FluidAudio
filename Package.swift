@@ -1,5 +1,8 @@
 // swift-tools-version: 5.10
 import PackageDescription
+import Foundation
+
+let enableTTS = ProcessInfo.processInfo.environment["FLUIDAUDIO_ENABLE_TTS"] == "1"
 
 let package = Package(
     name: "FluidAudio",
@@ -18,38 +21,67 @@ let package = Package(
         ),
     ],
     dependencies: [],
-    targets: [
-        .binaryTarget(
-            name: "ESpeakNG",
-            path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
-        ),
-        .target(
-            name: "FluidAudio",
-            dependencies: [
-                "ESpeakNG",
-                "FastClusterWrapper",
-            ],
-            path: "Sources/FluidAudio",
-            exclude: ["Frameworks"]
-        ),
-        .target(
-            name: "FastClusterWrapper",
-            path: "Sources/FastClusterWrapper",
-            publicHeadersPath: "include"
-        ),
-        .executableTarget(
-            name: "FluidAudioCLI",
-            dependencies: ["FluidAudio"],
-            path: "Sources/FluidAudioCLI",
-            exclude: ["README.md"],
-            resources: [
-                .process("Utils/english.json")
-            ]
-        ),
-        .testTarget(
-            name: "FluidAudioTests",
-            dependencies: ["FluidAudio"]
-        ),
-    ],
+    targets: {
+        var targets: [Target] = [
+            .target(
+                name: "FluidAudio",
+                dependencies: [
+                    "FastClusterWrapper",
+                ],
+                path: "Sources/FluidAudio",
+                exclude: ["Frameworks"]
+            ),
+            .target(
+                name: "FastClusterWrapper",
+                path: "Sources/FastClusterWrapper",
+                publicHeadersPath: "include"
+            ),
+        ]
+
+        // CLI target: depend on TTS only when enabled so builds can exclude GPL bits
+        var cliDependencies: [Target.Dependency] = ["FluidAudio"]
+
+        if enableTTS {
+            targets.append(
+                .binaryTarget(
+                    name: "ESpeakNG",
+                    path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
+                )
+            )
+            targets.append(
+                .target(
+                    name: "FluidAudioTTS",
+                    dependencies: [
+                        "FluidAudio",
+                        "ESpeakNG",
+                    ],
+                    path: "Sources/FluidAudioTTS"
+                )
+            )
+            cliDependencies.append("FluidAudioTTS")
+        }
+
+        targets.append(
+            .executableTarget(
+                name: "FluidAudioCLI",
+                dependencies: cliDependencies,
+                path: "Sources/FluidAudioCLI",
+                exclude: ["README.md"],
+                resources: [
+                    .process("Utils/english.json")
+                ],
+                swiftSettings: enableTTS ? [.define("ENABLE_TTS")] : []
+            )
+        )
+
+        targets.append(
+            .testTarget(
+                name: "FluidAudioTests",
+                dependencies: ["FluidAudio"]
+            )
+        )
+
+        return targets
+    }(),
     cxxLanguageStandard: .cxx17
 )

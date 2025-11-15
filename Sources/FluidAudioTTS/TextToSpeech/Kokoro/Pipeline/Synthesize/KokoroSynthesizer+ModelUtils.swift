@@ -1,5 +1,6 @@
 import CoreML
 import Foundation
+import FluidAudio
 
 extension KokoroSynthesizer {
     public static func ensureRequiredFiles() async throws {

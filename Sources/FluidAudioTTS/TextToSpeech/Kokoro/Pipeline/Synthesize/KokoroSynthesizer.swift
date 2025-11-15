@@ -2,6 +2,7 @@ import Accelerate
 import CoreML
 import Foundation
 import OSLog
+import FluidAudio
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking

@@ -1,4 +1,5 @@
 import Foundation
+import FluidAudio
 
 extension KokoroSynthesizer {
     public struct TokenCapacities {

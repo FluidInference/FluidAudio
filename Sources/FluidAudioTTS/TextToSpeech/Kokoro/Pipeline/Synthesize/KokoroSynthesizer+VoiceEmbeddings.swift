@@ -1,6 +1,7 @@
 import Accelerate
 import CoreML
 import Foundation
+import FluidAudio
 
 extension KokoroSynthesizer {
     struct VoiceEmbeddingPayload {

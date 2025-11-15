@@ -1,4 +1,5 @@
 import Foundation
+import FluidAudio
 
 /// Kokoro TTS resource downloader (lexicons, voice embeddings)
 public enum TtsResourceDownloader {

@@ -1,6 +1,7 @@
 import CoreML
 import Foundation
 import OSLog
+import FluidAudio
 
 public struct TtsModels {
     private let kokoroModels: [ModelNames.TTS.Variant: MLModel]

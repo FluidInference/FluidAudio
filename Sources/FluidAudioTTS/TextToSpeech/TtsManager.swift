@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import FluidAudio
 
 /// Manages text-to-speech synthesis using the Kokoro CoreML model.
 ///
