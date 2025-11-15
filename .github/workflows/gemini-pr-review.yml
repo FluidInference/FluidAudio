@@ -25,7 +25,7 @@ jobs:
          )
         )
       )
-      && (secrets.GEMINI_API_KEY != '')
+      && (github.actor != 'nektos/act')
     timeout-minutes: 15
     runs-on: ubuntu-latest
     permissions:
