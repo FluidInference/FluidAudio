@@ -74,10 +74,14 @@ let package = Package(
             )
         )
 
+        var testDeps: [Target.Dependency] = ["FluidAudio"]
+        if enableTTS {
+            testDeps.append("FluidAudioTTS")
+        }
         targets.append(
             .testTarget(
                 name: "FluidAudioTests",
-                dependencies: ["FluidAudio"]
+                dependencies: testDeps
             )
         )
 

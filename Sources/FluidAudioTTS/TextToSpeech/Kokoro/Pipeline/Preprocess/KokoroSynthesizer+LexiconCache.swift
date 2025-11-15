@@ -1,6 +1,6 @@
+import FluidAudio
 import Foundation
 import OSLog
-import FluidAudio
 
 extension KokoroSynthesizer {
     actor LexiconCache {

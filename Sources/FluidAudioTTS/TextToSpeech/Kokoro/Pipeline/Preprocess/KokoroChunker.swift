@@ -1,6 +1,6 @@
+import FluidAudio
 import Foundation
 import NaturalLanguage
-import FluidAudio
 
 /// Text chunking system for Kokoro TTS that segments input text into optimal chunks based on token capacity limits.
 /// Handles sentence splitting, phoneme resolution, and ensures each chunk fits within the model's processing constraints.

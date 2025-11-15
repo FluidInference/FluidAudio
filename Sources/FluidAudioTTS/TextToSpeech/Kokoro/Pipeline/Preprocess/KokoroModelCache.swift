@@ -1,7 +1,7 @@
 import CoreML
+import FluidAudio
 import Foundation
 import OSLog
-import FluidAudio
 
 public actor KokoroModelCache {
 

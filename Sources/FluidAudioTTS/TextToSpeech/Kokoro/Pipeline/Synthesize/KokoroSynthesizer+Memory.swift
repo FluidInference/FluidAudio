@@ -1,7 +1,7 @@
 import Accelerate
 import CoreML
-import Foundation
 import FluidAudio
+import Foundation
 
 extension KokoroSynthesizer {
     struct MultiArrayKey: Hashable {
