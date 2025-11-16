@@ -2,6 +2,16 @@
 
 This guide collects commonly used `fluidaudio` CLI commands for ASR, diarization, VAD, and datasets.
 
+## TTS
+
+TTS is optional and disabled by default. Enable it at build time:
+
+```bash
+FLUIDAUDIO_ENABLE_TTS=1 swift run fluidaudio tts "Hello from FluidAudio" --output out.wav
+```
+
+If the flag is omitted, the CLI will print that TTS is disabled for the current build.
+
 ## ASR
 
 ```bash

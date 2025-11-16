@@ -19,7 +19,7 @@ Pod::Spec.new do |spec|
   spec.source       = { :git => "https://github.com/FluidInference/FluidAudio.git", :tag => "v#{spec.version}" }
   # CocoaPods sets SWIFT_VERSION based on this list; use values Xcode recognizes.
   # Our code remains compatible with Swift 5 toolchains (uses conditional compilation for 6.x APIs).
-  spec.swift_versions = ["5.9"]
+  spec.swift_versions = ["5.10"]
 
   spec.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

@@ -435,6 +435,18 @@ Requirements (macOS)
 Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
 <https://github.com/espeak-ng/espeak-ng/tree/master>
 
+### Enable TTS (build flag)
+
+TTS is an optional component. Enable it at build time with the `FLUIDAUDIO_ENABLE_TTS=1` environment variable:
+
+- Terminal (SwiftPM):
+  - `FLUIDAUDIO_ENABLE_TTS=1 swift run fluidaudio tts "Hello" --output out.wav`
+  - `FLUIDAUDIO_ENABLE_TTS=1 swift build` (to include TTS targets in the build)
+  - `FLUIDAUDIO_ENABLE_TTS=1 swift test` (to include TTS tests)
+- Xcode: Edit Scheme → Run → Arguments → Environment Variables → add `FLUIDAUDIO_ENABLE_TTS=1`
+
+If you don’t enable the flag, `fluidaudio tts` will print “TTS is disabled in this build. Rebuild with FLUIDAUDIO_ENABLE_TTS=1 to enable.”
+
 ### Quick Start (CLI)
 
 ```bash

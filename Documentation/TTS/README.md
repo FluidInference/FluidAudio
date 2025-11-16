@@ -4,6 +4,22 @@
 
 Quick recipes for running the Kokoro synthesis stack.
 
+## Enable TTS in SwiftPM/Xcode
+
+TTS is gated behind a build-time flag. Set `FLUIDAUDIO_ENABLE_TTS=1` when building/running with SwiftPM, or add it as an Environment Variable in your Xcode scheme.
+
+Examples:
+
+```bash
+FLUIDAUDIO_ENABLE_TTS=1 swift run fluidaudio tts "Welcome to FluidAudio" --output ~/Desktop/demo.wav
+
+# Or explicitly build/test with TTS enabled
+FLUIDAUDIO_ENABLE_TTS=1 swift build
+FLUIDAUDIO_ENABLE_TTS=1 swift test
+```
+
+Without the flag, the CLI will report that TTS is disabled for the current build.
+
 ## CLI quick start
 
 ```bash
