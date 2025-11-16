@@ -228,7 +228,8 @@ public final class AsrManager {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> TdtHypothesis {
         // Route to appropriate decoder based on model version
         switch asrModels!.version {
@@ -246,7 +247,7 @@ public final class AsrManager {
                 globalFrameOffset: globalFrameOffset
             )
         case .v3:
-            let decoder = TdtDecoderV3(config: config)
+            let decoder = TdtDecoderV3(config: config, vocabulary: vocabulary, biasContext: customVocabulary)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
@@ -272,11 +273,15 @@ public final class AsrManager {
     ///   - source: The audio source type (microphone or system audio)
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
-    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
+    public func transcribe(
+        _ audioBuffer: AVAudioPCMBuffer,
+        source: AudioSource = .microphone,
+        customVocabulary: CustomVocabularyContext? = nil
+    ) async throws -> ASRResult
     {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
 
-        let result = try await transcribe(audioFloatArray, source: source)
+        let result = try await transcribe(audioFloatArray, source: source, customVocabulary: customVocabulary)
 
         return result
     }
@@ -291,10 +296,14 @@ public final class AsrManager {
     ///   - source: The audio source type (defaults to .system)
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
-    public func transcribe(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+    public func transcribe(
+        _ url: URL,
+        source: AudioSource = .system,
+        customVocabulary: CustomVocabularyContext? = nil
+    ) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
 
-        let result = try await transcribe(audioFloatArray, source: source)
+        let result = try await transcribe(audioFloatArray, source: source, customVocabulary: customVocabulary)
 
         return result
     }
@@ -312,15 +321,25 @@ public final class AsrManager {
     /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
         _ audioSamples: [Float],
-        source: AudioSource = .microphone
+        source: AudioSource = .microphone,
+        customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> ASRResult {
         var result: ASRResult
         switch source {
         case .microphone:
             result = try await transcribeWithState(
-                audioSamples, decoderState: &microphoneDecoderState)
+                audioSamples, decoderState: &microphoneDecoderState, customVocabulary: customVocabulary)
         case .system:
-            result = try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
+            result = try await transcribeWithState(
+                audioSamples, decoderState: &systemDecoderState, customVocabulary: customVocabulary)
+        }
+
+        // NOTE: customVocabulary is acknowledged here. Decode‑time biasing is introduced
+        // in the decoder hook; until then this acts as a no‑op to keep API stable.
+        if let customVocabulary {
+            logger.info("Custom vocabulary attached: \(customVocabulary.terms.count) terms, " +
+                "alpha=\(String(format: "%.2f", customVocabulary.alpha)), " +
+                "contextScore=\(String(format: "%.2f", customVocabulary.contextScore))")
         }
 
         // Stateless architecture: reset decoder state after each transcription to ensure

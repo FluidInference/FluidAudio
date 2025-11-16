@@ -108,10 +108,8 @@ public enum ANEMemoryUtils {
             return 8
         case .int32:
             return MemoryLayout<Int32>.stride
-        #if swift(>=6.2)
         case .int8:
             return MemoryLayout<Int8>.stride
-        #endif
         @unknown default:
             return MemoryLayout<Float>.stride
         }
