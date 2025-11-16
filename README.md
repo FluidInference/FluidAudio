@@ -437,7 +437,13 @@ Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
 
 ### Enable TTS (build flag)
 
-TTS is an optional component. Enable it at build time with the `FLUIDAUDIO_ENABLE_TTS=1` environment variable:
+TTS is disabled by default to keep the core library lightweight and license‑clean for most apps. Enabling it pulls in the ESpeakNG framework (used for G2P/OOV handling) and the TTS targets, which:
+
+- Avoids shipping GPL‑compatible bits unless you explicitly opt in
+- Keeps default builds smaller and CI faster when TTS isn’t needed
+- Limits platform scope (ESpeakNG is supported and linked on macOS in this repo)
+
+Enable TTS at build time with the `FLUIDAUDIO_ENABLE_TTS=1` environment variable:
 
 - Terminal (SwiftPM):
   - `FLUIDAUDIO_ENABLE_TTS=1 swift run fluidaudio tts "Hello" --output out.wav`
