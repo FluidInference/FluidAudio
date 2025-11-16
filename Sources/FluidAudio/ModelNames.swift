@@ -89,7 +89,7 @@ public enum ModelNames {
         public static let preprocessor = "Preprocessor"
         public static let encoder = "Encoder"
         public static let decoder = "Decoder"
-        public static let joint = "JointDecision"
+        public static let joint = "JointDecisionv2"
 
         // Shared vocabulary file across all model versions
         public static let vocabularyFile = "parakeet_vocab.json"
