@@ -700,8 +700,8 @@ internal struct TdtDecoderV3 {
 
         // If biasing is enabled and top-K is available, rerank candidates.
         if biasContext != nil,
-           let topKIdsArr = output.featureValue(for: "top_k_ids")?.multiArrayValue,
-           let topKLogitsArr = output.featureValue(for: "top_k_logits")?.multiArrayValue
+            let topKIdsArr = output.featureValue(for: "top_k_ids")?.multiArrayValue,
+            let topKLogitsArr = output.featureValue(for: "top_k_logits")?.multiArrayValue
         {
             let k = topKIdsArr.count
             let idPtr = topKIdsArr.dataPointer.bindMemory(to: Int32.self, capacity: k)

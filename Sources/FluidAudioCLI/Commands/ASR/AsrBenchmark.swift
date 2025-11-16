@@ -437,8 +437,8 @@ private struct WordDifference {
         case substitution
         case insertion
         case deletion
-        case merge   // reference two words -> hypothesis one word
-        case split   // reference one word -> hypothesis two words
+        case merge  // reference two words -> hypothesis one word
+        case split  // reference one word -> hypothesis two words
     }
 }
 
@@ -502,31 +502,43 @@ extension ASRBenchmark {
         enum BackType { case none, matchOrSub, ins, del, merge, split }
         var bt = Array(repeating: Array(repeating: BackType.none, count: n + 1), count: m + 1)
         // To know steps taken for merge/split
-        struct Step { let di: Int; let dj: Int }
+        struct Step {
+            let di: Int
+            let dj: Int
+        }
         var step = Array(repeating: Array(repeating: Step(di: 0, dj: 0), count: n + 1), count: m + 1)
 
-        dp[0][0] = 0; bt[0][0] = .none
-        for i in 1...m { dp[i][0] = i; bt[i][0] = .del; step[i][0] = Step(di: 1, dj: 0) }
-        for j in 1...n { dp[0][j] = j; bt[0][j] = .ins; step[0][j] = Step(di: 0, dj: 1) }
+        dp[0][0] = 0
+        bt[0][0] = .none
+        for i in 1...m {
+            dp[i][0] = i
+            bt[i][0] = .del
+            step[i][0] = Step(di: 1, dj: 0)
+        }
+        for j in 1...n {
+            dp[0][j] = j
+            bt[0][j] = .ins
+            step[0][j] = Step(di: 0, dj: 1)
+        }
 
         for i in 1...m {
             for j in 1...n {
                 // match or substitution
-                let costMS = dp[i-1][j-1] + (reference[i-1] == hypothesis[j-1] ? 0 : 1)
+                let costMS = dp[i - 1][j - 1] + (reference[i - 1] == hypothesis[j - 1] ? 0 : 1)
                 if costMS < dp[i][j] {
                     dp[i][j] = costMS
                     bt[i][j] = .matchOrSub
                     step[i][j] = Step(di: 1, dj: 1)
                 }
                 // insertion
-                let costI = dp[i][j-1] + 1
+                let costI = dp[i][j - 1] + 1
                 if costI < dp[i][j] {
                     dp[i][j] = costI
                     bt[i][j] = .ins
                     step[i][j] = Step(di: 0, dj: 1)
                 }
                 // deletion
-                let costD = dp[i-1][j] + 1
+                let costD = dp[i - 1][j] + 1
                 if costD < dp[i][j] {
                     dp[i][j] = costD
                     bt[i][j] = .del
@@ -534,9 +546,9 @@ extension ASRBenchmark {
                 }
                 // merge: ref[i-2] + ref[i-1] == hyp[j-1]
                 if i >= 2 {
-                    let mergedRef = reference[i-2] + reference[i-1]
-                    if concatEq(mergedRef, hypothesis[j-1]) {
-                        let costM = dp[i-2][j-1] + 1
+                    let mergedRef = reference[i - 2] + reference[i - 1]
+                    if concatEq(mergedRef, hypothesis[j - 1]) {
+                        let costM = dp[i - 2][j - 1] + 1
                         if costM < dp[i][j] {
                             dp[i][j] = costM
                             bt[i][j] = .merge
@@ -546,9 +558,9 @@ extension ASRBenchmark {
                 }
                 // split: ref[i-1] == hyp[j-2] + hyp[j-1]
                 if j >= 2 {
-                    let mergedHyp = hypothesis[j-2] + hypothesis[j-1]
-                    if concatEq(reference[i-1], mergedHyp) {
-                        let costS = dp[i-1][j-2] + 1
+                    let mergedHyp = hypothesis[j - 2] + hypothesis[j - 1]
+                    if concatEq(reference[i - 1], mergedHyp) {
+                        let costS = dp[i - 1][j - 2] + 1
                         if costS < dp[i][j] {
                             dp[i][j] = costS
                             bt[i][j] = .split
@@ -561,7 +573,8 @@ extension ASRBenchmark {
 
         // Backtrack
         var diffs: [WordDifference] = []
-        var i = m, j = n
+        var i = m
+        var j = n
         var position = max(m, n) - 1
         while i > 0 || j > 0 {
             let b = bt[i][j]
@@ -569,27 +582,46 @@ extension ASRBenchmark {
             switch b {
             case .matchOrSub:
                 if s.di == 1 && s.dj == 1 {
-                    if reference[i-1] != hypothesis[j-1] {
-                        diffs.append(WordDifference(position: position, reference: reference[i-1], hypothesis: hypothesis[j-1], type: .substitution))
+                    if reference[i - 1] != hypothesis[j - 1] {
+                        diffs.append(
+                            WordDifference(
+                                position: position, reference: reference[i - 1], hypothesis: hypothesis[j - 1],
+                                type: .substitution))
                     }
-                    i -= 1; j -= 1; position -= 1
-                } else { break }
+                    i -= 1
+                    j -= 1
+                    position -= 1
+                } else {
+                    break
+                }
             case .ins:
-                diffs.append(WordDifference(position: position, reference: nil, hypothesis: hypothesis[j-1], type: .insertion))
-                j -= 1; position -= 1
+                diffs.append(
+                    WordDifference(position: position, reference: nil, hypothesis: hypothesis[j - 1], type: .insertion))
+                j -= 1
+                position -= 1
             case .del:
-                diffs.append(WordDifference(position: position, reference: reference[i-1], hypothesis: nil, type: .deletion))
-                i -= 1; position -= 1
+                diffs.append(
+                    WordDifference(position: position, reference: reference[i - 1], hypothesis: nil, type: .deletion))
+                i -= 1
+                position -= 1
             case .merge:
                 // two ref words -> one hyp word
-                let refCombined = reference[i-2] + " " + reference[i-1]
-                diffs.append(WordDifference(position: position, reference: refCombined, hypothesis: hypothesis[j-1], type: .merge))
-                i -= 2; j -= 1; position -= 1
+                let refCombined = reference[i - 2] + " " + reference[i - 1]
+                diffs.append(
+                    WordDifference(
+                        position: position, reference: refCombined, hypothesis: hypothesis[j - 1], type: .merge))
+                i -= 2
+                j -= 1
+                position -= 1
             case .split:
                 // one ref word -> two hyp words
-                let hypCombined = hypothesis[j-2] + " " + hypothesis[j-1]
-                diffs.append(WordDifference(position: position, reference: reference[i-1], hypothesis: hypCombined, type: .split))
-                i -= 1; j -= 2; position -= 1
+                let hypCombined = hypothesis[j - 2] + " " + hypothesis[j - 1]
+                diffs.append(
+                    WordDifference(
+                        position: position, reference: reference[i - 1], hypothesis: hypCombined, type: .split))
+                i -= 1
+                j -= 2
+                position -= 1
             case .none:
                 // Fallback to avoid infinite loop
                 if i > 0 { i -= 1 }
@@ -737,25 +769,30 @@ extension ASRBenchmark {
             }
         }
 
-        var i = m, j = n
+        var i = m
+        var j = n
         var refDiffWords: [(String, Bool)] = []
         var hypDiffWords: [(String, Bool)] = []
         while i > 0 || j > 0 {
             if i > 0 && j > 0 && reference[i - 1] == hypothesis[j - 1] {
                 refDiffWords.insert((reference[i - 1], false), at: 0)
                 hypDiffWords.insert((hypothesis[j - 1], false), at: 0)
-                i -= 1; j -= 1
+                i -= 1
+                j -= 1
             } else if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {
                 refDiffWords.insert((reference[i - 1], true), at: 0)
                 hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
-                i -= 1; j -= 1
+                i -= 1
+                j -= 1
             } else if i > 0 && dp[i][j] == dp[i - 1][j] + 1 {
                 refDiffWords.insert((reference[i - 1], true), at: 0)
                 i -= 1
             } else if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {
                 hypDiffWords.insert((hypothesis[j - 1], true), at: 0)
                 j -= 1
-            } else { break }
+            } else {
+                break
+            }
         }
 
         let refString = refDiffWords.map { $0.1 ? "[\($0.0)]" : $0.0 }.joined(separator: " ")
@@ -789,10 +826,10 @@ extension ASRBenchmark {
         var streamingChunkDuration = 10.0
         var modelVersion: AsrModelVersion = .v3  // Default to v3
         // Filtering/sorting options (defaults enabled)
-        var minWER: Double? = 0.01             // Default: filter out WER < 1%
-        var sortByWERDescending: Bool = true   // Default: sort results by WER high→low
+        var minWER: Double? = 0.01  // Default: filter out WER < 1%
+        var sortByWERDescending: Bool = true  // Default: sort results by WER high→low
         // Diff options
-        var includeDiffs: Bool = false         // Include per-file word-level mismatches in JSON
+        var includeDiffs: Bool = false  // Include per-file word-level mismatches in JSON
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -899,7 +936,11 @@ extension ASRBenchmark {
         if testStreaming {
             logger.info("   Chunk duration: \(streamingChunkDuration)s")
         }
-        if let minWER { logger.info("   Min WER filter: \(String(format: "%.2f", minWER * 100))%") } else { logger.info("   Min WER filter: disabled") }
+        if let minWER {
+            logger.info("   Min WER filter: \(String(format: "%.2f", minWER * 100))%")
+        } else {
+            logger.info("   Min WER filter: disabled")
+        }
         logger.info("   Sort by WER: \(sortByWERDescending ? "descending (high→low)" : "disabled")")
 
         let config = ASRBenchmarkConfig(
@@ -972,16 +1013,25 @@ extension ASRBenchmark {
                     var ctx = try CustomVocabularyContext.load(from: url)
                     // Optional overrides
                     if let aIdx = arguments.firstIndex(of: "--alpha"), aIdx + 1 < arguments.count,
-                       let val = Float(arguments[aIdx + 1]) {
-                        ctx = CustomVocabularyContext(terms: ctx.terms, alpha: val, contextScore: ctx.contextScore, depthScaling: ctx.depthScaling, scorePerPhrase: ctx.scorePerPhrase)
+                        let val = Float(arguments[aIdx + 1])
+                    {
+                        ctx = CustomVocabularyContext(
+                            terms: ctx.terms, alpha: val, contextScore: ctx.contextScore,
+                            depthScaling: ctx.depthScaling, scorePerPhrase: ctx.scorePerPhrase)
                     }
                     if let cIdx = arguments.firstIndex(of: "--context-score"), cIdx + 1 < arguments.count,
-                       let val = Float(arguments[cIdx + 1]) {
-                        ctx = CustomVocabularyContext(terms: ctx.terms, alpha: ctx.alpha, contextScore: val, depthScaling: ctx.depthScaling, scorePerPhrase: ctx.scorePerPhrase)
+                        let val = Float(arguments[cIdx + 1])
+                    {
+                        ctx = CustomVocabularyContext(
+                            terms: ctx.terms, alpha: ctx.alpha, contextScore: val, depthScaling: ctx.depthScaling,
+                            scorePerPhrase: ctx.scorePerPhrase)
                     }
                     if let dIdx = arguments.firstIndex(of: "--depth-scaling"), dIdx + 1 < arguments.count,
-                       let val = Float(arguments[dIdx + 1]) {
-                        ctx = CustomVocabularyContext(terms: ctx.terms, alpha: ctx.alpha, contextScore: ctx.contextScore, depthScaling: val, scorePerPhrase: ctx.scorePerPhrase)
+                        let val = Float(arguments[dIdx + 1])
+                    {
+                        ctx = CustomVocabularyContext(
+                            terms: ctx.terms, alpha: ctx.alpha, contextScore: ctx.contextScore, depthScaling: val,
+                            scorePerPhrase: ctx.scorePerPhrase)
                     }
                     customVocab = ctx
                     let termCount = ctx.terms.count
@@ -1006,10 +1056,12 @@ extension ASRBenchmark {
                 filteredSortedResults.sort { $0.metrics.wer > $1.metrics.wer }
             }
 
-            let totalWER = filteredSortedResults.isEmpty
+            let totalWER =
+                filteredSortedResults.isEmpty
                 ? 0.0
                 : filteredSortedResults.reduce(0.0) { $0 + $1.metrics.wer } / Double(filteredSortedResults.count)
-            let totalCER = filteredSortedResults.isEmpty
+            let totalCER =
+                filteredSortedResults.isEmpty
                 ? 0.0
                 : filteredSortedResults.reduce(0.0) { $0 + $1.metrics.cer } / Double(filteredSortedResults.count)
 
@@ -1139,7 +1191,7 @@ extension ASRBenchmark {
                             let diffs = benchmark.generateWordDifferences(reference: refWords, hypothesis: hypWords)
                             let diffsArray: [[String: Any]] = diffs.map { d in
                                 var entry: [String: Any] = [
-                                    "position": d.position,
+                                    "position": d.position
                                 ]
                                 switch d.type {
                                 case .substitution: entry["type"] = "substitution"
@@ -1155,7 +1207,8 @@ extension ASRBenchmark {
                             resultDict["differences"] = diffsArray
 
                             // Also provide inline marked strings (no ANSI) for quick viewing
-                            let (refInline, hypInline) = benchmark.generateInlineDiffNoColor(reference: refWords, hypothesis: hypWords)
+                            let (refInline, hypInline) = benchmark.generateInlineDiffNoColor(
+                                reference: refWords, hypothesis: hypWords)
                             resultDict["referenceDiffInline"] = refInline
                             resultDict["hypothesisDiffInline"] = hypInline
                         }
@@ -1184,7 +1237,8 @@ extension ASRBenchmark {
             // Print detailed analysis for files with high WER (use filtered set)
             benchmark.printDetailedWERAnalysis(filteredSortedResults)
 
-            logger.info("\(filteredSortedResults.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
+            logger.info(
+                "\(filteredSortedResults.count) files per dataset • Test runtime: \(runtimeString) • \(dateString)")
 
             print("--- Benchmark Results ---")
             print("   Dataset: \(config.dataset) \(config.subset)")
@@ -1261,7 +1315,7 @@ extension ASRBenchmark {
 
                 # Only include files with WER >= 1% and sort by WER (desc)
                 fluidaudio asr-benchmark --subset test-clean --min-wer 1 --sort-wer
-            
+
             Expected Performance:
                 - test-clean: 2-6% WER for good ASR systems
                 - test-other: 5-15% WER for good ASR systems

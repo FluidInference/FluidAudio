@@ -153,7 +153,9 @@ enum TranscribeCommand {
             do {
                 let url = URL(fileURLWithPath: path)
                 customVocab = try CustomVocabularyContext.load(from: url)
-                logger.info("Loaded custom vocabulary: \(customVocab!.terms.count) terms, alpha=\(String(format: "%.2f", customVocab!.alpha))")
+                logger.info(
+                    "Loaded custom vocabulary: \(customVocab!.terms.count) terms, alpha=\(String(format: "%.2f", customVocab!.alpha))"
+                )
             } catch {
                 logger.error("Failed to load custom vocabulary at \(path): \(error.localizedDescription)")
                 exit(1)
@@ -165,10 +167,13 @@ enum TranscribeCommand {
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
             await testStreamingTranscription(
-                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion, customVocabulary: customVocab)
+                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion,
+                customVocabulary: customVocab)
         } else {
             logger.info("Using batch mode with direct processing\n")
-            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion, customVocabulary: customVocab)
+            await testBatchTranscription(
+                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion,
+                customVocabulary: customVocab)
         }
     }
 
