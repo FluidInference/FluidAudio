@@ -41,11 +41,71 @@ internal struct TdtDecoderV3 {
 
     private let logger = AppLogger(category: "TDT")
     private let config: ASRConfig
+    private let biasContext: CustomVocabularyContext?
+    private let vocabulary: [Int: String]
+    private let firstWordWeights: [String: Float]
+    private let biasMarginThreshold: Float
     private let predictionOptions = AsrModels.optimizedPredictionOptions()
     // Parakeet‑TDT‑v3: duration head has 5 bins mapping directly to frame advances
 
-    init(config: ASRConfig) {
+    init(config: ASRConfig, vocabulary: [Int: String] = [:], biasContext: CustomVocabularyContext? = nil) {
         self.config = config
+        self.vocabulary = vocabulary
+        self.biasContext = biasContext
+        // Margin gating: only apply bias when the model is uncertain.
+        // Read from env FLUIDAUDIO_BIAS_MARGIN if set, else default to 0.8 in logit space.
+        if let raw = ProcessInfo.processInfo.environment["FLUIDAUDIO_BIAS_MARGIN"], let v = Float(raw) {
+            self.biasMarginThreshold = v
+        } else {
+            self.biasMarginThreshold = 0.8
+        }
+        if let context = biasContext {
+            // Build a lookup from first word (lowercased) -> weight (max across duplicates)
+            var map: [String: Float] = [:]
+            for term in context.terms {
+                let text = term.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                // Prefer first token in phrase for start-of-word boosting
+                let first = text.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true).first
+                if let first, !first.isEmpty {
+                    let key = String(first)
+                    let weight = term.weight ?? 1.0
+                    if let existing = map[key] {
+                        if weight > existing { map[key] = weight }
+                    } else {
+                        map[key] = weight
+                    }
+                }
+            }
+            self.firstWordWeights = map
+        } else {
+            self.firstWordWeights = [:]
+        }
+    }
+
+    private func biasBonus(for tokenId: Int) -> Float {
+        guard let ctx = biasContext, !firstWordWeights.isEmpty else { return 0 }
+        guard let piece = vocabulary[tokenId] else { return 0 }
+        let p = piece.lowercased()
+        // SentencePiece uses '▁' to denote word boundaries. We only boost tokens that start a word.
+        // Match either '▁word' or 'word' (defensive) to the first-word map.
+        let key: String
+        if p.hasPrefix("▁") {
+            key = String(p.dropFirst())
+        } else {
+            key = p
+        }
+        guard let w = firstWordWeights[key], w > 0 else { return 0 }
+        // Basic scoring: contextScore * weight, scaled by alpha at application time
+        return ctx.contextScore * w
+    }
+
+    private func softmax(_ xs: [Float]) -> [Float] {
+        guard !xs.isEmpty else { return [] }
+        let m = xs.max() ?? 0
+        var exps = xs.map { expf($0 - m) }
+        let s = exps.reduce(0, +)
+        if s > 0 { exps = exps.map { $0 / s } }
+        return exps
     }
 
     /// Reusable input provider that holds references to preallocated
@@ -630,14 +690,51 @@ internal struct TdtDecoderV3 {
             throw ASRError.processingFailed("Joint decision returned unexpected tensor shapes")
         }
 
+        // Default top-1 decision
         let tokenPointer = tokenIdArray.dataPointer.bindMemory(to: Int32.self, capacity: tokenIdArray.count)
-        let token = Int(tokenPointer[0])
+        var chosenToken = Int(tokenPointer[0])
         let probPointer = tokenProbArray.dataPointer.bindMemory(to: Float.self, capacity: tokenProbArray.count)
-        let probability = probPointer[0]
+        var chosenProb = probPointer[0]
         let durationPointer = durationArray.dataPointer.bindMemory(to: Int32.self, capacity: durationArray.count)
         let durationBin = Int(durationPointer[0])
 
-        return JointDecision(token: token, probability: probability, durationBin: durationBin)
+        // If biasing is enabled and top-K is available, rerank candidates.
+        if biasContext != nil,
+           let topKIdsArr = output.featureValue(for: "top_k_ids")?.multiArrayValue,
+           let topKLogitsArr = output.featureValue(for: "top_k_logits")?.multiArrayValue
+        {
+            let k = topKIdsArr.count
+            let idPtr = topKIdsArr.dataPointer.bindMemory(to: Int32.self, capacity: k)
+            let logitPtr = topKLogitsArr.dataPointer.bindMemory(to: Float.self, capacity: k)
+            // If the top-1 is already far above top-2, skip biasing (confident prediction)
+            if k >= 2 {
+                let margin = logitPtr[0] - logitPtr[1]
+                if margin >= biasMarginThreshold {
+                    return JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin)
+                }
+            }
+            var adjusted: [Float] = []
+            adjusted.reserveCapacity(k)
+            var ids: [Int] = []
+            ids.reserveCapacity(k)
+            for i in 0..<k {
+                let tid = Int(idPtr[i])
+                ids.append(tid)
+                let base = logitPtr[i]
+                // alpha scaling applied here
+                let bonus = biasContext!.alpha * biasBonus(for: tid)
+                adjusted.append(base + bonus)
+            }
+            // Rerank
+            if let maxIdx = adjusted.indices.max(by: { adjusted[$0] < adjusted[$1] }) {
+                chosenToken = ids[maxIdx]
+                // Approximate probability from softmax over top-K adjusted logits
+                let probs = softmax(adjusted)
+                chosenProb = probs[maxIdx]
+            }
+        }
+
+        return JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin)
     }
 
     private func prepareDecoderProjection(_ projection: MLMultiArray) throws -> MLMultiArray {

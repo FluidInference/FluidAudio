@@ -1,0 +1,1969 @@
+{
+  "alpha": 0.5,
+  "contextScore": 1.2,
+  "depthScaling": 2.0,
+  "scorePerPhrase": 0.0,
+  "terms": [
+  {
+    "text": "missus",
+    "weight": 4.89
+  },
+  {
+    "text": "boolooroo",
+    "weight": 4.56
+  },
+  {
+    "text": "would",
+    "weight": 4.48
+  },
+  {
+    "text": "tis",
+    "weight": 4.08
+  },
+  {
+    "text": "poyser",
+    "weight": 3.95
+  },
+  {
+    "text": "warrenton",
+    "weight": 3.95
+  },
+  {
+    "text": "jago",
+    "weight": 3.79
+  },
+  {
+    "text": "kaffar",
+    "weight": 3.79
+  },
+  {
+    "text": "margolotte",
+    "weight": 3.79
+  },
+  {
+    "text": "wylder",
+    "weight": 3.79
+  },
+  {
+    "text": "anyone",
+    "weight": 3.61
+  },
+  {
+    "text": "charente",
+    "weight": 3.61
+  },
+  {
+    "text": "emil",
+    "weight": 3.61
+  },
+  {
+    "text": "fitzooth",
+    "weight": 3.61
+  },
+  {
+    "text": "ghisizzle",
+    "weight": 3.61
+  },
+  {
+    "text": "montalais",
+    "weight": 3.61
+  },
+  {
+    "text": "stuteley",
+    "weight": 3.61
+  },
+  {
+    "text": "unc",
+    "weight": 3.61
+  },
+  {
+    "text": "cresswell",
+    "weight": 3.39
+  },
+  {
+    "text": "estafania",
+    "weight": 3.39
+  },
+  {
+    "text": "everyone",
+    "weight": 3.39
+  },
+  {
+    "text": "gamewell",
+    "weight": 3.39
+  },
+  {
+    "text": "ghip",
+    "weight": 3.39
+  },
+  {
+    "text": "hollan",
+    "weight": 3.39
+  },
+  {
+    "text": "madam",
+    "weight": 3.39
+  },
+  {
+    "text": "man",
+    "weight": 3.39
+  },
+  {
+    "text": "neo platonists",
+    "weight": 3.39
+  },
+  {
+    "text": "neverbend",
+    "weight": 3.39
+  },
+  {
+    "text": "rodolfo",
+    "weight": 3.39
+  },
+  {
+    "text": "round",
+    "weight": 3.39
+  },
+  {
+    "text": "silvia",
+    "weight": 3.39
+  },
+  {
+    "text": "tabu",
+    "weight": 3.39
+  },
+  {
+    "text": "thorkel",
+    "weight": 3.39
+  },
+  {
+    "text": "totty",
+    "weight": 3.39
+  },
+  {
+    "text": "towards",
+    "weight": 3.39
+  },
+  {
+    "text": "valliere",
+    "weight": 3.39
+  },
+  {
+    "text": "zoof",
+    "weight": 3.39
+  },
+  {
+    "text": "andella",
+    "weight": 3.10
+  },
+  {
+    "text": "another",
+    "weight": 3.10
+  },
+  {
+    "text": "any thing",
+    "weight": 3.10
+  },
+  {
+    "text": "athenais",
+    "weight": 3.10
+  },
+  {
+    "text": "battleaxe",
+    "weight": 3.10
+  },
+  {
+    "text": "bragelonne",
+    "weight": 3.10
+  },
+  {
+    "text": "britannula",
+    "weight": 3.10
+  },
+  {
+    "text": "carey",
+    "weight": 3.10
+  },
+  {
+    "text": "chaise",
+    "weight": 3.10
+  },
+  {
+    "text": "chelford",
+    "weight": 3.10
+  },
+  {
+    "text": "chingachgook",
+    "weight": 3.10
+  },
+  {
+    "text": "court yard",
+    "weight": 3.10
+  },
+  {
+    "text": "creighton",
+    "weight": 3.10
+  },
+  {
+    "text": "dedalus",
+    "weight": 3.10
+  },
+  {
+    "text": "dobryna",
+    "weight": 3.10
+  },
+  {
+    "text": "dona",
+    "weight": 3.10
+  },
+  {
+    "text": "et cetera",
+    "weight": 3.10
+  },
+  {
+    "text": "fete",
+    "weight": 3.10
+  },
+  {
+    "text": "forever",
+    "weight": 3.10
+  },
+  {
+    "text": "hallo",
+    "weight": 3.10
+  },
+  {
+    "text": "larkspur",
+    "weight": 3.10
+  },
+  {
+    "text": "lecompte",
+    "weight": 3.10
+  },
+  {
+    "text": "leocadia",
+    "weight": 3.10
+  },
+  {
+    "text": "marivaux",
+    "weight": 3.10
+  },
+  {
+    "text": "mornin",
+    "weight": 3.10
+  },
+  {
+    "text": "munny",
+    "weight": 3.10
+  },
+  {
+    "text": "phronsie",
+    "weight": 3.10
+  },
+  {
+    "text": "radie",
+    "weight": 3.10
+  },
+  {
+    "text": "raoul",
+    "weight": 3.10
+  },
+  {
+    "text": "read",
+    "weight": 3.10
+  },
+  {
+    "text": "soames",
+    "weight": 3.10
+  },
+  {
+    "text": "sometime",
+    "weight": 3.10
+  },
+  {
+    "text": "thel",
+    "weight": 3.10
+  },
+  {
+    "text": "tonight",
+    "weight": 3.10
+  },
+  {
+    "text": "watry",
+    "weight": 3.10
+  },
+  {
+    "text": "whittaws",
+    "weight": 3.10
+  },
+  {
+    "text": "abbe",
+    "weight": 2.69
+  },
+  {
+    "text": "abolitionists",
+    "weight": 2.69
+  },
+  {
+    "text": "acknowledgement",
+    "weight": 2.69
+  },
+  {
+    "text": "adona",
+    "weight": 2.69
+  },
+  {
+    "text": "affect",
+    "weight": 2.69
+  },
+  {
+    "text": "affected",
+    "weight": 2.69
+  },
+  {
+    "text": "afterdeck",
+    "weight": 2.69
+  },
+  {
+    "text": "afterwards",
+    "weight": 2.69
+  },
+  {
+    "text": "aignan",
+    "weight": 2.69
+  },
+  {
+    "text": "allers",
+    "weight": 2.69
+  },
+  {
+    "text": "alluvion",
+    "weight": 2.69
+  },
+  {
+    "text": "anders",
+    "weight": 2.69
+  },
+  {
+    "text": "angor",
+    "weight": 2.69
+  },
+  {
+    "text": "answerd",
+    "weight": 2.69
+  },
+  {
+    "text": "ante room",
+    "weight": 2.69
+  },
+  {
+    "text": "anymore",
+    "weight": 2.69
+  },
+  {
+    "text": "apposition",
+    "weight": 2.69
+  },
+  {
+    "text": "ardle",
+    "weight": 2.69
+  },
+  {
+    "text": "argyle",
+    "weight": 2.69
+  },
+  {
+    "text": "aronnax",
+    "weight": 2.69
+  },
+  {
+    "text": "arrangement",
+    "weight": 2.69
+  },
+  {
+    "text": "ascendency",
+    "weight": 2.69
+  },
+  {
+    "text": "ask",
+    "weight": 2.69
+  },
+  {
+    "text": "atchison",
+    "weight": 2.69
+  },
+  {
+    "text": "atholemen",
+    "weight": 2.69
+  },
+  {
+    "text": "attendants",
+    "weight": 2.69
+  },
+  {
+    "text": "awhile",
+    "weight": 2.69
+  },
+  {
+    "text": "aye",
+    "weight": 2.69
+  },
+  {
+    "text": "babirusa",
+    "weight": 2.69
+  },
+  {
+    "text": "badauderie",
+    "weight": 2.69
+  },
+  {
+    "text": "bains",
+    "weight": 2.69
+  },
+  {
+    "text": "bar keeper",
+    "weight": 2.69
+  },
+  {
+    "text": "beebe",
+    "weight": 2.69
+  },
+  {
+    "text": "beeder",
+    "weight": 2.69
+  },
+  {
+    "text": "befal",
+    "weight": 2.69
+  },
+  {
+    "text": "before",
+    "weight": 2.69
+  },
+  {
+    "text": "beg",
+    "weight": 2.69
+  },
+  {
+    "text": "bein",
+    "weight": 2.69
+  },
+  {
+    "text": "billygoat",
+    "weight": 2.69
+  },
+  {
+    "text": "blasts",
+    "weight": 2.69
+  },
+  {
+    "text": "ble",
+    "weight": 2.69
+  },
+  {
+    "text": "blessings",
+    "weight": 2.69
+  },
+  {
+    "text": "blueskins",
+    "weight": 2.69
+  },
+  {
+    "text": "boar hound",
+    "weight": 2.69
+  },
+  {
+    "text": "bogus",
+    "weight": 2.69
+  },
+  {
+    "text": "bolls",
+    "weight": 2.69
+  },
+  {
+    "text": "bookkeeper",
+    "weight": 2.69
+  },
+  {
+    "text": "brake",
+    "weight": 2.69
+  },
+  {
+    "text": "breakfas",
+    "weight": 2.69
+  },
+  {
+    "text": "britannulists",
+    "weight": 2.69
+  },
+  {
+    "text": "brontes",
+    "weight": 2.69
+  },
+  {
+    "text": "bul",
+    "weight": 2.69
+  },
+  {
+    "text": "bunnit",
+    "weight": 2.69
+  },
+  {
+    "text": "burne",
+    "weight": 2.69
+  },
+  {
+    "text": "but",
+    "weight": 2.69
+  },
+  {
+    "text": "can",
+    "weight": 2.69
+  },
+  {
+    "text": "can not",
+    "weight": 2.69
+  },
+  {
+    "text": "candle light",
+    "weight": 2.69
+  },
+  {
+    "text": "canvass",
+    "weight": 2.69
+  },
+  {
+    "text": "casemates",
+    "weight": 2.69
+  },
+  {
+    "text": "cast",
+    "weight": 2.69
+  },
+  {
+    "text": "casts",
+    "weight": 2.69
+  },
+  {
+    "text": "cavern",
+    "weight": 2.69
+  },
+  {
+    "text": "ceasd",
+    "weight": 2.69
+  },
+  {
+    "text": "cendenaries",
+    "weight": 2.69
+  },
+  {
+    "text": "cetera",
+    "weight": 2.69
+  },
+  {
+    "text": "chatterbox",
+    "weight": 2.69
+  },
+  {
+    "text": "checker board",
+    "weight": 2.69
+  },
+  {
+    "text": "cheroot",
+    "weight": 2.69
+  },
+  {
+    "text": "chiaroscurist",
+    "weight": 2.69
+  },
+  {
+    "text": "chord",
+    "weight": 2.69
+  },
+  {
+    "text": "christain",
+    "weight": 2.69
+  },
+  {
+    "text": "civet",
+    "weight": 2.69
+  },
+  {
+    "text": "clause",
+    "weight": 2.69
+  },
+  {
+    "text": "clew",
+    "weight": 2.69
+  },
+  {
+    "text": "cock robin",
+    "weight": 2.69
+  },
+  {
+    "text": "collecting",
+    "weight": 2.69
+  },
+  {
+    "text": "colorist",
+    "weight": 2.69
+  },
+  {
+    "text": "colorists",
+    "weight": 2.69
+  },
+  {
+    "text": "composser",
+    "weight": 2.69
+  },
+  {
+    "text": "condense",
+    "weight": 2.69
+  },
+  {
+    "text": "condition",
+    "weight": 2.69
+  },
+  {
+    "text": "conquerin",
+    "weight": 2.69
+  },
+  {
+    "text": "conseil",
+    "weight": 2.69
+  },
+  {
+    "text": "contained",
+    "weight": 2.69
+  },
+  {
+    "text": "costs",
+    "weight": 2.69
+  },
+  {
+    "text": "cotton",
+    "weight": 2.69
+  },
+  {
+    "text": "could",
+    "weight": 2.69
+  },
+  {
+    "text": "countenance",
+    "weight": 2.69
+  },
+  {
+    "text": "courant",
+    "weight": 2.69
+  },
+  {
+    "text": "crasweller",
+    "weight": 2.69
+  },
+  {
+    "text": "craswellers",
+    "weight": 2.69
+  },
+  {
+    "text": "cresswells",
+    "weight": 2.69
+  },
+  {
+    "text": "curbstone",
+    "weight": 2.69
+  },
+  {
+    "text": "curved",
+    "weight": 2.69
+  },
+  {
+    "text": "cyn",
+    "weight": 2.69
+  },
+  {
+    "text": "dedalos",
+    "weight": 2.69
+  },
+  {
+    "text": "degree",
+    "weight": 2.69
+  },
+  {
+    "text": "deliberative",
+    "weight": 2.69
+  },
+  {
+    "text": "delicate",
+    "weight": 2.69
+  },
+  {
+    "text": "dias",
+    "weight": 2.69
+  },
+  {
+    "text": "dispatch",
+    "weight": 2.69
+  },
+  {
+    "text": "dissent",
+    "weight": 2.69
+  },
+  {
+    "text": "dissented",
+    "weight": 2.69
+  },
+  {
+    "text": "districts",
+    "weight": 2.69
+  },
+  {
+    "text": "divisions",
+    "weight": 2.69
+  },
+  {
+    "text": "dobrynadid",
+    "weight": 2.69
+  },
+  {
+    "text": "donnithorne",
+    "weight": 2.69
+  },
+  {
+    "text": "door place",
+    "weight": 2.69
+  },
+  {
+    "text": "door step",
+    "weight": 2.69
+  },
+  {
+    "text": "dorothy",
+    "weight": 2.69
+  },
+  {
+    "text": "doughnuts",
+    "weight": 2.69
+  },
+  {
+    "text": "doves",
+    "weight": 2.69
+  },
+  {
+    "text": "down stairs",
+    "weight": 2.69
+  },
+  {
+    "text": "dress",
+    "weight": 2.69
+  },
+  {
+    "text": "dripping",
+    "weight": 2.69
+  },
+  {
+    "text": "duerer",
+    "weight": 2.69
+  },
+  {
+    "text": "dyin",
+    "weight": 2.69
+  },
+  {
+    "text": "dykes",
+    "weight": 2.69
+  },
+  {
+    "text": "easterly",
+    "weight": 2.69
+  },
+  {
+    "text": "elcho",
+    "weight": 2.69
+  },
+  {
+    "text": "elmo",
+    "weight": 2.69
+  },
+  {
+    "text": "elsinore",
+    "weight": 2.69
+  },
+  {
+    "text": "emigrant",
+    "weight": 2.69
+  },
+  {
+    "text": "enquire",
+    "weight": 2.69
+  },
+  {
+    "text": "enquired",
+    "weight": 2.69
+  },
+  {
+    "text": "enquiries",
+    "weight": 2.69
+  },
+  {
+    "text": "enthralment",
+    "weight": 2.69
+  },
+  {
+    "text": "escheated",
+    "weight": 2.69
+  },
+  {
+    "text": "especial",
+    "weight": 2.69
+  },
+  {
+    "text": "esprit",
+    "weight": 2.69
+  },
+  {
+    "text": "evenin",
+    "weight": 2.69
+  },
+  {
+    "text": "ever",
+    "weight": 2.69
+  },
+  {
+    "text": "exist",
+    "weight": 2.69
+  },
+  {
+    "text": "faction",
+    "weight": 2.69
+  },
+  {
+    "text": "farm house",
+    "weight": 2.69
+  },
+  {
+    "text": "farthest",
+    "weight": 2.69
+  },
+  {
+    "text": "fever",
+    "weight": 2.69
+  },
+  {
+    "text": "for ever",
+    "weight": 2.69
+  },
+  {
+    "text": "foreseeing",
+    "weight": 2.69
+  },
+  {
+    "text": "foul mouthed",
+    "weight": 2.69
+  },
+  {
+    "text": "full",
+    "weight": 2.69
+  },
+  {
+    "text": "fulness",
+    "weight": 2.69
+  },
+  {
+    "text": "gayly",
+    "weight": 2.69
+  },
+  {
+    "text": "general ship",
+    "weight": 2.69
+  },
+  {
+    "text": "gentlemen",
+    "weight": 2.69
+  },
+  {
+    "text": "giaours",
+    "weight": 2.69
+  },
+  {
+    "text": "gier",
+    "weight": 2.69
+  },
+  {
+    "text": "girard",
+    "weight": 2.69
+  },
+  {
+    "text": "give",
+    "weight": 2.69
+  },
+  {
+    "text": "goat",
+    "weight": 2.69
+  },
+  {
+    "text": "goobers",
+    "weight": 2.69
+  },
+  {
+    "text": "good bye",
+    "weight": 2.69
+  },
+  {
+    "text": "government",
+    "weight": 2.69
+  },
+  {
+    "text": "gradated",
+    "weight": 2.69
+  },
+  {
+    "text": "grand",
+    "weight": 2.69
+  },
+  {
+    "text": "greeing",
+    "weight": 2.69
+  },
+  {
+    "text": "griefs",
+    "weight": 2.69
+  },
+  {
+    "text": "grim",
+    "weight": 2.69
+  },
+  {
+    "text": "guests",
+    "weight": 2.69
+  },
+  {
+    "text": "hakon",
+    "weight": 2.69
+  },
+  {
+    "text": "halloa",
+    "weight": 2.69
+  },
+  {
+    "text": "ham",
+    "weight": 2.69
+  },
+  {
+    "text": "hamlet",
+    "weight": 2.69
+  },
+  {
+    "text": "hangings",
+    "weight": 2.69
+  },
+  {
+    "text": "hanna",
+    "weight": 2.69
+  },
+  {
+    "text": "happen",
+    "weight": 2.69
+  },
+  {
+    "text": "harald",
+    "weight": 2.69
+  },
+  {
+    "text": "harangue",
+    "weight": 2.69
+  },
+  {
+    "text": "harkened",
+    "weight": 2.69
+  },
+  {
+    "text": "harts",
+    "weight": 2.69
+  },
+  {
+    "text": "hawtrey",
+    "weight": 2.69
+  },
+  {
+    "text": "hazewrapped",
+    "weight": 2.69
+  },
+  {
+    "text": "heart broken",
+    "weight": 2.69
+  },
+  {
+    "text": "helmsman",
+    "weight": 2.69
+  },
+  {
+    "text": "hen",
+    "weight": 2.69
+  },
+  {
+    "text": "heracleitus",
+    "weight": 2.69
+  },
+  {
+    "text": "here",
+    "weight": 2.69
+  },
+  {
+    "text": "horace",
+    "weight": 2.69
+  },
+  {
+    "text": "horse power",
+    "weight": 2.69
+  },
+  {
+    "text": "horseplay",
+    "weight": 2.69
+  },
+  {
+    "text": "host",
+    "weight": 2.69
+  },
+  {
+    "text": "hotbed",
+    "weight": 2.69
+  },
+  {
+    "text": "housecleaning",
+    "weight": 2.69
+  },
+  {
+    "text": "hussy",
+    "weight": 2.69
+  },
+  {
+    "text": "hydras",
+    "weight": 2.69
+  },
+  {
+    "text": "ichthyosaurus",
+    "weight": 2.69
+  },
+  {
+    "text": "ideal",
+    "weight": 2.69
+  },
+  {
+    "text": "ignoble",
+    "weight": 2.69
+  },
+  {
+    "text": "ike",
+    "weight": 2.69
+  },
+  {
+    "text": "impearled",
+    "weight": 2.69
+  },
+  {
+    "text": "impresses",
+    "weight": 2.69
+  },
+  {
+    "text": "inaction",
+    "weight": 2.69
+  },
+  {
+    "text": "inclosed",
+    "weight": 2.69
+  },
+  {
+    "text": "infants",
+    "weight": 2.69
+  },
+  {
+    "text": "intents",
+    "weight": 2.69
+  },
+  {
+    "text": "intrenchment",
+    "weight": 2.69
+  },
+  {
+    "text": "irwine",
+    "weight": 2.69
+  },
+  {
+    "text": "ist",
+    "weight": 2.69
+  },
+  {
+    "text": "its",
+    "weight": 2.69
+  },
+  {
+    "text": "jail",
+    "weight": 2.69
+  },
+  {
+    "text": "jasper",
+    "weight": 2.69
+  },
+  {
+    "text": "jus",
+    "weight": 2.69
+  },
+  {
+    "text": "keogh",
+    "weight": 2.69
+  },
+  {
+    "text": "kind",
+    "weight": 2.69
+  },
+  {
+    "text": "kneed",
+    "weight": 2.69
+  },
+  {
+    "text": "lake",
+    "weight": 2.69
+  },
+  {
+    "text": "lallie",
+    "weight": 2.69
+  },
+  {
+    "text": "lambent",
+    "weight": 2.69
+  },
+  {
+    "text": "lanthorn",
+    "weight": 2.69
+  },
+  {
+    "text": "learned",
+    "weight": 2.69
+  },
+  {
+    "text": "lefrank",
+    "weight": 2.69
+  },
+  {
+    "text": "leocadi",
+    "weight": 2.69
+  },
+  {
+    "text": "less",
+    "weight": 2.69
+  },
+  {
+    "text": "light",
+    "weight": 2.69
+  },
+  {
+    "text": "lilburn",
+    "weight": 2.69
+  },
+  {
+    "text": "lilly",
+    "weight": 2.69
+  },
+  {
+    "text": "lillys",
+    "weight": 2.69
+  },
+  {
+    "text": "lindens",
+    "weight": 2.69
+  },
+  {
+    "text": "line",
+    "weight": 2.69
+  },
+  {
+    "text": "liter",
+    "weight": 2.69
+  },
+  {
+    "text": "louis",
+    "weight": 2.69
+  },
+  {
+    "text": "love making",
+    "weight": 2.69
+  },
+  {
+    "text": "luis",
+    "weight": 2.69
+  },
+  {
+    "text": "luke",
+    "weight": 2.69
+  },
+  {
+    "text": "manicamp",
+    "weight": 2.69
+  },
+  {
+    "text": "manifested",
+    "weight": 2.69
+  },
+  {
+    "text": "manservant",
+    "weight": 2.69
+  },
+  {
+    "text": "marianne",
+    "weight": 2.69
+  },
+  {
+    "text": "mc laren",
+    "weight": 2.69
+  },
+  {
+    "text": "meadowcroft",
+    "weight": 2.69
+  },
+  {
+    "text": "mealyback",
+    "weight": 2.69
+  },
+  {
+    "text": "meet",
+    "weight": 2.69
+  },
+  {
+    "text": "men",
+    "weight": 2.69
+  },
+  {
+    "text": "merchiston",
+    "weight": 2.69
+  },
+  {
+    "text": "merganser",
+    "weight": 2.69
+  },
+  {
+    "text": "mersey",
+    "weight": 2.69
+  },
+  {
+    "text": "messrs",
+    "weight": 2.69
+  },
+  {
+    "text": "militated",
+    "weight": 2.69
+  },
+  {
+    "text": "mingoes",
+    "weight": 2.69
+  },
+  {
+    "text": "mists",
+    "weight": 2.69
+  },
+  {
+    "text": "mohammed",
+    "weight": 2.69
+  },
+  {
+    "text": "mombi",
+    "weight": 2.69
+  },
+  {
+    "text": "monceux",
+    "weight": 2.69
+  },
+  {
+    "text": "montfichet",
+    "weight": 2.69
+  },
+  {
+    "text": "montrose",
+    "weight": 2.69
+  },
+  {
+    "text": "moonbeams",
+    "weight": 2.69
+  },
+  {
+    "text": "mothers",
+    "weight": 2.69
+  },
+  {
+    "text": "mounted",
+    "weight": 2.69
+  },
+  {
+    "text": "mummeries",
+    "weight": 2.69
+  },
+  {
+    "text": "mussulmans",
+    "weight": 2.69
+  },
+  {
+    "text": "nares",
+    "weight": 2.69
+  },
+  {
+    "text": "narwhale",
+    "weight": 2.69
+  },
+  {
+    "text": "natty",
+    "weight": 2.69
+  },
+  {
+    "text": "nearer",
+    "weight": 2.69
+  },
+  {
+    "text": "new born",
+    "weight": 2.69
+  },
+  {
+    "text": "nobler",
+    "weight": 2.69
+  },
+  {
+    "text": "non compliance",
+    "weight": 2.69
+  },
+  {
+    "text": "nor",
+    "weight": 2.69
+  },
+  {
+    "text": "north west",
+    "weight": 2.69
+  },
+  {
+    "text": "northwards",
+    "weight": 2.69
+  },
+  {
+    "text": "northwest",
+    "weight": 2.69
+  },
+  {
+    "text": "nothin",
+    "weight": 2.69
+  },
+  {
+    "text": "nunkie",
+    "weight": 2.69
+  },
+  {
+    "text": "oaks",
+    "weight": 2.69
+  },
+  {
+    "text": "occupants",
+    "weight": 2.69
+  },
+  {
+    "text": "officers",
+    "weight": 2.69
+  },
+  {
+    "text": "olaf",
+    "weight": 2.69
+  },
+  {
+    "text": "origin",
+    "weight": 2.69
+  },
+  {
+    "text": "ottley",
+    "weight": 2.69
+  },
+  {
+    "text": "oughter",
+    "weight": 2.69
+  },
+  {
+    "text": "ozma",
+    "weight": 2.69
+  },
+  {
+    "text": "paroquet",
+    "weight": 2.69
+  },
+  {
+    "text": "paschal",
+    "weight": 2.69
+  },
+  {
+    "text": "passage way",
+    "weight": 2.69
+  },
+  {
+    "text": "pasteboard",
+    "weight": 2.69
+  },
+  {
+    "text": "patients",
+    "weight": 2.69
+  },
+  {
+    "text": "pease",
+    "weight": 2.69
+  },
+  {
+    "text": "pegre",
+    "weight": 2.69
+  },
+  {
+    "text": "pegrenne",
+    "weight": 2.69
+  },
+  {
+    "text": "pet",
+    "weight": 2.69
+  },
+  {
+    "text": "ph d",
+    "weight": 2.69
+  },
+  {
+    "text": "pick",
+    "weight": 2.69
+  },
+  {
+    "text": "pipt",
+    "weight": 2.69
+  },
+  {
+    "text": "plaits",
+    "weight": 2.69
+  },
+  {
+    "text": "pleasance",
+    "weight": 2.69
+  },
+  {
+    "text": "pond",
+    "weight": 2.69
+  },
+  {
+    "text": "poos",
+    "weight": 2.69
+  },
+  {
+    "text": "popham",
+    "weight": 2.69
+  },
+  {
+    "text": "portes",
+    "weight": 2.69
+  },
+  {
+    "text": "precede",
+    "weight": 2.69
+  },
+  {
+    "text": "precieuses",
+    "weight": 2.69
+  },
+  {
+    "text": "prevent",
+    "weight": 2.69
+  },
+  {
+    "text": "proselyting",
+    "weight": 2.69
+  },
+  {
+    "text": "prynne",
+    "weight": 2.69
+  },
+  {
+    "text": "purposed",
+    "weight": 2.69
+  },
+  {
+    "text": "puttin",
+    "weight": 2.69
+  },
+  {
+    "text": "quinson",
+    "weight": 2.69
+  },
+  {
+    "text": "ranged",
+    "weight": 2.69
+  },
+  {
+    "text": "rate",
+    "weight": 2.69
+  },
+  {
+    "text": "redman",
+    "weight": 2.69
+  },
+  {
+    "text": "reeder",
+    "weight": 2.69
+  },
+  {
+    "text": "reenforcements",
+    "weight": 2.69
+  },
+  {
+    "text": "remained",
+    "weight": 2.69
+  },
+  {
+    "text": "remark",
+    "weight": 2.69
+  },
+  {
+    "text": "remember",
+    "weight": 2.69
+  },
+  {
+    "text": "repartees",
+    "weight": 2.69
+  },
+  {
+    "text": "reweighed",
+    "weight": 2.69
+  },
+  {
+    "text": "rhone",
+    "weight": 2.69
+  },
+  {
+    "text": "roerer",
+    "weight": 2.69
+  },
+  {
+    "text": "roi",
+    "weight": 2.69
+  },
+  {
+    "text": "rose water",
+    "weight": 2.69
+  },
+  {
+    "text": "rufus",
+    "weight": 2.69
+  },
+  {
+    "text": "saild",
+    "weight": 2.69
+  },
+  {
+    "text": "sailorman",
+    "weight": 2.69
+  },
+  {
+    "text": "sandford",
+    "weight": 2.69
+  },
+  {
+    "text": "sate",
+    "weight": 2.69
+  },
+  {
+    "text": "saved",
+    "weight": 2.69
+  },
+  {
+    "text": "saw toothed",
+    "weight": 2.69
+  },
+  {
+    "text": "say",
+    "weight": 2.69
+  },
+  {
+    "text": "scathe",
+    "weight": 2.69
+  },
+  {
+    "text": "scene",
+    "weight": 2.69
+  },
+  {
+    "text": "sceura",
+    "weight": 2.69
+  },
+  {
+    "text": "scevra",
+    "weight": 2.69
+  },
+  {
+    "text": "school boys",
+    "weight": 2.69
+  },
+  {
+    "text": "scouting",
+    "weight": 2.69
+  },
+  {
+    "text": "scuse",
+    "weight": 2.69
+  },
+  {
+    "text": "scutcheon",
+    "weight": 2.69
+  },
+  {
+    "text": "seem",
+    "weight": 2.69
+  },
+  {
+    "text": "sence",
+    "weight": 2.69
+  },
+  {
+    "text": "senor",
+    "weight": 2.69
+  },
+  {
+    "text": "senora",
+    "weight": 2.69
+  },
+  {
+    "text": "sent",
+    "weight": 2.69
+  },
+  {
+    "text": "sentences",
+    "weight": 2.69
+  },
+  {
+    "text": "servant",
+    "weight": 2.69
+  },
+  {
+    "text": "shall",
+    "weight": 2.69
+  },
+  {
+    "text": "shames",
+    "weight": 2.69
+  },
+  {
+    "text": "shewd",
+    "weight": 2.69
+  },
+  {
+    "text": "should",
+    "weight": 2.69
+  },
+  {
+    "text": "showring",
+    "weight": 2.69
+  },
+  {
+    "text": "sif",
+    "weight": 2.69
+  },
+  {
+    "text": "sight seers",
+    "weight": 2.69
+  },
+  {
+    "text": "silviadid",
+    "weight": 2.69
+  },
+  {
+    "text": "silviadies",
+    "weight": 2.69
+  },
+  {
+    "text": "skillful",
+    "weight": 2.69
+  },
+  {
+    "text": "sleeve",
+    "weight": 2.69
+  },
+  {
+    "text": "smild",
+    "weight": 2.69
+  },
+  {
+    "text": "snubnosed",
+    "weight": 2.69
+  },
+  {
+    "text": "solon",
+    "weight": 2.69
+  },
+  {
+    "text": "some time",
+    "weight": 2.69
+  },
+  {
+    "text": "sorrel",
+    "weight": 2.69
+  },
+  {
+    "text": "sou",
+    "weight": 2.69
+  },
+  {
+    "text": "southey",
+    "weight": 2.69
+  },
+  {
+    "text": "stage",
+    "weight": 2.69
+  },
+  {
+    "text": "starlit",
+    "weight": 2.69
+  },
+  {
+    "text": "strength",
+    "weight": 2.69
+  },
+  {
+    "text": "summers",
+    "weight": 2.69
+  },
+  {
+    "text": "supper",
+    "weight": 2.69
+  },
+  {
+    "text": "surfaces",
+    "weight": 2.69
+  },
+  {
+    "text": "survive",
+    "weight": 2.69
+  },
+  {
+    "text": "suspicions",
+    "weight": 2.69
+  },
+  {
+    "text": "swan",
+    "weight": 2.69
+  },
+  {
+    "text": "sweep",
+    "weight": 2.69
+  },
+  {
+    "text": "swoons",
+    "weight": 2.69
+  },
+  {
+    "text": "sword like",
+    "weight": 2.69
+  },
+  {
+    "text": "table cloth",
+    "weight": 2.69
+  },
+  {
+    "text": "tag lines",
+    "weight": 2.69
+  },
+  {
+    "text": "tail",
+    "weight": 2.69
+  },
+  {
+    "text": "tea",
+    "weight": 2.69
+  },
+  {
+    "text": "technique",
+    "weight": 2.69
+  },
+  {
+    "text": "tenability",
+    "weight": 2.69
+  },
+  {
+    "text": "text books",
+    "weight": 2.69
+  },
+  {
+    "text": "than",
+    "weight": 2.69
+  },
+  {
+    "text": "thee",
+    "weight": 2.69
+  },
+  {
+    "text": "thorleif",
+    "weight": 2.69
+  },
+  {
+    "text": "thrilled",
+    "weight": 2.69
+  },
+  {
+    "text": "thro",
+    "weight": 2.69
+  },
+  {
+    "text": "timascheff",
+    "weight": 2.69
+  },
+  {
+    "text": "tintint",
+    "weight": 2.69
+  },
+  {
+    "text": "tintoret",
+    "weight": 2.69
+  },
+  {
+    "text": "to day",
+    "weight": 2.69
+  },
+  {
+    "text": "to morrow",
+    "weight": 2.69
+  },
+  {
+    "text": "today",
+    "weight": 2.69
+  },
+  {
+    "text": "toilette",
+    "weight": 2.69
+  },
+  {
+    "text": "tooms",
+    "weight": 2.69
+  },
+  {
+    "text": "tould",
+    "weight": 2.69
+  },
+  {
+    "text": "towne",
+    "weight": 2.69
+  },
+  {
+    "text": "treble",
+    "weight": 2.69
+  },
+  {
+    "text": "treddleston",
+    "weight": 2.69
+  },
+  {
+    "text": "tuppeny",
+    "weight": 2.69
+  },
+  {
+    "text": "twas",
+    "weight": 2.69
+  },
+  {
+    "text": "unclenched",
+    "weight": 2.69
+  },
+  {
+    "text": "under surface",
+    "weight": 2.69
+  },
+  {
+    "text": "underground",
+    "weight": 2.69
+  },
+  {
+    "text": "unwarily",
+    "weight": 2.69
+  },
+  {
+    "text": "up hill",
+    "weight": 2.69
+  },
+  {
+    "text": "up stairs",
+    "weight": 2.69
+  },
+  {
+    "text": "upon",
+    "weight": 2.69
+  },
+  {
+    "text": "valleyed",
+    "weight": 2.69
+  },
+  {
+    "text": "van",
+    "weight": 2.69
+  },
+  {
+    "text": "villad este",
+    "weight": 2.69
+  },
+  {
+    "text": "watermill",
+    "weight": 2.69
+  },
+  {
+    "text": "welcomed",
+    "weight": 2.69
+  },
+  {
+    "text": "what not",
+    "weight": 2.69
+  },
+  {
+    "text": "whatever",
+    "weight": 2.69
+  },
+  {
+    "text": "whittaw",
+    "weight": 2.69
+  },
+  {
+    "text": "whittawd",
+    "weight": 2.69
+  },
+  {
+    "text": "wholly",
+    "weight": 2.69
+  },
+  {
+    "text": "withes",
+    "weight": 2.69
+  },
+  {
+    "text": "wolf",
+    "weight": 2.69
+  },
+  {
+    "text": "woman",
+    "weight": 2.69
+  },
+  {
+    "text": "wood cutters",
+    "weight": 2.69
+  },
+  {
+    "text": "woodbegirt",
+    "weight": 2.69
+  },
+  {
+    "text": "world wide",
+    "weight": 2.69
+  },
+  {
+    "text": "worse",
+    "weight": 2.69
+  },
+  {
+    "text": "worst",
+    "weight": 2.69
+  },
+  {
+    "text": "yearning",
+    "weight": 2.69
+  }
+],
+  "source": "custom_vocab_parakeet_v3/boost.tsv"
+}

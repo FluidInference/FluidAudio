@@ -107,6 +107,8 @@ enum TranscribeCommand {
         var streamingMode = false
         var showMetadata = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
+        var customVocabPath: String? = nil
+        var customVocab: CustomVocabularyContext? = nil
 
         // Parse options
         var i = 1
@@ -132,10 +134,30 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
+            case "--custom-vocab":
+                if i + 1 < arguments.count {
+                    customVocabPath = arguments[i + 1]
+                    i += 1
+                } else {
+                    logger.error("Missing path after --custom-vocab")
+                    exit(1)
+                }
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
             i += 1
+        }
+
+        // Load custom vocabulary if provided
+        if let path = customVocabPath {
+            do {
+                let url = URL(fileURLWithPath: path)
+                customVocab = try CustomVocabularyContext.load(from: url)
+                logger.info("Loaded custom vocabulary: \(customVocab!.terms.count) terms, alpha=\(String(format: "%.2f", customVocab!.alpha))")
+            } catch {
+                logger.error("Failed to load custom vocabulary at \(path): \(error.localizedDescription)")
+                exit(1)
+            }
         }
 
         if streamingMode {
@@ -143,16 +165,16 @@ enum TranscribeCommand {
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
             await testStreamingTranscription(
-                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion, customVocabulary: customVocab)
         } else {
             logger.info("Using batch mode with direct processing\n")
-            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion, customVocabulary: customVocab)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion, customVocabulary: CustomVocabularyContext?
     ) async {
         do {
             // Initialize ASR models
@@ -184,7 +206,7 @@ enum TranscribeCommand {
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let result = try await asrManager.transcribe(audioFileURL)
+            let result = try await asrManager.transcribe(audioFileURL, customVocabulary: customVocabulary)
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Print results
@@ -247,7 +269,7 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion, customVocabulary: CustomVocabularyContext?
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -456,6 +478,7 @@ enum TranscribeCommand {
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
+                --custom-vocab <path>      Load custom vocabulary JSON for context boosting
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)
