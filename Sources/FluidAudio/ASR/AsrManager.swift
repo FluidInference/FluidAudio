@@ -277,8 +277,7 @@ public final class AsrManager {
         _ audioBuffer: AVAudioPCMBuffer,
         source: AudioSource = .microphone,
         customVocabulary: CustomVocabularyContext? = nil
-    ) async throws -> ASRResult
-    {
+    ) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
 
         let result = try await transcribe(audioFloatArray, source: source, customVocabulary: customVocabulary)
@@ -337,9 +336,10 @@ public final class AsrManager {
         // NOTE: customVocabulary is acknowledged here. Decode‑time biasing is introduced
         // in the decoder hook; until then this acts as a no‑op to keep API stable.
         if let customVocabulary {
-            logger.info("Custom vocabulary attached: \(customVocabulary.terms.count) terms, " +
-                "alpha=\(String(format: "%.2f", customVocabulary.alpha)), " +
-                "contextScore=\(String(format: "%.2f", customVocabulary.contextScore))")
+            logger.info(
+                "Custom vocabulary attached: \(customVocabulary.terms.count) terms, "
+                    + "alpha=\(String(format: "%.2f", customVocabulary.alpha)), "
+                    + "contextScore=\(String(format: "%.2f", customVocabulary.contextScore))")
         }
 
         // Stateless architecture: reset decoder state after each transcription to ensure
