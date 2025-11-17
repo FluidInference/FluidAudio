@@ -43,7 +43,8 @@ internal struct TdtDecoderV3 {
     private let config: ASRConfig
     private let biasContext: CustomVocabularyContext?
     private let vocabulary: [Int: String]
-    private let firstWordWeights: [String: Float]
+    private let tokenVocabEngine: TokenVocabularyEngine?
+    private let wordVocabEngine: CustomVocabularyEngine?
     private let biasMarginThreshold: Float
     private let predictionOptions = AsrModels.optimizedPredictionOptions()
     // Parakeet‑TDT‑v3: duration head has 5 bins mapping directly to frame advances
@@ -60,43 +61,66 @@ internal struct TdtDecoderV3 {
             self.biasMarginThreshold = 0.8
         }
         if let context = biasContext {
-            // Build a lookup from first word (lowercased) -> weight (max across duplicates)
-            var map: [String: Float] = [:]
-            for term in context.terms {
-                let text = term.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                // Prefer first token in phrase for start-of-word boosting
-                let first = text.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true).first
-                if let first, !first.isEmpty {
-                    let key = String(first)
-                    let weight = term.weight ?? 1.0
-                    if let existing = map[key] {
-                        if weight > existing { map[key] = weight }
-                    } else {
-                        map[key] = weight
-                    }
-                }
+            // Prefer token-level trie if any term has token IDs; otherwise use word-level trie.
+            if context.terms.contains(where: { ($0.tokenIds ?? []).isEmpty == false }) {
+                self.tokenVocabEngine = TokenVocabularyEngine(context: context)
+                self.wordVocabEngine = nil
+            } else {
+                self.tokenVocabEngine = nil
+                self.wordVocabEngine = CustomVocabularyEngine(context: context)
             }
-            self.firstWordWeights = map
         } else {
-            self.firstWordWeights = [:]
+            self.tokenVocabEngine = nil
+            self.wordVocabEngine = nil
         }
     }
 
-    private func biasBonus(for tokenId: Int) -> Float {
-        guard let ctx = biasContext, !firstWordWeights.isEmpty else { return 0 }
-        guard let piece = vocabulary[tokenId] else { return 0 }
-        let p = piece.lowercased()
-        // SentencePiece uses '▁' to denote word boundaries. We only boost tokens that start a word.
-        // Match either '▁word' or 'word' (defensive) to the first-word map.
-        let key: String
-        if p.hasPrefix("▁") {
-            key = String(p.dropFirst())
-        } else {
-            key = p
+    /// Compute bias bonus and next trie node for a candidate token.
+    ///
+    /// - Parameters:
+    ///   - tokenId: vocabulary index for the candidate token.
+    ///   - currentNode: current trie node index (nil if no custom vocab state).
+    /// - Returns: tuple of (bias, nextNode).
+    private func biasBonus(for tokenId: Int, currentNode: Int?) -> (bias: Float, nextNode: Int?) {
+        guard let ctx = biasContext else {
+            return (0, currentNode)
         }
-        guard let w = firstWordWeights[key], w > 0 else { return 0 }
-        // Basic scoring: contextScore * weight, scaled by alpha at application time
-        return ctx.contextScore * w
+
+        // Prefer token-level engine when available.
+        if let engine = tokenVocabEngine {
+            let node = currentNode ?? engine.rootIndex()
+            let (next, nodeBias) = engine.advance(from: node, withTokenId: tokenId)
+            if nodeBias <= 0 {
+                return (0, next)
+            }
+            let bonus = ctx.alpha * nodeBias
+            return (bonus, next)
+        }
+
+        // Fallback to word-level engine using SentencePiece word boundaries.
+        guard let engine = wordVocabEngine, let piece = vocabulary[tokenId] else {
+            return (0, currentNode)
+        }
+
+        let lower = piece.lowercased()
+        // SentencePiece uses '▁' to denote word boundaries; only treat those as word starts.
+        guard lower.hasPrefix("▁") else {
+            return (0, currentNode)
+        }
+
+        let word = String(lower.dropFirst())
+        if word.isEmpty {
+            return (0, currentNode)
+        }
+
+        let node = currentNode ?? engine.rootIndex()
+        let (next, nodeBias) = engine.advance(from: node, with: word)
+        if nodeBias <= 0 {
+            return (0, next)
+        }
+
+        let bonus = ctx.alpha * nodeBias
+        return (bonus, next)
     }
 
     private func softmax(_ xs: [Float]) -> [Float] {
@@ -316,7 +340,7 @@ internal struct TdtDecoderV3 {
             try populatePreparedDecoderProjection(decoderProjection, into: reusableDecoderStep)
 
             // Run joint network with preallocated inputs
-            let decision = try runJointPrepared(
+            let (decision, nextNode) = try runJointPrepared(
                 encoderFrames: encoderFrames,
                 timeIndex: safeTimeIndices,
                 preparedDecoderStep: reusableDecoderStep,
@@ -327,7 +351,8 @@ internal struct TdtDecoderV3 {
                 inputProvider: jointInput,
                 tokenIdBacking: tokenIdBacking,
                 tokenProbBacking: tokenProbBacking,
-                durationBacking: durationBacking
+                durationBacking: durationBacking,
+                currentNode: decoderState.vocabNode
             )
 
             // Predict token (what to emit) and duration (how many frames to skip)
@@ -342,6 +367,11 @@ internal struct TdtDecoderV3 {
 
             let blankId = config.tdtConfig.blankId  // 8192 for v3 models
             var blankMask = (label == blankId)  // Is this a blank (silence) token?
+
+            // Update trie state only when we emit a non-blank token.
+            if !blankMask, let nextNode {
+                decoderState.vocabNode = nextNode
+            }
 
             // CRITICAL FIX: Prevent infinite loops when blank has duration=0
             // Always advance at least 1 frame to ensure forward progress
@@ -380,7 +410,7 @@ internal struct TdtDecoderV3 {
                 timeIndicesCurrentLabels = timeIndices
 
                 // INTENTIONAL: Reusing prepared decoder step from outside loop
-                let innerDecision = try runJointPrepared(
+                let (innerDecision, innerNextNode) = try runJointPrepared(
                     encoderFrames: encoderFrames,
                     timeIndex: safeTimeIndices,
                     preparedDecoderStep: reusableDecoderStep,
@@ -391,13 +421,19 @@ internal struct TdtDecoderV3 {
                     inputProvider: jointInput,
                     tokenIdBacking: tokenIdBacking,
                     tokenProbBacking: tokenProbBacking,
-                    durationBacking: durationBacking
+                    durationBacking: durationBacking,
+                    currentNode: decoderState.vocabNode
                 )
 
                 label = innerDecision.token
                 score = clampProbability(innerDecision.probability)
                 duration = try mapDurationBin(
                     innerDecision.durationBin, durationBins: config.tdtConfig.durationBins)
+
+                // Update trie state only when we emit a non-blank token.
+                if label != config.tdtConfig.blankId, let innerNextNode {
+                    decoderState.vocabNode = innerNextNode
+                }
 
                 blankMask = (label == blankId)
 
@@ -513,7 +549,7 @@ internal struct TdtDecoderV3 {
                     from: decoderResult.output, key: "decoder", errorMessage: "Invalid decoder output")
                 try populatePreparedDecoderProjection(finalProjection, into: reusableDecoderStep)
 
-                let decision = try runJointPrepared(
+                let (decision, nextNode) = try runJointPrepared(
                     encoderFrames: encoderFrames,
                     timeIndex: frameIndex,
                     preparedDecoderStep: reusableDecoderStep,
@@ -524,7 +560,8 @@ internal struct TdtDecoderV3 {
                     inputProvider: jointInput,
                     tokenIdBacking: tokenIdBacking,
                     tokenProbBacking: tokenProbBacking,
-                    durationBacking: durationBacking
+                    durationBacking: durationBacking,
+                    currentNode: decoderState.vocabNode
                 )
 
                 let token = decision.token
@@ -653,8 +690,9 @@ internal struct TdtDecoderV3 {
         inputProvider: MLFeatureProvider,
         tokenIdBacking: MLMultiArray,
         tokenProbBacking: MLMultiArray,
-        durationBacking: MLMultiArray
-    ) throws -> JointDecision {
+        durationBacking: MLMultiArray,
+        currentNode: Int?
+    ) throws -> (decision: JointDecision, nextNode: Int?) {
 
         // Fill encoder step with the requested frame
         try encoderFrames.copyFrame(at: timeIndex, into: encoderDestPtr, destinationStride: encoderDestStride)
@@ -697,6 +735,7 @@ internal struct TdtDecoderV3 {
         var chosenProb = probPointer[0]
         let durationPointer = durationArray.dataPointer.bindMemory(to: Int32.self, capacity: durationArray.count)
         let durationBin = Int(durationPointer[0])
+        var chosenNextNode: Int? = currentNode
 
         // If biasing is enabled and top-K is available, rerank candidates.
         if biasContext != nil,
@@ -710,31 +749,35 @@ internal struct TdtDecoderV3 {
             if k >= 2 {
                 let margin = logitPtr[0] - logitPtr[1]
                 if margin >= biasMarginThreshold {
-                    return JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin)
+                    return (JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin), currentNode)
                 }
             }
             var adjusted: [Float] = []
             adjusted.reserveCapacity(k)
             var ids: [Int] = []
             ids.reserveCapacity(k)
+            var nextNodes: [Int?] = []
+            nextNodes.reserveCapacity(k)
             for i in 0..<k {
                 let tid = Int(idPtr[i])
                 ids.append(tid)
                 let base = logitPtr[i]
-                // alpha scaling applied here
-                let bonus = biasContext!.alpha * biasBonus(for: tid)
+                let (bonus, nextNode) = biasBonus(for: tid, currentNode: currentNode)
+                nextNodes.append(nextNode)
                 adjusted.append(base + bonus)
             }
             // Rerank
             if let maxIdx = adjusted.indices.max(by: { adjusted[$0] < adjusted[$1] }) {
                 chosenToken = ids[maxIdx]
+                chosenNextNode = nextNodes[maxIdx]
                 // Approximate probability from softmax over top-K adjusted logits
                 let probs = softmax(adjusted)
                 chosenProb = probs[maxIdx]
             }
         }
 
-        return JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin)
+        let decision = JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin)
+        return (decision, chosenNextNode)
     }
 
     private func prepareDecoderProjection(_ projection: MLMultiArray) throws -> MLMultiArray {
