@@ -4,6 +4,10 @@ import Foundation
 public struct CustomVocabularyTerm: Codable, Sendable {
     public let text: String
     public let weight: Float?
+    public let aliases: [String]?
+    /// Optional pre-tokenized model vocabulary IDs for this phrase.
+    /// When present, trie biasing can operate directly on token IDs instead of words.
+    public let tokenIds: [Int]?
 }
 
 /// Raw JSON model for on‑disk config.
