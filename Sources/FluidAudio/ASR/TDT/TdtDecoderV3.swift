@@ -745,13 +745,41 @@ internal struct TdtDecoderV3 {
             let k = topKIdsArr.count
             let idPtr = topKIdsArr.dataPointer.bindMemory(to: Int32.self, capacity: k)
             let logitPtr = topKLogitsArr.dataPointer.bindMemory(to: Float.self, capacity: k)
+
+            // DEBUG: Log top-K candidates
+            let debugEnabled = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_BOOSTING"] != nil
+            if debugEnabled {
+                print("\n[BOOSTING DEBUG] Frame \(timeIndex):")
+                print("Top-K candidates (k=\(k)):")
+                for i in 0..<min(k, 10) {  // Show up to 10 candidates
+                    let tid = Int(idPtr[i])
+                    let logit = logitPtr[i]
+                    let text = vocabulary[tid] ?? "<unk>"
+                    print("  [\(i)] token=\(tid) logit=\(String(format: "%.4f", logit)) text='\(text)'")
+                }
+            }
+
             // If the top-1 is already far above top-2, skip biasing (confident prediction)
             if k >= 2 {
                 let margin = logitPtr[0] - logitPtr[1]
+                if debugEnabled {
+                    print("Margin between top-1 and top-2: \(String(format: "%.4f", margin)) (threshold: \(String(format: "%.4f", biasMarginThreshold)))")
+                }
                 if margin >= biasMarginThreshold {
-                    return (JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin), currentNode)
+                    if debugEnabled {
+                        print("→ MARGIN GATING: Skipping boosting (high confidence)")
+                    }
+                    return (
+                        JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin),
+                        currentNode
+                    )
                 }
             }
+
+            if debugEnabled {
+                print("→ Applying boosting (margin below threshold or k=1)")
+            }
+
             var adjusted: [Float] = []
             adjusted.reserveCapacity(k)
             var ids: [Int] = []
@@ -765,14 +793,30 @@ internal struct TdtDecoderV3 {
                 let (bonus, nextNode) = biasBonus(for: tid, currentNode: currentNode)
                 nextNodes.append(nextNode)
                 adjusted.append(base + bonus)
+
+                if debugEnabled && bonus > 0 {
+                    let text = vocabulary[tid] ?? "<unk>"
+                    print("  Boosted token \(tid) ('\(text)'): logit \(String(format: "%.4f", base)) + bias \(String(format: "%.4f", bonus)) = \(String(format: "%.4f", base + bonus))")
+                }
             }
             // Rerank
             if let maxIdx = adjusted.indices.max(by: { adjusted[$0] < adjusted[$1] }) {
+                let originalChoice = chosenToken
                 chosenToken = ids[maxIdx]
                 chosenNextNode = nextNodes[maxIdx]
                 // Approximate probability from softmax over top-K adjusted logits
                 let probs = softmax(adjusted)
                 chosenProb = probs[maxIdx]
+
+                if debugEnabled {
+                    let originalText = vocabulary[originalChoice] ?? "<unk>"
+                    let newText = vocabulary[chosenToken] ?? "<unk>"
+                    if originalChoice != chosenToken {
+                        print("→ RE-RANKED: \(originalChoice) ('\(originalText)') → \(chosenToken) ('\(newText)')")
+                    } else {
+                        print("→ Same choice: \(chosenToken) ('\(newText)')")
+                    }
+                }
             }
         }
 
