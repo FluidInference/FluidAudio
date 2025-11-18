@@ -1,0 +1,62 @@
+[
+  {
+    "file": "/Users/kikow/brandon/FluidAudioSwift/tts_context_boosting_kokoro/01_saoirse_ronan_netflix_af_heart.wav",
+    "filename": "01_saoirse_ronan_netflix_af_heart.wav",
+    "reference": "Saoirse Ronan and Timothée Chalamet starred in that new Netflix series.",
+    "swift_baseline": "and start in that new Netflix series.",
+    "hypothesis": "and start in that new Netflix series.",
+    "nemo_model": "nvidia/parakeet-rnnt-0.6b",
+    "nemo_baseline": "and starred in that new netflix series",
+    "nemo_hypothesis": "and starred in that new netflix series"
+  },
+  {
+    "file": "/Users/kikow/brandon/FluidAudioSwift/tts_context_boosting_kokoro/02_wojciechowski_xarelto_af_heart.wav",
+    "filename": "02_wojciechowski_xarelto_af_heart.wav",
+    "reference": "Dr. Wojciechowski prescribed Xarelto for my atrial fibrillation condition.",
+    "swift_baseline": "Doctor prescribed for my atrial fibrillation condition.",
+    "hypothesis": "Doctor prescribed for my atrial fibrillation condition.",
+    "nemo_model": "nvidia/parakeet-rnnt-0.6b",
+    "nemo_baseline": "doctor prescribed for my atrial fibrillation condition",
+    "nemo_hypothesis": "doctor prescribed for my atrial fibrillation condition"
+  },
+  {
+    "file": "/Users/kikow/brandon/FluidAudioSwift/tts_context_boosting_kokoro/03_oculus_quest_psvr_af_heart.wav",
+    "filename": "03_oculus_quest_psvr_af_heart.wav",
+    "reference": "Can you order the Oculus Quest from Amazon or should we get the PlayStation VR?",
+    "swift_baseline": "Can you order the Oculus Quest from Amazon, or should we get the PlayStation VR?",
+    "hypothesis": "Can you order the Oculus Quest from Amazon, or should we get the PlayStation VR?",
+    "nemo_model": "nvidia/parakeet-rnnt-0.6b",
+    "nemo_baseline": "can you order the oculus quest from amazon or should we get the playstation vr",
+    "nemo_hypothesis": "can you order the oculus quest from amazon or should we get the playstation vr"
+  },
+  {
+    "file": "/Users/kikow/brandon/FluidAudioSwift/tts_context_boosting_kokoro/04_advil_zyrtec_chipotle_siobhan_af_heart.wav",
+    "filename": "04_advil_zyrtec_chipotle_siobhan_af_heart.wav",
+    "reference": "I took two Advil and one Zyrtec, then ate at Chipotle with Siobhan.",
+    "swift_baseline": "I took two and one, then ate at Chipotle with.",
+    "hypothesis": "I took two and one, then ate at Chipotle with.",
+    "nemo_model": "nvidia/parakeet-rnnt-0.6b",
+    "nemo_baseline": "i took two and one then ate it chipotle with",
+    "nemo_hypothesis": "i took two and one then ate it chipotle with"
+  },
+  {
+    "file": "/Users/kikow/brandon/FluidAudioSwift/tts_context_boosting_kokoro/05_macbook_airpods_schaumburg_af_heart.wav",
+    "filename": "05_macbook_airpods_schaumburg_af_heart.wav",
+    "reference": "I bought a MacBook Pro and AirPods Max at the Apple Store in Schaumburg.",
+    "swift_baseline": "I bought a MacBook Pro, an AirPods Mac at the Apple Store in Schomburg.",
+    "hypothesis": "I bought a MacBook Pro, an AirPods Macs at the Apple Store in Schomburg.",
+    "nemo_model": "nvidia/parakeet-rnnt-0.6b",
+    "nemo_baseline": "i bought a macbook pro and airpods macs at the apple store in schomburg",
+    "nemo_hypothesis": "i bought a macbook pro and airpods macs at the apple store in schomburg"
+  },
+  {
+    "file": "/Users/kikow/brandon/FluidAudioSwift/tts_context_boosting_kokoro/06_xavier_haagen_dazs_disney_af_heart.wav",
+    "filename": "06_xavier_haagen_dazs_disney_af_heart.wav",
+    "reference": "Xavier ordered Postmates delivery of Häagen-Dazs and watched Disney Plus.",
+    "swift_baseline": "ordered delivery of, and watched Disney<unk>.",
+    "hypothesis": "ordered delivery of, and watched Disney<unk>.",
+    "nemo_model": "nvidia/parakeet-rnnt-0.6b",
+    "nemo_baseline": "ordered delivery of and watched disney plus",
+    "nemo_hypothesis": "ordered delivery of and watched disney plus"
+  }
+]
