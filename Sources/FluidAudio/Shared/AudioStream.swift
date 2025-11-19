@@ -100,7 +100,7 @@ public struct AudioStream: Sendable {
 
             // re-synchronize
             if indexOffset > 0 {
-                if !processGaps || alignment == .backAligned {
+                if processGaps == false || alignment == .backAligned {
                     trimToFit(count: indexOffset + source.count)
                 }
                 buffer.append(contentsOf: Array(repeating: 0, count: indexOffset))
@@ -108,8 +108,11 @@ public struct AudioStream: Sendable {
                 buffer.removeLast(-indexOffset)
             }
         }
-
-        trimToFit(count: source.count)
+        
+        if alignment == .backAligned {
+            trimToFit(count: source.count)
+        }
+        
         buffer.append(contentsOf: source)
 
         guard let callback else { return }
@@ -178,10 +181,6 @@ public struct AudioStream: Sendable {
 
     /// Avoid unnecessary allocations due to overflow
     private mutating func trimToFit(count: Int) {
-        guard alignment == .frontAligned else {
-            return
-        }
-
         let expectedCount = count + buffer.count
         if expectedCount > capacity {
             let numRemoved = min(expectedCount - capacity, buffer.count)
