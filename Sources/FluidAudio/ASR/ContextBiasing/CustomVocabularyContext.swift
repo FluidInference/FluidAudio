@@ -5,9 +5,13 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     public let text: String
     public let weight: Float?
     public let aliases: [String]?
-    /// Optional pre-tokenized model vocabulary IDs for this phrase.
-    /// When present, trie biasing can operate directly on token IDs instead of words.
+    /// Optional pre-tokenized Parakeet TDT vocabulary IDs for this phrase.
+    /// When present, decode-time biasing can operate directly on RNNT/TDT token IDs.
     public let tokenIds: [Int]?
+    /// Optional pre-tokenized CTC vocabulary IDs for this phrase.
+    /// This is used by the auxiliary CTC keyword spotter path and is distinct from
+    /// the Parakeet TDT token IDs above.
+    public let ctcTokenIds: [Int]?
 }
 
 /// Raw JSON model for on‑disk config.

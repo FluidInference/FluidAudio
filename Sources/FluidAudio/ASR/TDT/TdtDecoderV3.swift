@@ -763,7 +763,9 @@ internal struct TdtDecoderV3 {
             if k >= 2 {
                 let margin = logitPtr[0] - logitPtr[1]
                 if debugEnabled {
-                    print("Margin between top-1 and top-2: \(String(format: "%.4f", margin)) (threshold: \(String(format: "%.4f", biasMarginThreshold)))")
+                    print(
+                        "Margin between top-1 and top-2: \(String(format: "%.4f", margin)) (threshold: \(String(format: "%.4f", biasMarginThreshold)))"
+                    )
                 }
                 if margin >= biasMarginThreshold {
                     if debugEnabled {
@@ -796,7 +798,9 @@ internal struct TdtDecoderV3 {
 
                 if debugEnabled && bonus > 0 {
                     let text = vocabulary[tid] ?? "<unk>"
-                    print("  Boosted token \(tid) ('\(text)'): logit \(String(format: "%.4f", base)) + bias \(String(format: "%.4f", bonus)) = \(String(format: "%.4f", base + bonus))")
+                    print(
+                        "  Boosted token \(tid) ('\(text)'): logit \(String(format: "%.4f", base)) + bias \(String(format: "%.4f", bonus)) = \(String(format: "%.4f", base + bonus))"
+                    )
                 }
             }
             // Rerank

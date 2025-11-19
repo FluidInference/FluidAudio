@@ -3,6 +3,16 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+// Helper for stderr output
+fileprivate struct StderrOutputStream: TextOutputStream {
+    func write(_ string: String) {
+        if let data = string.data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
+    }
+}
+fileprivate var stderr = StderrOutputStream()
+
 /// Thread-safe tracker for transcription updates and audio position
 actor TranscriptionTracker {
     private var volatileUpdates: [String] = []
@@ -109,6 +119,7 @@ enum TranscribeCommand {
         var modelVersion: AsrModelVersion = .v3  // Default to v3
         var customVocabPath: String? = nil
         var customVocab: CustomVocabularyContext? = nil
+        var useCtcKeywordBoost = false
 
         // Parse options
         var i = 1
@@ -142,6 +153,8 @@ enum TranscribeCommand {
                     logger.error("Missing path after --custom-vocab")
                     exit(1)
                 }
+            case "--ctc-keyword-boost":
+                useCtcKeywordBoost = true
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -173,13 +186,17 @@ enum TranscribeCommand {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion,
-                customVocabulary: customVocab)
+                customVocabulary: customVocab, useCtcKeywordBoost: useCtcKeywordBoost)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion, customVocabulary: CustomVocabularyContext?
+        audioFile: String,
+        showMetadata: Bool,
+        modelVersion: AsrModelVersion,
+        customVocabulary: CustomVocabularyContext?,
+        useCtcKeywordBoost: Bool
     ) async {
         do {
             // Initialize ASR models
@@ -211,8 +228,20 @@ enum TranscribeCommand {
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let result = try await asrManager.transcribe(audioFileURL, customVocabulary: customVocabulary)
+            let baseResult = try await asrManager.transcribe(audioFileURL, customVocabulary: customVocabulary)
             let processingTime = Date().timeIntervalSince(startTime)
+
+            // Optionally apply CTC-based keyword boosting when a custom vocabulary is provided.
+            let result: ASRResult
+            if useCtcKeywordBoost, let vocab = customVocabulary {
+                result = await applyCtcKeywordBoostIfNeeded(
+                    samples: samples,
+                    baseResult: baseResult,
+                    customVocabulary: vocab
+                )
+            } else {
+                result = baseResult
+            }
 
             // Print results
             logger.info("" + String(repeating: "=", count: 50))
@@ -270,6 +299,245 @@ enum TranscribeCommand {
         } catch {
             logger.error("Batch transcription failed: \(error)")
         }
+    }
+
+    /// Apply Argmax-style CTC keyword boosting on top of an existing ASR result.
+    ///
+    /// This uses the Parakeet-TDT CTC 110M CoreML models to score each
+    /// `CustomVocabularyTerm` that has `tokenIds` and, when possible, replaces
+    /// matching aliases in the transcript with the canonical term text.
+    private static func applyCtcKeywordBoostIfNeeded(
+        samples: [Float],
+        baseResult: ASRResult,
+        customVocabulary: CustomVocabularyContext,
+        minScore: Float = -10.0
+    ) async -> ASRResult {
+        if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+            print("[DEBUG] applyCtcKeywordBoostIfNeeded called", to: &stderr)
+        }
+
+        // Require non-empty vocabulary and timing metadata for time-aligned rewrites.
+        guard
+            !customVocabulary.terms.isEmpty,
+            let tokenTimings = baseResult.tokenTimings,
+            !tokenTimings.isEmpty
+        else {
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print(
+                    "[DEBUG] Early return: terms=\(customVocabulary.terms.count), tokenTimings=\(baseResult.tokenTimings?.count ?? 0)",
+                    to: &stderr)
+            }
+            return baseResult
+        }
+
+        do {
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print("[DEBUG] Creating CTC keyword spotter", to: &stderr)
+            }
+            let spotter = try await CtcKeywordSpotter.makeDefault()
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print("[DEBUG] Running spotKeywords on \(samples.count) samples", to: &stderr)
+            }
+            // Use a configurable CTC score threshold to filter out very weak
+            // detections before attempting any rewrites.
+            let detections = try await spotter.spotKeywords(
+                audioSamples: samples,
+                customVocabulary: customVocabulary,
+                minScore: minScore
+            )
+
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print("[DEBUG] Received \(detections.count) detections", to: &stderr)
+            }
+
+            // No CTC support or no confident matches → return baseline.
+            guard !detections.isEmpty else {
+                if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                    print("[DEBUG] No detections, returning baseline", to: &stderr)
+                }
+                return baseResult
+            }
+
+            // Insertion mode: keep the Parakeet v3 transcript intact and
+            // insert canonical custom-vocab phrases at word positions derived
+            // from the CTC detection windows.
+            var words = baseResult.text.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
+            if words.isEmpty {
+                return baseResult
+            }
+
+            let totalTokens = tokenTimings.count
+            let totalWords = words.count
+
+            struct InsertionOp {
+                let index: Int
+                let phrase: String
+                let score: Float
+            }
+
+            var insertions: [InsertionOp] = []
+            var seenPhrases: Set<String> = []
+
+            for detection in detections {
+                let canonical = detection.term.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !canonical.isEmpty else { continue }
+
+                // Only insert canonical phrases from the custom list; never
+                // decode raw CTC outputs.
+                if seenPhrases.contains(canonical) {
+                    continue
+                }
+
+                // Skip if the canonical phrase already appears verbatim in the
+                // baseline transcript.
+                if baseResult.text.range(
+                    of: canonical,
+                    options: [.caseInsensitive, .diacriticInsensitive]
+                ) != nil {
+                    continue
+                }
+
+                guard let tokenIndex = bestInsertionIndex(for: detection, tokenTimings: tokenTimings)
+                else {
+                    continue
+                }
+
+                let ratio: Double = totalTokens > 1
+                    ? Double(tokenIndex) / Double(totalTokens - 1) : 0.0
+                var wordIndex = Int((ratio * Double(totalWords)).rounded())
+                if wordIndex < 0 {
+                    wordIndex = 0
+                } else if wordIndex > words.count {
+                    wordIndex = words.count
+                }
+
+                insertions.append(
+                    InsertionOp(index: wordIndex, phrase: canonical, score: detection.score))
+                seenPhrases.insert(canonical)
+            }
+
+            guard !insertions.isEmpty else {
+                return baseResult
+            }
+
+            // Sort by index ascending, and for equal indices by descending score.
+            insertions.sort {
+                if $0.index == $1.index {
+                    return $0.score > $1.score
+                }
+                return $0.index < $1.index
+            }
+
+            // Apply insertions from the end so earlier indices remain valid.
+            for op in insertions.reversed() {
+                let idx = min(max(op.index, 0), words.count)
+                let phraseWords = op.phrase.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
+                words.insert(contentsOf: phraseWords, at: idx)
+            }
+
+            let updatedText = words.joined(separator: " ")
+
+            guard updatedText != baseResult.text else {
+                return baseResult
+            }
+
+            logger.info("CTC keyword boost updated transcript from:\n\(baseResult.text)\nTO:\n\(updatedText)")
+
+            return ASRResult(
+                text: updatedText,
+                confidence: baseResult.confidence,
+                duration: baseResult.duration,
+                processingTime: baseResult.processingTime,
+                tokenTimings: baseResult.tokenTimings,
+                performanceMetrics: baseResult.performanceMetrics
+            )
+        } catch {
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print("[DEBUG] CTC keyword boost exception: \(error)", to: &stderr)
+            }
+            logger.warning("CTC keyword boost failed: \(error)")
+            return baseResult
+        }
+    }
+
+    /// Compute the best token index at which to insert a canonical keyword,
+    /// based on overlap between the CTC detection window and Parakeet token
+    /// timings. If there are overlapping tokens, we pick the first; otherwise
+    /// we choose the token whose start time is closest to the detection start.
+    private static func bestInsertionIndex(
+        for detection: CtcKeywordSpotter.KeywordDetection,
+        tokenTimings: [TokenTiming]
+    ) -> Int? {
+        guard !tokenTimings.isEmpty else { return nil }
+
+        // First, collect tokens whose time window overlaps the detection window.
+        var overlappingIndices: [Int] = []
+        for (index, timing) in tokenTimings.enumerated() {
+            let tokenStart = timing.startTime
+            let tokenEnd = timing.endTime
+            if tokenEnd > detection.startTime && tokenStart < detection.endTime {
+                overlappingIndices.append(index)
+            }
+        }
+
+        if let firstOverlap = overlappingIndices.min() {
+            return firstOverlap
+        }
+
+        // Fallback: choose the token whose start time is closest to the detection's start time.
+        var bestIndex: Int?
+        var bestDelta = Double.greatestFiniteMagnitude
+
+        for (index, timing) in tokenTimings.enumerated() {
+            let delta = abs(timing.startTime - detection.startTime)
+            if delta < bestDelta {
+                bestDelta = delta
+                bestIndex = index
+            }
+        }
+
+        return bestIndex
+    }
+
+    /// Compute an approximate token span [start, end) for a CTC detection
+    /// using Parakeet token timings. We treat any token whose time window
+    /// overlaps the detection window as part of the span. If there are no
+    /// overlaps, we fall back to the single token whose start time is closest
+    /// to the detection start.
+    private static func spanForDetection(
+        _ detection: CtcKeywordSpotter.KeywordDetection,
+        tokenTimings: [TokenTiming]
+    ) -> (start: Int, end: Int)? {
+        guard !tokenTimings.isEmpty else { return nil }
+
+        var overlappingIndices: [Int] = []
+        for (index, timing) in tokenTimings.enumerated() {
+            let tokenStart = timing.startTime
+            let tokenEnd = timing.endTime
+            if tokenEnd > detection.startTime && tokenStart < detection.endTime {
+                overlappingIndices.append(index)
+            }
+        }
+
+        if let minIndex = overlappingIndices.min(), let maxIndex = overlappingIndices.max() {
+            return (start: minIndex, end: maxIndex + 1)
+        }
+
+        // No overlaps: choose nearest token by start time.
+        var bestIndex: Int?
+        var bestDelta = Double.greatestFiniteMagnitude
+        for (index, timing) in tokenTimings.enumerated() {
+            let delta = abs(timing.startTime - detection.startTime)
+            if delta < bestDelta {
+                bestDelta = delta
+                bestIndex = index
+            }
+        }
+
+        guard let idx = bestIndex else {
+            return nil
+        }
+        return (start: idx, end: idx + 1)
     }
 
     /// Test streaming transcription
