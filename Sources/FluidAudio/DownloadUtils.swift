@@ -321,6 +321,8 @@ public class DownloadUtils {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
+        case .parakeetCtc110m:
+            return ModelNames.CTC.requiredModels
         case .diarizer:
             return ModelNames.Diarizer.requiredModels
         case .kokoro:

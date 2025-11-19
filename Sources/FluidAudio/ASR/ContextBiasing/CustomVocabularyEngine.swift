@@ -98,8 +98,6 @@ struct CustomVocabularyEngine {
     }
 }
 
-
-
 /// Trie-based engine over token IDs, matching the model vocabulary indices.
 /// This is used when `CustomVocabularyTerm.tokenIds` is provided.
 struct TokenVocabularyEngine {
@@ -165,4 +163,3 @@ struct TokenVocabularyEngine {
         return (0, 0)
     }
 }
-
