@@ -206,7 +206,7 @@ The offline controller mirrors the reference pipeline:
 The CLI exposes the same controller via `fluidaudio process` and the diarization benchmark tooling:
 
 ```bash
-swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
+swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug --chunk-duration 10.0 --overlap 0.0
 swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6 --auto-download
 ```
 
