@@ -21,6 +21,8 @@ enum ProcessCommand {
         var mode = "streaming"  // Default to streaming
         var threshold: Float = 0.7045655  // PyAnnote community-1 default
         var debugMode = false
+        var chunkDuration: Float = 10.0
+        var chunkOverlap: Float = 0.0
         var outputFile: String?
         var rttmFile: String?
         var embeddingExportPath: String?
@@ -37,6 +39,16 @@ enum ProcessCommand {
             case "--threshold":
                 if i + 1 < arguments.count {
                     threshold = Float(arguments[i + 1]) ?? 0.8
+                    i += 1
+                }
+            case "--chunk-duration":
+                if i + 1 < arguments.count {
+                    chunkDuration = Float(arguments[i + 1]) ?? 10.0
+                    i += 1
+                }
+            case "--overlap":
+                if i + 1 < arguments.count {
+                    chunkOverlap = Float(arguments[i + 1]) ?? 0.0
                     i += 1
                 }
             case "--debug":
@@ -78,7 +90,9 @@ enum ProcessCommand {
             // Streaming mode - use DiarizerManager
             let config = DiarizerConfig(
                 clusteringThreshold: threshold,
-                debugMode: debugMode
+                debugMode: debugMode,
+                chunkDuration: chunkDuration,
+                chunkOverlap: chunkOverlap
             )
 
             let manager = DiarizerManager(config: config)
