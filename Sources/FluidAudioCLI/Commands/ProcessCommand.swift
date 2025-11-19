@@ -20,6 +20,8 @@ enum ProcessCommand {
         let audioFile = arguments[0]
         var mode = "streaming"  // Default to streaming
         var threshold: Float = 0.7045655  // PyAnnote community-1 default
+        var chunkDuration: Float = 10.0
+        var chunkOverlap: Float = 0.0
         var debugMode = false
         var chunkDuration: Float = 10.0
         var chunkOverlap: Float = 0.0

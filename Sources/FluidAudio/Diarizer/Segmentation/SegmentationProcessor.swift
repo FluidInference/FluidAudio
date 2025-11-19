@@ -11,6 +11,81 @@ public struct SegmentationProcessor {
 
     public init() {}
 
+    /// Repeat audio to fill the expected chunk length for downstream models.
+    ///
+    /// This keeps timestamps stable because only the audio is repeated; segment timing
+    /// continues to rely on the original chunk offset and frame indices.
+    public func repeatAudioChunk(
+        _ audioChunk: ArraySlice<Float>,
+        chunkSize: Int = 160_000,
+        buffer: inout [Float]
+    ) -> ArraySlice<Float> {
+        if buffer.count != chunkSize {
+            buffer = [Float](repeating: 0.0, count: chunkSize)
+        }
+
+        let copyCount = min(audioChunk.count, chunkSize)
+
+        buffer.withUnsafeMutableBufferPointer { destination in
+            guard let destBase = destination.baseAddress else { return }
+
+            guard copyCount > 0 else {
+                vDSP_vclr(destBase, 1, vDSP_Length(chunkSize))
+                return
+            }
+
+            let copied =
+                audioChunk.withContiguousStorageIfAvailable { storage -> Bool in
+                    guard let srcBase = storage.baseAddress else {
+                        return false
+                    }
+
+                    // If the storage already points to the destination buffer, skip the copy
+                    if srcBase == destBase {
+                        return true
+                    }
+
+                    vDSP_mmov(
+                        srcBase,
+                        destBase,
+                        vDSP_Length(copyCount),
+                        vDSP_Length(1),
+                        vDSP_Length(1),
+                        vDSP_Length(chunkSize)
+                    )
+                    return true
+                } ?? false
+
+            if !copied {
+                for (index, sample) in audioChunk.prefix(chunkSize).enumerated() {
+                    destBase.advanced(by: index).pointee = sample
+                }
+            }
+
+            if copyCount == chunkSize {
+                return
+            }
+
+            vDSP_vclr(destBase.advanced(by: copyCount), 1, vDSP_Length(chunkSize - copyCount))
+
+            var currentLength = copyCount
+            while currentLength < chunkSize {
+                let copyLength = min(currentLength, chunkSize - currentLength)
+                vDSP_mmov(
+                    destBase,
+                    destBase.advanced(by: currentLength),
+                    vDSP_Length(copyLength),
+                    vDSP_Length(1),
+                    vDSP_Length(1),
+                    vDSP_Length(copyLength)
+                )
+                currentLength += copyLength
+            }
+        }
+
+        return buffer[0..<chunkSize]
+    }
+
     /// Detect speaker segments using the CoreML segmentation model.
     ///
     /// This is the main model inference method that runs the pyannote segmentation model
