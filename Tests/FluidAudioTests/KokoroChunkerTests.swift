@@ -1,7 +1,7 @@
 import XCTest
 
 #if canImport(FluidAudioTTS) && canImport(ESpeakNG)
-import FluidAudioTTS
+@testable import FluidAudioTTS
 @testable import FluidAudio
 
 final class KokoroChunkerTests: XCTestCase {

@@ -1,7 +1,6 @@
 import FluidAudio
-import Foundation
-
 import FluidAudioTTS
+import Foundation
 
 public struct TTS {
 
