@@ -23,8 +23,6 @@ enum ProcessCommand {
         var chunkDuration: Float = 10.0
         var chunkOverlap: Float = 0.0
         var debugMode = false
-        var chunkDuration: Float = 10.0
-        var chunkOverlap: Float = 0.0
         var outputFile: String?
         var rttmFile: String?
         var embeddingExportPath: String?

@@ -260,7 +260,7 @@ public final class DiarizerManager {
 
         let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
 
-        var embeddingChunk = segmentationProcessor.repeatAudioChunk(
+        let embeddingChunk = segmentationProcessor.repeatAudioChunk(
             paddedChunk,
             chunkSize: chunkSize,
             buffer: &chunkBuffer
