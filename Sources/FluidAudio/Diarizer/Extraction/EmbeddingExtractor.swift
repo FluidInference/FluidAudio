@@ -7,6 +7,7 @@ public final class EmbeddingExtractor {
     private let wespeakerModel: MLModel
     private let logger = AppLogger(category: "EmbeddingExtractor")
     private let memoryOptimizer = ANEMemoryOptimizer()
+    private let embeddingWindowSampleCount = 160_000
 
     public init(embeddingModel: MLModel) {
         self.wespeakerModel = embeddingModel
@@ -34,22 +35,44 @@ public final class EmbeddingExtractor {
             return []
         }
 
-        let waveformShape = [3, 160_000] as [NSNumber]
+        let waveformShape = [3, embeddingWindowSampleCount] as [NSNumber]
         let maskShape = [3, firstMask.count] as [NSNumber]
 
-        let waveformBuffer = try memoryOptimizer.createAlignedArray(
+        let waveformBuffer = try memoryOptimizer.getPooledBuffer(
+            key: "embedding_waveform",
             shape: waveformShape,
             dataType: .float32
         )
 
-        let maskBuffer = try memoryOptimizer.createAlignedArray(
+        let maskBuffer = try memoryOptimizer.getPooledBuffer(
+            key: "embedding_mask_\(firstMask.count)",
             shape: maskShape,
             dataType: .float32
         )
 
+        let audioCopyLength = min(audio.count, embeddingWindowSampleCount)
+
+        memoryOptimizer.optimizedCopy(
+            from: audio,
+            to: waveformBuffer,
+            offset: 0  // First speaker slot
+        )
+
+        repeatVoiceSegmentIfNeeded(
+            in: waveformBuffer,
+            filledLength: audioCopyLength,
+            targetLength: embeddingWindowSampleCount,
+            offset: 0
+        )
+
+        // Prefetch once since waveform is shared across speakers
+        waveformBuffer.prefetchToNeuralEngine()
+
         // We need to return embeddings for ALL speakers, not just active ones
         // to maintain compatibility with the rest of the pipeline
         var embeddings: [[Float]] = []
+
+        let options = MLPredictionOptions()
 
         // Process all speakers but optimize for active ones
         for speakerIdx in 0..<masks.count {
@@ -61,13 +84,6 @@ public final class EmbeddingExtractor {
                 embeddings.append([Float](repeating: 0.0, count: 256))
                 continue
             }
-
-            // Use ANE-optimized copy for audio data
-            memoryOptimizer.optimizedCopy(
-                from: audio,
-                to: waveformBuffer,
-                offset: 0  // First speaker slot
-            )
 
             // Optimize mask creation with zero-copy view
             fillMaskBufferOptimized(
@@ -83,9 +99,7 @@ public final class EmbeddingExtractor {
             ])
 
             // Run model with optimal prediction options
-            let options = MLPredictionOptions()
             // Prefetch to Neural Engine for better performance
-            waveformBuffer.prefetchToNeuralEngine()
             maskBuffer.prefetchToNeuralEngine()
 
             let output = try wespeakerModel.prediction(from: featureProvider, options: options)
@@ -170,5 +184,34 @@ public final class EmbeddingExtractor {
         }
 
         return embedding
+    }
+
+    private func repeatVoiceSegmentIfNeeded(
+        in buffer: MLMultiArray,
+        filledLength: Int,
+        targetLength: Int,
+        offset: Int
+    ) {
+        guard buffer.dataType == .float32 else { return }
+
+        let availableLength = min(targetLength, max(0, buffer.count - offset))
+
+        guard filledLength > 0, filledLength < availableLength else { return }
+
+        let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self).advanced(by: offset)
+
+        var currentLength = filledLength
+        while currentLength < availableLength {
+            let copyCount = min(currentLength, availableLength - currentLength)
+            vDSP_mmov(
+                ptr,
+                ptr.advanced(by: currentLength),
+                vDSP_Length(copyCount),
+                vDSP_Length(1),
+                vDSP_Length(1),
+                vDSP_Length(copyCount)
+            )
+            currentLength += copyCount
+        }
     }
 }
