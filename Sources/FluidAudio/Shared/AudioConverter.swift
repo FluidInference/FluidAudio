@@ -1,5 +1,5 @@
-import Accelerate
 import AVFoundation
+import Accelerate
 import CoreMedia
 import Foundation
 import OSLog
@@ -57,13 +57,14 @@ final public class AudioConverter {
         try audioFile.read(into: buffer)
         return try resampleBuffer(buffer)
     }
-    
+
     /// Convert a CMSampleBuffer to 16kHz mono Float32 samples
     /// - Parameter sampleBuffer: Input CMSampleBuffer containing PCM data
     /// - Returns: Float array at 16kHz mono
     public func resampleSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+        else {
             throw AudioConverterError.sampleBufferFormatMissing
         }
 
