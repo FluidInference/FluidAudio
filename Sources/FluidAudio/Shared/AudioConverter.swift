@@ -1,5 +1,6 @@
-import AVFoundation
 import Accelerate
+import AVFoundation
+import CoreMedia
 import Foundation
 import OSLog
 
@@ -54,6 +55,45 @@ final public class AudioConverter {
         }
 
         try audioFile.read(into: buffer)
+        return try resampleBuffer(buffer)
+    }
+    
+    /// Convert a CMSampleBuffer to 16kHz mono Float32 samples
+    /// - Parameter sampleBuffer: Input CMSampleBuffer containing PCM data
+    /// - Returns: Float array at 16kHz mono
+    public func resampleSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            throw AudioConverterError.sampleBufferFormatMissing
+        }
+
+        var asbd = streamDescription.pointee
+        guard let sourceFormat = AVAudioFormat(streamDescription: &asbd) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+
+        let sampleCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        if sampleCount == 0 { return [] }
+        guard sampleCount <= Int32.max else {
+            throw AudioConverterError.frameCountOverflow
+        }
+
+        let frameCount = AVAudioFrameCount(sampleCount)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+        buffer.frameLength = frameCount
+
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(sampleCount),
+            into: buffer.mutableAudioBufferList
+        )
+        guard status == noErr else {
+            throw AudioConverterError.sampleBufferCopyFailed(status)
+        }
+
         return try resampleBuffer(buffer)
     }
 
@@ -283,6 +323,9 @@ public enum AudioConverterError: LocalizedError {
     case failedToCreateConverter
     case failedToCreateBuffer
     case conversionFailed(Error?)
+    case sampleBufferFormatMissing
+    case frameCountOverflow
+    case sampleBufferCopyFailed(OSStatus)
 
     public var errorDescription: String? {
         switch self {
@@ -292,6 +335,12 @@ public enum AudioConverterError: LocalizedError {
             return "Failed to create conversion buffer"
         case .conversionFailed(let error):
             return "Audio conversion failed: \(error?.localizedDescription ?? "Unknown error")"
+        case .sampleBufferFormatMissing:
+            return "Sample buffer is missing a valid audio format description"
+        case .frameCountOverflow:
+            return "Sample buffer contains more frames than supported"
+        case .sampleBufferCopyFailed(let status):
+            return "Failed to copy samples from CMSampleBuffer (status: \(status))"
         }
     }
 }
