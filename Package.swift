@@ -15,6 +15,10 @@ let package = Package(
             name: "FluidAudio",
             targets: ["FluidAudio"]
         ),
+        .library(
+            name: "FluidAudioWithTTS",
+            targets: ["FluidAudio", "FluidAudioTTS"]
+        ),
         .executable(
             name: "fluidaudio",
             targets: ["FluidAudioCLI"]
@@ -29,35 +33,35 @@ let package = Package(
                     "FastClusterWrapper",
                 ],
                 path: "Sources/FluidAudio",
-                exclude: ["Frameworks"]
+                exclude: [
+                    "Frameworks",
+                    "ASR/ContextBiasing",
+                    "ASR/CtcModels.swift",
+                ]
             ),
             .target(
                 name: "FastClusterWrapper",
                 path: "Sources/FastClusterWrapper",
                 publicHeadersPath: "include"
             ),
+            // TTS targets are always available for FluidAudioWithTTS product
+            .binaryTarget(
+                name: "ESpeakNG",
+                path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
+            ),
+            .target(
+                name: "FluidAudioTTS",
+                dependencies: [
+                    "FluidAudio",
+                    "ESpeakNG",
+                ],
+                path: "Sources/FluidAudioTTS"
+            ),
         ]
 
-        // CLI target: depend on TTS only when enabled so builds can exclude GPL bits
+        // CLI target: depend on TTS only when enabled via env var (for local development)
         var cliDependencies: [Target.Dependency] = ["FluidAudio"]
-
         if enableTTS {
-            targets.append(
-                .binaryTarget(
-                    name: "ESpeakNG",
-                    path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
-                )
-            )
-            targets.append(
-                .target(
-                    name: "FluidAudioTTS",
-                    dependencies: [
-                        "FluidAudio",
-                        "ESpeakNG",
-                    ],
-                    path: "Sources/FluidAudioTTS"
-                )
-            )
             cliDependencies.append("FluidAudioTTS")
         }
 

@@ -65,9 +65,33 @@ dependencies: [
 ],
 ```
 
-**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
+### Choosing a Product
 
-Important: When adding FluidAudio as a package dependency, only add the library to your target (not the executable). Select `FluidAudio` library in the package products dialog and add it to your app target.
+FluidAudio provides two library products:
+
+- **`FluidAudio`** (default) - Core functionality: ASR, diarization, VAD
+  - Lightweight, no GPL dependencies
+  - Recommended for most apps
+
+- **`FluidAudioWithTTS`** - Core + Text-to-Speech (Kokoro)
+  - Includes ESpeakNG framework (GPL-3.0)
+  - Choose this if you need TTS capabilities
+
+**In Xcode:**
+1. Add the FluidAudio package to your project
+2. In the "Add Package" dialog, select your desired product:
+   - `FluidAudio` for core features only
+   - `FluidAudioWithTTS` if you need text-to-speech
+3. Add the selected product to your app target
+
+**In Package.swift:**
+```swift
+.product(name: "FluidAudio", package: "FluidAudio")
+// OR for TTS support:
+.product(name: "FluidAudioWithTTS", package: "FluidAudio")
+```
+
+**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
 
 > **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
@@ -435,23 +459,26 @@ Requirements (macOS)
 Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
 <https://github.com/espeak-ng/espeak-ng/tree/master>
 
-### Enable TTS (build flag)
+### Enable TTS
 
-TTS is disabled by default to keep the core library lightweight and license‑clean for most apps. Enabling it pulls in the ESpeakNG framework (used for G2P/OOV handling) and the TTS targets, which:
+TTS is available as a separate product to keep the core library lightweight and license‑clean for most apps. The `FluidAudioWithTTS` product includes the ESpeakNG framework (GPL-3.0) for G2P/OOV handling.
 
-- Avoids shipping GPL‑compatible bits unless you explicitly opt in
-- Keeps default builds smaller and CI faster when TTS isn’t needed
-- Limits platform scope (ESpeakNG is supported and linked on macOS in this repo)
+**For library users (Xcode/SPM):**
+- Use the `FluidAudioWithTTS` product when adding the package (see [Installation](#installation))
+- Import both modules in your code:
+  ```swift
+  import FluidAudio       // Core functionality
+  import FluidAudioTTS    // TTS features
+  ```
 
-Enable TTS at build time with the `FLUIDAUDIO_ENABLE_TTS=1` environment variable:
-
-- Terminal (SwiftPM):
+**For CLI development:**
+- Use the `FLUIDAUDIO_ENABLE_TTS=1` environment variable:
   - `FLUIDAUDIO_ENABLE_TTS=1 swift run fluidaudio tts "Hello" --output out.wav`
-  - `FLUIDAUDIO_ENABLE_TTS=1 swift build` (to include TTS targets in the build)
-  - `FLUIDAUDIO_ENABLE_TTS=1 swift test` (to include TTS tests)
-- Xcode: Edit Scheme → Run → Arguments → Environment Variables → add `FLUIDAUDIO_ENABLE_TTS=1`
+  - `FLUIDAUDIO_ENABLE_TTS=1 swift build` (includes TTS in CLI)
+  - `FLUIDAUDIO_ENABLE_TTS=1 swift test` (includes TTS tests)
+- Or in Xcode: Edit Scheme → Run → Arguments → Environment Variables → add `FLUIDAUDIO_ENABLE_TTS=1`
 
-If you don’t enable the flag, `fluidaudio tts` will print “TTS is disabled in this build. Rebuild with FLUIDAUDIO_ENABLE_TTS=1 to enable.”
+Without the environment variable, `swift run fluidaudio tts` will print "TTS is disabled in this build."
 
 ### Quick Start (CLI)
 
