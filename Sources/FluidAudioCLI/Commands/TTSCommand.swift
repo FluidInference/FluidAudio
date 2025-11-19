@@ -1,11 +1,8 @@
 import FluidAudio
 import Foundation
 
-#if ENABLE_TTS && canImport(FluidAudioTTS)
 import FluidAudioTTS
-#endif
 
-#if ENABLE_TTS && canImport(FluidAudioTTS)
 public struct TTS {
 
     private static let logger = AppLogger(category: "TTSCommand")
@@ -443,17 +440,7 @@ public struct TTS {
         )
     }
 }
-#else
-public struct TTS {
-    private static let logger = AppLogger(category: "TTSCommand")
-    public static func run(arguments: [String]) async {
-        logger.error("TTS is disabled in this build. Rebuild with FLUIDAUDIO_ENABLE_TTS=1 to enable.")
-        print("TTS is disabled in this build. Rebuild with FLUIDAUDIO_ENABLE_TTS=1 to enable.")
-    }
-}
-#endif
 
-#if ENABLE_TTS && canImport(FluidAudioTTS)
 extension TTS {
     private struct BenchmarkResult {
         let text: String
@@ -728,4 +715,3 @@ extension TTS {
         }
     }
 }
-#endif

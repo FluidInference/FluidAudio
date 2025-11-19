@@ -39,24 +39,16 @@ import FluidAudioTTS    // TTS features
 
 ### For CLI Development
 
-When developing or running the FluidAudio CLI, use the `FLUIDAUDIO_ENABLE_TTS=1` environment variable:
+When developing or running the FluidAudio CLI, TTS support is enabled by default.
 
 **Terminal:**
 ```bash
-FLUIDAUDIO_ENABLE_TTS=1 swift run fluidaudio tts "Welcome to FluidAudio" --output ~/Desktop/demo.wav
+swift run fluidaudio tts "Welcome to FluidAudio" --output ~/Desktop/demo.wav
 
-# Or explicitly build/test with TTS enabled
-FLUIDAUDIO_ENABLE_TTS=1 swift build
-FLUIDAUDIO_ENABLE_TTS=1 swift test
+# Or explicitly build/test the CLI with TTS
+swift build
+swift test
 ```
-
-**Xcode (for CLI development):**
-1. Select the `fluidaudio` scheme
-2. Product → Scheme → Edit Scheme
-3. Run → Arguments → Environment Variables
-4. Click `+` and add: `FLUIDAUDIO_ENABLE_TTS` = `1`
-
-Without the flag, the CLI will report that TTS is disabled for the current build.
 
 ## CLI quick start
 

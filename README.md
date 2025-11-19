@@ -471,14 +471,11 @@ TTS is available as a separate product to keep the core library lightweight and 
   import FluidAudioTTS    // TTS features
   ```
 
-**For CLI development:**
-- Use the `FLUIDAUDIO_ENABLE_TTS=1` environment variable:
-  - `FLUIDAUDIO_ENABLE_TTS=1 swift run fluidaudio tts "Hello" --output out.wav`
-  - `FLUIDAUDIO_ENABLE_TTS=1 swift build` (includes TTS in CLI)
-  - `FLUIDAUDIO_ENABLE_TTS=1 swift test` (includes TTS tests)
-- Or in Xcode: Edit Scheme → Run → Arguments → Environment Variables → add `FLUIDAUDIO_ENABLE_TTS=1`
-
-Without the environment variable, `swift run fluidaudio tts` will print "TTS is disabled in this build."
+**For CLI usage:**
+- The `fluidaudio` CLI is built with TTS support enabled by default:
+  - `swift run fluidaudio tts "Hello" --output out.wav`
+  - `swift build` (builds CLI with TTS)
+  - `swift test` (runs tests including TTS coverage)
 
 ### Quick Start (CLI)
 
