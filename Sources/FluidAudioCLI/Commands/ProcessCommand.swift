@@ -41,12 +41,12 @@ enum ProcessCommand {
                     threshold = Float(arguments[i + 1]) ?? 0.8
                     i += 1
                 }
-            case "--chunk-duration":
+            case "--chunk-seconds":
                 if i + 1 < arguments.count {
                     chunkDuration = Float(arguments[i + 1]) ?? 10.0
                     i += 1
                 }
-            case "--overlap":
+            case "--overlap-seconds":
                 if i + 1 < arguments.count {
                     chunkOverlap = Float(arguments[i + 1]) ?? 0.0
                     i += 1
