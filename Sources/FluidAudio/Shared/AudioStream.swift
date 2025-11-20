@@ -112,6 +112,7 @@ public struct AudioStream: Sendable {
         if alignment == .backAligned {
             trimToFit(count: source.count)
         }
+        
         buffer.append(contentsOf: source)
 
         guard let callback else { return }

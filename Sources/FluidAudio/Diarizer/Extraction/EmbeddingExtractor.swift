@@ -7,7 +7,6 @@ public final class EmbeddingExtractor {
     private let wespeakerModel: MLModel
     private let logger = AppLogger(category: "EmbeddingExtractor")
     private let memoryOptimizer = ANEMemoryOptimizer()
-    private let embeddingWindowSampleCount = 160_000
 
     public init(embeddingModel: MLModel) {
         self.wespeakerModel = embeddingModel
@@ -35,44 +34,46 @@ public final class EmbeddingExtractor {
             return []
         }
 
-        let waveformShape = [3, embeddingWindowSampleCount] as [NSNumber]
+        let waveformSampleCount = 160_000
+        let waveformShape = [3, waveformSampleCount] as [NSNumber]
         let maskShape = [3, firstMask.count] as [NSNumber]
 
-        let waveformBuffer = try memoryOptimizer.getPooledBuffer(
-            key: "embedding_waveform",
+        let waveformBuffer = try memoryOptimizer.createAlignedArray(
             shape: waveformShape,
             dataType: .float32
         )
 
-        let maskBuffer = try memoryOptimizer.getPooledBuffer(
-            key: "embedding_mask_\(firstMask.count)",
+        let maskBuffer = try memoryOptimizer.createAlignedArray(
             shape: maskShape,
             dataType: .float32
         )
-
-        let audioCopyLength = min(audio.count, embeddingWindowSampleCount)
-
-        memoryOptimizer.optimizedCopy(
-            from: audio,
-            to: waveformBuffer,
-            offset: 0  // First speaker slot
-        )
-
-        repeatVoiceSegmentIfNeeded(
-            in: waveformBuffer,
-            filledLength: audioCopyLength,
-            targetLength: embeddingWindowSampleCount,
-            offset: 0
-        )
-
-        // Prefetch once since waveform is shared across speakers
-        waveformBuffer.prefetchToNeuralEngine()
 
         // We need to return embeddings for ALL speakers, not just active ones
         // to maintain compatibility with the rest of the pipeline
         var embeddings: [[Float]] = []
 
-        let options = MLPredictionOptions()
+        let audioSampleCount = audio.distance(from: audio.startIndex, to: audio.endIndex)
+        let effectiveSampleCount = min(audioSampleCount, waveformSampleCount)
+
+        let maskRepeatFrameCount: Int
+        if effectiveSampleCount == 0 {
+            maskRepeatFrameCount = 0
+        } else if effectiveSampleCount < waveformSampleCount {
+            let scaledFrames = Int(
+                (Double(firstMask.count) * Double(effectiveSampleCount)) / Double(waveformSampleCount)
+            )
+            maskRepeatFrameCount = max(1, min(firstMask.count, scaledFrames))
+        } else {
+            maskRepeatFrameCount = firstMask.count
+        }
+
+        // Repeat shorter chunks to 10s so the embedding model sees consistent input length
+        fillWaveformBuffer(
+            audio: audio,
+            buffer: waveformBuffer,
+            targetSampleCount: waveformSampleCount,
+            availableSampleCount: audioSampleCount
+        )
 
         // Process all speakers but optimize for active ones
         for speakerIdx in 0..<masks.count {
@@ -89,7 +90,8 @@ public final class EmbeddingExtractor {
             fillMaskBufferOptimized(
                 masks: masks,
                 speakerIndex: speakerIdx,
-                buffer: maskBuffer
+                buffer: maskBuffer,
+                repeatFrameCount: maskRepeatFrameCount
             )
 
             // Create zero-copy feature provider
@@ -99,7 +101,9 @@ public final class EmbeddingExtractor {
             ])
 
             // Run model with optimal prediction options
+            let options = MLPredictionOptions()
             // Prefetch to Neural Engine for better performance
+            waveformBuffer.prefetchToNeuralEngine()
             maskBuffer.prefetchToNeuralEngine()
 
             let output = try wespeakerModel.prediction(from: featureProvider, options: options)
@@ -120,28 +124,60 @@ public final class EmbeddingExtractor {
         return embeddings
     }
 
+    private func fillWaveformBuffer<C>(
+        audio: C,
+        buffer: MLMultiArray,
+        targetSampleCount: Int,
+        availableSampleCount: Int
+    ) where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
+        let copyCount = min(availableSampleCount, targetSampleCount)
+
+        guard copyCount > 0 else { return }
+
+        if copyCount == targetSampleCount {
+            memoryOptimizer.optimizedCopy(from: audio, to: buffer, offset: 0)
+            return
+        }
+
+        // Copy the available audio once
+        memoryOptimizer.optimizedCopy(from: audio.prefix(copyCount), to: buffer, offset: 0)
+
+        // Repeat in-place to reach target length with minimal additional copies
+        let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self)
+        var filled = copyCount
+        while filled < targetSampleCount {
+            let repeatCount = min(filled, targetSampleCount - filled)
+            let destination = ptr.advanced(by: filled)
+            memmove(destination, ptr, repeatCount * MemoryLayout<Float>.size)
+            filled += repeatCount
+        }
+    }
+
     private func fillMaskBufferOptimized(
         masks: [[Float]],
         speakerIndex: Int,
-        buffer: MLMultiArray
+        buffer: MLMultiArray,
+        repeatFrameCount: Int
     ) {
-        // Clear buffer using vDSP for speed
         let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self)
-        let totalElements = buffer.count
-        var zero: Float = 0
-        vDSP_vfill(&zero, ptr, 1, vDSP_Length(totalElements))
+        let maskCount = masks[speakerIndex].count
+        let framesToCopy = min(max(repeatFrameCount, 0), maskCount)
+        guard framesToCopy > 0 else { return }
+
+        // Clear just the active row (maskCount elements) before refilling
+        vDSP_vclr(ptr, 1, vDSP_Length(maskCount))
 
         // Copy speaker mask to first slot using optimized memory copy
-        let maskCount = masks[speakerIndex].count
-        masks[speakerIndex].withUnsafeBufferPointer { maskPtr in
-            vDSP_mmov(
-                maskPtr.baseAddress!,
-                ptr,
-                vDSP_Length(maskCount),
-                vDSP_Length(1),
-                vDSP_Length(1),
-                vDSP_Length(maskCount)
-            )
+        _ = masks[speakerIndex].withUnsafeBufferPointer { maskPtr in
+            memcpy(ptr, maskPtr.baseAddress!, framesToCopy * MemoryLayout<Float>.size)
+        }
+
+        var filledFrames = framesToCopy
+        while filledFrames < maskCount {
+            let copyCount = min(filledFrames, maskCount - filledFrames)
+            let destination = ptr.advanced(by: filledFrames)
+            memmove(destination, ptr, copyCount * MemoryLayout<Float>.size)
+            filledFrames += copyCount
         }
     }
 
@@ -184,34 +220,5 @@ public final class EmbeddingExtractor {
         }
 
         return embedding
-    }
-
-    private func repeatVoiceSegmentIfNeeded(
-        in buffer: MLMultiArray,
-        filledLength: Int,
-        targetLength: Int,
-        offset: Int
-    ) {
-        guard buffer.dataType == .float32 else { return }
-
-        let availableLength = min(targetLength, max(0, buffer.count - offset))
-
-        guard filledLength > 0, filledLength < availableLength else { return }
-
-        let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self).advanced(by: offset)
-
-        var currentLength = filledLength
-        while currentLength < availableLength {
-            let copyCount = min(currentLength, availableLength - currentLength)
-            vDSP_mmov(
-                ptr,
-                ptr.advanced(by: currentLength),
-                vDSP_Length(copyCount),
-                vDSP_Length(1),
-                vDSP_Length(1),
-                vDSP_Length(copyCount)
-            )
-            currentLength += copyCount
-        }
     }
 }
