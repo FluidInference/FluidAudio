@@ -228,7 +228,7 @@ enum TranscribeCommand {
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let baseResult = try await asrManager.transcribe(audioFileURL, customVocabulary: customVocabulary)
+            let baseResult = try await asrManager.transcribe(audioFileURL)
             let processingTime = Date().timeIntervalSince(startTime)
 
             // Optionally apply CTC-based keyword boosting when a custom vocabulary is provided.
@@ -366,9 +366,6 @@ enum TranscribeCommand {
                 return baseResult
             }
 
-            let totalTokens = tokenTimings.count
-            let totalWords = words.count
-
             struct InsertionOp {
                 let index: Int
                 let phrase: String
@@ -397,19 +394,16 @@ enum TranscribeCommand {
                     continue
                 }
 
-                guard let tokenIndex = bestInsertionIndex(for: detection, tokenTimings: tokenTimings)
-                else {
+                guard bestInsertionIndex(for: detection, tokenTimings: tokenTimings) != nil else {
                     continue
                 }
 
-                let ratio: Double = totalTokens > 1
-                    ? Double(tokenIndex) / Double(totalTokens - 1) : 0.0
-                var wordIndex = Int((ratio * Double(totalWords)).rounded())
-                if wordIndex < 0 {
-                    wordIndex = 0
-                } else if wordIndex > words.count {
-                    wordIndex = words.count
-                }
+                let detectionMidpoint = (detection.startTime + detection.endTime) / 2.0
+                let wordIndex = wordIndexNearTime(
+                    targetTime: detectionMidpoint,
+                    words: words,
+                    tokenTimings: tokenTimings
+                )
 
                 insertions.append(
                     InsertionOp(index: wordIndex, phrase: canonical, score: detection.score))
@@ -538,6 +532,48 @@ enum TranscribeCommand {
             return nil
         }
         return (start: idx, end: idx + 1)
+    }
+
+    /// Map a target timestamp to a best-effort word index using token timings.
+    /// Tokens that mark word starts (SentencePiece boundary "▁" or 1:1 word-token outputs)
+    /// are treated as anchors. We pick the word whose start time is closest to the target time.
+    private static func wordIndexNearTime(
+        targetTime: Double,
+        words: [String],
+        tokenTimings: [TokenTiming]
+    ) -> Int {
+        guard !words.isEmpty, !tokenTimings.isEmpty else { return 0 }
+
+        var starts: [(index: Int, time: Double)] = []
+        let tokensEqualWords = tokenTimings.count == words.count
+
+        // Always anchor the first word to the first token's start time.
+        starts.append((0, tokenTimings[0].startTime))
+        var currentWord = 0
+
+        for timing in tokenTimings.dropFirst() {
+            let rawToken = timing.token
+            let trimmed = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isBoundary = trimmed.hasPrefix("▁") || tokensEqualWords
+            if isBoundary && currentWord + 1 < words.count {
+                currentWord += 1
+                starts.append((currentWord, timing.startTime))
+            }
+        }
+
+        guard let best = starts.min(by: { lhs, rhs in
+            abs(lhs.time - targetTime) < abs(rhs.time - targetTime)
+        }) else {
+            return 0
+        }
+
+        if best.index < 0 {
+            return 0
+        }
+        if best.index >= words.count {
+            return words.count - 1
+        }
+        return best.index
     }
 
     /// Test streaming transcription
@@ -751,7 +787,8 @@ enum TranscribeCommand {
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
-                --custom-vocab <path>      Load custom vocabulary JSON for context boosting
+                --custom-vocab <path>      Load custom vocabulary JSON for CTC keyword boosting
+                --ctc-keyword-boost        Enable CTC keyword spotting when using a custom vocab
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)

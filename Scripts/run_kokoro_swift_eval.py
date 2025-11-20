@@ -16,6 +16,7 @@ Usage (from FluidAudioSwift root):
     --wav-dir tts_context_boosting_kokoro \
     --out kokoro_swift_eval.json \
     [--custom-vocab custom_vocab_parakeet_v3/custom_vocab.json] \
+    [--disable-ctc] \
     [--with-nemo --nemo-model-name nvidia/parakeet-rnnt-0.6b]
 """
 
@@ -178,6 +179,11 @@ def main() -> None:
         help="Optional path to custom_vocab JSON for context boosting",
     )
     ap.add_argument(
+        "--disable-ctc",
+        action="store_true",
+        help="Disable CTC keyword boosting even when a custom vocab is provided",
+    )
+    ap.add_argument(
         "--with-nemo",
         action="store_true",
         help="Also run NeMo ASR and add nemo_hypothesis/nemo_model to the JSON output",
@@ -236,6 +242,8 @@ def main() -> None:
 
     results: List[dict] = []
 
+    use_ctc_boost = custom_vocab is not None and not args.disable_ctc
+
     for wav in sorted(wav_dir.glob("*.wav")):
         ref = DEFAULT_REFERENCES.get(wav.name)
         if ref is None:
@@ -284,7 +292,7 @@ def main() -> None:
             hyp = run_swift_transcribe(
                 wav,
                 custom_vocab=per_file_custom_vocab or custom_vocab,
-                use_ctc=True,
+                use_ctc=use_ctc_boost,
             )
         else:
             hyp = swift_baseline

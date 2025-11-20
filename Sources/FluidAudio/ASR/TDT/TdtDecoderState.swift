@@ -6,9 +6,6 @@ import Foundation
 struct TdtDecoderState {
     var hiddenState: MLMultiArray
     var cellState: MLMultiArray
-    /// Optional trie cursor for custom vocabulary context boosting.
-    /// When non-nil, this tracks the current node in the CustomVocabularyEngine trie.
-    var vocabNode: Int?
     /// Stores the last decoded token from the previous audio chunk.
     /// Used for maintaining linguistic context across chunk boundaries in streaming ASR.
     /// When processing a new chunk, the decoder starts with this token instead of SOS,
@@ -43,7 +40,6 @@ struct TdtDecoderState {
         // Initialize to zeros using Accelerate
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
-        vocabNode = nil
     }
 
     static func make() -> TdtDecoderState {
@@ -62,7 +58,6 @@ struct TdtDecoderState {
     init(from other: TdtDecoderState) throws {
         hiddenState = try MLMultiArray(shape: other.hiddenState.shape, dataType: .float32)
         cellState = try MLMultiArray(shape: other.cellState.shape, dataType: .float32)
-        vocabNode = other.vocabNode
         lastToken = other.lastToken
         timeJump = other.timeJump
 
@@ -74,7 +69,6 @@ struct TdtDecoderState {
     mutating func reset() {
         hiddenState.resetData(to: 0)
         cellState.resetData(to: 0)
-        vocabNode = nil
         lastToken = nil
         predictorOutput = nil
         timeJump = nil
