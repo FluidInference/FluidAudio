@@ -81,6 +81,45 @@ public struct TtsModels {
         return TtsModels(models: loaded)
     }
 
+    /// Load a Kokoro CoreML model from a local path (either .mlmodelc or .mlpackage).
+    /// The loaded model is registered under the 15s variant by default.
+    public static func loadLocal(at path: String) async throws -> TtsModels {
+        let expanded = (path as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: expanded)
+        let fm = FileManager.default
+
+        guard fm.fileExists(atPath: url.path) else {
+            throw TTSError.modelNotFound("Local model not found at: \(url.path)")
+        }
+
+        let modelURL: URL
+        do {
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            if url.pathExtension == "mlmodelc" || (isDir && url.path.hasSuffix(".mlmodelc")) {
+                modelURL = url
+            } else if url.pathExtension == "mlpackage" || isDir {
+                modelURL = try await MLModel.compileModel(at: url)
+            } else {
+                // Try loading directly; if it fails, attempt compile
+                do {
+                    _ = try MLModel(contentsOf: url)
+                    modelURL = url
+                } catch {
+                    modelURL = try await MLModel.compileModel(at: url)
+                }
+            }
+        } catch {
+            throw TTSError.processingFailed("Failed to prepare local model: \(error.localizedDescription)")
+        }
+
+        do {
+            let model = try MLModel(contentsOf: modelURL)
+            return TtsModels(models: [.fifteenSecond: model])
+        } catch {
+            throw TTSError.processingFailed("Failed to load local model: \(error.localizedDescription)")
+        }
+    }
+
     private static func getCacheDirectory() throws -> URL {
         let baseDirectory: URL
         #if os(macOS)
