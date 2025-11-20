@@ -231,6 +231,7 @@ public final class AsrManager {
         globalFrameOffset: Int = 0,
         customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> TdtHypothesis {
+        _ = customVocabulary  // Custom vocab is ignored for TDT decoding (CTC-only path uses it separately)
         // Route to appropriate decoder based on model version
         switch asrModels!.version {
         case .v2:
@@ -247,7 +248,7 @@ public final class AsrManager {
                 globalFrameOffset: globalFrameOffset
             )
         case .v3:
-            let decoder = TdtDecoderV3(config: config, vocabulary: vocabulary, biasContext: customVocabulary)
+            let decoder = TdtDecoderV3(config: config)
             return try await decoder.decodeWithTimings(
                 encoderOutput: encoderOutput,
                 encoderSequenceLength: encoderSequenceLength,
