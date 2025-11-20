@@ -34,7 +34,8 @@ public final class EmbeddingExtractor {
             return []
         }
 
-        let waveformShape = [3, 160_000] as [NSNumber]
+        let waveformSampleCount = 160_000
+        let waveformShape = [3, waveformSampleCount] as [NSNumber]
         let maskShape = [3, firstMask.count] as [NSNumber]
 
         let waveformBuffer = try memoryOptimizer.createAlignedArray(
@@ -51,6 +52,29 @@ public final class EmbeddingExtractor {
         // to maintain compatibility with the rest of the pipeline
         var embeddings: [[Float]] = []
 
+        let audioSampleCount = audio.distance(from: audio.startIndex, to: audio.endIndex)
+        let effectiveSampleCount = min(audioSampleCount, waveformSampleCount)
+
+        let maskRepeatFrameCount: Int
+        if effectiveSampleCount == 0 {
+            maskRepeatFrameCount = 0
+        } else if effectiveSampleCount < waveformSampleCount {
+            let scaledFrames = Int(
+                (Double(firstMask.count) * Double(effectiveSampleCount)) / Double(waveformSampleCount)
+            )
+            maskRepeatFrameCount = max(1, min(firstMask.count, scaledFrames))
+        } else {
+            maskRepeatFrameCount = firstMask.count
+        }
+
+        // Repeat shorter chunks to 10s so the embedding model sees consistent input length
+        fillWaveformBuffer(
+            audio: audio,
+            buffer: waveformBuffer,
+            targetSampleCount: waveformSampleCount,
+            availableSampleCount: audioSampleCount
+        )
+
         // Process all speakers but optimize for active ones
         for speakerIdx in 0..<masks.count {
             // Check if speaker is active
@@ -62,18 +86,12 @@ public final class EmbeddingExtractor {
                 continue
             }
 
-            // Use ANE-optimized copy for audio data
-            memoryOptimizer.optimizedCopy(
-                from: audio,
-                to: waveformBuffer,
-                offset: 0  // First speaker slot
-            )
-
             // Optimize mask creation with zero-copy view
             fillMaskBufferOptimized(
                 masks: masks,
                 speakerIndex: speakerIdx,
-                buffer: maskBuffer
+                buffer: maskBuffer,
+                repeatFrameCount: maskRepeatFrameCount
             )
 
             // Create zero-copy feature provider
@@ -106,28 +124,60 @@ public final class EmbeddingExtractor {
         return embeddings
     }
 
+    private func fillWaveformBuffer<C>(
+        audio: C,
+        buffer: MLMultiArray,
+        targetSampleCount: Int,
+        availableSampleCount: Int
+    ) where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
+        let copyCount = min(availableSampleCount, targetSampleCount)
+
+        guard copyCount > 0 else { return }
+
+        if copyCount == targetSampleCount {
+            memoryOptimizer.optimizedCopy(from: audio, to: buffer, offset: 0)
+            return
+        }
+
+        // Copy the available audio once
+        memoryOptimizer.optimizedCopy(from: audio.prefix(copyCount), to: buffer, offset: 0)
+
+        // Repeat in-place to reach target length with minimal additional copies
+        let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self)
+        var filled = copyCount
+        while filled < targetSampleCount {
+            let repeatCount = min(filled, targetSampleCount - filled)
+            let destination = ptr.advanced(by: filled)
+            memmove(destination, ptr, repeatCount * MemoryLayout<Float>.size)
+            filled += repeatCount
+        }
+    }
+
     private func fillMaskBufferOptimized(
         masks: [[Float]],
         speakerIndex: Int,
-        buffer: MLMultiArray
+        buffer: MLMultiArray,
+        repeatFrameCount: Int
     ) {
-        // Clear buffer using vDSP for speed
         let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self)
-        let totalElements = buffer.count
-        var zero: Float = 0
-        vDSP_vfill(&zero, ptr, 1, vDSP_Length(totalElements))
+        let maskCount = masks[speakerIndex].count
+        let framesToCopy = min(max(repeatFrameCount, 0), maskCount)
+        guard framesToCopy > 0 else { return }
+
+        // Clear just the active row (maskCount elements) before refilling
+        vDSP_vclr(ptr, 1, vDSP_Length(maskCount))
 
         // Copy speaker mask to first slot using optimized memory copy
-        let maskCount = masks[speakerIndex].count
         masks[speakerIndex].withUnsafeBufferPointer { maskPtr in
-            vDSP_mmov(
-                maskPtr.baseAddress!,
-                ptr,
-                vDSP_Length(maskCount),
-                vDSP_Length(1),
-                vDSP_Length(1),
-                vDSP_Length(maskCount)
-            )
+            memcpy(ptr, maskPtr.baseAddress!, framesToCopy * MemoryLayout<Float>.size)
+        }
+
+        var filledFrames = framesToCopy
+        while filledFrames < maskCount {
+            let copyCount = min(filledFrames, maskCount - filledFrames)
+            let destination = ptr.advanced(by: filledFrames)
+            memmove(destination, ptr, copyCount * MemoryLayout<Float>.size)
+            filledFrames += copyCount
         }
     }
 
