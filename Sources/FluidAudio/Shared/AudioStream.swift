@@ -108,11 +108,11 @@ public struct AudioStream: Sendable {
                 buffer.removeLast(-indexOffset)
             }
         }
-        
+
         if alignment == .backAligned {
             trimToFit(count: source.count)
         }
-        
+
         buffer.append(contentsOf: source)
 
         guard let callback else { return }
