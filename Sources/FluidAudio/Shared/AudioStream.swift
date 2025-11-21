@@ -45,7 +45,7 @@ public struct AudioStream: Sendable {
     }
 
     // MARK: - init
-    
+
     /// - Parameters:
     ///   - chunkDuration: Chunk duration in seconds
     ///   - strideDuration: Duration between successive chunk starts (defaults to chunkDuration)
@@ -66,7 +66,7 @@ public struct AudioStream: Sendable {
         self.alignment = alignment
 
         self.chunkSize = Int(round(Self.sampleRate * chunkDuration))
-        self.hopSize =  Int(round(Self.sampleRate * self.strideDuration))
+        self.hopSize = Int(round(Self.sampleRate * self.strideDuration))
         self.processGaps = processGaps
 
         self.buffer = ContiguousArray(repeating: 0, count: chunkSize - hopSize)
