@@ -252,3 +252,29 @@ Note that the baseline pytorch version is ~11% DER, we lost some precision dropp
 ### Streaming/online Diarization
 
 This is more tricky and honestly a lot more fragile to clustering. Expect +10-15% worse DER for the streaming implementation. Only use this when you critically need realtime streaming speaker diarization. In most cases, offline is more than enough for most applications.
+
+Running a near real-time diarization benchmark:
+```bash
+swift run fluidaudio diarization-benchmark --mode streaming \
+    --dataset ami-sdm \
+    --threshold 0.8 \
+    --auto-download \
+    --chunk-seconds 3.0 \
+    --overlap-seconds 2.0
+    
+...
+
+------------------------------------------------------------------------------------------
+Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
+------------------------------------------------------------------------------------------
+IS1002b          12.2     13.7      4.0      4.8      3.4 5/4           128.0
+ES2003a          18.8     30.4      9.5      1.2      8.2 4/4           163.9
+ES2002a          25.0     33.3      9.8      7.9      7.2 7/4           127.9
+ES2005a          28.8     47.7     10.3      6.1     12.4 5/4           158.4
+IS1000a          33.9     46.1     11.8      5.4     16.8 7/4           136.9
+IS1001a          76.3     91.4     12.3      4.2     59.8 8/4           134.9
+ES2004a          78.3     96.8     10.4      1.8     66.1 7/4           137.4
+------------------------------------------------------------------------------------------
+AVERAGE          39.0     51.4      9.7      4.5     24.8         -    141.1
+==========================================================================================
+```
