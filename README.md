@@ -61,28 +61,9 @@ Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.7"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
 ],
 ```
-
-### Choosing a Product
-
-FluidAudio provides two library products:
-
-- **`FluidAudio`** (default) - Core functionality: ASR, diarization, VAD
-  - Lightweight, no GPL dependencies
-  - Recommended for most apps
-
-- **`FluidAudioWithTTS`** - Core + Text-to-Speech (Kokoro)
-  - Includes ESpeakNG framework (GPL-3.0)
-  - Choose this if you need TTS capabilities
-
-**In Xcode:**
-1. Add the FluidAudio package to your project
-2. In the "Add Package" dialog, select your desired product:
-   - `FluidAudio` for core features only
-   - `FluidAudioWithTTS` if you need text-to-speech
-3. Add the selected product to your app target
 
 **In Package.swift:**
 ```swift
@@ -90,6 +71,13 @@ FluidAudio provides two library products:
 // OR for TTS support:
 .product(name: "FluidAudioWithTTS", package: "FluidAudio")
 ```
+
+**In Xcode:**
+1. Add the FluidAudio package to your project
+2. In the "Add Package" dialog, select your desired product:
+   - `FluidAudio` for core features only
+   - `FluidAudioWithTTS` if you need text-to-speech
+3. Add the selected product to your app target
 
 **CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
 
