@@ -447,18 +447,6 @@ Requirements (macOS)
 Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
 <https://github.com/espeak-ng/espeak-ng/tree/master>
 
-### Enable TTS
-
-TTS is available as a separate product to keep the core library lightweight and license‑clean for most apps. The `FluidAudioWithTTS` product includes the ESpeakNG framework (GPL-3.0) for G2P/OOV handling.
-
-**For library users (Xcode/SPM):**
-- Use the `FluidAudioWithTTS` product when adding the package (see [Installation](#installation))
-- Import both modules in your code:
-  ```swift
-  import FluidAudio       // Core functionality
-  import FluidAudioTTS    // TTS features
-  ```
-
 **For CLI usage:**
 - The `fluidaudio` CLI is built with TTS support enabled by default:
   - `swift run fluidaudio tts "Hello" --output out.wav`
