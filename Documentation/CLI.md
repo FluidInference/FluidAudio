@@ -2,6 +2,14 @@
 
 This guide collects commonly used `fluidaudio` CLI commands for ASR, diarization, VAD, and datasets.
 
+## TTS
+
+TTS is built into the CLI. Run it directly:
+
+```bash
+swift run fluidaudio tts "Hello from FluidAudio" --output out.wav
+```
+
 ## ASR
 
 ```bash

@@ -1,5 +1,7 @@
 import XCTest
 
+#if canImport(FluidAudioTTS) && canImport(ESpeakNG)
+import FluidAudioTTS
 @testable import FluidAudio
 
 /// Tests that verify the ESpeakNG framework can be properly linked and loaded.
@@ -60,3 +62,4 @@ final class FrameworkLinkTests: XCTestCase {
         }
     }
 }
+#endif

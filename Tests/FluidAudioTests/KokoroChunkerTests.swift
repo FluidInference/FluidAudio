@@ -1,5 +1,7 @@
 import XCTest
 
+#if canImport(FluidAudioTTS) && canImport(ESpeakNG)
+@testable import FluidAudioTTS
 @testable import FluidAudio
 
 final class KokoroChunkerTests: XCTestCase {
@@ -138,3 +140,4 @@ final class KokoroChunkerTests: XCTestCase {
         )
     }
 }
+#endif

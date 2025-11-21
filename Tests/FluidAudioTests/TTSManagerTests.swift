@@ -1,5 +1,7 @@
 import XCTest
 
+#if canImport(FluidAudioTTS) && canImport(ESpeakNG)
+import FluidAudioTTS
 @testable import FluidAudio
 
 final class TtSManagerTests: XCTestCase {
@@ -160,3 +162,4 @@ final class TtSManagerTests: XCTestCase {
         }
     }
 }
+#endif

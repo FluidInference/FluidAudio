@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 public struct TtsPreprocessingResult {
