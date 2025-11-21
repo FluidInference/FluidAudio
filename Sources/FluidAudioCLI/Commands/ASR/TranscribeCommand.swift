@@ -301,45 +301,30 @@ enum TranscribeCommand {
         }
     }
 
-    /// Apply Argmax-style CTC keyword boosting on top of an existing ASR result.
+    /// Apply CTC keyword boosting using CTC detections as a word presence signal.
     ///
-    /// This uses the Parakeet-TDT CTC 110M CoreML models to score each
-    /// `CustomVocabularyTerm` that has `tokenIds` and, when possible, replaces
-    /// matching aliases in the transcript with the canonical term text.
+    /// Strategy: CTC acts as a detector for which keywords are present in the audio.
+    /// For each detected keyword, find the most similar word(s) in the TDT transcript
+    /// and replace with the canonical form, regardless of timing alignment.
     private static func applyCtcKeywordBoostIfNeeded(
         samples: [Float],
         baseResult: ASRResult,
         customVocabulary: CustomVocabularyContext,
-        minScore: Float = -10.0
+        minScore: Float = -10.0,
+        minSimilarity: Float = 0.50,
+        minCombinedConfidence: Float = 0.54
     ) async -> ASRResult {
         if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
             print("[DEBUG] applyCtcKeywordBoostIfNeeded called", to: &stderr)
         }
 
-        // Require non-empty vocabulary and timing metadata for time-aligned rewrites.
-        guard
-            !customVocabulary.terms.isEmpty,
-            let tokenTimings = baseResult.tokenTimings,
-            !tokenTimings.isEmpty
-        else {
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                print(
-                    "[DEBUG] Early return: terms=\(customVocabulary.terms.count), tokenTimings=\(baseResult.tokenTimings?.count ?? 0)",
-                    to: &stderr)
-            }
+        guard !customVocabulary.terms.isEmpty else {
             return baseResult
         }
 
         do {
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                print("[DEBUG] Creating CTC keyword spotter", to: &stderr)
-            }
+            // Step 1: Run CTC to detect which keywords are present
             let spotter = try await CtcKeywordSpotter.makeDefault()
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                print("[DEBUG] Running spotKeywords on \(samples.count) samples", to: &stderr)
-            }
-            // Use a configurable CTC score threshold to filter out very weak
-            // detections before attempting any rewrites.
             let detections = try await spotter.spotKeywords(
                 audioSamples: samples,
                 customVocabulary: customVocabulary,
@@ -347,92 +332,208 @@ enum TranscribeCommand {
             )
 
             if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                print("[DEBUG] Received \(detections.count) detections", to: &stderr)
-            }
-
-            // No CTC support or no confident matches → return baseline.
-            guard !detections.isEmpty else {
-                if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                    print("[DEBUG] No detections, returning baseline", to: &stderr)
+                print("[DEBUG] CTC detected \(detections.count) keywords", to: &stderr)
+                for detection in detections {
+                    print(
+                        "[DEBUG]   '\(detection.term.text)' score=\(String(format: "%.2f", detection.score))",
+                        to: &stderr)
                 }
+            }
+
+            guard !detections.isEmpty else {
                 return baseResult
             }
 
-            // Insertion mode: keep the Parakeet v3 transcript intact and
-            // insert canonical custom-vocab phrases at word positions derived
-            // from the CTC detection windows.
+            // Step 2: Build set of detected canonical keywords
+            let detectedKeywords = Set(detections.map { $0.term.text.lowercased() })
+
+            // Step 3: Split TDT transcript into words
             var words = baseResult.text.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
-            if words.isEmpty {
+            guard !words.isEmpty else {
                 return baseResult
             }
 
-            struct InsertionOp {
-                let index: Int
-                let phrase: String
-                let score: Float
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print("[DEBUG] TDT transcript has \(words.count) words", to: &stderr)
+                print("[DEBUG] Searching for best matches for \(detectedKeywords.count) detected keywords", to: &stderr)
             }
 
-            var insertions: [InsertionOp] = []
-            var seenPhrases: Set<String> = []
+            // Step 4: For each detected keyword, find best matching word(s) in transcript
+            struct Replacement {
+                let wordIndex: Int
+                let canonical: String
+                let similarity: Float
+                let ctcScore: Float
+                let originalWord: String
+
+                var combinedConfidence: Float {
+                    // Normalize CTC score from [-10, -5] range to [0, 1]
+                    // Better CTC scores (closer to 0) = higher confidence
+                    let normalizedCtcScore = max(0, min(1, (ctcScore + 10) / 5))
+                    // Weight similarity more heavily (60%) than CTC confidence (40%)
+                    return 0.6 * similarity + 0.4 * normalizedCtcScore
+                }
+            }
+
+            var replacements: [Replacement] = []
 
             for detection in detections {
                 let canonical = detection.term.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !canonical.isEmpty else { continue }
 
-                // Only insert canonical phrases from the custom list; never
-                // decode raw CTC outputs.
-                if seenPhrases.contains(canonical) {
+                let canonicalWords = canonical.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
+
+                // Skip if canonical already exists verbatim in transcript
+                if baseResult.text.range(of: canonical, options: [.caseInsensitive]) != nil {
+                    if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                        print("[DEBUG] '\(canonical)' already exists verbatim, skipping", to: &stderr)
+                    }
                     continue
                 }
 
-                // Skip if the canonical phrase already appears verbatim in the
-                // baseline transcript.
-                if baseResult.text.range(
-                    of: canonical,
-                    options: [.caseInsensitive, .diacriticInsensitive]
-                ) != nil {
-                    continue
+                // Find best matching word or phrase in transcript
+                var bestMatch: (index: Int, similarity: Float, spanLength: Int)?
+
+                // Try single-word matches
+                for (i, word) in words.enumerated() {
+                    let cleanWord = word.trimmingCharacters(in: .punctuationCharacters)
+
+                    // For multi-word canonical, compare against first word
+                    let targetWord = canonicalWords[0]
+                    let similarity = characterSimilarity(cleanWord, targetWord)
+
+                    if similarity >= minSimilarity {
+                        if let existing = bestMatch {
+                            if similarity > existing.similarity {
+                                bestMatch = (i, similarity, canonicalWords.count)
+                            }
+                        } else {
+                            bestMatch = (i, similarity, canonicalWords.count)
+                        }
+                    }
                 }
 
-                guard bestInsertionIndex(for: detection, tokenTimings: tokenTimings) != nil else {
-                    continue
+                // Try multi-word matches if canonical has multiple words
+                if canonicalWords.count > 1 {
+                    for startIdx in 0..<words.count {
+                        let endIdx = min(startIdx + canonicalWords.count, words.count)
+                        let span = words[startIdx..<endIdx]
+                        let spanText = span.map { $0.trimmingCharacters(in: .punctuationCharacters) }.joined(
+                            separator: " ")
+
+                        let similarity = characterSimilarity(spanText, canonical)
+
+                        if similarity >= minSimilarity {
+                            if let existing = bestMatch {
+                                // Prefer longer spans and higher similarity
+                                if span.count > existing.spanLength
+                                    || (span.count == existing.spanLength && similarity > existing.similarity)
+                                {
+                                    bestMatch = (startIdx, similarity, span.count)
+                                }
+                            } else {
+                                bestMatch = (startIdx, similarity, span.count)
+                            }
+                        }
+                    }
                 }
 
-                let detectionMidpoint = (detection.startTime + detection.endTime) / 2.0
-                let wordIndex = wordIndexNearTime(
-                    targetTime: detectionMidpoint,
-                    words: words,
-                    tokenTimings: tokenTimings
-                )
+                if let match = bestMatch {
+                    let originalSpan = words[match.index..<min(match.index + match.spanLength, words.count)]
+                    let replacement = Replacement(
+                        wordIndex: match.index,
+                        canonical: canonical,
+                        similarity: match.similarity,
+                        ctcScore: detection.score,
+                        originalWord: originalSpan.joined(separator: " ")
+                    )
 
-                insertions.append(
-                    InsertionOp(index: wordIndex, phrase: canonical, score: detection.score))
-                seenPhrases.insert(canonical)
+                    // Filter by combined confidence
+                    if replacement.combinedConfidence >= minCombinedConfidence {
+                        replacements.append(replacement)
+
+                        if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                            print(
+                                "[DEBUG] Match: '\(originalSpan.joined(separator: " "))' -> '\(canonical)' (similarity: \(String(format: "%.2f", match.similarity)), ctc: \(String(format: "%.2f", detection.score)), combined: \(String(format: "%.2f", replacement.combinedConfidence)))",
+                                to: &stderr)
+                        }
+                    } else if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                        print(
+                            "[DEBUG] Rejected: '\(originalSpan.joined(separator: " "))' -> '\(canonical)' (similarity: \(String(format: "%.2f", match.similarity)), ctc: \(String(format: "%.2f", detection.score)), combined: \(String(format: "%.2f", replacement.combinedConfidence)) < \(String(format: "%.2f", minCombinedConfidence)))",
+                            to: &stderr)
+                    }
+                }
             }
 
-            guard !insertions.isEmpty else {
+            guard !replacements.isEmpty else {
+                if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                    print("[DEBUG] No suitable replacements found", to: &stderr)
+                }
                 return baseResult
             }
 
-            // Sort by index ascending, and for equal indices by descending score.
-            insertions.sort {
-                if $0.index == $1.index {
-                    return $0.score > $1.score
+            // Step 5: Sort by span length (prefer multi-word), then similarity, and apply non-overlapping replacements
+            replacements.sort { lhs, rhs in
+                let lhsSpanLength = lhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
+                let rhsSpanLength = rhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
+
+                // Prefer longer spans (multi-word matches)
+                if lhsSpanLength != rhsSpanLength {
+                    return lhsSpanLength > rhsSpanLength
                 }
-                return $0.index < $1.index
+
+                // Then prefer higher similarity
+                return lhs.similarity > rhs.similarity
             }
 
-            // Apply insertions from the end so earlier indices remain valid.
-            for op in insertions.reversed() {
-                let idx = min(max(op.index, 0), words.count)
-                let phraseWords = op.phrase.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
-                words.insert(contentsOf: phraseWords, at: idx)
+            var usedIndices = Set<Int>()
+            var finalReplacements: [Replacement] = []
+
+            for replacement in replacements {
+                let spanLength = replacement.canonical.split(whereSeparator: { $0.isWhitespace }).count
+                let range = replacement.wordIndex..<min(replacement.wordIndex + spanLength, words.count)
+
+                // Check if this range overlaps with any already used indices
+                let overlaps = range.contains { usedIndices.contains($0) }
+
+                if !overlaps {
+                    finalReplacements.append(replacement)
+                    range.forEach { usedIndices.insert($0) }
+                }
+            }
+
+            // Step 6: Apply replacements from end to start
+            finalReplacements.sort { $0.wordIndex > $1.wordIndex }
+
+            for replacement in finalReplacements {
+                let canonicalWords = replacement.canonical.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
+                let spanLength = canonicalWords.count
+                let endIdx = min(replacement.wordIndex + spanLength, words.count)
+
+                // Preserve capitalization if original word started with uppercase
+                let originalSpan = words[replacement.wordIndex..<endIdx]
+                let finalWords = zip(
+                    canonicalWords,
+                    originalSpan + Array(repeating: "", count: max(0, canonicalWords.count - originalSpan.count))
+                ).map { canonical, original in
+                    if !original.isEmpty && original.first?.isUppercase == true && canonical.first?.isLowercase == true
+                    {
+                        return canonical.prefix(1).uppercased() + canonical.dropFirst()
+                    }
+                    return canonical
+                }
+
+                words.replaceSubrange(replacement.wordIndex..<endIdx, with: finalWords)
             }
 
             let updatedText = words.joined(separator: " ")
 
             guard updatedText != baseResult.text else {
                 return baseResult
+            }
+
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print("[DEBUG] Applied \(finalReplacements.count) replacements", to: &stderr)
             }
 
             logger.info("CTC keyword boost updated transcript from:\n\(baseResult.text)\nTO:\n\(updatedText)")
@@ -454,126 +555,55 @@ enum TranscribeCommand {
         }
     }
 
-    /// Compute the best token index at which to insert a canonical keyword,
-    /// based on overlap between the CTC detection window and Parakeet token
-    /// timings. If there are overlapping tokens, we pick the first; otherwise
-    /// we choose the token whose start time is closest to the detection start.
-    private static func bestInsertionIndex(
-        for detection: CtcKeywordSpotter.KeywordDetection,
-        tokenTimings: [TokenTiming]
-    ) -> Int? {
-        guard !tokenTimings.isEmpty else { return nil }
+    /// Compute character-level Levenshtein similarity with uppercase boost
+    private static func characterSimilarity(_ a: String, _ b: String) -> Float {
+        let aNorm = a.lowercased()
+        let bNorm = b.lowercased()
+        let distance = levenshteinDistance(aNorm, bNorm)
+        let maxLen = max(aNorm.count, bNorm.count)
+        guard maxLen > 0 else { return 1.0 }
 
-        // First, collect tokens whose time window overlaps the detection window.
-        var overlappingIndices: [Int] = []
-        for (index, timing) in tokenTimings.enumerated() {
-            let tokenStart = timing.startTime
-            let tokenEnd = timing.endTime
-            if tokenEnd > detection.startTime && tokenStart < detection.endTime {
-                overlappingIndices.append(index)
-            }
+        var similarity = 1.0 - Float(distance) / Float(maxLen)
+
+        // Boost if both start with uppercase
+        if a.first?.isUppercase == true && b.first?.isUppercase == true {
+            similarity += 0.1
         }
 
-        if let firstOverlap = overlappingIndices.min() {
-            return firstOverlap
-        }
-
-        // Fallback: choose the token whose start time is closest to the detection's start time.
-        var bestIndex: Int?
-        var bestDelta = Double.greatestFiniteMagnitude
-
-        for (index, timing) in tokenTimings.enumerated() {
-            let delta = abs(timing.startTime - detection.startTime)
-            if delta < bestDelta {
-                bestDelta = delta
-                bestIndex = index
-            }
-        }
-
-        return bestIndex
+        return min(similarity, 1.0)
     }
 
-    /// Compute an approximate token span [start, end) for a CTC detection
-    /// using Parakeet token timings. We treat any token whose time window
-    /// overlaps the detection window as part of the span. If there are no
-    /// overlaps, we fall back to the single token whose start time is closest
-    /// to the detection start.
-    private static func spanForDetection(
-        _ detection: CtcKeywordSpotter.KeywordDetection,
-        tokenTimings: [TokenTiming]
-    ) -> (start: Int, end: Int)? {
-        guard !tokenTimings.isEmpty else { return nil }
+    /// Compute Levenshtein distance between two strings
+    private static func levenshteinDistance(_ a: String, _ b: String) -> Int {
+        let aChars = Array(a)
+        let bChars = Array(b)
+        let m = aChars.count
+        let n = bChars.count
 
-        var overlappingIndices: [Int] = []
-        for (index, timing) in tokenTimings.enumerated() {
-            let tokenStart = timing.startTime
-            let tokenEnd = timing.endTime
-            if tokenEnd > detection.startTime && tokenStart < detection.endTime {
-                overlappingIndices.append(index)
+        guard m > 0 else { return n }
+        guard n > 0 else { return m }
+
+        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+
+        for i in 0...m {
+            dp[i][0] = i
+        }
+        for j in 0...n {
+            dp[0][j] = j
+        }
+
+        for i in 1...m {
+            for j in 1...n {
+                let cost = aChars[i - 1] == bChars[j - 1] ? 0 : 1
+                dp[i][j] = min(
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + cost
+                )
             }
         }
 
-        if let minIndex = overlappingIndices.min(), let maxIndex = overlappingIndices.max() {
-            return (start: minIndex, end: maxIndex + 1)
-        }
-
-        // No overlaps: choose nearest token by start time.
-        var bestIndex: Int?
-        var bestDelta = Double.greatestFiniteMagnitude
-        for (index, timing) in tokenTimings.enumerated() {
-            let delta = abs(timing.startTime - detection.startTime)
-            if delta < bestDelta {
-                bestDelta = delta
-                bestIndex = index
-            }
-        }
-
-        guard let idx = bestIndex else {
-            return nil
-        }
-        return (start: idx, end: idx + 1)
-    }
-
-    /// Map a target timestamp to a best-effort word index using token timings.
-    /// Tokens that mark word starts (SentencePiece boundary "▁" or 1:1 word-token outputs)
-    /// are treated as anchors. We pick the word whose start time is closest to the target time.
-    private static func wordIndexNearTime(
-        targetTime: Double,
-        words: [String],
-        tokenTimings: [TokenTiming]
-    ) -> Int {
-        guard !words.isEmpty, !tokenTimings.isEmpty else { return 0 }
-
-        var starts: [(index: Int, time: Double)] = []
-        let tokensEqualWords = tokenTimings.count == words.count
-
-        // Always anchor the first word to the first token's start time.
-        starts.append((0, tokenTimings[0].startTime))
-        var currentWord = 0
-
-        for timing in tokenTimings.dropFirst() {
-            let rawToken = timing.token
-            let trimmed = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isBoundary = trimmed.hasPrefix("▁") || tokensEqualWords
-            if isBoundary && currentWord + 1 < words.count {
-                currentWord += 1
-                starts.append((currentWord, timing.startTime))
-            }
-        }
-
-        guard let best = starts.min(by: { lhs, rhs in
-            abs(lhs.time - targetTime) < abs(rhs.time - targetTime)
-        }) else {
-            return 0
-        }
-
-        if best.index < 0 {
-            return 0
-        }
-        if best.index >= words.count {
-            return words.count - 1
-        }
-        return best.index
+        return dp[m][n]
     }
 
     /// Test streaming transcription

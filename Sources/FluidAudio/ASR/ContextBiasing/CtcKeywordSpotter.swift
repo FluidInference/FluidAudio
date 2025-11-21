@@ -67,7 +67,7 @@ public struct CtcKeywordSpotter {
         audioSamples: [Float],
         keywordTokenIds: [Int]
     ) async throws -> (score: Float, startFrame: Int, endFrame: Int) {
-        let logProbs = try await computeLogProbs(for: audioSamples)
+        let (logProbs, _) = try await computeLogProbs(for: audioSamples)
         let (score, start, end) = ctcWordSpot(logProbs: logProbs, keywordTokens: keywordTokenIds)
         return (score, start, end)
     }
@@ -81,19 +81,30 @@ public struct CtcKeywordSpotter {
         customVocabulary: CustomVocabularyContext,
         minScore: Float? = nil
     ) async throws -> [KeywordDetection] {
-        let logProbs = try await computeLogProbs(for: audioSamples)
+        let (logProbs, totalFramesBeforeTrim) = try await computeLogProbs(for: audioSamples)
         guard !logProbs.isEmpty else { return [] }
 
         if debugMode {
             print("=== CTC Keyword Spotter Debug ===", to: &standardError)
-            print("Audio samples: \(audioSamples.count), frames: \(logProbs.count)", to: &standardError)
+            print(
+                "Audio samples: \(audioSamples.count), frames: \(logProbs.count) (total before trim: \(totalFramesBeforeTrim))",
+                to: &standardError)
             print("Vocab size: \(logProbs[0].count), blank ID: \(blankId)", to: &standardError)
             print("Terms to spot: \(customVocabulary.terms.count)", to: &standardError)
         }
 
-        // Each CTC frame spans a fixed slice of the original audio.
-        // Derive frame duration from the trimmed logProbs and original sample count.
-        let frameDuration = Double(audioSamples.count) / Double(logProbs.count) / Double(sampleRate)
+        // Each CTC frame spans a fixed slice of audio based on the model's downsampling.
+        // The model outputs a fixed number of frames (totalFramesBeforeTrim, typically 188)
+        // for maxModelSamples (240000), so frame duration is constant.
+        let samplesPerFrame = Double(maxModelSamples) / Double(totalFramesBeforeTrim)
+        let frameDuration = samplesPerFrame / Double(sampleRate)
+
+        if debugMode {
+            print("[DEBUG] CTC frame timing:", to: &standardError)
+            print(
+                "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), frameDuration=\(String(format: "%.5f", frameDuration))s (~\(String(format: "%.2f", 1.0 / frameDuration)) fps)",
+                to: &standardError)
+        }
 
         var results: [KeywordDetection] = []
 
@@ -171,8 +182,8 @@ public struct CtcKeywordSpotter {
 
     // MARK: - CoreML pipeline
 
-    private func computeLogProbs(for audioSamples: [Float]) async throws -> [[Float]] {
-        guard !audioSamples.isEmpty else { return [] }
+    private func computeLogProbs(for audioSamples: [Float]) async throws -> (logProbs: [[Float]], totalFrames: Int) {
+        guard !audioSamples.isEmpty else { return ([], 0) }
 
         // 1) Prepare fixed-length audio input expected by MelSpectrogram.
         let audioInput = try prepareAudioArray(audioSamples)
@@ -265,11 +276,12 @@ public struct CtcKeywordSpotter {
 
         // 5) Convert logits → log‑probabilities and trim padding frames.
         let allLogProbs = try makeLogProbs(from: ctcRaw)
+        let totalFrames = allLogProbs.count
         let trimmed = trimLogProbs(allLogProbs, for: audioSamples.count)
 
         if debugMode {
             print(
-                "Log-probs computed: \(trimmed.count) frames, vocab size: \(trimmed.first?.count ?? 0)",
+                "Log-probs computed: \(trimmed.count) frames (total: \(totalFrames)), vocab size: \(trimmed.first?.count ?? 0)",
                 to: &standardError)
             // Sample a few frames to check log-prob distribution
             if trimmed.count > 0 {
@@ -286,7 +298,7 @@ public struct CtcKeywordSpotter {
             }
         }
 
-        return trimmed
+        return (trimmed, totalFrames)
     }
 
     private func prepareAudioArray(_ audioSamples: [Float]) throws -> MLMultiArray {
@@ -421,6 +433,16 @@ public struct CtcKeywordSpotter {
         let samplesPerFrame = Double(maxModelSamples) / Double(totalFrames)
         let validFrames = Int(ceil(Double(sampleCount) / samplesPerFrame))
         let clampedFrames = max(1, min(validFrames, totalFrames))
+
+        if debugMode {
+            print("[DEBUG] Trimming CTC frames:", to: &standardError)
+            print(
+                "[DEBUG]   totalFrames=\(totalFrames), sampleCount=\(sampleCount), maxModelSamples=\(maxModelSamples)",
+                to: &standardError)
+            print(
+                "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), validFrames=\(validFrames), clampedFrames=\(clampedFrames)",
+                to: &standardError)
+        }
 
         return Array(logProbs.prefix(clampedFrames))
     }

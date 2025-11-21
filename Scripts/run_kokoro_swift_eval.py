@@ -228,18 +228,6 @@ def main() -> None:
     if custom_vocab is not None and not custom_vocab.is_file():
         raise SystemExit(f"Custom vocab JSON not found: {custom_vocab}")
 
-    # If we have a custom vocab, load it once so we can build
-    # per-file filtered variants that only contain terms present
-    # in the reference sentence. This keeps Kokoro eval focused
-    # on the keywords that actually belong in each utterance and
-    # reduces cross-sentence hallucinations.
-    custom_vocab_data: Optional[dict] = None
-    if custom_vocab is not None:
-        try:
-            custom_vocab_data = json.loads(custom_vocab.read_text(encoding="utf-8"))
-        except Exception as exc:  # pragma: no cover - defensive
-            raise SystemExit(f"Failed to load custom vocab JSON: {exc}") from exc
-
     results: List[dict] = []
 
     use_ctc_boost = custom_vocab is not None and not args.disable_ctc
@@ -251,47 +239,13 @@ def main() -> None:
             continue
         print(f"Transcribing {wav} ...")
 
-        # Build a per-file custom vocab that only includes terms
-        # whose canonical text or aliases appear in the reference.
-        per_file_custom_vocab: Optional[Path] = None
-        if custom_vocab is not None and custom_vocab_data is not None:
-            terms = custom_vocab_data.get("terms") or []
-            ref_lower = ref.lower()
-            filtered_terms = []
-            for term in terms:
-                text = (term.get("text") or "").strip()
-                aliases = term.get("aliases") or []
-                if not text:
-                    continue
-                text_lower = text.lower()
-                if text_lower in ref_lower:
-                    filtered_terms.append(term)
-                    continue
-                for alias in aliases:
-                    alias_str = (alias or "").strip()
-                    if not alias_str:
-                        continue
-                    if alias_str.lower() in ref_lower:
-                        filtered_terms.append(term)
-                        break
-
-            if filtered_terms:
-                per_file_data = dict(custom_vocab_data)
-                per_file_data["terms"] = filtered_terms
-                tmp_name = f"{custom_vocab.stem}_{wav.stem}_filtered.json"
-                per_file_custom_vocab = custom_vocab.with_name(tmp_name)
-                per_file_custom_vocab.write_text(
-                    json.dumps(per_file_data, ensure_ascii=False, indent=2) + "\n",
-                    encoding="utf-8",
-                )
-
         # Baseline Swift (no context boosting)
         swift_baseline = run_swift_transcribe(wav, custom_vocab=None)
-        # Boosted Swift (with custom vocab if provided)
+        # Boosted Swift (with full custom vocab if provided)
         if custom_vocab is not None:
             hyp = run_swift_transcribe(
                 wav,
-                custom_vocab=per_file_custom_vocab or custom_vocab,
+                custom_vocab=custom_vocab,
                 use_ctc=use_ctc_boost,
             )
         else:
