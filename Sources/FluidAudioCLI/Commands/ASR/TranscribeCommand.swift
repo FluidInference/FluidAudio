@@ -314,9 +314,7 @@ enum TranscribeCommand {
         minSimilarity: Float = 0.50,
         minCombinedConfidence: Float = 0.54
     ) async -> ASRResult {
-        if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-            print("[DEBUG] applyCtcKeywordBoostIfNeeded called", to: &stderr)
-        }
+        let debug = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
 
         guard !customVocabulary.terms.isEmpty else {
             return baseResult
@@ -353,7 +351,7 @@ enum TranscribeCommand {
                 return baseResult
             }
 
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+            if debug {
                 print("[DEBUG] TDT transcript has \(words.count) words", to: &stderr)
                 print("[DEBUG] Searching for best matches for \(detectedKeywords.count) detected keywords", to: &stderr)
             }
@@ -472,7 +470,7 @@ enum TranscribeCommand {
                 return baseResult
             }
 
-            // Step 5: Sort by span length (prefer multi-word), then similarity, and apply non-overlapping replacements
+            // Step 5: Sort by span length (prefer multi-word), then combined confidence, and apply non-overlapping replacements
             replacements.sort { lhs, rhs in
                 let lhsSpanLength = lhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
                 let rhsSpanLength = rhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
