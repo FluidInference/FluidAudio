@@ -8,7 +8,6 @@ final class AudioStreamTests: XCTestCase {
         let chunkDuration: TimeInterval = 0.01
         var stream = AudioStream(
             chunkDuration: chunkDuration,
-            overlapDuration: 0,
             atTime: chunkDuration,
             alignment: .backAligned
         )
@@ -31,7 +30,7 @@ final class AudioStreamTests: XCTestCase {
         let chunkDuration: TimeInterval = 0.01
         var stream = AudioStream(
             chunkDuration: chunkDuration,
-            overlapDuration: 0,
+            strideDuration: chunkDuration,
             atTime: chunkDuration,
             alignment: .backAligned
         )
@@ -67,16 +66,16 @@ final class AudioStreamTests: XCTestCase {
 
     func testFrontAlignedChunksPreserveOverlapFromPreviousChunk() {
         let chunkDuration: TimeInterval = 0.02
-        let overlapDuration: TimeInterval = 0.01
+        let strideDuration: TimeInterval = 0.01
         var stream = AudioStream(
             chunkDuration: chunkDuration,
-            overlapDuration: overlapDuration,
+            strideDuration: strideDuration,
             atTime: chunkDuration,
             alignment: .frontAligned
         )
 
         let chunkSize = stream.chunkSize
-        let hopSize = Int(round(AudioStream.sampleRate * (chunkDuration - overlapDuration)))
+        let hopSize = Int(round(AudioStream.sampleRate * strideDuration))
         let overlapSampleCount = chunkSize - hopSize
 
         // Warm up the buffer so the initial zero padding is removed.
@@ -100,7 +99,7 @@ final class AudioStreamTests: XCTestCase {
         let chunkDuration: TimeInterval = 0.01
         var stream = AudioStream(
             chunkDuration: chunkDuration,
-            overlapDuration: 0,
+            strideDuration: chunkDuration,
             atTime: chunkDuration,
             alignment: .frontAligned,
             processGaps: true

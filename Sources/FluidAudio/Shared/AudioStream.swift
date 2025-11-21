@@ -10,7 +10,7 @@ import Foundation
 
 public struct AudioStream: Sendable {
     // MARK: - public properties
-    public typealias Callback = @Sendable (ArraySlice<Float>, TimeInterval) -> Void
+    public typealias Callback = @Sendable (ArraySlice<Float>, TimeInterval) throws -> Void
 
     /// Audio sample rate
     public static let sampleRate: Double = 16_000
@@ -18,8 +18,8 @@ public struct AudioStream: Sendable {
     /// Chunk duration in seconds
     public let chunkDuration: TimeInterval
 
-    /// Overlap duration in seconds
-    public let overlapDuration: TimeInterval
+    /// Duration between successive calls
+    public let strideDuration: TimeInterval
 
     /// Number of samples in a chunk
     public let chunkSize: Int
@@ -45,28 +45,28 @@ public struct AudioStream: Sendable {
     }
 
     // MARK: - init
-
+    
     /// - Parameters:
     ///   - chunkDuration: Chunk duration in seconds
-    ///   - overlapDuration: Chunk overlap duration in seconds
+    ///   - strideDuration: Duration between successive chunk starts (defaults to chunkDuration)
     ///   - time: Audio buffer start time
     ///   - alignment: Chunk alignment mode
     ///   - sampleRate: Audio sample rate in Hz
     ///   - processGaps: Whether gaps created during resynchronization should be processed (for front-aligned chunks only)
     public init(
         chunkDuration: TimeInterval = 10.0,
-        overlapDuration: TimeInterval = 0.0,
+        strideDuration: TimeInterval? = nil,
         atTime time: TimeInterval = 0.0,
         alignment: AudioStreamAlignment = .backAligned,
         processGaps: Bool = false
     ) {
         self.chunkDuration = chunkDuration
-        self.overlapDuration = overlapDuration
-        self.bufferStartTime = time - (chunkDuration - overlapDuration)
+        self.strideDuration = strideDuration ?? chunkDuration
+        self.bufferStartTime = time - self.strideDuration
         self.alignment = alignment
 
         self.chunkSize = Int(round(Self.sampleRate * chunkDuration))
-        self.hopSize = Int(round(Self.sampleRate * (chunkDuration - overlapDuration)))
+        self.hopSize =  Int(round(Self.sampleRate * self.strideDuration))
         self.processGaps = processGaps
 
         self.buffer = ContiguousArray(repeating: 0, count: chunkSize - hopSize)
@@ -157,7 +157,7 @@ public struct AudioStream: Sendable {
                 bufferStartTime += TimeInterval(numRemoved) / Self.sampleRate
             } else {
                 buffer.removeFirst(hopSize)
-                bufferStartTime += overlapDuration / Self.sampleRate
+                bufferStartTime += strideDuration
             }
         }
 
