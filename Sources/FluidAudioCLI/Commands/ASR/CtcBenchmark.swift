@@ -88,9 +88,18 @@ public class CtcBenchmark {
         }
 
         // Initialize ASR manager
-        logger.info("Initializing ASR manager...")
-        let asrManager = AsrManager()
-        logger.info("ASR manager initialized")
+        logger.info("Initializing ASR system...")
+        let asrConfig = ASRConfig(tdtConfig: TdtConfig())
+        let asrManager = AsrManager(config: asrConfig)
+
+        do {
+            let models = try await AsrModels.downloadAndLoad(version: .v3)
+            try await asrManager.initialize(models: models)
+            logger.info("ASR system initialized successfully")
+        } catch {
+            logger.error("Failed to initialize ASR system: \(error.localizedDescription)")
+            throw error
+        }
 
         var results: [BenchmarkResult] = []
         var totalBaselineWER = 0.0
