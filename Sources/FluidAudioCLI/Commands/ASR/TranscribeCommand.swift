@@ -329,7 +329,7 @@ enum TranscribeCommand {
                 minScore: minScore
             )
 
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+            if debug {
                 print("[DEBUG] CTC detected \(detections.count) keywords", to: &stderr)
                 for detection in detections {
                     print(
