@@ -13,8 +13,8 @@ let package = Package(
             targets: ["FluidAudio"]
         ),
         .library(
-            name: "FluidAudioWithTTS",
-            targets: ["FluidAudio", "FluidAudioTTS"]
+            name: "FluidAudioTTS",
+            targets: ["FluidAudioTTS"]
         ),
         .executable(
             name: "fluidaudio",
