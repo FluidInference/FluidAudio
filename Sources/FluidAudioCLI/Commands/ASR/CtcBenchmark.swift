@@ -30,10 +30,10 @@ public class CtcBenchmark {
 
         for i in 1...refWords.count {
             for j in 1...hypWords.count {
-                if refWords[i-1] == hypWords[j-1] {
-                    d[i][j] = d[i-1][j-1]
+                if refWords[i - 1] == hypWords[j - 1] {
+                    d[i][j] = d[i - 1][j - 1]
                 } else {
-                    d[i][j] = min(d[i-1][j], d[i][j-1], d[i-1][j-1]) + 1
+                    d[i][j] = min(d[i - 1][j], d[i][j - 1], d[i - 1][j - 1]) + 1
                 }
             }
         }
@@ -63,13 +63,18 @@ public class CtcBenchmark {
         }
 
         // Load metadata
+        logger.info("Loading metadata...")
         let metadataURL = URL(fileURLWithPath: datasetPath).appendingPathComponent("metadata.json")
         guard let metadataData = try? Data(contentsOf: metadataURL) else {
-            throw NSError(domain: "CtcBenchmark", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load metadata.json"])
+            logger.error("Failed to load metadata.json from \(metadataURL.path)")
+            throw NSError(
+                domain: "CtcBenchmark", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load metadata.json"])
         }
 
+        logger.info("Decoding metadata...")
         let decoder = JSONDecoder()
         let metadata = try decoder.decode([AudioMetadata].self, from: metadataData)
+        logger.info("Loaded \(metadata.count) items from metadata")
 
         let samplesToProcess = maxFiles.map { min($0, metadata.count) } ?? metadata.count
         logger.info("Processing \(samplesToProcess) samples")
@@ -83,7 +88,9 @@ public class CtcBenchmark {
         }
 
         // Initialize ASR manager
+        logger.info("Initializing ASR manager...")
         let asrManager = AsrManager()
+        logger.info("ASR manager initialized")
 
         var results: [BenchmarkResult] = []
         var totalBaselineWER = 0.0
@@ -166,55 +173,11 @@ public class CtcBenchmark {
         asrManager: AsrManager,
         customVocab: CustomVocabularyContext?
     ) async throws -> String {
-        // Load audio
         let audioURL = URL(fileURLWithPath: audioPath)
-        guard let audioFile = try? AVAudioFile(forReading: audioURL) else {
-            throw NSError(domain: "CtcBenchmark", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to load audio file"])
-        }
 
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 16000,
-            channels: 1,
-            interleaved: false
-        )!
-
-        guard let converter = AVAudioConverter(from: audioFile.processingFormat, to: format) else {
-            throw NSError(domain: "CtcBenchmark", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio converter"])
-        }
-
-        let frameCount = AVAudioFrameCount(audioFile.length)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            throw NSError(domain: "CtcBenchmark", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
-        }
-
-        // Read audio file into buffer
-        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: frameCount) else {
-            throw NSError(domain: "CtcBenchmark", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create input buffer"])
-        }
-
-        try audioFile.read(into: inputBuffer)
-
-        var error: NSError?
-        converter.convert(to: buffer, error: &error) { _, outStatus in
-            outStatus.pointee = .haveData
-            return inputBuffer.frameLength > 0 ? inputBuffer : nil
-        }
-
-        if let error = error {
-            throw error
-        }
-
-        guard let samples = buffer.floatChannelData?[0] else {
-            throw NSError(domain: "CtcBenchmark", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to extract audio samples"])
-        }
-
-        let sampleCount = Int(buffer.frameLength)
-        let samplesArray = Array(UnsafeBufferPointer(start: samples, count: sampleCount))
-
-        // Transcribe
+        // Use AsrManager's built-in file transcription
         let result = try await asrManager.transcribe(
-            samplesArray,
+            audioURL,
             customVocabulary: customVocab
         )
 
@@ -259,6 +222,7 @@ public class CtcBenchmark {
 
     public static func runCLI(arguments: [String]) async {
         let logger = AppLogger(category: "CtcBenchmark")
+        logger.info("CTC Benchmark CLI started")
 
         var datasetPath: String?
         var customVocabPath: String?
@@ -270,6 +234,8 @@ public class CtcBenchmark {
             printUsage()
             exit(0)
         }
+
+        logger.info("Parsing arguments...")
 
         var i = 0
         while i < arguments.count {
@@ -321,31 +287,32 @@ public class CtcBenchmark {
     }
 
     private static func printUsage() {
-        print("""
-        CTC Keyword Boosting Benchmark
+        print(
+            """
+            CTC Keyword Boosting Benchmark
 
-        Usage: fluidaudio ctc-benchmark --dataset <path> [options]
+            Usage: fluidaudio ctc-benchmark --dataset <path> [options]
 
-        Required:
-            --dataset <path>         Path to dataset directory (must contain metadata.json)
+            Required:
+                --dataset <path>         Path to dataset directory (must contain metadata.json)
 
-        Options:
-            --vocab <path>           Path to custom vocabulary JSON file
-            --custom-vocab <path>    Alias for --vocab
-            --max-files <n>          Maximum number of files to process
-            --output <path>          Output JSON file for results
-            -h, --help               Show this help message
+            Options:
+                --vocab <path>           Path to custom vocabulary JSON file
+                --custom-vocab <path>    Alias for --vocab
+                --max-files <n>          Maximum number of files to process
+                --output <path>          Output JSON file for results
+                -h, --help               Show this help message
 
-        Examples:
-            # Run on Earnings22 with CTC boosting
-            fluidaudio ctc-benchmark --dataset ~/Datasets/Earnings22 \\
-                --vocab custom_vocab.json --max-files 50 \\
-                --output earnings22_ctc_results.json
+            Examples:
+                # Run on Earnings22 with CTC boosting
+                fluidaudio ctc-benchmark --dataset ~/Datasets/Earnings22 \\
+                    --vocab custom_vocab.json --max-files 50 \\
+                    --output earnings22_ctc_results.json
 
-            # Run on Earnings22 without CTC (baseline only)
-            fluidaudio ctc-benchmark --dataset ~/Datasets/Earnings22 \\
-                --max-files 50 --output earnings22_baseline.json
-        """)
+                # Run on Earnings22 without CTC (baseline only)
+                fluidaudio ctc-benchmark --dataset ~/Datasets/Earnings22 \\
+                    --max-files 50 --output earnings22_baseline.json
+            """)
     }
 }
 #endif
