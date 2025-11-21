@@ -474,7 +474,9 @@ enum StreamDiarizationBenchmark {
 
                 // Process chunk and track timing
                 let inferenceStart = Date()
-                let chunkResult = try diarizerManager.performCompleteDiarization(paddedChunk)
+                let chunkResult = try autoreleasepool {
+                    try diarizerManager.performCompleteDiarization(paddedChunk)
+                }
                 let inferenceTime = Date().timeIntervalSince(inferenceStart)
 
                 // Track chunk processing latency
