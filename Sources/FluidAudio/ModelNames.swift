@@ -5,6 +5,7 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+    case parakeetCtc110m = "argmaxinc/ctckit-pro"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
 
@@ -17,6 +18,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-0.6b-v3-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
+        case .parakeetCtc110m:
+            return "ctckit-pro"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -26,7 +29,13 @@ public enum Repo: String, CaseIterable {
 
     /// Fully qualified HuggingFace repo path (owner/name)
     public var remotePath: String {
-        "FluidInference/\(name)"
+        switch self {
+        case .parakeetCtc110m:
+            // Uses Argmax CoreML export for Parakeet CTC 110M
+            return rawValue
+        default:
+            return "FluidInference/\(name)"
+        }
     }
 
     /// Local folder name used for caching
@@ -89,7 +98,7 @@ public enum ModelNames {
         public static let preprocessor = "Preprocessor"
         public static let encoder = "Encoder"
         public static let decoder = "Decoder"
-        public static let joint = "JointDecision"
+        public static let joint = "JointDecisionv2"
 
         // Shared vocabulary file across all model versions
         public static let vocabularyFile = "parakeet_vocab.json"
@@ -110,6 +119,25 @@ public enum ModelNames {
         public static func vocabulary(for repo: Repo) -> String {
             return vocabularyFile
         }
+    }
+
+    /// CTC keyword spotting model names (Parakeet-TDT CTC 110M).
+    public enum CTC {
+        public static let subfolder = "parakeet-tdt_ctc-110m"
+
+        public static let melSpectrogram = "MelSpectrogram"
+        public static let audioEncoder = "AudioEncoder"
+
+        public static let melSpectrogramPath = subfolder + "/" + melSpectrogram + ".mlmodelc"
+        public static let audioEncoderPath = subfolder + "/" + audioEncoder + ".mlmodelc"
+
+        // Vocabulary JSON path (shared by Python/Nemo and CoreML exports).
+        public static let vocabularyPath = subfolder + "/vocab.json"
+
+        public static let requiredModels: Set<String> = [
+            melSpectrogramPath,
+            audioEncoderPath,
+        ]
     }
 
     /// VAD model names
@@ -177,6 +205,8 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
+        case .parakeetCtc110m:
+            return ModelNames.CTC.requiredModels
         case .diarizer:
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels

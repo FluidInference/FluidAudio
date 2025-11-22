@@ -12,7 +12,7 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertEqual(ModelNames.ASR.preprocessorFile, "Preprocessor.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.encoderFile, "Encoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "Decoder.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.jointFile, "JointDecision.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.jointFile, "JointDecisionv2.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeet), "parakeet_vocab.json")
         XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeetV2), "parakeet_vocab.json")
     }

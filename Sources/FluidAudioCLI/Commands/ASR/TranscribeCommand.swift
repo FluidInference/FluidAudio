@@ -3,6 +3,16 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+// Helper for stderr output
+fileprivate struct StderrOutputStream: TextOutputStream {
+    func write(_ string: String) {
+        if let data = string.data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
+    }
+}
+fileprivate var stderr = StderrOutputStream()
+
 /// Thread-safe tracker for transcription updates and audio position
 actor TranscriptionTracker {
     private var volatileUpdates: [String] = []
@@ -107,6 +117,9 @@ enum TranscribeCommand {
         var streamingMode = false
         var showMetadata = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
+        var customVocabPath: String? = nil
+        var customVocab: CustomVocabularyContext? = nil
+        var useCtcKeywordBoost = false
 
         // Parse options
         var i = 1
@@ -132,10 +145,34 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
+            case "--custom-vocab":
+                if i + 1 < arguments.count {
+                    customVocabPath = arguments[i + 1]
+                    i += 1
+                } else {
+                    logger.error("Missing path after --custom-vocab")
+                    exit(1)
+                }
+            case "--ctc-keyword-boost":
+                useCtcKeywordBoost = true
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
             i += 1
+        }
+
+        // Load custom vocabulary if provided
+        if let path = customVocabPath {
+            do {
+                let url = URL(fileURLWithPath: path)
+                customVocab = try CustomVocabularyContext.load(from: url)
+                logger.info(
+                    "Loaded custom vocabulary: \(customVocab!.terms.count) terms, alpha=\(String(format: "%.2f", customVocab!.alpha))"
+                )
+            } catch {
+                logger.error("Failed to load custom vocabulary at \(path): \(error.localizedDescription)")
+                exit(1)
+            }
         }
 
         if streamingMode {
@@ -143,16 +180,23 @@ enum TranscribeCommand {
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
             await testStreamingTranscription(
-                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion,
+                customVocabulary: customVocab)
         } else {
             logger.info("Using batch mode with direct processing\n")
-            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+            await testBatchTranscription(
+                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion,
+                customVocabulary: customVocab, useCtcKeywordBoost: useCtcKeywordBoost)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String,
+        showMetadata: Bool,
+        modelVersion: AsrModelVersion,
+        customVocabulary: CustomVocabularyContext?,
+        useCtcKeywordBoost: Bool
     ) async {
         do {
             // Initialize ASR models
@@ -184,8 +228,20 @@ enum TranscribeCommand {
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let result = try await asrManager.transcribe(audioFileURL)
+            let baseResult = try await asrManager.transcribe(audioFileURL)
             let processingTime = Date().timeIntervalSince(startTime)
+
+            // Optionally apply CTC-based keyword boosting when a custom vocabulary is provided.
+            let result: ASRResult
+            if useCtcKeywordBoost, let vocab = customVocabulary {
+                result = await applyCtcKeywordBoostIfNeeded(
+                    samples: samples,
+                    baseResult: baseResult,
+                    customVocabulary: vocab
+                )
+            } else {
+                result = baseResult
+            }
 
             // Print results
             logger.info("" + String(repeating: "=", count: 50))
@@ -245,9 +301,79 @@ enum TranscribeCommand {
         }
     }
 
+    /// Apply CTC keyword boosting using CTC detections as a word presence signal.
+    ///
+    /// Strategy: CTC acts as a detector for which keywords are present in the audio.
+    /// For each detected keyword, find the most similar word(s) in the TDT transcript
+    /// and replace with the canonical form, regardless of timing alignment.
+    private static func applyCtcKeywordBoostIfNeeded(
+        samples: [Float],
+        baseResult: ASRResult,
+        customVocabulary: CustomVocabularyContext
+    ) async -> ASRResult {
+        let debug = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+
+        guard !customVocabulary.terms.isEmpty else {
+            return baseResult
+        }
+
+        do {
+            // Step 1: Run CTC to detect which keywords are present
+            let spotter = try await CtcKeywordSpotter.makeDefault()
+            let detections = try await spotter.spotKeywords(
+                audioSamples: samples,
+                customVocabulary: customVocabulary,
+                minScore: customVocabulary.minCtcScore
+            )
+
+            if debug {
+                print("[DEBUG] CTC detected \(detections.count) keywords", to: &stderr)
+                for detection in detections {
+                    print(
+                        "[DEBUG]   '\(detection.term.text)' score=\(String(format: "%.2f", detection.score))",
+                        to: &stderr)
+                }
+            }
+
+            guard !detections.isEmpty else {
+                return baseResult
+            }
+
+            // Step 2: Use KeywordMerger to apply corrections (string-based for now)
+            let mergeResult = KeywordMerger.applyCorrections(
+                detections: detections,
+                toTranscript: baseResult.text,
+                vocabulary: customVocabulary,
+                debugMode: debug
+            )
+
+            guard mergeResult.correctedText != baseResult.text else {
+                return baseResult
+            }
+
+            logger.info(
+                "CTC keyword boost updated transcript from:\n\(baseResult.text)\nTO:\n\(mergeResult.correctedText)")
+
+            return ASRResult(
+                text: mergeResult.correctedText,
+                confidence: baseResult.confidence,
+                duration: baseResult.duration,
+                processingTime: baseResult.processingTime,
+                tokenTimings: baseResult.tokenTimings,
+                performanceMetrics: baseResult.performanceMetrics
+            )
+        } catch {
+            if debug {
+                print("[DEBUG] CTC keyword boost exception: \(error)", to: &stderr)
+            }
+            logger.warning("CTC keyword boost failed: \(error)")
+            return baseResult
+        }
+    }
+
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion, customVocabulary: CustomVocabularyContext?
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -456,6 +582,8 @@ enum TranscribeCommand {
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
+                --custom-vocab <path>      Load custom vocabulary JSON for CTC keyword boosting
+                --ctc-keyword-boost        Enable CTC keyword spotting when using a custom vocab
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)

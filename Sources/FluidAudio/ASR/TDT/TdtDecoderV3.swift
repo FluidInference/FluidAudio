@@ -48,6 +48,15 @@ internal struct TdtDecoderV3 {
         self.config = config
     }
 
+    private func softmax(_ xs: [Float]) -> [Float] {
+        guard !xs.isEmpty else { return [] }
+        let m = xs.max() ?? 0
+        var exps = xs.map { expf($0 - m) }
+        let s = exps.reduce(0, +)
+        if s > 0 { exps = exps.map { $0 / s } }
+        return exps
+    }
+
     /// Reusable input provider that holds references to preallocated
     /// encoder and decoder step tensors for the joint model.
     private final class ReusableJointInput: NSObject, MLFeatureProvider {
@@ -630,14 +639,15 @@ internal struct TdtDecoderV3 {
             throw ASRError.processingFailed("Joint decision returned unexpected tensor shapes")
         }
 
+        // Default top-1 decision
         let tokenPointer = tokenIdArray.dataPointer.bindMemory(to: Int32.self, capacity: tokenIdArray.count)
-        let token = Int(tokenPointer[0])
+        let chosenToken = Int(tokenPointer[0])
         let probPointer = tokenProbArray.dataPointer.bindMemory(to: Float.self, capacity: tokenProbArray.count)
-        let probability = probPointer[0]
+        let chosenProb = probPointer[0]
         let durationPointer = durationArray.dataPointer.bindMemory(to: Int32.self, capacity: durationArray.count)
         let durationBin = Int(durationPointer[0])
 
-        return JointDecision(token: token, probability: probability, durationBin: durationBin)
+        return JointDecision(token: chosenToken, probability: chosenProb, durationBin: durationBin)
     }
 
     private func prepareDecoderProjection(_ projection: MLMultiArray) throws -> MLMultiArray {

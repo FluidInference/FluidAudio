@@ -108,11 +108,11 @@ public enum ANEMemoryUtils {
             return 8
         case .int32:
             return MemoryLayout<Int32>.stride
-        #if swift(>=6.2)
-        case .int8:
-            return MemoryLayout<Int8>.stride
-        #endif
         @unknown default:
+            // Back-compat: some CoreML SDKs don't expose `.int8` at compile time.
+            // Detect Int8 dynamically via textual name to support models using it.
+            let name = String(describing: dataType).lowercased()
+            if name.contains("int8") { return MemoryLayout<Int8>.stride }
             return MemoryLayout<Float>.stride
         }
     }
