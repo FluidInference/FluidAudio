@@ -260,7 +260,7 @@ var stream = AudioStream(
     chunkDuration: 5.0, // 10.0 for best accuracy. 3.0 for lowest
     chunkSkip: 2.0, // Duration between successive chunk starts
     streamStartTime: 0.0, // Audio stream start time
-    chunkingStrategy: .backAligned // Most recent
+    chunkingStrategy: .useMostRecent // Most recent
 )
 
 stream.bind { chunk, time in
@@ -318,17 +318,16 @@ class RealTimeDiarizer {
         diarizer = DiarizerManager()  // Default config
         diarizer.initialize(models: models)
         audioStream = AudioStream(
-            chunkDuration: 5.0,
-            strideDuration: 3.0,
+            chunkDuration: 5.0, // 5 second chunks work well
+            chunkSkip: 3.0, // 3.0 second delay between chunks works well
             atTime: 0.0,
-            alignment: .frontAligned
+            chunkingStrategy: .useFixedSkip // ensure chunks are evenly spaced
         )
         audioStream.bind { chunk, _ in
             Task {
                 do {
                     let result = try diarizer.performCompleteDiarization(chunk)
                     await handleResults(result)
-                    streamPosition += chunkDuration
                 } catch {
                     print("Diarization error: \(error)")
                 }
