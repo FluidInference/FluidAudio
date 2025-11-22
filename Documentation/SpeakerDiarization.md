@@ -353,7 +353,7 @@ class RealTimeDiarizer {
     @MainActor
     private func handleResults(_ result: DiarizationResult) {
         for segment in result.segments {
-            print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - (segment.endTimeSeconds)")
+            print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
         }
     }
 }
