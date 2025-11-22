@@ -258,10 +258,9 @@ diarizer.initialize(models: models)
 
 var stream = AudioStream(
     chunkDuration: 5.0, // 10.0 for best accuracy. 3.0 for lowest
-    strideDuration: 2.0, // Duration between successive chunk starts
-    atTime: 0.0, // Audio stream start time
-    alignment: .backAligned, // Most recent
-    processGaps: false // Whether to skip gaps created by unsynchronized timestamps
+    chunkSkip: 2.0, // Duration between successive chunk starts
+    streamStartTime: 0.0, // Audio stream start time
+    chunkingStrategy: .backAligned // Most recent
 )
 
 stream.bind { chunk, time in
