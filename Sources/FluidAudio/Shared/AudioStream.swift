@@ -180,7 +180,7 @@ public struct AudioStream: Sendable {
             let chunkStartTime = bufferStartTime + chunkOffset
             let sample = buffer[writeIndex - temporaryChunkSize..<writeIndex]
             result = try body(sample, chunkStartTime)
-        case .useFixedHop:
+        case .useFixedSkip:
             let sample = buffer.prefix(temporaryChunkSize)
             let chunkStartTime = bufferStartTime
             result = try body(sample, chunkStartTime)
@@ -196,7 +196,7 @@ public struct AudioStream: Sendable {
         switch chunkingStrategy {
         case .useMostRecent:
             forgetFirst(writeIndex - (chunkSize - skipSize))
-        case .useFixedHop:
+        case .useFixedSkip:
             forgetFirst(skipSize)
         }
 
@@ -370,7 +370,7 @@ public enum AudioStreamError: Error, LocalizedError {
 
 public enum AudioStreamChunkingStrategy: Sendable {
     /// Ensure that the number of samples between the start of each chunk is constant.
-    case useFixedHop
+    case useFixedSkip
 
     /// Use the most recent audio samples to form the chunk.
     case useMostRecent

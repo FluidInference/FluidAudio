@@ -73,7 +73,7 @@ final class AudioStreamTests: XCTestCase {
             chunkDuration: chunkDuration,
             chunkSkip: chunkSkip,
             streamStartTime: chunkDuration,
-            chunkingStrategy: .useFixedHop,
+            chunkingStrategy: .useFixedSkip,
             startupStrategy: .startSilent,
             sampleRate: sampleRate
         )
