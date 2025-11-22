@@ -141,6 +141,15 @@ public struct CtcKeywordSpotter {
                             }
                         }
                         print("      frame[\(frameIdx)]: \(tokenLogProbs.joined(separator: ", "))", to: &standardError)
+
+                        // Show top 10 most likely tokens at this frame
+                        let topK = 10
+                        let sortedIndices = frame.enumerated()
+                            .sorted { $0.element > $1.element }
+                            .prefix(topK)
+                        print("      top-\(topK) tokens: ", terminator: "", to: &standardError)
+                        let topTokens = sortedIndices.map { "id\($0.offset)=\(String(format: "%.4f", $0.element))" }
+                        print(topTokens.joined(separator: ", "), to: &standardError)
                     }
                 }
             }
@@ -451,6 +460,9 @@ public struct CtcKeywordSpotter {
 
     /// Dynamic programming keyword alignment, ported from
     /// `NeMo/scripts/asr_context_biasing/ctc_word_spotter.py:ctc_word_spot`.
+    // Wildcard token ID: -1 represents "*" that matches anything at zero cost
+    private static let WILDCARD_TOKEN_ID = -1
+
     func ctcWordSpot(
         logProbs: [[Float]],
         keywordTokens: [Int]
@@ -482,6 +494,18 @@ public struct CtcKeywordSpotter {
 
             for n in 1...N {
                 let tokenId = keywordTokens[n - 1]
+
+                // Wildcard token: matches any symbol (including blank) at zero cost
+                if tokenId == Self.WILDCARD_TOKEN_ID {
+                    // Wildcard can skip this frame at zero cost
+                    let wildcardSkip = dp[t - 1][n - 1]  // Move to next token
+                    let wildcardStay = dp[t - 1][n]  // Stay on wildcard
+
+                    let wildcardScore = max(wildcardSkip, wildcardStay)
+                    dp[t][n] = wildcardScore
+                    backtrackTime[t][n] = wildcardScore == wildcardSkip ? t - 1 : backtrackTime[t - 1][n]
+                    continue
+                }
 
                 if tokenId < 0 || tokenId >= frame.count {
                     continue
@@ -522,7 +546,10 @@ public struct CtcKeywordSpotter {
         }
 
         let bestStart = backtrackTime[bestEnd][N]
-        let normalizedScore = bestScore / Float(N)
+
+        // Normalize score only by non-wildcard tokens
+        let nonWildcardCount = keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
+        let normalizedScore = nonWildcardCount > 0 ? bestScore / Float(nonWildcardCount) : bestScore
 
         return (normalizedScore, bestStart, bestEnd)
     }

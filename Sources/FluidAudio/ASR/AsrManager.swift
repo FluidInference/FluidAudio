@@ -33,6 +33,9 @@ public final class AsrManager {
     }
     #endif
 
+    /// Custom vocabulary context for context biasing
+    private var customVocabulary: CustomVocabularyContext?
+
     // TODO:: the decoder state should be moved higher up in the API interface
     internal var microphoneDecoderState: TdtDecoderState
     internal var systemDecoderState: TdtDecoderState
@@ -90,6 +93,25 @@ public final class AsrManager {
         logger.info("Token duration optimization model loaded successfully")
 
         logger.info("AsrManager initialized successfully with provided models")
+    }
+
+    /// Update custom vocabulary for context biasing without reinitializing ASR
+    /// - Parameter vocabulary: New custom vocabulary context, or nil to disable context biasing
+    public func setCustomVocabulary(_ vocabulary: CustomVocabularyContext?) {
+        self.customVocabulary = vocabulary
+        if let vocab = vocabulary {
+            logger.info(
+                "Custom vocabulary updated: \(vocab.terms.count) terms, "
+                    + "thresholds: similarity=\(String(format: "%.2f", vocab.minSimilarity)), "
+                    + "combined=\(String(format: "%.2f", vocab.minCombinedConfidence))")
+        } else {
+            logger.info("Custom vocabulary disabled")
+        }
+    }
+
+    /// Get current custom vocabulary
+    public func getCustomVocabulary() -> CustomVocabularyContext? {
+        return customVocabulary
     }
 
     private func createFeatureProvider(

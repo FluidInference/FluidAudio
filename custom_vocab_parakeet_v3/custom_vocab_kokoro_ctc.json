@@ -3,6 +3,9 @@
   "contextScore": 1.5,
   "depthScaling": 2.0,
   "scorePerPhrase": 0.0,
+  "minCtcScore": -10.0,
+  "minSimilarity": 0.55,
+  "minCombinedConfidence": 0.57,
   "terms": [
     {
       "text": "saoirse",
@@ -72,7 +75,13 @@
     },
     {
       "text": "siobhan",
+      "aliases": ["chavon", "shivon"],
       "ctcTokenIds": [8, 972, 584, 975, 28]
+    },
+    {
+      "text": "siobhan_wildcard",
+      "aliases": ["siobhan"],
+      "ctcTokenIds": [-1, 8, 972, -1, 975, 28, -1]
     },
     {
       "text": "airpods",
@@ -109,12 +118,8 @@
     },
     {
       "text": "dazs",
+      "aliases": ["däzs"],
       "ctcTokenIds": [29, 852, 973]
-    },
-    {
-      "text": "haagen dazs",
-      "aliases": ["häagen-dazs", "haagen-dazs"],
-      "ctcTokenIds": [67, 314, 19, 29, 852, 973]
     }
   ]
 }
