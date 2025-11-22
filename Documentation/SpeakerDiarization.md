@@ -345,7 +345,7 @@ class RealTimeDiarizer {
         // Install tap to capture audio
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
-            try self.audioStream.write(from: buffer)
+            try? self.audioStream.write(from: buffer)
         }
 
         audioEngine.prepare()
