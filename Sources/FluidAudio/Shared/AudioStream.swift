@@ -264,7 +264,7 @@ public struct AudioStream: Sendable {
             try append(from: sourceBase, count: count)
         }
         
-        guard let success else {
+        guard success != nil else {
             throw AudioStreamError.discontiguousSourceBuffer
         }
 
@@ -318,7 +318,7 @@ public struct AudioStream: Sendable {
     private mutating func prepareToAppend(from src: UnsafePointer<Float>?, count: inout Int, maxWriteIndex: Int, shiftedWriteIndex: Int) -> UnsafePointer<Float>? {
         precondition(maxWriteIndex >= shiftedWriteIndex)
         
-        var newWriteIndex = writeIndex + count
+        let newWriteIndex = writeIndex + count
         
         guard newWriteIndex > 0 else {
             // none of the items will be written since they don't reach the start of the buffer
