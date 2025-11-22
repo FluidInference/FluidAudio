@@ -63,27 +63,29 @@ public struct AudioStream: Sendable {
         guard chunkDuration >= 1 / sampleRate else {
             throw AudioStreamError.invalidChunkDuration
         }
-        
+
         self.chunkDuration = chunkDuration
         self.chunkSkip = chunkSkip ?? chunkDuration
-        
+
         guard self.chunkSkip > 0 && self.chunkSkip <= chunkDuration else {
             throw AudioStreamError.invalidChunkSkip
         }
-        
+
         self.chunkingStrategy = chunkingStrategy
         self.sampleRate = sampleRate
-        
+
         self.chunkSize = Int(round(sampleRate * chunkDuration))
         self.skipSize = Int(round(sampleRate * self.chunkSkip))
 
-        let capacity = Int(round((bufferCapacitySeconds ?? (chunkDuration + self.chunkSkip))
-                                 * sampleRate))
+        let capacity = Int(
+            round(
+                (bufferCapacitySeconds ?? (chunkDuration + self.chunkSkip))
+                    * sampleRate))
         guard capacity >= chunkSize else {
             throw AudioStreamError.bufferTooSmall
         }
         self.buffer = ContiguousArray(repeating: 0, count: capacity)
-        
+
         switch startupStrategy {
         case .startSilent:
             self.writeIndex = chunkSize - skipSize
@@ -121,7 +123,7 @@ public struct AudioStream: Sendable {
     public mutating func write(from source: [Float], atTime time: TimeInterval? = nil) throws {
         try writeGeneric(from: source, atTime: time)
     }
-    
+
     /// Add new audio data to the buffer
     /// - Parameters:
     ///   - source: Audio samples to write
@@ -130,7 +132,7 @@ public struct AudioStream: Sendable {
     public mutating func write(from source: ArraySlice<Float>, atTime time: TimeInterval? = nil) throws {
         try writeGeneric(from: source, atTime: time)
     }
-    
+
     /// Add new audio data to the buffer
     /// - Parameters:
     ///   - source: Audio samples to write
@@ -169,27 +171,27 @@ public struct AudioStream: Sendable {
         guard isChunkReady else {
             throw AudioStreamError.noChunksAvailable
         }
-        
+
         // Do stuff with the chunk
         let result: R
         switch chunkingStrategy {
         case .useMostRecent:
             let chunkOffset = TimeInterval(writeIndex - temporaryChunkSize) / sampleRate
             let chunkStartTime = bufferStartTime + chunkOffset
-            let sample = buffer[writeIndex-temporaryChunkSize..<writeIndex]
+            let sample = buffer[writeIndex - temporaryChunkSize..<writeIndex]
             result = try body(sample, chunkStartTime)
         case .useFixedHop:
             let sample = buffer.prefix(temporaryChunkSize)
             let chunkStartTime = bufferStartTime
             result = try body(sample, chunkStartTime)
         }
-        
+
         // Update temporary chunk size if needed
         guard temporaryChunkSize == chunkSize else {
             temporaryChunkSize = min(temporaryChunkSize + skipSize, chunkSize)
             return result
         }
-        
+
         // Forget the front of the buffer
         switch chunkingStrategy {
         case .useMostRecent:
@@ -197,7 +199,7 @@ public struct AudioStream: Sendable {
         case .useFixedHop:
             forgetFirst(skipSize)
         }
-        
+
         return result
     }
 
@@ -207,24 +209,23 @@ public struct AudioStream: Sendable {
         guard isChunkReady else {
             return nil
         }
-        
+
         // In theory, this should never throw
         return try? withChunk { chunk, timestamp in
             return (Array(chunk), timestamp)
         }
     }
-    
+
     // MARK: - private helpers
-    
+
     /// Add new audio data to the buffer
     /// - Parameters:
     ///   - source: Audio samples to write
     ///   - time: Timestamp for resynchronization (optional)
     private mutating func writeGeneric<C>(from source: C, atTime time: TimeInterval? = nil) throws
     where C: Collection, C.Element == Float {
-        let writeIndexReset = (chunkingStrategy == .useMostRecent ?
-                               temporaryChunkSize : buffer.count)
-        
+        let writeIndexReset = (chunkingStrategy == .useMostRecent ? temporaryChunkSize : buffer.count)
+
         if let time {
             let startIndex = Int(round(bufferStartTime * sampleRate))
             let endIndex = startIndex + writeIndex + source.count
@@ -233,10 +234,11 @@ public struct AudioStream: Sendable {
             var missingSampleCount = expectedEndIndex - endIndex
 
             if missingSampleCount > 0 {
-                prepareToAppend(from: nil,
-                                count: &missingSampleCount,
-                                maxWriteIndex: buffer.count - source.count,
-                                shiftedWriteIndex: writeIndexReset - source.count)
+                prepareToAppend(
+                    from: nil,
+                    count: &missingSampleCount,
+                    maxWriteIndex: buffer.count - source.count,
+                    shiftedWriteIndex: writeIndexReset - source.count)
                 if missingSampleCount > 0 {
                     let stride = MemoryLayout<Float>.stride
                     memset(&buffer[writeIndex], 0, missingSampleCount * stride)
@@ -252,18 +254,20 @@ public struct AudioStream: Sendable {
                 throw AudioStreamError.sourceBaseAddressUnknown
             }
             var count = ptr.count
-            
-            guard let sourceBase = prepareToAppend(from: base,
-                                                   count: &count,
-                                                   maxWriteIndex: buffer.count,
-                                                   shiftedWriteIndex: writeIndexReset)
+
+            guard
+                let sourceBase = prepareToAppend(
+                    from: base,
+                    count: &count,
+                    maxWriteIndex: buffer.count,
+                    shiftedWriteIndex: writeIndexReset)
             else {
                 return
             }
-            
+
             try append(from: sourceBase, count: count)
         }
-        
+
         guard success != nil else {
             throw AudioStreamError.discontiguousSourceBuffer
         }
@@ -274,16 +278,16 @@ public struct AudioStream: Sendable {
             try? withChunk(callback)
         }
     }
-    
+
     private mutating func rollbackLast(_ count: Int) {
         writeIndex -= count
-        
+
         if writeIndex < 0 {
             bufferStartTime += TimeInterval(writeIndex) / sampleRate
             writeIndex = 0
         }
     }
-    
+
     private mutating func forgetFirst(_ count: Int) {
         // Bring all elements in the index range [count, writeIndex) to the front
         if count < writeIndex {
@@ -291,18 +295,19 @@ public struct AudioStream: Sendable {
                 guard let base = ptr.baseAddress else {
                     return
                 }
-                
+
                 let stride = MemoryLayout<Float>.stride
-                
-                memmove(base,
-                        base.advanced(by: count),
-                        (writeIndex - count) * stride)
+
+                memmove(
+                    base,
+                    base.advanced(by: count),
+                    (writeIndex - count) * stride)
             }
         }
         writeIndex -= count
         bufferStartTime += TimeInterval(count) / sampleRate
     }
-    
+
     private mutating func append(from src: UnsafePointer<Float>, count: Int) throws {
         try buffer.withUnsafeMutableBufferPointer { ptr in
             guard let base = ptr.baseAddress else {
@@ -313,24 +318,26 @@ public struct AudioStream: Sendable {
             writeIndex += count
         }
     }
-    
+
     @discardableResult
-    private mutating func prepareToAppend(from src: UnsafePointer<Float>?, count: inout Int, maxWriteIndex: Int, shiftedWriteIndex: Int) -> UnsafePointer<Float>? {
+    private mutating func prepareToAppend(
+        from src: UnsafePointer<Float>?, count: inout Int, maxWriteIndex: Int, shiftedWriteIndex: Int
+    ) -> UnsafePointer<Float>? {
         precondition(maxWriteIndex >= shiftedWriteIndex)
-        
+
         let newWriteIndex = writeIndex + count
-        
+
         guard newWriteIndex > 0 else {
             // none of the items will be written since they don't reach the start of the buffer
             writeIndex += count
             count = 0
             return nil
         }
-        
+
         if newWriteIndex > maxWriteIndex {
             // shift back so that the write index is in bounds
             forgetFirst(newWriteIndex - shiftedWriteIndex)
-            
+
             // check if the source now precedes the buffer
             guard shiftedWriteIndex > 0 else {
                 writeIndex += count
@@ -338,7 +345,7 @@ public struct AudioStream: Sendable {
                 return nil
             }
         }
-        
+
         // drop any part of the source the precedes the buffer
         if writeIndex < 0 {
             let shift = -writeIndex
@@ -346,7 +353,7 @@ public struct AudioStream: Sendable {
             count -= shift
             return src?.advanced(by: shift)
         }
-        
+
         return src
     }
 }
@@ -375,7 +382,7 @@ public enum AudioStreamStartupStrategy: Sendable {
 
     /// Chunk size will increase by `chunkDuration - chunkOverlap` seconds each callback until reaching `chunkDuration`
     case rampUpChunkSize
-    
+
     /// Wait for the first chunk to fill up before running
     case waitForFullChunk
 }
