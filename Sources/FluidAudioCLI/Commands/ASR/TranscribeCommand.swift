@@ -309,10 +309,7 @@ enum TranscribeCommand {
     private static func applyCtcKeywordBoostIfNeeded(
         samples: [Float],
         baseResult: ASRResult,
-        customVocabulary: CustomVocabularyContext,
-        minScore: Float = -10.0,
-        minSimilarity: Float = 0.50,
-        minCombinedConfidence: Float = 0.54
+        customVocabulary: CustomVocabularyContext
     ) async -> ASRResult {
         let debug = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
 
@@ -326,7 +323,7 @@ enum TranscribeCommand {
             let detections = try await spotter.spotKeywords(
                 audioSamples: samples,
                 customVocabulary: customVocabulary,
-                minScore: minScore
+                minScore: customVocabulary.minCtcScore
             )
 
             if debug {
@@ -342,202 +339,23 @@ enum TranscribeCommand {
                 return baseResult
             }
 
-            // Step 2: Build set of detected canonical keywords
-            let detectedKeywords = Set(detections.map { $0.term.text.lowercased() })
+            // Step 2: Use KeywordMerger to apply corrections (string-based for now)
+            let mergeResult = KeywordMerger.applyCorrections(
+                detections: detections,
+                toTranscript: baseResult.text,
+                vocabulary: customVocabulary,
+                debugMode: debug
+            )
 
-            // Step 3: Split TDT transcript into words
-            var words = baseResult.text.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
-            guard !words.isEmpty else {
+            guard mergeResult.correctedText != baseResult.text else {
                 return baseResult
             }
 
-            if debug {
-                print("[DEBUG] TDT transcript has \(words.count) words", to: &stderr)
-                print("[DEBUG] Searching for best matches for \(detectedKeywords.count) detected keywords", to: &stderr)
-            }
-
-            // Step 4: For each detected keyword, find best matching word(s) in transcript
-            struct Replacement {
-                let wordIndex: Int
-                let canonical: String
-                let similarity: Float
-                let ctcScore: Float
-                let originalWord: String
-
-                var combinedConfidence: Float {
-                    // Normalize CTC score from [-10, -5] range to [0, 1]
-                    // Better CTC scores (closer to 0) = higher confidence
-                    let normalizedCtcScore = max(0, min(1, (ctcScore + 10) / 5))
-                    // Weight similarity more heavily (60%) than CTC confidence (40%)
-                    return 0.6 * similarity + 0.4 * normalizedCtcScore
-                }
-            }
-
-            var replacements: [Replacement] = []
-
-            for detection in detections {
-                let canonical = detection.term.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !canonical.isEmpty else { continue }
-
-                let canonicalWords = canonical.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
-
-                // Skip if canonical already exists verbatim in transcript
-                if baseResult.text.range(of: canonical, options: [.caseInsensitive]) != nil {
-                    if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                        print("[DEBUG] '\(canonical)' already exists verbatim, skipping", to: &stderr)
-                    }
-                    continue
-                }
-
-                // Find best matching word or phrase in transcript
-                var bestMatch: (index: Int, similarity: Float, spanLength: Int)?
-
-                // Try single-word matches
-                for (i, word) in words.enumerated() {
-                    let cleanWord = word.trimmingCharacters(in: .punctuationCharacters)
-
-                    // For multi-word canonical, compare against first word
-                    let targetWord = canonicalWords[0]
-                    let similarity = characterSimilarity(cleanWord, targetWord)
-
-                    if similarity >= minSimilarity {
-                        if let existing = bestMatch {
-                            if similarity > existing.similarity {
-                                bestMatch = (i, similarity, canonicalWords.count)
-                            }
-                        } else {
-                            bestMatch = (i, similarity, canonicalWords.count)
-                        }
-                    }
-                }
-
-                // Try multi-word matches if canonical has multiple words
-                if canonicalWords.count > 1 {
-                    for startIdx in 0..<words.count {
-                        let endIdx = min(startIdx + canonicalWords.count, words.count)
-                        let span = words[startIdx..<endIdx]
-                        let spanText = span.map { $0.trimmingCharacters(in: .punctuationCharacters) }.joined(
-                            separator: " ")
-
-                        let similarity = characterSimilarity(spanText, canonical)
-
-                        if similarity >= minSimilarity {
-                            if let existing = bestMatch {
-                                // Prefer longer spans and higher similarity
-                                if span.count > existing.spanLength
-                                    || (span.count == existing.spanLength && similarity > existing.similarity)
-                                {
-                                    bestMatch = (startIdx, similarity, span.count)
-                                }
-                            } else {
-                                bestMatch = (startIdx, similarity, span.count)
-                            }
-                        }
-                    }
-                }
-
-                if let match = bestMatch {
-                    let originalSpan = words[match.index..<min(match.index + match.spanLength, words.count)]
-                    let replacement = Replacement(
-                        wordIndex: match.index,
-                        canonical: canonical,
-                        similarity: match.similarity,
-                        ctcScore: detection.score,
-                        originalWord: originalSpan.joined(separator: " ")
-                    )
-
-                    // Filter by combined confidence
-                    if replacement.combinedConfidence >= minCombinedConfidence {
-                        replacements.append(replacement)
-
-                        if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                            print(
-                                "[DEBUG] Match: '\(originalSpan.joined(separator: " "))' -> '\(canonical)' (similarity: \(String(format: "%.2f", match.similarity)), ctc: \(String(format: "%.2f", detection.score)), combined: \(String(format: "%.2f", replacement.combinedConfidence)))",
-                                to: &stderr)
-                        }
-                    } else if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                        print(
-                            "[DEBUG] Rejected: '\(originalSpan.joined(separator: " "))' -> '\(canonical)' (similarity: \(String(format: "%.2f", match.similarity)), ctc: \(String(format: "%.2f", detection.score)), combined: \(String(format: "%.2f", replacement.combinedConfidence)) < \(String(format: "%.2f", minCombinedConfidence)))",
-                            to: &stderr)
-                    }
-                }
-            }
-
-            guard !replacements.isEmpty else {
-                if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                    print("[DEBUG] No suitable replacements found", to: &stderr)
-                }
-                return baseResult
-            }
-
-            // Step 5: Sort by span length (prefer multi-word), then combined confidence, and apply non-overlapping replacements
-            replacements.sort { lhs, rhs in
-                let lhsSpanLength = lhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
-                let rhsSpanLength = rhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
-
-                // Prefer longer spans (multi-word matches)
-                if lhsSpanLength != rhsSpanLength {
-                    return lhsSpanLength > rhsSpanLength
-                }
-
-                // Then prefer higher similarity
-                return lhs.similarity > rhs.similarity
-            }
-
-            var usedIndices = Set<Int>()
-            var finalReplacements: [Replacement] = []
-
-            for replacement in replacements {
-                let spanLength = replacement.canonical.split(whereSeparator: { $0.isWhitespace }).count
-                let range = replacement.wordIndex..<min(replacement.wordIndex + spanLength, words.count)
-
-                // Check if this range overlaps with any already used indices
-                let overlaps = range.contains { usedIndices.contains($0) }
-
-                if !overlaps {
-                    finalReplacements.append(replacement)
-                    range.forEach { usedIndices.insert($0) }
-                }
-            }
-
-            // Step 6: Apply replacements from end to start
-            finalReplacements.sort { $0.wordIndex > $1.wordIndex }
-
-            for replacement in finalReplacements {
-                let canonicalWords = replacement.canonical.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
-                let spanLength = canonicalWords.count
-                let endIdx = min(replacement.wordIndex + spanLength, words.count)
-
-                // Preserve capitalization if original word started with uppercase
-                let originalSpan = words[replacement.wordIndex..<endIdx]
-                let finalWords = zip(
-                    canonicalWords,
-                    originalSpan + Array(repeating: "", count: max(0, canonicalWords.count - originalSpan.count))
-                ).map { canonical, original in
-                    if !original.isEmpty && original.first?.isUppercase == true && canonical.first?.isLowercase == true
-                    {
-                        return canonical.prefix(1).uppercased() + canonical.dropFirst()
-                    }
-                    return canonical
-                }
-
-                words.replaceSubrange(replacement.wordIndex..<endIdx, with: finalWords)
-            }
-
-            let updatedText = words.joined(separator: " ")
-
-            guard updatedText != baseResult.text else {
-                return baseResult
-            }
-
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                print("[DEBUG] Applied \(finalReplacements.count) replacements", to: &stderr)
-            }
-
-            logger.info("CTC keyword boost updated transcript from:\n\(baseResult.text)\nTO:\n\(updatedText)")
+            logger.info(
+                "CTC keyword boost updated transcript from:\n\(baseResult.text)\nTO:\n\(mergeResult.correctedText)")
 
             return ASRResult(
-                text: updatedText,
+                text: mergeResult.correctedText,
                 confidence: baseResult.confidence,
                 duration: baseResult.duration,
                 processingTime: baseResult.processingTime,
@@ -545,63 +363,12 @@ enum TranscribeCommand {
                 performanceMetrics: baseResult.performanceMetrics
             )
         } catch {
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+            if debug {
                 print("[DEBUG] CTC keyword boost exception: \(error)", to: &stderr)
             }
             logger.warning("CTC keyword boost failed: \(error)")
             return baseResult
         }
-    }
-
-    /// Compute character-level Levenshtein similarity with uppercase boost
-    private static func characterSimilarity(_ a: String, _ b: String) -> Float {
-        let aNorm = a.lowercased()
-        let bNorm = b.lowercased()
-        let distance = levenshteinDistance(aNorm, bNorm)
-        let maxLen = max(aNorm.count, bNorm.count)
-        guard maxLen > 0 else { return 1.0 }
-
-        var similarity = 1.0 - Float(distance) / Float(maxLen)
-
-        // Boost if both start with uppercase
-        if a.first?.isUppercase == true && b.first?.isUppercase == true {
-            similarity += 0.1
-        }
-
-        return min(similarity, 1.0)
-    }
-
-    /// Compute Levenshtein distance between two strings
-    private static func levenshteinDistance(_ a: String, _ b: String) -> Int {
-        let aChars = Array(a)
-        let bChars = Array(b)
-        let m = aChars.count
-        let n = bChars.count
-
-        guard m > 0 else { return n }
-        guard n > 0 else { return m }
-
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-
-        for i in 0...m {
-            dp[i][0] = i
-        }
-        for j in 0...n {
-            dp[0][j] = j
-        }
-
-        for i in 1...m {
-            for j in 1...n {
-                let cost = aChars[i - 1] == bChars[j - 1] ? 0 : 1
-                dp[i][j] = min(
-                    dp[i - 1][j] + 1,
-                    dp[i][j - 1] + 1,
-                    dp[i - 1][j - 1] + cost
-                )
-            }
-        }
-
-        return dp[m][n]
     }
 
     /// Test streaming transcription
