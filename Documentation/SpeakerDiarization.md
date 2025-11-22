@@ -321,8 +321,7 @@ class RealTimeDiarizer {
             chunkDuration: 5.0,
             strideDuration: 3.0,
             atTime: 0.0,
-            alignment: .frontAligned,
-            processGaps: Bool = false
+            alignment: .frontAligned
         )
         audioStream.bind { chunk, _ in
             Task {
