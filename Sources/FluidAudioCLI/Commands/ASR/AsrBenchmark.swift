@@ -76,7 +76,8 @@ public class ASRBenchmark {
         asrManager: AsrManager,
         subset: String = "test-clean",
         singleFile: String? = nil,
-        customVocabulary: CustomVocabularyContext? = nil
+        customVocabulary: CustomVocabularyContext? = nil,
+        compareCtc: Bool = false
     )
         async throws -> [ASRBenchmarkResult]
     {
@@ -134,6 +135,10 @@ public class ASRBenchmark {
                 if config.testStreaming {
                     result = try await processLibriSpeechFileStreaming(
                         asrManager: asrManager, file: audioFile, customVocabulary: customVocabulary)
+                } else if compareCtc && customVocabulary != nil {
+                    // CTC comparison mode: run both baseline and CTC-boosted
+                    result = try await processLibriSpeechFileWithCtcComparison(
+                        asrManager: asrManager, file: audioFile, customVocabulary: customVocabulary!)
                 } else {
                     result = try await processLibriSpeechFile(
                         asrManager: asrManager, file: audioFile, customVocabulary: customVocabulary)
@@ -172,6 +177,52 @@ public class ASRBenchmark {
             metrics: metrics,
             processingTime: processingTime,
             audioLength: audioLength
+        )
+    }
+
+    /// Process a single LibriSpeech file with CTC comparison (baseline vs CTC-boosted)
+    private func processLibriSpeechFileWithCtcComparison(
+        asrManager: AsrManager, file: LibriSpeechFile, customVocabulary: CustomVocabularyContext
+    ) async throws
+        -> ASRBenchmarkResult
+    {
+        let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
+        let audioLength = TimeInterval(audioSamples.count) / 16000.0
+        let url = URL(fileURLWithPath: file.audioPath.path)
+
+        // Run baseline (without custom vocabulary)
+        logger.debug("   Running baseline transcription...")
+        let baselineStartTime = Date()
+        let baselineResult = try await asrManager.transcribe(url, customVocabulary: nil)
+        let baselineTime = Date().timeIntervalSince(baselineStartTime)
+        let baselineMetrics = calculateASRMetrics(hypothesis: baselineResult.text, reference: file.transcript)
+
+        // Run CTC-boosted (with custom vocabulary)
+        logger.debug("   Running CTC-boosted transcription...")
+        let ctcStartTime = Date()
+        let ctcResult = try await asrManager.transcribe(url, customVocabulary: customVocabulary)
+        let ctcTime = Date().timeIntervalSince(ctcStartTime)
+        let ctcMetrics = calculateASRMetrics(hypothesis: ctcResult.text, reference: file.transcript)
+
+        let totalProcessingTime = baselineTime + ctcTime
+
+        // Calculate improvement
+        let werImprovement = (baselineMetrics.wer - ctcMetrics.wer) / baselineMetrics.wer
+        logger.info(
+            "   Baseline WER: \(String(format: "%.1f", baselineMetrics.wer * 100))% | CTC WER: \(String(format: "%.1f", ctcMetrics.wer * 100))% | Improvement: \(String(format: "%.1f", werImprovement * 100))%"
+        )
+
+        return ASRBenchmarkResult(
+            fileName: file.fileName,
+            hypothesis: ctcResult.text,  // Use CTC result as main hypothesis
+            reference: file.transcript,
+            metrics: ctcMetrics,  // Use CTC metrics as main metrics
+            processingTime: totalProcessingTime,
+            audioLength: audioLength,
+            baselineHypothesis: baselineResult.text,
+            baselineMetrics: baselineMetrics,
+            ctcHypothesis: ctcResult.text,
+            ctcMetrics: ctcMetrics
         )
     }
 
@@ -827,9 +878,11 @@ extension ASRBenchmark {
         var modelVersion: AsrModelVersion = .v3  // Default to v3
         // Filtering/sorting options (defaults enabled)
         var minWER: Double? = 0.01  // Default: filter out WER < 1%
-        var sortByWERDescending: Bool = true  // Default: sort results by WER high→low
+        var sortByWERDescending: Bool = false  // Default: sort results by WER high→low
         // Diff options
         var includeDiffs: Bool = false  // Include per-file word-level mismatches in JSON
+        // CTC comparison mode
+        var compareCtc: Bool = false
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -916,6 +969,8 @@ extension ASRBenchmark {
                 sortByWERDescending = false
             case "--include-diffs":
                 includeDiffs = true
+            case "--compare-ctc":
+                compareCtc = true
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
@@ -942,6 +997,7 @@ extension ASRBenchmark {
             logger.info("   Min WER filter: disabled")
         }
         logger.info("   Sort by WER: \(sortByWERDescending ? "descending (high→low)" : "disabled")")
+        logger.info("   Compare CTC: \(compareCtc ? "enabled" : "disabled")")
 
         let config = ASRBenchmarkConfig(
             dataset: "librispeech",
@@ -1045,7 +1101,8 @@ extension ASRBenchmark {
             }
 
             let results = try await benchmark.runLibriSpeechBenchmark(
-                asrManager: asrManager, subset: subset, singleFile: singleFile, customVocabulary: customVocab)
+                asrManager: asrManager, subset: subset, singleFile: singleFile, customVocabulary: customVocab,
+                compareCtc: compareCtc)
 
             // Apply optional filtering/sorting before summarizing and exporting
             var filteredSortedResults = results
@@ -1139,6 +1196,26 @@ extension ASRBenchmark {
                 "totalProcessingTime": totalProcessingTime,
             ]
 
+            // Add CTC comparison summary if available
+            if compareCtc {
+                let ctcResults = filteredSortedResults.filter { $0.baselineMetrics != nil && $0.ctcMetrics != nil }
+                if !ctcResults.isEmpty {
+                    let avgBaselineWER =
+                        ctcResults.reduce(0.0) { $0 + ($1.baselineMetrics?.wer ?? 0.0) } / Double(ctcResults.count)
+                    let avgCtcWER =
+                        ctcResults.reduce(0.0) { $0 + ($1.ctcMetrics?.wer ?? 0.0) } / Double(ctcResults.count)
+                    let avgImprovement =
+                        ctcResults.reduce(0.0) { $0 + ($1.werImprovement ?? 0.0) } / Double(ctcResults.count)
+
+                    summaryDict["ctcComparison"] = [
+                        "averageBaselineWER": avgBaselineWER,
+                        "averageCtcWER": avgCtcWER,
+                        "averageWerImprovement": avgImprovement,
+                        "filesCompared": ctcResults.count,
+                    ]
+                }
+            }
+
             // Add streaming summary if available
             if config.testStreaming {
                 let streamingResults = results.compactMap { $0.streamingMetrics }
@@ -1179,6 +1256,15 @@ extension ASRBenchmark {
                             "audioLength": result.audioLength,
                             "processingTime": result.processingTime,
                         ]
+
+                        // Add CTC comparison data if available
+                        if let baselineMetrics = result.baselineMetrics, let ctcMetrics = result.ctcMetrics {
+                            resultDict["baselineWER"] = baselineMetrics.wer
+                            resultDict["ctcWER"] = ctcMetrics.wer
+                            resultDict["werImprovement"] = result.werImprovement ?? 0.0
+                            resultDict["baselineHypothesis"] = result.baselineHypothesis ?? ""
+                            resultDict["ctcHypothesis"] = result.ctcHypothesis ?? ""
+                        }
 
                         if includeDiffs {
                             // Build word-level differences using normalized texts
@@ -1251,6 +1337,24 @@ extension ASRBenchmark {
             print(
                 "   Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioDuration))s / \(String(format: "%.1f", totalProcessingTime))s)"
             )
+
+            // Print CTC comparison results if available
+            if compareCtc {
+                let ctcResults = filteredSortedResults.filter { $0.baselineMetrics != nil && $0.ctcMetrics != nil }
+                if !ctcResults.isEmpty {
+                    let avgBaselineWER =
+                        ctcResults.reduce(0.0) { $0 + ($1.baselineMetrics?.wer ?? 0.0) } / Double(ctcResults.count)
+                    let avgCtcWER =
+                        ctcResults.reduce(0.0) { $0 + ($1.ctcMetrics?.wer ?? 0.0) } / Double(ctcResults.count)
+                    let avgImprovement = (avgBaselineWER - avgCtcWER) / avgBaselineWER
+
+                    print("\n--- CTC Comparison Results ---")
+                    print("   Files compared: \(ctcResults.count)")
+                    print("   Average baseline WER: \(String(format: "%.1f", avgBaselineWER * 100))%")
+                    print("   Average CTC WER: \(String(format: "%.1f", avgCtcWER * 100))%")
+                    print("   Average WER improvement: \(String(format: "%.1f", avgImprovement * 100))%")
+                }
+            }
         } catch {
             logger.error("ERROR: ASR benchmark failed: \(error)")
             exit(1)
@@ -1272,6 +1376,7 @@ extension ASRBenchmark {
                 --output <file>           Output JSON file path (default: asr_benchmark_results.json)
                 --model-version <version> ASR model version to use: v2 or v3 (default: v3)
                 --custom-vocab <path>     Load custom vocabulary JSON for context boosting (batch mode)
+                --compare-ctc             Run both baseline and CTC-boosted transcriptions for comparison (requires --custom-vocab)
                 --min-wer <value>        Filter results by minimum WER (default: 1%). Accepts fraction (0.01) or percent (1 = 1%).
                 --no-min-wer             Disable minimum WER filtering
                 --sort-wer               Sort output results by WER descending (default: enabled)
@@ -1315,6 +1420,10 @@ extension ASRBenchmark {
 
                 # Only include files with WER >= 1% and sort by WER (desc)
                 fluidaudio asr-benchmark --subset test-clean --min-wer 1 --sort-wer
+
+                # Compare baseline vs CTC-boosted transcriptions
+                fluidaudio asr-benchmark --subset test-clean --max-files 100 \\
+                    --custom-vocab custom_vocabulary.json --compare-ctc
 
             Expected Performance:
                 - test-clean: 2-6% WER for good ASR systems

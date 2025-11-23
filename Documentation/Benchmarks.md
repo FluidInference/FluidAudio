@@ -66,6 +66,23 @@ Use v2 if you only need English, it is a bit more accurate
    Overall RTFx: 145.8x (19452.5s / 133.4s)
 ```
 
+### Earnings22 CTC Benchmark (sliced vocab)
+
+The Earnings22 dataset is split into 5 vocab shards (25 files each, all under the 1k keyword cap):
+`Datasets/Earnings22/custom_vocabulary_000_024.json`, `_025_049.json`, `_050_074.json`,
+`_075_099.json`, `_100_124.json`. Run each slice against its file range:
+
+```bash
+# Example: first slice (files 000-024)
+swift run fluidaudio ctc-benchmark \
+  --dataset Datasets/Earnings22 \
+  --max-files 25 \
+  --vocab Datasets/Earnings22/custom_vocabulary_000_024.json \
+  --output earnings22_ctc_000_024.json
+
+# Update --max-files/--vocab per slice; repeat for the remaining shards.
+```
+
 ### ASR Model Compilation
 
 Core ML first-load compile times captured on iPhone 16 Pro Max and iPhone 13 running the

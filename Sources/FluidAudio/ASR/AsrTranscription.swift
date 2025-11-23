@@ -142,9 +142,9 @@ extension AsrManager {
         return try MLDictionaryFeatureProvider(dictionary: features)
     }
 
-    /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
-    /// This is used by both sliding window chunking and streaming paths to unify behavior.
-    internal func transcribeStreamingChunk(
+    /// Streaming-friendly chunk transcription that preserves decoder state and optionally deduplicates
+    /// overlapping tokens. Used by both sliding window chunking and streaming paths to keep behavior unified.
+    public func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
         previousTokens: [Int] = []

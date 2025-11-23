@@ -54,6 +54,7 @@ public class CtcBenchmark {
         datasetPath: String,
         customVocabPath: String?,
         maxFiles: Int?,
+        startIndex: Int = 0,
         outputPath: String?
     ) async throws {
         logger.info("=== CTC Keyword Boosting Benchmark ===")
@@ -76,8 +77,10 @@ public class CtcBenchmark {
         let metadata = try decoder.decode([AudioMetadata].self, from: metadataData)
         logger.info("Loaded \(metadata.count) items from metadata")
 
-        let samplesToProcess = maxFiles.map { min($0, metadata.count) } ?? metadata.count
-        logger.info("Processing \(samplesToProcess) samples")
+        let clampedStart = min(max(0, startIndex), metadata.count)
+        let slicedMetadata = Array(metadata.dropFirst(clampedStart))
+        let samplesToProcess = maxFiles.map { min($0, slicedMetadata.count) } ?? slicedMetadata.count
+        logger.info("Processing \(samplesToProcess) samples starting at index \(clampedStart)")
 
         // Load custom vocabulary if provided
         var customVocab: CustomVocabularyContext?
@@ -105,43 +108,71 @@ public class CtcBenchmark {
         var totalBaselineWER = 0.0
         var totalCtcWER = 0.0
 
-        for (index, item) in metadata.prefix(samplesToProcess).enumerated() {
-            let audioPath = URL(fileURLWithPath: datasetPath).appendingPathComponent(item.audioFile).path
+        for (index, item) in slicedMetadata.prefix(samplesToProcess).enumerated() {
+            let audioURL = URL(fileURLWithPath: datasetPath).appendingPathComponent(item.audioFile)
+            let audioPath = audioURL.path
+
+            guard FileManager.default.fileExists(atPath: audioPath) else {
+                logger.error("Missing audio file at \(audioPath)")
+                throw NSError(
+                    domain: "CtcBenchmark",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Missing audio file at \(audioPath)"])
+            }
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: audioPath)
+                let size = (attributes[.size] as? NSNumber)?.intValue ?? -1
+                if size <= 0 {
+                    logger.error("Audio file is empty at \(audioPath)")
+                    throw NSError(
+                        domain: "CtcBenchmark",
+                        code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "Audio file is empty at \(audioPath)"])
+                }
+            } catch {
+                logger.error("Unable to stat audio file at \(audioPath): \(error.localizedDescription)")
+                throw error
+            }
 
             logger.info("[\(index+1)/\(samplesToProcess)] Processing \(item.audioFile)...")
 
-            // Transcribe without CTC boosting (baseline)
-            let baselineResult = try await transcribeFile(audioPath, asrManager: asrManager, customVocab: nil)
+            do {
+                // Transcribe without CTC boosting (baseline)
+                let baselineResult = try await transcribeFile(audioPath, asrManager: asrManager, customVocab: nil)
 
-            // Transcribe with CTC boosting
-            let ctcResult: String
-            if let vocab = customVocab {
-                ctcResult = try await transcribeFile(audioPath, asrManager: asrManager, customVocab: vocab)
-            } else {
-                ctcResult = baselineResult
+                // Transcribe with CTC boosting
+                let ctcResult: String
+                if let vocab = customVocab {
+                    ctcResult = try await transcribeFile(audioPath, asrManager: asrManager, customVocab: vocab)
+                } else {
+                    ctcResult = baselineResult
+                }
+
+                // Calculate WER
+                let baselineWER = calculateWER(reference: item.transcript, hypothesis: baselineResult)
+                let ctcWER = calculateWER(reference: item.transcript, hypothesis: ctcResult)
+
+                totalBaselineWER += baselineWER
+                totalCtcWER += ctcWER
+
+                let result = BenchmarkResult(
+                    audioFile: item.audioFile,
+                    reference: item.transcript,
+                    baseline: baselineResult,
+                    withCtc: ctcResult,
+                    baselineWER: baselineWER,
+                    ctcWER: ctcWER,
+                    improvement: baselineWER - ctcWER
+                )
+                results.append(result)
+
+                logger.info("  Baseline WER: \(String(format: "%.2f", baselineWER))%")
+                logger.info("  CTC WER:      \(String(format: "%.2f", ctcWER))%")
+                logger.info("  Improvement:  \(String(format: "%.2f", baselineWER - ctcWER))%")
+            } catch {
+                logger.error("Failed on \(audioPath): \(error.localizedDescription)")
+                throw error
             }
-
-            // Calculate WER
-            let baselineWER = calculateWER(reference: item.transcript, hypothesis: baselineResult)
-            let ctcWER = calculateWER(reference: item.transcript, hypothesis: ctcResult)
-
-            totalBaselineWER += baselineWER
-            totalCtcWER += ctcWER
-
-            let result = BenchmarkResult(
-                audioFile: item.audioFile,
-                reference: item.transcript,
-                baseline: baselineResult,
-                withCtc: ctcResult,
-                baselineWER: baselineWER,
-                ctcWER: ctcWER,
-                improvement: baselineWER - ctcWER
-            )
-            results.append(result)
-
-            logger.info("  Baseline WER: \(String(format: "%.2f", baselineWER))%")
-            logger.info("  CTC WER:      \(String(format: "%.2f", ctcWER))%")
-            logger.info("  Improvement:  \(String(format: "%.2f", baselineWER - ctcWER))%")
         }
 
         // Calculate summary statistics
@@ -202,8 +233,36 @@ public class CtcBenchmark {
 
         enum CodingKeys: String, CodingKey {
             case id
-            case audioFile = "audio_file"
+            case audioFileSnake = "audio_file"
+            case audioFileCamel = "audioFile"
             case transcript
+            case sourceId  // ignored
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(Int.self, forKey: .id)
+            transcript = try container.decode(String.self, forKey: .transcript)
+
+            if let file = try? container.decode(String.self, forKey: .audioFileSnake) {
+                audioFile = file
+            } else if let file = try? container.decode(String.self, forKey: .audioFileCamel) {
+                audioFile = file
+            } else if let file = try? container.decode(String.self, forKey: .sourceId) {
+                audioFile = file
+            } else {
+                throw DecodingError.dataCorrupted(
+                    .init(
+                        codingPath: container.codingPath,
+                        debugDescription: "Missing audio file field"))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(audioFile, forKey: .audioFileSnake)
+            try container.encode(transcript, forKey: .transcript)
         }
     }
 
@@ -236,6 +295,7 @@ public class CtcBenchmark {
         var datasetPath: String?
         var customVocabPath: String?
         var maxFiles: Int?
+        var startIndex: Int = 0
         var outputPath: String?
 
         // Check for help flag
@@ -264,6 +324,11 @@ public class CtcBenchmark {
                     maxFiles = Int(arguments[i + 1])
                     i += 1
                 }
+            case "--start-index":
+                if i + 1 < arguments.count {
+                    startIndex = max(0, Int(arguments[i + 1]) ?? 0)
+                    i += 1
+                }
             case "--output":
                 if i + 1 < arguments.count {
                     outputPath = arguments[i + 1]
@@ -287,6 +352,7 @@ public class CtcBenchmark {
                 datasetPath: dataset,
                 customVocabPath: customVocabPath,
                 maxFiles: maxFiles,
+                startIndex: startIndex,
                 outputPath: outputPath
             )
         } catch {
@@ -309,6 +375,7 @@ public class CtcBenchmark {
                 --vocab <path>           Path to custom vocabulary JSON file
                 --custom-vocab <path>    Alias for --vocab
                 --max-files <n>          Maximum number of files to process
+                --start-index <n>        Skip the first n entries from metadata
                 --output <path>          Output JSON file for results
                 -h, --help               Show this help message
 
@@ -321,6 +388,18 @@ public class CtcBenchmark {
                 # Run on Earnings22 without CTC (baseline only)
                 fluidaudio ctc-benchmark --dataset ~/Datasets/Earnings22 \\
                     --max-files 50 --output earnings22_baseline.json
+
+                # Slice Earnings22 into 25-file shards with per-slice vocab
+                fluidaudio ctc-benchmark --dataset ~/Datasets/Earnings22 \\
+                    --start-index 0 --max-files 25 \\
+                    --vocab Datasets/Earnings22/custom_vocabulary_000_024.json \\
+                    --output earnings22_ctc_000_024.json
+
+                # Next slice (files 25-49)
+                fluidaudio ctc-benchmark --dataset ~/Datasets/Earnings22 \\
+                    --start-index 25 --max-files 25 \\
+                    --vocab Datasets/Earnings22/custom_vocabulary_025_049.json \\
+                    --output earnings22_ctc_025_049.json
             """)
     }
 }

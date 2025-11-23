@@ -18,7 +18,8 @@ internal struct TdtDecoderV2 {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> TdtHypothesis {
         let decoder = TdtDecoderV3(config: config)
         return try await decoder.decodeWithTimings(
@@ -30,7 +31,8 @@ internal struct TdtDecoderV2 {
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,
             isLastChunk: isLastChunk,
-            globalFrameOffset: globalFrameOffset
+            globalFrameOffset: globalFrameOffset,
+            customVocabulary: customVocabulary
         )
     }
 
