@@ -2,23 +2,44 @@ import Accelerate
 import CoreML
 import Foundation
 import OSLog
+import os // Required for OSAllocatedUnfairLock
 
-public final class DiarizerManager {
+// Mark as @unchecked Sendable
+// Justification: We protect mutable state (models, embeddingExtractor) with a lock.
+// The processing methods capture local references to these models, ensuring thread safety during inference.
+public final class DiarizerManager: @unchecked Sendable {
 
+    private let stateLock = OSAllocatedUnfairLock()
     internal let logger = AppLogger(category: "Diarizer")
     internal let config: DiarizerConfig
-    private var models: DiarizerModels?
+
+    // MARK: - Thread-Safe Properties
+
+    internal var models: DiarizerModels? {
+        get { stateLock.withLock { _models } }
+        set { stateLock.withLock { _models = newValue } }
+    }
+    // Backing storage for models
+    private var _models: DiarizerModels?
+
+    public var embeddingExtractor: EmbeddingExtractor? {
+        get { stateLock.withLock { _embeddingExtractor } }
+        set { stateLock.withLock { _embeddingExtractor = newValue } }
+    }
+    // Backing storage for extractor
+    private var _embeddingExtractor: EmbeddingExtractor?
+    
     /// Public getter for segmentation model (for streaming)
     public var segmentationModel: MLModel? {
         return models?.segmentationModel
     }
 
     public let segmentationProcessor = SegmentationProcessor()
-    public var embeddingExtractor: EmbeddingExtractor?
     private let audioValidation = AudioValidation()
     private let memoryOptimizer = ANEMemoryOptimizer()
 
     // Speaker manager for consistent speaker tracking
+    // SpeakerManager is internally thread-safe (uses its own queue), so it is safe here.
     public let speakerManager: SpeakerManager
 
     public init(config: DiarizerConfig = .default) {
@@ -42,6 +63,7 @@ public final class DiarizerManager {
     public func initialize(models: consuming DiarizerModels) {
         logger.info("Initializing diarization system")
 
+        // We use the setters here, which acquire the lock automatically.
         self.embeddingExtractor = EmbeddingExtractor(embeddingModel: models.embeddingModel)
         logger.info("EmbeddingExtractor initialized with embedding model")
 
@@ -49,7 +71,9 @@ public final class DiarizerManager {
     }
 
     public func cleanup() {
-        models = nil
+        // Reset via setters to ensure thread safety if cleanup is called while processing
+        self.models = nil
+        self.embeddingExtractor = nil
         logger.info("Diarization resources cleaned up")
     }
 
@@ -111,6 +135,7 @@ public final class DiarizerManager {
         _ samples: C, sampleRate: Int = 16000
     ) throws -> DiarizationResult
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
+        // This local capture is thread-safe due to the property lock
         guard let models else {
             throw DiarizerError.notInitialized
         }
@@ -262,6 +287,7 @@ public final class DiarizerManager {
 
         let embeddingStartTime = Date()
 
+        // This local capture is thread-safe due to the property lock
         guard let embeddingExtractor = self.embeddingExtractor else {
             throw DiarizerError.notInitialized
         }
@@ -477,5 +503,4 @@ public final class DiarizerManager {
         let magnitude = sqrt(vDSP.sumOfSquares(embedding))
         return min(1.0, magnitude / 10.0)
     }
-
 }
