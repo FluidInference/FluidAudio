@@ -30,7 +30,7 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-swift-6.1-${{ hashFiles('**/Package.swift') }}
+          key: ${{ runner.os }}-swift-6.1-${{ github.sha }}
 
       - name: Cache VAD models
         uses: actions/cache@v4
