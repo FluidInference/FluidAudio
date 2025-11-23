@@ -210,22 +210,8 @@ public struct CtcKeywordSpotter {
                 logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
         }
 
-        // Prefer staged path, but fall back to fused if staged fails at runtime.
-        if models.melSpectrogram != nil, models.encoder != nil {
-            do {
-                return try await computeWithStagedModels(audioSamples: audioSamples)
-            } catch {
-                if debugMode {
-                    print("[DEBUG] Staged CTC failed, falling back to fused: \(error)", to: &standardError)
-                }
-            }
-        }
-
-        if let fused = models.fusedMelEncoder {
-            return try await computeWithFusedModel(fused, audioSamples: audioSamples)
-        }
-
-        throw ASRError.processingFailed("No CTC model available (staged or fused)")
+        // Use staged models (mel spectrogram + encoder)
+        return try await computeWithStagedModels(audioSamples: audioSamples)
     }
 
     private func computeWithFusedModel(
@@ -310,12 +296,8 @@ public struct CtcKeywordSpotter {
         let (audioInput, clampedCount) = try prepareAudioArray(audioSamples)
         let melInput = try makeFeatureProvider(name: "audio", array: audioInput, length: clampedCount)
 
-        guard
-            let melModel = models.melSpectrogram,
-            let encoderModel = models.encoder
-        else {
-            throw ASRError.processingFailed("CTC MelSpectrogram/AudioEncoder models are unavailable")
-        }
+        let melModel = models.melSpectrogram
+        let encoderModel = models.encoder
 
         let melOutput = try await melModel.compatPrediction(
             from: melInput,

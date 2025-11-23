@@ -131,7 +131,7 @@ struct ChunkProcessor {
         let actualFrameCount = ASRConstants.calculateEncoderFrames(from: samples.count)
         let globalFrameOffset = chunkStart / ASRConstants.samplesPerEncoderFrame
 
-        let (hypothesis, encoderSequenceLength, _) = try await manager.executeMLInferenceWithTimings(
+        let (hypothesis, encoderSequenceLength) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
             originalLength: samples.count,
             actualAudioFrames: actualFrameCount,
