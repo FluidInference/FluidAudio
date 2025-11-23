@@ -30,13 +30,13 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-swift-6.1-${{ hashFiles('Package.swift', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+          key: ${{ runner.os }}-swift-6.1-${{ hashFiles('Package.swift', 'Sources/FluidAudio/Model*.swift') }}
 
       - name: Cache VAD models
         uses: actions/cache@v4
         with:
           path: ~/Library/Application Support/FluidAudio/Models/silero-vad-coreml
-          key: ${{ runner.os }}-vad-models-${{ hashFiles('Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+          key: ${{ runner.os }}-vad-models-${{ hashFiles('Sources/FluidAudio/Model*.swift') }}
 
       - name: Cache VOiCES dataset
         uses: actions/cache@v4
