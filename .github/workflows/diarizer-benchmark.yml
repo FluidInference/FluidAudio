@@ -31,13 +31,13 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-diarizer-${{ hashFiles('Package.swift', 'Sources/FluidAudio/Model*.swift') }}
+          key: ${{ runner.os }}-diarizer-${{ hashFiles('**/*.swift') }}
 
       - name: Cache Diarizer models
         uses: actions/cache@v4
         with:
           path: ~/Library/Application Support/FluidAudio/Models/speaker-diarization-coreml
-          key: ${{ runner.os }}-diarizer-models-${{ hashFiles('Sources/FluidAudio/Model*.swift') }}
+          key: ${{ runner.os }}-diarizer-models-${{ hashFiles('Sources/FluidAudio/Model*.swift') }}-v1
 
       - name: Cache AMI dataset
         uses: actions/cache@v4
