@@ -31,7 +31,7 @@ jobs:
             ~/Library/Caches/Homebrew
             /usr/local/Cellar/ffmpeg
             /opt/homebrew/Cellar/ffmpeg
-          key: ${{ runner.os }}-asr-${{ hashFiles('**/*.swift') }}
+          key: ${{ runner.os }}-asr-${{ hashFiles('**/Package.swift') }}
 
       - name: Install ffmpeg
         run: |
