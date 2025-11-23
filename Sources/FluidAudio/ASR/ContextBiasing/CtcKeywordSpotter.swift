@@ -33,10 +33,19 @@ public struct CtcKeywordSpotter {
     // Debug flag controlled by environment variable FLUIDAUDIO_DEBUG_CTC_BOOSTING
     private let debugMode: Bool = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
 
+    private struct CtcLogProbResult {
+        let logProbs: [[Float]]
+        let frameDuration: Double
+        let totalFrames: Int
+        let audioSamplesUsed: Int
+        let frameTimes: [Double]?
+    }
+
     /// Result for a single keyword detection.
     public struct KeywordDetection: Sendable {
         public let term: CustomVocabularyTerm
         public let score: Float
+        public let totalFrames: Int
         public let startFrame: Int
         public let endFrame: Int
         public let startTime: TimeInterval
@@ -47,6 +56,8 @@ public struct CtcKeywordSpotter {
         self.models = models
         self.blankId = blankId
         self.predictionOptions = AsrModels.optimizedPredictionOptions()
+        // CTC staged models have dynamic shapes; force CPU to avoid CoreML NE/GPU crashes.
+        self.predictionOptions.usesCPUOnly = true
     }
 
     /// Convenience helper to create a spotter using the default cache location.
@@ -67,8 +78,8 @@ public struct CtcKeywordSpotter {
         audioSamples: [Float],
         keywordTokenIds: [Int]
     ) async throws -> (score: Float, startFrame: Int, endFrame: Int) {
-        let (logProbs, _) = try await computeLogProbs(for: audioSamples)
-        let (score, start, end) = ctcWordSpot(logProbs: logProbs, keywordTokens: keywordTokenIds)
+        let ctcResult = try await computeLogProbs(for: audioSamples)
+        let (score, start, end) = ctcWordSpot(logProbs: ctcResult.logProbs, keywordTokens: keywordTokenIds)
         return (score, start, end)
     }
 
@@ -81,30 +92,23 @@ public struct CtcKeywordSpotter {
         customVocabulary: CustomVocabularyContext,
         minScore: Float? = nil
     ) async throws -> [KeywordDetection] {
-        let (logProbs, totalFramesBeforeTrim) = try await computeLogProbs(for: audioSamples)
+        let ctcResult = try await computeLogProbs(for: audioSamples)
+        let logProbs = ctcResult.logProbs
         guard !logProbs.isEmpty else { return [] }
 
         if debugMode {
             print("=== CTC Keyword Spotter Debug ===", to: &standardError)
             print(
-                "Audio samples: \(audioSamples.count), frames: \(logProbs.count) (total before trim: \(totalFramesBeforeTrim))",
+                "Audio samples: \(audioSamples.count), frames: \(logProbs.count)",
                 to: &standardError)
             print("Vocab size: \(logProbs[0].count), blank ID: \(blankId)", to: &standardError)
             print("Terms to spot: \(customVocabulary.terms.count)", to: &standardError)
         }
 
-        // Each CTC frame spans a fixed slice of audio based on the model's downsampling.
-        // The model outputs a fixed number of frames (totalFramesBeforeTrim, typically 188)
-        // for maxModelSamples (240000), so frame duration is constant.
-        let samplesPerFrame = Double(maxModelSamples) / Double(totalFramesBeforeTrim)
-        let frameDuration = samplesPerFrame / Double(sampleRate)
-
-        if debugMode {
-            print("[DEBUG] CTC frame timing:", to: &standardError)
-            print(
-                "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), frameDuration=\(String(format: "%.5f", frameDuration))s (~\(String(format: "%.2f", 1.0 / frameDuration)) fps)",
-                to: &standardError)
-        }
+        // Each CTC frame spans a fixed slice of the original audio.
+        // Derive frame duration from the trimmed logProbs and original sample count.
+        let frameDuration = ctcResult.frameDuration
+        let totalFrames = ctcResult.totalFrames
 
         var results: [KeywordDetection] = []
 
@@ -123,9 +127,12 @@ public struct CtcKeywordSpotter {
             let (score, start, end) = ctcWordSpot(logProbs: logProbs, keywordTokens: ids)
 
             if debugMode {
-                print(
-                    "  '\(term.text)': score=\(String(format: "%.4f", score)), frames=[\(start), \(end)], time=[\(String(format: "%.3f", TimeInterval(start) * frameDuration))s, \(String(format: "%.3f", TimeInterval(end) * frameDuration))s]",
-                    to: &standardError)
+                let scoreText = String(format: "%.4f", score)
+                let startText = String(format: "%.3f", TimeInterval(start) * frameDuration)
+                let endText = String(format: "%.3f", TimeInterval(end) * frameDuration)
+                let detectionSummary =
+                    "  '\(term.text)': score=\(scoreText), frames=[\(start), \(end)], time=[\(startText)s, \(endText)s]"
+                print(detectionSummary, to: &standardError)
                 print("    CTC token IDs: \(ids)", to: &standardError)
 
                 // Sample log-probs for this term's tokens at the detected window
@@ -156,19 +163,25 @@ public struct CtcKeywordSpotter {
 
             if let threshold = minScore, score <= threshold {
                 if debugMode {
+                    let thresholdText = String(format: "%.4f", threshold)
                     print(
-                        "    REJECTED: score \(String(format: "%.4f", score)) <= threshold \(String(format: "%.4f", threshold))",
+                        "    REJECTED: score \(String(format: "%.4f", score)) <= threshold \(thresholdText)",
                         to: &standardError)
                 }
                 continue
             }
 
-            let startTime = TimeInterval(start) * frameDuration
-            let endTime = TimeInterval(end) * frameDuration
+            let startTime =
+                ctcResult.frameTimes.flatMap { start < $0.count ? $0[start] : nil }
+                ?? TimeInterval(start) * frameDuration
+            let endTime =
+                ctcResult.frameTimes.flatMap { end < $0.count ? $0[end] : nil }
+                ?? TimeInterval(end) * frameDuration
 
             let detection = KeywordDetection(
                 term: term,
                 score: score,
+                totalFrames: totalFrames,
                 startFrame: start,
                 endFrame: end,
                 startTime: startTime,
@@ -191,27 +204,140 @@ public struct CtcKeywordSpotter {
 
     // MARK: - CoreML pipeline
 
-    private func computeLogProbs(for audioSamples: [Float]) async throws -> (logProbs: [[Float]], totalFrames: Int) {
-        guard !audioSamples.isEmpty else { return ([], 0) }
+    private func computeLogProbs(for audioSamples: [Float]) async throws -> CtcLogProbResult {
+        guard !audioSamples.isEmpty else {
+            return CtcLogProbResult(
+                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
+        }
 
-        // 1) Prepare fixed-length audio input expected by MelSpectrogram.
-        let audioInput = try prepareAudioArray(audioSamples)
-        let melInput = try makeFeatureProvider(name: "audio", array: audioInput)
+        // Prefer staged path, but fall back to fused if staged fails at runtime.
+        if models.melSpectrogram != nil, models.encoder != nil {
+            do {
+                return try await computeWithStagedModels(audioSamples: audioSamples)
+            } catch {
+                if debugMode {
+                    print("[DEBUG] Staged CTC failed, falling back to fused: \(error)", to: &standardError)
+                }
+            }
+        }
 
-        // 2) Run MelSpectrogram.
-        let melOutput = try await models.melSpectrogram.compatPrediction(
+        if let fused = models.fusedMelEncoder {
+            return try await computeWithFusedModel(fused, audioSamples: audioSamples)
+        }
+
+        throw ASRError.processingFailed("No CTC model available (staged or fused)")
+    }
+
+    private func computeWithFusedModel(
+        _ model: MLModel,
+        audioSamples: [Float]
+    ) async throws -> CtcLogProbResult {
+        let clampedCount = min(audioSamples.count, maxModelSamples)
+        let audioArray = try MLMultiArray(shape: [1, NSNumber(value: clampedCount)], dataType: .float32)
+
+        for i in 0..<clampedCount {
+            audioArray[i] = NSNumber(value: audioSamples[i])
+        }
+
+        let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
+        lengthArray[0] = NSNumber(value: clampedCount)
+
+        let dict: [String: MLFeatureValue] = [
+            "audio_signal": MLFeatureValue(multiArray: audioArray),
+            "audio_length": MLFeatureValue(multiArray: lengthArray),
+        ]
+        let inputProvider = try MLDictionaryFeatureProvider(dictionary: dict)
+
+        let output = try await model.compatPrediction(
+            from: inputProvider,
+            options: predictionOptions
+        )
+
+        guard let logProbsArray = output.featureValue(for: "log_probs")?.multiArrayValue else {
+            throw ASRError.processingFailed("Missing log_probs output from fused CTC model")
+        }
+        guard let encoderLengthArray = output.featureValue(for: "encoder_length")?.multiArrayValue else {
+            throw ASRError.processingFailed("Missing encoder_length output from fused CTC model")
+        }
+        let frameTimesArray = output.featureValue(for: "frame_times")?.multiArrayValue
+
+        let encoderFrames = encoderLengthArray[0].intValue
+        let allLogProbs = try makeLogProbs(from: logProbsArray, applyLogSoftmax: false)
+        let frameCount = max(0, min(encoderFrames, allLogProbs.count))
+        let trimmed = frameCount > 0 ? Array(allLogProbs.prefix(frameCount)) : []
+
+        var frameDuration: Double = 0
+        var frameTimes: [Double]? = nil
+        if let frameTimesArray {
+            var times: [Double] = []
+            times.reserveCapacity(frameTimesArray.count)
+            for i in 0..<frameTimesArray.count {
+                times.append(frameTimesArray[i].doubleValue)
+            }
+            if frameCount > 0 {
+                times = Array(times.prefix(frameCount))
+            }
+            frameTimes = times
+            if times.count > 1 {
+                frameDuration = max(0, times[1] - times[0])
+            }
+        }
+        if frameDuration == 0 {
+            frameDuration =
+                frameCount > 0
+                ? Double(clampedCount) / Double(frameCount) / Double(sampleRate)
+                : 0
+        }
+
+        if debugMode {
+            let fusedSummary =
+                "Fused CTC log-probs: frames=\(trimmed.count)/\(allLogProbs.count), encoder_length=\(encoderFrames)"
+            let vocabSummary = "  vocab size \(trimmed.first?.count ?? 0)"
+            print(fusedSummary + "," + vocabSummary, to: &standardError)
+        }
+
+        return CtcLogProbResult(
+            logProbs: trimmed,
+            frameDuration: frameDuration,
+            totalFrames: frameCount,
+            audioSamplesUsed: clampedCount,
+            frameTimes: frameTimes
+        )
+    }
+
+    private func computeWithStagedModels(audioSamples: [Float]) async throws -> CtcLogProbResult {
+        // Prepare fixed-length audio input expected by MelSpectrogram.
+        let (audioInput, clampedCount) = try prepareAudioArray(audioSamples)
+        let melInput = try makeFeatureProvider(name: "audio", array: audioInput, length: clampedCount)
+
+        guard
+            let melModel = models.melSpectrogram,
+            let encoderModel = models.encoder
+        else {
+            throw ASRError.processingFailed("CTC MelSpectrogram/AudioEncoder models are unavailable")
+        }
+
+        let melOutput = try await melModel.compatPrediction(
             from: melInput,
             options: predictionOptions
         )
 
-        guard
-            let melFeatures = melOutput.featureValue(for: "melspectrogram_features")?.multiArrayValue
-        else {
+        guard let melFeatures = melOutput.featureValue(for: "melspectrogram_features")?.multiArrayValue else {
             throw ASRError.processingFailed("Missing melspectrogram_features from CTC MelSpectrogram model")
+        }
+
+        // Prefer explicit mel_length; otherwise infer from shape (frames axis).
+        var melLengthValue =
+            melOutput.featureValue(for: "mel_length")?.multiArrayValue?[0].intValue
+            ?? melFeatures.shape.last?.intValue
+        if melFeatures.shape.count == 4 {
+            melLengthValue = melFeatures.shape[2].intValue
         }
 
         if debugMode {
             print("Mel features shape: \(melFeatures.shape)", to: &standardError)
+            let lengthText = melLengthValue.map(String.init) ?? "nil"
+            print("mel_length: \(lengthText)", to: &standardError)
 
             // Print mel feature statistics to compare with Python NeMo
             let melCount = melFeatures.count
@@ -227,9 +353,9 @@ public struct CtcKeywordSpotter {
             }
             let melMean = melSum / Float(melCount)
 
-            print(
-                "Mel features stats: min=\(String(format: "%.4f", melMin)), max=\(String(format: "%.4f", melMax)), mean=\(String(format: "%.4f", melMean))",
-                to: &standardError)
+            let statsSummary =
+                String(format: "Mel features stats: min=%.4f, max=%.4f, mean=%.4f", melMin, melMax, melMean)
+            print(statsSummary, to: &standardError)
 
             // Print first frame (first 10 features) for comparison
             if melFeatures.shape.count >= 4 {
@@ -244,11 +370,11 @@ public struct CtcKeywordSpotter {
             }
         }
 
-        // 3) Build encoder input (mel features + length placeholder).
-        let encoderInput = try makeEncoderInput(melFeatures: melFeatures)
+        // Build encoder input (mel features + length placeholder).
+        let encoderInput = try makeEncoderInput(melFeatures: melFeatures, melLength: melLengthValue)
 
-        // 4) Run AudioEncoder to obtain CTC logits.
-        let encoderOutput = try await models.encoder.compatPrediction(
+        // Run AudioEncoder to obtain CTC logits.
+        let encoderOutput = try await encoderModel.compatPrediction(
             from: encoderInput,
             options: predictionOptions
         )
@@ -283,14 +409,14 @@ public struct CtcKeywordSpotter {
                 to: &standardError)
         }
 
-        // 5) Convert logits → log‑probabilities and trim padding frames.
+        // Convert logits → log‑probabilities and trim padding frames.
         let allLogProbs = try makeLogProbs(from: ctcRaw)
-        let totalFrames = allLogProbs.count
-        let trimmed = trimLogProbs(allLogProbs, for: audioSamples.count)
+        let trimmed = trimLogProbs(allLogProbs, audioSampleCount: clampedCount)
+        let frameCount = trimmed.count
 
         if debugMode {
             print(
-                "Log-probs computed: \(trimmed.count) frames (total: \(totalFrames)), vocab size: \(trimmed.first?.count ?? 0)",
+                "Log-probs computed: \(trimmed.count) frames (total: \(allLogProbs.count)), vocab size: \(trimmed.first?.count ?? 0)",
                 to: &standardError)
             // Sample a few frames to check log-prob distribution
             if trimmed.count > 0 {
@@ -300,19 +426,33 @@ public struct CtcKeywordSpotter {
                     let maxLogProb = frame.max() ?? -Float.infinity
                     let maxIdx = frame.firstIndex(of: maxLogProb) ?? -1
                     let blankLogProb = blankId < frame.count ? frame[blankId] : -Float.infinity
+                    let maxText = String(format: "%.4f", maxLogProb)
+                    let blankText = String(format: "%.4f", blankLogProb)
                     print(
-                        "  frame[\(idx)]: max_logprob=\(String(format: "%.4f", maxLogProb)) at idx=\(maxIdx), blank_logprob=\(String(format: "%.4f", blankLogProb))",
+                        "  frame[\(idx)]: max_logprob=\(maxText) at idx=\(maxIdx), blank_logprob=\(blankText)",
                         to: &standardError)
                 }
             }
         }
 
-        return (trimmed, totalFrames)
+        let frameDuration =
+            frameCount > 0
+            ? Double(clampedCount) / Double(frameCount) / Double(sampleRate)
+            : 0
+
+        return CtcLogProbResult(
+            logProbs: trimmed,
+            frameDuration: frameDuration,
+            totalFrames: frameCount,
+            audioSamplesUsed: clampedCount,
+            frameTimes: nil
+        )
     }
 
-    private func prepareAudioArray(_ audioSamples: [Float]) throws -> MLMultiArray {
+    private func prepareAudioArray(_ audioSamples: [Float]) throws -> (MLMultiArray, Int) {
         let clampedCount = min(audioSamples.count, maxModelSamples)
-        // Use Float16 to match the CoreML model's expected input type
+        // Use Float16 to match the CoreML model's expected input type.
+        // Current staged Mel expects 1-D: [maxSamples].
         let array = try MLMultiArray(shape: [NSNumber(value: maxModelSamples)], dataType: .float16)
 
         // Copy actual samples.
@@ -335,44 +475,84 @@ public struct CtcKeywordSpotter {
             }
             let absMax = audioSamples.prefix(clampedCount).map { abs($0) }.max() ?? 0
             let mean = audioSamples.prefix(clampedCount).reduce(0.0, +) / Float(clampedCount)
-            print(
-                "  Audio input: count=\(clampedCount)/\(maxModelSamples), mid_5=[\(sampleVals.joined(separator: ", "))], abs_max=\(String(format: "%.4f", absMax)), mean=\(String(format: "%.6f", mean))",
-                to: &standardError)
+            let statsText = String(
+                format: "  Audio input: count=%d/%d, abs_max=%.4f, mean=%.6f",
+                clampedCount, maxModelSamples, absMax, mean)
+            print(statsText, to: &standardError)
+            print("  mid_5=[\(sampleVals.joined(separator: ", "))]", to: &standardError)
         }
 
-        return array
+        return (array, clampedCount)
     }
 
-    private func makeFeatureProvider(name: String, array: MLMultiArray) throws -> MLFeatureProvider {
-        let dict: [String: MLFeatureValue] = [
+    private func makeFeatureProvider(
+        name: String, array: MLMultiArray, length: Int? = nil
+    ) throws
+        -> MLFeatureProvider
+    {
+        var dict: [String: MLFeatureValue] = [
             name: MLFeatureValue(multiArray: array)
         ]
+
+        if let length, name == "audio" {
+            let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
+            lengthArray[0] = NSNumber(value: length)
+            dict["audio_length"] = MLFeatureValue(multiArray: lengthArray)
+        }
         return try MLDictionaryFeatureProvider(dictionary: dict)
     }
 
-    private func makeEncoderInput(melFeatures: MLMultiArray) throws -> MLFeatureProvider {
+    private func makeEncoderInput(melFeatures: MLMultiArray, melLength: Int?) throws -> MLFeatureProvider {
         // The encoder expects:
-        // - "melspectrogram_features": [1, 1, T, 80]
-        // - "input_1": scalar placeholder (length/flag). Use 1 as a simple "valid" marker.
-        // Use Float16 to match the CoreML model's expected input type
-        let lengthArray = try MLMultiArray(shape: [1, 1, 1, 1], dataType: .float16)
-        lengthArray[0] = 1
+        // - "melspectrogram_features": passthrough from MelSpectrogram
+        // - "mel_length": [1] int32 frame count
+        // Some exports also require a dummy "input_1": [1,1,1,1] fp16 flag.
+        let lengthValue = melLength ?? melFeatures.shape.last?.intValue ?? 0
+        guard lengthValue > 0 else {
+            throw ASRError.processingFailed("Invalid mel_length for CTC encoder input")
+        }
 
-        let dict: [String: MLFeatureValue] = [
+        let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
+        lengthArray[0] = NSNumber(value: lengthValue)
+
+        let dict: NSMutableDictionary = [
             "melspectrogram_features": MLFeatureValue(multiArray: melFeatures),
-            "input_1": MLFeatureValue(multiArray: lengthArray),
+            "mel_length": MLFeatureValue(multiArray: lengthArray),
         ]
-        return try MLDictionaryFeatureProvider(dictionary: dict)
+
+        // Optional placeholder accepted by some staged exports.
+        if let input1 = try? MLMultiArray(shape: [1, 1, 1, 1], dataType: .float16) {
+            input1[0] = 1
+            dict["input_1"] = MLFeatureValue(multiArray: input1)
+        }
+
+        return try MLDictionaryFeatureProvider(dictionary: dict as! [String: MLFeatureValue])
     }
 
-    private func makeLogProbs(from ctcOutput: MLMultiArray) throws -> [[Float]] {
-        // Expected shape: [1, vocabSize, 1, timeSteps]
-        guard ctcOutput.shape.count == 4 else {
+    private func makeLogProbs(
+        from ctcOutput: MLMultiArray,
+        applyLogSoftmax: Bool = true
+    ) throws -> [[Float]] {
+        let rank = ctcOutput.shape.count
+        guard rank == 3 || rank == 4 else {
             throw ASRError.processingFailed("Unexpected CTC output rank: \(ctcOutput.shape)")
         }
 
-        let vocabSize = ctcOutput.shape[1].intValue
-        let timeSteps = ctcOutput.shape[3].intValue
+        let vocabSize: Int
+        let timeSteps: Int
+        let indexBuilder: (Int, Int) -> [NSNumber]
+
+        if rank == 3 {
+            // Expected shape: [1, timeSteps, vocabSize]
+            timeSteps = ctcOutput.shape[1].intValue
+            vocabSize = ctcOutput.shape[2].intValue
+            indexBuilder = { t, v in [0, t, v].map { NSNumber(value: $0) } }
+        } else {
+            // Expected shape: [1, vocabSize, 1, timeSteps]
+            vocabSize = ctcOutput.shape[1].intValue
+            timeSteps = ctcOutput.shape[3].intValue
+            indexBuilder = { t, v in [0, v, 0, t].map { NSNumber(value: $0) } }
+        }
 
         if vocabSize <= 0 || timeSteps <= 0 {
             return []
@@ -383,25 +563,28 @@ public struct CtcKeywordSpotter {
             count: timeSteps
         )
 
-        // Iterate over time and vocab dimensions, read logits, and apply log-softmax per frame.
+        // Iterate over time/vocab dimensions, read logits or log-probabilities.
+        // Apply log-softmax per frame when needed.
         for t in 0..<timeSteps {
             var logits = [Float](repeating: 0, count: vocabSize)
 
             for v in 0..<vocabSize {
-                let index = [0, v, 0, t].map { NSNumber(value: $0) }
-                logits[v] = ctcOutput[index].floatValue
+                logits[v] = ctcOutput[indexBuilder(t, v)].floatValue
             }
 
             if debugMode && t == 0 {
                 let maxLogit = logits.max() ?? 0
                 let minLogit = logits.min() ?? 0
-                let blankLogit = logits[blankId]
+                let blankLogit = logits.indices.contains(blankId) ? logits[blankId] : 0
+                let minText = String(format: "%.4f", minLogit)
+                let maxText = String(format: "%.4f", maxLogit)
+                let blankText = String(format: "%.4f", blankLogit)
                 print(
-                    "  Raw logits frame[0]: min=\(String(format: "%.4f", minLogit)), max=\(String(format: "%.4f", maxLogit)), blank=\(String(format: "%.4f", blankLogit))",
+                    "  Raw logits frame[0]: min=\(minText), max=\(maxText), blank=\(blankText)",
                     to: &standardError)
             }
 
-            let row = logSoftmax(logits)
+            let row = applyLogSoftmax ? logSoftmax(logits) : logits
             logProbs[t] = row
         }
 
@@ -431,22 +614,22 @@ public struct CtcKeywordSpotter {
         return result
     }
 
-    private func trimLogProbs(_ logProbs: [[Float]], for sampleCount: Int) -> [[Float]] {
+    private func trimLogProbs(_ logProbs: [[Float]], audioSampleCount: Int) -> [[Float]] {
         guard !logProbs.isEmpty else { return logProbs }
 
         let totalFrames = logProbs.count
-        if sampleCount >= maxModelSamples {
+        if audioSampleCount >= maxModelSamples {
             return logProbs
         }
 
         let samplesPerFrame = Double(maxModelSamples) / Double(totalFrames)
-        let validFrames = Int(ceil(Double(sampleCount) / samplesPerFrame))
+        let validFrames = Int(ceil(Double(audioSampleCount) / samplesPerFrame))
         let clampedFrames = max(1, min(validFrames, totalFrames))
 
         if debugMode {
             print("[DEBUG] Trimming CTC frames:", to: &standardError)
             print(
-                "[DEBUG]   totalFrames=\(totalFrames), sampleCount=\(sampleCount), maxModelSamples=\(maxModelSamples)",
+                "[DEBUG]   totalFrames=\(totalFrames), sampleCount=\(audioSampleCount), maxModelSamples=\(maxModelSamples)",
                 to: &standardError)
             print(
                 "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), validFrames=\(validFrames), clampedFrames=\(clampedFrames)",

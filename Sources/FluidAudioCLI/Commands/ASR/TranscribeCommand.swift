@@ -117,9 +117,10 @@ enum TranscribeCommand {
         var streamingMode = false
         var showMetadata = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
-        var customVocabPath: String? = nil
-        var customVocab: CustomVocabularyContext? = nil
-        var useCtcKeywordBoost = false
+        var customWordsPath: String?
+        var customWords: [String] = []
+        var customVocabularyPath: String?
+        var customVocabulary: CustomVocabularyContext?
 
         // Parse options
         var i = 1
@@ -145,32 +146,53 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
+            case "--custom-words":
+                if i + 1 < arguments.count {
+                    customWordsPath = arguments[i + 1]
+                    i += 1
+                } else {
+                    logger.error("Missing path after --custom-words")
+                    exit(1)
+                }
             case "--custom-vocab":
                 if i + 1 < arguments.count {
-                    customVocabPath = arguments[i + 1]
+                    customVocabularyPath = arguments[i + 1]
                     i += 1
                 } else {
                     logger.error("Missing path after --custom-vocab")
                     exit(1)
                 }
-            case "--ctc-keyword-boost":
-                useCtcKeywordBoost = true
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        // Load custom vocabulary if provided
-        if let path = customVocabPath {
+        // Load custom words if provided
+        if let path = customWordsPath {
             do {
                 let url = URL(fileURLWithPath: path)
-                customVocab = try CustomVocabularyContext.load(from: url)
-                logger.info(
-                    "Loaded custom vocabulary: \(customVocab!.terms.count) terms, alpha=\(String(format: "%.2f", customVocab!.alpha))"
-                )
+                let contents = try String(contentsOf: url, encoding: .utf8)
+                customWords =
+                    contents
+                    .split(whereSeparator: { $0.isNewline })
+                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                logger.info("Loaded \(customWords.count) custom words from \(path)")
             } catch {
-                logger.error("Failed to load custom vocabulary at \(path): \(error.localizedDescription)")
+                logger.error("Failed to load custom words at \(path): \(error.localizedDescription)")
+                exit(1)
+            }
+        }
+
+        // Load structured custom vocabulary (for CTC keyword boosting) if provided
+        if let vocabPath = customVocabularyPath {
+            do {
+                let url = URL(fileURLWithPath: vocabPath)
+                customVocabulary = try CustomVocabularyContext.load(from: url)
+                logger.info("Loaded custom vocabulary from \(vocabPath) (terms: \(customVocabulary?.terms.count ?? 0))")
+            } catch {
+                logger.error("Failed to load custom vocabulary at \(vocabPath): \(error.localizedDescription)")
                 exit(1)
             }
         }
@@ -181,12 +203,12 @@ enum TranscribeCommand {
             )
             await testStreamingTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion,
-                customVocabulary: customVocab)
+                customWords: customWords, customVocabulary: customVocabulary)
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion,
-                customVocabulary: customVocab, useCtcKeywordBoost: useCtcKeywordBoost)
+                customWords: customWords, customVocabulary: customVocabulary)
         }
     }
 
@@ -195,8 +217,8 @@ enum TranscribeCommand {
         audioFile: String,
         showMetadata: Bool,
         modelVersion: AsrModelVersion,
-        customVocabulary: CustomVocabularyContext?,
-        useCtcKeywordBoost: Bool
+        customWords: [String],
+        customVocabulary: CustomVocabularyContext?
     ) async {
         do {
             // Initialize ASR models
@@ -220,27 +242,36 @@ enum TranscribeCommand {
 
             try audioFileHandle.read(into: buffer)
 
-            // Convert audio to the format expected by ASR (16kHz mono Float array)
-            let samples = try AudioConverter().resampleAudioFile(path: audioFile)
             let duration = Double(audioFileHandle.length) / format.sampleRate
-            logger.info("Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
+            logger.info("Processing \(String(format: "%.2f", duration))s of audio\n")
 
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let baseResult = try await asrManager.transcribe(audioFileURL)
+            let baseResult = try await asrManager.transcribe(
+                audioFileURL, customVocabulary: customVocabulary)
             let processingTime = Date().timeIntervalSince(startTime)
 
-            // Optionally apply CTC-based keyword boosting when a custom vocabulary is provided.
-            let result: ASRResult
-            if useCtcKeywordBoost, let vocab = customVocabulary {
+            var result = baseResult
+
+            if let vocabulary = customVocabulary {
+                let monoSamples = extractMonoSamples(from: buffer)
                 result = await applyCtcKeywordBoostIfNeeded(
-                    samples: samples,
-                    baseResult: baseResult,
-                    customVocabulary: vocab
+                    samples: monoSamples,
+                    baseResult: result,
+                    customVocabulary: vocabulary
                 )
-            } else {
-                result = baseResult
+            }
+
+            if !customWords.isEmpty {
+                let rewritten = rewrite(text: result.text, using: customWords)
+                result = ASRResult(
+                    text: rewritten,
+                    confidence: result.confidence,
+                    duration: result.duration,
+                    processingTime: result.processingTime,
+                    tokenTimings: result.tokenTimings
+                )
             }
 
             // Print results
@@ -299,6 +330,51 @@ enum TranscribeCommand {
         } catch {
             logger.error("Batch transcription failed: \(error)")
         }
+    }
+
+    /// Simple post-processing rewrite that replaces `<unk>` placeholders with
+    /// the supplied custom words (in order) if they are not already present.
+    private static func rewrite(text: String, using customWords: [String]) -> String {
+        guard !customWords.isEmpty else { return text }
+
+        let lowercased = text.lowercased()
+        let remaining = customWords.filter { !lowercased.contains($0.lowercased()) }
+        guard !remaining.isEmpty else { return text }
+
+        let nsText = text as NSString
+        let pattern = "(?i)<unk>"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+
+        let mutable = NSMutableString(string: text)
+        var offset = 0
+        var replacementIndex = 0
+
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
+            guard replacementIndex < remaining.count else { break }
+            let replacement = remaining[replacementIndex]
+            replacementIndex += 1
+
+            let adjustedRange = NSRange(
+                location: match.range.location + offset,
+                length: match.range.length
+            )
+            mutable.replaceCharacters(in: adjustedRange, with: replacement)
+            offset += (replacement as NSString).length - match.range.length
+        }
+
+        return String(mutable)
+    }
+
+    /// Convert the first channel of a PCM buffer to a mono sample array.
+    private static func extractMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
+        let frameLength = Int(buffer.frameLength)
+        guard
+            frameLength > 0,
+            let channelData = buffer.floatChannelData?[0]
+        else {
+            return []
+        }
+        return Array(UnsafeBufferPointer(start: channelData, count: frameLength))
     }
 
     /// Apply CTC keyword boosting using CTC detections as a word presence signal.
@@ -373,7 +449,11 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion, customVocabulary: CustomVocabularyContext?
+        audioFile: String,
+        showMetadata: Bool,
+        modelVersion: AsrModelVersion,
+        customWords: [String],
+        customVocabulary: CustomVocabularyContext?
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -382,6 +462,9 @@ enum TranscribeCommand {
         let streamingAsr = StreamingAsrManager(config: config)
 
         do {
+            if customVocabulary != nil {
+                logger.warning("Custom vocabulary is applied only in batch mode; streaming ignores CTC boosting.")
+            }
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
 
@@ -503,6 +586,7 @@ enum TranscribeCommand {
 
             // Finalize transcription
             let finalText = try await streamingAsr.finish()
+            let finalOutput = customWords.isEmpty ? finalText : rewrite(text: finalText, using: customWords)
 
             // Cancel update task
             updateTask.cancel()
@@ -515,7 +599,7 @@ enum TranscribeCommand {
             logger.info("STREAMING TRANSCRIPTION RESULTS")
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
-            print(finalText)
+            print(finalOutput)
             logger.info("Performance:")
             logger.info("  Audio duration: \(String(format: "%.2f", totalDuration))s")
             logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
@@ -582,8 +666,8 @@ enum TranscribeCommand {
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
-                --custom-vocab <path>      Load custom vocabulary JSON for CTC keyword boosting
-                --ctc-keyword-boost        Enable CTC keyword spotting when using a custom vocab
+                --custom-vocab <path>     JSON custom vocabulary for CTC keyword boosting (batch only)
+                --custom-words <path>      Newline-delimited custom words to replace <unk> tokens (post-process only)
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)

@@ -335,7 +335,7 @@ public struct KeywordMerger {
         detections: [CtcKeywordSpotter.KeywordDetection],
         toTranscript transcript: String,
         vocabulary: CustomVocabularyContext,
-        debugMode: Bool = false
+        debugMode: Bool = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
     ) -> MergeResult {
 
         let minSimilarity = vocabulary.minSimilarity
@@ -368,10 +368,11 @@ public struct KeywordMerger {
             let originalWord: String
 
             var combinedConfidence: Float {
-                // Normalize CTC score from [-10, -5] range to [0, 1]
-                let normalizedCtcScore = max(0, min(1, (ctcScore + 10) / 5))
-                // Weight similarity more heavily (60%) than CTC confidence (40%)
-                return 0.6 * similarity + 0.4 * normalizedCtcScore
+                // Normalize CTC score from [-12, -6] range to [0, 1]
+                // Expanded range to accommodate weaker CTC detections
+                let normalizedCtcScore = max(0, min(1, (ctcScore + 12) / 6))
+                // Weight similarity heavily (70%) since character matching helps weak phonetic cases
+                return 0.7 * similarity + 0.3 * normalizedCtcScore
             }
         }
 
@@ -502,23 +503,62 @@ public struct KeywordMerger {
             return MergeResult(correctedText: transcript, replacements: [])
         }
 
-        // Sort by span length (prefer multi-word), then similarity
-        replacements.sort { lhs, rhs in
-            let lhsSpanLength = lhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
-            let rhsSpanLength = rhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
-
-            if lhsSpanLength != rhsSpanLength {
-                return lhsSpanLength > rhsSpanLength
-            }
-
-            return lhs.similarity > rhs.similarity
+        // Group replacements by word index to handle conflicts
+        var replacementsByIndex: [Int: [InternalReplacement]] = [:]
+        for replacement in replacements {
+            replacementsByIndex[replacement.wordIndex, default: []].append(replacement)
         }
 
-        // Select non-overlapping replacements
+        // For each word position, select the best replacement
+        var selectedReplacements: [InternalReplacement] = []
+        for (wordIdx, candidates) in replacementsByIndex {
+            if debugMode && candidates.count > 1 {
+                logger.info(
+                    "KeywordMerger: Conflict at word \(wordIdx) ('\(words[wordIdx])'): \(candidates.count) candidates")
+                for c in candidates {
+                    logger.info(
+                        "  - '\(c.canonical)' sim=\(String(format: "%.2f", c.similarity)) conf=\(String(format: "%.2f", c.combinedConfidence))"
+                    )
+                }
+            }
+
+            // When multiple detections target the same word, prefer:
+            // 1. Higher similarity (exact/near-exact matches)
+            // 2. Longer span length (multi-word phrases)
+            // 3. Higher combined confidence
+            let best = candidates.max { lhs, rhs in
+                // Prioritize similarity first to prefer exact matches
+                if abs(lhs.similarity - rhs.similarity) > 0.1 {
+                    return lhs.similarity < rhs.similarity
+                }
+
+                // Then prefer longer spans
+                let lhsSpanLength = lhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
+                let rhsSpanLength = rhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
+                if lhsSpanLength != rhsSpanLength {
+                    return lhsSpanLength < rhsSpanLength
+                }
+
+                // Finally use combined confidence as tiebreaker
+                return lhs.combinedConfidence < rhs.combinedConfidence
+            }
+
+            if let best = best {
+                if debugMode && candidates.count > 1 {
+                    logger.info("  → Selected '\(best.canonical)'")
+                }
+                selectedReplacements.append(best)
+            }
+        }
+
+        // Select non-overlapping replacements (for multi-word phrases)
         var usedIndices = Set<Int>()
         var finalReplacements: [InternalReplacement] = []
 
-        for replacement in replacements {
+        // Sort by similarity to process best matches first
+        selectedReplacements.sort { $0.similarity > $1.similarity }
+
+        for replacement in selectedReplacements {
             let spanLength = replacement.canonical.split(whereSeparator: { $0.isWhitespace }).count
             let range = replacement.wordIndex..<min(replacement.wordIndex + spanLength, words.count)
 
@@ -601,10 +641,13 @@ public struct KeywordMerger {
 
     /// Compute combined character + phonetic similarity
     private static func combinedSimilarity(_ a: String, _ b: String) -> Float {
-        // Phoneme-only matching: Testing showed 0.4*char + 0.6*phonetic produces
-        // identical results to phoneme-only (90.9% accuracy on test set).
-        // Character similarity adds no value, so simplified to phonetic only.
-        return phoneticSimilarity(a, b)
+        // Weighted average of character and phonetic similarity
+        // Requires BOTH to contribute, avoiding false positives where only one is high
+        let charSim = characterSimilarity(a, b)
+        let phoneSim = phoneticSimilarity(a, b)
+
+        // 60% character (more reliable), 40% phonetic (helps with spelling variations)
+        return 0.6 * charSim + 0.4 * phoneSim
     }
 
     /// Compute character-level Levenshtein similarity

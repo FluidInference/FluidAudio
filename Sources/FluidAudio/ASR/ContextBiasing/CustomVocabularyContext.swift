@@ -48,8 +48,8 @@ public struct CustomVocabularyContext: Sendable {
         contextScore: Float = 1.2,
         depthScaling: Float = 2.0,
         scorePerPhrase: Float = 0.0,
-        minCtcScore: Float = -10.0,
-        minSimilarity: Float = 0.50,
+        minCtcScore: Float = -12.0,
+        minSimilarity: Float = 0.52,
         minCombinedConfidence: Float = 0.54
     ) {
         self.terms = terms
@@ -72,8 +72,8 @@ public struct CustomVocabularyContext: Sendable {
         let contextScore = config.contextScore ?? 1.2
         let depthScaling = config.depthScaling ?? 2.0
         let scorePerPhrase = config.scorePerPhrase ?? 0.0
-        let minCtcScore = config.minCtcScore ?? -10.0
-        let minSimilarity = config.minSimilarity ?? 0.50
+        let minCtcScore = config.minCtcScore ?? -12.0
+        let minSimilarity = config.minSimilarity ?? 0.52
         let minCombinedConfidence = config.minCombinedConfidence ?? 0.54
 
         // Validate and normalize vocabulary terms
