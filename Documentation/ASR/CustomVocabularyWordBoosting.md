@@ -1,10 +1,69 @@
 # Custom Vocabulary and Word Boosting (Parakeet v3 · NeMo/Riva · Argmax)
 
+## FluidAudio Architecture: Two Models for Context Boosting
+
+FluidAudio uses **TWO separate models** for CTC-based context boosting:
+
+### 1. Parakeet CTC 110M (`argmaxinc/ctckit-pro`)
+- **Purpose**: CTC keyword spotting (acoustic detection)
+- **Size**: 110M parameters
+- **Architecture**: Mel Spectrogram → CTC Encoder → Logits [T × 1024]
+- **Vocabulary**: 1024 character-level CTC tokens (e.g., `▁z`, `y`, `r`, `t`, `e`, `c`)
+- **Output**: Log-probabilities over tokens at each time frame (NOT discrete tokens)
+- **Used for**: Pre-decoding keyword detection via dynamic programming
+
+### 2. Parakeet TDT v3 0.6B (`FluidInference/parakeet-tdt-0.6b-v3-coreml`)
+- **Purpose**: Main ASR transcription
+- **Size**: 600M parameters
+- **Architecture**: Mel Spectrogram → Conformer Encoder → TDT Decoder (RNN-T)
+- **Vocabulary**: 8192 subword BPE tokens (SentencePiece)
+- **Output**: Text transcription with token durations
+- **Used for**: Production-quality speech-to-text
+
+### Why Two Models?
+
+The CTC model (110M) detects keywords **acoustically** in the CTC logits BEFORE decoding happens. This catches words the TDT decoder might miss or misspell. The keyword detections are then merged into the TDT transcript using character + phonetic similarity matching.
+
+**Pipeline**: Audio → CTC Keyword Spotting → TDT Transcription → Keyword Merging → Final Transcript
+
+**Common Confusion**: The TDT v3 model does NOT have a CTC head. We use a completely separate CTC model for keyword spotting.
+
+### How CTC Encoder Works
+
+The CTC encoder is a neural network that outputs **log-probabilities**, not discrete tokens:
+
+```
+Input: Audio samples [16kHz Float32, 240,000 samples for 15s]
+    ↓
+Mel Spectrogram: [128 mel bins × ~1,501 frames]
+    ↓
+CTC Encoder: Conformer-based neural network
+    ↓
+Output: CTC Logits [T × V]
+    T = time frames (~80 frames for 5 seconds)
+    V = vocabulary size (1024 CTC tokens)
+```
+
+**What are CTC logits?**
+- `logits[t][token_id]` = log-probability of token_id at time frame t
+- Example: `logits[73][245] = -2.3` means token 245 has probability e^(-2.3) ≈ 0.10 at frame 73
+- The encoder outputs a probability distribution over all 1024 tokens at each time step
+
+**Dynamic Programming Keyword Spotting:**
+- For keyword "zyrtec" with CTC token IDs `[245, 968, 54]`
+- DP algorithm searches the logits to find where this token sequence appears
+- Computes best alignment path: `dp[t][n]` = best score to match first n tokens by time t
+- Returns detection with acoustic confidence score
+
+**Key Distinction:**
+- ❌ "CTC encoder produces tokens"
+- ✅ "CTC encoder produces log-probability distributions that we search for token sequences"
+
 ## Summary
 
 - Word boosting (aka contextual biasing, custom vocabulary) increases the likelihood of specific words/phrases during transcription without retraining or changing model weights.
 - Parakeet v3 uses decoder/serving features in NeMo or Riva to apply boosts. The model itself is unchanged.
-- Argmax’s Custom Vocabulary is model‑agnostic: it runs a dedicated keyword search and merges hits into any transcript (including Parakeet‑backed pipelines), enabling large vocabularies (~1000 keywords).
+- Argmax's Custom Vocabulary is model‑agnostic: it runs a dedicated keyword search and merges hits into any transcript (including Parakeet‑backed pipelines), enabling large vocabularies (~1000 keywords).
 - Proper tuning substantially improves name/jargon accuracy while minimizing false inserts.
 
 ## How It Works
