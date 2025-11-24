@@ -1,4 +1,3 @@
-
 # Speaker Diarization
 
 Real-time speaker diarization for iOS and macOS, answering "who spoke when" in audio streams.
