@@ -1,3 +1,4 @@
+#if canImport(SentencePieceWrapper)
 import Foundation
 import OSLog
 import SentencePieceWrapper
@@ -155,3 +156,31 @@ extension CustomVocabularyContext {
         )
     }
 }
+#else
+import Foundation
+import OSLog
+
+/// Fallback tokenizer that reuses the simpler CTC tokenizer when SentencePiece is unavailable.
+public class SentencePieceCtcTokenizer {
+    private let logger = Logger(subsystem: "com.fluidaudio", category: "SentencePieceCtcTokenizer")
+
+    public init() {}
+
+    public func encode(_ text: String) -> [Int] {
+        do {
+            let fallbackTokenizer = try CtcTokenizer()
+            return fallbackTokenizer.encode(text)
+        } catch {
+            logger.warning("SentencePiece unavailable; fallback tokenizer failed: \(error)")
+            return []
+        }
+    }
+}
+
+extension CustomVocabularyContext {
+    /// When SentencePiece is unavailable, fall back to CTC tokenization.
+    public static func loadWithSentencePieceTokenization(from url: URL) throws -> CustomVocabularyContext {
+        try loadWithCtcTokenization(from: url)
+    }
+}
+#endif

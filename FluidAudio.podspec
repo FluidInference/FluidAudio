@@ -22,21 +22,10 @@ Pod::Spec.new do |spec|
   spec.swift_versions = ["5.10"]
 
   spec.pod_target_xcconfig = {
-    'DEFINES_MODULE' => 'YES',
-    'ARCHS[sdk=macosx*]' => 'arm64',
-    'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
-    'ARCHS[sdk=iphonesimulator*]' => 'arm64',
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386 x86_64',
-    'ARCHS[sdk=iphoneos*]' => 'arm64'
+    'DEFINES_MODULE' => 'YES'
   }
 
-  spec.user_target_xcconfig = {
-    'ARCHS[sdk=macosx*]' => 'arm64',
-    'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
-    'ARCHS[sdk=iphonesimulator*]' => 'arm64',
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386 x86_64',
-    'ARCHS[sdk=iphoneos*]' => 'arm64'
-  }
+  spec.user_target_xcconfig = {}
 
   spec.subspec "FastClusterWrapper" do |wrapper|
     wrapper.requires_arc = false
@@ -49,20 +38,8 @@ Pod::Spec.new do |spec|
     }
   end
 
-  spec.subspec "SentencePieceWrapper" do |wrapper|
-    wrapper.requires_arc = false
-    wrapper.source_files = "Sources/SentencePieceWrapper/**/*.{cpp,h}"
-    wrapper.public_header_files = "Sources/SentencePieceWrapper/include/SentencePieceBridge.h"
-    wrapper.header_mappings_dir = "Sources/SentencePieceWrapper"
-    wrapper.vendored_frameworks = "Sources/FluidAudio/Frameworks/SentencePiece.xcframework"
-    wrapper.pod_target_xcconfig = {
-      'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17'
-    }
-  end
-
   spec.subspec "Core" do |core|
     core.dependency "#{spec.name}/FastClusterWrapper"
-    core.dependency "#{spec.name}/SentencePieceWrapper"
     core.source_files = "Sources/FluidAudio/**/*.swift"
 
     # iOS Configuration
