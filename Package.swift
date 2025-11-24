@@ -25,7 +25,7 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "SentencePiece",
-            path: "smdesaiSentencePiece/SentencePiece.xcframework"
+            path: "Sources/FluidAudio/Frameworks/SentencePiece.xcframework"
         ),
         .target(
             name: "SentencePieceWrapper",
