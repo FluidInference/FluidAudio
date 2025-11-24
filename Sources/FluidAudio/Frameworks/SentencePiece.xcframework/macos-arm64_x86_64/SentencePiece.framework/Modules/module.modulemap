@@ -1,0 +1,9 @@
+framework module SentencePiece {
+    umbrella header "SentencePiece.h"
+    
+    export *
+    module * { export * }
+    
+    link "sentencepiece"
+    link "c++"
+}
