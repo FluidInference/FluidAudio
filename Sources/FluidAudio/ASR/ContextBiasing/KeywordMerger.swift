@@ -641,13 +641,8 @@ public struct KeywordMerger {
 
     /// Compute combined character + phonetic similarity
     private static func combinedSimilarity(_ a: String, _ b: String) -> Float {
-        // Weighted average of character and phonetic similarity
-        // Requires BOTH to contribute, avoiding false positives where only one is high
-        let charSim = characterSimilarity(a, b)
-        let phoneSim = phoneticSimilarity(a, b)
-
-        // 60% character (more reliable), 40% phonetic (helps with spelling variations)
-        return 0.6 * charSim + 0.4 * phoneSim
+        // Forcing phonetic-only similarity (character weight = 0) for this run
+        return phoneticSimilarity(a, b)
     }
 
     /// Compute character-level Levenshtein similarity

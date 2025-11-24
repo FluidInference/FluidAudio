@@ -176,7 +176,9 @@ public class ASRBenchmark {
             reference: file.transcript,
             metrics: metrics,
             processingTime: processingTime,
-            audioLength: audioLength
+            audioLength: audioLength,
+            ctcDetectedTerms: asrResult.ctcDetectedTerms,
+            ctcAppliedTerms: asrResult.ctcAppliedTerms
         )
     }
 
@@ -207,10 +209,20 @@ public class ASRBenchmark {
         let totalProcessingTime = baselineTime + ctcTime
 
         // Calculate improvement
-        let werImprovement = (baselineMetrics.wer - ctcMetrics.wer) / baselineMetrics.wer
-        logger.info(
-            "   Baseline WER: \(String(format: "%.1f", baselineMetrics.wer * 100))% | CTC WER: \(String(format: "%.1f", ctcMetrics.wer * 100))% | Improvement: \(String(format: "%.1f", werImprovement * 100))%"
-        )
+        let werImprovement: Double?
+        if baselineMetrics.wer > 0 {
+            werImprovement = (baselineMetrics.wer - ctcMetrics.wer) / baselineMetrics.wer
+        } else {
+            werImprovement = nil
+        }
+        let baselinePct = String(format: "%.1f", baselineMetrics.wer * 100)
+        let ctcPct = String(format: "%.1f", ctcMetrics.wer * 100)
+        if let werImprovement {
+            let improvementPct = String(format: "%.1f", werImprovement * 100)
+            logger.info("   Baseline WER: \(baselinePct)% | CTC WER: \(ctcPct)% | Improvement: \(improvementPct)%")
+        } else {
+            logger.info("   Baseline WER: \(baselinePct)% | CTC WER: \(ctcPct)% | Improvement: N/A (baseline WER = 0)")
+        }
 
         return ASRBenchmarkResult(
             fileName: file.fileName,
@@ -222,7 +234,9 @@ public class ASRBenchmark {
             baselineHypothesis: baselineResult.text,
             baselineMetrics: baselineMetrics,
             ctcHypothesis: ctcResult.text,
-            ctcMetrics: ctcMetrics
+            ctcMetrics: ctcMetrics,
+            ctcDetectedTerms: ctcResult.ctcDetectedTerms,
+            ctcAppliedTerms: ctcResult.ctcAppliedTerms
         )
     }
 
@@ -339,7 +353,8 @@ public class ASRBenchmark {
             metrics: metrics,
             processingTime: totalInferenceTime,
             audioLength: audioLength,
-            streamingMetrics: streamingMetrics
+            streamingMetrics: streamingMetrics,
+            ctcDetectedTerms: nil
         )
     }
 
@@ -1062,11 +1077,13 @@ extension ASRBenchmark {
 
             // Load custom vocabulary if provided in arguments; support overrides
             var customVocab: CustomVocabularyContext? = nil
+            var customVocabPath: String? = nil
             if let idx = arguments.firstIndex(of: "--custom-vocab"), idx + 1 < arguments.count {
                 let path = arguments[idx + 1]
                 do {
                     let url = URL(fileURLWithPath: path)
-                    var ctx = try CustomVocabularyContext.load(from: url)
+                    var ctx = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: url)
+                    customVocabPath = path
                     // Optional overrides
                     if let aIdx = arguments.firstIndex(of: "--alpha"), aIdx + 1 < arguments.count,
                         let val = Float(arguments[aIdx + 1])
@@ -1179,6 +1196,11 @@ extension ASRBenchmark {
                 "maxFiles": config.maxFiles as Any,
                 "debugMode": config.debugMode,
             ]
+
+            if let customVocabPath {
+                configDict["customVocabularyPath"] = customVocabPath
+                configDict["ctcTokenization"] = "sentencepiece"
+            }
 
             if config.testStreaming {
                 configDict["testStreaming"] = config.testStreaming
@@ -1310,6 +1332,13 @@ extension ASRBenchmark {
                                 "streamingRTFx": streamingMetrics.streamingRTFx,
                                 "chunkDuration": streamingMetrics.chunkDuration,
                             ]
+                        }
+
+                        if let detected = result.ctcDetectedTerms, !detected.isEmpty {
+                            resultDict["ctcDetectedTerms"] = detected
+                        }
+                        if let applied = result.ctcAppliedTerms, !applied.isEmpty {
+                            resultDict["ctcAppliedTerms"] = applied
                         }
 
                         return resultDict

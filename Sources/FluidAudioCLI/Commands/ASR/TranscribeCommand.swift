@@ -189,7 +189,7 @@ enum TranscribeCommand {
         if let vocabPath = customVocabularyPath {
             do {
                 let url = URL(fileURLWithPath: vocabPath)
-                customVocabulary = try CustomVocabularyContext.load(from: url)
+                customVocabulary = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: url)
                 logger.info("Loaded custom vocabulary from \(vocabPath) (terms: \(customVocabulary?.terms.count ?? 0))")
             } catch {
                 logger.error("Failed to load custom vocabulary at \(vocabPath): \(error.localizedDescription)")

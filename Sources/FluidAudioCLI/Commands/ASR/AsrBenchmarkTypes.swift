@@ -1,4 +1,4 @@
-#if os(macOS)
+﻿#if os(macOS)
 //
 //  AsrBenchmarkTypes.swift
 //  FluidAudio
@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import FluidAudio
 
 /// ASR evaluation metrics
 public struct ASRMetrics: Sendable {
@@ -71,6 +72,8 @@ public struct ASRBenchmarkResult: Sendable {
     public let audioLength: TimeInterval
     public let rtfx: Double  // Real-Time Factor (inverse)
     public let streamingMetrics: StreamingMetrics?  // Optional streaming metrics
+    public let ctcDetectedTerms: [String]?
+    public let ctcAppliedTerms: [String]?
 
     // CTC comparison data (optional)
     public let baselineHypothesis: String?
@@ -82,7 +85,8 @@ public struct ASRBenchmarkResult: Sendable {
         fileName: String, hypothesis: String, reference: String, metrics: ASRMetrics, processingTime: TimeInterval,
         audioLength: TimeInterval, streamingMetrics: StreamingMetrics? = nil,
         baselineHypothesis: String? = nil, baselineMetrics: ASRMetrics? = nil,
-        ctcHypothesis: String? = nil, ctcMetrics: ASRMetrics? = nil
+        ctcHypothesis: String? = nil, ctcMetrics: ASRMetrics? = nil,
+        ctcDetectedTerms: [String]? = nil, ctcAppliedTerms: [String]? = nil
     ) {
         self.fileName = fileName
         self.hypothesis = hypothesis
@@ -96,6 +100,8 @@ public struct ASRBenchmarkResult: Sendable {
         self.baselineMetrics = baselineMetrics
         self.ctcHypothesis = ctcHypothesis
         self.ctcMetrics = ctcMetrics
+        self.ctcDetectedTerms = ctcDetectedTerms
+        self.ctcAppliedTerms = ctcAppliedTerms
     }
 
     /// Calculate relative WER improvement when CTC comparison is available
@@ -103,6 +109,7 @@ public struct ASRBenchmarkResult: Sendable {
         guard let baselineWER = baselineMetrics?.wer, let ctcWER = ctcMetrics?.wer else {
             return nil
         }
+        guard baselineWER > 0 else { return nil }
         return (baselineWER - ctcWER) / baselineWER
     }
 }

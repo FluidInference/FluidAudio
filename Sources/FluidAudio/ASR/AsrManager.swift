@@ -35,6 +35,8 @@ public final class AsrManager {
 
     /// Custom vocabulary context for context biasing
     private var customVocabulary: CustomVocabularyContext?
+    /// Cached CTC keyword spotter to avoid per-call initialization cost
+    private var cachedCtcKeywordSpotter: CtcKeywordSpotter?
 
     // TODO:: the decoder state should be moved higher up in the API interface
     internal var microphoneDecoderState: TdtDecoderState
@@ -356,13 +358,63 @@ public final class AsrManager {
                 audioSamples, decoderState: &systemDecoderState, customVocabulary: customVocabulary)
         }
 
-        // NOTE: customVocabulary is acknowledged here. Decode‑time biasing is introduced
-        // in the decoder hook; until then this acts as a no‑op to keep API stable.
-        if let customVocabulary {
-            logger.info(
-                "Custom vocabulary attached: \(customVocabulary.terms.count) terms, "
-                    + "alpha=\(String(format: "%.2f", customVocabulary.alpha)), "
-                    + "contextScore=\(String(format: "%.2f", customVocabulary.contextScore))")
+        // Optional CTC keyword boosting and metrics
+        if let customVocabulary, !customVocabulary.terms.isEmpty {
+            let debug = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+            do {
+                let spotter = try await getKeywordSpotter()
+                let detections = try await spotter.spotKeywords(
+                    audioSamples: audioSamples,
+                    customVocabulary: customVocabulary,
+                    minScore: customVocabulary.minCtcScore
+                )
+
+                let detectedTerms = detections.map { $0.term.text }
+
+                if debug {
+                    logger.info("CTC boost: detected \(detections.count) keywords")
+                }
+
+                if !detections.isEmpty {
+                    let mergeResult = KeywordMerger.applyCorrections(
+                        detections: detections,
+                        toTranscript: result.text,
+                        vocabulary: customVocabulary,
+                        debugMode: debug
+                    )
+
+                    let appliedTerms = mergeResult.replacements.map { $0.canonicalText }
+                    let loweredCorrected = mergeResult.correctedText.lowercased()
+                    let filteredDetected = detectedTerms
+                        .filter { loweredCorrected.contains($0.lowercased()) }
+
+                    result = ASRResult(
+                        text: mergeResult.correctedText,
+                        confidence: result.confidence,
+                        duration: result.duration,
+                        processingTime: result.processingTime,
+                        tokenTimings: result.tokenTimings,
+                        performanceMetrics: result.performanceMetrics,
+                        ctcDetectedTerms: filteredDetected.isEmpty ? nil : filteredDetected,
+                        ctcAppliedTerms: appliedTerms.isEmpty ? nil : appliedTerms
+                    )
+                } else if !detectedTerms.isEmpty {
+                    let loweredText = result.text.lowercased()
+                    let filteredDetected = detectedTerms.filter { loweredText.contains($0.lowercased()) }
+                    result = ASRResult(
+                        text: result.text,
+                        confidence: result.confidence,
+                        duration: result.duration,
+                        processingTime: result.processingTime,
+                        tokenTimings: result.tokenTimings,
+                        performanceMetrics: result.performanceMetrics,
+                        ctcDetectedTerms: filteredDetected.isEmpty ? nil : filteredDetected,
+                        ctcAppliedTerms: nil
+                    )
+                }
+            } catch {
+                logger.warning("CTC keyword boost failed: \(error.localizedDescription)")
+            }
         }
 
         // Stateless architecture: reset decoder state after each transcription to ensure
@@ -370,6 +422,15 @@ public final class AsrManager {
         try await self.resetDecoderState()
 
         return result
+    }
+
+    private func getKeywordSpotter() async throws -> CtcKeywordSpotter {
+        if let cachedCtcKeywordSpotter {
+            return cachedCtcKeywordSpotter
+        }
+        let spotter = try await CtcKeywordSpotter.makeDefault()
+        cachedCtcKeywordSpotter = spotter
+        return spotter
     }
 
     // Reset both decoder states

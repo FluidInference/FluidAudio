@@ -219,7 +219,10 @@ extension AsrManager {
             confidence: confidence,
             duration: duration,
             processingTime: processingTime,
-            tokenTimings: resultTimings
+            tokenTimings: resultTimings,
+            performanceMetrics: nil,
+            ctcDetectedTerms: nil,
+            ctcAppliedTerms: nil
         )
     }
 

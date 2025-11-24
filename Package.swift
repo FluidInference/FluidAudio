@@ -20,14 +20,30 @@ let package = Package(
     dependencies: [],
     targets: [
         .binaryTarget(
+            name: "SentencePiece",
+            path: "smdesaiSentencePiece/SentencePiece.xcframework"
+        ),
+        .binaryTarget(
             name: "ESpeakNG",
             path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
+        ),
+        .target(
+            name: "SentencePieceWrapper",
+            dependencies: [
+                "SentencePiece"
+            ],
+            path: "Sources/SentencePieceWrapper",
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .headerSearchPath("include")
+            ]
         ),
         .target(
             name: "FluidAudio",
             dependencies: [
                 "ESpeakNG",
                 "FastClusterWrapper",
+                "SentencePieceWrapper",
             ],
             path: "Sources/FluidAudio",
             exclude: ["Frameworks"]
