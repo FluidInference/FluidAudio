@@ -385,7 +385,8 @@ public final class AsrManager {
 
                     let appliedTerms = mergeResult.replacements.map { $0.canonicalText }
                     let loweredCorrected = mergeResult.correctedText.lowercased()
-                    let filteredDetected = detectedTerms
+                    let filteredDetected =
+                        detectedTerms
                         .filter { loweredCorrected.contains($0.lowercased()) }
 
                     result = ASRResult(

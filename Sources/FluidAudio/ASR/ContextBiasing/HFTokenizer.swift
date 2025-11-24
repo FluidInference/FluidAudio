@@ -24,7 +24,8 @@ public class HFTokenizer {
 
         // Extract vocabulary
         guard let model = tokenizerJson?["model"] as? [String: Any],
-              let vocabDict = model["vocab"] as? [String: Int] else {
+            let vocabDict = model["vocab"] as? [String: Int]
+        else {
             throw CtcTokenizerError.encodingFailed("Failed to parse vocabulary from tokenizer.json")
         }
 
@@ -135,7 +136,8 @@ public class HFTokenizer {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
-        return applicationSupportURL
+        return
+            applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent("ctckit-pro", isDirectory: true)
