@@ -17,14 +17,14 @@ final class AudioStreamTests: XCTestCase {
         let samples = (0..<chunkSize).map { Float($0) }
         try stream.write(from: samples)
 
-        guard let result = stream.readChunk() else {
+        guard let result = stream.readChunkIfAvailable() else {
             XCTFail("Expected a chunk to be available")
             return
         }
 
         XCTAssertEqual(result.chunk, samples)
         XCTAssertEqual(result.chunkStartTime, 0, accuracy: 1e-6)
-        XCTAssertFalse(stream.isChunkReady)
+        XCTAssertFalse(stream.hasNewChunk)
     }
 
     func testBoundCallbackProducesSequentialMostRecentChunks() throws {
@@ -85,11 +85,11 @@ final class AudioStreamTests: XCTestCase {
         // Warm up the buffer so the initial zero padding is removed.
         let warmupData = Array(repeating: Float(1), count: hopSize)
         try stream.write(from: warmupData)
-        _ = stream.readChunk()
+        _ = stream.readChunkIfAvailable()
 
         let incrementalData = (0..<hopSize).map { Float($0) }
         try stream.write(from: incrementalData)
-        guard let nextChunk = stream.readChunk()?.chunk else {
+        guard let nextChunk = stream.readChunkIfAvailable()?.chunk else {
             XCTFail("Expected fixed-hop chunk after warm-up")
             return
         }
@@ -118,7 +118,7 @@ final class AudioStreamTests: XCTestCase {
         let samples = (0..<chunkSize).map { Float($0 + 1) }
         try stream.write(from: samples, atTime: timestamp)
 
-        guard let (chunk, startTime) = stream.readChunk() else {
+        guard let (chunk, startTime) = stream.readChunkIfAvailable() else {
             XCTFail("Expected chunk after writing data with a timestamp gap")
             return
         }
@@ -146,7 +146,7 @@ final class AudioStreamTests: XCTestCase {
 
         // First write fills to hopSize
         try stream.write(from: Array(repeating: Float(1), count: hopSize))
-        guard let firstChunk = stream.readChunk()?.chunk else {
+        guard let firstChunk = stream.readChunkIfAvailable()?.chunk else {
             XCTFail("Expected initial ramp-up chunk")
             return
         }
@@ -154,7 +154,7 @@ final class AudioStreamTests: XCTestCase {
 
         // Second write increases to 2 * hopSize
         try stream.write(from: Array(repeating: Float(2), count: hopSize))
-        guard let secondChunk = stream.readChunk()?.chunk else {
+        guard let secondChunk = stream.readChunkIfAvailable()?.chunk else {
             XCTFail("Expected second ramp-up chunk")
             return
         }
@@ -162,7 +162,7 @@ final class AudioStreamTests: XCTestCase {
 
         // Third write reaches the full chunk size
         try stream.write(from: Array(repeating: Float(3), count: hopSize))
-        guard let thirdChunk = stream.readChunk()?.chunk else {
+        guard let thirdChunk = stream.readChunkIfAvailable()?.chunk else {
             XCTFail("Expected full-size chunk after ramp-up")
             return
         }
