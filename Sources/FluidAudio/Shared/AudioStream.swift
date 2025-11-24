@@ -45,7 +45,8 @@ public struct AudioStream: Sendable {
     ///   - chunkDuration: Chunk duration in seconds
     ///   - chunkSkip: Duration between the start of each chunk (defaults to `chunkDuration`)
     ///   - time: Audio buffer start time
-    ///   - alignment: Chunk alignment mode
+    ///   - chunkingStrategy: Strategy to determine how to align chunks at each write
+    ///   - startupStrategy: Strategy to handle the first chunk(s) before the buffer is filled
     ///   - sampleRate: Audio sample rate
     ///   - bufferCapacitySeconds: The number of seconds of audio that the buffer can hold
     /// - Throws: `AudioStreamError.invalidChunkDuration` if `chunkDuration <= 0`
@@ -354,7 +355,7 @@ public struct AudioStream: Sendable {
             }
         }
 
-        // drop any part of the source the precedes the buffer
+        // drop any part of the source that precedes the buffer
         if writeIndex < 0 {
             let shift = -writeIndex
             writeIndex = 0
