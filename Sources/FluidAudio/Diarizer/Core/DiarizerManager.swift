@@ -260,12 +260,6 @@ public final class DiarizerManager {
 
         let segmentationTime = Date().timeIntervalSince(segmentationStartTime)
 
-        let embeddingChunk = segmentationProcessor.getSegments(
-            audioChunk: paddedChunk,
-            segmentationModel: self.models.segmentationModel,
-            chunkSize: chunkSize
-        )
-
         let embeddingStartTime = Date()
 
         guard let embeddingExtractor = self.embeddingExtractor else {
@@ -287,7 +281,7 @@ public final class DiarizerManager {
         }
 
         let embeddings = try embeddingExtractor.getEmbeddings(
-            audio: embeddingChunk,
+            audio: paddedChunk,
             masks: masks,
             minActivityThreshold: config.minActiveFramesCount
         )
