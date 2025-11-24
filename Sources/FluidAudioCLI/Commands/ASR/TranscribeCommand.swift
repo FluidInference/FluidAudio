@@ -91,6 +91,90 @@ actor TranscriptionTracker {
     }
 }
 
+/// Word-level timing information
+struct WordTiming: Sendable {
+    let word: String
+    let startTime: TimeInterval
+    let endTime: TimeInterval
+    let confidence: Float
+}
+
+/// Helper to merge tokens into word-level timings
+///
+/// This merger assumes that the ASR tokenizer produces subword tokens where:
+/// - Tokens starting with whitespace (space, newline, tab) indicate word boundaries
+/// - Multiple consecutive tokens without leading whitespace form a single word
+/// - This pattern is typical for BPE (Byte Pair Encoding) tokenizers like SentencePiece
+enum WordTimingMerger {
+    /// Merge token timings into word-level timings by detecting word boundaries
+    ///
+    /// - Parameter tokenTimings: Array of token-level timing information from the ASR model
+    /// - Returns: Array of word-level timing information with merged tokens
+    ///
+    /// Example: Tokens `[" H", "ello", " wor", "ld"]` → Words `["Hello", "world"]`
+    static func mergeTokensIntoWords(_ tokenTimings: [TokenTiming]) -> [WordTiming] {
+        guard !tokenTimings.isEmpty else { return [] }
+
+        var wordTimings: [WordTiming] = []
+        var currentWord = ""
+        var currentStartTime: TimeInterval?
+        var currentEndTime: TimeInterval = 0
+        var currentConfidences: [Float] = []
+
+        for timing in tokenTimings {
+            let token = timing.token
+
+            // Check if token starts with whitespace (indicates new word boundary)
+            if token.hasPrefix(" ") || token.hasPrefix("\n") || token.hasPrefix("\t") {
+                // Finish previous word if exists
+                if !currentWord.isEmpty, let startTime = currentStartTime {
+                    wordTimings.append(
+                        WordTiming(
+                            word: currentWord,
+                            startTime: startTime,
+                            endTime: currentEndTime,
+                            confidence: averageConfidence(currentConfidences)
+                        ))
+                }
+
+                // Start new word (trim leading whitespace)
+                currentWord = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                currentStartTime = timing.startTime
+                currentEndTime = timing.endTime
+                currentConfidences = [timing.confidence]
+            } else {
+                // Continue current word or start first word if no whitespace prefix
+                if currentStartTime == nil {
+                    currentStartTime = timing.startTime
+                }
+                currentWord += token
+                currentEndTime = timing.endTime
+                currentConfidences.append(timing.confidence)
+            }
+        }
+
+        // Add final word
+        if !currentWord.isEmpty, let startTime = currentStartTime {
+            wordTimings.append(
+                WordTiming(
+                    word: currentWord,
+                    startTime: startTime,
+                    endTime: currentEndTime,
+                    confidence: averageConfidence(currentConfidences)
+                ))
+        }
+
+        return wordTimings
+    }
+
+    /// Calculate average confidence from an array of confidence scores
+    /// - Parameter confidences: Array of confidence values
+    /// - Returns: Average confidence, or 0.0 if array is empty
+    private static func averageConfidence(_ confidences: [Float]) -> Float {
+        confidences.isEmpty ? 0.0 : confidences.reduce(0, +) / Float(confidences.count)
+    }
+}
+
 /// Command to transcribe audio files using batch or streaming mode
 enum TranscribeCommand {
     private static let logger = AppLogger(category: "Transcribe")
@@ -106,6 +190,7 @@ enum TranscribeCommand {
         let audioFile = arguments[0]
         var streamingMode = false
         var showMetadata = false
+        var wordTimestamps = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Parse options
@@ -119,6 +204,8 @@ enum TranscribeCommand {
                 streamingMode = true
             case "--metadata":
                 showMetadata = true
+            case "--word-timestamps":
+                wordTimestamps = true
             case "--model-version":
                 if i + 1 < arguments.count {
                     switch arguments[i + 1].lowercased() {
@@ -143,16 +230,19 @@ enum TranscribeCommand {
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
             await testStreamingTranscription(
-                audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+                audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
+                modelVersion: modelVersion)
         } else {
             logger.info("Using batch mode with direct processing\n")
-            await testBatchTranscription(audioFile: audioFile, showMetadata: showMetadata, modelVersion: modelVersion)
+            await testBatchTranscription(
+                audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
+                modelVersion: modelVersion)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, modelVersion: AsrModelVersion
     ) async {
         do {
             // Initialize ASR models
@@ -193,6 +283,21 @@ enum TranscribeCommand {
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
             print(result.text)
+
+            // Print word-level timestamps if requested
+            if wordTimestamps {
+                if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty {
+                    let wordTimings = WordTimingMerger.mergeTokensIntoWords(tokenTimings)
+                    logger.info("\nWord-level timestamps:")
+                    for (index, word) in wordTimings.enumerated() {
+                        logger.info(
+                            "  [\(index)] \(String(format: "%.3f", word.startTime))s - \(String(format: "%.3f", word.endTime))s: \"\(word.word)\" (conf: \(String(format: "%.3f", word.confidence)))"
+                        )
+                    }
+                } else {
+                    logger.info("\nWord-level timestamps: Not available (no token timings)")
+                }
+            }
 
             if showMetadata {
                 logger.info("Metadata:")
@@ -247,7 +352,7 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String, showMetadata: Bool, modelVersion: AsrModelVersion
+        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, modelVersion: AsrModelVersion
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -390,6 +495,22 @@ enum TranscribeCommand {
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
             print(finalText)
+
+            // Print word-level timestamps if requested
+            if wordTimestamps {
+                if let snapshot = await tracker.metadataSnapshot() {
+                    let wordTimings = WordTimingMerger.mergeTokensIntoWords(snapshot.timings)
+                    logger.info("\nWord-level timestamps:")
+                    for (index, word) in wordTimings.enumerated() {
+                        logger.info(
+                            "  [\(index)] \(String(format: "%.3f", word.startTime))s - \(String(format: "%.3f", word.endTime))s: \"\(word.word)\" (conf: \(String(format: "%.3f", word.confidence)))"
+                        )
+                    }
+                } else {
+                    logger.info("\nWord-level timestamps: Not available (no token timings)")
+                }
+            }
+
             logger.info("Performance:")
             logger.info("  Audio duration: \(String(format: "%.2f", totalDuration))s")
             logger.info("  Processing time: \(String(format: "%.2f", processingTime))s")
@@ -455,12 +576,14 @@ enum TranscribeCommand {
                 --help, -h         Show this help message
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
+                --word-timestamps  Show word-level timestamps for each word in the transcription
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)
                 fluidaudio transcribe audio.wav --streaming        # Streaming mode
                 fluidaudio transcribe audio.wav --metadata         # Batch mode with metadata
+                fluidaudio transcribe audio.wav --word-timestamps  # Batch mode with word timestamps
                 fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
 
             Batch mode (default):
@@ -476,6 +599,12 @@ enum TranscribeCommand {
             - Shows confidence score for transcription accuracy
             - Batch mode: Shows duration and token-based start/end times (if available)
             - Streaming mode: Shows timestamps for each transcription update
+            - Works with both batch and streaming modes
+
+            Word timestamps option:
+            - Shows start and end times for each word in the transcription
+            - Merges subword tokens into complete words with timing information
+            - Displays confidence scores for each word
             - Works with both batch and streaming modes
             """
         )

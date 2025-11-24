@@ -3,7 +3,7 @@ import Foundation
 
 extension MLModel {
     /// Compatibly call Core ML prediction across Swift compiler versions.
-    internal func compatPrediction(
+    public func compatPrediction(
         from input: MLFeatureProvider,
         options: MLPredictionOptions
     ) async throws -> MLFeatureProvider {
