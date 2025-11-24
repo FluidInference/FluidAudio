@@ -2,7 +2,7 @@ import Accelerate
 import CoreML
 import Foundation
 import OSLog
-import os // Required for OSAllocatedUnfairLock
+import os  // Required for OSAllocatedUnfairLock
 
 // Mark as @unchecked Sendable
 // Justification: We protect mutable state (models, embeddingExtractor) with a lock.
@@ -28,7 +28,7 @@ public final class DiarizerManager: @unchecked Sendable {
     }
     // Backing storage for extractor
     private var _embeddingExtractor: EmbeddingExtractor?
-    
+
     /// Public getter for segmentation model (for streaming)
     public var segmentationModel: MLModel? {
         return models?.segmentationModel
