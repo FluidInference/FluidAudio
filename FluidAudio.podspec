@@ -17,6 +17,8 @@ Pod::Spec.new do |spec|
   spec.osx.deployment_target = "14.0"
 
   spec.source       = { :git => "https://github.com/FluidInference/FluidAudio.git", :tag => "v#{spec.version}" }
+  # CocoaPods sets SWIFT_VERSION based on this list; use values Xcode recognizes.
+  # Our code remains compatible with Swift 5 toolchains (uses conditional compilation for 6.x APIs).
   spec.swift_versions = ["5.10"]
 
   spec.pod_target_xcconfig = {
@@ -52,12 +54,8 @@ Pod::Spec.new do |spec|
     core.source_files = "Sources/FluidAudio/**/*.swift"
 
     # iOS Configuration
-    # Exclude TTS module from iOS builds to avoid ESpeakNG xcframework linking issues.
-    # CocoaPods has known limitations with vendored xcframeworks during pod lib lint on iOS:
-    # the framework symbols aren't properly linked in the temporary build environment,
-    # causing "Undefined symbols" linker errors even though the binary is valid.
-    # iOS builds include: ASR (speech recognition), Diarization, and VAD (voice activity detection).
-    core.ios.exclude_files = "Sources/FluidAudio/TextToSpeech/**/*"
+    # TTS sources are moved under `Sources/FluidAudioTTS` and are not part of the Core subspec.
+    # iOS builds include ASR, Diarization, and VAD.
     core.ios.frameworks = "CoreML", "AVFoundation", "Accelerate", "UIKit"
 
     # macOS Configuration
