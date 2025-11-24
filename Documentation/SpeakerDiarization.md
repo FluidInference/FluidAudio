@@ -270,7 +270,7 @@ stream.bind { chunk, time in
 }
 
 for audioSamples in audioStream {
-    stream.write(from: audioSamples)
+    try stream.write(from: audioSamples)
 }
 ```
 
