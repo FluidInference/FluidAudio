@@ -320,7 +320,7 @@ class RealTimeDiarizer {
         audioStream = AudioStream(
             chunkDuration: 5.0, // 5 second chunks work well
             chunkSkip: 3.0, // 3.0 second delay between chunks works well
-            atTime: 0.0,
+            streamStartTime: 0.0,
             chunkingStrategy: .useFixedSkip // ensure chunks are evenly spaced
         )
         audioStream.bind { chunk, _ in
