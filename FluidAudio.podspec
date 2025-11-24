@@ -49,8 +49,20 @@ Pod::Spec.new do |spec|
     }
   end
 
+  spec.subspec "SentencePieceWrapper" do |wrapper|
+    wrapper.requires_arc = false
+    wrapper.source_files = "Sources/SentencePieceWrapper/**/*.{cpp,h}"
+    wrapper.public_header_files = "Sources/SentencePieceWrapper/include/SentencePieceBridge.h"
+    wrapper.header_mappings_dir = "Sources/SentencePieceWrapper"
+    wrapper.vendored_frameworks = "Sources/FluidAudio/Frameworks/SentencePiece.xcframework"
+    wrapper.pod_target_xcconfig = {
+      'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17'
+    }
+  end
+
   spec.subspec "Core" do |core|
     core.dependency "#{spec.name}/FastClusterWrapper"
+    core.dependency "#{spec.name}/SentencePieceWrapper"
     core.source_files = "Sources/FluidAudio/**/*.swift"
 
     # iOS Configuration
