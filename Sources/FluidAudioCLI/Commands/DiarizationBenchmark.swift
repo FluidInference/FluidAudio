@@ -475,7 +475,7 @@ enum StreamDiarizationBenchmark {
                 // Process chunk and track timing
                 let inferenceStart = Date()
                 let chunkResult = try autoreleasepool {
-                    try diarizerManager.performCompleteDiarization(paddedChunk)
+                    try diarizerManager.performCompleteDiarization(paddedChunk, atTime: chunkStartTime)
                 }
                 let inferenceTime = Date().timeIntervalSince(inferenceStart)
 
@@ -498,8 +498,8 @@ enum StreamDiarizationBenchmark {
                     let adjustedSegment = TimedSpeakerSegment(
                         speakerId: segment.speakerId,
                         embedding: segment.embedding,
-                        startTimeSeconds: segment.startTimeSeconds + Float(chunkStartTime),
-                        endTimeSeconds: segment.endTimeSeconds + Float(chunkStartTime),
+                        startTimeSeconds: segment.startTimeSeconds,
+                        endTimeSeconds: segment.endTimeSeconds,
                         qualityScore: segment.qualityScore
                     )
                     allSegments.append(adjustedSegment)
