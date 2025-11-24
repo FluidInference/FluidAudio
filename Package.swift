@@ -12,6 +12,10 @@ let package = Package(
             name: "FluidAudio",
             targets: ["FluidAudio"]
         ),
+        .library(
+            name: "FluidAudioTTS",
+            targets: ["FluidAudioTTS"]
+        ),
         .executable(
             name: "fluidaudio",
             targets: ["FluidAudioCLI"]
@@ -22,10 +26,6 @@ let package = Package(
         .binaryTarget(
             name: "SentencePiece",
             path: "smdesaiSentencePiece/SentencePiece.xcframework"
-        ),
-        .binaryTarget(
-            name: "ESpeakNG",
-            path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
         ),
         .target(
             name: "SentencePieceWrapper",
@@ -41,21 +41,38 @@ let package = Package(
         .target(
             name: "FluidAudio",
             dependencies: [
-                "ESpeakNG",
                 "FastClusterWrapper",
                 "SentencePieceWrapper",
             ],
             path: "Sources/FluidAudio",
-            exclude: ["Frameworks"]
+            exclude: [
+                "Frameworks",
+            ]
         ),
         .target(
             name: "FastClusterWrapper",
             path: "Sources/FastClusterWrapper",
             publicHeadersPath: "include"
         ),
+        // TTS targets are always available for FluidAudioWithTTS product
+        .binaryTarget(
+            name: "ESpeakNG",
+            path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
+        ),
+        .target(
+            name: "FluidAudioTTS",
+            dependencies: [
+                "FluidAudio",
+                "ESpeakNG",
+            ],
+            path: "Sources/FluidAudioTTS"
+        ),
         .executableTarget(
             name: "FluidAudioCLI",
-            dependencies: ["FluidAudio"],
+            dependencies: [
+                "FluidAudio",
+                "FluidAudioTTS",
+            ],
             path: "Sources/FluidAudioCLI",
             exclude: ["README.md"],
             resources: [
@@ -64,7 +81,10 @@ let package = Package(
         ),
         .testTarget(
             name: "FluidAudioTests",
-            dependencies: ["FluidAudio"]
+            dependencies: [
+                "FluidAudio",
+                "FluidAudioTTS",
+            ]
         ),
     ],
     cxxLanguageStandard: .cxx17

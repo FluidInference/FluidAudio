@@ -8,15 +8,17 @@ on:
 jobs:
   test-tts:
     runs-on: macos-14
+    env:
+      FLUIDAUDIO_ENABLE_TTS: "1"
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Build FluidAudio
+    - name: Build FluidAudio (with TTS)
       run: |
         swift build -c release
     
-    - name: Generate TTS Audio
+    - name: Generate TTS Audio (Kokoro)
       run: |
         echo "🎤 Generating TTS audio (ground truth test)..."
         TEXT="I can't believe we finally made it to the summit after climbing for twelve exhausting hours through wind and rain, but wow, this view of the endless mountain ranges stretching to the horizon makes every single difficult step completely worth the journey."
