@@ -354,7 +354,7 @@ public struct AudioStream: Sendable {
             }
         }
 
-        // drop any part of the source the precedes the buffer
+        // drop any part of the source that precedes the buffer
         if writeIndex < 0 {
             let shift = -writeIndex
             writeIndex = 0
