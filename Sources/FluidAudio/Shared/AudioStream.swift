@@ -382,7 +382,7 @@ public enum AudioStreamChunkingStrategy: Sendable {
 }
 
 public enum AudioStreamStartupStrategy: Sendable {
-    /// Start with a silent audio stream. Callbacks will begin after `chunkDuration - chunkOverlap` seconds.
+    /// Start with a silent audio stream. Callbacks will begin after `chunkDuration - chunkSkip` seconds.
     case startSilent
 
     /// Chunk size will increase by `chunkDuration - chunkSkip` seconds each callback until reaching `chunkDuration`
