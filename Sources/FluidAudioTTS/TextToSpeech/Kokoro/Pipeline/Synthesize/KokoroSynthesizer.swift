@@ -256,15 +256,13 @@ public struct KokoroSynthesizer {
         // Pad or truncate to match model expectation
         var trimmedIds = inputIds
         if trimmedIds.count > targetTokens {
-            logger.warning(
-                "input_ids length (\(trimmedIds.count)) exceeds targetTokens=\(targetTokens) for chunk '\(chunk.text)' — truncating"
-            )
+            Self.logger.warning("input_ids length (\(trimmedIds.count)) exceeds targetTokens=\(targetTokens) for chunk '\(chunk.text)' — truncating")
             trimmedIds = Array(trimmedIds.prefix(targetTokens))
         } else if trimmedIds.count < targetTokens {
-            Self.logger.debug(
-                "input_ids length (\(trimmedIds.count)) below targetTokens=\(targetTokens) for chunk '\(chunk.text)' — padding with zeros"
-            )
+            Self.logger.info("input_ids length (\(trimmedIds.count)) below targetTokens=\(targetTokens) for chunk '\(chunk.text)' — padding with zeros")
             trimmedIds.append(contentsOf: Array(repeating: Int32(0), count: targetTokens - trimmedIds.count))
+        } else {
+            Self.logger.debug("input_ids length (\(trimmedIds.count)) matches targetTokens=\(targetTokens)")
         }
 
         let inputShape: [NSNumber] = [1, NSNumber(value: targetTokens)]
@@ -309,7 +307,21 @@ public struct KokoroSynthesizer {
         }
 
         let phasesPointer = phasesArray.dataPointer.bindMemory(to: Float.self, capacity: 9)
-        phasesPointer.initialize(repeating: 0, count: 9)
+        
+        // Generate Gaussian noise (mean=0, std=1) for random_phases
+        // Using Box-Muller transform with deterministic seed for reproducibility
+        var generator = SeededRandomNumberGenerator(seed: UInt64(bitPattern: Int64(chunk.text.hashValue)))
+        for i in stride(from: 0, to: 9, by: 2) {
+            let u1 = Float.random(in: 0..<1, using: &generator)
+            let u2 = Float.random(in: 0..<1, using: &generator)
+            let z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * Float.pi * u2)
+            let z1 = sqrt(-2.0 * log(u1)) * sin(2.0 * Float.pi * u2)
+            
+            phasesPointer[i] = z0
+            if i + 1 < 9 {
+                phasesPointer[i + 1] = z1
+            }
+        }
 
         // Debug: print model IO
 
@@ -351,9 +363,12 @@ public struct KokoroSynthesizer {
                 n = Int(lenFV.doubleValue)
             }
             n = max(0, n)
+            Self.logger.debug("Model returned audio_length_samples: \(n) (buffer size: \(audioArrayUnwrapped.count))")
             if n > 0 && n <= audioArrayUnwrapped.count {
                 effectiveCount = n
             }
+        } else {
+            Self.logger.debug("Model did NOT return audio_length_samples")
         }
 
         if variant == .fiveSecond {
@@ -395,7 +410,30 @@ public struct KokoroSynthesizer {
         }
 
         await recycleModelArrays()
-        return (samples, predictionTime)
+        
+        // Trim trailing silence conservatively to avoid over-cutting natural tails
+        let silenceThreshold: Float = 0.003 // approx -50dB
+        let tailBufferSamples = Int(0.12 * Double(TtsConstants.audioSampleRate)) // keep ~120ms after last voiced sample
+        var lastSignalIndex = samples.count - 1
+        while lastSignalIndex >= 0 {
+            if abs(samples[lastSignalIndex]) > silenceThreshold {
+                break
+            }
+            lastSignalIndex -= 1
+        }
+
+        // If everything is silence or no trailing silence, return as-is
+        if lastSignalIndex < 0 {
+            return (samples, predictionTime)
+        }
+        let trailingSilence = samples.count - (lastSignalIndex + 1)
+        if trailingSilence <= tailBufferSamples {
+            return (samples, predictionTime)
+        }
+
+        let finalIndex = min(samples.count, lastSignalIndex + 1 + tailBufferSamples)
+        let trimmedSamples = Array(samples.prefix(finalIndex))
+        return (trimmedSamples, predictionTime)
     }
 
     /// Main synthesis function returning audio bytes only.
@@ -522,9 +560,10 @@ public struct KokoroSynthesizer {
                 let inputIds = entry.inputIds
                 let template = entry.template
                 let chunkIndex = index
-                guard let embeddingData = embeddingCache[inputIds.count] else {
+                let phonemeCount = max(0, inputIds.count - 2)
+                guard let embeddingData = embeddingCache[phonemeCount] else {
                     throw TTSError.processingFailed(
-                        "Missing voice embedding for chunk \(index + 1) with \(inputIds.count) tokens"
+                        "Missing voice embedding for chunk \(index + 1) with \(phonemeCount) phoneme characters"
                     )
                 }
                 let referenceVector = embeddingData.vector
@@ -761,29 +800,30 @@ public struct KokoroSynthesizer {
     private static func adjustSamples(_ samples: [Float], factor: Float) -> [Float] {
         let clamped = max(0.1, factor)
         if abs(clamped - 1.0) < 0.01 { return samples }
-
-        if clamped < 1.0 {
-            let repeatCount = max(1, Int(round(1.0 / clamped)))
-            var stretched: [Float] = []
-            stretched.reserveCapacity(samples.count * repeatCount)
-            for sample in samples {
-                for _ in 0..<repeatCount {
-                    stretched.append(sample)
-                }
-            }
-            return stretched
+        
+        let originalCount = samples.count
+        let newCount = Int(Float(originalCount) / clamped)
+        guard newCount > 0 else { return [] }
+        
+        var output = [Float](repeating: 0, count: newCount)
+        
+        // Generate indices: 0, clamped, 2*clamped, ...
+        var start: Float = 0
+        var step: Float = clamped
+        var indices = [Float](repeating: 0, count: newCount)
+        vDSP_vramp(&start, &step, &indices, 1, vDSP_Length(newCount))
+        
+        // Pad samples with one extra element to handle interpolation at the edge
+        var paddedSamples = samples
+        if let last = samples.last {
+            paddedSamples.append(last)
+        } else {
+            return []
         }
-
-        let step = Int(clamped)
-        guard step > 1 else { return samples }
-        var compressed: [Float] = []
-        compressed.reserveCapacity(samples.count / step + 1)
-        var index = 0
-        while index < samples.count {
-            compressed.append(samples[index])
-            index += step
-        }
-        return compressed
+        
+        vDSP_vlint(paddedSamples, indices, 1, &output, 1, vDSP_Length(newCount), vDSP_Length(paddedSamples.count))
+        
+        return output
     }
 
     static func removeDelimiterCharacters(from text: String) -> String {

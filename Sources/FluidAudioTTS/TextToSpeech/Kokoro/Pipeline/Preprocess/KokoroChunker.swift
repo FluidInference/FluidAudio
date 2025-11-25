@@ -22,6 +22,20 @@ enum KokoroChunker {
     private static let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "KokoroChunker")
     private static let decimalDigits = CharacterSet.decimalDigits
     private static let apostropheCharacters: Set<Character> = ["'", "’", "ʼ", "‛", "‵", "′"]
+    private static func pauseAfterMs(for text: String) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = trimmed.last else { return 60 }
+        switch last {
+        case ".", "?", "!":
+            return 220
+        case ",", ";", ":":
+            return 140
+        case "-", "—":
+            return 80
+        default:
+            return 60
+        }
+    }
 
     private static func isWordCharacter(_ character: Character) -> Bool {
         if character.isLetter || character.isNumber || apostropheCharacters.contains(character) {
@@ -292,13 +306,14 @@ enum KokoroChunker {
             let textValue = chunkAtoms.reduce(into: "") { partial, atom in
                 partial = appendSegment(partial, with: atom)
             }.trimmingCharacters(in: .whitespacesAndNewlines)
+            let pauseAfter = pauseAfterMs(for: textValue)
             chunks.append(
                 TextChunk(
                     words: chunkWords,
                     atoms: chunkAtoms,
                     phonemes: chunkPhonemes,
                     totalFrames: 0,
-                    pauseAfterMs: 0,
+                    pauseAfterMs: pauseAfter,
                     text: textValue
                 )
             )
