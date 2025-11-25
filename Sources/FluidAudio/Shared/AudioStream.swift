@@ -2,10 +2,9 @@ import AVFoundation
 import Foundation
 
 /// A sliding window buffer for a real-time audio stream.
-public struct AudioStream: Sendable {
+public class AudioStream {
     // MARK: - public properties
-    public typealias Callback = @Sendable (ArraySlice<Float>, TimeInterval) throws -> Void
-
+    
     /// Audio sample rate
     public let sampleRate: Double
 
@@ -17,20 +16,37 @@ public struct AudioStream: Sendable {
 
     /// Number of samples in a chunk
     public let chunkSize: Int
-
+    
+    /// Number of samples to skip between chunks
+    public let skipSize: Int
+    
     /// Alignment mode for reading the chunks
     public let chunkingStrategy: AudioStreamChunkingStrategy
 
     /// Whether the next chunk is ready to be read
     public var hasNewChunk: Bool { writeIndex >= temporaryChunkSize }
+    
+    /// Duration of overlap between consecutive chunks
+    public var chunkOverlap: TimeInterval { chunkDuration - chunkSkip }
+    
+    /// Number of samples that overlap between consecutive chunks
+    public var overlapSize: Int { chunkSize - skipSize }
 
     // MARK: - private properties
-    private let skipSize: Int
-    private var bufferStartTime: TimeInterval
-    private var buffer: ContiguousArray<Float>
+    /// Index to which the next sample will be written
     private var writeIndex: Int
-    private var callback: Callback?
+
+    /// Callback for when a new chunk is ready
+    private var callback: ((ArraySlice<Float>, TimeInterval) throws -> Void)?
+    
+    /// Chunk size, but allows for the growing chunks that come with the `rampUpChunkSize` startup strategy
     private var temporaryChunkSize: Int
+    
+    /// Timestamp of the sample at index 0 in the audio buffer
+    private var bufferStartTime: TimeInterval
+    
+    /// Sliding audio buffer
+    private var buffer: ContiguousArray<Float>
 
     // MARK: - init
 
@@ -54,22 +70,22 @@ public struct AudioStream: Sendable {
         sampleRate: Double = 16_000,
         bufferCapacitySeconds: TimeInterval? = nil
     ) throws {
-        guard chunkDuration >= 1 / sampleRate else {
-            throw AudioStreamError.invalidChunkDuration
-        }
-
         self.chunkDuration = chunkDuration
         self.chunkSkip = chunkSkip ?? chunkDuration
-
-        guard self.chunkSkip > 0 && self.chunkSkip <= chunkDuration else {
-            throw AudioStreamError.invalidChunkSkip
-        }
 
         self.chunkingStrategy = chunkingStrategy
         self.sampleRate = sampleRate
 
         self.chunkSize = Int(round(sampleRate * chunkDuration))
         self.skipSize = Int(round(sampleRate * self.chunkSkip))
+
+        guard chunkSize > 0 else {
+            throw AudioStreamError.invalidChunkDuration
+        }
+
+        guard skipSize > 0 && skipSize <= chunkSize else {
+            throw AudioStreamError.invalidChunkSkip
+        }
 
         let capacity = Int(
             round(
@@ -83,16 +99,16 @@ public struct AudioStream: Sendable {
         switch startupStrategy {
         case .startSilent:
             self.writeIndex = chunkSize - skipSize
-            self.bufferStartTime = time - (chunkDuration - self.chunkSkip)
             self.temporaryChunkSize = chunkSize
+            self.bufferStartTime = time - (chunkDuration - self.chunkSkip)
         case .rampUpChunkSize:
             self.writeIndex = 0
-            self.bufferStartTime = time
             self.temporaryChunkSize = skipSize
+            self.bufferStartTime = time
         case .waitForFullChunk:
             self.writeIndex = 0
-            self.bufferStartTime = time
             self.temporaryChunkSize = chunkSize
+            self.bufferStartTime = time
         }
     }
 
@@ -100,12 +116,22 @@ public struct AudioStream: Sendable {
 
     /// Bind a callback to the chunk updates
     /// - Parameter callback: The callback to bind
-    public mutating func bind(_ callback: @escaping Callback) {
+    public func bind(_ callback: @escaping (ArraySlice<Float>, TimeInterval) throws -> Void) {
         self.callback = callback
+    }
+    
+    /// Bind a callback to the chunk updates
+    /// - Parameter callback: The callback to bind
+    public func bind(_ callback: @escaping (ArraySlice<Float>, TimeInterval) async throws -> Void) {
+        self.callback = { (chunk: ArraySlice<Float>, timestamp: TimeInterval) -> Void in
+            Task.detached {
+                try await callback(chunk, timestamp)
+            }
+        }
     }
 
     /// Remove update binding
-    public mutating func unbind() {
+    public func unbind() {
         self.callback = nil
     }
 
@@ -114,7 +140,7 @@ public struct AudioStream: Sendable {
     ///   - source: Audio samples to write
     ///   - time: Timestamp for resynchronization (optional)
     /// - Warning: Samples may be skipped if the time jumps forward significantly.
-    public mutating func write<C>(from source: C, atTime time: TimeInterval? = nil) throws
+    public func write<C>(from source: C, atTime time: TimeInterval? = nil) throws
     where C: Collection & Sequence, C.Element == Float {
         if let array = source as? [Float] {
             return try self.writeContiguousSamples(from: array, atTime: time)
@@ -134,7 +160,7 @@ public struct AudioStream: Sendable {
     ///   - buffer: Audio buffer to write from
     ///   - time: Timestamp for resynchronization (optional)
     /// - Warning: Samples may be skipped if the time jumps forward significantly.
-    public mutating func write(from buffer: AVAudioPCMBuffer, atTime time: TimeInterval? = nil) throws {
+    public func write(from buffer: AVAudioPCMBuffer, atTime time: TimeInterval? = nil) throws {
         let samples = try AudioConverter().resampleBuffer(buffer)
         try write(from: samples, atTime: time)
     }
@@ -144,7 +170,7 @@ public struct AudioStream: Sendable {
     ///   - sampleBuffer: `CMSampleBuffer` to write from
     ///   - time: Timestamp for resynchronization (optional)
     /// - Warning: Samples may be skipped if the time jumps forward significantly.
-    public mutating func write(from sampleBuffer: CMSampleBuffer, atTime time: TimeInterval? = nil) throws {
+    public func write(from sampleBuffer: CMSampleBuffer, atTime time: TimeInterval? = nil) throws {
         let samples = try AudioConverter().resampleSampleBuffer(sampleBuffer)
         try write(from: samples, atTime: time)
     }
@@ -152,7 +178,7 @@ public struct AudioStream: Sendable {
     /// Pop the next chunk if available and do something with it
     /// - Parameter body: Takes the chunk as an `ArraySlice<Float>` and the chunk start time
     /// - Note: Chunks will never be available if the audio stream has a binding
-    public mutating func withChunkIfAvailable<R>(
+    public func withChunkIfAvailable<R>(
         _ body: (ArraySlice<Float>, TimeInterval) throws -> R
     ) rethrows -> R? {
         guard hasNewChunk else {
@@ -182,7 +208,7 @@ public struct AudioStream: Sendable {
         // Forget the front of the buffer
         switch chunkingStrategy {
         case .useMostRecent:
-            forgetOldest(writeIndex - (chunkSize - skipSize))
+            forgetOldest(writeIndex - overlapSize)
         case .useFixedSkip:
             forgetOldest(skipSize)
         }
@@ -193,7 +219,7 @@ public struct AudioStream: Sendable {
     /// Pop the next chunk if it's ready
     /// - Returns: The next chunk and the chunk start time if its ready
     /// - Note: Chunks will never be available if the audio stream has a binding
-    public mutating func readChunkIfAvailable() -> (chunk: [Float], chunkStartTime: TimeInterval)? {
+    public func readChunkIfAvailable() -> (chunk: [Float], chunkStartTime: TimeInterval)? {
         return withChunkIfAvailable { chunk, timestamp in
             (Array(chunk), timestamp)
         }
@@ -205,62 +231,33 @@ public struct AudioStream: Sendable {
     /// - Parameters:
     ///   - source: Audio samples to write
     ///   - time: Timestamp for resynchronization (optional)
-    private mutating func writeContiguousSamples<C>(from source: C, atTime time: TimeInterval? = nil) throws
+    private func writeContiguousSamples<C>(from source: C, atTime time: TimeInterval? = nil) throws
     where C: Collection & Sequence, C.Element == Float {
         guard source.count > 0 else {
             return
         }
-
-        let writeIndexReset = (chunkingStrategy == .useMostRecent ? temporaryChunkSize : buffer.count)
 
         if let time {
             let startIndex = Int(round(bufferStartTime * sampleRate))
             let endIndex = startIndex + writeIndex + source.count
             let expectedEndIndex = Int(round(time * sampleRate))
 
-            var missingSampleCount = expectedEndIndex - endIndex
+            let deviation = expectedEndIndex - endIndex
 
-            if missingSampleCount > 0 {
-                prepareToAppend(
-                    from: nil,
-                    count: &missingSampleCount,
-                    maxWriteIndex: buffer.count - source.count,
-                    shiftedWriteIndex: writeIndexReset - source.count)
-                if missingSampleCount > 0 {
-                    let stride = MemoryLayout<Float>.stride
-                    memset(&buffer[writeIndex], 0, missingSampleCount * stride)
-                    writeIndex += missingSampleCount
-                }
-            } else if missingSampleCount < 0 {
-                rollbackNewest(-missingSampleCount)
+            if deviation > 0 {
+                appendZeros(count: deviation, beforeAdding: source.count)
+            } else if deviation < 0 {
+                rollbackNewest(-deviation)
             }
         }
 
-        let success: Void? = source.withContiguousStorageIfAvailable { ptr in
-            guard let base = ptr.baseAddress else {
-                return
-            }
-            var count = ptr.count
-
-            guard
-                let sourceBase = prepareToAppend(
-                    from: base,
-                    count: &count,
-                    maxWriteIndex: buffer.count,
-                    shiftedWriteIndex: writeIndexReset)
-            else {
-                return
-            }
-
-            append(from: sourceBase, count: count)
+        source.withContiguousStorageIfAvailable { ptr in
+            append(from: ptr.baseAddress!, count: ptr.count)
         }
-
-        guard success != nil else {
-            throw AudioStreamError.discontiguousSourceBuffer
-        }
-
+        
         guard let callback else { return }
-
+        
+        // It's technically possible to have multiple chunks ready at once
         while hasNewChunk {
             try withChunkIfAvailable(callback)
         }
@@ -268,7 +265,7 @@ public struct AudioStream: Sendable {
 
     /// Rollback the newest `count` samples.
     /// - Parameter count: Number of samples to rollback
-    private mutating func rollbackNewest(_ count: Int) {
+    private func rollbackNewest(_ count: Int) {
         writeIndex -= count
 
         if writeIndex < 0 {
@@ -279,7 +276,7 @@ public struct AudioStream: Sendable {
 
     /// Forget the oldest `count` audio samples.
     /// - Parameter count: Number of samples to forget
-    private mutating func forgetOldest(_ count: Int) {
+    private func forgetOldest(_ count: Int) {
         // Bring all elements in the index range [count, writeIndex) to the front
         if count < writeIndex {
             buffer.withUnsafeMutableBufferPointer { ptr in
@@ -303,60 +300,110 @@ public struct AudioStream: Sendable {
     /// - Parameters:
     ///   - src: Source pointer
     ///   - count: Number of samples to append
-    private mutating func append(from src: UnsafePointer<Float>, count: Int) {
+    private func append(from src: UnsafePointer<Float>, count: Int) {
+        let shiftedWriteIndex: Int
+        switch chunkingStrategy {
+        case .useMostRecent:
+            shiftedWriteIndex = temporaryChunkSize
+        case .useFixedSkip:
+            shiftedWriteIndex = buffer.count
+        }
+
+        let countAdded = prepareToAppendAndReturnNumAdded(
+            count: count,
+            cappingWriteIndexAt: buffer.count,
+            shiftWriteIndexTo: shiftedWriteIndex
+        )
+
+        guard countAdded > 0 else {
+            return
+        }
+
+        // Drop all samples that didn't fit
+        let source = src.advanced(by: count - countAdded)
+
+        // Append the source
         buffer.withUnsafeMutableBufferPointer { ptr in
             guard let base = ptr.baseAddress else {
                 return
             }
             let stride = MemoryLayout<Float>.stride
-            memcpy(base.advanced(by: writeIndex), src, count * stride)
-            writeIndex += count
+            memcpy(base.advanced(by: writeIndex), source, countAdded * stride)
+            writeIndex += countAdded
         }
     }
 
-    /// Prepare the buffer to append from a buffer to avoid overflowing
+    /// Append zeros to the buffer
     /// - Parameters:
-    ///   - src: Pointer to the start of the source buffer
+    ///   - count: Number of zeros to append
+    ///   - addedSampleCount: Number of samples being appended after the zeros
+    private func appendZeros(count: Int, beforeAdding addedSampleCount: Int) {
+        let shiftedWriteIndex: Int
+
+        switch chunkingStrategy {
+        case .useMostRecent:
+            shiftedWriteIndex = temporaryChunkSize - addedSampleCount
+        case .useFixedSkip:
+            shiftedWriteIndex = buffer.count - addedSampleCount
+        }
+
+        let countAdded = prepareToAppendAndReturnNumAdded(
+            count: count,
+            cappingWriteIndexAt: buffer.count - addedSampleCount,
+            shiftWriteIndexTo: shiftedWriteIndex
+        )
+
+        guard countAdded > 0 else {
+            return
+        }
+
+        // Append the source
+        buffer.withUnsafeMutableBufferPointer { ptr in
+            guard let base = ptr.baseAddress else {
+                return
+            }
+            let stride = MemoryLayout<Float>.stride
+            memset(base.advanced(by: writeIndex), 0, countAdded * stride)
+            writeIndex += countAdded
+        }
+    }
+
+    /// Prepare to append `count` samples to the buffer and trim the samples to fit
+    /// - Parameters:
     ///   - count: Number of samples about to be appended
-    ///   - maxWriteIndex: Maximum value of `writeIndex` to avoid shifting back the buffer
+    ///   - maxWriteIndex: Maximum value `writeIndex` can reach before shifting back the buffer
     ///   - shiftedWriteIndex: Desired value of `writeIndex` after shifting back the buffer
-    /// - Returns: Pointer to the first element of the source buffer that will actually be appended
+    /// - Returns: The number of samples that will actually be appended
     @discardableResult
-    private mutating func prepareToAppend(
-        from src: UnsafePointer<Float>?, count: inout Int, maxWriteIndex: Int, shiftedWriteIndex: Int
-    ) -> UnsafePointer<Float>? {
+    private func prepareToAppendAndReturnNumAdded(
+        count: Int,
+        cappingWriteIndexAt maxWriteIndex: Int,
+        shiftWriteIndexTo shiftedWriteIndex: Int
+    ) -> Int {
         precondition(maxWriteIndex >= shiftedWriteIndex)
 
-        let newWriteIndex = writeIndex + count
+        var writeIndexAfterAppend = writeIndex + count
 
-        guard newWriteIndex > 0 else {
-            // none of the items will be written since they don't reach the start of the buffer
-            writeIndex += count
-            count = 0
-            return nil
+        // Shift back so the writeIndex will stay in bounds
+        if writeIndexAfterAppend > maxWriteIndex {
+            forgetOldest(writeIndexAfterAppend - shiftedWriteIndex)
+            writeIndexAfterAppend = shiftedWriteIndex
         }
 
-        if newWriteIndex > maxWriteIndex {
-            // shift back so that the write index is in bounds
-            forgetOldest(newWriteIndex - shiftedWriteIndex)
-
-            // check if the source now precedes the buffer
-            guard shiftedWriteIndex > 0 else {
-                writeIndex += count
-                count = 0
-                return nil
-            }
+        // Exit if the entire source precedes the buffer
+        guard writeIndexAfterAppend > 0 else {
+            writeIndex = writeIndexAfterAppend
+            return 0
         }
 
-        // drop any part of the source that precedes the buffer
+        // Remove any incoming samples that precede the buffer
         if writeIndex < 0 {
-            let shift = -writeIndex
+            let numToForget = -writeIndex
             writeIndex = 0
-            count -= shift
-            return src?.advanced(by: shift)
+            return count - numToForget
         }
 
-        return src
+        return count
     }
 }
 
@@ -364,7 +411,6 @@ public enum AudioStreamError: Error, LocalizedError {
     case bufferTooSmall
     case invalidChunkSkip
     case invalidChunkDuration
-    case discontiguousSourceBuffer
 }
 
 public enum AudioStreamChunkingStrategy: Sendable {
