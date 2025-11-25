@@ -1,10 +1,3 @@
-//
-//  File.swift
-//  FluidAudio
-//
-//  Created by Benjamin Lee on 11/18/25.
-//
-
 import AVFoundation
 import Foundation
 
