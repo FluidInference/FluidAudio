@@ -53,11 +53,15 @@ public final class EmbeddingExtractor {
         var embeddings: [[Float]] = []
 
         // Fill shared waveform buffer once; reused across speakers
-        fillWaveformBufferWithRepeatPadding(
+        fillWaveformBufferOptimized(
             audio: audio,
             buffer: waveformBuffer,
             requiredSamples: waveformSampleCount
         )
+        
+        // Calculate number of masks that are actually used
+        
+        let numMasksUsed = (firstMask.count * audio.count + 80_000) / 160_000
 
         // Process all speakers but optimize for active ones
         for speakerIdx in 0..<masks.count {
@@ -73,6 +77,7 @@ public final class EmbeddingExtractor {
             // Optimize mask creation with zero-copy view
             fillMaskBufferOptimized(
                 masks: masks,
+                numMasksUsed: numMasksUsed,
                 speakerIndex: speakerIdx,
                 buffer: maskBuffer
             )
@@ -107,7 +112,8 @@ public final class EmbeddingExtractor {
         return embeddings
     }
 
-    private func fillWaveformBufferWithRepeatPadding<C>(
+    /// Fill the waveform buffer with loop (repeat) padding
+    private func fillWaveformBufferOptimized<C>(
         audio: C,
         buffer: MLMultiArray,
         requiredSamples: Int
@@ -130,7 +136,7 @@ public final class EmbeddingExtractor {
             offset: 0
         )
 
-        if initialCopyCount == samplesToFill {
+        guard initialCopyCount < samplesToFill else {
             return
         }
 
@@ -150,8 +156,10 @@ public final class EmbeddingExtractor {
         }
     }
 
+    /// Fill the mask buffer with loop (repeat) padding
     private func fillMaskBufferOptimized(
         masks: [[Float]],
+        numMasksUsed: Int,
         speakerIndex: Int,
         buffer: MLMultiArray
     ) {
@@ -163,15 +171,35 @@ public final class EmbeddingExtractor {
 
         // Copy speaker mask to first slot using optimized memory copy
         let maskCount = masks[speakerIndex].count
+        
         masks[speakerIndex].withUnsafeBufferPointer { maskPtr in
             vDSP_mmov(
                 maskPtr.baseAddress!,
                 ptr,
-                vDSP_Length(maskCount),
+                vDSP_Length(numMasksUsed),
                 vDSP_Length(1),
                 vDSP_Length(1),
-                vDSP_Length(maskCount)
+                vDSP_Length(numMasksUsed)
             )
+        }
+        
+        guard numMasksUsed < maskCount && numMasksUsed > 0 else {
+            return
+        }
+        
+        var filledCount = numMasksUsed
+        while filledCount < maskCount {
+            let remaining = maskCount - filledCount
+            let copyCount = min(filledCount, remaining)
+            vDSP_mmov(
+                ptr,
+                ptr.advanced(by: filledCount),
+                vDSP_Length(copyCount),
+                vDSP_Length(1),
+                vDSP_Length(1),
+                vDSP_Length(copyCount)
+            )
+            filledCount += copyCount
         }
     }
 
