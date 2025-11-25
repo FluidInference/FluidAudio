@@ -4,7 +4,7 @@ import Foundation
 /// A sliding window buffer for a real-time audio stream.
 public class AudioStream {
     // MARK: - public properties
-    
+
     /// Audio sample rate
     public let sampleRate: Double
 
@@ -16,19 +16,19 @@ public class AudioStream {
 
     /// Number of samples in a chunk
     public let chunkSize: Int
-    
+
     /// Number of samples to skip between chunks
     public let skipSize: Int
-    
+
     /// Alignment mode for reading the chunks
     public let chunkingStrategy: AudioStreamChunkingStrategy
 
     /// Whether the next chunk is ready to be read
     public var hasNewChunk: Bool { writeIndex >= temporaryChunkSize }
-    
+
     /// Duration of overlap between consecutive chunks
     public var chunkOverlap: TimeInterval { chunkDuration - chunkSkip }
-    
+
     /// Number of samples that overlap between consecutive chunks
     public var overlapSize: Int { chunkSize - skipSize }
 
@@ -38,13 +38,13 @@ public class AudioStream {
 
     /// Callback for when a new chunk is ready
     private var callback: ((ArraySlice<Float>, TimeInterval) throws -> Void)?
-    
+
     /// Chunk size, but allows for the growing chunks that come with the `rampUpChunkSize` startup strategy
     private var temporaryChunkSize: Int
-    
+
     /// Timestamp of the sample at index 0 in the audio buffer
     private var bufferStartTime: TimeInterval
-    
+
     /// Sliding audio buffer
     private var buffer: ContiguousArray<Float>
 
@@ -119,7 +119,7 @@ public class AudioStream {
     public func bind(_ callback: @escaping (ArraySlice<Float>, TimeInterval) throws -> Void) {
         self.callback = callback
     }
-    
+
     /// Bind a callback to the chunk updates
     /// - Parameter callback: The callback to bind
     public func bind(_ callback: @escaping (ArraySlice<Float>, TimeInterval) async throws -> Void) {
@@ -254,9 +254,9 @@ public class AudioStream {
         source.withContiguousStorageIfAvailable { ptr in
             append(from: ptr.baseAddress!, count: ptr.count)
         }
-        
+
         guard let callback else { return }
-        
+
         // It's technically possible to have multiple chunks ready at once
         while hasNewChunk {
             try withChunkIfAvailable(callback)

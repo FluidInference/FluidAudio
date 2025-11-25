@@ -80,14 +80,14 @@ final class AudioStreamTests: XCTestCase {
         XCTAssertEqual(firstChunk, first)
         XCTAssertEqual(firstStart, 0, accuracy: 1e-6)
 
-        let secondTail = Array<Float>(repeating: Float(2), count: hopSize)
+        let secondTail = [Float](repeating: Float(2), count: hopSize)
         try stream.write(from: secondTail)
         guard let (secondChunk, secondStart) = stream.readChunkIfAvailable() else {
             XCTFail("Expected second fixed-skip chunk")
             return
         }
         XCTAssertEqual(secondStart, chunkSkip, accuracy: 1e-6)
-        let expectedPrefix = Array<Float>(repeating: 1.0, count: stream.chunkSize - hopSize)
+        let expectedPrefix = [Float](repeating: 1.0, count: stream.chunkSize - hopSize)
         XCTAssertEqual(Array(secondChunk.prefix(stream.chunkSize - hopSize)), expectedPrefix)
         XCTAssertEqual(Array(secondChunk.suffix(hopSize)), secondTail)
     }
