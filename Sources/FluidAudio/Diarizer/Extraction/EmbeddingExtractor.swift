@@ -35,7 +35,6 @@ public final class EmbeddingExtractor {
         }
 
         let waveformShape = [3, 160_000] as [NSNumber]
-        let waveformSampleCount = waveformShape.last?.intValue ?? 160_000
         let maskShape = [3, firstMask.count] as [NSNumber]
 
         let waveformBuffer = try memoryOptimizer.createAlignedArray(
@@ -53,10 +52,9 @@ public final class EmbeddingExtractor {
         var embeddings: [[Float]] = []
 
         // Fill shared waveform buffer once; reused across speakers
-        fillWaveformBufferOptimized(
+        fillWaveformBuffer(
             audio: audio,
-            buffer: waveformBuffer,
-            requiredSamples: waveformSampleCount
+            buffer: waveformBuffer
         )
 
         // Calculate number of masks that are actually used
@@ -113,46 +111,38 @@ public final class EmbeddingExtractor {
     }
 
     /// Fill the waveform buffer with loop (repeat) padding
-    private func fillWaveformBufferOptimized<C>(
+    private func fillWaveformBuffer<C>(
         audio: C,
-        buffer: MLMultiArray,
-        requiredSamples: Int
+        buffer: MLMultiArray
     ) where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
-        let samplesToFill = min(requiredSamples, buffer.count)
-        guard samplesToFill > 0 else { return }
-
-        let availableSamples = audio.count
-        let destination = buffer.dataPointer.assumingMemoryBound(to: Float.self)
-
-        guard availableSamples > 0 else {
-            var zero: Float = 0
-            vDSP_vfill(&zero, destination, 1, vDSP_Length(samplesToFill))
-            return
-        }
-        let initialCopyCount = min(availableSamples, samplesToFill)
+        let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self)
+        var sampleCount = audio.count
+        let requiredCount = 160_000
+        
+        // Load the original audio into the buffer
         memoryOptimizer.optimizedCopy(
-            from: audio.prefix(initialCopyCount),
+            from: audio,
             to: buffer,
-            offset: 0
+            offset: 0 // first speaker slot
         )
-
-        guard initialCopyCount < samplesToFill else {
+        
+        // If sampleCount is zero then we'll get stuck in an infinite loop
+        guard sampleCount > 0 else {
             return
         }
-
-        var filledCount = initialCopyCount
-        while filledCount < samplesToFill {
-            let remaining = samplesToFill - filledCount
-            let copyCount = min(filledCount, remaining)
+        
+        // Repeat-pad the buffer by doubling it until it's full
+        while sampleCount < requiredCount {
+            let copyCount = min(sampleCount, requiredCount - sampleCount)
             vDSP_mmov(
-                destination,
-                destination.advanced(by: filledCount),
+                ptr,
+                ptr.advanced(by: sampleCount),
                 vDSP_Length(copyCount),
                 vDSP_Length(1),
                 vDSP_Length(1),
                 vDSP_Length(copyCount)
             )
-            filledCount += copyCount
+            sampleCount += copyCount
         }
     }
 
@@ -170,36 +160,37 @@ public final class EmbeddingExtractor {
         vDSP_vfill(&zero, ptr, 1, vDSP_Length(totalElements))
 
         // Copy speaker mask to first slot using optimized memory copy
-        let maskCount = masks[speakerIndex].count
+        let requiredMasks = masks[speakerIndex].count
+        var maskCount = numMasksUsed
 
         masks[speakerIndex].withUnsafeBufferPointer { maskPtr in
             vDSP_mmov(
                 maskPtr.baseAddress!,
                 ptr,
-                vDSP_Length(numMasksUsed),
+                vDSP_Length(maskCount),
                 vDSP_Length(1),
                 vDSP_Length(1),
-                vDSP_Length(numMasksUsed)
+                vDSP_Length(maskCount)
             )
         }
 
-        guard numMasksUsed < maskCount && numMasksUsed > 0 else {
+        // If maskCount is zero then we'll get stuck in an infinite loop
+        guard maskCount > 0 else {
             return
         }
-
-        var filledCount = numMasksUsed
-        while filledCount < maskCount {
-            let remaining = maskCount - filledCount
-            let copyCount = min(filledCount, remaining)
+        
+        // Repeat-pad the buffer by doubling it until it's full
+        while maskCount < requiredMasks {
+            let copyCount = min(maskCount, requiredMasks - maskCount)
             vDSP_mmov(
                 ptr,
-                ptr.advanced(by: filledCount),
+                ptr.advanced(by: maskCount),
                 vDSP_Length(copyCount),
                 vDSP_Length(1),
                 vDSP_Length(1),
                 vDSP_Length(copyCount)
             )
-            filledCount += copyCount
+            maskCount += copyCount
         }
     }
 
