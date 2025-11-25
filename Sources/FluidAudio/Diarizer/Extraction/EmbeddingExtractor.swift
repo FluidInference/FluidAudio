@@ -118,19 +118,19 @@ public final class EmbeddingExtractor {
         let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self)
         var sampleCount = audio.count
         let requiredCount = 160_000
-        
+
         // Load the original audio into the buffer
         memoryOptimizer.optimizedCopy(
             from: audio,
             to: buffer,
-            offset: 0 // first speaker slot
+            offset: 0  // first speaker slot
         )
-        
+
         // If sampleCount is zero then we'll get stuck in an infinite loop
         guard sampleCount > 0 else {
             return
         }
-        
+
         // Repeat-pad the buffer by doubling it until it's full
         while sampleCount < requiredCount {
             let copyCount = min(sampleCount, requiredCount - sampleCount)
@@ -178,7 +178,7 @@ public final class EmbeddingExtractor {
         guard maskCount > 0 else {
             return
         }
-        
+
         // Repeat-pad the buffer by doubling it until it's full
         while maskCount < requiredMasks {
             let copyCount = min(maskCount, requiredMasks - maskCount)
