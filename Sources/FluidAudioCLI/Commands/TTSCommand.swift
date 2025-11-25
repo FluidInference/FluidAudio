@@ -111,6 +111,7 @@ public struct TTS {
     public static func run(arguments: [String]) async {
         var output = "output.wav"
         var voice = TtsConstants.recommendedVoice
+        var voiceSpeed: Float = 1.0
         var metricsPath: String? = nil
         var chunkDirectory: String? = nil
         var variantPreference: ModelNames.TTS.Variant? = nil
@@ -132,6 +133,11 @@ public struct TTS {
             case "--voice", "-v":
                 if i + 1 < arguments.count {
                     voice = arguments[i + 1]
+                    i += 1
+                }
+            case "--speed", "-s":
+                if i + 1 < arguments.count, let value = Float(arguments[i + 1]) {
+                    voiceSpeed = value
                     i += 1
                 }
             case "--metrics":
@@ -211,6 +217,7 @@ public struct TTS {
             let detailed = try await manager.synthesizeDetailed(
                 text: text,
                 voice: voiceOverride,
+                voiceSpeed: voiceSpeed,
                 variantPreference: variantPreference
             )
             let wav = detailed.audio
@@ -424,11 +431,12 @@ public struct TTS {
     private static func printUsage() {
         print(
             """
-            Usage: fluidaudio tts "text" [--output file.wav] [--voice af_heart] [--metrics metrics.json]
+            Usage: fluidaudio tts "text" [--output file.wav] [--voice af_heart] [--speed 1.0] [--metrics metrics.json]
 
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart)
+              --speed, -s          Voice speed (default: 1.0)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)

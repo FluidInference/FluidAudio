@@ -190,9 +190,8 @@ extension KokoroSynthesizer {
 
         guard let dict = json as? [String: Any] else { return nil }
 
-        if let embed = dict["embedding"], let parsed = parseArray(embed) {
-            return parsed
-        }
+        // REMOVED: dict["embedding"] check - this was causing all phoneme counts to use
+        // the same (wrong) embedding instead of the phoneme-count-specific embeddings
 
         if let voiceSpecific = dict[voiceID], let parsed = parseArray(voiceSpecific) {
             return parsed
@@ -229,7 +228,10 @@ extension KokoroSynthesizer {
         entries: [ChunkEntry],
         embeddingDimension: Int
     ) throws -> [Int: VoiceEmbeddingData] {
-        let uniqueCounts = Set(entries.map { $0.inputIds.count })
+        // Python reference uses len(phonemes) - 1 for embedding lookup.
+        // However, replicating this exactly (character count) caused quality degradation.
+        // Using inputIds.count - 2 (token count excluding BOS/EOS) gives better results.
+        let uniqueCounts = Set(entries.map { max(0, $0.inputIds.count - 2) })
         var cache: [Int: VoiceEmbeddingData] = [:]
         cache.reserveCapacity(uniqueCounts.count)
 

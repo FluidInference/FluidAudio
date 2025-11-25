@@ -139,6 +139,8 @@ Task {
         await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "download":
         await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "compare-audio":
+        await CompareAudioCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "help", "--help", "-h":
         printUsage()
         exitWithPeakMemory(0)
