@@ -63,12 +63,30 @@ final public class AudioConverter {
         return try resampleBuffer(buffer)
     }
 
+    /// Convert an audio file path to 16kHz mono Float32 samples
+    /// - Parameter path: File path of the audio file to read
+    /// - Returns: Float array at 16kHz mono
+    public func resampleAudioFile(path: String) throws -> [Float] {
+        let url = URL(fileURLWithPath: path)
+        return try resampleAudioFile(url)
+    }
+
     /// Convert a CMSampleBuffer to the target format
     /// - Parameter sampleBuffer: Input CMSampleBuffer containing PCM data
     /// - Returns: Float array at 16kHz mono
     /// - Throws: `AudioConverterError.sampleBufferFormatMissing` (most likely caused by the sample buffer belonging
     ///  to a video frame)
-    public func resampleSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
+    public func convertSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
+        let buffer = try extractAVAudioPCMBuffer(from: sampleBuffer)
+        return try convertBuffer(buffer, to: targetFormat)
+    }
+
+    /// Convert a CMSampleBuffer to the target format
+    /// - Parameter sampleBuffer: Input CMSampleBuffer containing PCM data
+    /// - Returns: Float array at 16kHz mono
+    /// - Throws: `AudioConverterError.sampleBufferFormatMissing` (most likely caused by the sample buffer belonging
+    ///  to a video frame)
+    public func extractAVAudioPCMBuffer(from sampleBuffer: CMSampleBuffer) throws -> AVAudioPCMBuffer {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
             let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
         else {
@@ -80,14 +98,15 @@ final public class AudioConverter {
         }
 
         let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
-        guard frameCount > 0 else {
-            return []
-        }
 
         guard let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
             throw AudioConverterError.failedToCreateBuffer
         }
         buffer.frameLength = frameCount
+
+        guard frameCount > 0 else {
+            return buffer
+        }
 
         let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
             sampleBuffer,
@@ -100,15 +119,7 @@ final public class AudioConverter {
             throw AudioConverterError.sampleBufferCopyFailed(status)
         }
 
-        return try resampleBuffer(buffer)
-    }
-
-    /// Convert an audio file path to 16kHz mono Float32 samples
-    /// - Parameter path: File path of the audio file to read
-    /// - Returns: Float array at 16kHz mono
-    public func resampleAudioFile(path: String) throws -> [Float] {
-        let url = URL(fileURLWithPath: path)
-        return try resampleAudioFile(url)
+        return buffer
     }
 
     /// Convert a buffer to the target format.
