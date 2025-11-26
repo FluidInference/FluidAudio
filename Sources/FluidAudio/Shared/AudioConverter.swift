@@ -324,7 +324,6 @@ public enum AudioConverterError: LocalizedError {
     case failedToCreateConverter
     case failedToCreateBuffer
     case conversionFailed(Error?)
-    /// This edge case usually arises when a video sample is passed in instead of an audio sample
     case sampleBufferFormatMissing
     case failedToCreateSourceFormat
     case sampleBufferCopyFailed(OSStatus)
@@ -340,6 +339,7 @@ public enum AudioConverterError: LocalizedError {
         case .sampleBufferFormatMissing:
             return "Sample buffer is missing a valid audio format description."
         case .failedToCreateSourceFormat:
+            // This edge case usually arises when a video sample is provided instead of an audio sample
             return "Failed to create a source audio format description for CMSampleBuffer."
         case .sampleBufferCopyFailed(let status):
             return "Failed to copy samples from CMSampleBuffer (status: \(status))"
