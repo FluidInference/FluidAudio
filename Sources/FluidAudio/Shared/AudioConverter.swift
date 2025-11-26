@@ -58,9 +58,11 @@ final public class AudioConverter {
         return try resampleBuffer(buffer)
     }
 
-    /// Convert a CMSampleBuffer to 16kHz mono Float32 samples
+    /// Convert a CMSampleBuffer to the target format
     /// - Parameter sampleBuffer: Input CMSampleBuffer containing PCM data
     /// - Returns: Float array at 16kHz mono
+    /// - Throws: `AudioConverterError.sampleBufferFormatMissing` (most likely caused by the sample buffer belonging
+    ///  to a video frame)
     public func resampleSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
             let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
