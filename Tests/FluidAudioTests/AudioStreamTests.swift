@@ -114,6 +114,199 @@ final class AudioStreamTests: XCTestCase {
         XCTAssertEqual(start, -0.5, accuracy: 1e-6)
     }
 
+    func testLargeForwardJumpProducesSequentialChunksFixedSkip() throws {
+        let chunkDuration: TimeInterval = 0.01
+        let sampleRate = 1_000.0
+        let stream = try AudioStream(
+            chunkDuration: chunkDuration,
+            streamStartTime: 0.0,
+            chunkingStrategy: .useFixedSkip,
+            startupStrategy: .startSilent,
+            sampleRate: sampleRate,
+            bufferCapacitySeconds: 0.1
+        )
+
+        let chunkSize = stream.chunkSize
+        let payload = (0..<15).map { Float($0) }
+
+        try stream.write(from: payload, atTime: 0.04)
+
+        var chunks: [([Float], TimeInterval)] = []
+        while let result = stream.readChunkIfAvailable() {
+            chunks.append((result.chunk, result.chunkStartTime))
+        }
+
+        let expectedTimestamps: [TimeInterval] = [0.0, 0.01, 0.02, 0.03]
+        let chunkTimestamps = chunks.map(\.1)
+
+        XCTAssertEqual(chunks.count, 4)
+        for (timestamp, expected) in zip(chunkTimestamps, expectedTimestamps) {
+            XCTAssertEqual(timestamp, expected, accuracy: 1e-6)
+        }
+
+        let expectedChunks: [[Float]] = [
+            Array(repeating: 0, count: chunkSize),
+            Array(repeating: 0, count: chunkSize),
+            Array(repeating: 0, count: chunkSize - 5) + Array(payload.prefix(5)),
+            Array(payload.suffix(chunkSize)),
+        ]
+        XCTAssertEqual(chunks.map(\.0), expectedChunks)
+    }
+
+    func testLargeForwardJumpAlignsMostRecentChunkTimestamp() throws {
+        let chunkDuration: TimeInterval = 0.01
+        let sampleRate = 1_000.0
+        let stream = try AudioStream(
+            chunkDuration: chunkDuration,
+            streamStartTime: 0.0,
+            chunkingStrategy: .useMostRecent,
+            startupStrategy: .startSilent,
+            sampleRate: sampleRate
+        )
+
+        let payload = (0..<15).map { Float($0) }
+        try stream.write(from: payload, atTime: 0.04)
+
+        guard let (chunk, start) = stream.readChunkIfAvailable() else {
+            XCTFail("Expected most-recent chunk after large forward jump")
+            return
+        }
+
+        XCTAssertEqual(chunk.count, stream.chunkSize)
+        XCTAssertEqual(chunk, Array(payload.suffix(stream.chunkSize)))
+        XCTAssertEqual(start, 0.03, accuracy: 1e-6)
+    }
+
+    func testNegativeTimestampDropsOldDataWithoutCrash() throws {
+        let chunkDuration: TimeInterval = 0.02
+        let sampleRate = 1_000.0
+        let stream = try AudioStream(
+            chunkDuration: chunkDuration,
+            streamStartTime: 0.0,
+            chunkingStrategy: .useMostRecent,
+            startupStrategy: .startSilent,
+            sampleRate: sampleRate
+        )
+
+        try stream.write(from: (0..<20).map(Float.init), atTime: nil)
+        try stream.write(from: (100..<105).map(Float.init), atTime: -0.05)
+        try stream.write(from: (200..<215).map(Float.init), atTime: nil)
+
+        guard let (chunk, start) = stream.readChunkIfAvailable() else {
+            XCTFail("Expected chunk after negative timestamp rollback")
+            return
+        }
+
+        XCTAssertEqual(start, -0.055, accuracy: 1e-6)
+        XCTAssertEqual(chunk, (100..<105).map(Float.init) + (200..<215).map(Float.init))
+    }
+
+    func testBoundCallbackReceivesTimestampedMultiChunks() throws {
+        let chunkDuration: TimeInterval = 0.01
+        let sampleRate = 1_000.0
+        let stream = try AudioStream(
+            chunkDuration: chunkDuration,
+            streamStartTime: 0.0,
+            chunkingStrategy: .useFixedSkip,
+            startupStrategy: .startSilent,
+            sampleRate: sampleRate
+        )
+
+        var receivedTimes: [TimeInterval] = []
+        let expectedTimes: [TimeInterval] = [0.01, 0.02]  // the first chunk should be skipped because it won't fit in the buffer
+        stream.bind { _, time in
+            receivedTimes.append(time)
+        }
+
+        try stream.write(from: Array(0..<20).map { Float($0) }, atTime: 0.03)
+
+        for (receivedTime, expectedTime) in zip(receivedTimes, expectedTimes) {
+            XCTAssertEqual(receivedTime, expectedTime, accuracy: 1e-6)
+        }
+        stream.unbind()
+    }
+
+    func testOscillatingTimestampsStillProduceOrderedChunks() throws {
+        let chunkDuration: TimeInterval = 0.01
+        let sampleRate = 1_000.0
+        let stream = try AudioStream(
+            chunkDuration: chunkDuration,
+            streamStartTime: 0.0,
+            chunkingStrategy: .useFixedSkip,
+            startupStrategy: .startSilent,
+            sampleRate: sampleRate,
+            bufferCapacitySeconds: 1
+        )
+
+        var samples: [[Float]] = [
+            (0..<10).map(Float.init),
+            (10..<20).map(Float.init),
+            (20..<50).map(Float.init),
+        ]
+
+        var timestamps: [TimeInterval] = [0.02, 0.00, 0.06]
+        var chunks: [[Float]] = []
+
+        var startTimes: [TimeInterval] = []
+        while samples.isEmpty == false {
+            let sample = samples.removeFirst()
+            let time = timestamps.removeFirst()
+            try stream.write(from: sample, atTime: time)
+        }
+        while let next = stream.readChunkIfAvailable() {
+            startTimes.append(next.chunkStartTime)
+            chunks.append(next.chunk)
+        }
+
+        XCTAssertEqual(startTimes.count, 7)
+        print(startTimes)
+        for window in zip(startTimes, startTimes.dropFirst()) {
+            XCTAssertLessThan(window.0, window.1 + 1e-9)
+        }
+
+        // 7th chunk should be 40-49
+        // 6th chunk should be 30-39
+        // 5th chunk should be 20-29
+        // 4th chunk should be silent due to being wiped
+        // 3rd chunk should be silent due to being wiped
+        // 2nd chunk should be silent due to being wiped
+        // 1st chunk should be 10-19
+
+        let silentChunk = [Float](repeating: 0, count: 10)
+
+        XCTAssertEqual(chunks[0], (10..<20).map(Float.init))
+        XCTAssertEqual(chunks[1], silentChunk)
+        XCTAssertEqual(chunks[2], silentChunk)
+        XCTAssertEqual(chunks[3], silentChunk)
+        XCTAssertEqual(chunks[4], (20..<30).map(Float.init))
+        XCTAssertEqual(chunks[5], (30..<40).map(Float.init))
+        XCTAssertEqual(chunks[6], (40..<50).map(Float.init))
+
+        XCTAssertEqual(startTimes.first!, -0.01, accuracy: 1e-6)
+        XCTAssertEqual(startTimes.last!, 0.05, accuracy: 1e-6)
+    }
+
+    func testStartTimeOffsetPropagatesToChunks() throws {
+        let chunkDuration: TimeInterval = 0.01
+        let sampleRate = 1_000.0
+        let streamStart: TimeInterval = 5.0
+        let stream = try AudioStream(
+            chunkDuration: chunkDuration,
+            streamStartTime: streamStart,
+            chunkingStrategy: .useMostRecent,
+            startupStrategy: .startSilent,
+            sampleRate: sampleRate
+        )
+
+        try stream.write(from: Array(0..<stream.chunkSize).map { Float($0) })
+        guard let (chunk, start) = stream.readChunkIfAvailable() else {
+            XCTFail("Expected chunk for non-zero streamStartTime")
+            return
+        }
+        XCTAssertEqual(chunk.count, stream.chunkSize)
+        XCTAssertEqual(start, streamStart, accuracy: 1e-6)
+    }
+
     func testBoundPreventsManualReadsUntilUnbound() throws {
         let chunkDuration: TimeInterval = 0.01
         let stream = try AudioStream(
@@ -144,6 +337,9 @@ final class AudioStreamTests: XCTestCase {
         guard let (chunk, time) = stream.readChunkIfAvailable() else {
             XCTFail("Expected chunk after unbinding")
             return
+        }
+        for callback in callbacks {
+            print("Time:", callback.1)
         }
         XCTAssertEqual(chunk, secondPayload)
         XCTAssertEqual(time, chunkDuration, accuracy: 1e-6)
