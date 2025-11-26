@@ -13,9 +13,14 @@ import OSLog
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
+    private let debug: Bool
 
     /// Public initializer so external modules (e.g. CLI) can construct the converter
-    public init(targetFormat: AVAudioFormat? = nil) {
+    /// - Parameters:
+    ///   - targetFormat: Target audio format
+    ///   - debug: Whether to log debug messages
+    public init(targetFormat: AVAudioFormat? = nil, debug: Bool = true) {
+        self.debug = debug
         if let format = targetFormat {
             self.targetFormat = format
         } else {
@@ -165,9 +170,11 @@ final public class AudioConverter {
         }
 
         let outputSampleCount = aggregated.count
-        logger.debug(
-            "Audio conversion: \(inputSampleCount) samples → \(outputSampleCount) samples, ratio: \(Double(outputSampleCount)/Double(inputSampleCount))"
-        )
+        if debug {
+            logger.debug(
+                "Audio conversion: \(inputSampleCount) samples → \(outputSampleCount) samples, ratio: \(Double(outputSampleCount)/Double(inputSampleCount))"
+            )
+        }
 
         return aggregated
     }
@@ -229,10 +236,12 @@ final public class AudioConverter {
                 outputSamples[i] = monoSamples[index]
             }
         }
-
-        logger.debug(
-            "Manual resampling: \(channelCount) channels → mono, \(inputSampleRate)Hz → \(targetSampleRate)Hz"
-        )
+        
+        if debug {
+            logger.debug(
+                "Manual resampling: \(channelCount) channels → mono, \(inputSampleRate)Hz → \(targetSampleRate)Hz"
+            )
+        }
 
         return outputSamples
     }
