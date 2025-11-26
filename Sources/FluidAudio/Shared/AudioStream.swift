@@ -115,17 +115,23 @@ public class AudioStream {
     // MARK: - public methods
 
     /// Bind a callback to the chunk updates
+    /// - Note: If the callback is slow, you may want to wrap it in a `Task`.
     /// - Parameter callback: The callback to bind
     public func bind(_ callback: @escaping (ArraySlice<Float>, TimeInterval) throws -> Void) {
         self.callback = callback
     }
 
-    /// Bind a callback to the chunk updates
-    /// - Parameter callback: The callback to bind
-    public func bind(_ callback: @escaping (ArraySlice<Float>, TimeInterval) async throws -> Void) {
+    /// Bind a fire and forget asynchronous callback to the chunk updates
+    /// - Parameters:
+    ///   - priority: Task priority
+    ///   - callback: The callback to bind
+    public func bind(
+        priority: TaskPriority = .medium,
+        _ callback: @escaping (ArraySlice<Float>, TimeInterval) async -> Void
+    ) {
         self.callback = { (chunk: ArraySlice<Float>, timestamp: TimeInterval) -> Void in
-            Task.detached {
-                try await callback(chunk, timestamp)
+            Task.detached(priority: priority) {
+                await callback(chunk, timestamp)
             }
         }
     }
