@@ -259,7 +259,6 @@ final class AudioStreamTests: XCTestCase {
         }
 
         XCTAssertEqual(startTimes.count, 7)
-        print(startTimes)
         for window in zip(startTimes, startTimes.dropFirst()) {
             XCTAssertLessThan(window.0, window.1 + 1e-9)
         }
@@ -338,9 +337,7 @@ final class AudioStreamTests: XCTestCase {
             XCTFail("Expected chunk after unbinding")
             return
         }
-        for callback in callbacks {
-            print("Time:", callback.1)
-        }
+
         XCTAssertEqual(chunk, secondPayload)
         XCTAssertEqual(time, chunkDuration, accuracy: 1e-6)
     }
