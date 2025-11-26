@@ -21,7 +21,7 @@ public struct SegmentationProcessor {
     ///   - segmentationModel: Pre-loaded CoreML segmentation model
     ///   - chunkSize: Expected audio size (default 160k samples = 10s)
     /// - Returns: Tuple of (binarized segments, raw feature provider)
-    func getSegments(
+    public func getSegments(
         audioChunk: ArraySlice<Float>,
         segmentationModel: MLModel,
         chunkSize: Int = 160_000
