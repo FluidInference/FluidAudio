@@ -76,7 +76,7 @@ final public class AudioConverter {
     /// - Returns: Float array at 16kHz mono
     /// - Throws: `AudioConverterError.sampleBufferFormatMissing` (most likely caused by the sample buffer belonging
     ///  to a video frame)
-    public func convertSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
+    public func resampleSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
         let buffer = try extractAVAudioPCMBuffer(from: sampleBuffer)
         return try convertBuffer(buffer, to: targetFormat)
     }
