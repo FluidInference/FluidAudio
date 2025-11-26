@@ -206,7 +206,7 @@ The offline controller mirrors the reference pipeline:
 The CLI exposes the same controller via `fluidaudio process` and the diarization benchmark tooling:
 
 ```bash
-swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug
+swift run fluidaudio process meeting.wav --mode offline --threshold 0.6 --debug --chunk-seconds 10.0 --overlap-seconds 0.0
 swift run fluidaudio diarization-benchmark --mode offline --dataset ami-sdm --threshold 0.6 --auto-download
 ```
 
@@ -255,34 +255,22 @@ Process audio in chunks for real-time applications:
 let diarizer = DiarizerManager()  // Default config works well
 diarizer.initialize(models: models)
 
-let chunkDuration = 5.0  // Can be 3.0 for low latency or 10.0 for best accuracy
-let chunkSize = Int(16000 * chunkDuration)  // Convert to samples
-var audioBuffer: [Float] = []
-var streamPosition = 0.0
+var stream = AudioStream(
+    chunkDuration: 5.0, // 10.0 for best accuracy. 3.0 for lowest
+    chunkSkip: 2.0, // Duration between successive chunk starts
+    streamStartTime: 0.0, // Audio stream start time
+    chunkingStrategy: .useMostRecent // Most recent
+)
+
+stream.bind { chunk, time in
+    let results = try diarizer.performCompleteDiarization(chunk, atTime: time)
+    for segment in results.segments {
+        handleSpeakerSegment(segment)
+    }
+}
 
 for audioSamples in audioStream {
-    audioBuffer.append(contentsOf: audioSamples)
-
-    // Process when we have accumulated enough audio
-    while audioBuffer.count >= chunkSize {
-        let chunk = Array(audioBuffer.prefix(chunkSize))
-        audioBuffer.removeFirst(chunkSize)
-
-        // This works with any chunk size, but accuracy varies
-        let result = try diarizer.performCompleteDiarization(chunk)
-
-        // Adjust timestamps manually
-        for segment in result.segments {
-            let adjustedSegment = TimedSpeakerSegment(
-                speakerId: segment.speakerId,
-                startTimeSeconds: streamPosition + segment.startTimeSeconds,
-                endTimeSeconds: streamPosition + segment.endTimeSeconds
-            )
-            handleSpeakerSegment(adjustedSegment)
-        }
-
-        streamPosition += chunkDuration
-    }
+    try stream.write(from: audioSamples)
 }
 ```
 
@@ -322,18 +310,28 @@ import AVFoundation
 class RealTimeDiarizer {
     private let audioEngine = AVAudioEngine()
     private let diarizer: DiarizerManager
-    private var audioBuffer: [Float] = []
-    private let chunkDuration = 10.0  // seconds
-    private let sampleRate: Double = 16000
-    private var chunkSamples: Int { Int(sampleRate * chunkDuration) }
-    private var streamPosition: Double = 0
-    // Audio converter for format conversion
-    private let converter = AudioConverter()
+    private var audioStream: AudioStream
     
     init() async throws {
         let models = try await DiarizerModels.downloadIfNeeded()
         diarizer = DiarizerManager()  // Default config
         diarizer.initialize(models: models)
+        audioStream = AudioStream(
+            chunkDuration: 5.0, // 5 second chunks work well
+            chunkSkip: 3.0, // 3.0 second delay between chunks works well
+            streamStartTime: 0.0,
+            chunkingStrategy: .useFixedSkip // ensure chunks are evenly spaced
+        )
+        audioStream.bind { chunk, _ in
+            Task {
+                do {
+                    let result = try diarizer.performCompleteDiarization(chunk)
+                    await handleResults(result)
+                } catch {
+                    print("Diarization error: \(error)")
+                }
+            }
+        }
     }
 
     func startCapture() throws {
@@ -343,48 +341,18 @@ class RealTimeDiarizer {
         // Install tap to capture audio
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
-
-            // Convert to 16kHz mono Float array using AudioConverter (streaming)
-            if let samples = try? self.converter.resampleBuffer(buffer) {
-                self.processAudioSamples(samples)
-            }
+            try? self.audioStream.write(from: buffer)
         }
 
         audioEngine.prepare()
         try audioEngine.start()
     }
 
-    private func processAudioSamples(_ samples: [Float]) {
-        audioBuffer.append(contentsOf: samples)
-
-        // Process complete chunks
-        while audioBuffer.count >= chunkSamples {
-            let chunk = Array(audioBuffer.prefix(chunkSamples))
-            audioBuffer.removeFirst(chunkSamples)
-
-            Task {
-                do {
-                    let result = try diarizer.performCompleteDiarization(chunk)
-                    await handleResults(result, at: streamPosition)
-                    streamPosition += chunkDuration
-                } catch {
-                    print("Diarization error: \(error)")
-                }
-            }
-        }
-    }
-
     @MainActor
-    private func handleResults(_ result: DiarizationResult, at position: Double) {
+    private func handleResults(_ result: DiarizationResult) {
         for segment in result.segments {
-            print("Speaker \(segment.speakerId): \(position + segment.startTimeSeconds)s")
+            print("Speaker \(segment.speakerId): \(segment.startTimeSeconds)s - \(segment.endTimeSeconds)s")
         }
-    }
-
-    private func convertBuffer(_ buffer: AVAudioPCMBuffer) -> [Float] {
-        // Use FluidAudio.AudioConverter in streaming mode
-        // Returns 16kHz mono Float array; swallow conversion errors in sample code
-        return (try? converter.resampleBuffer(buffer)) ?? []
     }
 }
 ```
