@@ -141,7 +141,7 @@ public class AudioStream {
     ///   - time: Timestamp for resynchronization (optional)
     /// - Warning: Samples may be skipped if the time jumps forward significantly.
     public func write<C>(from source: C, atTime time: TimeInterval? = nil) throws
-    where C: Collection & Sequence, C.Element == Float {
+    where C: Collection, C.Element == Float {
         if let array = source as? [Float] {
             return try self.writeContiguousSamples(from: array, atTime: time)
         }
@@ -232,7 +232,7 @@ public class AudioStream {
     ///   - source: Audio samples to write
     ///   - time: Timestamp for resynchronization (optional)
     private func writeContiguousSamples<C>(from source: C, atTime time: TimeInterval? = nil) throws
-    where C: Collection & Sequence, C.Element == Float {
+    where C: RandomAccessCollection, C.Element == Float {
         guard source.count > 0 else {
             return
         }
