@@ -2,7 +2,13 @@ import AVFoundation
 import Foundation
 
 /// A sliding window buffer for a real-time audio stream.
-public class AudioStream {
+public class AudioStream: @unchecked Sendable {
+    public typealias Callback<C> = (C, TimeInterval) throws -> Void
+    where C: RangeReplaceableCollection, C.Element == Float
+
+    public typealias AsyncCallback<C> = (C, TimeInterval) async -> Void
+    where C: RangeReplaceableCollection, C.Element == Float
+
     // MARK: - public properties
 
     /// Audio sample rate
@@ -24,7 +30,7 @@ public class AudioStream {
     public let chunkingStrategy: AudioStreamChunkingStrategy
 
     /// Whether the next chunk is ready to be read
-    public var hasNewChunk: Bool { writeIndex >= temporaryChunkSize }
+    public var hasNewChunk: Bool { queue.sync { writeIndex >= temporaryChunkSize } }
 
     /// Duration of overlap between consecutive chunks
     public var chunkOverlap: TimeInterval { chunkDuration - chunkSkip }
@@ -33,11 +39,12 @@ public class AudioStream {
     public var overlapSize: Int { chunkSize - skipSize }
 
     // MARK: - private properties
+
     /// Index to which the next sample will be written
     private var writeIndex: Int
 
     /// Callback for when a new chunk is ready
-    private var callback: ((ArraySlice<Float>, TimeInterval) throws -> Void)?
+    private var callback: Callback<[Float]>?
 
     /// Chunk size, but allows for the growing chunks that come with the `rampUpChunkSize` startup strategy
     private var temporaryChunkSize: Int
@@ -47,6 +54,10 @@ public class AudioStream {
 
     /// Sliding audio buffer
     private var buffer: ContiguousArray<Float>
+
+    private let queue = DispatchQueue(label: "FluidAudio.AudioStream.queue", attributes: .concurrent)
+
+    private let converter: AudioConverter
 
     // MARK: - init
 
@@ -87,14 +98,22 @@ public class AudioStream {
             throw AudioStreamError.invalidChunkSkip
         }
 
-        let capacity = Int(
-            round(
-                (bufferCapacitySeconds ?? (chunkDuration + self.chunkSkip))
-                    * sampleRate))
+        let bufferDuration = bufferCapacitySeconds ?? (chunkDuration + self.chunkSkip)
+        let capacity = Int(round(bufferDuration * sampleRate))
         guard capacity >= chunkSize else {
             throw AudioStreamError.bufferTooSmall
         }
+
         self.buffer = ContiguousArray(repeating: 0, count: capacity)
+
+        self.converter = AudioConverter(
+            targetFormat: AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: 1,
+                interleaved: false
+            )!
+        )
 
         switch startupStrategy {
         case .startSilent:
@@ -117,8 +136,24 @@ public class AudioStream {
     /// Bind a callback to the chunk updates
     /// - Note: If the callback is slow, you may want to wrap it in a `Task`.
     /// - Parameter callback: The callback to bind
-    public func bind(_ callback: @escaping (ArraySlice<Float>, TimeInterval) throws -> Void) {
-        self.callback = callback
+    public func bind(_ callback: @escaping Callback<[Float]>) {
+        queue.sync(flags: .barrier) {
+            self.callback = { (chunk: [Float], timestamp: TimeInterval) -> Void in
+                try callback(chunk, timestamp)
+            }
+        }
+    }
+
+    /// Bind a callback to the chunk updates
+    /// - Note: If the callback is slow, you may want to wrap it in a `Task`.
+    /// - Parameter callback: The callback to bind
+    public func bind<C>(_ callback: @escaping Callback<C>)
+    where C: RangeReplaceableCollection, C.Element == Float {
+        queue.sync(flags: .barrier) {
+            self.callback = { (chunk: [Float], timestamp: TimeInterval) -> Void in
+                try callback(C(chunk), timestamp)
+            }
+        }
     }
 
     /// Bind a fire and forget asynchronous callback to the chunk updates
@@ -127,18 +162,40 @@ public class AudioStream {
     ///   - callback: The callback to bind
     public func bind(
         priority: TaskPriority = .medium,
-        _ callback: @escaping (ArraySlice<Float>, TimeInterval) async -> Void
+        _ callback: @escaping AsyncCallback<[Float]>
     ) {
-        self.callback = { (chunk: ArraySlice<Float>, timestamp: TimeInterval) -> Void in
-            Task.detached(priority: priority) {
-                await callback(chunk, timestamp)
+        queue.sync(flags: .barrier) {
+            self.callback = { (chunk: [Float], timestamp: TimeInterval) -> Void in
+                Task.detached(priority: priority) {
+                    await callback(chunk, timestamp)
+                }
+            }
+        }
+    }
+
+    /// Bind a fire and forget asynchronous callback to the chunk updates
+    /// - Parameters:
+    ///   - priority: Task priority
+    ///   - callback: The callback to bind
+    public func bind<C>(
+        priority: TaskPriority = .medium,
+        _ callback: @escaping AsyncCallback<C>
+    )
+    where C: RangeReplaceableCollection, C.Element == Float {
+        queue.sync(flags: .barrier) {
+            self.callback = { (chunk: [Float], timestamp: TimeInterval) -> Void in
+                Task.detached(priority: priority) {
+                    await callback(C(chunk), timestamp)
+                }
             }
         }
     }
 
     /// Remove update binding
     public func unbind() {
-        self.callback = nil
+        queue.sync(flags: .barrier) {
+            self.callback = nil
+        }
     }
 
     /// Add new audio data to the buffer
@@ -157,7 +214,6 @@ public class AudioStream {
         if let contiguous = source as? ContiguousArray<Float> {
             return try self.writeContiguousSamples(from: contiguous, atTime: time)
         }
-
         try self.writeContiguousSamples(from: Array(source), atTime: time)
     }
 
@@ -167,7 +223,7 @@ public class AudioStream {
     ///   - time: Timestamp for resynchronization (optional)
     /// - Warning: Samples may be skipped if the time jumps forward significantly.
     public func write(from buffer: AVAudioPCMBuffer, atTime time: TimeInterval? = nil) throws {
-        let samples = try AudioConverter().resampleBuffer(buffer)
+        let samples = try converter.resampleBuffer(buffer)
         try write(from: samples, atTime: time)
     }
 
@@ -177,56 +233,60 @@ public class AudioStream {
     ///   - time: Timestamp for resynchronization (optional)
     /// - Warning: Samples may be skipped if the time jumps forward significantly.
     public func write(from sampleBuffer: CMSampleBuffer, atTime time: TimeInterval? = nil) throws {
-        let samples = try AudioConverter().resampleSampleBuffer(sampleBuffer)
+        let samples = try converter.resampleSampleBuffer(sampleBuffer)
         try write(from: samples, atTime: time)
     }
 
     /// Pop the next chunk if available and do something with it
     /// - Parameter body: Takes the chunk as an `ArraySlice<Float>` and the chunk start time
     /// - Note: Chunks will never be available if the audio stream has a binding
-    public func withChunkIfAvailable<R>(
-        _ body: (ArraySlice<Float>, TimeInterval) throws -> R
-    ) rethrows -> R? {
-        guard hasNewChunk else {
+    public func withChunkIfAvailable<R, C>(
+        _ body: (C, TimeInterval) throws -> R
+    ) rethrows -> R?
+    where C: RangeReplaceableCollection, C.Element == Float {
+        guard let (chunkArray, timestamp) = readChunkIfAvailable() else {
             return nil
         }
-
-        // Do stuff with the chunk
-        let result: R
-        switch chunkingStrategy {
-        case .useMostRecent:
-            let chunkStartIndex = writeIndex - temporaryChunkSize
-            let chunkStartTime = bufferStartTime + TimeInterval(chunkStartIndex) / sampleRate
-            let sample = buffer[chunkStartIndex..<writeIndex]
-            result = try body(sample, chunkStartTime)
-        case .useFixedSkip:
-            let sample = buffer.prefix(temporaryChunkSize)
-            result = try body(sample, bufferStartTime)
-        }
-
-        // Update temporary chunk size if needed
-        guard temporaryChunkSize == chunkSize else {
-            temporaryChunkSize = min(temporaryChunkSize + skipSize, chunkSize)
-            return result
-        }
-
-        // Forget the front of the buffer
-        switch chunkingStrategy {
-        case .useMostRecent:
-            forgetOldest(writeIndex - overlapSize)
-        case .useFixedSkip:
-            forgetOldest(skipSize)
-        }
-
-        return result
+        return try body(C(chunkArray), timestamp)
     }
 
     /// Pop the next chunk if it's ready
     /// - Returns: The next chunk and the chunk start time if its ready
     /// - Note: Chunks will never be available if the audio stream has a binding
     public func readChunkIfAvailable() -> (chunk: [Float], chunkStartTime: TimeInterval)? {
-        return withChunkIfAvailable { chunk, timestamp in
-            (Array(chunk), timestamp)
+        guard hasNewChunk else {
+            return nil
+        }
+
+        return queue.sync(flags: .barrier) {
+            var chunk: [Float] = []
+            var chunkStartTime: TimeInterval = 0
+
+            // Extract the chunk
+            switch chunkingStrategy {
+            case .useMostRecent:
+                let chunkStartIndex = writeIndex - temporaryChunkSize
+                chunkStartTime = bufferStartTime + TimeInterval(chunkStartIndex) / sampleRate
+                chunk = Array(buffer[chunkStartIndex..<writeIndex])
+            case .useFixedSkip:
+                chunk = Array(buffer.prefix(temporaryChunkSize))
+                chunkStartTime = bufferStartTime
+            }
+
+            if temporaryChunkSize == chunkSize {
+                // Forget the front of the buffer
+                switch chunkingStrategy {
+                case .useMostRecent:
+                    forgetOldest(writeIndex - overlapSize)
+                case .useFixedSkip:
+                    forgetOldest(skipSize)
+                }
+            } else {
+                // Update temporary chunk size
+                temporaryChunkSize = min(temporaryChunkSize + skipSize, chunkSize)
+            }
+
+            return (chunk, chunkStartTime)
         }
     }
 
@@ -242,29 +302,33 @@ public class AudioStream {
             return
         }
 
-        if let time {
-            let startIndex = Int(round(bufferStartTime * sampleRate))
-            let endIndex = startIndex + writeIndex + source.count
-            let expectedEndIndex = Int(round(time * sampleRate))
+        queue.sync(flags: .barrier) {
+            if let time {
+                // Align samples with timestamps
+                let startIndex = Int(round(bufferStartTime * sampleRate))
+                let endIndex = startIndex + writeIndex + source.count
+                let expectedEndIndex = Int(round(time * sampleRate))
 
-            let deviation = expectedEndIndex - endIndex
+                let deviation = expectedEndIndex - endIndex
 
-            if deviation > 0 {
-                appendZeros(count: deviation, beforeAdding: source.count)
-            } else if deviation < 0 {
-                rollbackNewest(-deviation)
+                if deviation > 0 {
+                    appendZeros(count: deviation, beforeAdding: source.count)
+                } else if deviation < 0 {
+                    rollbackNewest(-deviation)
+                }
+            }
+
+            // Write new samples
+            source.withContiguousStorageIfAvailable { ptr in
+                append(from: ptr.baseAddress!, count: ptr.count)
             }
         }
 
-        source.withContiguousStorageIfAvailable { ptr in
-            append(from: ptr.baseAddress!, count: ptr.count)
-        }
-
-        guard let callback else { return }
-
         // It's technically possible to have multiple chunks ready at once
-        while hasNewChunk {
-            try withChunkIfAvailable(callback)
+        while let callback = queue.sync(execute: { self.callback }),
+            let (chunk, timestamp) = readChunkIfAvailable()
+        {
+            try callback(chunk, timestamp)
         }
     }
 
