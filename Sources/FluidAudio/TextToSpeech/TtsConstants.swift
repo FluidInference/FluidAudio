@@ -58,4 +58,8 @@ public enum TtsConstants {
     /// Model fetch configuration.
     public static let defaultRepository: String = "FluidInference/kokoro-82m-coreml"
     public static let defaultModelsSubdirectory: String = "Models"
+
+    /// Maximum number of tokens per chunk to prevent quality degradation.
+    /// Empirically determined that quality drops significantly after ~2.5s (approx 55 tokens).
+    public static let maxTokensPerChunk: Int = 55
 }

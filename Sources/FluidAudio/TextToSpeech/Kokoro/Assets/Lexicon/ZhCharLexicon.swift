@@ -30,21 +30,34 @@ public actor ZhCharLexicon {
                 return overrideURL
             }
             let base = try TtsModels.cacheDirectoryURL().appendingPathComponent("Models/kokoro")
-            return base.appendingPathComponent("zh_char_phonemes.json")
+            return base.appendingPathComponent("zh_char_ipa.json")
         }()
 
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            logger.warning("ZhCharLexicon file not found at: \(url.path)")
-            mapping = [:]
-            isLoaded = true
-            return
+        // Download if not cached
+        if !FileManager.default.fileExists(atPath: url.path) {
+            logger.info("zh_char_ipa.json not found in cache, downloading...")
+            let downloadURL = URL(string: "https://huggingface.co/alexwengg/tts-zh/resolve/main/zh_char_ipa.json")!
+            do {
+                let (tempURL, _) = try await URLSession.shared.download(from: downloadURL)
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.moveItem(at: tempURL, to: url)
+                logger.info("Downloaded zh_char_ipa.json to cache")
+            } catch {
+                logger.error("Failed to download zh_char_ipa.json: \(error.localizedDescription)")
+                mapping = [:]
+                isLoaded = true
+                throw TTSError.processingFailed("Failed to download zh_char_ipa.json: \(error.localizedDescription)")
+            }
         }
 
         do {
             let data = try Data(contentsOf: url)
             let json = try JSONSerialization.jsonObject(with: data)
             guard let dict = json as? [String: Any] else {
-                throw TTSError.processingFailed("Invalid zh_char_phonemes.json format")
+                throw TTSError.processingFailed("Invalid zh_char_ipa.json format")
             }
             var parsed: [String: String] = [:]
             parsed.reserveCapacity(dict.count)
@@ -55,11 +68,11 @@ public actor ZhCharLexicon {
             }
             mapping = parsed
             isLoaded = true
-            logger.info("Loaded zh_char_phonemes.json with \(mapping.count) entries")
+            logger.info("Loaded zh_char_ipa.json with \(mapping.count) entries")
         } catch {
             mapping = [:]
             isLoaded = true
-            throw TTSError.processingFailed("Failed to load zh_char_phonemes.json: \(error.localizedDescription)")
+            throw TTSError.processingFailed("Failed to load zh_char_ipa.json: \(error.localizedDescription)")
         }
     }
 

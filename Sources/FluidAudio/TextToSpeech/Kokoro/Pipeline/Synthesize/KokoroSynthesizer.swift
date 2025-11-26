@@ -757,15 +757,29 @@ public struct KokoroSynthesizer {
         )
     }
 
-    /// Synthesize directly from a Kokoro-zh phoneme string (one codepoint per token).
-    /// This bypasses English lexicon + chunking and is useful for Mandarin.
     public static func synthesizePhonemeStringDetailed(
         phonemes: String,
         voice: String = TtsConstants.recommendedVoice,
         voiceSpeed: Float = 1.0,
         variantPreference: ModelNames.TTS.Variant? = .fifteenSecond
     ) async throws -> SynthesisResult {
-        logger.info("Starting synthesis from phoneme string; length=\(phonemes.count)")
+        return try await synthesizePhonemeStringsDetailed(
+            phonemes: [phonemes],
+            voice: voice,
+            voiceSpeed: voiceSpeed,
+            variantPreference: variantPreference
+        )
+    }
+
+    /// Synthesize directly from a list of Kokoro-zh phoneme strings.
+    /// Each string is treated as a separate chunk.
+    public static func synthesizePhonemeStringsDetailed(
+        phonemes: [String],
+        voice: String = TtsConstants.recommendedVoice,
+        voiceSpeed: Float = 1.0,
+        variantPreference: ModelNames.TTS.Variant? = .fifteenSecond
+    ) async throws -> SynthesisResult {
+        logger.info("Starting synthesis from \(phonemes.count) phoneme strings")
 
         try await ensureRequiredFiles()
         if !isVoiceEmbeddingPayloadCached(for: voice) {
@@ -778,18 +792,22 @@ public struct KokoroSynthesizer {
         let capacities = try await capacities(for: variantPreference)
         let lexiconMetrics = await lexiconCache.metrics()
 
-        // Build a single chunk from phoneme codepoints
-        let tokens: [String] = phonemes.map { String($0) }
-        let chunk = TextChunk(
-            words: [],
-            atoms: tokens,
-            phonemes: tokens,
-            totalFrames: 0,
-            pauseAfterMs: 0,
-            text: phonemes
-        )
+        // Build chunks from phoneme strings
+        var chunks: [TextChunk] = []
+        for p in phonemes {
+            let tokens = p.map { String($0) }
+            chunks.append(TextChunk(
+                words: [],
+                atoms: tokens,
+                phonemes: tokens,
+                totalFrames: 0,
+                pauseAfterMs: 0,
+                text: p
+            ))
+        }
+
         let entries = try buildChunkEntries(
-            from: [chunk],
+            from: chunks,
             vocabulary: vocabulary,
             preference: variantPreference,
             capacities: capacities
@@ -976,28 +994,28 @@ public struct KokoroSynthesizer {
         let clamped = max(0.1, factor)
         if abs(clamped - 1.0) < 0.01 { return samples }
 
-        if clamped < 1.0 {
-            let repeatCount = max(1, Int(round(1.0 / clamped)))
-            var stretched: [Float] = []
-            stretched.reserveCapacity(samples.count * repeatCount)
-            for sample in samples {
-                for _ in 0..<repeatCount {
-                    stretched.append(sample)
-                }
-            }
-            return stretched
-        }
+        let inputCount = samples.count
+        guard inputCount > 1 else { return samples }
+        
+        // Calculate output size: new_duration = old_duration / factor
+        let outputCount = Int(Float(inputCount) / clamped)
+        guard outputCount > 0 else { return [] }
 
-        let step = Int(clamped)
-        guard step > 1 else { return samples }
-        var compressed: [Float] = []
-        compressed.reserveCapacity(samples.count / step + 1)
-        var index = 0
-        while index < samples.count {
-            compressed.append(samples[index])
-            index += step
-        }
-        return compressed
+        // Pad input with one extra sample (duplicate last) to safely handle interpolation at the edge
+        // vDSP_vlint requires index < M-1, so we need M = inputCount + 1
+        var padded = samples
+        padded.append(samples.last ?? 0)
+        
+        var indices = [Float](repeating: 0, count: outputCount)
+        var start: Float = 0
+        var step: Float = clamped
+        vDSP_vramp(&start, &step, &indices, 1, vDSP_Length(outputCount))
+        
+        // vDSP.linearInterpolate(elements:using:)
+        // Requires Accelerate
+        let output = vDSP.linearInterpolate(elementsOf: padded, using: indices)
+        
+        return output
     }
 
     static func removeDelimiterCharacters(from text: String) -> String {

@@ -93,28 +93,22 @@ enum TTSZh {
             if let modelPath, !modelPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let modelURL = URL(fileURLWithPath: (modelPath as NSString).expandingTildeInPath)
                 let root = modelURL.deletingLastPathComponent()
-                let zhVocab = root.appendingPathComponent("zh_vocab_index.json")
                 let genericVocab = root.appendingPathComponent("vocab_index.json")
-                if fm.fileExists(atPath: zhVocab.path) {
-                    await KokoroVocabulary.shared.setOverrideURL(zhVocab)
-                } else if fm.fileExists(atPath: genericVocab.path) {
+                if fm.fileExists(atPath: genericVocab.path) {
                     await KokoroVocabulary.shared.setOverrideURL(genericVocab)
                 }
             } else {
                 let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
-                let cwdZh = cwd.appendingPathComponent("zh_vocab_index.json")
                 let cwdGeneric = cwd.appendingPathComponent("vocab_index.json")
-                if fm.fileExists(atPath: cwdZh.path) {
-                    await KokoroVocabulary.shared.setOverrideURL(cwdZh)
-                } else if fm.fileExists(atPath: cwdGeneric.path) {
+                if fm.fileExists(atPath: cwdGeneric.path) {
                     await KokoroVocabulary.shared.setOverrideURL(cwdGeneric)
                 }
             }
 
             // Ensure zh assets (vocab + char lexicon) in cache as a fallback, and prefer zh vocab override.
             do {
-                let ensured = try await TtsResourceDownloader.ensureZhAssetsInCache()
-                await KokoroVocabulary.shared.setOverrideURL(ensured.vocabURL)
+                let _ = try await TtsResourceDownloader.ensureZhAssetsInCache()
+                // await KokoroVocabulary.shared.setOverrideURL(ensured.vocabURL) // Don't use zh_vocab_index.json
             } catch {
                 logger.warning("Failed to ensure zh assets; continuing: \(error.localizedDescription)")
             }
@@ -145,13 +139,67 @@ enum TTSZh {
                 try await manager.initialize(preloadVoices: preloadVoices)
             }
 
-            // Lexicon-based Mandarin encoding
+            // Lexicon-based Mandarin encoding with Chunking
             let vocab = try await KokoroVocabulary.shared.getVocabulary()
             let allowed = Set(vocab.keys)
-            let phonemeString = try await ZhCharLexicon.shared.encode(text: text, allowedTokens: allowed)
+            
+            logger.info("DEBUG: allowed contains '↓'? \(allowed.contains("↓"))")
+            if let id = vocab["↓"] {
+                logger.info("DEBUG: '↓' ID: \(id)")
+            }
 
-            let detailed = try await manager.synthesizePhonemesDetailed(
-                phonemes: phonemeString,
+            // Chunk text using sentence boundaries
+            let limit = TtsConstants.maxTokensPerChunk
+            var textChunks: [String] = []
+            
+            text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .bySentences) { sentence, _, _, _ in
+                guard let sentence = sentence else { return }
+                
+                if sentence.count <= limit {
+                    textChunks.append(sentence)
+                } else {
+                    // Split long sentences by comma or hard limit
+                    var current = ""
+                    for char in sentence {
+                        current.append(char)
+                        if (char == "，" || char == ",") && current.count > 5 {
+                             textChunks.append(current)
+                             current = ""
+                        } else if current.count >= limit {
+                             textChunks.append(current)
+                             current = ""
+                        }
+                    }
+                    if !current.isEmpty { textChunks.append(current) }
+                }
+            }
+            
+            if textChunks.isEmpty && !text.isEmpty {
+                // Fallback for text without clear sentence boundaries
+                var current = ""
+                for char in text {
+                    current.append(char)
+                    if current.count >= limit {
+                        textChunks.append(current)
+                        current = ""
+                    }
+                }
+                if !current.isEmpty { textChunks.append(current) }
+            }
+            
+            // Convert chunks to phonemes
+            var phonemeStrings: [String] = []
+            for chunk in textChunks {
+                let p = try await ZhCharLexicon.shared.encode(text: chunk, allowedTokens: allowed)
+                logger.info("DEBUG: Encoded chunk: '\(chunk)' -> '\(p)'")
+                for c in p {
+                    if c == "↓" { logger.info("DEBUG: Found ↓ in output") }
+                }
+                if !p.isEmpty { phonemeStrings.append(p) }
+            }
+
+            let detailed = try await manager.synthesizePhonemeStringsDetailed(
+                phonemes: phonemeStrings,
                 voice: voiceOverride,
                 voiceSpeed: speed,
                 variantPreference: .fifteenSecond

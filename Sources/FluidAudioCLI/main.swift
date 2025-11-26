@@ -23,6 +23,7 @@ func printUsage() {
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
             tts-zh                  Synthesize Mandarin with Kokoro zh (zh-lexicon defaults)
+            compare-audio           Compare speaker embeddings of two audio files
             download                Download evaluation datasets
             help                    Show this help message
 
@@ -142,6 +143,12 @@ Task {
         await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "download":
         await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "compare-audio":
+        await CompareAudioCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "check-vocab":
+        await CheckVocabCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "synthesize-phonemes":
+        await SynthesizePhonemesCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "help", "--help", "-h":
         printUsage()
         exitWithPeakMemory(0)

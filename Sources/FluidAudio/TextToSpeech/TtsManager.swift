@@ -169,6 +169,31 @@ public final class TtSManager {
         }
     }
 
+    /// Synthesize directly from a list of Kokoro-zh phoneme strings.
+    public func synthesizePhonemeStringsDetailed(
+        phonemes: [String],
+        voice: String? = nil,
+        voiceSpeed: Float = 1.0,
+        speakerId: Int = 0,
+        variantPreference: ModelNames.TTS.Variant? = nil
+    ) async throws -> KokoroSynthesizer.SynthesisResult {
+        guard isInitialized else { throw TTSError.modelNotFound("Kokoro model not initialized") }
+        try await prepareLexiconAssetsIfNeeded()
+        let selectedVoice = resolveVoice(voice, speakerId: speakerId)
+        try await ensureVoiceEmbeddingIfNeeded(for: selectedVoice)
+
+        return try await KokoroSynthesizer.withLexiconAssets(lexiconAssets) {
+            try await KokoroSynthesizer.withModelCache(modelCache) {
+                try await KokoroSynthesizer.synthesizePhonemeStringsDetailed(
+                    phonemes: phonemes,
+                    voice: selectedVoice,
+                    voiceSpeed: voiceSpeed,
+                    variantPreference: variantPreference
+                )
+            }
+        }
+    }
+
     public func setDefaultVoice(_ voice: String, speakerId: Int = 0) async throws {
         let normalized = Self.normalizeVoice(voice)
         try await ensureVoiceEmbeddingIfNeeded(for: normalized)
