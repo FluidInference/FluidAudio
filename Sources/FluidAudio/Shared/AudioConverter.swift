@@ -236,7 +236,7 @@ final public class AudioConverter {
                 outputSamples[i] = monoSamples[index]
             }
         }
-        
+
         if debug {
             logger.debug(
                 "Manual resampling: \(channelCount) channels → mono, \(inputSampleRate)Hz → \(targetSampleRate)Hz"
