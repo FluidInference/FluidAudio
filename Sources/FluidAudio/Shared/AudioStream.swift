@@ -189,14 +189,13 @@ public class AudioStream {
         let result: R
         switch chunkingStrategy {
         case .useMostRecent:
-            let chunkOffset = TimeInterval(writeIndex - temporaryChunkSize) / sampleRate
-            let chunkStartTime = bufferStartTime + chunkOffset
-            let sample = buffer[writeIndex - temporaryChunkSize..<writeIndex]
+            let chunkStartIndex = writeIndex - temporaryChunkSize
+            let chunkStartTime = bufferStartTime + TimeInterval(chunkStartIndex) / sampleRate
+            let sample = buffer[chunkStartIndex..<writeIndex]
             result = try body(sample, chunkStartTime)
         case .useFixedSkip:
             let sample = buffer.prefix(temporaryChunkSize)
-            let chunkStartTime = bufferStartTime
-            result = try body(sample, chunkStartTime)
+            result = try body(sample, bufferStartTime)
         }
 
         // Update temporary chunk size if needed
