@@ -19,7 +19,7 @@ final public class AudioConverter {
     /// - Parameters:
     ///   - targetFormat: Target audio format
     ///   - debug: Whether to log debug messages
-    public init(targetFormat: AVAudioFormat? = nil, debug: Bool = true) {
+    public init(targetFormat: AVAudioFormat? = nil, debug: Bool = false) {
         self.debug = debug
         if let format = targetFormat {
             self.targetFormat = format
