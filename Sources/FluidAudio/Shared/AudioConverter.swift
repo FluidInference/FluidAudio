@@ -68,18 +68,15 @@ final public class AudioConverter {
             throw AudioConverterError.sampleBufferFormatMissing
         }
 
-        var asbd = streamDescription.pointee
-        guard let sourceFormat = AVAudioFormat(streamDescription: &asbd) else {
-            throw AudioConverterError.failedToCreateBuffer
+        guard let sourceFormat = AVAudioFormat(streamDescription: streamDescription) else {
+            throw AudioConverterError.failedToCreateSourceFormat
         }
 
-        let sampleCount = CMSampleBufferGetNumSamples(sampleBuffer)
-        if sampleCount == 0 { return [] }
-        guard sampleCount <= Int32.max else {
-            throw AudioConverterError.frameCountOverflow
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0 else {
+            return []
         }
 
-        let frameCount = AVAudioFrameCount(sampleCount)
         guard let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
             throw AudioConverterError.failedToCreateBuffer
         }
@@ -88,9 +85,10 @@ final public class AudioConverter {
         let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
             sampleBuffer,
             at: 0,
-            frameCount: Int32(sampleCount),
+            frameCount: Int32(frameCount),
             into: buffer.mutableAudioBufferList
         )
+
         guard status == noErr else {
             throw AudioConverterError.sampleBufferCopyFailed(status)
         }
@@ -325,7 +323,7 @@ public enum AudioConverterError: LocalizedError {
     case failedToCreateBuffer
     case conversionFailed(Error?)
     case sampleBufferFormatMissing
-    case frameCountOverflow
+    case failedToCreateSourceFormat
     case sampleBufferCopyFailed(OSStatus)
 
     public var errorDescription: String? {
@@ -337,9 +335,9 @@ public enum AudioConverterError: LocalizedError {
         case .conversionFailed(let error):
             return "Audio conversion failed: \(error?.localizedDescription ?? "Unknown error")"
         case .sampleBufferFormatMissing:
-            return "Sample buffer is missing a valid audio format description"
-        case .frameCountOverflow:
-            return "Sample buffer contains more frames than supported"
+            return "Sample buffer is missing a valid audio format description. Make sure it's not a video sample."
+        case .failedToCreateSourceFormat:
+            return "Failed to create a source audio format description for CMSampleBuffer."
         case .sampleBufferCopyFailed(let status):
             return "Failed to copy samples from CMSampleBuffer (status: \(status))"
         }
