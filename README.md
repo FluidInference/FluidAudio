@@ -36,11 +36,13 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 - **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses
 
-## FluidAudio Video Demos
+## Video Demos
 
-- **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** - Video demonstration of FluidAudio's transcription accuracy and speed
-- **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** - Python Speaker diarization on Mac using FluidAudio's segmentation model
-- **[Mobile TTS](https://x.com/sach1n/status/1977817056507793521)** - Voice on mobile video using FluidAudio's Kokoro and Silero models
+| Link | Description |
+| --- | --- |
+| **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** | Video demonstration of FluidAudio's transcription accuracy and speed |
+| **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** | Python Speaker diarization on Mac using FluidAudio's segmentation model |
+| **[Mobile TTS](https://x.com/sach1n/status/1977817056507793521)** | Voice on mobile video using FluidAudio's Kokoro and Silero models |
 
 ## Showcase
 

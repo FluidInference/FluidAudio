@@ -269,3 +269,110 @@ Note that the baseline pytorch version is ~11% DER, we lost some precision dropp
 ### Streaming/online Diarization
 
 This is more tricky and honestly a lot more fragile to clustering. Expect +10-15% worse DER for the streaming implementation. Only use this when you critically need realtime streaming speaker diarization. In most cases, offline is more than enough for most applications.
+
+Running a near real-time diarization benchmark for 3s chunks, 1s overlap, and 0.85 clustering threshold:
+```bash
+swift run fluidaudio diarization-benchmark --mode streaming \
+    --dataset ami-sdm \
+    --threshold 0.85 \
+    --auto-download \
+    --chunk-seconds 3.0 \
+    --overlap-seconds 1.0
+    
+...
+
+------------------------------------------------------------------------------------------
+Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
+------------------------------------------------------------------------------------------
+ES2004a          31.6     41.6      6.7      2.1     22.7 7/4            49.8
+ES2005a          39.7     65.0      6.9      7.3     25.5 5/4            59.1
+IS1002b          40.4     51.3      1.1      5.2     34.1 9/4            45.3
+ES2002a          41.5     56.0      5.3     10.1     26.1 6/4            48.6
+ES2003a          53.1     78.7      5.3      2.3     45.5 5/4            57.1
+IS1000a          66.7     74.0      6.1      7.6     53.0 7/4            50.7
+IS1001a          75.0     88.6      7.1      4.7     63.2 10/4           48.8
+------------------------------------------------------------------------------------------
+AVERAGE          49.7     65.0      5.5      5.6     38.6         -     51.4
+==========================================================================================
+```
+
+
+Diarization benchmark with 10s chunks, 0s overlap, and 0.7 clustering threshold:
+```bash
+swift run fluidaudio diarization-benchmark --mode streaming \
+    --dataset ami-sdm
+    --threshold 0.7
+    --auto-download
+    --chunk-seconds 10.0
+    --overlap-seconds 0.0
+
+...
+
+------------------------------------------------------------------------------------------
+Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
+------------------------------------------------------------------------------------------
+ES2003a          12.0     19.5      6.9      1.2      3.9 4/4           477.0
+ES2004a          15.1     24.8      9.2      1.2      4.7 4/4           367.4
+ES2002a          17.8     26.8      8.6      5.8      3.4 6/4           356.8
+IS1002b          38.0     41.8      3.1      3.1     31.8 5/4           361.9
+ES2005a          22.5     36.8      7.7      6.8      8.0 4/4           460.8
+IS1000a          57.7     80.6     11.9      3.9     41.9 8/4           352.1
+IS1001a          70.1     85.4     11.2      2.4     56.5 7/4           370.9
+------------------------------------------------------------------------------------------
+AVERAGE          33.3     45.1      8.4      3.5     21.5         -    392.4
+==========================================================================================
+```
+
+
+Diarization benchmark with 5s chunks, 0s overlap, and 0.8 clustering threshold (best configuration found):
+```bash
+swift run fluidaudio diarization-benchmark --mode streaming \
+    --dataset ami-sdm
+    --threshold 0.8
+    --auto-download
+    --chunk-seconds 5.0
+    --overlap-seconds 0.0
+
+...
+
+------------------------------------------------------------------------------------------
+Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
+------------------------------------------------------------------------------------------
+IS1002b           9.8     11.7      3.5      3.8      2.6 5/4           205.2
+ES2003a          14.4     23.3      7.4      1.6      5.3 4/4           260.9
+ES2004a          17.0     26.0      9.0      1.3      6.7 7/4           218.1
+ES2005a          18.4     31.0      9.2      5.8      3.4 4/4           259.8
+ES2002a          20.8     30.5      9.5      7.4      3.9 5/4           198.0
+IS1000a          24.7     35.7     12.1      4.3      8.3 6/4           204.2
+IS1001a          78.0     94.5     13.3      3.0     61.6 6/4           215.7
+------------------------------------------------------------------------------------------
+AVERAGE          26.2     36.1      9.2      3.9     13.1         -    223.1
+==========================================================================================
+```
+
+
+Diarization benchmark with 5s chunks, 2s overlap, and 0.8 clustering threshold:
+```bash
+swift run fluidaudio diarization-benchmark --mode streaming \
+    --dataset ami-sdm
+    --threshold 0.8
+    --auto-download
+    --chunk-seconds 5.0
+    --overlap-seconds 2.0
+
+...
+
+------------------------------------------------------------------------------------------
+Meeting        DER %    JER %    Miss %     FA %     SE %   Speakers     RTFx
+------------------------------------------------------------------------------------------
+ES2003a          24.5     42.1      4.7      1.9     18.0 6/4            81.4
+ES2005a          27.5     50.6      5.5      7.6     14.4 5/4            76.8
+ES2004a          31.6     54.8      6.4      2.3     23.0 5/4            66.9
+IS1002b          39.6     57.0      0.8      5.1     33.7 6/4            63.7
+ES2002a          41.1     57.2      4.7      9.8     26.7 5/4            65.5
+IS1000a          57.4     54.2      6.1      7.7     43.6 9/4            67.2
+IS1001a          79.0     86.8      7.0      5.0     66.9 10/4           64.5
+------------------------------------------------------------------------------------------
+AVERAGE          43.0     57.5      5.0      5.6     32.3         -     69.4
+==========================================================================================
+```
