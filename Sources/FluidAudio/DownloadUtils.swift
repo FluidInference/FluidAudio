@@ -320,7 +320,7 @@ public class DownloadUtils {
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
-            return ModelNames.ASR.requiredModels
+            return ModelNames.ASR.requiredModels(for: repo)
         case .parakeetCtc110m:
             return ModelNames.CTC.requiredModels
         case .diarizer:

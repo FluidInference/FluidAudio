@@ -17,8 +17,10 @@ public enum AsrModelVersion: Sendable {
 
 public struct AsrModels: Sendable {
 
-    /// Required model names for ASR
-    public static let requiredModelNames = ModelNames.ASR.requiredModels
+    /// Get required model names for a specific ASR version
+    public static func requiredModelNames(for version: AsrModelVersion) -> Set<String> {
+        return ModelNames.ASR.requiredModels(for: version.repo)
+    }
 
     public let encoder: MLModel
     public let preprocessor: MLModel
@@ -143,15 +145,16 @@ extension AsrModels {
         }
 
         // Load decoder and joint as well
+        let jointFileName = Names.jointFile(for: version.repo)
         let decoderAndJoint = try await DownloadUtils.loadModels(
             version.repo,
-            modelNames: [Names.decoderFile, Names.jointFile],
+            modelNames: [Names.decoderFile, jointFileName],
             directory: parentDirectory,
             computeUnits: config.computeUnits
         )
 
         guard let decoderModel = decoderAndJoint[Names.decoderFile],
-            let jointModel = decoderAndJoint[Names.jointFile]
+            let jointModel = decoderAndJoint[jointFileName]
         else {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }

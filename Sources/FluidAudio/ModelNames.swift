@@ -98,7 +98,10 @@ public enum ModelNames {
         public static let preprocessor = "Preprocessor"
         public static let encoder = "Encoder"
         public static let decoder = "Decoder"
-        public static let joint = "JointDecisionv2"
+
+        // Joint model names differ between versions
+        public static let jointV2 = "JointDecision"  // v2 uses JointDecision
+        public static let jointV3 = "JointDecisionv2"  // v3 uses JointDecisionv2
 
         // Shared vocabulary file across all model versions
         public static let vocabularyFile = "parakeet_vocab.json"
@@ -106,14 +109,28 @@ public enum ModelNames {
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
-        public static let jointFile = joint + ".mlmodelc"
 
-        public static let requiredModels: Set<String> = [
-            preprocessorFile,
-            encoderFile,
-            decoderFile,
-            jointFile,
-        ]
+        // Get joint file name based on repo/version
+        public static func jointFile(for repo: Repo) -> String {
+            switch repo {
+            case .parakeetV2:
+                return jointV2 + ".mlmodelc"
+            case .parakeet:
+                return jointV3 + ".mlmodelc"
+            default:
+                return jointV3 + ".mlmodelc"  // Default to v3
+            }
+        }
+
+        // Get required models based on repo/version
+        public static func requiredModels(for repo: Repo) -> Set<String> {
+            return [
+                preprocessorFile,
+                encoderFile,
+                decoderFile,
+                jointFile(for: repo),
+            ]
+        }
 
         /// Get vocabulary filename for specific model version
         public static func vocabulary(for repo: Repo) -> String {
@@ -204,7 +221,7 @@ public enum ModelNames {
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
-            return ModelNames.ASR.requiredModels
+            return ModelNames.ASR.requiredModels(for: repo)
         case .parakeetCtc110m:
             return ModelNames.CTC.requiredModels
         case .diarizer:
