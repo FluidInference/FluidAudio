@@ -20,7 +20,8 @@ func printUsage() {
             asr-benchmark           Run ASR benchmark on LibriSpeech
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             ctc-benchmark           Run CTC keyword boosting benchmark
-            transcribe              Transcribe audio file using streaming ASR
+            transcribe              Transcribe audio file using streaming ASR (TDT)
+            eou-transcribe          Transcribe audio using Parakeet EOU 120M (RNNT)
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
             download                Download evaluation datasets
@@ -130,6 +131,8 @@ Task {
         await CtcBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
     case "transcribe":
         await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "eou-transcribe":
+        await EouTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":
         await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 

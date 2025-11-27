@@ -5,6 +5,7 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+    case parakeetEOU = "alexwengg/parakeet-realtime-eou-120m-coreml"
     case parakeetCtc110m = "argmaxinc/ctckit-pro"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
@@ -18,6 +19,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-0.6b-v3-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
+        case .parakeetEOU:
+            return "parakeet-realtime-eou-120m-coreml"
         case .parakeetCtc110m:
             return "ctckit-pro"
         case .diarizer:
@@ -32,6 +35,9 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .parakeetCtc110m:
             // Uses Argmax CoreML export for Parakeet CTC 110M
+            return rawValue
+        case .parakeetEOU:
+            // Uses alexwengg's CoreML export for Parakeet EOU
             return rawValue
         default:
             return "FluidInference/\(name)"
@@ -138,6 +144,35 @@ public enum ModelNames {
         }
     }
 
+    /// ASR EOU (End-of-Utterance) RNNT model names (Parakeet Realtime EOU 120M)
+    public enum ASREOU {
+        public static let preprocessor = "parakeet_eou_preprocessor"
+        public static let encoder = "parakeet_eou_encoder"
+        public static let decoder = "parakeet_eou_decoder"
+        public static let joint = "parakeet_eou_joint_minimal"  // Use minimal model for better numerical stability
+        public static let jointDecision = "parakeet_eou_joint_decision_single_step"
+        public static let vocabularyFile = "vocab.json"
+        public static let metadataFile = "metadata.json"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile,
+            jointFile,
+        ]
+
+        // Token IDs from metadata.json
+        public static let blankId = 1026
+        public static let eouTokenId = 1024
+        public static let eobTokenId = 1025
+        public static let vocabSize = 1026
+    }
+
     /// CTC keyword spotting model names (Parakeet-TDT CTC 110M).
     public enum CTC {
         public static let subfolder = "parakeet-tdt_ctc-110m"
@@ -222,6 +257,8 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels(for: repo)
+        case .parakeetEOU:
+            return ModelNames.ASREOU.requiredModels
         case .parakeetCtc110m:
             return ModelNames.CTC.requiredModels
         case .diarizer:
