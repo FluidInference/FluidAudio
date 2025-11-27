@@ -1,5 +1,6 @@
 import Foundation
 import FluidAudio
+import FluidAudioTTS
 
 enum CheckVocabCommand {
     static func run(arguments: [String]) async {

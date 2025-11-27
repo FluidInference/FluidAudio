@@ -1,4 +1,5 @@
 import FluidAudio
+import FluidAudioTTS
 import Foundation
 
 /// Convenience wrapper for Mandarin: enforces zh-lexicon G2P and sensible defaults.
