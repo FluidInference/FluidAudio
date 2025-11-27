@@ -108,7 +108,7 @@ public final class DiarizerManager {
     /// let result = try diarizer.performCompleteDiarization(audioContiguous)
     /// ```
     public func performCompleteDiarization<C>(
-        _ samples: C, sampleRate: Int = 16000
+        _ samples: C, sampleRate: Int = 16000, atTime startTime: TimeInterval = 0
     ) throws -> DiarizationResult
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         guard let models else {
@@ -138,7 +138,7 @@ public final class DiarizerManager {
             let chunkEndOffset = min(chunkSize, remainingSamples)
             let chunkEnd = samples.index(chunkStart, offsetBy: chunkEndOffset)
             let chunk = samples[chunkStart..<chunkEnd]
-            let chunkOffset = Double(chunkStartOffset) / Double(sampleRate)
+            let chunkOffset = Double(chunkStartOffset) / Double(sampleRate) + startTime
 
             let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
                 chunk,

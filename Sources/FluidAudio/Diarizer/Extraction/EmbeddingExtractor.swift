@@ -51,6 +51,16 @@ public final class EmbeddingExtractor {
         // to maintain compatibility with the rest of the pipeline
         var embeddings: [[Float]] = []
 
+        // Fill shared waveform buffer once; reused across speakers
+        fillWaveformBuffer(
+            audio: audio,
+            buffer: waveformBuffer
+        )
+
+        // Calculate number of masks that are actually used
+
+        let numMasksInChunk = (firstMask.count * audio.count + 80_000) / 160_000
+
         // Process all speakers but optimize for active ones
         for speakerIdx in 0..<masks.count {
             // Check if speaker is active
@@ -62,16 +72,10 @@ public final class EmbeddingExtractor {
                 continue
             }
 
-            // Use ANE-optimized copy for audio data
-            memoryOptimizer.optimizedCopy(
-                from: audio,
-                to: waveformBuffer,
-                offset: 0  // First speaker slot
-            )
-
             // Optimize mask creation with zero-copy view
             fillMaskBufferOptimized(
                 masks: masks,
+                numMasksInChunk: numMasksInChunk,
                 speakerIndex: speakerIdx,
                 buffer: maskBuffer
             )
@@ -106,8 +110,46 @@ public final class EmbeddingExtractor {
         return embeddings
     }
 
+    /// Fill the waveform buffer with loop (repeat) padding
+    private func fillWaveformBuffer<C>(
+        audio: C,
+        buffer: MLMultiArray
+    ) where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
+        let ptr = buffer.dataPointer.assumingMemoryBound(to: Float.self)
+        var sampleCount = audio.count
+        let requiredCount = 160_000
+
+        // Load the original audio into the buffer
+        memoryOptimizer.optimizedCopy(
+            from: audio,
+            to: buffer,
+            offset: 0  // first speaker slot
+        )
+
+        // If sampleCount is zero then we'll get stuck in an infinite loop
+        guard sampleCount > 0 else {
+            return
+        }
+
+        // Repeat-pad the buffer by doubling it until it's full
+        while sampleCount < requiredCount {
+            let copyCount = min(sampleCount, requiredCount - sampleCount)
+            vDSP_mmov(
+                ptr,
+                ptr.advanced(by: sampleCount),
+                vDSP_Length(copyCount),
+                vDSP_Length(1),
+                vDSP_Length(1),
+                vDSP_Length(copyCount)
+            )
+            sampleCount += copyCount
+        }
+    }
+
+    /// Fill the mask buffer with loop (repeat) padding
     private func fillMaskBufferOptimized(
         masks: [[Float]],
+        numMasksInChunk: Int,
         speakerIndex: Int,
         buffer: MLMultiArray
     ) {
@@ -118,16 +160,37 @@ public final class EmbeddingExtractor {
         vDSP_vfill(&zero, ptr, 1, vDSP_Length(totalElements))
 
         // Copy speaker mask to first slot using optimized memory copy
-        let maskCount = masks[speakerIndex].count
+        let requiredCount = masks[speakerIndex].count
+        var currentCount = numMasksInChunk
+
         masks[speakerIndex].withUnsafeBufferPointer { maskPtr in
             vDSP_mmov(
                 maskPtr.baseAddress!,
                 ptr,
-                vDSP_Length(maskCount),
+                vDSP_Length(currentCount),
                 vDSP_Length(1),
                 vDSP_Length(1),
-                vDSP_Length(maskCount)
+                vDSP_Length(currentCount)
             )
+        }
+
+        // If maskCount is zero then we'll get stuck in an infinite loop
+        guard currentCount > 0 else {
+            return
+        }
+
+        // Repeat-pad the buffer by doubling it until it's full
+        while currentCount < requiredCount {
+            let copyCount = min(currentCount, requiredCount - currentCount)
+            vDSP_mmov(
+                ptr,
+                ptr.advanced(by: currentCount),
+                vDSP_Length(copyCount),
+                vDSP_Length(1),
+                vDSP_Length(1),
+                vDSP_Length(copyCount)
+            )
+            currentCount += copyCount
         }
     }
 

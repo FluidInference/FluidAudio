@@ -1,5 +1,6 @@
 import Accelerate
 import CoreML
+import FluidAudio
 import Foundation
 
 extension KokoroSynthesizer {

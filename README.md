@@ -36,6 +36,14 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 - **Apple Neural Engine**: Models run efficiently on Apple's ANE for maximum performance with minimal power consumption
 - **Open-Source Models**: All models are publicly available on HuggingFace — converted and optimized by our team; permissive licenses
 
+## Video Demos
+
+| Link | Description |
+| --- | --- |
+| **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** | Video demonstration of FluidAudio's transcription accuracy and speed |
+| **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** | Python Speaker diarization on Mac using FluidAudio's segmentation model |
+| **[Mobile TTS](https://x.com/sach1n/status/1977817056507793521)** | Voice on mobile video using FluidAudio's Kokoro and Silero models |
+
 ## Showcase
 
 Make a PR if you want to add your app, please keep it in chronological order.
@@ -53,6 +61,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Starling](https://github.com/Ryandonofrio3/Starling)** | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
 | **[BoltAI](https://boltai.com/)** | Write content 10x faster using parakeet models |
 | **[Voxeoflow](https://www.voxeoflow.app)** | Mac dictation app with real-time translation. Lightning-fast transcription in over 100 languages, instantly translated to your target language. |
+| **[Speakmac](https://speakmac.app)** | Mac app that lets you type anywhere on your Mac using your voice. Fully local, private dictation built on FluidAudio. |
 
 ## Installation
 
@@ -60,13 +69,47 @@ Add FluidAudio to your project using Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.7"),
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
 ],
 ```
 
-**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
+### Choosing a Product
 
-Important: When adding FluidAudio as a package dependency, only add the library to your target (not the executable). Select `FluidAudio` library in the package products dialog and add it to your app target.
+FluidAudio provides two library products:
+
+- **`FluidAudio`** (default) - Core functionality: ASR, diarization, VAD
+  - Lightweight, no GPL dependencies
+  - Recommended for most apps
+
+- **`FluidAudioTTS`** - Text-to-Speech (Kokoro)
+  - Separate optional product
+  - Includes ESpeakNG framework (GPL-3.0)
+  - Only bundled if you explicitly add it as a dependency
+
+**In Xcode:**
+1. Add the FluidAudio package to your project
+2. In the "Add Package" dialog, select your desired product(s):
+   - `FluidAudio` for core features (ASR, diarization, VAD)
+   - `FluidAudioTTS` if you need text-to-speech
+3. Add the selected product(s) to your app target
+
+**In Package.swift:**
+```swift
+// Core features only (no GPL dependencies):
+.product(name: "FluidAudio", package: "FluidAudio")
+
+// Add TTS support (includes GPL ESpeakNG):
+.product(name: "FluidAudioTTS", package: "FluidAudio")
+```
+
+**In Xcode:**
+1. Add the FluidAudio package to your project
+2. In the "Add Package" dialog, select your desired product:
+   - `FluidAudio` for core features only
+   - `FluidAudioWithTTS` if you need text-to-speech
+3. Add the selected product to your app target
+
+**CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.7.8'`
 
 > **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
@@ -433,6 +476,12 @@ Offline mode also reports RTFx using the model's per-chunk processing time.
 Requirements (macOS)
 Ensure eSpeak NG headers/libs are available via pkg-config (`espeak-ng`).
 <https://github.com/espeak-ng/espeak-ng/tree/master>
+
+**For CLI usage:**
+- The `fluidaudio` CLI is built with TTS support enabled by default:
+  - `swift run fluidaudio tts "Hello" --output out.wav`
+  - `swift build` (builds CLI with TTS)
+  - `swift test` (runs tests including TTS coverage)
 
 ### Quick Start (CLI)
 

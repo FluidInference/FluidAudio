@@ -1,4 +1,5 @@
 import ESpeakNG
+import FluidAudio
 import Foundation
 
 /// Thread-safe wrapper around eSpeak NG C API to get IPA phonemes for a word.

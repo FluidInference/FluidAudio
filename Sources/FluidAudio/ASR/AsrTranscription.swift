@@ -140,7 +140,7 @@ extension AsrManager {
 
     /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
     /// This is used by both sliding window chunking and streaming paths to unify behavior.
-    internal func transcribeStreamingChunk(
+    public func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
         previousTokens: [Int] = []
