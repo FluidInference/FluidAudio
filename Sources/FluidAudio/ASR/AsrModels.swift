@@ -324,7 +324,7 @@ extension AsrModels {
             DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
             DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
             DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
+            DownloadSpec(fileName: Names.jointFile(for: version.repo), computeUnits: defaultUnits),
         ]
 
         for spec in specs {
@@ -356,7 +356,7 @@ extension AsrModels {
 
     public static func modelsExist(at directory: URL, version: AsrModelVersion) -> Bool {
         let fileManager = FileManager.default
-        let requiredFiles = ModelNames.ASR.requiredModels
+        let requiredFiles = ModelNames.ASR.requiredModels(for: version.repo)
 
         // Check in the DownloadUtils repo structure
         let repoPath = repoPath(from: directory, version: version)
