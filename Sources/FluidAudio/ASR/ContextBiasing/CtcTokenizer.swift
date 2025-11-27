@@ -128,7 +128,7 @@ extension CustomVocabularyContext {
     /// Load vocabulary with automatic CTC tokenization
     public static func loadWithCtcTokenization(from url: URL) throws -> CustomVocabularyContext {
         // First load normally
-        var context = try Self.load(from: url)
+        let context = try Self.load(from: url)
 
         // Initialize CTC tokenizer
         let tokenizer = try CtcTokenizer()
