@@ -30,6 +30,10 @@ public final class StreamingEouAsrManager {
     private var audioBuffer: [Float] = []
     private let bufferSizeSeconds: Double = 4.0
 
+    // Mel feature buffer for incremental streaming
+    // Each element is a frame: [128 mel coefficients]
+    private var melBuffer: [[Float]] = []
+
     /// Sample rate expected by the model
     public static let sampleRate = 16_000
 
@@ -68,94 +72,66 @@ public final class StreamingEouAsrManager {
 
         let startTime = Date()
 
-        // --- Audio Buffering (NeMo Pattern) ---
-        // Append new chunk to buffer
-        audioBuffer.append(contentsOf: audioChunk)
-        
-        // Maintain buffer size (4s)
-        let maxSamples = Int(Double(StreamingEouAsrManager.sampleRate) * bufferSizeSeconds)
-        if audioBuffer.count > maxSamples {
-            audioBuffer.removeFirst(audioBuffer.count - maxSamples)
-        }
-        
-        // Run preprocessor on the ENTIRE buffer to get continuous features
-        let (melFeatures, melLength) = try await runPreprocessor(
-            audio: audioBuffer,
-            audioLength: audioBuffer.count,
+        // --- Direct Chunk Mel Processing ---
+        // Feed each chunk's mel features directly to the streaming encoder
+        // The cache provides context from previous chunks (no overlapping mel needed)
+        //
+        // NeMo streaming config uses 45 mel frames per chunk (chunk_size=9 * 4 + 9 buffer)
+        // This corresponds to ~450ms of audio at 100 frames/second
+
+        // Run preprocessor on this audio chunk
+        let (chunkMel, chunkMelLength) = try await runPreprocessor(
+            audio: audioChunk,
+            audioLength: audioChunk.count,
             model: models.preprocessor
         )
-        
-        // Extract features corresponding to the NEW chunk (last 129 frames for 1280ms)
-        // NeMo logic: feature_chunk_len = int(chunk_size / stride)
-        // For 1280ms chunk, stride 10ms -> 128 frames.
-        // CoreML model expects 129 frames.
-        let fixedFrames = 129
-        let totalFrames = melFeatures.shape[2].intValue
-        let inputMel = try MLMultiArray(shape: [1, 128, NSNumber(value: fixedFrames)], dataType: .float32)
-        
-        // Initialize with silence (-10.0)
-        let count = inputMel.count
-        let destPtr = inputMel.dataPointer.bindMemory(to: Float.self, capacity: count)
-        destPtr.initialize(repeating: -10.0, count: count)
-        
-        if totalFrames >= fixedFrames {
-            // Slicing: Copy last fixedFrames from each of the 128 channels
-            // Assuming default C-contiguous layout [1, 128, T] -> T is inner dimension
-            let srcPtr = melFeatures.dataPointer.bindMemory(to: Float.self, capacity: melFeatures.count)
-            let startFrame = totalFrames - fixedFrames
-            
-            for channel in 0..<128 {
-                // Source: channel * totalFrames + startFrame
-                let srcOffset = channel * totalFrames + startFrame
-                // Dest: channel * fixedFrames
-                let destOffset = channel * fixedFrames
-                
-                // Copy fixedFrames floats
-                (destPtr + destOffset).update(from: (srcPtr + srcOffset), count: fixedFrames)
-            }
-        } else {
-            // Padding: Copy all totalFrames to the END of inputMel (or beginning?)
-            // If we are at start of stream, we have [0...totalFrames].
-            // We should put them at [0...totalFrames] and pad the rest?
-            // NeMo padding usually pads at the end.
-            
-            let srcPtr = melFeatures.dataPointer.bindMemory(to: Float.self, capacity: melFeatures.count)
-            
-            for channel in 0..<128 {
-                let srcOffset = channel * totalFrames
-                let destOffset = channel * fixedFrames
-                
-                // Copy totalFrames floats
-                (destPtr + destOffset).update(from: (srcPtr + srcOffset), count: totalFrames)
+
+        let actualMelFrames = chunkMelLength
+
+        // Prepare fixed-size input (73 frames - NeMo mode 2: chunk_size=16 * 4 + 9 pre_cache)
+        let fixedFrames = 73  // NeMo streaming chunk size (mode 2 for stability)
+        let melDim = 128
+        let inputMel = try MLMultiArray(shape: [1, NSNumber(value: melDim), NSNumber(value: fixedFrames)], dataType: .float32)
+        let destPtr = inputMel.dataPointer.bindMemory(to: Float.self, capacity: inputMel.count)
+        let srcPtr = chunkMel.dataPointer.bindMemory(to: Float.self, capacity: chunkMel.count)
+        let srcT = chunkMel.shape[2].intValue
+
+        // Initialize with silence (-10.0) - padding for short chunks
+        destPtr.initialize(repeating: -10.0, count: inputMel.count)
+
+        // Copy actual mel frames from this chunk (pad at end if needed)
+        let framesToCopy = min(actualMelFrames, fixedFrames)
+        for channel in 0..<melDim {
+            for frame in 0..<framesToCopy {
+                destPtr[channel * fixedFrames + frame] = srcPtr[channel * srcT + frame]
             }
         }
-        
-        // Create length array (always 129 if we padded/sliced to 129)
-        // But encoder might need actual length if padded?
-        // If we padded, actual length is totalFrames.
-        // If we sliced, actual length is fixedFrames.
-        let inputLength = min(totalFrames, fixedFrames)
+
+        // Tell the encoder how many valid frames we have
+        let inputLength = framesToCopy
         let melLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
         melLengthArray[0] = NSNumber(value: inputLength)
 
-        logger.debug("Preprocessor (Buffered): buffer=\(audioBuffer.count) samples, mel_total=\(totalFrames), extracted=\(fixedFrames)")
+        logger.debug("Preprocessor: chunk=\(audioChunk.count) samples, mel_frames=\(actualMelFrames), padding=\(fixedFrames - framesToCopy)")
 
-        // Run streaming encoder with cache state
+        // Run streaming encoder with cache support
         let (encoderOutput, encoderLength, newCacheChannel, newCacheTime, newCacheLen) = try await runStreamingEncoder(
             mel: inputMel,
             melLength: melLengthArray,
-            model: models.encoder,
+            model: models.streamingEncoder,
             encoderState: encoderState
         )
 
-        // Update encoder cache state
-        encoderState.updateCache(
+        let cacheLenBefore = encoderState.cacheLastChannelLen
+
+        // Update encoder state with new caches
+        encoderState.updateConformerCache(
             newCacheChannel: newCacheChannel,
             newCacheTime: newCacheTime,
             newCacheLen: newCacheLen
         )
 
-        logger.debug("Encoder: output shape=\(encoderOutput.shape), length=\(encoderLength), cacheLen=\(newCacheLen)")
+        logger.debug("StreamingEncoder: enc_length=\(encoderLength), cache_len: \(cacheLenBefore) → \(newCacheLen)")
 
         // Create partial hypothesis from accumulated state (NeMo pattern)
         let previousTokenCount = accumulatedTokens.count
@@ -206,12 +182,14 @@ public final class StreamingEouAsrManager {
         let audioDuration = Double(audioChunk.count) / Double(Self.sampleRate)
         
         // Reset partial hypothesis on EOU or final chunk (NeMo pattern)
+        // Also reset decoder state to start fresh for next utterance
         if fullHypothesis.eouDetected || isFinal {
-            logger.debug("Resetting partial hypothesis (EOU=\(fullHypothesis.eouDetected), final=\(isFinal))")
+            logger.debug("Resetting partial hypothesis and decoder state (EOU=\(fullHypothesis.eouDetected), final=\(isFinal))")
             accumulatedTokens.removeAll()
             accumulatedTimestamps.removeAll()
             accumulatedConfidences.removeAll()
             accumulatedScore = 0.0
+            decoderState.reset()  // Reset decoder LSTM state for new utterance
         }
 
         return StreamingTranscriptionResult(
@@ -229,14 +207,15 @@ public final class StreamingEouAsrManager {
     public func resetState() {
         encoderState?.reset()
         decoderState.reset()
-        
+
         // Reset partial hypothesis
         accumulatedTokens.removeAll()
         accumulatedTimestamps.removeAll()
         accumulatedConfidences.removeAll()
         accumulatedScore = 0.0
         audioBuffer.removeAll()
-        
+        melBuffer.removeAll()
+
         logger.debug("State reset for new utterance")
     }
 
@@ -278,6 +257,7 @@ public final class StreamingEouAsrManager {
         return (mel, melLength)
     }
 
+    /// Run streaming encoder with cache support
     private func runStreamingEncoder(
         mel: MLMultiArray,
         melLength: MLMultiArray,
@@ -286,23 +266,18 @@ public final class StreamingEouAsrManager {
     ) async throws -> (
         encoder: MLMultiArray, length: Int, cacheChannel: MLMultiArray, cacheTime: MLMultiArray, cacheLen: Int
     ) {
-        // melLength is already MLMultiArray
-        
         let cacheLenArray = try encoderState.createCacheLenArray()
 
-        // Padding/Slicing is now handled in processChunk
-        let inputMel = mel
-
         logger.debug(
-            "Encoder input shapes: mel=\(inputMel.shape), cache_channel=\(encoderState.cacheLastChannel.shape), cache_time=\(encoderState.cacheLastTime.shape), cache_len=\(encoderState.cacheLastChannelLen)"
+            "StreamingEncoder input: mel=\(mel.shape), cache_channel=\(encoderState.cacheLastChannel.shape), cache_time=\(encoderState.cacheLastTime.shape), cache_len=\(encoderState.cacheLastChannelLen)"
         )
 
         let input = try MLDictionaryFeatureProvider(dictionary: [
-            "mel": MLFeatureValue(multiArray: inputMel),
+            "mel": MLFeatureValue(multiArray: mel),
             "mel_length": MLFeatureValue(multiArray: melLength),
             "cache_last_channel": MLFeatureValue(multiArray: encoderState.cacheLastChannel),
             "cache_last_time": MLFeatureValue(multiArray: encoderState.cacheLastTime),
-            "cache_last_channel_len": MLFeatureValue(multiArray: cacheLenArray)
+            "cache_last_channel_len": MLFeatureValue(multiArray: cacheLenArray),
         ])
 
         let output = try await model.prediction(from: input)
@@ -313,13 +288,13 @@ public final class StreamingEouAsrManager {
             let newCacheTime = output.featureValue(for: "cache_last_time_out")?.multiArrayValue,
             let newCacheLenArray = output.featureValue(for: "cache_last_channel_len_out")?.multiArrayValue
         else {
-            throw ASRError.processingFailed("Streaming encoder output missing expected features")
+            throw ASRError.processingFailed("StreamingEncoder output missing expected features")
         }
 
-        let encoderLength = encoderLengthArray[0].intValue
+        let outputLength = encoderLengthArray[0].intValue
         let newCacheLen = newCacheLenArray[0].intValue
 
-        return (encoder, encoderLength, newCacheChannel, newCacheTime, newCacheLen)
+        return (encoder, outputLength, newCacheChannel, newCacheTime, newCacheLen)
     }
 
     private func convertTokensToText(
@@ -401,7 +376,7 @@ public struct StreamingTranscriptionResult: Sendable {
 /// Holds loaded CoreML models for streaming Parakeet EOU
 public struct StreamingEouAsrModels: Sendable {
     public let preprocessor: MLModel
-    public let encoder: MLModel  // Streaming encoder with cache I/O
+    public let streamingEncoder: MLModel  // Cache-aware streaming encoder (mel -> encoder with caches)
     public let decoder: MLModel
     public let joint: MLModel
     public let configuration: MLModelConfiguration
@@ -409,7 +384,7 @@ public struct StreamingEouAsrModels: Sendable {
 
     private static let logger = AppLogger(category: "StreamingEouAsrModels")
 
-    /// Load streaming EOU models from a directory
+    /// Load streaming EOU models from a directory (streaming encoder architecture)
     public static func load(
         from directory: URL,
         configuration: MLModelConfiguration? = nil,
@@ -420,18 +395,18 @@ public struct StreamingEouAsrModels: Sendable {
         let ext = useMLPackage ? ".mlpackage" : ".mlmodelc"
         logger.info("Loading streaming EOU models from \(directory.path) (extension: \(ext))")
 
-        // Streaming model names
-        let preprocessorURL = directory.appendingPathComponent("parakeet_eou_streaming_preprocessor" + ext)
-        let encoderURL = directory.appendingPathComponent("parakeet_eou_streaming_encoder" + ext)
-        let decoderURL = directory.appendingPathComponent("parakeet_eou_streaming_decoder" + ext)
-        let jointURL = directory.appendingPathComponent("parakeet_eou_streaming_joint_decision" + ext)
+        // Model file names
+        let preprocessorURL = directory.appendingPathComponent("preprocessor" + ext)
+        let streamingEncoderURL = directory.appendingPathComponent("streaming_encoder" + ext)
+        let decoderURL = directory.appendingPathComponent("decoder" + ext)
+        let jointURL = directory.appendingPathComponent("joint_decision" + ext)
         let vocabURL = directory.appendingPathComponent("vocab.json")
 
         // Check files exist
         let fm = FileManager.default
         for (name, url) in [
             ("Preprocessor", preprocessorURL),
-            ("Encoder", encoderURL),
+            ("StreamingEncoder", streamingEncoderURL),
             ("Decoder", decoderURL),
             ("Joint", jointURL),
         ] {
@@ -440,11 +415,14 @@ public struct StreamingEouAsrModels: Sendable {
             }
         }
 
-        // Compile and load models (mlpackage -> mlmodelc)
-        let preprocessor = try await compileAndLoad(preprocessorURL, configuration: mlConfig)
-        let encoder = try await compileAndLoad(encoderURL, configuration: mlConfig)
-        let decoder = try await compileAndLoad(decoderURL, configuration: mlConfig)
-        let joint = try await compileAndLoad(jointURL, configuration: mlConfig)
+        // Compile and load models
+        let cpuConfig = MLModelConfiguration()
+        cpuConfig.computeUnits = .cpuOnly
+
+        let preprocessor = try await compileAndLoad(preprocessorURL, configuration: cpuConfig)
+        let streamingEncoder = try await compileAndLoad(streamingEncoderURL, configuration: mlConfig)
+        let decoder = try await compileAndLoad(decoderURL, configuration: cpuConfig)
+        let joint = try await compileAndLoad(jointURL, configuration: cpuConfig)
 
         // Load vocabulary
         let vocabulary = try loadVocabulary(from: vocabURL)
@@ -453,7 +431,7 @@ public struct StreamingEouAsrModels: Sendable {
 
         return StreamingEouAsrModels(
             preprocessor: preprocessor,
-            encoder: encoder,
+            streamingEncoder: streamingEncoder,
             decoder: decoder,
             joint: joint,
             configuration: mlConfig,

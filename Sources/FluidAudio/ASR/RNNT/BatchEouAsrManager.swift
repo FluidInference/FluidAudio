@@ -462,7 +462,7 @@ public struct BatchEouAsrModels: Sendable {
         let preprocessorURL = directory.appendingPathComponent("preprocessor" + ext)
         let encoderURL = directory.appendingPathComponent("encoder" + ext)
         let preEncodeURL = directory.appendingPathComponent("pre_encode" + ext)
-        let conformerURL = directory.appendingPathComponent("conformer_batch" + ext)
+        let conformerURL = directory.appendingPathComponent("conformer" + ext)
         let decoderURL = directory.appendingPathComponent("decoder" + ext)
         let jointURL = directory.appendingPathComponent("joint_decision" + ext)
         let vocabURL = directory.appendingPathComponent("vocab.json")

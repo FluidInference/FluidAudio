@@ -22,6 +22,7 @@ func printUsage() {
             streaming-eou-test      Test streaming EOU with cache-aware encoder
             batch-eou-test          Test batch EOU with fixed-size encoder
             batch-eou-benchmark     Run batch EOU benchmark on LibriSpeech
+            streaming-eou-benchmark Run streaming EOU benchmark (cache-aware encoder)
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             ctc-benchmark           Run CTC keyword boosting benchmark
             transcribe              Transcribe audio file using streaming ASR (TDT)
@@ -145,6 +146,8 @@ Task {
         await BatchEouTestCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "batch-eou-benchmark":
         await BatchEouBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "streaming-eou-benchmark":
+        await StreamingEouBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":
         await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 

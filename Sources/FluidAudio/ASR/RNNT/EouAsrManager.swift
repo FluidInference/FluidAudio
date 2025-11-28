@@ -19,7 +19,8 @@ public final class EouAsrManager {
     private let logger = AppLogger(category: "EouASR")
     private let config: RnntConfig
 
-    /// Maximum audio samples supported (15 seconds at 16kHz)
+    /// Maximum audio samples per chunk (15 seconds at 16kHz)
+    /// Model was exported with this fixed input size
     public static let maxAudioSamples = 240_000
 
     /// Sample rate expected by the model
@@ -65,11 +66,9 @@ public final class EouAsrManager {
 
         let startTime = Date()
 
-        // Validate audio length
-        guard audioSamples.count <= Self.maxAudioSamples else {
-            throw ASRError.processingFailed(
-                "Audio too long: \(audioSamples.count) samples. Max: \(Self.maxAudioSamples)"
-            )
+        // For long audio, process in chunks
+        if audioSamples.count > Self.maxAudioSamples {
+            return try await transcribeChunked(audioSamples, models: models, startTime: startTime)
         }
 
         // Pad audio to max length
@@ -123,6 +122,106 @@ public final class EouAsrManager {
             processingTime: processingTime,
             tokenTimings: tokenTimings,
             eouDetected: hypothesis.eouDetected
+        )
+    }
+
+    /// Transcribe long audio by processing in chunks
+    private func transcribeChunked(
+        _ audioSamples: [Float],
+        models: EouAsrModels,
+        startTime: Date
+    ) async throws -> EouTranscriptionResult {
+        let chunkSize = Self.maxAudioSamples
+        let overlap = 16000  // 1 second overlap for continuity
+        let stride = chunkSize - overlap
+
+        var allText = ""
+        var allTimings: [EouTokenTiming] = []
+        var totalConfidence: Float = 0
+        var chunkCount = 0
+        var eouDetected = false
+
+        var offset = 0
+        while offset < audioSamples.count {
+            let endIdx = min(offset + chunkSize, audioSamples.count)
+            let chunkSamples = Array(audioSamples[offset..<endIdx])
+
+            // Pad chunk if needed
+            var paddedChunk = chunkSamples
+            if paddedChunk.count < chunkSize {
+                paddedChunk.append(contentsOf: [Float](repeating: 0, count: chunkSize - paddedChunk.count))
+            }
+
+            // Process chunk
+            let (melFeatures, melLength) = try await runPreprocessor(
+                audio: paddedChunk,
+                audioLength: chunkSamples.count,
+                model: models.preprocessor
+            )
+
+            let (encoderOutput, encoderLength) = try await runEncoder(
+                mel: melFeatures,
+                melLength: melLength,
+                model: models.encoder
+            )
+
+            // Reset decoder for each chunk (stateless)
+            decoderState.reset()
+
+            let decoder = RnntDecoder(config: config)
+            let hypothesis = try await decoder.decodeWithTimings(
+                encoderOutput: encoderOutput,
+                encoderSequenceLength: encoderLength,
+                decoderModel: models.decoder,
+                jointModel: models.joint,
+                decoderState: &decoderState
+            )
+
+            let (text, tokenTimings) = convertTokensToText(
+                tokens: hypothesis.ySequence,
+                timestamps: hypothesis.timestamps,
+                confidences: hypothesis.tokenConfidences,
+                vocabulary: models.vocabulary
+            )
+
+            // Adjust timings for chunk offset (frame offset = samples / samples_per_frame)
+            // Each frame is ~80ms = 1280 samples at 16kHz
+            let frameOffset = offset / 1280
+            for timing in tokenTimings {
+                allTimings.append(EouTokenTiming(
+                    token: timing.token,
+                    tokenId: timing.tokenId,
+                    frameIndex: timing.frameIndex + frameOffset,
+                    confidence: timing.confidence
+                ))
+            }
+
+            if !text.isEmpty {
+                if !allText.isEmpty {
+                    allText += " "
+                }
+                allText += text
+            }
+
+            totalConfidence += hypothesis.score
+            chunkCount += 1
+            if hypothesis.eouDetected {
+                eouDetected = true
+            }
+
+            offset += stride
+        }
+
+        let processingTime = Date().timeIntervalSince(startTime)
+        let audioDuration = Double(audioSamples.count) / Double(Self.sampleRate)
+
+        return EouTranscriptionResult(
+            text: allText,
+            confidence: chunkCount > 0 ? totalConfidence / Float(chunkCount) : 0,
+            duration: audioDuration,
+            processingTime: processingTime,
+            tokenTimings: allTimings.isEmpty ? nil : allTimings,
+            eouDetected: eouDetected
         )
     }
 

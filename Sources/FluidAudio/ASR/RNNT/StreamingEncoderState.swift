@@ -1,14 +1,19 @@
 import CoreML
 import Foundation
 
-/// State for cache-aware streaming encoder
+/// State for cache-aware streaming encoder (split architecture)
 ///
 /// Holds the encoder cache tensors that persist across streaming chunks.
-/// Based on NVIDIA's cache-aware streaming FastConformer architecture:
+/// Based on NVIDIA's cache-aware streaming FastConformer architecture with split encoder:
+/// - pre_encode_cache: Conv subsampling overlap cache [1, 9, 128]
 /// - cache_last_channel: Attention context cache [17, 1, 70, 512]
 /// - cache_last_time: Time convolution cache [17, 1, 512, 8]
 /// - cache_last_channel_len: Current cache usage length
 public final class StreamingEncoderState: @unchecked Sendable {
+    /// Pre-encode cache for conv subsampling overlap - shape [1, 9, 128]
+    /// (batch, pre_cache_size, mel_dim)
+    public let preEncodeCache: MLMultiArray
+
     /// Attention context cache - shape [17, 1, 70, 512]
     /// (num_layers, batch, cache_size, hidden_dim)
     public let cacheLastChannel: MLMultiArray
@@ -25,6 +30,16 @@ public final class StreamingEncoderState: @unchecked Sendable {
 
     public init(config: StreamingEncoderConfig = .parakeetEOUStreaming) throws {
         self.config = config
+
+        // Initialize pre_encode_cache: [1, 9, 128]
+        self.preEncodeCache = try MLMultiArray(
+            shape: [
+                1,
+                NSNumber(value: config.preCacheSize),
+                NSNumber(value: config.melDim),
+            ],
+            dataType: .float32
+        )
 
         // Initialize cache_last_channel: [17, 1, 70, 512]
         self.cacheLastChannel = try MLMultiArray(
@@ -56,6 +71,10 @@ public final class StreamingEncoderState: @unchecked Sendable {
 
     /// Reset cache state to zeros
     public func reset() {
+        let preEncPtr = preEncodeCache.dataPointer.bindMemory(
+            to: Float.self, capacity: preEncodeCache.count)
+        memset(preEncPtr, 0, preEncodeCache.count * MemoryLayout<Float>.stride)
+
         let channelPtr = cacheLastChannel.dataPointer.bindMemory(
             to: Float.self, capacity: cacheLastChannel.count)
         memset(channelPtr, 0, cacheLastChannel.count * MemoryLayout<Float>.stride)
@@ -67,8 +86,17 @@ public final class StreamingEncoderState: @unchecked Sendable {
         cacheLastChannelLen = 0
     }
 
-    /// Update cache from encoder output
-    public func updateCache(
+    /// Update pre-encode cache
+    public func updatePreEncodeCache(newCache: MLMultiArray) {
+        let srcPtr = newCache.dataPointer.bindMemory(
+            to: Float.self, capacity: newCache.count)
+        let dstPtr = preEncodeCache.dataPointer.bindMemory(
+            to: Float.self, capacity: preEncodeCache.count)
+        memcpy(dstPtr, srcPtr, min(preEncodeCache.count, newCache.count) * MemoryLayout<Float>.stride)
+    }
+
+    /// Update conformer cache from encoder output
+    public func updateConformerCache(
         newCacheChannel: MLMultiArray,
         newCacheTime: MLMultiArray,
         newCacheLen: Int
@@ -89,6 +117,15 @@ public final class StreamingEncoderState: @unchecked Sendable {
         memcpy(dstTimePtr, srcTimePtr, min(cacheLastTime.count, newCacheTime.count) * MemoryLayout<Float>.stride)
 
         cacheLastChannelLen = newCacheLen
+    }
+
+    /// Update cache from encoder output (legacy compatibility)
+    public func updateCache(
+        newCacheChannel: MLMultiArray,
+        newCacheTime: MLMultiArray,
+        newCacheLen: Int
+    ) {
+        updateConformerCache(newCacheChannel: newCacheChannel, newCacheTime: newCacheTime, newCacheLen: newCacheLen)
     }
 
     /// Create MLMultiArray for cache_last_channel_len input
@@ -113,18 +150,22 @@ public struct StreamingEncoderConfig: Sendable {
     /// Time convolution cache size
     public let cacheTimeSize: Int
 
+    /// Pre-encode cache size (for conv subsampling overlap)
+    public let preCacheSize: Int
+
     /// Mel spectrogram features
     public let melDim: Int
 
     /// Sample rate
     public let sampleRate: Int
 
-    /// Default configuration for Parakeet EOU streaming
+    /// Default configuration for Parakeet EOU streaming (split encoder)
     public static let parakeetEOUStreaming = StreamingEncoderConfig(
         numLayers: 17,
         encoderHiddenSize: 512,
         cacheChannelSize: 70,
         cacheTimeSize: 8,
+        preCacheSize: 9,
         melDim: 128,
         sampleRate: 16000
     )
@@ -134,6 +175,7 @@ public struct StreamingEncoderConfig: Sendable {
         encoderHiddenSize: Int = 512,
         cacheChannelSize: Int = 70,
         cacheTimeSize: Int = 8,
+        preCacheSize: Int = 9,
         melDim: Int = 128,
         sampleRate: Int = 16000
     ) {
@@ -141,6 +183,7 @@ public struct StreamingEncoderConfig: Sendable {
         self.encoderHiddenSize = encoderHiddenSize
         self.cacheChannelSize = cacheChannelSize
         self.cacheTimeSize = cacheTimeSize
+        self.preCacheSize = preCacheSize
         self.melDim = melDim
         self.sampleRate = sampleRate
     }
