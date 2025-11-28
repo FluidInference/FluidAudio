@@ -83,15 +83,25 @@ internal struct RnntDecoder {
         decoderModel: MLModel,
         jointModel: MLModel,
         decoderState: inout RnntDecoderState,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        partialHypothesis: RnntHypothesis? = nil
     ) async throws -> RnntHypothesis {
         // Early exit for very short audio
         guard encoderSequenceLength > 0 else {
-            return RnntHypothesis(decState: decoderState)
+            return partialHypothesis ?? RnntHypothesis(decState: decoderState)
         }
 
-        var hypothesis = RnntHypothesis(decState: decoderState)
-        hypothesis.lastToken = decoderState.lastToken
+        var hypothesis: RnntHypothesis
+        
+        if let partial = partialHypothesis {
+            // Restore state from partial hypothesis (NeMo streaming pattern)
+            hypothesis = partial
+            // Ensure current decoder state is linked
+            hypothesis.decState = decoderState
+        } else {
+            hypothesis = RnntHypothesis(decState: decoderState)
+            hypothesis.lastToken = decoderState.lastToken
+        }
 
         // Encoder output shape: [1, 512, T] - need to access frames along time axis
         let encoderShape = encoderOutput.shape.map { $0.intValue }
@@ -154,7 +164,11 @@ internal struct RnntDecoder {
             decoderState.cellState.copyData(from: zero.cellState)
         }
 
-        // Prime decoder with blank token if no prior context
+        // Initialize decoder projection if no prior context
+        // NeMo's decoder.forward(blank) returns [B, H, 2] where:
+        //   time=0: SOS (zero embedding through RNN) - matches predict(None)
+        //   time=1: blank token embedding through RNN
+        // We need time=0 for the initial projection
         if decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
             let primed = try runDecoder(
                 token: config.blankId,
@@ -168,7 +182,10 @@ internal struct RnntDecoder {
                 key: "decoder",
                 errorMessage: "Invalid decoder output"
             )
-            decoderState.predictorOutput = proj
+            // Extract time=0 (SOS) not time=1 (blank)
+            // Shape is [1, 640, 2] - we want index 0
+            let sosProjection = try extractTimeStep(proj, timeIndex: 0)
+            decoderState.predictorOutput = sosProjection
             hypothesis.decState = primed.newState
         }
 
@@ -194,10 +211,13 @@ internal struct RnntDecoder {
                 // Get decoder output
                 let decoderResult: (output: MLFeatureProvider, newState: RnntDecoderState)
                 if let cached = decoderState.predictorOutput {
+                    // Use cached zero projection for first step only
                     let provider = try MLDictionaryFeatureProvider(dictionary: [
                         "decoder": MLFeatureValue(multiArray: cached)
                     ])
                     decoderResult = (output: provider, newState: stateToUse)
+                    // Do NOT clear cache here - we reuse it until non-blank token
+                    // decoderState.predictorOutput = nil
                 } else {
                     decoderResult = try runDecoder(
                         token: label,
@@ -215,7 +235,7 @@ internal struct RnntDecoder {
                     errorMessage: "Invalid decoder output"
                 )
                 if frameIdx == 0 && symbolsThisFrame == 0 {
-                    logger.debug("Decoder projection shape: \(decoderProjection.shape.map { $0.intValue })")
+                    logger.debug("Decoder projection shape: \(decoderProjection.shape.map { $0.intValue }), strides: \(decoderProjection.strides.map { $0.intValue })")
                 }
                 try copyDecoderProjection(decoderProjection, into: reusableDecoderStep)
 
@@ -274,6 +294,11 @@ internal struct RnntDecoder {
                     )
                 }
 
+                // Log every frame to debug iteration
+                if symbolsThisFrame == 0 {
+                    logger.debug("Frame \(frameIdx): token=\(decision.token), prob=\(decision.probability) \(decision.token == config.blankId ? "BLANK" : "NON-BLANK")")
+                }
+                
                 // Check for blank token
                 if decision.token == config.blankId {
                     // Blank = done with this frame, move to next
@@ -298,20 +323,13 @@ internal struct RnntDecoder {
                     decoderState.markEndOfUtterance()
                 }
 
-                // Update decoder state with new token
-                let step = try runDecoder(
-                    token: decision.token,
-                    state: decoderResult.newState,
-                    model: decoderModel,
-                    targetArray: reusableTargetArray,
-                    targetLengthArray: reusableTargetLengthArray
-                )
-                hypothesis.decState = step.newState
-                decoderState.predictorOutput = try extractFeatureValue(
-                    from: step.output,
-                    key: "decoder",
-                    errorMessage: "Invalid decoder output"
-                )
+                // Update decoder state for next iteration
+                // NeMo: hypothesis.dec_state = hidden_prime (state after processing lastToken)
+                // In next iteration, we will run decoder(token=decision.token, state=hypothesis.decState)
+                hypothesis.decState = decoderResult.newState
+                
+                // Clear cached projection because we have a new token
+                decoderState.predictorOutput = nil
 
                 symbolsThisFrame += 1
             }
@@ -376,14 +394,39 @@ internal struct RnntDecoder {
         // Run the joint model
         let output = try model.prediction(from: inputProvider)
 
-        // Get logits from minimal model
+        // Try to get token_id directly (joint_decision_single_step model)
+        if let tokenIdValue = output.featureValue(for: "token_id"),
+            let tokenIdArray = tokenIdValue.multiArrayValue
+        {
+            let tokenIdPtr = tokenIdArray.dataPointer.bindMemory(to: Int32.self, capacity: 1)
+            let token = Int(tokenIdPtr[0])
+
+            var prob: Float = 0.99
+            if let tokenProbValue = output.featureValue(for: "token_prob"),
+                let tokenProbArray = tokenProbValue.multiArrayValue
+            {
+                let probPtr = tokenProbArray.dataPointer.bindMemory(to: Float.self, capacity: 1)
+                prob = probPtr[0]
+            }
+
+            if let frame = debugFrame {
+                print("[DEBUG] Frame \(frame): token=\(token), prob=\(prob)")
+            }
+
+            return JointDecision(
+                token: token,
+                probability: clampProbability(prob)
+            )
+        }
+
+        // Fall back to logits output (raw joint model)
         let logitsArray = try extractFeatureValue(
             from: output,
             key: "logits",
-            errorMessage: "Joint output missing logits"
+            errorMessage: "Joint output missing both token_id and logits"
         )
 
-        // Compute argmax in Swift for numerical stability
+        // Compute argmax in Swift
         let vocabSize = config.vocabSize + 1  // +1 for blank
         let logitsPtr = logitsArray.dataPointer.bindMemory(to: Float.self, capacity: vocabSize)
 
@@ -397,9 +440,7 @@ internal struct RnntDecoder {
             }
         }
 
-        // Debug: show top-5 for selected frames
         if let frame = debugFrame {
-            // Find top-5
             var tokenLogits: [(Int, Float)] = []
             for i in 0..<vocabSize {
                 tokenLogits.append((i, logitsPtr[i]))
@@ -407,16 +448,14 @@ internal struct RnntDecoder {
             tokenLogits.sort { $0.1 > $1.1 }
             let top5 = Array(tokenLogits.prefix(5))
             print("[DEBUG] Frame \(frame) joint top-5: \(top5)")
-            print("[DEBUG] Frame \(frame) logits stats: max=\(maxLogit), token=\(maxToken)")
         }
 
-        // Compute softmax probability for the max token
+        // Compute softmax probability
         var expSum: Float = 0
         for i in 0..<vocabSize {
-            // Subtract max for numerical stability
             expSum += exp(logitsPtr[i] - maxLogit)
         }
-        let prob = 1.0 / expSum  // exp(maxLogit - maxLogit) / sum = 1 / sum
+        let prob = 1.0 / expSum
 
         return JointDecision(
             token: maxToken,
@@ -445,6 +484,49 @@ internal struct RnntDecoder {
         }
     }
 
+    
+    private func extractTimeStep(
+        _ projection: MLMultiArray,
+        timeIndex: Int
+    ) throws -> MLMultiArray {
+        let shape = projection.shape.map { $0.intValue }
+        let hiddenSize = config.decoderHiddenSize
+        
+        // Expected shape: [1, 640, 2] where 2 is time dimension
+        guard shape.count == 3, shape[1] == hiddenSize else {
+            throw ASRError.processingFailed("Unexpected decoder shape: \(shape)")
+        }
+        
+        guard timeIndex < shape[2] else {
+            throw ASRError.processingFailed("Time index \(timeIndex) out of bounds for shape \(shape)")
+        }
+        
+        // Create output array for single time step: [1, 640, 1]
+        let result = try MLMultiArray(
+            shape: [1, NSNumber(value: hiddenSize), 1],
+            dataType: .float32
+        )
+        
+        let srcPtr = projection.dataPointer.bindMemory(to: Float.self, capacity: projection.count)
+        let destPtr = result.dataPointer.bindMemory(to: Float.self, capacity: hiddenSize)
+        let strides = projection.strides.map { $0.intValue }
+        
+        // Extract the specified time index
+        // Shape [1, 640, 2], strides typically [1280, 2, 1]
+        // For time=0: offset = 0
+        // For time=1: offset = 1
+        let timeStride = strides[2]
+        let offset = timeIndex * timeStride
+        
+        // Copy the hidden dimension
+        let hiddenStride = strides[1]
+        for i in 0..<hiddenSize {
+            destPtr[i] = srcPtr[i * hiddenStride + offset]
+        }
+        
+        return result
+    }
+    
     private func copyDecoderProjection(
         _ projection: MLMultiArray,
         into dest: MLMultiArray
@@ -472,8 +554,21 @@ internal struct RnntDecoder {
         } else {
             // Strided copy
             let stride = strides[hiddenAxis]
+            
+            // Check if there is a time/sequence dimension (U) that is > 1
+            // Shape is [1, 640, 2] -> strides [1280, 2, 1]
+            // We want to take the LAST frame (index 1) if U=2
+            var offset = 0
+            if shape.count >= 3 && shape[2] > 1 {
+                // Assuming shape [B, H, U] where U is the last dim
+                // If U=2, we want index 1.
+                // Stride for U is strides[2]
+                let uStride = strides[2]
+                offset = (shape[2] - 1) * uStride
+            }
+            
             for i in 0..<hiddenSize {
-                destPtr[i] = srcPtr[i * stride]
+                destPtr[i] = srcPtr[i * stride + offset]
             }
         }
     }
@@ -505,8 +600,22 @@ struct RnntHypothesis: Sendable {
     var lastToken: Int?
     var eouDetected: Bool = false
 
-    init(decState: RnntDecoderState) {
+    init(
+        score: Float = 0.0,
+        ySequence: [Int] = [],
+        decState: RnntDecoderState? = nil,
+        timestamps: [Int] = [],
+        tokenConfidences: [Float] = [],
+        eouDetected: Bool = false,
+        lastToken: Int? = nil
+    ) {
+        self.score = score
+        self.ySequence = ySequence
         self.decState = decState
+        self.timestamps = timestamps
+        self.tokenConfidences = tokenConfidences
+        self.eouDetected = eouDetected
+        self.lastToken = lastToken
     }
 
     var isEmpty: Bool { ySequence.isEmpty }

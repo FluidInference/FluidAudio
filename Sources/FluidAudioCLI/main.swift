@@ -17,7 +17,11 @@ func printUsage() {
             diarization-benchmark   Run diarization benchmark
             vad-benchmark           Run VAD-specific benchmark
             vad-analyze             Inspect VAD segmentation and streaming events
-            asr-benchmark           Run ASR benchmark on LibriSpeech
+            asr-benchmark           Run ASR benchmark on LibriSpeech (Parakeet TDT)
+            eou-benchmark           Run ASR benchmark on LibriSpeech (Parakeet EOU)
+            streaming-eou-test      Test streaming EOU with cache-aware encoder
+            batch-eou-test          Test batch EOU with fixed-size encoder
+            batch-eou-benchmark     Run batch EOU benchmark on LibriSpeech
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             ctc-benchmark           Run CTC keyword boosting benchmark
             transcribe              Transcribe audio file using streaming ASR (TDT)
@@ -133,6 +137,14 @@ Task {
         await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "eou-transcribe":
         await EouTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "eou-benchmark":
+        await EouBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "streaming-eou-test":
+        await StreamingEouTestCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "batch-eou-test":
+        await BatchEouTestCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "batch-eou-benchmark":
+        await BatchEouBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":
         await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 

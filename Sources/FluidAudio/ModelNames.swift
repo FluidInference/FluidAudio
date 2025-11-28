@@ -149,8 +149,7 @@ public enum ModelNames {
         public static let preprocessor = "parakeet_eou_preprocessor"
         public static let encoder = "parakeet_eou_encoder"
         public static let decoder = "parakeet_eou_decoder"
-        public static let joint = "parakeet_eou_joint_minimal"  // Use minimal model for better numerical stability
-        public static let jointDecision = "parakeet_eou_joint_decision_single_step"
+        public static let joint = "parakeet_eou_joint_decision_single_step"
         public static let vocabularyFile = "vocab.json"
         public static let metadataFile = "metadata.json"
 
@@ -166,10 +165,10 @@ public enum ModelNames {
             jointFile,
         ]
 
-        // Token IDs from metadata.json
+        // Token IDs from metadata.json / vocab.json
         public static let blankId = 1026
-        public static let eouTokenId = 1024
-        public static let eobTokenId = 1025
+        public static let eouTokenId = 1025  // <EOU>
+        public static let eobTokenId = 1026  // <EOB> (same as blank?)
         public static let vocabSize = 1026
     }
 

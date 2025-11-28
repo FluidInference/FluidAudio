@@ -44,8 +44,8 @@ public struct RnntConfig: Sendable {
     public init(
         maxSymbolsPerStep: Int = 10,
         blankId: Int = 1026,
-        eouTokenId: Int = 1024,
-        eobTokenId: Int = 1025,
+        eouTokenId: Int = 1025,
+        eobTokenId: Int = 1026,
         vocabSize: Int = 1026,
         maxTokensPerChunk: Int = 150,
         consecutiveBlankLimit: Int = 5,
