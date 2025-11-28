@@ -165,28 +165,39 @@ internal struct RnntDecoder {
         }
 
         // Initialize decoder projection if no prior context
-        // NeMo's decoder.forward(blank) returns [B, H, 2] where:
-        //   time=0: SOS (zero embedding through RNN) - matches predict(None)
-        //   time=1: blank token embedding through RNN
-        // We need time=0 for the initial projection
+        // NeMo's decoder.predict(y=None, add_sos=True) processes TWO zero embeddings:
+        //   time=0: LSTM(zero_input, zero_state) -> t=0 output
+        //   time=1: LSTM(zero_input, t=0_state) -> t=1 output (this is what we need)
+        // CoreML model only outputs 1 timestep per call, so we call it twice
         if decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
-            let primed = try runDecoder(
+            // First call: process blank with zero state -> get t=0 output and updated state
+            let firstCall = try runDecoder(
                 token: config.blankId,
                 state: decoderState,
                 model: decoderModel,
                 targetArray: reusableTargetArray,
                 targetLengthArray: reusableTargetLengthArray
             )
+
+            // Second call: process blank again with the updated state -> get t=1 output
+            let secondCall = try runDecoder(
+                token: config.blankId,
+                state: firstCall.newState,
+                model: decoderModel,
+                targetArray: reusableTargetArray,
+                targetLengthArray: reusableTargetLengthArray
+            )
+
             let proj = try extractFeatureValue(
-                from: primed.output,
+                from: secondCall.output,
                 key: "decoder",
                 errorMessage: "Invalid decoder output"
             )
-            // Extract time=0 (SOS) not time=1 (blank)
-            // Shape is [1, 640, 2] - we want index 0
-            let sosProjection = try extractTimeStep(proj, timeIndex: 0)
+            // Now we have the t=1 output which matches NeMo's predict(None)[:, -1, :]
+            let timeSteps = proj.shape[2].intValue
+            let sosProjection = try extractTimeStep(proj, timeIndex: timeSteps - 1)
             decoderState.predictorOutput = sosProjection
-            hypothesis.decState = primed.newState
+            hypothesis.decState = secondCall.newState
         }
 
         var tokensProcessedThisChunk = 0
@@ -245,12 +256,11 @@ internal struct RnntDecoder {
                     inputProvider: jointInput,
                     tokenIdBacking: tokenIdBacking,
                     tokenProbBacking: tokenProbBacking,
-                    debugFrame: (frameIdx < 3 || frameIdx == 50 || frameIdx == 100) && symbolsThisFrame == 0
-                        ? frameIdx : nil
+                    debugFrame: nil  // Disable debug output
                 )
 
-                // Debug frames at various points
-                if (frameIdx < 3 || frameIdx == 50 || frameIdx == 100) && symbolsThisFrame == 0 {
+                // Debug frames at various points (disabled)
+                if false {
                     // Check encoder step values - ALL values for statistics
                     let encStepPtr = reusableEncoderStep.dataPointer.bindMemory(
                         to: Float.self, capacity: encoderHiddenSize)
@@ -370,15 +380,14 @@ internal struct RnntDecoder {
             "c_in": MLFeatureValue(multiArray: state.cellState),
         ])
 
-        // Reuse state output buffers
-        predictionOptions.outputBackings = [
-            "h_out": state.hiddenState,
-            "c_out": state.cellState,
-        ]
+        // DON'T reuse input state as output backing - this corrupts state when we have multiple hypotheses
+        // The output arrays will be freshly allocated by CoreML
+        predictionOptions.outputBackings = [:]
 
         let output = try model.prediction(from: input, options: predictionOptions)
 
-        var newState = state
+        // Create a new state by deep-copying from output
+        var newState = try RnntDecoderState(from: state)
         newState.update(from: output)
 
         return (output, newState)
