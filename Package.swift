@@ -57,7 +57,7 @@ let package = Package(
         // TTS targets are always available for FluidAudioWithTTS product
         .binaryTarget(
             name: "ESpeakNG",
-            path: "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
+            path: "Frameworks/ESpeakNG.xcframework"
         ),
         .target(
             name: "FluidAudioTTS",
