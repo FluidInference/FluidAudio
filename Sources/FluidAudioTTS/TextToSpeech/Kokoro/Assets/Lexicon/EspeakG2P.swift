@@ -130,7 +130,7 @@ final class EspeakG2P {
                 espeakBundle = Bundle(url: bundlePath)
             }
         }
-        
+
         // Fallback: Check for PackageFrameworks directory (common in SPM builds)
         if espeakBundle == nil {
             let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(

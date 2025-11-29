@@ -109,7 +109,7 @@ extension KokoroSynthesizer {
                     )
                     return
                 }
-                
+
                 throw TTSError.processingFailed(
                     "G2P (eSpeak NG) unavailable but required for OOV words (\(sample)): \(error.localizedDescription)"
                 )
