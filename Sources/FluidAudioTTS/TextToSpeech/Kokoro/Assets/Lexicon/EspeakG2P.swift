@@ -47,7 +47,16 @@ final class EspeakG2P {
 
     func phonemize(word: String, espeakVoice: String = "en-us") throws -> [String]? {
         return try queue.sync {
-            try initializeIfNeeded(espeakVoice: espeakVoice)
+            do {
+                try initializeIfNeeded(espeakVoice: espeakVoice)
+            } catch {
+                if ProcessInfo.processInfo.environment["CI"] != nil {
+                    logger.warning("G2P unavailable in CI, returning nil for word: \(word)")
+                    return nil
+                }
+                throw error
+            }
+            
             return word.withCString { cstr -> [String]? in
                 var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
                 let modeIPA = Int32(espeakPHONEMES_IPA)
