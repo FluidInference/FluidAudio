@@ -59,11 +59,6 @@ Pod::Spec.new do |spec|
     core.ios.frameworks = "CoreML", "AVFoundation", "Accelerate", "UIKit"
 
     # macOS Configuration
-    # ESpeakNG framework is only vendored for macOS in the podspec (not a framework limitation).
-    # The xcframework supports iOS, but CocoaPods fails to link it during iOS validation.
-    # This enables TTS (text-to-speech) functionality with G2P (grapheme-to-phoneme) conversion.
-    # macOS builds include: ASR, Diarization, VAD, and TTS with ESpeakNG support.
-    core.osx.vendored_frameworks = "Sources/FluidAudio/Frameworks/ESpeakNG.xcframework"
     core.osx.frameworks = "CoreML", "AVFoundation", "Accelerate", "Cocoa"
   end
 
