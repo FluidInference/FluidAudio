@@ -47,7 +47,16 @@ final class EspeakG2P {
 
     func phonemize(word: String, espeakVoice: String = "en-us") throws -> [String]? {
         return try queue.sync {
-            try initializeIfNeeded(espeakVoice: espeakVoice)
+            do {
+                try initializeIfNeeded(espeakVoice: espeakVoice)
+            } catch {
+                if ProcessInfo.processInfo.environment["CI"] != nil {
+                    logger.warning("G2P unavailable in CI, returning nil for word: \(word)")
+                    return nil
+                }
+                throw error
+            }
+
             return word.withCString { cstr -> [String]? in
                 var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
                 let modeIPA = Int32(espeakPHONEMES_IPA)
@@ -108,22 +117,52 @@ final class EspeakG2P {
     }
 
     private static func frameworkBundledDataPath() throws -> URL {
-        guard let espeakBundle = Bundle(identifier: "com.fluidinference.espeakng") else {
+        var espeakBundle = Bundle(identifier: "com.fluidinference.espeakng")
+        if espeakBundle == nil {
+            espeakBundle = Bundle.allBundles.first { $0.bundlePath.hasSuffix("ESpeakNG.framework") }
+        }
+
+        // Fallback: Check for framework on disk relative to the executable (for CLI/SPM builds)
+        if espeakBundle == nil {
+            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(
+                "ESpeakNG.framework")
+            if FileManager.default.fileExists(atPath: bundlePath.path) {
+                espeakBundle = Bundle(url: bundlePath)
+            }
+        }
+
+        // Fallback: Check for PackageFrameworks directory (common in SPM builds)
+        if espeakBundle == nil {
+            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(
+                "PackageFrameworks/ESpeakNG.framework")
+            if FileManager.default.fileExists(atPath: bundlePath.path) {
+                espeakBundle = Bundle(url: bundlePath)
+            }
+        }
+
+        guard let espeakBundle = espeakBundle else {
             staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
+            staticLogger.debug("Available bundles: \(Bundle.allBundles.map { $0.bundleIdentifier ?? $0.bundlePath })")
             throw EspeakG2PError.frameworkBundleMissing
         }
 
-        guard let bundleURL = espeakBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
+        guard let resourceURL = espeakBundle.resourceURL else {
+            staticLogger.error("ESpeakNG.framework has no resource URL at \(espeakBundle.bundlePath)")
+            throw EspeakG2PError.dataBundleMissing  // Or a more specific error if needed
+        }
+
+        let dataDir = resourceURL.appendingPathComponent("espeak-ng-data")
+
+        guard FileManager.default.fileExists(atPath: dataDir.path) else {
             staticLogger.error(
-                "espeak-ng-data.bundle missing from ESpeakNG.framework resources at \(espeakBundle.bundlePath)")
+                "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
             throw EspeakG2PError.dataBundleMissing
         }
 
-        let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
         let voicesPath = dataDir.appendingPathComponent("voices")
 
         guard FileManager.default.fileExists(atPath: voicesPath.path) else {
-            staticLogger.error("espeak-ng-data.bundle found but voices directory missing at \(voicesPath.path)")
+            staticLogger.error("espeak-ng-data found but voices directory missing at \(voicesPath.path)")
             throw EspeakG2PError.voicesDirectoryMissing
         }
 
