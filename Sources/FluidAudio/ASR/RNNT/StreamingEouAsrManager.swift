@@ -418,7 +418,8 @@ public struct StreamingEouAsrModels: Sendable {
         guard let decoderURL = findModel("decoder") else {
             throw ASRError.processingFailed("Decoder model not found in \(directory.path)")
         }
-        guard let jointURL = findModel("joint_decision") else {
+        // Try both joint model naming conventions
+        guard let jointURL = findModel("joint_decision") ?? findModel("joint") else {
             throw ASRError.processingFailed("Joint model not found in \(directory.path)")
         }
         let vocabURL = directory.appendingPathComponent("vocab.json")
