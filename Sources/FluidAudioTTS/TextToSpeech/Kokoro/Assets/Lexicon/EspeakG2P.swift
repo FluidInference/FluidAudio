@@ -148,7 +148,7 @@ final class EspeakG2P {
 
         guard let resourceURL = espeakBundle.resourceURL else {
             staticLogger.error("ESpeakNG.framework has no resource URL at \(espeakBundle.bundlePath)")
-            throw EspeakG2PError.dataBundleMissing // Or a more specific error if needed
+            throw EspeakG2PError.dataBundleMissing  // Or a more specific error if needed
         }
 
         let dataDir = resourceURL.appendingPathComponent("espeak-ng-data")
