@@ -1,0 +1,225 @@
+import FluidAudio
+import FluidAudioTTS
+import Foundation
+
+/// Convenience wrapper for Mandarin: enforces zh-lexicon G2P and sensible defaults.
+enum TTSZh {
+    private static let logger = AppLogger(category: "TTSZhCommand")
+
+    public static func run(arguments: [String]) async {
+        var output = "out.wav"
+        var voice = "zf_003"
+        var modelPath: String? = nil
+        var voicesDir: String? = nil
+        var speed: Float = 1.0
+        var text: String? = nil
+
+        // Parse a minimal set of flags
+        var i = 0
+        while i < arguments.count {
+            let arg = arguments[i]
+            switch arg {
+            case "--help", "-h":
+                print(
+                    "Usage: fluidaudio tts-zh \"text\" [--output out.wav] [--voice zf_003] [--model-path path] [--voices-dir dir] [--speed 1.0]"
+                )
+                return
+            case "--output", "-o":
+                if i + 1 < arguments.count {
+                    output = arguments[i + 1]
+                    i += 1
+                }
+            case "--voice", "-v":
+                if i + 1 < arguments.count {
+                    voice = arguments[i + 1]
+                    i += 1
+                }
+            case "--model", "--model-path":
+                if i + 1 < arguments.count {
+                    modelPath = arguments[i + 1]
+                    i += 1
+                }
+            case "--voices-dir":
+                if i + 1 < arguments.count {
+                    voicesDir = arguments[i + 1]
+                    i += 1
+                }
+            case "--speed":
+                if i + 1 < arguments.count, let val = Float(arguments[i + 1]) {
+                    speed = val
+                    i += 1
+                }
+            default:
+                if text == nil { text = arg } else { logger.warning("Ignoring unexpected argument '\(arg)'") }
+            }
+            i += 1
+        }
+
+        guard let text = text else {
+            print(
+                "Usage: fluidaudio tts-zh \"text\" [--output out.wav] [--voice zf_003] [--model-path path] [--voices-dir dir] [--speed 1.0]"
+            )
+            return
+        }
+
+        do {
+            // Prefer a local zh vocabulary next to CWD if present, before any model detection.
+            do {
+                let fm = FileManager.default
+                let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
+                let cwdZh = cwd.appendingPathComponent("zh_vocab_index.json")
+                if fm.fileExists(atPath: cwdZh.path) {
+                    await KokoroVocabulary.shared.setOverrideURL(cwdZh)
+                }
+            }
+
+            // Auto-detect model if not provided
+            if modelPath == nil {
+                let fm = FileManager.default
+                let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
+                let candidates: [URL] = [
+                    cwd.appendingPathComponent("kokoro_v21_zh.mlmodelc"),
+                    cwd.appendingPathComponent("tts-zh/kokoro_v21_zh.mlmodelc"),
+                    cwd.appendingPathComponent("build/kokoro_v21_zh_compiled/kokoro_v21_zh.mlmodelc"),
+                    cwd.appendingPathComponent("kokoro_v21_zh.mlpackage"),
+                    cwd.appendingPathComponent("tts-zh/kokoro_v21_zh.mlpackage"),
+                ]
+                if let found = candidates.first(where: { fm.fileExists(atPath: $0.path) }) {
+                    modelPath = found.path
+                }
+            }
+
+            // If model path found, auto-detect vocab next to it. Otherwise, try CWD fallbacks.
+            let fm = FileManager.default
+            if let modelPath, !modelPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let modelURL = URL(fileURLWithPath: (modelPath as NSString).expandingTildeInPath)
+                let root = modelURL.deletingLastPathComponent()
+                let genericVocab = root.appendingPathComponent("vocab_index.json")
+                if fm.fileExists(atPath: genericVocab.path) {
+                    await KokoroVocabulary.shared.setOverrideURL(genericVocab)
+                }
+            } else {
+                let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
+                let cwdGeneric = cwd.appendingPathComponent("vocab_index.json")
+                if fm.fileExists(atPath: cwdGeneric.path) {
+                    await KokoroVocabulary.shared.setOverrideURL(cwdGeneric)
+                }
+            }
+
+            // Ensure zh assets (vocab + char lexicon) in cache as a fallback, and prefer zh vocab override.
+            do {
+                let _ = try await TtsResourceDownloader.ensureZhAssetsInCache()
+                // await KokoroVocabulary.shared.setOverrideURL(ensured.vocabURL) // Don't use zh_vocab_index.json
+            } catch {
+                logger.warning("Failed to ensure zh assets; continuing: \(error.localizedDescription)")
+            }
+
+            // Provide extra voices dirs: explicit + sibling voices
+            var extraDirs: [URL] = []
+            if let dir = voicesDir, !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                extraDirs.append(URL(fileURLWithPath: (dir as NSString).expandingTildeInPath, isDirectory: true))
+            }
+            if let modelPath {
+                let root = URL(fileURLWithPath: (modelPath as NSString).expandingTildeInPath)
+                    .deletingLastPathComponent()
+                let sibling = root.appendingPathComponent("voices", isDirectory: true)
+                if FileManager.default.fileExists(atPath: sibling.path) { extraDirs.append(sibling) }
+            }
+            if !extraDirs.isEmpty { KokoroSynthesizer.setAdditionalVoiceDirectories(extraDirs) }
+
+            let manager = TtSManager()
+            let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
+            let voiceOverride = requestedVoice.isEmpty ? nil : requestedVoice
+            let preloadVoices = voiceOverride.map { Set([$0]) }
+
+            // Initialize models: use local model if provided; otherwise download defaults
+            if let localPath = modelPath, !localPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let models = try await TtsModels.loadLocal(at: localPath)
+                try await manager.initialize(models: models, preloadVoices: preloadVoices)
+            } else {
+                try await manager.initialize(preloadVoices: preloadVoices)
+            }
+
+            // Lexicon-based Mandarin encoding with Chunking
+            let vocab = try await KokoroVocabulary.shared.getVocabulary()
+            let allowed = Set(vocab.keys)
+            
+            logger.info("DEBUG: allowed contains '↓'? \(allowed.contains("↓"))")
+            if let id = vocab["↓"] {
+                logger.info("DEBUG: '↓' ID: \(id)")
+            }
+
+            // Chunk text using sentence boundaries
+            let limit = TtsConstants.maxTokensPerChunk
+            var textChunks: [String] = []
+            
+            text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .bySentences) { sentence, _, _, _ in
+                guard let sentence = sentence else { return }
+                
+                if sentence.count <= limit {
+                    textChunks.append(sentence)
+                } else {
+                    // Split long sentences by comma or hard limit
+                    var current = ""
+                    for char in sentence {
+                        current.append(char)
+                        if (char == "，" || char == ",") && current.count > 5 {
+                             textChunks.append(current)
+                             current = ""
+                        } else if current.count >= limit {
+                             textChunks.append(current)
+                             current = ""
+                        }
+                    }
+                    if !current.isEmpty { textChunks.append(current) }
+                }
+            }
+            
+            if textChunks.isEmpty && !text.isEmpty {
+                // Fallback for text without clear sentence boundaries
+                var current = ""
+                for char in text {
+                    current.append(char)
+                    if current.count >= limit {
+                        textChunks.append(current)
+                        current = ""
+                    }
+                }
+                if !current.isEmpty { textChunks.append(current) }
+            }
+            
+            // Convert chunks to phonemes
+            var phonemeStrings: [String] = []
+            for chunk in textChunks {
+                let p = try await ZhCharLexicon.shared.encode(text: chunk, allowedTokens: allowed)
+                logger.info("DEBUG: Encoded chunk: '\(chunk)' -> '\(p)'")
+                for c in p {
+                    if c == "↓" { logger.info("DEBUG: Found ↓ in output") }
+                }
+                if !p.isEmpty { phonemeStrings.append(p) }
+            }
+
+            let detailed = try await manager.synthesizePhonemeStringsDetailed(
+                phonemes: phonemeStrings,
+                voice: voiceOverride,
+                voiceSpeed: speed,
+                variantPreference: .fifteenSecond
+            )
+
+            // Write WAV
+            let outURL = {
+                let expanded = (output as NSString).expandingTildeInPath
+                if expanded.hasPrefix("/") { return URL(fileURLWithPath: expanded) }
+                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                return cwd.appendingPathComponent(expanded)
+            }()
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try detailed.audio.write(to: outURL)
+            logger.info("Saved output WAV: \(outURL.path)")
+        } catch {
+            logger.error("TTS zh failed: \(error)")
+            print("❌ TTS zh failed: \(error)")
+        }
+    }
+}
