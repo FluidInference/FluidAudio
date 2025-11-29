@@ -96,27 +96,44 @@ public final class StreamingEncoderState: @unchecked Sendable {
     }
 
     /// Update conformer cache from encoder output
+    /// Note: The encoder output may have different strides than our state cache,
+    /// so we must copy element-by-element respecting the strides of both arrays.
     public func updateConformerCache(
         newCacheChannel: MLMultiArray,
         newCacheTime: MLMultiArray,
         newCacheLen: Int
     ) {
-        // Copy new cache values
-        let srcChannelPtr = newCacheChannel.dataPointer.bindMemory(
-            to: Float.self, capacity: newCacheChannel.count)
-        let dstChannelPtr = cacheLastChannel.dataPointer.bindMemory(
-            to: Float.self, capacity: cacheLastChannel.count)
-        memcpy(
-            dstChannelPtr, srcChannelPtr,
-            min(cacheLastChannel.count, newCacheChannel.count) * MemoryLayout<Float>.stride)
+        // Copy cache_last_channel: shape [17, 1, 70, 512]
+        copyMLMultiArrayWithStrides(from: newCacheChannel, to: cacheLastChannel)
 
-        let srcTimePtr = newCacheTime.dataPointer.bindMemory(
-            to: Float.self, capacity: newCacheTime.count)
-        let dstTimePtr = cacheLastTime.dataPointer.bindMemory(
-            to: Float.self, capacity: cacheLastTime.count)
-        memcpy(dstTimePtr, srcTimePtr, min(cacheLastTime.count, newCacheTime.count) * MemoryLayout<Float>.stride)
+        // Copy cache_last_time: shape [17, 1, 512, 8]
+        copyMLMultiArrayWithStrides(from: newCacheTime, to: cacheLastTime)
 
         cacheLastChannelLen = newCacheLen
+    }
+
+    /// Copy MLMultiArray data respecting strides of both source and destination
+    private func copyMLMultiArrayWithStrides(from src: MLMultiArray, to dst: MLMultiArray) {
+        let srcStrides = src.strides.map { $0.intValue }
+        let dstStrides = dst.strides.map { $0.intValue }
+        let shape = dst.shape.map { $0.intValue }
+
+        let srcPtr = src.dataPointer.bindMemory(to: Float.self, capacity: src.count)
+        let dstPtr = dst.dataPointer.bindMemory(to: Float.self, capacity: dst.count)
+
+        // For 4D array [d0, d1, d2, d3], iterate through all elements
+        // This is a generic copy that handles any stride mismatch
+        for i0 in 0..<shape[0] {
+            for i1 in 0..<shape[1] {
+                for i2 in 0..<shape[2] {
+                    for i3 in 0..<shape[3] {
+                        let srcIdx = i0 * srcStrides[0] + i1 * srcStrides[1] + i2 * srcStrides[2] + i3 * srcStrides[3]
+                        let dstIdx = i0 * dstStrides[0] + i1 * dstStrides[1] + i2 * dstStrides[2] + i3 * dstStrides[3]
+                        dstPtr[dstIdx] = srcPtr[srcIdx]
+                    }
+                }
+            }
+        }
     }
 
     /// Update cache from encoder output (legacy compatibility)

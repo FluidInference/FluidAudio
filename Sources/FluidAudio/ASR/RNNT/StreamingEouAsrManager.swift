@@ -88,9 +88,9 @@ public final class StreamingEouAsrManager {
 
         let actualMelFrames = chunkMelLength
 
-        // Prepare fixed-size input (101 frames = 1000ms chunks at 16kHz)
-        // 1000ms audio / 10ms hop = 100 frames + 1 = 101 mel frames
-        let fixedFrames = 101  // Must match exported streaming_encoder model
+        // Prepare fixed-size input (73 frames = 730ms chunks for NeMo mode 2)
+        // 730ms audio / 10ms hop = 73 mel frames
+        let fixedFrames = 73  // Must match exported streaming_encoder model
         let melDim = 128
         let inputMel = try MLMultiArray(shape: [1, NSNumber(value: melDim), NSNumber(value: fixedFrames)], dataType: .float32)
         let destPtr = inputMel.dataPointer.bindMemory(to: Float.self, capacity: inputMel.count)
