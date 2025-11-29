@@ -112,7 +112,7 @@ final class EspeakG2P {
         if espeakBundle == nil {
             espeakBundle = Bundle.allBundles.first { $0.bundlePath.hasSuffix("ESpeakNG.framework") }
         }
-        
+
         guard let espeakBundle = espeakBundle else {
             staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
             staticLogger.debug("Available bundles: \(Bundle.allBundles.map { $0.bundleIdentifier ?? $0.bundlePath })")
