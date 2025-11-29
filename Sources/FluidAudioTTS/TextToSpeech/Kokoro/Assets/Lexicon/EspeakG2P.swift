@@ -56,7 +56,7 @@ final class EspeakG2P {
                 }
                 throw error
             }
-            
+
             return word.withCString { cstr -> [String]? in
                 var raw: UnsafeRawPointer? = UnsafeRawPointer(cstr)
                 let modeIPA = Int32(espeakPHONEMES_IPA)
@@ -124,7 +124,8 @@ final class EspeakG2P {
 
         // Fallback: Check for framework on disk relative to the executable (for CLI/SPM builds)
         if espeakBundle == nil {
-            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("ESpeakNG.framework")
+            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(
+                "ESpeakNG.framework")
             if FileManager.default.fileExists(atPath: bundlePath.path) {
                 espeakBundle = Bundle(url: bundlePath)
             }
@@ -132,7 +133,8 @@ final class EspeakG2P {
         
         // Fallback: Check for PackageFrameworks directory (common in SPM builds)
         if espeakBundle == nil {
-            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("PackageFrameworks/ESpeakNG.framework")
+            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(
+                "PackageFrameworks/ESpeakNG.framework")
             if FileManager.default.fileExists(atPath: bundlePath.path) {
                 espeakBundle = Bundle(url: bundlePath)
             }

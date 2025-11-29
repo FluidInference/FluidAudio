@@ -104,7 +104,9 @@ extension KokoroSynthesizer {
                 // In CI environments, we might want to proceed even if G2P is missing
                 // (e.g. for basic smoke tests that don't verify audio content).
                 if ProcessInfo.processInfo.environment["CI"] != nil {
-                    print("Warning: G2P (eSpeak NG) unavailable in CI environment. OOV words (\(sample)) will be skipped or incorrect.")
+                    print(
+                        "Warning: G2P (eSpeak NG) unavailable in CI environment. OOV words (\(sample)) will be skipped or incorrect."
+                    )
                     return
                 }
                 
