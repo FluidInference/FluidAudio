@@ -48,16 +48,19 @@ def export_streaming_encoder(model_id="nvidia/parakeet_realtime_eou_120m-v1", ou
     wrapper.eval()
 
     # Define input shapes for 160ms chunks
-    # 160ms at 10ms stride -> 16 frames. +1 for safety/overlap? 
-    # For 1280ms we used 129 (128+1). So for 160ms let's use 17 (16+1).
-    frames = 17 
+    # The encoder's streaming_cfg specifies chunk_size=[9, 16]
+    # 160ms at 10ms stride = 16 frames (exact match!)
+    frames = 16  # Native chunk size for streaming mode
     mel_dim = 128  # Parakeet uses 128 mel features, not 80
+    
+    # Cache shapes: number of layers = 17 (FastConformer architecture)
+    num_layers = 17
     
     example_input = (
         torch.randn(1, mel_dim, frames),
         torch.tensor([frames], dtype=torch.int32),
-        torch.randn(17, 1, 70, 512), # cache_last_channel
-        torch.randn(17, 1, 512, 8),  # cache_last_time
+        torch.randn(num_layers, 1, 70, 512), # cache_last_channel
+        torch.randn(num_layers, 1, 512, 8),  # cache_last_time
         torch.tensor([0], dtype=torch.int32) # cache_last_channel_len
     )
 
@@ -68,8 +71,8 @@ def export_streaming_encoder(model_id="nvidia/parakeet_realtime_eou_120m-v1", ou
     inputs = [
         ct.TensorType(name="mel", shape=(1, mel_dim, frames), dtype=np.float32),
         ct.TensorType(name="mel_length", shape=(1,), dtype=np.int32),
-        ct.TensorType(name="cache_last_channel", shape=(17, 1, 70, 512), dtype=np.float32),
-        ct.TensorType(name="cache_last_time", shape=(17, 1, 512, 8), dtype=np.float32),
+        ct.TensorType(name="cache_last_channel", shape=(num_layers, 1, 70, 512), dtype=np.float32),
+        ct.TensorType(name="cache_last_time", shape=(num_layers, 1, 512, 8), dtype=np.float32),
         ct.TensorType(name="cache_last_channel_len", shape=(1,), dtype=np.int32),
     ]
 

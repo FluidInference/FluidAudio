@@ -220,10 +220,12 @@ FluidAudio/
 - **Models**: Parakeet Realtime EOU 120M with RNNT decoder
 - **Performance**:
   - **1000ms chunks**: 25% WER, 25ms latency (baseline)
-  - **160ms chunks**: 46.43% WER, 8.7ms latency (low-latency mode)
+  - **160ms chunks (16 frames, native)**: 42.13% WER, 14.2ms latency (optimized)
+  - **160ms chunks (17 frames)**: 46.43% WER, 8.7ms latency (sub-optimal)
 - **Critical Export Bugs Fixed** (Nov 2024):
   1. mel_dim mismatch (80 vs 128) - caused garbage encoder output
   2. Output tensor naming (encoder_output vs encoder) - caused Swift load failures
+- **Native Chunk Size Optimization**: Using encoder's native 16-frame chunk size (per streaming_cfg) improved WER by 4.3% over arbitrary 17 frames
 - **Documentation**: See `docs/PARAKEET_STREAMING_160MS_ROOT_CAUSE.md` for debugging details
 - **Trade-off**: Lower latency (160ms) has higher WER due to less acoustic context
 

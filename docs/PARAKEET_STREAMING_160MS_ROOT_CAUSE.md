@@ -109,6 +109,46 @@ python3 export_streaming_encoder.py --chunk-ms 160 --output-dir parakeet_eou_str
 - **RTFx**: 18.2x realtime
 - **Hypothesis**: "he hoped there would be souvenir turnips and carrots and brews potatoes..."
 
+### After Native Chunk Size Optimization (16 frames)
+- **WER**: 42.13% (4.3% improvement from 17-frame config)
+- **CER**: 26.10%
+- **Average Latency**: 14.2ms
+- **Max Latency**: 61.2ms
+- **RTFx**: 12.9x realtime
+- **Median WER**: 38.89%
+
+## Native Chunk Size Discovery
+
+### Investigation
+Examined the NeMo encoder's streaming configuration:
+```python
+encoder.streaming_cfg.chunk_size = [9, 16]  # Native design uses 16 frames
+encoder.streaming_cfg.drop_extra_pre_encoded = 2
+```
+
+The encoder was **designed for 16-frame chunks** (160ms at 10ms stride), not the arbitrary 17 frames we initially used.
+
+### Implementation
+1. **Updated export_streaming_encoder.py**:
+   - Changed `frames = 17` to `frames = 16`
+   - Added `num_layers = 17` variable for cache shapes
+   - Used native chunk size matching streaming_cfg
+
+2. **Created export_preprocessor.py**:
+   - Exported preprocessor with variable input support (RangeDim)
+   - Support range: 1600-16000 samples (100ms-1000ms)
+   - Default: 2560 samples (160ms)
+
+3. **Updated StreamingEouAsrManager.swift**:
+   - Changed `fixedFrames` from 17 to 16
+
+### Results
+Using the encoder's native chunk size improved WER by 4.3%:
+- 17 frames (arbitrary): 46.43% WER, 8.7ms latency
+- 16 frames (native): 42.13% WER, 14.2ms latency
+
+The slight latency increase is acceptable given the significant accuracy improvement.
+
 ### Comparison Table
 
 | Metric | 1000ms Baseline | 160ms Fixed | Improvement |

@@ -34,7 +34,7 @@ public final class StreamingEouAsrManager {
     // Each element is a frame: [128 mel coefficients]
     private var melBuffer: [[Float]] = []
 
-    // Overlap buffer for STFT continuity (0ms = 0 samples)
+    // Overlap buffer for STFT continuity (disabled for now)
     private var audioOverlapBuffer: [Float] = []
     private let overlapSamples = 0
     private let hopLength = 160
@@ -117,8 +117,8 @@ public final class StreamingEouAsrManager {
             }
         }
 
-        // Prepare fixed-size input (17 frames = 160ms chunks)
-        let fixedFrames = 17  // Must match exported streaming_encoder model (160ms)
+        // Prepare fixed-size input (16 frames = 160ms chunks, native chunk size)
+        let fixedFrames = 16  // Must match exported streaming_encoder model (160ms native)
         let melDim = 128
         let inputMel = try MLMultiArray(shape: [1, NSNumber(value: melDim), NSNumber(value: fixedFrames)], dataType: .float32)
         let destPtr = inputMel.dataPointer.bindMemory(to: Float.self, capacity: inputMel.count)
