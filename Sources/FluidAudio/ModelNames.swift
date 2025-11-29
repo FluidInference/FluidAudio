@@ -165,10 +165,11 @@ public enum ModelNames {
             jointFile,
         ]
 
-        // Token IDs from metadata.json / vocab.json
-        public static let blankId = 1026
-        public static let eouTokenId = 1025  // <EOU>
-        public static let eobTokenId = 1026  // <EOB> (same as blank?)
+        // Token IDs from vocab.json (NeMo parakeet_realtime_eou_120m-v1)
+        // vocab.json: {"<EOU>": 1024, "<EOB>": 1025, "<blk>": 1026}
+        public static let eouTokenId = 1024  // <EOU> - End of Utterance
+        public static let eobTokenId = 1025  // <EOB> - End of Block
+        public static let blankId = 1026     // <blk> - RNNT blank token
         public static let vocabSize = 1026
     }
 

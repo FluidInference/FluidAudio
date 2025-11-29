@@ -88,8 +88,9 @@ public final class StreamingEouAsrManager {
 
         let actualMelFrames = chunkMelLength
 
-        // Prepare fixed-size input (73 frames - NeMo mode 2: chunk_size=16 * 4 + 9 pre_cache)
-        let fixedFrames = 73  // NeMo streaming chunk size (mode 2 for stability)
+        // Prepare fixed-size input (101 frames = 1000ms chunks at 16kHz)
+        // 1000ms audio / 10ms hop = 100 frames + 1 = 101 mel frames
+        let fixedFrames = 101  // Must match exported streaming_encoder model
         let melDim = 128
         let inputMel = try MLMultiArray(shape: [1, NSNumber(value: melDim), NSNumber(value: fixedFrames)], dataType: .float32)
         let destPtr = inputMel.dataPointer.bindMemory(to: Float.self, capacity: inputMel.count)
@@ -391,29 +392,36 @@ public struct StreamingEouAsrModels: Sendable {
         useMLPackage: Bool = true
     ) async throws -> StreamingEouAsrModels {
         let mlConfig = configuration ?? defaultConfiguration()
-
-        let ext = useMLPackage ? ".mlpackage" : ".mlmodelc"
-        logger.info("Loading streaming EOU models from \(directory.path) (extension: \(ext))")
-
-        // Model file names
-        let preprocessorURL = directory.appendingPathComponent("preprocessor" + ext)
-        let streamingEncoderURL = directory.appendingPathComponent("streaming_encoder" + ext)
-        let decoderURL = directory.appendingPathComponent("decoder" + ext)
-        let jointURL = directory.appendingPathComponent("joint_decision" + ext)
-        let vocabURL = directory.appendingPathComponent("vocab.json")
-
-        // Check files exist
         let fm = FileManager.default
-        for (name, url) in [
-            ("Preprocessor", preprocessorURL),
-            ("StreamingEncoder", streamingEncoderURL),
-            ("Decoder", decoderURL),
-            ("Joint", jointURL),
-        ] {
-            guard fm.fileExists(atPath: url.path) else {
-                throw ASRError.processingFailed("\(name) model not found at \(url.path)")
+
+        logger.info("Loading streaming EOU models from \(directory.path)")
+
+        // Helper to find model with either extension
+        func findModel(_ baseName: String) -> URL? {
+            let mlpackageURL = directory.appendingPathComponent(baseName + ".mlpackage")
+            let mlmodelcURL = directory.appendingPathComponent(baseName + ".mlmodelc")
+            if fm.fileExists(atPath: mlpackageURL.path) {
+                return mlpackageURL
+            } else if fm.fileExists(atPath: mlmodelcURL.path) {
+                return mlmodelcURL
             }
+            return nil
         }
+
+        // Find model files (try both extensions)
+        guard let preprocessorURL = findModel("preprocessor") else {
+            throw ASRError.processingFailed("Preprocessor model not found in \(directory.path)")
+        }
+        guard let streamingEncoderURL = findModel("streaming_encoder") else {
+            throw ASRError.processingFailed("StreamingEncoder model not found in \(directory.path)")
+        }
+        guard let decoderURL = findModel("decoder") else {
+            throw ASRError.processingFailed("Decoder model not found in \(directory.path)")
+        }
+        guard let jointURL = findModel("joint_decision") else {
+            throw ASRError.processingFailed("Joint model not found in \(directory.path)")
+        }
+        let vocabURL = directory.appendingPathComponent("vocab.json")
 
         // Compile and load models
         let cpuConfig = MLModelConfiguration()

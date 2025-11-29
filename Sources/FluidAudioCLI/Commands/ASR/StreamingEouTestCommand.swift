@@ -70,7 +70,11 @@ public enum StreamingEouTestCommand {
             print("Loading streaming models...")
             let modelsURL = URL(fileURLWithPath: modelsPath)
             let manager = StreamingEouAsrManager()
-            try await manager.initializeFromLocalPath(modelsURL)
+            // Try mlpackage first, fall back to mlmodelc
+            let hasMLPackage = FileManager.default.fileExists(
+                atPath: modelsURL.appendingPathComponent("streaming_encoder.mlpackage").path
+            )
+            try await manager.initializeFromLocalPath(modelsURL, useMLPackage: hasMLPackage)
             print("Models loaded successfully")
 
             // Load audio file
