@@ -214,6 +214,19 @@ FluidAudio/
 - **Models**: Parakeet TDT v3 (0.6b) supporting 25 European languages
 - **Performance**: ~209.8x RTF on M4 Pro, 55.7% WER improvement with stateless approach
 
+#### 1b. Streaming ASR (Parakeet EOU)
+- **StreamingEouAsrManager**: Cache-aware streaming ASR with End-of-Utterance detection
+- **Architecture**: Stateful processing with persistent encoder cache across chunks
+- **Models**: Parakeet Realtime EOU 120M with RNNT decoder
+- **Performance**:
+  - **1000ms chunks**: 25% WER, 25ms latency (baseline)
+  - **160ms chunks**: 46.43% WER, 8.7ms latency (low-latency mode)
+- **Critical Export Bugs Fixed** (Nov 2024):
+  1. mel_dim mismatch (80 vs 128) - caused garbage encoder output
+  2. Output tensor naming (encoder_output vs encoder) - caused Swift load failures
+- **Documentation**: See `docs/PARAKEET_STREAMING_160MS_ROOT_CAUSE.md` for debugging details
+- **Trade-off**: Lower latency (160ms) has higher WER due to less acoustic context
+
 #### 2. Diarization System
 - **DiarizerManager**: Main orchestrator for speaker separation
 - **SegmentationProcessor**: Voice activity detection and segmentation

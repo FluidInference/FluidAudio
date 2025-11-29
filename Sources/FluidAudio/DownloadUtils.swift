@@ -237,7 +237,7 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
             logger.info("Models not found in cache at \(repoPath.path)")
-            try await downloadRepo(repo, to: directory, variant: variant)
+            try await downloadRepo(repo, to: directory, variant: variant, requiredModels: Set(modelNames))
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
         }
@@ -276,29 +276,73 @@ public class DownloadUtils {
                         ])
                 }
 
-                let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
-                guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
-                    logger.error("Missing coremldata.bin in \(name)")
-                    throw CocoaError(
-                        .fileReadCorruptFile,
-                        userInfo: [
-                            NSFilePathErrorKey: coremlDataPath.path,
-                            NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
-                        ])
+                // For .mlmodelc, check for coremldata.bin
+                if name.hasSuffix(".mlmodelc") {
+                    let coremlDataPath = modelPath.appendingPathComponent("coremldata.bin")
+                    guard FileManager.default.fileExists(atPath: coremlDataPath.path) else {
+                        logger.error("Missing coremldata.bin in \(name)")
+                        throw CocoaError(
+                            .fileReadCorruptFile,
+                            userInfo: [
+                                NSFilePathErrorKey: coremlDataPath.path,
+                                NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
+                            ])
+                    }
+                } else if name.hasSuffix(".mlpackage") {
+                    // For .mlpackage, check for Manifest.json or Data directory
+                    let manifestPath = modelPath.appendingPathComponent("Manifest.json")
+                    let dataPath = modelPath.appendingPathComponent("Data")
+                    guard FileManager.default.fileExists(atPath: manifestPath.path) || FileManager.default.fileExists(atPath: dataPath.path) else {
+                        logger.error("Invalid .mlpackage structure in \(name)")
+                        throw CocoaError(
+                            .fileReadCorruptFile,
+                            userInfo: [
+                                NSFilePathErrorKey: modelPath.path,
+                                NSLocalizedDescriptionKey: "Invalid .mlpackage structure in model: \(name)",
+                            ])
+                    }
                 }
 
                 // Measure Core ML model initialization time (aka local compilation/open)
                 let start = Date()
-                let model = try MLModel(contentsOf: modelPath, configuration: config)
+                let model: MLModel
+                
+                if name.hasSuffix(".mlpackage") {
+                    logger.info("Compiling \(name)...")
+                    // Compile .mlpackage
+                    let compiledURL = try await MLModel.compileModel(at: modelPath)
+                    model = try MLModel(contentsOf: compiledURL, configuration: config)
+                    // Cleanup compiled model? 
+                    // Usually compiled models are temp. If we delete it, we recompile every time.
+                    // But DownloadUtils loads it into memory.
+                    try? FileManager.default.removeItem(at: compiledURL)
+                } else {
+                    model = try MLModel(contentsOf: modelPath, configuration: config)
+                }
+                
                 let elapsed = Date().timeIntervalSince(start)
 
                 models[name] = model
 
                 let ms = elapsed * 1000
                 let formatted = String(format: "%.2f", ms)
-                logger.info("Compiled model \(name) in \(formatted) ms :: \(SystemInfo.summary())")
+                logger.info("Compiled/Loaded model \(name) in \(formatted) ms :: \(SystemInfo.summary())")
             } catch {
                 logger.error("Failed to load model \(name): \(error)")
+                
+                // Try fallback compilation for .mlpackage if direct compilation failed
+                if name.hasSuffix(".mlpackage") {
+                     let innerModel = modelPath.appendingPathComponent("Data/com.apple.CoreML/model.mlmodel")
+                     if FileManager.default.fileExists(atPath: innerModel.path) {
+                         logger.info("Retrying compilation with inner model: \(innerModel.path)")
+                         if let compiledURL = try? await MLModel.compileModel(at: innerModel),
+                            let model = try? MLModel(contentsOf: compiledURL, configuration: config) {
+                             models[name] = model
+                             try? FileManager.default.removeItem(at: compiledURL)
+                             continue // Success, continue loop
+                         }
+                     }
+                }
 
                 if let contents = try? FileManager.default.contentsOfDirectory(
                     atPath: modelPath.deletingLastPathComponent().path)
@@ -333,45 +377,72 @@ public class DownloadUtils {
     }
 
     /// Download a HuggingFace repository
-    private static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
+    private static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil, requiredModels: Set<String>? = nil) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
         // Get the required model names for this repo from the appropriate manager
-        let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+        // Use passed requiredModels if available, otherwise fetch default
+        let modelsToDownload = requiredModels ?? ModelNames.getRequiredModelNames(for: repo, variant: variant)
 
         // Download all repository contents
         let files = try await listRepoFiles(repo)
+        print("Repo \(repo.name) contains files: \(files.map { $0.path })")
 
+        try await processRepoFiles(files, repo: repo, repoPath: repoPath, requiredModels: modelsToDownload)
+        
+        logger.info("Downloaded all required models for \(repo.folderName)")
+    }
+
+    /// Process a list of repo files recursively
+    private static func processRepoFiles(
+        _ files: [RepoFile],
+        repo: Repo,
+        repoPath: URL,
+        requiredModels: Set<String>
+    ) async throws {
         for file in files {
             switch file.type {
-            case "directory" where file.path.hasSuffix(".mlmodelc"):
-                // Check if this model is required (with or without subfolder prefix)
-                let isRequired =
-                    requiredModels.contains(file.path) || requiredModels.contains { $0.hasSuffix("/" + file.path) }
+            case "directory":
+                // Check if this directory is a model bundle
+                if file.path.hasSuffix(".mlmodelc") || file.path.hasSuffix(".mlpackage") {
+                    // Check if this model is required (with or without subfolder prefix)
+                    let isRequired =
+                        requiredModels.contains(file.path) || requiredModels.contains { $0.hasSuffix("/" + file.path) }
 
-                if isRequired {
-                    logger.info("Downloading required model: \(file.path)")
+                    if isRequired {
+                        logger.info("Downloading required model: \(file.path)")
 
-                    // Find if this should go in a subfolder
-                    if let fullPath = requiredModels.first(where: { $0.hasSuffix("/" + file.path) }),
-                        fullPath.contains("/")
-                    {
-                        // Extract subfolder (e.g., "speaker-diarization-offline/Segmentation.mlmodelc" -> "speaker-diarization-offline")
-                        let subfolder = String(fullPath.split(separator: "/").first!)
-                        let subfolderPath = repoPath.appendingPathComponent(subfolder)
-                        try FileManager.default.createDirectory(at: subfolderPath, withIntermediateDirectories: true)
+                        // Find if this should go in a subfolder
+                        if let fullPath = requiredModels.first(where: { $0.hasSuffix("/" + file.path) }),
+                            fullPath.contains("/")
+                        {
+                            // Extract subfolder
+                            let subfolder = String(fullPath.split(separator: "/").first!)
+                            let subfolderPath = repoPath.appendingPathComponent(subfolder)
+                            try FileManager.default.createDirectory(at: subfolderPath, withIntermediateDirectories: true)
 
-                        // Download to subfolder
-                        try await downloadModelDirectory(repo: repo, dirPath: file.path, to: subfolderPath)
+                            // Download to subfolder
+                            try await downloadModelDirectory(repo: repo, dirPath: file.path, to: subfolderPath)
+                        } else {
+                            // Download to root of repo
+                            try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
+                        }
                     } else {
-                        // Download to root of repo
-                        try await downloadModelDirectory(repo: repo, dirPath: file.path, to: repoPath)
+                        logger.info("Skipping unrequired model: \(file.path)")
                     }
                 } else {
-                    logger.info("Skipping unrequired model: \(file.path)")
+                    // Not a model bundle, but might contain one?
+                    // Check if any required model starts with this directory path
+                    let containsRequiredModel = requiredModels.contains { $0.hasPrefix(file.path + "/") }
+                    
+                    if containsRequiredModel {
+                        logger.info("Recursing into directory: \(file.path)")
+                        let subFiles = try await listRepoFiles(repo, path: file.path)
+                        try await processRepoFiles(subFiles, repo: repo, repoPath: repoPath, requiredModels: requiredModels)
+                    }
                 }
 
             case "file" where isEssentialFile(file.path):
@@ -388,8 +459,6 @@ public class DownloadUtils {
                 break
             }
         }
-
-        logger.info("Downloaded all required models for \(repo.folderName)")
     }
 
     /// Check if a file is essential for model operation

@@ -140,8 +140,7 @@ enum EouTranscribeCommand {
                     offset += stride
                     chunkIndex += 1
 
-                    // Reset state between chunks
-                    manager.resetState()
+                    // State is reset internally by transcribe()
                 }
             }
 

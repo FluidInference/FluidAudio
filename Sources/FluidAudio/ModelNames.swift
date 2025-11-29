@@ -166,11 +166,37 @@ public enum ModelNames {
         ]
 
         // Token IDs from vocab.json (NeMo parakeet_realtime_eou_120m-v1)
-        // vocab.json: {"<EOU>": 1024, "<EOB>": 1025, "<blk>": 1026}
         public static let eouTokenId = 1024  // <EOU> - End of Utterance
         public static let eobTokenId = 1025  // <EOB> - End of Block
         public static let blankId = 1026     // <blk> - RNNT blank token
         public static let vocabSize = 1026
+    }
+
+    /// ASR EOU Streaming model names
+    public enum ASREOUStreaming {
+        public static let subfolder = "StreamingModelConvert"
+        
+        public static let preprocessor = "parakeet_eou_streaming_preprocessor"
+        public static let streamingEncoder = "parakeet_eou_streaming_encoder"
+        public static let decoder = "parakeet_eou_streaming_decoder"
+        public static let joint = "parakeet_eou_streaming_joint_decision"
+        public static let vocabularyFile = "vocab.json" // In root or subfolder? Repo listing showed it in root AND subfolder.
+
+        // Files are .mlpackage in the repo
+        public static let preprocessorFile = subfolder + "/" + preprocessor + ".mlpackage"
+        public static let streamingEncoderFile = subfolder + "/" + streamingEncoder + ".mlpackage"
+        public static let decoderFile = subfolder + "/" + decoder + ".mlpackage"
+        public static let jointFile = subfolder + "/" + joint + ".mlpackage"
+        
+        // Vocabulary might be in subfolder too
+        public static let vocabularyPath = subfolder + "/" + vocabularyFile
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            streamingEncoderFile,
+            decoderFile,
+            jointFile,
+        ]
     }
 
     /// CTC keyword spotting model names (Parakeet-TDT CTC 110M).

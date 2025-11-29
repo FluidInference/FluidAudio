@@ -66,21 +66,20 @@ public final class EouAsrManager {
 
         let startTime = Date()
 
-        // For long audio, process in chunks
-        if audioSamples.count > Self.maxAudioSamples {
-            return try await transcribeChunked(audioSamples, models: models, startTime: startTime)
-        }
-
         // Pad audio to max length
         var paddedAudio = audioSamples
         if paddedAudio.count < Self.maxAudioSamples {
             paddedAudio.append(contentsOf: [Float](repeating: 0, count: Self.maxAudioSamples - paddedAudio.count))
+        } else if paddedAudio.count > Self.maxAudioSamples {
+            // Truncate if too long (batch mode limitation)
+            paddedAudio = Array(paddedAudio.prefix(Self.maxAudioSamples))
+            logger.warning("Audio truncated to \(Self.maxAudioSamples) samples (max supported length)")
         }
 
         // Run preprocessor
         let (melFeatures, melLength) = try await runPreprocessor(
             audio: paddedAudio,
-            audioLength: audioSamples.count,
+            audioLength: min(audioSamples.count, Self.maxAudioSamples),
             model: models.preprocessor
         )
 
@@ -123,116 +122,6 @@ public final class EouAsrManager {
             tokenTimings: tokenTimings,
             eouDetected: hypothesis.eouDetected
         )
-    }
-
-    /// Transcribe long audio by processing in chunks
-    private func transcribeChunked(
-        _ audioSamples: [Float],
-        models: EouAsrModels,
-        startTime: Date
-    ) async throws -> EouTranscriptionResult {
-        let chunkSize = Self.maxAudioSamples
-        let overlap = 16000  // 1 second overlap for continuity
-        let stride = chunkSize - overlap
-
-        var allText = ""
-        var allTimings: [EouTokenTiming] = []
-        var totalConfidence: Float = 0
-        var chunkCount = 0
-        var eouDetected = false
-
-        var offset = 0
-        while offset < audioSamples.count {
-            let endIdx = min(offset + chunkSize, audioSamples.count)
-            let chunkSamples = Array(audioSamples[offset..<endIdx])
-
-            // Pad chunk if needed
-            var paddedChunk = chunkSamples
-            if paddedChunk.count < chunkSize {
-                paddedChunk.append(contentsOf: [Float](repeating: 0, count: chunkSize - paddedChunk.count))
-            }
-
-            // Process chunk
-            let (melFeatures, melLength) = try await runPreprocessor(
-                audio: paddedChunk,
-                audioLength: chunkSamples.count,
-                model: models.preprocessor
-            )
-
-            let (encoderOutput, encoderLength) = try await runEncoder(
-                mel: melFeatures,
-                melLength: melLength,
-                model: models.encoder
-            )
-
-            // Reset decoder for each chunk (stateless)
-            decoderState.reset()
-
-            let decoder = RnntDecoder(config: config)
-            let hypothesis = try await decoder.decodeWithTimings(
-                encoderOutput: encoderOutput,
-                encoderSequenceLength: encoderLength,
-                decoderModel: models.decoder,
-                jointModel: models.joint,
-                decoderState: &decoderState
-            )
-
-            let (text, tokenTimings) = convertTokensToText(
-                tokens: hypothesis.ySequence,
-                timestamps: hypothesis.timestamps,
-                confidences: hypothesis.tokenConfidences,
-                vocabulary: models.vocabulary
-            )
-
-            // Adjust timings for chunk offset (frame offset = samples / samples_per_frame)
-            // Each frame is ~80ms = 1280 samples at 16kHz
-            let frameOffset = offset / 1280
-            for timing in tokenTimings {
-                allTimings.append(EouTokenTiming(
-                    token: timing.token,
-                    tokenId: timing.tokenId,
-                    frameIndex: timing.frameIndex + frameOffset,
-                    confidence: timing.confidence
-                ))
-            }
-
-            if !text.isEmpty {
-                if !allText.isEmpty {
-                    allText += " "
-                }
-                allText += text
-            }
-
-            totalConfidence += hypothesis.score
-            chunkCount += 1
-            if hypothesis.eouDetected {
-                eouDetected = true
-            }
-
-            offset += stride
-        }
-
-        let processingTime = Date().timeIntervalSince(startTime)
-        let audioDuration = Double(audioSamples.count) / Double(Self.sampleRate)
-
-        return EouTranscriptionResult(
-            text: allText,
-            confidence: chunkCount > 0 ? totalConfidence / Float(chunkCount) : 0,
-            duration: audioDuration,
-            processingTime: processingTime,
-            tokenTimings: allTimings.isEmpty ? nil : allTimings,
-            eouDetected: eouDetected
-        )
-    }
-
-    /// Reset decoder state for new utterance
-    public func resetState() {
-        decoderState.reset()
-    }
-
-    /// Check if end-of-utterance was detected in last transcription
-    public func wasEouDetected() -> Bool {
-        return decoderState.eouDetected
     }
 
     // MARK: - Private Methods
@@ -313,9 +202,9 @@ public final class EouAsrManager {
                 continue
             }
 
-            // Handle SentencePiece encoding (▁ = word boundary)
+            // Handle SentencePiece encoding (  = word boundary)
             let displayToken: String
-            if token.hasPrefix("▁") {
+            if token.hasPrefix(" ") {
                 displayToken = " " + String(token.dropFirst())
             } else {
                 displayToken = token
