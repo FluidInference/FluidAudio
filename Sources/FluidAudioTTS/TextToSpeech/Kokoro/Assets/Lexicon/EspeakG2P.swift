@@ -108,8 +108,14 @@ final class EspeakG2P {
     }
 
     private static func frameworkBundledDataPath() throws -> URL {
-        guard let espeakBundle = Bundle(identifier: "com.fluidinference.espeakng") else {
+        var espeakBundle = Bundle(identifier: "com.fluidinference.espeakng")
+        if espeakBundle == nil {
+            espeakBundle = Bundle.allBundles.first { $0.bundlePath.hasSuffix("ESpeakNG.framework") }
+        }
+        
+        guard let espeakBundle = espeakBundle else {
             staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
+            staticLogger.debug("Available bundles: \(Bundle.allBundles.map { $0.bundleIdentifier ?? $0.bundlePath })")
             throw EspeakG2PError.frameworkBundleMissing
         }
 
