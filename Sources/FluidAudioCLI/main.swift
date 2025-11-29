@@ -139,6 +139,10 @@ Task {
         await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "download":
         await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "canary-stream":
+        await CanaryStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "librispeech-benchmark":
+        await LibriSpeechBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "help", "--help", "-h":
         printUsage()
         exitWithPeakMemory(0)

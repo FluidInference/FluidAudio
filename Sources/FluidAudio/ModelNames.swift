@@ -7,6 +7,7 @@ public enum Repo: String, CaseIterable {
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
+    case canary = "alexwengg/canary-1b-v2-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -21,12 +22,14 @@ public enum Repo: String, CaseIterable {
             return "speaker-diarization-coreml"
         case .kokoro:
             return "kokoro-82m-coreml"
+        case .canary:
+            return "canary-1b-v2-coreml"
         }
     }
 
     /// Fully qualified HuggingFace repo path (owner/name)
     public var remotePath: String {
-        "FluidInference/\(name)"
+        rawValue
     }
 
     /// Local folder name used for caching
@@ -34,6 +37,8 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .kokoro:
             return "kokoro"
+        case .canary:
+            return "canary"
         default:
             return name
         }
@@ -123,6 +128,28 @@ public enum ModelNames {
         ]
     }
 
+    /// Canary model names
+    public enum Canary {
+        public static let preprocessor = "Preprocessor"
+        public static let encoder = "Encoder"
+        public static let decoder = "Decoder"
+        public static let vocabularyFile = "tokenizer.json" // Assuming standard tokenizer file
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile
+        ]
+        
+        public static func vocabulary(for repo: Repo) -> String {
+            return vocabularyFile
+        }
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -184,6 +211,8 @@ public enum ModelNames {
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
             return ModelNames.TTS.requiredModels
+        case .canary:
+            return ModelNames.Canary.requiredModels
         }
     }
 

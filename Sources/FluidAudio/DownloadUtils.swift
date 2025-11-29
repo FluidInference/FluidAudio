@@ -325,6 +325,8 @@ public class DownloadUtils {
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
             return ModelNames.TTS.requiredModels
+        case .canary:
+            return ModelNames.Canary.requiredModels
         }
     }
 
