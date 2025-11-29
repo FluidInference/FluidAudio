@@ -113,6 +113,22 @@ final class EspeakG2P {
             espeakBundle = Bundle.allBundles.first { $0.bundlePath.hasSuffix("ESpeakNG.framework") }
         }
 
+        // Fallback: Check for framework on disk relative to the executable (for CLI/SPM builds)
+        if espeakBundle == nil {
+            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("ESpeakNG.framework")
+            if FileManager.default.fileExists(atPath: bundlePath.path) {
+                espeakBundle = Bundle(url: bundlePath)
+            }
+        }
+        
+        // Fallback: Check for PackageFrameworks directory (common in SPM builds)
+        if espeakBundle == nil {
+            let bundlePath = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("PackageFrameworks/ESpeakNG.framework")
+            if FileManager.default.fileExists(atPath: bundlePath.path) {
+                espeakBundle = Bundle(url: bundlePath)
+            }
+        }
+
         guard let espeakBundle = espeakBundle else {
             staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
             staticLogger.debug("Available bundles: \(Bundle.allBundles.map { $0.bundleIdentifier ?? $0.bundlePath })")
