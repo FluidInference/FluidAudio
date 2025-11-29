@@ -146,17 +146,23 @@ final class EspeakG2P {
             throw EspeakG2PError.frameworkBundleMissing
         }
 
-        guard let bundleURL = espeakBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") else {
+        guard let resourceURL = espeakBundle.resourceURL else {
+            staticLogger.error("ESpeakNG.framework has no resource URL at \(espeakBundle.bundlePath)")
+            throw EspeakG2PError.dataBundleMissing // Or a more specific error if needed
+        }
+
+        let dataDir = resourceURL.appendingPathComponent("espeak-ng-data")
+
+        guard FileManager.default.fileExists(atPath: dataDir.path) else {
             staticLogger.error(
-                "espeak-ng-data.bundle missing from ESpeakNG.framework resources at \(espeakBundle.bundlePath)")
+                "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
             throw EspeakG2PError.dataBundleMissing
         }
 
-        let dataDir = bundleURL.appendingPathComponent("espeak-ng-data")
         let voicesPath = dataDir.appendingPathComponent("voices")
 
         guard FileManager.default.fileExists(atPath: voicesPath.path) else {
-            staticLogger.error("espeak-ng-data.bundle found but voices directory missing at \(voicesPath.path)")
+            staticLogger.error("espeak-ng-data found but voices directory missing at \(voicesPath.path)")
             throw EspeakG2PError.voicesDirectoryMissing
         }
 
