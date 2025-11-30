@@ -183,10 +183,10 @@ public enum ModelNames {
         public static let vocabularyFile = "vocab.json" // In root or subfolder? Repo listing showed it in root AND subfolder.
 
         // Files are .mlpackage in the repo
-        public static let preprocessorFile = subfolder + "/" + preprocessor + ".mlpackage"
-        public static let streamingEncoderFile = subfolder + "/" + streamingEncoder + ".mlpackage"
-        public static let decoderFile = subfolder + "/" + decoder + ".mlpackage"
-        public static let jointFile = subfolder + "/" + joint + ".mlpackage"
+        public static let preprocessorFile = subfolder + "/" + preprocessor + ".mlmodelc"
+        public static let streamingEncoderFile = subfolder + "/" + streamingEncoder + ".mlmodelc"
+        public static let decoderFile = subfolder + "/" + decoder + ".mlmodelc"
+        public static let jointFile = subfolder + "/" + joint + ".mlmodelc"
         
         // Vocabulary might be in subfolder too
         public static let vocabularyPath = subfolder + "/" + vocabularyFile

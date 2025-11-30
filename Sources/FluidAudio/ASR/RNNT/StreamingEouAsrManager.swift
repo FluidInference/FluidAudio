@@ -117,8 +117,8 @@ public final class StreamingEouAsrManager {
             }
         }
 
-        // Prepare fixed-size input (16 frames = 160ms chunks, native chunk size)
-        let fixedFrames = 16  // Must match exported streaming_encoder model (160ms native)
+        // Prepare fixed-size input (32 frames = 320ms chunks)
+        let fixedFrames = 32  // Must match exported streaming_encoder model
         let melDim = 128
         let inputMel = try MLMultiArray(shape: [1, NSNumber(value: melDim), NSNumber(value: fixedFrames)], dataType: .float32)
         let destPtr = inputMel.dataPointer.bindMemory(to: Float.self, capacity: inputMel.count)
@@ -143,7 +143,7 @@ public final class StreamingEouAsrManager {
         let melLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
         melLengthArray[0] = NSNumber(value: inputLength)
 
-        logger.debug("Preprocessor: chunk=\(audioChunk.count) samples, mel_frames=\(actualMelFrames), padding=\(fixedFrames - framesToCopy)")
+        // logger.debug("Preprocessor: chunk=\(audioChunk.count) samples, mel_frames=\(actualMelFrames), padding=\(fixedFrames - framesToCopy)")
 
         // Run streaming encoder with cache support
         let (encoderOutput, encoderLength, newCacheChannel, newCacheTime, newCacheLen) = try await runStreamingEncoder(
@@ -162,7 +162,7 @@ public final class StreamingEouAsrManager {
             newCacheLen: newCacheLen
         )
 
-        print("DEBUG: StreamingEncoder: enc_length=\(encoderLength), cache_len: \(cacheLenBefore) → \(newCacheLen)")
+        // print("DEBUG: StreamingEncoder: enc_length=\(encoderLength), cache_len: \(cacheLenBefore) → \(newCacheLen)")
 
         // Create partial hypothesis from accumulated state (NeMo pattern)
         let previousTokenCount = accumulatedTokens.count
@@ -175,7 +175,7 @@ public final class StreamingEouAsrManager {
             lastToken: accumulatedTokens.last
         )
         
-        logger.debug("Partial hypothesis: \(previousTokenCount) tokens, last_token=\(partialHypothesis.lastToken ?? -1)")
+        // logger.debug("Partial hypothesis: \(previousTokenCount) tokens, last_token=\(partialHypothesis.lastToken ?? -1)")
 
         // Run RNNT decoder with partial hypothesis
         let decoder = RnntDecoder(config: config)
@@ -193,7 +193,7 @@ public final class StreamingEouAsrManager {
         let newTimestamps = Array(fullHypothesis.timestamps.dropFirst(previousTokenCount))
         let newConfidences = Array(fullHypothesis.tokenConfidences.dropFirst(previousTokenCount))
         
-        logger.debug("New tokens this chunk: \(newTokens.count) (total now: \(fullHypothesis.ySequence.count))")
+        // logger.debug("New tokens this chunk: \(newTokens.count) (total now: \(fullHypothesis.ySequence.count))")
         
         // Update accumulated state
         accumulatedTokens = fullHypothesis.ySequence
@@ -215,7 +215,7 @@ public final class StreamingEouAsrManager {
         // Reset partial hypothesis on EOU or final chunk (NeMo pattern)
         // Also reset decoder state to start fresh for next utterance
         if fullHypothesis.eouDetected || isFinal {
-            logger.debug("Resetting partial hypothesis and decoder state (EOU=\(fullHypothesis.eouDetected), final=\(isFinal))")
+            // logger.debug("Resetting partial hypothesis and decoder state (EOU=\(fullHypothesis.eouDetected), final=\(isFinal))")
             accumulatedTokens.removeAll()
             accumulatedTimestamps.removeAll()
             accumulatedConfidences.removeAll()
@@ -300,9 +300,9 @@ public final class StreamingEouAsrManager {
     ) {
         let cacheLenArray = try encoderState.createCacheLenArray()
 
-        logger.debug(
-            "StreamingEncoder input: mel=\(mel.shape), cache_channel=\(encoderState.cacheLastChannel.shape), cache_time=\(encoderState.cacheLastTime.shape), cache_len=\(encoderState.cacheLastChannelLen)"
-        )
+        // logger.debug(
+        //     "StreamingEncoder input: mel=\(mel.shape), cache_channel=\(encoderState.cacheLastChannel.shape), cache_time=\(encoderState.cacheLastTime.shape), cache_len=\(encoderState.cacheLastChannelLen)"
+        // )
 
         let input = try MLDictionaryFeatureProvider(dictionary: [
             "mel": MLFeatureValue(multiArray: mel),

@@ -38,7 +38,7 @@ class StreamingEncoderWrapper(nn.Module):
 
         return outputs
 
-def export_streaming_encoder(model_id="nvidia/parakeet_realtime_eou_120m-v1", output_path="streaming_encoder.mlpackage"):
+def export_streaming_encoder(model_id="nvidia/parakeet_realtime_eou_120m-v1", output_path="streaming_encoder.mlpackage", frames=16):
     print(f"Loading model: {model_id}")
     asr_model = nemo_asr.models.ASRModel.from_pretrained(model_id, map_location="cpu")
     asr_model.eval()
@@ -47,10 +47,9 @@ def export_streaming_encoder(model_id="nvidia/parakeet_realtime_eou_120m-v1", ou
     wrapper = StreamingEncoderWrapper(encoder)
     wrapper.eval()
 
-    # Define input shapes for 160ms chunks
-    # The encoder's streaming_cfg specifies chunk_size=[9, 16]
-    # 160ms at 10ms stride = 16 frames (exact match!)
-    frames = 16  # Native chunk size for streaming mode
+    # Define input shapes
+    # 16 frames = 160ms
+    print(f"Exporting for chunk size: {frames} frames ({frames*10}ms)")
     mel_dim = 128  # Parakeet uses 128 mel features, not 80
     
     # Cache shapes: number of layers = 17 (FastConformer architecture)
@@ -97,4 +96,10 @@ def export_streaming_encoder(model_id="nvidia/parakeet_realtime_eou_120m-v1", ou
     print("Done!")
 
 if __name__ == "__main__":
-    export_streaming_encoder()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--frames", type=int, default=16, help="Number of frames per chunk (10ms per frame)")
+    parser.add_argument("--output", type=str, default="streaming_encoder.mlpackage", help="Output path")
+    args = parser.parse_args()
+    
+    export_streaming_encoder(frames=args.frames, output_path=args.output)

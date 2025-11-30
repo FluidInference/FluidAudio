@@ -108,29 +108,29 @@ internal struct RnntDecoder {
         let encoderHiddenSize = encoderShape[1]  // 512
         let encoderTimeFrames = min(encoderShape[2], encoderSequenceLength)
 
-        let encoderStrides = encoderOutput.strides.map { $0.intValue }
-        logger.debug(
-            "RNNT decode: encoder shape=\(encoderShape), strides=\(encoderStrides), seqLen=\(encoderSequenceLength), frames=\(encoderTimeFrames)"
-        )
+        // let encoderStrides = encoderOutput.strides.map { $0.intValue }
+        // logger.debug(
+        //     "RNNT decode: encoder shape=\(encoderShape), strides=\(encoderStrides), seqLen=\(encoderSequenceLength), frames=\(encoderTimeFrames)"
+        // )
 
         // Debug: print encoder layout info
-        let encPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: min(1000, encoderOutput.count))
-        var firstVals: [Float] = []
-        for i in 0..<min(5, encoderOutput.count) {
-            firstVals.append(encPtr[i])
-        }
-        logger.debug("First 5 encoder values (raw memory): \(firstVals)")
+        // let encPtr = encoderOutput.dataPointer.bindMemory(to: Float.self, capacity: min(1000, encoderOutput.count))
+        // var firstVals: [Float] = []
+        // for i in 0..<min(5, encoderOutput.count) {
+        //     firstVals.append(encPtr[i])
+        // }
+        // logger.debug("First 5 encoder values (raw memory): \(firstVals)")
 
         // Check what frame 0 looks like with different interpretations
         // If shape is [1, 512, 189] with strides [S0, S1, S2], then [0, h, t] = h*S1 + t*S2
-        var frame0Values: [Float] = []
-        for h in 0..<5 {
-            // Shape [1, 512, 189] -> [batch, hidden, time]
-            // For frame 0: h*strides[1] + 0*strides[2]
-            let idx = h * encoderStrides[1] + 0 * encoderStrides[2]
-            frame0Values.append(encPtr[idx])
-        }
-        logger.debug("Frame 0 hidden dims 0-4 (shape [1,512,189]): \(frame0Values)")
+        // var frame0Values: [Float] = []
+        // for h in 0..<5 {
+        //     // Shape [1, 512, 189] -> [batch, hidden, time]
+        //     // For frame 0: h*strides[1] + 0*strides[2]
+        //     let idx = h * 512 + 0 // Assuming stride
+        //     // frame0Values.append(encPtr[idx])
+        // }
+        // logger.debug("Frame 0 hidden dims 0-4 (shape [1,512,189]): \(frame0Values)")
 
         // Preallocate arrays for decoder input
         let reusableTargetArray = try MLMultiArray(shape: [1, 1] as [NSNumber], dataType: .int32)
@@ -171,6 +171,8 @@ internal struct RnntDecoder {
         // CoreML model only outputs 1 timestep per call, so we call it twice
         if decoderState.predictorOutput == nil && hypothesis.lastToken == nil {
             // First call: process blank with zero state -> get t=0 output and updated state
+            // NeMo's greedy decoding initializes by running the RNN once with a zero input (add_sos=False).
+            // We match this by running the decoder once with the blank token.
             let firstCall = try runDecoder(
                 token: config.blankId,
                 state: decoderState,
@@ -179,25 +181,17 @@ internal struct RnntDecoder {
                 targetLengthArray: reusableTargetLengthArray
             )
 
-            // Second call: process blank again with the updated state -> get t=1 output
-            let secondCall = try runDecoder(
-                token: config.blankId,
-                state: firstCall.newState,
-                model: decoderModel,
-                targetArray: reusableTargetArray,
-                targetLengthArray: reusableTargetLengthArray
-            )
-
             let proj = try extractFeatureValue(
-                from: secondCall.output,
+                from: firstCall.output,
                 key: "decoder",
                 errorMessage: "Invalid decoder output"
             )
-            // Now we have the t=1 output which matches NeMo's predict(None)[:, -1, :]
+            
+            // Now we have the t=0 output which matches NeMo's predict(None)
             let timeSteps = proj.shape[2].intValue
             let sosProjection = try extractTimeStep(proj, timeIndex: timeSteps - 1)
             decoderState.predictorOutput = sosProjection
-            hypothesis.decState = secondCall.newState
+            hypothesis.decState = firstCall.newState
         }
 
         var tokensProcessedThisChunk = 0
@@ -246,7 +240,7 @@ internal struct RnntDecoder {
                     errorMessage: "Invalid decoder output"
                 )
                 if frameIdx == 0 && symbolsThisFrame == 0 {
-                    logger.debug("Decoder projection shape: \(decoderProjection.shape.map { $0.intValue }), strides: \(decoderProjection.strides.map { $0.intValue })")
+                    // logger.debug("Decoder projection shape: \(decoderProjection.shape.map { $0.intValue }), strides: \(decoderProjection.strides.map { $0.intValue })")
                 }
                 try copyDecoderProjection(decoderProjection, into: reusableDecoderStep)
 
@@ -306,7 +300,7 @@ internal struct RnntDecoder {
 
                 // Log every frame to debug iteration
                 if symbolsThisFrame == 0 {
-                    logger.debug("Frame \(frameIdx): token=\(decision.token), prob=\(decision.probability) \(decision.token == config.blankId ? "BLANK" : "NON-BLANK")")
+                    // logger.debug("Frame \(frameIdx): token=\(decision.token), prob=\(decision.probability) \(decision.token == config.blankId ? "BLANK" : "NON-BLANK")")
                 }
                 
                 // Check for blank token

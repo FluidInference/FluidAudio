@@ -118,21 +118,41 @@ public final class StreamingEncoderState: @unchecked Sendable {
         let dstStrides = dst.strides.map { $0.intValue }
         let shape = dst.shape.map { $0.intValue }
 
-        let srcPtr = src.dataPointer.bindMemory(to: Float.self, capacity: src.count)
-        let dstPtr = dst.dataPointer.bindMemory(to: Float.self, capacity: dst.count)
+        // Handle Float32 -> Float32
+        if src.dataType == .float32 && dst.dataType == .float32 {
+            let srcPtr = src.dataPointer.bindMemory(to: Float.self, capacity: src.count)
+            let dstPtr = dst.dataPointer.bindMemory(to: Float.self, capacity: dst.count)
 
-        // For 4D array [d0, d1, d2, d3], iterate through all elements
-        // This is a generic copy that handles any stride mismatch
-        for i0 in 0..<shape[0] {
-            for i1 in 0..<shape[1] {
-                for i2 in 0..<shape[2] {
-                    for i3 in 0..<shape[3] {
-                        let srcIdx = i0 * srcStrides[0] + i1 * srcStrides[1] + i2 * srcStrides[2] + i3 * srcStrides[3]
-                        let dstIdx = i0 * dstStrides[0] + i1 * dstStrides[1] + i2 * dstStrides[2] + i3 * dstStrides[3]
-                        dstPtr[dstIdx] = srcPtr[srcIdx]
+            for i0 in 0..<shape[0] {
+                for i1 in 0..<shape[1] {
+                    for i2 in 0..<shape[2] {
+                        for i3 in 0..<shape[3] {
+                            let srcIdx = i0 * srcStrides[0] + i1 * srcStrides[1] + i2 * srcStrides[2] + i3 * srcStrides[3]
+                            let dstIdx = i0 * dstStrides[0] + i1 * dstStrides[1] + i2 * dstStrides[2] + i3 * dstStrides[3]
+                            dstPtr[dstIdx] = srcPtr[srcIdx]
+                        }
                     }
                 }
             }
+        }
+        // Handle Float16 -> Float32
+        else if src.dataType == .float16 && dst.dataType == .float32 {
+            let srcPtr = src.dataPointer.bindMemory(to: Float16.self, capacity: src.count)
+            let dstPtr = dst.dataPointer.bindMemory(to: Float.self, capacity: dst.count)
+
+            for i0 in 0..<shape[0] {
+                for i1 in 0..<shape[1] {
+                    for i2 in 0..<shape[2] {
+                        for i3 in 0..<shape[3] {
+                            let srcIdx = i0 * srcStrides[0] + i1 * srcStrides[1] + i2 * srcStrides[2] + i3 * srcStrides[3]
+                            let dstIdx = i0 * dstStrides[0] + i1 * dstStrides[1] + i2 * dstStrides[2] + i3 * dstStrides[3]
+                            dstPtr[dstIdx] = Float(srcPtr[srcIdx])
+                        }
+                    }
+                }
+            }
+        } else {
+            print("Error: Unsupported data type combination in copyMLMultiArrayWithStrides: src=\(src.dataType), dst=\(dst.dataType)")
         }
     }
 
