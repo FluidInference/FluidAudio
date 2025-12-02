@@ -1,6 +1,9 @@
 import Foundation
-import NaturalLanguage
 import OSLog
+
+#if canImport(Metaphone3)
+import Metaphone3
+#endif
 
 /// Merges CTC keyword detections into an existing transcript by replacing similar words
 /// with their canonical forms. This allows using CTC keyword spotting with any ASR system.
@@ -8,50 +11,41 @@ public struct KeywordMerger {
 
     private static let logger = Logger(subsystem: "com.fluidaudio", category: "KeywordMerger")
 
-    /// Check if a word is likely a common word (not a proper noun) using NaturalLanguage framework
-    /// - Parameters:
-    ///   - word: The word to check
-    ///   - transcript: Full transcript for context
-    ///   - wordIndex: Index of the word in the transcript
-    private static func isCommonWord(_ word: String, in transcript: String, at wordIndex: Int) -> Bool {
-        // Use full transcript for context so NLTagger can properly identify word types
-        let tagger = NLTagger(tagSchemes: [.lexicalClass, .nameType])
-        tagger.string = transcript
+    // MARK: - Phonetic Encoder Selection
 
-        // Find the word's position in the transcript
-        let words = transcript.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
-        guard wordIndex < words.count else { return false }
+    /// Which phonetic encoder is being used (logged once at first use)
+    private enum PhoneticEncoder {
+        case metaphone3
+        case doubleMetaphone
 
-        // Calculate character position of this word
-        var charPosition = 0
-        for i in 0..<wordIndex {
-            charPosition += words[i].count + 1  // +1 for space
-        }
-
-        guard
-            let startIndex = transcript.index(
-                transcript.startIndex, offsetBy: charPosition, limitedBy: transcript.endIndex)
-        else {
-            return false
-        }
-
-        let lexicalTag = tagger.tag(at: startIndex, unit: .word, scheme: .lexicalClass).0
-        let nameTag = tagger.tag(at: startIndex, unit: .word, scheme: .nameType).0
-
-        // If it's a named entity (person, place, organization), it's NOT a common word
-        if let tag = nameTag {
-            // Check if it's actually a named entity (not just "OtherWord")
-            if tag == .personalName || tag == .placeName || tag == .organizationName {
-                return false  // It's a proper noun, allow replacement
+        var description: String {
+            switch self {
+            case .metaphone3: return "Metaphone3"
+            case .doubleMetaphone: return "DoubleMetaphone"
             }
         }
+    }
 
-        // Common word types that shouldn't be replaced: verbs, pronouns, determiners, prepositions, etc.
-        switch lexicalTag {
-        case .verb, .pronoun, .determiner, .preposition, .conjunction, .adverb, .particle, .interjection:
-            return true
-        default:
-            return false
+    /// Track whether we've logged the encoder selection
+    private static var hasLoggedEncoderSelection = false
+
+    /// The active phonetic encoder (determined at compile time)
+    private static var activeEncoder: PhoneticEncoder {
+        #if canImport(Metaphone3)
+        return .metaphone3
+        #else
+        return .doubleMetaphone
+        #endif
+    }
+
+    /// Log which encoder is being used (once per session)
+    private static func logEncoderSelectionOnce() {
+        guard !hasLoggedEncoderSelection else { return }
+        hasLoggedEncoderSelection = true
+
+        let debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+        if debugMode {
+            print("[KeywordMerger] Using \(activeEncoder.description) for phonetic encoding")
         }
     }
 
@@ -88,6 +82,14 @@ public struct KeywordMerger {
 
         let minSimilarity = vocabulary.minSimilarity
         let minCombinedConfidence = vocabulary.minCombinedConfidence
+
+        var encoder: Any? = nil
+        #if canImport(Metaphone3)
+        let mp = Metaphone3Encoder()
+        mp.encodeVowels = false
+        mp.encodeExact = false
+        encoder = mp
+        #endif
 
         guard !vocabulary.terms.isEmpty else {
             return MergeResult(correctedText: transcript, replacements: [])
@@ -207,10 +209,14 @@ public struct KeywordMerger {
                 // Map token index back to word index (approximate)
                 // For now, use frame timing to estimate word position
                 let matchFrameIdx = relevantTokens[match.startIdx].frameIndex
+
+                // Use the last frame of the entire sequence as the total duration reference
+                let totalFrames = ctcTokenSequence.last?.frameIndex ?? matchFrameIdx
+
                 let wordIndex = estimateWordIndex(
                     frameIndex: matchFrameIdx,
                     totalWords: words.count,
-                    detectionFrames: detectionFrameRange
+                    totalFrames: totalFrames
                 )
 
                 if wordIndex < words.count {
@@ -283,9 +289,10 @@ public struct KeywordMerger {
     }
 
     /// Estimate word index from frame index (approximate mapping)
-    private static func estimateWordIndex(frameIndex: Int, totalWords: Int, detectionFrames: ClosedRange<Int>) -> Int {
-        // Simple linear interpolation based on frame position
-        let relativePosition = Float(frameIndex - detectionFrames.lowerBound) / Float(detectionFrames.count)
+    private static func estimateWordIndex(frameIndex: Int, totalWords: Int, totalFrames: Int) -> Int {
+        // Simple linear interpolation based on frame position in the whole segment
+        guard totalFrames > 0 else { return 0 }
+        let relativePosition = Float(frameIndex) / Float(totalFrames)
         return min(Int(relativePosition * Float(totalWords)), totalWords - 1)
     }
 
@@ -341,6 +348,14 @@ public struct KeywordMerger {
         let minSimilarity = vocabulary.minSimilarity
         let minCombinedConfidence = vocabulary.minCombinedConfidence
 
+        var encoder: Any? = nil
+        #if canImport(Metaphone3)
+        let mp = Metaphone3Encoder()
+        mp.encodeVowels = false
+        mp.encodeExact = false
+        encoder = mp
+        #endif
+
         guard !vocabulary.terms.isEmpty else {
             return MergeResult(correctedText: transcript, replacements: [])
         }
@@ -356,8 +371,12 @@ public struct KeywordMerger {
         }
 
         if debugMode {
-            logger.info("KeywordMerger: Processing \(detections.count) detections for \(words.count) words")
+            logger.info(
+                "KeywordMerger (String-Based): Processing \(detections.count) detections for \(words.count) words")
         }
+
+        // Pre-compute cleaned words (strip punctuation)
+        let cleanedWords = words.map { $0.trimmingCharacters(in: .punctuationCharacters) }
 
         // Internal replacement structure with confidence scoring
         struct InternalReplacement {
@@ -366,6 +385,7 @@ public struct KeywordMerger {
             let similarity: Float
             let ctcScore: Float
             let originalWord: String
+            let spanLength: Int  // Number of original words being replaced
 
             var combinedConfidence: Float {
                 // Normalize CTC score from [-12, -6] range to [0, 1]
@@ -405,21 +425,20 @@ public struct KeywordMerger {
                 let formWords = formToMatch.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
 
                 // Try single-word matches
-                for (i, word) in words.enumerated() {
-                    let cleanWord = word.trimmingCharacters(in: .punctuationCharacters)
+                for (i, _) in words.enumerated() {
+                    let cleanWord = cleanedWords[i]
 
-                    // Skip common dictionary words (verbs, pronouns, etc.) even if capitalized
-                    guard !isCommonWord(cleanWord, in: transcript, at: i) else {
-                        continue
-                    }
+                    // Check if this word matches any alias (case-insensitive) - always allow alias corrections
+                    let isAliasMatch = allForms.contains { $0.lowercased() == cleanWord.lowercased() }
 
-                    // Only replace capitalized words (proper nouns), skip lowercase common words
-                    guard cleanWord.first?.isUppercase == true else {
+                    // Only replace capitalized words (proper nouns), unless it's an alias match
+                    // This naturally filters out most common words (verbs, pronouns, etc.) which are lowercase
+                    guard cleanWord.first?.isUppercase == true || isAliasMatch else {
                         continue
                     }
 
                     let targetWord = formWords[0]
-                    let similarity = combinedSimilarity(cleanWord, targetWord)
+                    let similarity = combinedSimilarity(cleanWord, targetWord, encoder: encoder)
 
                     if similarity >= minSimilarity {
                         if let existing = bestMatch {
@@ -432,19 +451,51 @@ public struct KeywordMerger {
                     }
                 }
 
+                // Try joining adjacent transcript words to match single-word vocabulary term
+                if formWords.count == 1 {
+                    let targetWord = formWords[0]
+                    for startIdx in 0..<words.count {
+                        // Try joining 2 or 3 adjacent words
+                        for spanLen in 2...3 {
+                            let endIdx = startIdx + spanLen
+                            guard endIdx <= words.count else { continue }
+
+                            let span = words[startIdx..<endIdx]
+
+                            // Only process if first word is capitalized (proper noun)
+                            let firstWord = cleanedWords[startIdx]
+                            guard firstWord.first?.isUppercase == true else { continue }
+
+                            let joinedSpan = span.map { $0.trimmingCharacters(in: .punctuationCharacters) }.joined()
+
+                            let similarity = combinedSimilarity(joinedSpan, targetWord, encoder: encoder)
+
+                            if similarity >= minSimilarity {
+                                // Prefer longer spans only if similarity is comparable to existing match
+                                if let existing = bestMatch {
+                                    // Only prefer longer span if similarity is within 0.15 of existing
+                                    let similarityComparable = similarity >= existing.similarity - 0.15
+                                    if (spanLen > existing.spanLength && similarityComparable)
+                                        || (spanLen == existing.spanLength && similarity > existing.similarity)
+                                    {
+                                        bestMatch = (startIdx, similarity, spanLen)
+                                    }
+                                } else {
+                                    bestMatch = (startIdx, similarity, spanLen)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Try multi-word matches if form has multiple words
                 if formWords.count > 1 {
                     for startIdx in 0..<words.count {
                         let endIdx = min(startIdx + formWords.count, words.count)
                         let span = words[startIdx..<endIdx]
 
-                        // Skip phrases starting with common dictionary words
-                        let firstWord = span.first?.trimmingCharacters(in: .punctuationCharacters) ?? ""
-                        guard !isCommonWord(firstWord, in: transcript, at: startIdx) else {
-                            continue
-                        }
-
                         // Only replace if first word is capitalized (proper noun phrase)
+                        let firstWord = cleanedWords[startIdx]
                         guard firstWord.first?.isUppercase == true else {
                             continue
                         }
@@ -452,11 +503,13 @@ public struct KeywordMerger {
                         let spanText = span.map { $0.trimmingCharacters(in: .punctuationCharacters) }.joined(
                             separator: " ")
 
-                        let similarity = combinedSimilarity(spanText, formToMatch)
+                        let similarity = combinedSimilarity(spanText, formToMatch, encoder: encoder)
 
                         if similarity >= minSimilarity {
                             if let existing = bestMatch {
-                                if span.count > existing.spanLength
+                                // Only prefer longer span if similarity is within 0.15 of existing
+                                let similarityComparable = similarity >= existing.similarity - 0.15
+                                if (span.count > existing.spanLength && similarityComparable)
                                     || (span.count == existing.spanLength && similarity > existing.similarity)
                                 {
                                     bestMatch = (startIdx, similarity, span.count)
@@ -476,7 +529,8 @@ public struct KeywordMerger {
                     canonical: canonical,
                     similarity: match.similarity,
                     ctcScore: detection.score,
-                    originalWord: originalSpan.joined(separator: " ")
+                    originalWord: originalSpan.joined(separator: " "),
+                    spanLength: match.spanLength
                 )
 
                 // Filter by combined confidence
@@ -532,11 +586,9 @@ public struct KeywordMerger {
                     return lhs.similarity < rhs.similarity
                 }
 
-                // Then prefer longer spans
-                let lhsSpanLength = lhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
-                let rhsSpanLength = rhs.canonical.split(whereSeparator: { $0.isWhitespace }).count
-                if lhsSpanLength != rhsSpanLength {
-                    return lhsSpanLength < rhsSpanLength
+                // Then prefer longer spans (number of original words being replaced)
+                if lhs.spanLength != rhs.spanLength {
+                    return lhs.spanLength < rhs.spanLength
                 }
 
                 // Finally use combined confidence as tiebreaker
@@ -559,8 +611,8 @@ public struct KeywordMerger {
         selectedReplacements.sort { $0.similarity > $1.similarity }
 
         for replacement in selectedReplacements {
-            let spanLength = replacement.canonical.split(whereSeparator: { $0.isWhitespace }).count
-            let range = replacement.wordIndex..<min(replacement.wordIndex + spanLength, words.count)
+            // Use the actual span length of original words being replaced
+            let range = replacement.wordIndex..<min(replacement.wordIndex + replacement.spanLength, words.count)
 
             let overlaps = range.contains { usedIndices.contains($0) }
 
@@ -577,16 +629,17 @@ public struct KeywordMerger {
 
         for replacement in finalReplacements {
             let canonicalWords = replacement.canonical.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
-            let spanLength = canonicalWords.count
-            let endIdx = min(replacement.wordIndex + spanLength, words.count)
+            // Use the actual span of original words being replaced
+            let endIdx = min(replacement.wordIndex + replacement.spanLength, words.count)
 
             // Preserve capitalization if original word started with uppercase
             let originalSpan = words[replacement.wordIndex..<endIdx]
-            let finalWords = zip(
-                canonicalWords,
-                originalSpan + Array(repeating: "", count: max(0, canonicalWords.count - originalSpan.count))
-            ).map { canonical, original in
-                if !original.isEmpty && original.first?.isUppercase == true && canonical.first?.isLowercase == true {
+            let firstOriginal = originalSpan.first ?? ""
+            let finalWords = canonicalWords.enumerated().map { idx, canonical in
+                // Capitalize first word if original started with uppercase
+                if idx == 0 && !firstOriginal.isEmpty && firstOriginal.first?.isUppercase == true
+                    && canonical.first?.isLowercase == true
+                {
                     return canonical.prefix(1).uppercased() + canonical.dropFirst()
                 }
                 return canonical
@@ -597,7 +650,7 @@ public struct KeywordMerger {
                     originalText: replacement.originalWord,
                     canonicalText: replacement.canonical,
                     wordIndex: replacement.wordIndex,
-                    spanLength: spanLength,
+                    spanLength: replacement.spanLength,
                     similarity: replacement.similarity,
                     combinedConfidence: replacement.combinedConfidence
                 ))
@@ -614,8 +667,69 @@ public struct KeywordMerger {
         return MergeResult(correctedText: correctedText, replacements: publicReplacements)
     }
 
-    /// Compute phonetic similarity using Double Metaphone
-    private static func phoneticSimilarity(_ a: String, _ b: String) -> Float {
+    /// Compute phonetic similarity using the best available encoder
+    /// Uses Metaphone3 if available (better accuracy), otherwise falls back to DoubleMetaphone
+    private static func phoneticSimilarity(_ a: String, _ b: String, encoder: Any? = nil) -> Float {
+        logEncoderSelectionOnce()
+
+        #if canImport(Metaphone3)
+        return metaphone3Similarity(a, b, encoder: encoder)
+        #else
+        return doubleMetaphoneSimilarity(a, b)
+        #endif
+    }
+
+    #if canImport(Metaphone3)
+    /// Compute phonetic similarity using Metaphone3 (more accurate for names)
+    private static func metaphone3Similarity(_ a: String, _ b: String, encoder: Any? = nil) -> Float {
+        // Use passed encoder or fallback
+        let encoderInstance: Metaphone3Encoder
+        if let passed = encoder as? Metaphone3Encoder {
+            encoderInstance = passed
+        } else {
+            encoderInstance = Metaphone3Encoder()
+            encoderInstance.encodeVowels = false
+            encoderInstance.encodeExact = false
+        }
+
+        let resultA = encoderInstance.encode(a)
+        let resultB = encoderInstance.encode(b)
+
+        let aPrimary = resultA.metaph
+        let aAlternate = resultA.alternateMetaph
+        let bPrimary = resultB.metaph
+        let bAlternate = resultB.alternateMetaph
+
+        // Check for exact phonetic match (any combination)
+        if aPrimary == bPrimary {
+            return 1.0
+        }
+        if !aAlternate.isEmpty && aAlternate == bPrimary {
+            return 1.0
+        }
+        if !bAlternate.isEmpty && aPrimary == bAlternate {
+            return 1.0
+        }
+        if !aAlternate.isEmpty && !bAlternate.isEmpty && aAlternate == bAlternate {
+            return 1.0
+        }
+
+        // Compute edit distance on phonetic codes
+        let dist1 = levenshteinDistance(aPrimary, bPrimary)
+        let dist2 =
+            !aAlternate.isEmpty && !bAlternate.isEmpty
+            ? levenshteinDistance(aAlternate, bAlternate) : Int.max
+        let dist = min(dist1, dist2)
+
+        let maxLen = max(aPrimary.count, bPrimary.count)
+        guard maxLen > 0 else { return 0.0 }
+
+        return 1.0 - Float(dist) / Float(maxLen)
+    }
+    #endif
+
+    /// Compute phonetic similarity using Double Metaphone (fallback)
+    private static func doubleMetaphoneSimilarity(_ a: String, _ b: String) -> Float {
         let (aPrimary, aAlternate) = DoubleMetaphone.encode(a)
         let (bPrimary, bAlternate) = DoubleMetaphone.encode(b)
 
@@ -639,10 +753,24 @@ public struct KeywordMerger {
         return 1.0 - Float(dist) / Float(maxLen)
     }
 
-    /// Compute combined character + phonetic similarity
-    private static func combinedSimilarity(_ a: String, _ b: String) -> Float {
-        // Forcing phonetic-only similarity (character weight = 0) for this run
-        return phoneticSimilarity(a, b)
+    /// Compute combined character + phonetic similarity with multi-factor gating
+    private static func combinedSimilarity(_ a: String, _ b: String, encoder: Any? = nil) -> Float {
+        let phoneSim = phoneticSimilarity(a, b, encoder: encoder)
+        let charSim = characterSimilarity(a, b)
+        let lenRatio = Float(min(a.count, b.count)) / Float(max(a.count, b.count))
+
+        // Poor length ratio: heavy penalty
+        if lenRatio < 0.6 {
+            return charSim * lenRatio
+        }
+
+        // If phonetic match is very high, use it
+        if phoneSim >= 0.9 {
+            return max(phoneSim, charSim)
+        }
+
+        // Otherwise blend character and phonetic similarity
+        return (charSim * 0.6) + (phoneSim * 0.4)
     }
 
     /// Compute character-level Levenshtein similarity

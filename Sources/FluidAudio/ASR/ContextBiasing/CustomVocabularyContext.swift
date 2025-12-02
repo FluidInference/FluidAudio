@@ -13,6 +13,27 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     /// This is used by the auxiliary CTC keyword spotter path and is distinct from
     /// the Parakeet TDT token IDs above.
     public let ctcTokenIds: [Int]?
+
+    /// Create a custom vocabulary term.
+    /// - Parameters:
+    ///   - text: The word or phrase to boost
+    ///   - weight: Optional weight for the term
+    ///   - aliases: Optional alternative spellings
+    ///   - tokenIds: Optional pre-tokenized Parakeet TDT token IDs
+    ///   - ctcTokenIds: Optional pre-tokenized CTC token IDs
+    public init(
+        text: String,
+        weight: Float? = nil,
+        aliases: [String]? = nil,
+        tokenIds: [Int]? = nil,
+        ctcTokenIds: [Int]? = nil
+    ) {
+        self.text = text
+        self.weight = weight
+        self.aliases = aliases
+        self.tokenIds = tokenIds
+        self.ctcTokenIds = ctcTokenIds
+    }
 }
 
 /// Raw JSON model for on‑disk config.

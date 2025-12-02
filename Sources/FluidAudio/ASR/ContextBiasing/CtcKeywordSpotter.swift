@@ -50,6 +50,24 @@ public struct CtcKeywordSpotter {
         public let endFrame: Int
         public let startTime: TimeInterval
         public let endTime: TimeInterval
+
+        public init(
+            term: CustomVocabularyTerm,
+            score: Float,
+            totalFrames: Int,
+            startFrame: Int,
+            endFrame: Int,
+            startTime: TimeInterval,
+            endTime: TimeInterval
+        ) {
+            self.term = term
+            self.score = score
+            self.totalFrames = totalFrames
+            self.startFrame = startFrame
+            self.endFrame = endFrame
+            self.startTime = startTime
+            self.endTime = endTime
+        }
     }
 
     public init(models: CtcModels, blankId: Int = 1024) {

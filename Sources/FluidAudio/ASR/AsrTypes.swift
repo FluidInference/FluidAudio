@@ -43,6 +43,22 @@ public struct LocalAgreementConfig: Sendable {
 
 // MARK: - Results
 
+/// Represents a word correction applied during transcription (for UI highlighting)
+public struct WordCorrection: Sendable, Equatable {
+    /// Character range in the corrected/final text string
+    public let range: Range<Int>
+    /// The original (misspelled) word from the raw transcription
+    public let original: String
+    /// The corrected (canonical) word from custom vocabulary
+    public let corrected: String
+
+    public init(range: Range<Int>, original: String, corrected: String) {
+        self.range = range
+        self.original = original
+        self.corrected = corrected
+    }
+}
+
 public struct ASRResult: Sendable {
     public let text: String
     public let confidence: Float
@@ -52,13 +68,16 @@ public struct ASRResult: Sendable {
     public let performanceMetrics: ASRPerformanceMetrics?
     public let ctcDetectedTerms: [String]?
     public let ctcAppliedTerms: [String]?
+    /// Word corrections applied via CTC keyword boosting (for UI highlighting)
+    public let corrections: [WordCorrection]?
 
     public init(
         text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval,
         tokenTimings: [TokenTiming]? = nil,
         performanceMetrics: ASRPerformanceMetrics? = nil,
         ctcDetectedTerms: [String]? = nil,
-        ctcAppliedTerms: [String]? = nil
+        ctcAppliedTerms: [String]? = nil,
+        corrections: [WordCorrection]? = nil
     ) {
         self.text = text
         self.confidence = confidence
@@ -68,6 +87,7 @@ public struct ASRResult: Sendable {
         self.performanceMetrics = performanceMetrics
         self.ctcDetectedTerms = ctcDetectedTerms
         self.ctcAppliedTerms = ctcAppliedTerms
+        self.corrections = corrections
     }
 
     /// Real-time factor (RTFx) - how many times faster than real-time

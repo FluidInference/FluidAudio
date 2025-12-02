@@ -103,8 +103,7 @@ public class CtcTokenizer {
             applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent("ctckit-pro", isDirectory: true)
-            .appendingPathComponent("parakeet-tdt_ctc-110m", isDirectory: true)
+            .appendingPathComponent(Repo.parakeetCtc110m.folderName, isDirectory: true)
     }
 }
 
@@ -160,10 +159,6 @@ extension CustomVocabularyContext {
         // Return updated context with tokenized terms
         return CustomVocabularyContext(
             terms: updatedTerms,
-            alpha: context.alpha,
-            contextScore: context.contextScore,
-            depthScaling: context.depthScaling,
-            scorePerPhrase: context.scorePerPhrase,
             minCtcScore: context.minCtcScore,
             minSimilarity: context.minSimilarity,
             minCombinedConfidence: context.minCombinedConfidence

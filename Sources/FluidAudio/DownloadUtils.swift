@@ -191,7 +191,8 @@ public class DownloadUtils {
         modelNames: [String],
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        variant: String? = nil
+        variant: String? = nil,
+        progress: ProgressHandler? = nil
     ) async throws -> [String: MLModel] {
         // Ensure host environment is logged for debugging (once per process)
         await SystemInfo.logOnce(using: logger)
@@ -199,7 +200,7 @@ public class DownloadUtils {
             // 1st attempt: normal load
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits, variant: variant)
+                directory: directory, computeUnits: computeUnits, variant: variant, progress: progress)
         } catch {
             // 1st attempt failed → wipe cache to signal redownload
             logger.warning("First load failed: \(error.localizedDescription)")
@@ -210,7 +211,7 @@ public class DownloadUtils {
             // 2nd attempt after fresh download
             return try await loadModelsOnce(
                 repo, modelNames: modelNames,
-                directory: directory, computeUnits: computeUnits, variant: variant)
+                directory: directory, computeUnits: computeUnits, variant: variant, progress: progress)
         }
     }
 
@@ -226,7 +227,8 @@ public class DownloadUtils {
         modelNames: [String],
         directory: URL,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
-        variant: String? = nil
+        variant: String? = nil,
+        progress: ProgressHandler? = nil
     ) async throws -> [String: MLModel] {
         // Ensure host environment is logged for debugging (once per process)
         await SystemInfo.logOnce(using: logger)
@@ -237,7 +239,7 @@ public class DownloadUtils {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         if !FileManager.default.fileExists(atPath: repoPath.path) {
             logger.info("Models not found in cache at \(repoPath.path)")
-            try await downloadRepo(repo, to: directory, variant: variant)
+            try await downloadRepo(repo, to: directory, variant: variant, progress: progress)
         } else {
             logger.info("Found \(repo.folderName) locally, no download needed")
         }
@@ -331,7 +333,9 @@ public class DownloadUtils {
     }
 
     /// Download a HuggingFace repository
-    private static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
+    private static func downloadRepo(
+        _ repo: Repo, to directory: URL, variant: String? = nil, progress: ProgressHandler? = nil
+    ) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
@@ -379,7 +383,8 @@ public class DownloadUtils {
                     path: file.path,
                     to: repoPath.appendingPathComponent(file.path),
                     expectedSize: file.size,
-                    config: .default
+                    config: .default,
+                    progressHandler: progress ?? createProgressHandler(for: file.path, size: file.size)
                 )
 
             default:
@@ -559,34 +564,67 @@ public class DownloadUtils {
     ) async throws {
         var request = URLRequest(url: url)
         request.timeoutInterval = config.timeout
+        if startByte > 0 {
+            request.setValue("bytes=\(startByte)-", forHTTPHeaderField: "Range")
+        }
 
-        // Use URLSession download task with progress
-        // Always use URLSession.download for reliability (proven to work in PR #32)
-        let (tempFile, response) = try await sharedSession.download(for: request)
+        let (bytes, response) = try await sharedSession.bytes(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
-            httpResponse.statusCode == 200
+            (200...299).contains(httpResponse.statusCode)
         else {
             throw URLError(.badServerResponse)
         }
 
-        // Ensure parent directory exists before moving
+        // Create parent directory
         let parentDir = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
 
-        // Move to destination with better error handling for CI
-        do {
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: tempFile, to: destination)
-        } catch {
-            // In CI, URLSession might download to a different temp location
-            // Try copying instead of moving as a fallback
-            logger.warning("Move failed, attempting copy: \(error)")
-            try FileManager.default.copyItem(at: tempFile, to: destination)
-            try? FileManager.default.removeItem(at: tempFile)
+        // Open file handle for writing
+        if !FileManager.default.fileExists(atPath: destination.path) {
+            FileManager.default.createFile(atPath: destination.path, contents: nil)
+        }
+        let fileHandle = try FileHandle(forWritingTo: destination)
+        if startByte > 0 {
+            try fileHandle.seek(toOffset: UInt64(startByte))
+        } else {
+            try fileHandle.truncate(atOffset: 0)
         }
 
-        // Report complete
+        var downloadedBytes = startByte
+        var lastReportedBytes = startByte
+
+        // Report initial progress
+        if expectedSize > 0 {
+            progressHandler?(Double(downloadedBytes) / Double(expectedSize))
+        }
+
+        // Optimization: Accumulate buffer
+        var buffer = Data(capacity: 65536)
+        for try await byte in bytes {
+            buffer.append(byte)
+            if buffer.count >= 65536 {
+                try fileHandle.write(contentsOf: buffer)
+                downloadedBytes += Int64(buffer.count)
+                buffer.removeAll(keepingCapacity: true)
+
+                // Report progress approx every 1% or 1MB
+                if expectedSize > 0 && (downloadedBytes - lastReportedBytes) > (expectedSize / 100) {
+                    progressHandler?(Double(downloadedBytes) / Double(expectedSize))
+                    lastReportedBytes = downloadedBytes
+                }
+            }
+        }
+
+        // Write remaining
+        if !buffer.isEmpty {
+            try fileHandle.write(contentsOf: buffer)
+            downloadedBytes += Int64(buffer.count)
+        }
+
+        try fileHandle.close()
+
+        // Final progress report
         progressHandler?(1.0)
     }
 

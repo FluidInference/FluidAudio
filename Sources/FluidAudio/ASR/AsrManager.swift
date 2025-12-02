@@ -100,14 +100,85 @@ public final class AsrManager {
     /// Update custom vocabulary for context biasing without reinitializing ASR
     /// - Parameter vocabulary: New custom vocabulary context, or nil to disable context biasing
     public func setCustomVocabulary(_ vocabulary: CustomVocabularyContext?) {
-        self.customVocabulary = vocabulary
-        if let vocab = vocabulary {
+        // Tokenize terms for CTC keyword spotting if they don't have ctcTokenIds
+        if var vocab = vocabulary {
+            vocab = tokenizeVocabularyForCtc(vocab)
+            self.customVocabulary = vocab
             logger.info(
                 "Custom vocabulary updated: \(vocab.terms.count) terms, "
                     + "thresholds: similarity=\(String(format: "%.2f", vocab.minSimilarity)), "
                     + "combined=\(String(format: "%.2f", vocab.minCombinedConfidence))")
         } else {
+            self.customVocabulary = nil
             logger.info("Custom vocabulary disabled")
+        }
+    }
+
+    /// Tokenize vocabulary terms for CTC keyword spotting.
+    /// This also expands aliases into separate CTC detection entries, allowing the acoustic
+    /// model to detect alias pronunciations (e.g., "xertec") while the canonical form ("zyrtec")
+    /// is used for text replacement.
+    private func tokenizeVocabularyForCtc(_ vocabulary: CustomVocabularyContext) -> CustomVocabularyContext {
+        do {
+            let tokenizer = try CtcTokenizer()
+            var expandedTerms: [CustomVocabularyTerm] = []
+            var tokenizedCount = 0
+            var aliasExpansionCount = 0
+
+            for term in vocabulary.terms {
+                // 1. Add the canonical term with its own CTC tokens
+                let canonicalTokenIds = term.ctcTokenIds ?? tokenizer.encode(term.text)
+                let canonicalTerm = CustomVocabularyTerm(
+                    text: term.text,
+                    weight: term.weight,
+                    aliases: term.aliases,
+                    tokenIds: term.tokenIds,
+                    ctcTokenIds: canonicalTokenIds
+                )
+                expandedTerms.append(canonicalTerm)
+
+                if term.ctcTokenIds == nil {
+                    tokenizedCount += 1
+                    logger.debug("Tokenized '\(term.text)': \(canonicalTokenIds)")
+                }
+
+                // 2. Expand aliases: create additional CTC detection entries for each alias
+                // The text field remains the canonical form (for replacement), but ctcTokenIds
+                // are derived from the alias spelling (for acoustic detection).
+                if let aliases = term.aliases {
+                    for alias in aliases {
+                        let aliasTokenIds = tokenizer.encode(alias)
+                        let aliasTerm = CustomVocabularyTerm(
+                            text: term.text,  // Canonical form for replacement
+                            weight: term.weight,
+                            aliases: term.aliases,
+                            tokenIds: term.tokenIds,
+                            ctcTokenIds: aliasTokenIds  // Alias tokens for acoustic matching
+                        )
+                        expandedTerms.append(aliasTerm)
+                        aliasExpansionCount += 1
+                        logger.debug("Tokenized alias '\(alias)' -> '\(term.text)': \(aliasTokenIds)")
+                    }
+                }
+            }
+
+            logger.info(
+                "CTC tokenization: \(tokenizedCount) terms tokenized, \(aliasExpansionCount) alias expansions, total \(expandedTerms.count) CTC entries"
+            )
+
+            return CustomVocabularyContext(
+                terms: expandedTerms,
+                alpha: vocabulary.alpha,
+                contextScore: vocabulary.contextScore,
+                depthScaling: vocabulary.depthScaling,
+                scorePerPhrase: vocabulary.scorePerPhrase,
+                minCtcScore: vocabulary.minCtcScore,
+                minSimilarity: vocabulary.minSimilarity,
+                minCombinedConfidence: vocabulary.minCombinedConfidence
+            )
+        } catch {
+            logger.warning("Failed to tokenize vocabulary for CTC: \(error.localizedDescription)")
+            return vocabulary
         }
     }
 
@@ -348,26 +419,122 @@ public final class AsrManager {
         source: AudioSource = .microphone,
         customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> ASRResult {
+        // Use parameter if provided, otherwise fall back to stored vocabulary
+        let effectiveVocabulary = customVocabulary ?? self.customVocabulary
+
         var result: ASRResult
         switch source {
         case .microphone:
             result = try await transcribeWithState(
-                audioSamples, decoderState: &microphoneDecoderState, customVocabulary: customVocabulary)
+                audioSamples, decoderState: &microphoneDecoderState, customVocabulary: effectiveVocabulary)
         case .system:
             result = try await transcribeWithState(
-                audioSamples, decoderState: &systemDecoderState, customVocabulary: customVocabulary)
+                audioSamples, decoderState: &systemDecoderState, customVocabulary: effectiveVocabulary)
         }
 
         // Optional CTC keyword boosting and metrics
-        if let customVocabulary, !customVocabulary.terms.isEmpty {
+        if let effectiveVocabulary, !effectiveVocabulary.terms.isEmpty {
             let debug = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+            logger.info("CTC boost: using vocabulary with \(effectiveVocabulary.terms.count) terms")
             do {
                 let spotter = try await getKeywordSpotter()
-                let detections = try await spotter.spotKeywords(
-                    audioSamples: audioSamples,
-                    customVocabulary: customVocabulary,
-                    minScore: customVocabulary.minCtcScore
-                )
+
+                // CTC model can only process ~15 seconds (240,000 samples) at a time
+                // For longer audio, process in overlapping chunks and merge detections
+                let maxChunkSamples = 240_000
+                let chunkOverlap = 32_000  // 2 seconds overlap to catch words at boundaries
+                let sampleRate = 16000.0
+                var allDetections: [CtcKeywordSpotter.KeywordDetection] = []
+
+                if audioSamples.count <= maxChunkSamples {
+                    // Short audio - process directly
+                    let detections = try await spotter.spotKeywords(
+                        audioSamples: audioSamples,
+                        customVocabulary: effectiveVocabulary,
+                        minScore: effectiveVocabulary.minCtcScore
+                    )
+                    allDetections = detections
+                } else {
+                    // Long audio - process in overlapping chunks
+                    // Overlap ensures words at chunk boundaries are detected
+                    let chunkStep = maxChunkSamples - chunkOverlap
+                    var chunkStart = 0
+                    var chunkIndex = 0
+
+                    // Time-aware deduplication: track (term, timeWindow) -> best detection
+                    // Time window of 2 seconds groups duplicate detections from overlapping chunks
+                    let deduplicationWindowSeconds = 2.0
+                    var bestDetectionsByTermAndTime: [String: CtcKeywordSpotter.KeywordDetection] = [:]
+
+                    while chunkStart < audioSamples.count {
+                        let chunkEnd = min(chunkStart + maxChunkSamples, audioSamples.count)
+                        let chunk = Array(audioSamples[chunkStart..<chunkEnd])
+
+                        // Calculate time offset for this chunk
+                        let chunkTimeOffset = Double(chunkStart) / sampleRate
+
+                        if debug && chunkIndex % 20 == 0 {
+                            logger.debug(
+                                "CTC chunk \(chunkIndex): samples \(chunkStart)-\(chunkEnd), offset \(String(format: "%.1f", chunkTimeOffset))s"
+                            )
+                        }
+
+                        let chunkDetections = try await spotter.spotKeywords(
+                            audioSamples: chunk,
+                            customVocabulary: effectiveVocabulary,
+                            minScore: effectiveVocabulary.minCtcScore
+                        )
+
+                        // Adjust detection times and deduplicate by (term, time_window)
+                        for detection in chunkDetections {
+                            // Create adjusted detection with absolute timestamps
+                            let adjustedStartTime = detection.startTime + chunkTimeOffset
+                            let adjustedEndTime = detection.endTime + chunkTimeOffset
+
+                            // Create deduplication key: term + quantized time window
+                            let timeWindow = Int(adjustedStartTime / deduplicationWindowSeconds)
+                            let dedupeKey = "\(detection.term.text)@\(timeWindow)"
+
+                            // Keep the detection with the highest score for each (term, time_window)
+                            if let existing = bestDetectionsByTermAndTime[dedupeKey] {
+                                if detection.score > existing.score {
+                                    // Replace with higher-scoring detection (adjusted times)
+                                    let adjusted = CtcKeywordSpotter.KeywordDetection(
+                                        term: detection.term,
+                                        score: detection.score,
+                                        totalFrames: detection.totalFrames,
+                                        startFrame: detection.startFrame + Int(Double(chunkStart) / sampleRate * 100),
+                                        endFrame: detection.endFrame + Int(Double(chunkStart) / sampleRate * 100),
+                                        startTime: adjustedStartTime,
+                                        endTime: adjustedEndTime
+                                    )
+                                    bestDetectionsByTermAndTime[dedupeKey] = adjusted
+                                }
+                            } else {
+                                // First detection for this (term, time_window)
+                                let adjusted = CtcKeywordSpotter.KeywordDetection(
+                                    term: detection.term,
+                                    score: detection.score,
+                                    totalFrames: detection.totalFrames,
+                                    startFrame: detection.startFrame + Int(Double(chunkStart) / sampleRate * 100),
+                                    endFrame: detection.endFrame + Int(Double(chunkStart) / sampleRate * 100),
+                                    startTime: adjustedStartTime,
+                                    endTime: adjustedEndTime
+                                )
+                                bestDetectionsByTermAndTime[dedupeKey] = adjusted
+                            }
+                        }
+
+                        chunkStart += chunkStep
+                        chunkIndex += 1
+                    }
+
+                    allDetections = Array(bestDetectionsByTermAndTime.values)
+                    logger.info(
+                        "CTC boost: processed \(chunkIndex) chunks, found \(allDetections.count) unique detections")
+                }
+
+                let detections = allDetections
 
                 let detectedTerms = detections.map { $0.term.text }
 
@@ -379,7 +546,7 @@ public final class AsrManager {
                     let mergeResult = KeywordMerger.applyCorrections(
                         detections: detections,
                         toTranscript: result.text,
-                        vocabulary: customVocabulary,
+                        vocabulary: effectiveVocabulary,
                         debugMode: debug
                     )
 
@@ -389,6 +556,23 @@ public final class AsrManager {
                         detectedTerms
                         .filter { loweredCorrected.contains($0.lowercased()) }
 
+                    // Convert replacements to WordCorrection with character positions
+                    let corrections = Self.computeWordCorrections(
+                        from: mergeResult.replacements,
+                        in: mergeResult.correctedText
+                    )
+
+                    // Always log correction info for debugging
+                    logger.info(
+                        "CTC boost: \(mergeResult.replacements.count) replacements → \(corrections.count) corrections")
+                    if debug {
+                        for correction in corrections {
+                            logger.info(
+                                "  Correction: '\(correction.original)' → '\(correction.corrected)' at \(correction.range)"
+                            )
+                        }
+                    }
+
                     result = ASRResult(
                         text: mergeResult.correctedText,
                         confidence: result.confidence,
@@ -397,7 +581,8 @@ public final class AsrManager {
                         tokenTimings: result.tokenTimings,
                         performanceMetrics: result.performanceMetrics,
                         ctcDetectedTerms: filteredDetected.isEmpty ? nil : filteredDetected,
-                        ctcAppliedTerms: appliedTerms.isEmpty ? nil : appliedTerms
+                        ctcAppliedTerms: appliedTerms.isEmpty ? nil : appliedTerms,
+                        corrections: corrections.isEmpty ? nil : corrections
                     )
                 } else if !detectedTerms.isEmpty {
                     let loweredText = result.text.lowercased()
@@ -415,6 +600,7 @@ public final class AsrManager {
                 }
             } catch {
                 logger.warning("CTC keyword boost failed: \(error.localizedDescription)")
+                print("[ERROR] CTC keyword boost failed: \(error)")
             }
         }
 
@@ -432,6 +618,50 @@ public final class AsrManager {
         let spotter = try await CtcKeywordSpotter.makeDefault()
         cachedCtcKeywordSpotter = spotter
         return spotter
+    }
+
+    /// Convert KeywordMerger replacements to WordCorrection with character positions
+    /// - Parameters:
+    ///   - replacements: Replacements from KeywordMerger
+    ///   - correctedText: The final corrected text
+    /// - Returns: Array of WordCorrection with character ranges
+    private static func computeWordCorrections(
+        from replacements: [KeywordMerger.MergeResult.Replacement],
+        in correctedText: String
+    ) -> [WordCorrection] {
+        guard !replacements.isEmpty else { return [] }
+
+        var corrections: [WordCorrection] = []
+        var searchStartIndex = correctedText.startIndex
+
+        // Sort replacements by word index to process in order
+        let sortedReplacements = replacements.sorted { $0.wordIndex < $1.wordIndex }
+
+        for replacement in sortedReplacements {
+            let canonical = replacement.canonicalText
+
+            // Find the canonical text in the corrected text starting from searchStartIndex
+            if let range = correctedText.range(
+                of: canonical,
+                options: .caseInsensitive,
+                range: searchStartIndex..<correctedText.endIndex
+            ) {
+                let startOffset = correctedText.distance(from: correctedText.startIndex, to: range.lowerBound)
+                let endOffset = correctedText.distance(from: correctedText.startIndex, to: range.upperBound)
+
+                corrections.append(
+                    WordCorrection(
+                        range: startOffset..<endOffset,
+                        original: replacement.originalText,
+                        corrected: canonical
+                    ))
+
+                // Move search start past this match to handle duplicates correctly
+                searchStartIndex = range.upperBound
+            }
+        }
+
+        return corrections
     }
 
     // Reset both decoder states
