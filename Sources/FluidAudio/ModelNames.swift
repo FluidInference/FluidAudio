@@ -5,7 +5,7 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
-    case parakeetCtc110m = "argmaxinc/ctckit-pro"
+    case parakeetCtc110m = "alexwengg/parakeet-ctc-110m-coreml"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
 
@@ -19,7 +19,7 @@ public enum Repo: String, CaseIterable {
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
-            return "ctckit-pro"
+            return "parakeet-ctc-110m-coreml"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -31,8 +31,7 @@ public enum Repo: String, CaseIterable {
     public var remotePath: String {
         switch self {
         case .parakeetCtc110m:
-            // Uses Argmax CoreML export for Parakeet CTC 110M
-            return rawValue
+            return "alexwengg/\(name)"
         default:
             return "FluidInference/\(name)"
         }
@@ -140,16 +139,14 @@ public enum ModelNames {
 
     /// CTC keyword spotting model names (Parakeet-TDT CTC 110M).
     public enum CTC {
-        public static let subfolder = "parakeet-tdt_ctc-110m"
-
         public static let melSpectrogram = "MelSpectrogram"
         public static let audioEncoder = "AudioEncoder"
 
-        public static let melSpectrogramPath = subfolder + "/" + melSpectrogram + ".mlmodelc"
-        public static let audioEncoderPath = subfolder + "/" + audioEncoder + ".mlmodelc"
+        public static let melSpectrogramPath = melSpectrogram + ".mlmodelc"
+        public static let audioEncoderPath = audioEncoder + ".mlmodelc"
 
         // Vocabulary JSON path (shared by Python/Nemo and CoreML exports).
-        public static let vocabularyPath = subfolder + "/vocab.json"
+        public static let vocabularyPath = "vocab.json"
 
         public static let requiredModels: Set<String> = [
             melSpectrogramPath,

@@ -294,7 +294,8 @@ extension AsrModels {
     public static func download(
         to directory: URL? = nil,
         force: Bool = false,
-        version: AsrModelVersion = .v3
+        version: AsrModelVersion = .v3,
+        progress: ((Double) -> Void)? = nil
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(for: version)
         logger.info("Downloading ASR models to: \(targetDir.path)")
@@ -327,13 +328,30 @@ extension AsrModels {
             DownloadSpec(fileName: Names.jointFile(for: version.repo), computeUnits: defaultUnits),
         ]
 
+        // Calculate weights for progress reporting
+        // Encoder is approx 110MB, others are small.
+        // Weights: Encoder=0.9, others split the rest
+        let weights: [String: Double] = [
+            Names.encoderFile: 0.90
+        ]
+        let defaultWeight = 0.03
+
+        var accumulatedProgress = 0.0
+
         for spec in specs {
+            let weight = weights[spec.fileName] ?? defaultWeight
+
             _ = try await DownloadUtils.loadModels(
                 version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDir,
-                computeUnits: spec.computeUnits
+                computeUnits: spec.computeUnits,
+                progress: { fileProgress in
+                    let scaledProgress = accumulatedProgress + (fileProgress * weight)
+                    progress?(scaledProgress)
+                }
             )
+            accumulatedProgress += weight
         }
 
         logger.info("Successfully downloaded ASR models")
@@ -343,9 +361,10 @@ extension AsrModels {
     public static func downloadAndLoad(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        version: AsrModelVersion = .v3
+        version: AsrModelVersion = .v3,
+        progress: ((Double) -> Void)? = nil
     ) async throws -> AsrModels {
-        let targetDir = try await download(to: directory, version: version)
+        let targetDir = try await download(to: directory, version: version, progress: progress)
         return try await load(from: targetDir, configuration: configuration, version: version)
     }
 

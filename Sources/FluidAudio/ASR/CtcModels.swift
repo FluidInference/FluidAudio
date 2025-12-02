@@ -74,7 +74,11 @@ extension CtcModels {
 
     /// Download CTC models to the default cache directory (or a custom one) if needed.
     @discardableResult
-    public static func download(to directory: URL? = nil, force: Bool = false) async throws -> URL {
+    public static func download(
+        to directory: URL? = nil,
+        force: Bool = false,
+        progress: ((Double) -> Void)? = nil
+    ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory()
         logger.info("Preparing CTC models at: \(targetDir.path)")
 
@@ -92,22 +96,43 @@ extension CtcModels {
             }
         }
 
-        _ = try await DownloadUtils.loadModels(
-            .parakeetCtc110m,
-            modelNames: [
-                ModelNames.CTC.melSpectrogramPath,
-                ModelNames.CTC.audioEncoderPath,
-            ],
-            directory: parentDir
-        )
+        // Weights for progress
+        let weights: [String: Double] = [
+            ModelNames.CTC.audioEncoderPath: 0.95
+        ]
+        let defaultWeight = 0.05
+        var accumulatedProgress = 0.0
+
+        let modelNames = [
+            ModelNames.CTC.melSpectrogramPath,
+            ModelNames.CTC.audioEncoderPath,
+        ]
+
+        for name in modelNames {
+            let weight = weights[name] ?? defaultWeight
+
+            _ = try await DownloadUtils.loadModels(
+                .parakeetCtc110m,
+                modelNames: [name],
+                directory: parentDir,
+                progress: { fileProgress in
+                    let scaledProgress = accumulatedProgress + (fileProgress * weight)
+                    progress?(scaledProgress)
+                }
+            )
+            accumulatedProgress += weight
+        }
 
         logger.info("Successfully downloaded CTC models")
         return targetDir
     }
 
     /// Convenience helper that downloads (if needed) and loads the CTC models.
-    public static func downloadAndLoad(to directory: URL? = nil) async throws -> CtcModels {
-        let targetDir = try await download(to: directory)
+    public static func downloadAndLoad(
+        to directory: URL? = nil,
+        progress: ((Double) -> Void)? = nil
+    ) async throws -> CtcModels {
+        let targetDir = try await download(to: directory, progress: progress)
         return try await load(from: targetDir)
     }
 
