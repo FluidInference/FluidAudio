@@ -140,6 +140,17 @@ final class EspeakG2P {
             }
         }
 
+        // Final Fallback: Check if resources are flattened into the main bundle (common in some release builds)
+        if espeakBundle == nil {
+            if let resourceURL = Bundle.main.resourceURL {
+                let flattenedDataDir = resourceURL.appendingPathComponent("espeak-ng-data")
+                if FileManager.default.fileExists(atPath: flattenedDataDir.path) {
+                    staticLogger.info("Found espeak-ng-data flattened in main bundle resources")
+                    return flattenedDataDir
+                }
+            }
+        }
+
         guard let espeakBundle = espeakBundle else {
             staticLogger.error("ESpeakNG.framework not found; ensure it is embedded with the application.")
             staticLogger.debug("Available bundles: \(Bundle.allBundles.map { $0.bundleIdentifier ?? $0.bundlePath })")
@@ -151,12 +162,33 @@ final class EspeakG2P {
             throw EspeakG2PError.dataBundleMissing  // Or a more specific error if needed
         }
 
-        let dataDir = resourceURL.appendingPathComponent("espeak-ng-data")
+        var dataDir = resourceURL.appendingPathComponent("espeak-ng-data")
 
-        guard FileManager.default.fileExists(atPath: dataDir.path) else {
-            staticLogger.error(
-                "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
-            throw EspeakG2PError.dataBundleMissing
+        if !FileManager.default.fileExists(atPath: dataDir.path) {
+            // One last check: maybe it's not in the framework resource URL but in the main bundle resource URL?
+            // This happens if the framework resources are copied to the main bundle during build.
+            if let mainResourceURL = Bundle.main.resourceURL {
+                let mainDataDir = mainResourceURL.appendingPathComponent("espeak-ng-data")
+                if FileManager.default.fileExists(atPath: mainDataDir.path) {
+                    staticLogger.info("Found espeak-ng-data in main bundle resources (fallback)")
+                    dataDir = mainDataDir
+                } else {
+                    staticLogger.error(
+                        "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
+                    throw EspeakG2PError.dataBundleMissing
+                }
+            } else {
+                staticLogger.error(
+                    "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
+                throw EspeakG2PError.dataBundleMissing
+            }
+        }
+
+        // Check for nested espeak-ng-data (common in some framework structures)
+        let nestedDataDir = dataDir.appendingPathComponent("espeak-ng-data")
+        if FileManager.default.fileExists(atPath: nestedDataDir.path) {
+            staticLogger.debug("Found nested espeak-ng-data directory, descending...")
+            dataDir = nestedDataDir
         }
 
         let voicesPath = dataDir.appendingPathComponent("voices")
