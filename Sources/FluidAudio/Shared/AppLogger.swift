@@ -103,7 +103,13 @@ actor LogConsole {
         let timestamp = dateFormatter.string(from: Date())
         let line = "[\(timestamp)] [\(label(for: level))] [FluidAudio.\(category)] \(message)\n"
         if let data = line.data(using: .utf8) {
-            FileHandle.standardError.write(data)
+            do {
+                try FileHandle.standardError.write(contentsOf: data)
+            } catch {
+                // If an I/O error occurs (e.g., the disk is full, the pipe is closed),
+                // the program won't crash. Instead, you handle the error here.
+                print("Fatal: Failed to write to standard error. Underlying error: \(error.localizedDescription)")
+            }
         }
     }
 
