@@ -161,17 +161,34 @@ final class EspeakG2P {
             staticLogger.error("ESpeakNG.framework has no resource URL at \(espeakBundle.bundlePath)")
             throw EspeakG2PError.dataBundleMissing  // Or a more specific error if needed
         }
-
         var dataDir = resourceURL.appendingPathComponent("espeak-ng-data")
+
+        // Check for .bundle variant (espeak-ng-data.bundle/espeak-ng-data)
+        // The xcframework packages data inside a .bundle wrapper
+        if !FileManager.default.fileExists(atPath: dataDir.path) {
+            let bundleDataDir = resourceURL
+                .appendingPathComponent("espeak-ng-data.bundle")
+                .appendingPathComponent("espeak-ng-data")
+            if FileManager.default.fileExists(atPath: bundleDataDir.path) {
+                staticLogger.info("Found espeak-ng-data inside .bundle wrapper")
+                dataDir = bundleDataDir
+            }
+        }
 
         if !FileManager.default.fileExists(atPath: dataDir.path) {
             // One last check: maybe it's not in the framework resource URL but in the main bundle resource URL?
             // This happens if the framework resources are copied to the main bundle during build.
             if let mainResourceURL = Bundle.main.resourceURL {
                 let mainDataDir = mainResourceURL.appendingPathComponent("espeak-ng-data")
+                let mainBundleDataDir = mainResourceURL
+                    .appendingPathComponent("espeak-ng-data.bundle")
+                    .appendingPathComponent("espeak-ng-data")
                 if FileManager.default.fileExists(atPath: mainDataDir.path) {
                     staticLogger.info("Found espeak-ng-data in main bundle resources (fallback)")
                     dataDir = mainDataDir
+                } else if FileManager.default.fileExists(atPath: mainBundleDataDir.path) {
+                    staticLogger.info("Found espeak-ng-data.bundle in main bundle resources (fallback)")
+                    dataDir = mainBundleDataDir
                 } else {
                     staticLogger.error(
                         "espeak-ng-data directory missing from ESpeakNG.framework resources at \(dataDir.path)")
