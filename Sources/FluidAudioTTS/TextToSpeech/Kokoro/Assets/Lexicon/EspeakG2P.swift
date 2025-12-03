@@ -166,7 +166,8 @@ final class EspeakG2P {
         // Check for .bundle variant (espeak-ng-data.bundle/espeak-ng-data)
         // The xcframework packages data inside a .bundle wrapper
         if !FileManager.default.fileExists(atPath: dataDir.path) {
-            let bundleDataDir = resourceURL
+            let bundleDataDir =
+                resourceURL
                 .appendingPathComponent("espeak-ng-data.bundle")
                 .appendingPathComponent("espeak-ng-data")
             if FileManager.default.fileExists(atPath: bundleDataDir.path) {
@@ -180,7 +181,8 @@ final class EspeakG2P {
             // This happens if the framework resources are copied to the main bundle during build.
             if let mainResourceURL = Bundle.main.resourceURL {
                 let mainDataDir = mainResourceURL.appendingPathComponent("espeak-ng-data")
-                let mainBundleDataDir = mainResourceURL
+                let mainBundleDataDir =
+                    mainResourceURL
                     .appendingPathComponent("espeak-ng-data.bundle")
                     .appendingPathComponent("espeak-ng-data")
                 if FileManager.default.fileExists(atPath: mainDataDir.path) {
