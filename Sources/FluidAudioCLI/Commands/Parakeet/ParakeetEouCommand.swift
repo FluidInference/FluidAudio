@@ -121,8 +121,10 @@ struct ParakeetEouCommand {
             
             try audioFile.read(into: buffer)
             
+            await manager.reset()
             let startTime = Date()
-            let transcript = try await manager.process(audioBuffer: buffer)
+            var transcript = try await manager.process(audioBuffer: buffer)
+            transcript += try await manager.finish()
             let duration = Date().timeIntervalSince(startTime)
             
             logger.info("--- Transcript ---")
@@ -198,8 +200,10 @@ struct ParakeetEouCommand {
                 // StreamingEouAsrManager handles resampling internally in `process(audioBuffer:)`?
                 // Yes, it calls `audioConverter.resampleBuffer(audioBuffer)`
                 
+                await manager.reset()
                 let startTime = Date()
-                let transcript = try await manager.process(audioBuffer: buffer)
+                var transcript = try await manager.process(audioBuffer: buffer)
+                transcript += try await manager.finish()
                 let duration = Date().timeIntervalSince(startTime)
                 
                 let wer = calculateWer(hypothesis: transcript, reference: reference)

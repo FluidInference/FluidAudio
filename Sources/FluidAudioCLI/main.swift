@@ -147,6 +147,8 @@ Task {
         // But here we are manually dispatching.
         // Let's try passing just the flags.
         await ParakeetEouCommand.main(Array(arguments.dropFirst(2)))
+    case "debug-encoder":
+        await DebugEncoderCommand.main(Array(arguments.dropFirst(2)))
     case "help", "--help", "-h":
         printUsage()
         exitWithPeakMemory(0)

@@ -18,7 +18,7 @@ public final class RnntDecoder {
     // Constants
     private let blankId: Int32 = 1026
     private let eouId: Int32 = 1024 // Verified EOU ID
-    private let maxSymbolsPerStep = 10
+    private let maxSymbolsPerStep = 2
     private let hiddenSize = 640
     private let layers = 1
     
@@ -108,8 +108,7 @@ public final class RnntDecoder {
                         // Stricter threshold: 2
                         if consecutiveTokenCount >= 2 {
                             // Force break (treat as blank) to break the loop
-                            // print("Repetition detected: \(tokenId) x\(consecutiveTokenCount). Breaking.")
-                            consecutiveTokenCount = 0
+                            // Do NOT reset count here, so next frame also breaks if same token
                             break
                         }
                     } else {

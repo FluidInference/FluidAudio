@@ -23,7 +23,7 @@ public actor StreamingEouAsrManager {
     private var tokenizer: Tokenizer?
     
     // Configuration
-    private let chunkFrames = 135
+    private let chunkFrames = 128
     private let shiftFrames = 120
     private let hopLength = 160
     private var chunkSamples: Int { chunkFrames * hopLength } // 21600
@@ -79,6 +79,40 @@ public actor StreamingEouAsrManager {
         
         processedSteps += 1
         return transcript
+    }
+    
+    public func finish() async throws -> String {
+        var transcript = ""
+        
+        // If there is remaining audio, pad it and process
+        if !audioBuffer.isEmpty {
+            let remaining = audioBuffer.count
+            // Only process if we have a significant amount of audio left, or if it's the only audio
+            // But for safety, let's just process whatever is left if it's non-empty
+            
+            let paddingNeeded = chunkSamples - remaining
+            if paddingNeeded > 0 {
+                audioBuffer.append(contentsOf: Array(repeating: 0.0, count: paddingNeeded))
+            }
+            
+            // Process final chunk
+            // Note: We don't shift here because it's the end
+            let chunk = Array(audioBuffer.prefix(chunkSamples))
+            let newText = try await processChunk(chunk)
+            transcript += newText
+            
+            // Clear buffer
+            audioBuffer.removeAll()
+        }
+        
+        return transcript
+    }
+    
+    public func reset() {
+        self.encoderState.reset()
+        self.rnntDecoder?.resetState()
+        self.audioBuffer.removeAll()
+        self.processedSteps = 0
     }
     
     private func processChunk(_ samples: [Float]) async throws -> String {

@@ -425,7 +425,8 @@ def main(
     
     # Set streaming params
     # chunk_size=16 (default)
-    # shift_size=15 -> 1 frame overlap/drop
+    # chunk_size=16 (128 mel frames)
+    # shift_size=15 (120 mel frames) -> 1 frame overlap (8 mel frames)
     asr_model.encoder.setup_streaming_params(chunk_size=16, shift_size=15)
     print(f"DEBUG: Streaming Config: {asr_model.encoder.streaming_cfg}", flush=True)
 
@@ -478,7 +479,7 @@ def main(
         return
 
     # Get chunk size from streaming config
-    chunk_size = 8  # Default
+    chunk_size = 16  # Default
     if streaming_cfg and streaming_cfg.chunk_size:
         cs = streaming_cfg.chunk_size
         chunk_size = int(cs[0]) if isinstance(cs, (list, tuple)) else int(cs)
@@ -547,8 +548,8 @@ def main(
     # Use fixed chunk wrapper for diagnostic (single large chunk)
     pre_encode_wrapper = FixedChunkPreEncodeWrapper(pre_encode, mel_dim)
 
-    # Chunk size for input (1.35s = 135 frames)
-    chunk_size_in = 135 
+    # Chunk size for input (1.28s = 128 frames)
+    chunk_size_in = 128 
     
     # Test inputs
     # CRITICAL: Must match PreEncodeWrapper expectation [B, D, T]
@@ -749,7 +750,7 @@ def main(
     print(f"Traced model output shape: {out[0].shape}")
     
     single_encoder_inputs = [
-        ct.TensorType(name="mel", shape=(1, mel_dim, 135), dtype=np.float32), 
+        ct.TensorType(name="mel", shape=(1, mel_dim, 128), dtype=np.float32), 
         ct.TensorType(name="mel_length", shape=(1,), dtype=np.int32),
         ct.TensorType(name="cache_last_channel", shape=test_cache_channel.shape, dtype=np.float32),
         ct.TensorType(name="cache_last_time", shape=test_cache_time.shape, dtype=np.float32),
