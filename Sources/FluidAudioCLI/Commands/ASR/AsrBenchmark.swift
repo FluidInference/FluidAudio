@@ -386,7 +386,7 @@ public class ASRBenchmark {
         return filteredFiles
     }
 
-    private func getLibriSpeechDirectory() -> URL {
+    public func getLibriSpeechDirectory() -> URL {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
