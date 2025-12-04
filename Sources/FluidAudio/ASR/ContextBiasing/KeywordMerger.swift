@@ -45,7 +45,7 @@ public struct KeywordMerger {
 
         let debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
         if debugMode {
-            print("[KeywordMerger] Using \(activeEncoder.description) for phonetic encoding")
+            logger.debug("[KeywordMerger] Using \(activeEncoder.description) for phonetic encoding")
         }
     }
 
@@ -403,6 +403,10 @@ public struct KeywordMerger {
             let canonical = detection.term.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !canonical.isEmpty else { continue }
 
+            if debugMode && canonical.lowercased().contains("prevnar") {
+                logger.debug("[Detection] Processing '\(canonical)', transcript: '\(transcript.prefix(100))...'")
+            }
+
             // Build list of all forms to check (canonical + aliases)
             var allForms = [canonical]
             if let aliases = detection.term.aliases {
@@ -424,29 +428,32 @@ public struct KeywordMerger {
             for formToMatch in allForms {
                 let formWords = formToMatch.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
 
-                // Try single-word matches
-                for (i, _) in words.enumerated() {
-                    let cleanWord = cleanedWords[i]
+                // Try single-word matches (only for single-word vocabulary terms)
+                // Multi-word phrases are handled in the multi-word matching section below
+                if formWords.count == 1 {
+                    for (i, _) in words.enumerated() {
+                        let cleanWord = cleanedWords[i]
 
-                    // Check if this word matches any alias (case-insensitive) - always allow alias corrections
-                    let isAliasMatch = allForms.contains { $0.lowercased() == cleanWord.lowercased() }
+                        // Check if this word matches any alias (case-insensitive) - always allow alias corrections
+                        let isAliasMatch = allForms.contains { $0.lowercased() == cleanWord.lowercased() }
 
-                    // Only replace capitalized words (proper nouns), unless it's an alias match
-                    // This naturally filters out most common words (verbs, pronouns, etc.) which are lowercase
-                    guard cleanWord.first?.isUppercase == true || isAliasMatch else {
-                        continue
-                    }
+                        // Only replace capitalized words (proper nouns), unless it's an alias match
+                        // This naturally filters out most common words (verbs, pronouns, etc.) which are lowercase
+                        guard cleanWord.first?.isUppercase == true || isAliasMatch else {
+                            continue
+                        }
 
-                    let targetWord = formWords[0]
-                    let similarity = combinedSimilarity(cleanWord, targetWord, encoder: encoder)
+                        let targetWord = formWords[0]
+                        let similarity = combinedSimilarity(cleanWord, targetWord, encoder: encoder)
 
-                    if similarity >= minSimilarity {
-                        if let existing = bestMatch {
-                            if similarity > existing.similarity {
-                                bestMatch = (i, similarity, formWords.count)
+                        if similarity >= minSimilarity {
+                            if let existing = bestMatch {
+                                if similarity > existing.similarity {
+                                    bestMatch = (i, similarity, 1)
+                                }
+                            } else {
+                                bestMatch = (i, similarity, 1)
                             }
-                        } else {
-                            bestMatch = (i, similarity, formWords.count)
                         }
                     }
                 }
@@ -490,20 +497,31 @@ public struct KeywordMerger {
 
                 // Try multi-word matches if form has multiple words
                 if formWords.count > 1 {
+                    let debugEnv = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+                    if debugEnv && formToMatch.lowercased().contains("prevnar") {
+                        logger.debug("[MultiWord] Trying to match '\(formToMatch)' (formWords: \(formWords))")
+                    }
+
                     for startIdx in 0..<words.count {
-                        let endIdx = min(startIdx + formWords.count, words.count)
-                        let span = words[startIdx..<endIdx]
+                        let endIdx = startIdx + formWords.count
+                        // Ensure we have enough words remaining for full phrase match
+                        guard endIdx <= words.count else { continue }
+
+                        let span = Array(words[startIdx..<endIdx])
+                        let cleanedSpan = span.map { $0.trimmingCharacters(in: .punctuationCharacters) }
 
                         // Only replace if first word is capitalized (proper noun phrase)
-                        let firstWord = cleanedWords[startIdx]
-                        guard firstWord.first?.isUppercase == true else {
+                        guard cleanedSpan[0].first?.isUppercase == true else {
                             continue
                         }
 
-                        let spanText = span.map { $0.trimmingCharacters(in: .punctuationCharacters) }.joined(
-                            separator: " ")
+                        if debugEnv && formToMatch.lowercased().contains("prevnar") {
+                            logger.debug("[MultiWord] Checking span: \(cleanedSpan) vs \(formWords)")
+                        }
 
-                        let similarity = combinedSimilarity(spanText, formToMatch, encoder: encoder)
+                        // Compare word-by-word for better phonetic matching of phrases
+                        let similarity = multiWordSimilarity(
+                            cleanedSpan, formWords.map { String($0) }, encoder: encoder)
 
                         if similarity >= minSimilarity {
                             if let existing = bestMatch {
@@ -567,11 +585,10 @@ public struct KeywordMerger {
         var selectedReplacements: [InternalReplacement] = []
         for (wordIdx, candidates) in replacementsByIndex {
             if debugMode && candidates.count > 1 {
-                logger.info(
-                    "KeywordMerger: Conflict at word \(wordIdx) ('\(words[wordIdx])'): \(candidates.count) candidates")
+                logger.debug("[Conflict] at word \(wordIdx) ('\(words[wordIdx])'): \(candidates.count) candidates")
                 for c in candidates {
-                    logger.info(
-                        "  - '\(c.canonical)' sim=\(String(format: "%.2f", c.similarity)) conf=\(String(format: "%.2f", c.combinedConfidence))"
+                    logger.debug(
+                        "  - '\(c.canonical)' sim=\(String(format: "%.2f", c.similarity)) span=\(c.spanLength) conf=\(String(format: "%.2f", c.combinedConfidence))"
                     )
                 }
             }
@@ -597,7 +614,7 @@ public struct KeywordMerger {
 
             if let best = best {
                 if debugMode && candidates.count > 1 {
-                    logger.info("  → Selected '\(best.canonical)'")
+                    logger.debug("  → Selected '\(best.canonical)'")
                 }
                 selectedReplacements.append(best)
             }
@@ -753,11 +770,51 @@ public struct KeywordMerger {
         return 1.0 - Float(dist) / Float(maxLen)
     }
 
+    /// Compute similarity for multi-word phrases by comparing word-by-word
+    /// Returns average similarity across all word pairs
+    private static func multiWordSimilarity(
+        _ transcriptWords: [String],
+        _ vocabWords: [String],
+        encoder: Any? = nil
+    ) -> Float {
+        guard transcriptWords.count == vocabWords.count, !transcriptWords.isEmpty else {
+            return 0.0
+        }
+
+        var totalSimilarity: Float = 0.0
+        let debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+
+        for (tWord, vWord) in zip(transcriptWords, vocabWords) {
+            let wordSim = combinedSimilarity(tWord, vWord, encoder: encoder)
+            totalSimilarity += wordSim
+            if debugMode && (vocabWords.first?.lowercased().contains("prevnar") == true) {
+                logger.debug("[MultiWordSim] '\(tWord)' vs '\(vWord)' = \(String(format: "%.3f", wordSim))")
+            }
+        }
+
+        let avgSim = totalSimilarity / Float(transcriptWords.count)
+        if debugMode && (vocabWords.first?.lowercased().contains("prevnar") == true) {
+            logger.debug(
+                "[MultiWordSim] Total: \(transcriptWords) vs \(vocabWords) = \(String(format: "%.3f", avgSim))")
+        }
+
+        return avgSim
+    }
+
     /// Compute combined character + phonetic similarity with multi-factor gating
     private static func combinedSimilarity(_ a: String, _ b: String, encoder: Any? = nil) -> Float {
-        let phoneSim = phoneticSimilarity(a, b, encoder: encoder)
         let charSim = characterSimilarity(a, b)
         let lenRatio = Float(min(a.count, b.count)) / Float(max(a.count, b.count))
+
+        // For purely numeric strings, use only character similarity
+        // Phonetic encoding doesn't work well for numbers (e.g., "13" vs "20")
+        let aIsNumeric = a.allSatisfy { $0.isNumber }
+        let bIsNumeric = b.allSatisfy { $0.isNumber }
+        if aIsNumeric || bIsNumeric {
+            return charSim
+        }
+
+        let phoneSim = phoneticSimilarity(a, b, encoder: encoder)
 
         // Poor length ratio: heavy penalty
         if lenRatio < 0.6 {

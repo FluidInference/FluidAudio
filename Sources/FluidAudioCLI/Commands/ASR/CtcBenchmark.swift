@@ -83,11 +83,17 @@ public class CtcBenchmark {
         logger.info("Processing \(samplesToProcess) samples starting at index \(clampedStart)")
 
         // Load custom vocabulary if provided
+        // Supports both JSON format (.json) and simple text format (.txt)
         var customVocab: CustomVocabularyContext?
         if let vocabPath = customVocabPath {
             let vocabURL = URL(fileURLWithPath: vocabPath)
-            customVocab = try CustomVocabularyContext.load(from: vocabURL)
-            logger.info("Loaded vocabulary with \(customVocab?.terms.count ?? 0) terms")
+            let isJson = vocabURL.pathExtension.lowercased() == "json"
+            if isJson {
+                customVocab = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: vocabURL)
+            } else {
+                customVocab = try CustomVocabularyContext.loadFromSimpleFormatWithTokenization(from: vocabURL)
+            }
+            logger.info("Loaded vocabulary with \(customVocab?.terms.count ?? 0) terms (tokenized for CTC)")
         }
 
         // Initialize ASR manager

@@ -364,13 +364,18 @@ public actor StreamingAsrManager {
     }
 
     private func applyKeywordCorrections(
-        to text: String, audioSamples: [Float]
+        to text: String, tokenTimings: [TokenTiming], audioSamples: [Float]
     ) async -> (text: String, corrections: [CorrectedWord]) {
         // Apply artifact cleaning BEFORE keyword correction
         let cleanedText = fixChunkBoundaryArtifacts(text)
 
         guard let vocabulary = customVocabulary, !vocabulary.terms.isEmpty else {
             logger.debug("CTC correction skipped: no custom vocabulary")
+            return (cleanedText, [])
+        }
+
+        guard !tokenTimings.isEmpty else {
+            logger.debug("CTC correction skipped: no token timings available")
             return (cleanedText, [])
         }
 
@@ -406,50 +411,33 @@ public actor StreamingAsrManager {
                     "CTC: \(detections.count) detections but no replacements applied to '\(text.prefix(50))...'")
             }
 
-            // Convert word-based replacements to character ranges in the corrected text
-            let corrections = Self.extractCorrectionRanges(
-                from: mergeResult.replacements,
-                in: mergeResult.correctedText
-            )
+            // Compute character ranges by finding each corrected word in the result text
+            var corrections: [CorrectedWord] = []
+            var searchStart = mergeResult.correctedText.startIndex
+            for replacement in mergeResult.replacements {
+                if let range = mergeResult.correctedText.range(
+                    of: replacement.canonicalText,
+                    range: searchStart..<mergeResult.correctedText.endIndex
+                ) {
+                    let startOffset = mergeResult.correctedText.distance(
+                        from: mergeResult.correctedText.startIndex, to: range.lowerBound)
+                    let endOffset = mergeResult.correctedText.distance(
+                        from: mergeResult.correctedText.startIndex, to: range.upperBound)
+                    corrections.append(
+                        CorrectedWord(
+                            range: startOffset..<endOffset,
+                            original: replacement.originalText,
+                            corrected: replacement.canonicalText
+                        ))
+                    searchStart = range.upperBound
+                }
+            }
 
             return (mergeResult.correctedText, corrections)
         } catch {
             logger.warning("CTC keyword correction failed: \(error.localizedDescription)")
             return (text, [])
         }
-    }
-
-    /// Extract character-level correction ranges from word-based replacements
-    private static func extractCorrectionRanges(
-        from replacements: [KeywordMerger.MergeResult.Replacement],
-        in correctedText: String
-    ) -> [CorrectedWord] {
-        var corrections: [CorrectedWord] = []
-
-        for replacement in replacements {
-            // Find the canonical word in the corrected text
-            // We search for the exact corrected word
-            let searchTerm = replacement.canonicalText
-            var searchRange = correctedText.startIndex..<correctedText.endIndex
-
-            // Find all occurrences and pick the most likely one based on context
-            while let range = correctedText.range(of: searchTerm, options: .caseInsensitive, range: searchRange) {
-                let startOffset = correctedText.distance(from: correctedText.startIndex, to: range.lowerBound)
-                let endOffset = correctedText.distance(from: correctedText.startIndex, to: range.upperBound)
-
-                corrections.append(
-                    CorrectedWord(
-                        range: startOffset..<endOffset,
-                        original: replacement.originalText,
-                        corrected: replacement.canonicalText
-                    ))
-
-                // Only take the first match for now (most replacements are unique)
-                break
-            }
-        }
-
-        return corrections
     }
 
     /// Get an async stream of transcription updates
@@ -729,7 +717,9 @@ public actor StreamingAsrManager {
             // Apply CTC keyword corrections if custom vocabulary is set
             if customVocabulary != nil {
                 let (correctedText, chunkCorrections) = await applyKeywordCorrections(
-                    to: interim.text, audioSamples: windowSamples)
+                    to: interim.text,
+                    tokenTimings: interim.tokenTimings ?? [],
+                    audioSamples: windowSamples)
                 if correctedText != interim.text {
                     interim = ASRResult(
                         text: correctedText,

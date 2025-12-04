@@ -2,16 +2,6 @@ import CoreML
 import Foundation
 import OSLog
 
-// Helper for stderr output
-fileprivate struct StderrOutputStream: TextOutputStream {
-    func write(_ string: String) {
-        if let data = string.data(using: .utf8) {
-            FileHandle.standardError.write(data)
-        }
-    }
-}
-fileprivate var standardError = StderrOutputStream()
-
 /// Swift implementation of CTC keyword spotting for Parakeet-TDT CTC 110M,
 /// mirroring the NeMo `ctc_word_spot` dynamic programming algorithm.
 ///
@@ -115,12 +105,10 @@ public struct CtcKeywordSpotter {
         guard !logProbs.isEmpty else { return [] }
 
         if debugMode {
-            print("=== CTC Keyword Spotter Debug ===", to: &standardError)
-            print(
-                "Audio samples: \(audioSamples.count), frames: \(logProbs.count)",
-                to: &standardError)
-            print("Vocab size: \(logProbs[0].count), blank ID: \(blankId)", to: &standardError)
-            print("Terms to spot: \(customVocabulary.terms.count)", to: &standardError)
+            logger.debug("=== CTC Keyword Spotter Debug ===")
+            logger.debug("Audio samples: \(audioSamples.count), frames: \(logProbs.count)")
+            logger.debug("Vocab size: \(logProbs[0].count), blank ID: \(blankId)")
+            logger.debug("Terms to spot: \(customVocabulary.terms.count)")
         }
 
         // Each CTC frame spans a fixed slice of the original audio.
@@ -137,7 +125,7 @@ public struct CtcKeywordSpotter {
             let ids = term.ctcTokenIds ?? term.tokenIds
             guard let ids, !ids.isEmpty else {
                 if debugMode {
-                    print("  Skipping '\(term.text)': no CTC token IDs", to: &standardError)
+                    logger.debug("  Skipping '\(term.text)': no CTC token IDs")
                 }
                 continue
             }
@@ -150,8 +138,8 @@ public struct CtcKeywordSpotter {
                 let endText = String(format: "%.3f", TimeInterval(end) * frameDuration)
                 let detectionSummary =
                     "  '\(term.text)': score=\(scoreText), frames=[\(start), \(end)], time=[\(startText)s, \(endText)s]"
-                print(detectionSummary, to: &standardError)
-                print("    CTC token IDs: \(ids)", to: &standardError)
+                logger.debug("\(detectionSummary)")
+                logger.debug("    CTC token IDs: \(ids)")
 
                 // Sample log-probs for this term's tokens at the detected window
                 if start < logProbs.count && end <= logProbs.count {
@@ -165,26 +153,34 @@ public struct CtcKeywordSpotter {
                                 tokenLogProbs.append("id\(tokenId)=\(String(format: "%.4f", logProb))")
                             }
                         }
-                        print("      frame[\(frameIdx)]: \(tokenLogProbs.joined(separator: ", "))", to: &standardError)
+                        logger.debug("      frame[\(frameIdx)]: \(tokenLogProbs.joined(separator: ", "))")
 
                         // Show top 10 most likely tokens at this frame
                         let topK = 10
                         let sortedIndices = frame.enumerated()
                             .sorted { $0.element > $1.element }
                             .prefix(topK)
-                        print("      top-\(topK) tokens: ", terminator: "", to: &standardError)
                         let topTokens = sortedIndices.map { "id\($0.offset)=\(String(format: "%.4f", $0.element))" }
-                        print(topTokens.joined(separator: ", "), to: &standardError)
+                        logger.debug("      top-\(topK) tokens: \(topTokens.joined(separator: ", "))")
                     }
                 }
             }
 
-            if let threshold = minScore, score <= threshold {
+            // Adjust threshold for multi-token phrases (they naturally have lower scores)
+            // Each additional token beyond 3 relaxes the threshold by 1.0
+            let tokenCount = ids.count
+            let adjustedThreshold: Float? = minScore.map { base in
+                let extraTokens = max(0, tokenCount - 3)
+                return base - Float(extraTokens) * 1.0
+            }
+
+            if let threshold = adjustedThreshold, score <= threshold {
                 if debugMode {
                     let thresholdText = String(format: "%.4f", threshold)
-                    print(
-                        "    REJECTED: score \(String(format: "%.4f", score)) <= threshold \(thresholdText)",
-                        to: &standardError)
+                    let baseText = minScore.map { String(format: "%.4f", $0) } ?? "nil"
+                    logger.debug(
+                        "    REJECTED: score \(String(format: "%.4f", score)) <= threshold \(thresholdText) (base: \(baseText), tokens: \(tokenCount))"
+                    )
                 }
                 continue
             }
@@ -208,13 +204,13 @@ public struct CtcKeywordSpotter {
             results.append(detection)
 
             if debugMode {
-                print("    ACCEPTED: adding detection", to: &standardError)
+                logger.debug("    ACCEPTED: adding detection")
             }
         }
 
         if debugMode {
-            print("Total detections: \(results.count)", to: &standardError)
-            print("=================================", to: &standardError)
+            logger.debug("Total detections: \(results.count)")
+            logger.debug("=================================")
         }
 
         return results
@@ -297,7 +293,7 @@ public struct CtcKeywordSpotter {
             let fusedSummary =
                 "Fused CTC log-probs: frames=\(trimmed.count)/\(allLogProbs.count), encoder_length=\(encoderFrames)"
             let vocabSummary = "  vocab size \(trimmed.first?.count ?? 0)"
-            print(fusedSummary + "," + vocabSummary, to: &standardError)
+            logger.debug("\(fusedSummary),\(vocabSummary)")
         }
 
         return CtcLogProbResult(
@@ -335,9 +331,9 @@ public struct CtcKeywordSpotter {
         }
 
         if debugMode {
-            print("Mel features shape: \(melFeatures.shape)", to: &standardError)
+            logger.debug("Mel features shape: \(melFeatures.shape)")
             let lengthText = melLengthValue.map(String.init) ?? "nil"
-            print("mel_length: \(lengthText)", to: &standardError)
+            logger.debug("mel_length: \(lengthText)")
 
             // Print mel feature statistics to compare with Python NeMo
             let melCount = melFeatures.count
@@ -355,18 +351,18 @@ public struct CtcKeywordSpotter {
 
             let statsSummary =
                 String(format: "Mel features stats: min=%.4f, max=%.4f, mean=%.4f", melMin, melMax, melMean)
-            print(statsSummary, to: &standardError)
+            logger.debug("\(statsSummary)")
 
             // Print first frame (first 10 features) for comparison
             if melFeatures.shape.count >= 4 {
-                print("First mel frame (first 10 features):", to: &standardError)
+                logger.debug("First mel frame (first 10 features):")
                 var firstFrameVals: [String] = []
                 for i in 0..<min(10, melFeatures.shape[3].intValue) {
                     let idx = [0, 0, 0, i] as [NSNumber]
                     let val = melFeatures[idx].floatValue
                     firstFrameVals.append(String(format: "%.4f", val))
                 }
-                print("  [\(firstFrameVals.joined(separator: ", "))]", to: &standardError)
+                logger.debug("  [\(firstFrameVals.joined(separator: ", "))]")
             }
         }
 
@@ -384,9 +380,7 @@ public struct CtcKeywordSpotter {
         let hasSoftmax = encoderOutput.featureValue(for: "ctc_head_output")?.multiArrayValue != nil
 
         if debugMode {
-            print(
-                "CTC outputs available: ctc_head_raw_output=\(hasRaw), ctc_head_output=\(hasSoftmax)",
-                to: &standardError)
+            logger.debug("CTC outputs available: ctc_head_raw_output=\(hasRaw), ctc_head_output=\(hasSoftmax)")
         }
 
         // Use ctc_head_raw_output (raw logits), NOT ctc_head_output (which contains post-softmax probabilities)
@@ -402,11 +396,9 @@ public struct CtcKeywordSpotter {
         }
 
         if debugMode {
-            print("CTC raw output shape: \(ctcRaw.shape)", to: &standardError)
+            logger.debug("CTC raw output shape: \(ctcRaw.shape)")
             let usedOutput = hasRaw ? "ctc_head_raw_output (raw logits)" : "ctc_head_output (post-softmax)"
-            print(
-                "Using output: \(usedOutput)",
-                to: &standardError)
+            logger.debug("Using output: \(usedOutput)")
         }
 
         // Convert logits → log‑probabilities and trim padding frames.
@@ -415,9 +407,9 @@ public struct CtcKeywordSpotter {
         let frameCount = trimmed.count
 
         if debugMode {
-            print(
-                "Log-probs computed: \(trimmed.count) frames (total: \(allLogProbs.count)), vocab size: \(trimmed.first?.count ?? 0)",
-                to: &standardError)
+            logger.debug(
+                "Log-probs computed: \(trimmed.count) frames (total: \(allLogProbs.count)), vocab size: \(trimmed.first?.count ?? 0)"
+            )
             // Sample a few frames to check log-prob distribution
             if trimmed.count > 0 {
                 let sampleFrameIndices = [0, trimmed.count / 2, trimmed.count - 1]
@@ -428,9 +420,7 @@ public struct CtcKeywordSpotter {
                     let blankLogProb = blankId < frame.count ? frame[blankId] : -Float.infinity
                     let maxText = String(format: "%.4f", maxLogProb)
                     let blankText = String(format: "%.4f", blankLogProb)
-                    print(
-                        "  frame[\(idx)]: max_logprob=\(maxText) at idx=\(maxIdx), blank_logprob=\(blankText)",
-                        to: &standardError)
+                    logger.debug("  frame[\(idx)]: max_logprob=\(maxText) at idx=\(maxIdx), blank_logprob=\(blankText)")
                 }
             }
         }
@@ -478,8 +468,8 @@ public struct CtcKeywordSpotter {
             let statsText = String(
                 format: "  Audio input: count=%d/%d, abs_max=%.4f, mean=%.6f",
                 clampedCount, maxModelSamples, absMax, mean)
-            print(statsText, to: &standardError)
-            print("  mid_5=[\(sampleVals.joined(separator: ", "))]", to: &standardError)
+            logger.debug("\(statsText)")
+            logger.debug("  mid_5=[\(sampleVals.joined(separator: ", "))]")
         }
 
         return (array, clampedCount)
@@ -579,9 +569,7 @@ public struct CtcKeywordSpotter {
                 let minText = String(format: "%.4f", minLogit)
                 let maxText = String(format: "%.4f", maxLogit)
                 let blankText = String(format: "%.4f", blankLogit)
-                print(
-                    "  Raw logits frame[0]: min=\(minText), max=\(maxText), blank=\(blankText)",
-                    to: &standardError)
+                logger.debug("  Raw logits frame[0]: min=\(minText), max=\(maxText), blank=\(blankText)")
             }
 
             let row = applyLogSoftmax ? logSoftmax(logits) : logits
@@ -627,13 +615,13 @@ public struct CtcKeywordSpotter {
         let clampedFrames = max(1, min(validFrames, totalFrames))
 
         if debugMode {
-            print("[DEBUG] Trimming CTC frames:", to: &standardError)
-            print(
-                "[DEBUG]   totalFrames=\(totalFrames), sampleCount=\(audioSampleCount), maxModelSamples=\(maxModelSamples)",
-                to: &standardError)
-            print(
-                "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), validFrames=\(validFrames), clampedFrames=\(clampedFrames)",
-                to: &standardError)
+            logger.debug("[DEBUG] Trimming CTC frames:")
+            logger.debug(
+                "[DEBUG]   totalFrames=\(totalFrames), sampleCount=\(audioSampleCount), maxModelSamples=\(maxModelSamples)"
+            )
+            logger.debug(
+                "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), validFrames=\(validFrames), clampedFrames=\(clampedFrames)"
+            )
         }
 
         return Array(logProbs.prefix(clampedFrames))
