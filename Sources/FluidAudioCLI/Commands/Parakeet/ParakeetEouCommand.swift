@@ -319,6 +319,10 @@ struct ParakeetEouCommand {
     static func levenshtein<T: Equatable>(a: [T], b: [T]) -> Int {
         let m = a.count
         let n = b.count
+        
+        if m == 0 { return n }
+        if n == 0 { return m }
+        
         var matrix = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
         
         for i in 1...m { matrix[i][0] = i }
