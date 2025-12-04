@@ -23,16 +23,35 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        .binaryTarget(
+            name: "SentencePiece",
+            path: "Sources/FluidAudio/Frameworks/SentencePiece.xcframework"
+        ),
+        .binaryTarget(
+            name: "Metaphone3",
+            path: "Sources/FluidAudio/Frameworks/Metaphone3.xcframework"
+        ),
+        .target(
+            name: "SentencePieceWrapper",
+            dependencies: [
+                "SentencePiece"
+            ],
+            path: "Sources/SentencePieceWrapper",
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .headerSearchPath("include")
+            ]
+        ),
         .target(
             name: "FluidAudio",
             dependencies: [
                 "FastClusterWrapper",
+                "SentencePieceWrapper",
+                "Metaphone3",
             ],
             path: "Sources/FluidAudio",
             exclude: [
-                "Frameworks",
-                "ASR/ContextBiasing",
-                "ASR/CtcModels.swift",
+                "Frameworks"
             ]
         ),
         .target(

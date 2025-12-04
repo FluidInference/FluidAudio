@@ -302,11 +302,24 @@ enum TranscribeCommand {
         }
 
         // Load structured custom vocabulary (for CTC keyword boosting) if provided
+        // Supports both JSON format and simple text format (auto-detected by extension)
         if let vocabPath = customVocabularyPath {
             do {
                 let url = URL(fileURLWithPath: vocabPath)
-                customVocabulary = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: url)
-                logger.info("Loaded custom vocabulary from \(vocabPath) (terms: \(customVocabulary?.terms.count ?? 0))")
+                let isJson = url.pathExtension.lowercased() == "json"
+
+                if isJson {
+                    customVocabulary = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: url)
+                    logger.info(
+                        "Loaded custom vocabulary (JSON) from \(vocabPath) (terms: \(customVocabulary?.terms.count ?? 0))"
+                    )
+                } else {
+                    // Simple text format: one word per line, optionally "word: alias1, alias2, ..."
+                    customVocabulary = try CustomVocabularyContext.loadFromSimpleFormatWithTokenization(from: url)
+                    logger.info(
+                        "Loaded custom vocabulary (text) from \(vocabPath) (terms: \(customVocabulary?.terms.count ?? 0))"
+                    )
+                }
             } catch {
                 logger.error("Failed to load custom vocabulary at \(vocabPath): \(error.localizedDescription)")
                 exit(1)
@@ -384,13 +397,8 @@ enum TranscribeCommand {
 
             var result = baseResult
 
-            if let vocabulary = customVocabulary {
-                result = await applyCtcKeywordBoostIfNeeded(
-                    samples: samples,
-                    baseResult: result,
-                    customVocabulary: vocabulary
-                )
-            }
+            // Note: CTC keyword boosting is already applied internally by AsrManager.transcribe()
+            // when customVocabulary is provided. No need to call applyCtcKeywordBoostIfNeeded again.
 
             if !customWords.isEmpty {
                 let rewritten = rewrite(text: result.text, using: customWords)
@@ -512,76 +520,6 @@ enum TranscribeCommand {
         return String(mutable)
     }
 
-    /// Apply CTC keyword boosting using CTC detections as a word presence signal.
-    ///
-    /// Strategy: CTC acts as a detector for which keywords are present in the audio.
-    /// For each detected keyword, find the most similar word(s) in the TDT transcript
-    /// and replace with the canonical form, regardless of timing alignment.
-    private static func applyCtcKeywordBoostIfNeeded(
-        samples: [Float],
-        baseResult: ASRResult,
-        customVocabulary: CustomVocabularyContext
-    ) async -> ASRResult {
-        let debug = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
-
-        guard !customVocabulary.terms.isEmpty else {
-            return baseResult
-        }
-
-        do {
-            // Step 1: Run CTC to detect which keywords are present
-            let spotter = try await CtcKeywordSpotter.makeDefault()
-            let detections = try await spotter.spotKeywords(
-                audioSamples: samples,
-                customVocabulary: customVocabulary,
-                minScore: customVocabulary.minCtcScore
-            )
-
-            if debug {
-                print("[DEBUG] CTC detected \(detections.count) keywords", to: &stderr)
-                for detection in detections {
-                    print(
-                        "[DEBUG]   '\(detection.term.text)' score=\(String(format: "%.2f", detection.score))",
-                        to: &stderr)
-                }
-            }
-
-            guard !detections.isEmpty else {
-                return baseResult
-            }
-
-            // Step 2: Use KeywordMerger to apply corrections (string-based for now)
-            let mergeResult = KeywordMerger.applyCorrections(
-                detections: detections,
-                toTranscript: baseResult.text,
-                vocabulary: customVocabulary,
-                debugMode: debug
-            )
-
-            guard mergeResult.correctedText != baseResult.text else {
-                return baseResult
-            }
-
-            logger.info(
-                "CTC keyword boost updated transcript from:\n\(baseResult.text)\nTO:\n\(mergeResult.correctedText)")
-
-            return ASRResult(
-                text: mergeResult.correctedText,
-                confidence: baseResult.confidence,
-                duration: baseResult.duration,
-                processingTime: baseResult.processingTime,
-                tokenTimings: baseResult.tokenTimings,
-                performanceMetrics: baseResult.performanceMetrics
-            )
-        } catch {
-            if debug {
-                print("[DEBUG] CTC keyword boost exception: \(error)", to: &stderr)
-            }
-            logger.warning("CTC keyword boost failed: \(error)")
-            return baseResult
-        }
-    }
-
     /// Test streaming transcription
     private static func testStreamingTranscription(
         audioFile: String,
@@ -599,14 +537,17 @@ enum TranscribeCommand {
         let streamingAsr = StreamingAsrManager(config: config)
 
         do {
-            if customVocabulary != nil {
-                logger.warning("Custom vocabulary is applied only in batch mode; streaming ignores CTC boosting.")
-            }
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
 
             // Start the engine with the models
             try await streamingAsr.start(models: models)
+
+            // Enable custom vocabulary for CTC keyword boosting in streaming mode
+            if let vocabulary = customVocabulary {
+                await streamingAsr.setCustomVocabulary(vocabulary)
+                logger.info("Custom vocabulary enabled for streaming with \(vocabulary.terms.count) terms")
+            }
 
             // Load audio file
             let audioFileURL = URL(fileURLWithPath: audioFile)
@@ -814,7 +755,10 @@ enum TranscribeCommand {
                 --model-version <ver>   ASR model version to use: v2 or v3 (default: v3)
                 --realtime-chunk-size   Size of chunks to simulate real-time streaming (default: 500ms)
                 <size>                  Format: e.g., "500ms", "100ms", "2000ms" (range: 10ms-5000ms)
-                --custom-vocab <path>   JSON custom vocabulary for CTC keyword boosting (batch only)
+                --custom-vocab <path>   Custom vocabulary for CTC keyword boosting (batch only)
+                                        Supports JSON format (.json) or simple text format (.txt):
+                                        - JSON: {"terms": [{"text": "word", "aliases": ["alias1"]}]}
+                                        - Text: One word per line, optionally "word: alias1, alias2, ..."
                 --custom-words <path>   Newline-delimited custom words to replace <unk> tokens (post-process only)
 
             Examples:

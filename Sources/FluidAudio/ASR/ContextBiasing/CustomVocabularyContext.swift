@@ -127,6 +127,37 @@ public struct CustomVocabularyContext: Sendable {
         )
     }
 
+    /// Load a custom vocabulary from simple text format.
+    /// Format: one word per line, optionally "word: alias1, alias2, ..."
+    public static func loadFromSimpleFormat(from url: URL) throws -> CustomVocabularyContext {
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        var terms: [CustomVocabularyTerm] = []
+
+        for line in contents.split(whereSeparator: { $0.isNewline }) {
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+
+            // Parse "word: alias1, alias2, ..." format
+            if let colonIndex = trimmed.firstIndex(of: ":") {
+                let word = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespaces)
+                let aliasesPart = String(trimmed[trimmed.index(after: colonIndex)...])
+                let aliases = aliasesPart.split(separator: ",").map {
+                    String($0).trimmingCharacters(in: .whitespaces)
+                }.filter { !$0.isEmpty }
+
+                terms.append(
+                    CustomVocabularyTerm(
+                        text: word,
+                        aliases: aliases.isEmpty ? nil : aliases
+                    ))
+            } else {
+                terms.append(CustomVocabularyTerm(text: trimmed))
+            }
+        }
+
+        return CustomVocabularyContext(terms: terms)
+    }
+
     /// Sanitize a vocabulary term and return warnings about potential issues.
     private static func sanitizeVocabularyTerm(_ text: String) -> (sanitized: String, warnings: [String]) {
         var warnings: [String] = []
