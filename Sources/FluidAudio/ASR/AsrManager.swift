@@ -543,38 +543,49 @@ public final class AsrManager {
                 }
 
                 if !detections.isEmpty {
-                    let mergeResult = KeywordMerger.applyCorrections(
-                        detections: detections,
-                        toTranscript: result.text,
-                        vocabulary: effectiveVocabulary,
-                        debugMode: debug
+                    // Use VocabularyRescorer for principled CTC-based rescoring
+                    // This compares acoustic evidence for original words vs vocabulary terms
+                    // and only replaces when vocabulary term has significantly higher score
+                    let rescorer = VocabularyRescorer(
+                        spotter: spotter,
+                        vocabulary: effectiveVocabulary
                     )
 
-                    let appliedTerms = mergeResult.replacements.map { $0.canonicalText }
-                    let loweredCorrected = mergeResult.correctedText.lowercased()
+                    let rescoreOutput = try await rescorer.rescore(
+                        transcript: result.text,
+                        audioSamples: audioSamples,
+                        detections: detections
+                    )
+
+                    let appliedTerms = rescoreOutput.replacements
+                        .filter { $0.shouldReplace }
+                        .compactMap { $0.replacementWord }
+                    let loweredCorrected = rescoreOutput.text.lowercased()
                     let filteredDetected =
                         detectedTerms
                         .filter { loweredCorrected.contains($0.lowercased()) }
 
-                    // Convert replacements to WordCorrection with character positions
-                    let corrections = Self.computeWordCorrections(
-                        from: mergeResult.replacements,
-                        in: mergeResult.correctedText
+                    // Convert rescoring replacements to WordCorrection with character positions
+                    let corrections = Self.computeWordCorrectionsFromRescoring(
+                        from: rescoreOutput.replacements.filter { $0.shouldReplace },
+                        in: rescoreOutput.text
                     )
 
                     // Always log correction info for debugging
+                    let replacementCount = rescoreOutput.replacements.filter { $0.shouldReplace }.count
                     logger.info(
-                        "CTC boost: \(mergeResult.replacements.count) replacements → \(corrections.count) corrections")
+                        "CTC rescore: \(replacementCount) replacements → \(corrections.count) corrections")
                     if debug {
-                        for correction in corrections {
+                        for replacement in rescoreOutput.replacements {
+                            let action = replacement.shouldReplace ? "REPLACED" : "KEPT"
                             logger.info(
-                                "  Correction: '\(correction.original)' → '\(correction.corrected)' at \(correction.range)"
+                                "  [\(action)] '\(replacement.originalWord)' → '\(replacement.replacementWord ?? "-")': \(replacement.reason)"
                             )
                         }
                     }
 
                     result = ASRResult(
-                        text: mergeResult.correctedText,
+                        text: rescoreOutput.text,
                         confidence: result.confidence,
                         duration: result.duration,
                         processingTime: result.processingTime,
@@ -654,6 +665,47 @@ public final class AsrManager {
                         range: startOffset..<endOffset,
                         original: replacement.originalText,
                         corrected: canonical
+                    ))
+
+                // Move search start past this match to handle duplicates correctly
+                searchStartIndex = range.upperBound
+            }
+        }
+
+        return corrections
+    }
+
+    /// Convert VocabularyRescorer replacements to WordCorrection with character positions
+    /// - Parameters:
+    ///   - replacements: Replacements from VocabularyRescorer
+    ///   - correctedText: The corrected transcript text
+    /// - Returns: Array of WordCorrection objects with character ranges
+    private static func computeWordCorrectionsFromRescoring(
+        from replacements: [VocabularyRescorer.RescoringResult],
+        in correctedText: String
+    ) -> [WordCorrection] {
+        guard !replacements.isEmpty else { return [] }
+
+        var corrections: [WordCorrection] = []
+        var searchStartIndex = correctedText.startIndex
+
+        for replacement in replacements {
+            guard let replacementWord = replacement.replacementWord else { continue }
+
+            // Find the replacement word in the corrected text starting from searchStartIndex
+            if let range = correctedText.range(
+                of: replacementWord,
+                options: .caseInsensitive,
+                range: searchStartIndex..<correctedText.endIndex
+            ) {
+                let startOffset = correctedText.distance(from: correctedText.startIndex, to: range.lowerBound)
+                let endOffset = correctedText.distance(from: correctedText.startIndex, to: range.upperBound)
+
+                corrections.append(
+                    WordCorrection(
+                        range: startOffset..<endOffset,
+                        original: replacement.originalWord,
+                        corrected: replacementWord
                     ))
 
                 // Move search start past this match to handle duplicates correctly
