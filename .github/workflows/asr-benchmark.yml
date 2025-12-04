@@ -31,7 +31,7 @@ jobs:
             ~/Library/Caches/Homebrew
             /usr/local/Cellar/ffmpeg
             /opt/homebrew/Cellar/ffmpeg
-          key: ${{ runner.os }}-asr-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/Frameworks/**', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+          key: ${{ runner.os }}-asr-${{ github.sha }}
 
       - name: Install ffmpeg
         run: |
