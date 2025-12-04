@@ -105,18 +105,29 @@ public class SentencePieceCtcTokenizer {
 
 /// Extension to use SentencePiece tokenizer with CustomVocabularyContext
 extension CustomVocabularyContext {
-    /// Load vocabulary with SentencePiece CTC tokenization
+    /// Load vocabulary with SentencePiece CTC tokenization (JSON format)
     public static func loadWithSentencePieceTokenization(from url: URL) throws -> CustomVocabularyContext {
         // First load normally
         let context = try Self.load(from: url)
+        return try tokenizeContext(context)
+    }
 
+    /// Load vocabulary from simple text format with SentencePiece CTC tokenization
+    /// Format: one word per line, optionally "word: alias1, alias2, ..."
+    public static func loadFromSimpleFormatWithTokenization(from url: URL) throws -> CustomVocabularyContext {
+        let context = try loadFromSimpleFormat(from: url)
+        return try tokenizeContext(context)
+    }
+
+    /// Add CTC token IDs to terms using SentencePiece tokenizer
+    private static func tokenizeContext(_ context: CustomVocabularyContext) throws -> CustomVocabularyContext {
         // Try to use SentencePiece tokenizer, fall back to simple tokenizer if needed
         let tokenizer: SentencePieceCtcTokenizer
         do {
             tokenizer = try SentencePieceCtcTokenizer()
         } catch {
             // If SentencePiece fails, use the simple tokenizer
-            return try loadWithCtcTokenization(from: url)
+            return try tokenizeContextWithCtcTokenizer(context)
         }
 
         let logger = Logger(subsystem: "com.fluidaudio", category: "CustomVocabulary")
@@ -152,6 +163,40 @@ extension CustomVocabularyContext {
             minCombinedConfidence: context.minCombinedConfidence
         )
     }
+
+    /// Fallback tokenization using CtcTokenizer
+    private static func tokenizeContextWithCtcTokenizer(
+        _ context: CustomVocabularyContext
+    ) throws -> CustomVocabularyContext {
+        let tokenizer = try CtcTokenizer()
+        let logger = Logger(subsystem: "com.fluidaudio", category: "CustomVocabulary")
+
+        var updatedTerms: [CustomVocabularyTerm] = []
+        for term in context.terms {
+            if term.ctcTokenIds == nil || term.ctcTokenIds?.isEmpty == true {
+                let tokenIds = tokenizer.encode(term.text)
+                logger.debug("CTC tokenized '\(term.text)': \(tokenIds)")
+
+                let updatedTerm = CustomVocabularyTerm(
+                    text: term.text,
+                    weight: term.weight,
+                    aliases: term.aliases,
+                    tokenIds: term.tokenIds,
+                    ctcTokenIds: tokenIds
+                )
+                updatedTerms.append(updatedTerm)
+            } else {
+                updatedTerms.append(term)
+            }
+        }
+
+        return CustomVocabularyContext(
+            terms: updatedTerms,
+            minCtcScore: context.minCtcScore,
+            minSimilarity: context.minSimilarity,
+            minCombinedConfidence: context.minCombinedConfidence
+        )
+    }
 }
 #else
 import Foundation
@@ -178,6 +223,36 @@ extension CustomVocabularyContext {
     /// When SentencePiece is unavailable, fall back to CTC tokenization.
     public static func loadWithSentencePieceTokenization(from url: URL) throws -> CustomVocabularyContext {
         try loadWithCtcTokenization(from: url)
+    }
+
+    /// Load vocabulary from simple text format with CTC tokenization (fallback)
+    /// Format: one word per line, optionally "word: alias1, alias2, ..."
+    public static func loadFromSimpleFormatWithTokenization(from url: URL) throws -> CustomVocabularyContext {
+        let context = try loadFromSimpleFormat(from: url)
+        let tokenizer = try CtcTokenizer()
+        let logger = Logger(subsystem: "com.fluidaudio", category: "CustomVocabulary")
+
+        var updatedTerms: [CustomVocabularyTerm] = []
+        for term in context.terms {
+            let tokenIds = tokenizer.encode(term.text)
+            logger.debug("CTC tokenized '\(term.text)': \(tokenIds)")
+
+            let updatedTerm = CustomVocabularyTerm(
+                text: term.text,
+                weight: term.weight,
+                aliases: term.aliases,
+                tokenIds: term.tokenIds,
+                ctcTokenIds: tokenIds
+            )
+            updatedTerms.append(updatedTerm)
+        }
+
+        return CustomVocabularyContext(
+            terms: updatedTerms,
+            minCtcScore: context.minCtcScore,
+            minSimilarity: context.minSimilarity,
+            minCombinedConfidence: context.minCombinedConfidence
+        )
     }
 }
 #endif

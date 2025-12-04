@@ -1076,13 +1076,20 @@ extension ASRBenchmark {
             }
 
             // Load custom vocabulary if provided in arguments; support overrides
+            // Supports both JSON format (.json) and simple text format (.txt)
             var customVocab: CustomVocabularyContext? = nil
             var customVocabPath: String? = nil
             if let idx = arguments.firstIndex(of: "--custom-vocab"), idx + 1 < arguments.count {
                 let path = arguments[idx + 1]
                 do {
                     let url = URL(fileURLWithPath: path)
-                    var ctx = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: url)
+                    let isJson = url.pathExtension.lowercased() == "json"
+                    var ctx: CustomVocabularyContext
+                    if isJson {
+                        ctx = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: url)
+                    } else {
+                        ctx = try CustomVocabularyContext.loadFromSimpleFormatWithTokenization(from: url)
+                    }
                     customVocabPath = path
                     // Optional overrides
                     if let aIdx = arguments.firstIndex(of: "--alpha"), aIdx + 1 < arguments.count,

@@ -27,6 +27,10 @@ let package = Package(
             name: "SentencePiece",
             path: "Sources/FluidAudio/Frameworks/SentencePiece.xcframework"
         ),
+        .binaryTarget(
+            name: "Metaphone3",
+            path: "Sources/FluidAudio/Frameworks/Metaphone3.xcframework"
+        ),
         .target(
             name: "SentencePieceWrapper",
             dependencies: [
@@ -43,10 +47,11 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "SentencePieceWrapper",
+                "Metaphone3",
             ],
             path: "Sources/FluidAudio",
             exclude: [
-                "Frameworks",
+                "Frameworks"
             ]
         ),
         .target(
