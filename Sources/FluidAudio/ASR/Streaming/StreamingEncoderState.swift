@@ -37,6 +37,13 @@ public struct StreamingEncoderState {
         
         self.cacheLastChannelLen = try! MLMultiArray(
             shape: [NSNumber(value: 1)], dataType: .int32)
+            
+        self.preCache = try! MLMultiArray(
+            shape: [
+                NSNumber(value: 1),
+                NSNumber(value: Self.preCacheSize),
+                NSNumber(value: Self.melDim)
+            ], dataType: .float32)
         
         reset()
     }
@@ -54,6 +61,11 @@ public struct StreamingEncoderState {
         }
         
         cacheLastChannelLen[0] = 0
+        
+        let preCacheCount = preCache.count
+        preCache.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
+            ptr.baseAddress?.assign(repeating: 0, count: preCacheCount)
+        }
     }
     
     public func toFeatureProvider() -> MLFeatureProvider {
@@ -65,14 +77,25 @@ public struct StreamingEncoderState {
     }
     
     public mutating func update(from output: MLFeatureProvider) {
-        if let newChannel = output.featureValue(for: "new_cache_last_channel")?.multiArrayValue {
+        if let newChannel = output.featureValue(for: "new_cache_channel")?.multiArrayValue {
             self.cacheLastChannel = newChannel
         }
-        if let newTime = output.featureValue(for: "new_cache_last_time")?.multiArrayValue {
+        if let newTime = output.featureValue(for: "new_cache_time")?.multiArrayValue {
             self.cacheLastTime = newTime
         }
-        if let newLen = output.featureValue(for: "new_cache_last_channel_len")?.multiArrayValue {
+        if let newLen = output.featureValue(for: "new_cache_len")?.multiArrayValue {
             self.cacheLastChannelLen = newLen
+        }
+    }
+    
+    // MARK: - Pre-Encode Cache
+    public var preCache: MLMultiArray
+    private static let preCacheSize = 9
+    private static let melDim = 128
+    
+    public mutating func updatePreCache(from output: MLFeatureProvider) {
+        if let newPreCache = output.featureValue(for: "new_pre_cache")?.multiArrayValue {
+            self.preCache = newPreCache
         }
     }
 }

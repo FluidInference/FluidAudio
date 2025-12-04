@@ -4,26 +4,31 @@ import torch
 import soundfile as sf
 import json
 from pathlib import Path
-import nemo.collections.asr as nemo_asr # Still needed for Tokenizer
+import sentencepiece as spm
 
 def test_pure_coreml():
     # Paths
     model_dir = Path("Models/ParakeetEOU/Streaming")
-    audio_file = "mobius/models/stt/parakeet-tdt-v2-0.6b/coreml/audio/yc_first_minute_16k.wav"
+    audio_file = "/Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/2961/960/2961-960-0005.flac"
     
     # Load Metadata
     with open(model_dir / "metadata.json") as f:
         metadata = json.load(f)
         
-    tokenizer_meta = metadata["tokenizer"]
-    blank_id = tokenizer_meta["blank_id"]
-    vocab_size = tokenizer_meta["vocab_size"]
+    # tokenizer_meta = metadata["tokenizer"]
+    blank_id = metadata["blank_id"]
+    vocab_size = metadata["vocab_size"]
     
-    # Load NeMo Tokenizer (for decoding IDs)
-    print("Loading NeMo tokenizer...")
-    # We still use NeMo for tokenizer to verify output text
-    asr_model = nemo_asr.models.ASRModel.from_pretrained("nvidia/parakeet_realtime_eou_120m-v1", map_location="cpu")
-    tokenizer = asr_model.tokenizer
+    # Load SentencePiece Tokenizer
+    print("Loading SentencePiece tokenizer...")
+    sp_model_path = model_dir / "tokenizer.model"
+    sp = spm.SentencePieceProcessor(model_file=str(sp_model_path))
+    
+    # Find EOU ID
+    eou_id = 1024 # Hardcoded or find from vocab
+    # Verify EOU
+    # eou_token = sp.id_to_piece(eou_id)
+    # print(f"EOU Token: {eou_token}")
     
     # Load CoreML models
     print("Loading CoreML models...")
@@ -48,8 +53,8 @@ def test_pure_coreml():
     # Preprocessor Hop Length: 160 (default for Parakeet/Conformer usually)
     # We can check asr_model.preprocessor.featurizer.hop_length
     hop_length = 160
-    if hasattr(asr_model, "preprocessor") and hasattr(asr_model.preprocessor, "featurizer"):
-        hop_length = asr_model.preprocessor.featurizer.hop_length
+    # if hasattr(asr_model, "preprocessor") and hasattr(asr_model.preprocessor, "featurizer"):
+    #     hop_length = asr_model.preprocessor.featurizer.hop_length
     print(f"Hop Length: {hop_length}")
     
     chunk_frames = 135
@@ -88,14 +93,14 @@ def test_pure_coreml():
     predicted_ids = []
     
     # Find EOU ID
-    eou_id = None
-    if hasattr(tokenizer, "tokenizer") and hasattr(tokenizer.tokenizer, "get_vocab"):
-        vocab = tokenizer.tokenizer.get_vocab()
-        for token, idx in vocab.items():
-            if "<EOU>" in token.upper() or "eou" in token.lower():
-                eou_id = idx
-                print(f"Found EOU Token: {token} -> {eou_id}")
-                break
+    eou_id = 1024
+    # if hasattr(tokenizer, "tokenizer") and hasattr(tokenizer.tokenizer, "get_vocab"):
+    #     vocab = tokenizer.tokenizer.get_vocab()
+    #     for token, idx in vocab.items():
+    #         if "<EOU>" in token.upper() or "eou" in token.lower():
+    #             eou_id = idx
+    #             print(f"Found EOU Token: {token} -> {eou_id}")
+    #             break
     
     # Streaming Loop
     total_samples = len(audio)
@@ -113,8 +118,8 @@ def test_pure_coreml():
             chunk_audio = np.pad(chunk_audio, (0, pad_len), mode='constant')
             
         # Add Dither (Optional but recommended for stability based on previous tests)
-        # dither_amount = 1e-5
-        # chunk_audio += np.random.normal(0, dither_amount, chunk_audio.shape).astype(np.float32)
+        dither_amount = 1e-5
+        chunk_audio += np.random.normal(0, dither_amount, chunk_audio.shape).astype(np.float32)
         
         # Preprocess (CoreML)
         # Input: audio_signal [1, samples], audio_length [1]
@@ -214,7 +219,8 @@ def test_pure_coreml():
         step += 1
         
     # Final Transcript
-    text = tokenizer.ids_to_text(predicted_ids)
+    # Final Transcript
+    text = sp.decode(predicted_ids)
     print(f"\nPure CoreML Transcript: {text}")
 
 if __name__ == "__main__":

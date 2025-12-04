@@ -797,19 +797,20 @@ extension ASRBenchmark {
                 testStreaming = true
             case "--pure-coreml":
                 pureCoreML = true
+            case "--dump-features":
+                // Enable debug features if this flag is present
+                debugMode = true
             case "--chunk-duration":
                 if i + 1 < arguments.count {
-                    if let duration = Double(arguments[i + 1]), duration > 0 {
+                    if let duration = Double(arguments[i + 1]) {
                         streamingChunkDuration = duration
-                    } else {
-                        logger.error("Invalid chunk duration: \(arguments[i + 1])")
-                        exit(1)
                     }
                     i += 1
                 }
             case "--model-version":
                 if i + 1 < arguments.count {
-                    switch arguments[i + 1].lowercased() {
+                    let versionString = arguments[i + 1].lowercased()
+                    switch versionString {
                     case "v2", "2":
                         modelVersion = .v2
                     case "v3", "3":
@@ -821,7 +822,7 @@ extension ASRBenchmark {
                     i += 1
                 }
             default:
-                logger.warning("Unknown option: \(arguments[i])")
+                break
             }
             i += 1
         }
@@ -861,10 +862,42 @@ extension ASRBenchmark {
         )
 
         let asrManager = AsrManager(config: asrConfig)
-
+        
         do {
-            let startBenchmark = Date()
+            // If dumping features, we must be in pure-coreml mode and single file
+            let dumpFeatures = arguments.contains("--dump-features")
+            
+            if dumpFeatures {
+                guard pureCoreML, let singleFile = singleFile else {
+                    logger.error("Error: --dump-features requires --pure-coreml and --single-file")
+                    exit(1)
+                }
+                
+                logger.info("Running in Feature Dump Mode")
+                
+                let pureCoreMLManager = StreamingEouAsrManager(debugFeatures: true)
+                let modelDir = URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Models/ParakeetEOU/Streaming")
+                try await pureCoreMLManager.loadModels(modelDir: modelDir)
+                
+                // Process single file
+                let fileUrl = URL(fileURLWithPath: singleFile)
+                
+                let audioFile = try AVAudioFile(forReading: fileUrl)
+                let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
+                try audioFile.read(into: buffer)
+                
+                _ = try await pureCoreMLManager.process(audioBuffer: buffer)
+                _ = try await pureCoreMLManager.finish()
+                
+                let outputUrl = URL(fileURLWithPath: "coreml_mel_features.json")
+                try await pureCoreMLManager.saveDebugFeatures(to: outputUrl)
+                
+                logger.info("Done. Features dumped to coreml_mel_features.json")
+                exit(0)
+            }
 
+            let startBenchmark = Date()
+            
             logger.info("Initializing ASR system...")
             do {
                 let models = try await AsrModels.downloadAndLoad(version: modelVersion)

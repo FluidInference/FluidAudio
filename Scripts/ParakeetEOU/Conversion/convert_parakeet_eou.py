@@ -40,6 +40,24 @@ from individual_components import (
     _coreml_convert,
 )
 
+def apply_stft_patch():
+    # Monkey patch coremltools.stft to handle extra arguments from newer torch versions
+    try:
+        import coremltools.converters.mil.frontend.torch.ops as torch_ops
+        _original_stft = torch_ops.stft
+
+        def patched_stft(context, node):
+            if len(node.inputs) > 8:
+                node.inputs = node.inputs[:8]
+            return _original_stft(context, node)
+
+        torch_ops.stft = patched_stft
+        if "stft" in torch_ops._TORCH_OPS_REGISTRY:
+            torch_ops._TORCH_OPS_REGISTRY["stft"] = patched_stft
+        print("Monkey patched coremltools.stft for compatibility.")
+    except Exception as e:
+        print(f"Warning: Could not monkey patch stft: {e}")
+
 DEFAULT_MODEL_ID = "nvidia/parakeet_realtime_eou_120m-v1"
 AUTHOR = "Fluid Inference"
 

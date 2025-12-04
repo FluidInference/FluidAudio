@@ -13,15 +13,19 @@ This allows proper streaming inference by:
 
 import json
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 
-import coremltools as ct
-import numpy as np
+import os
+import shutil
+import sys
+import argparse
 import torch
 import typer
 from torch import nn
+import coremltools as ct
+import numpy as np
 
-from convert_parakeet_eou import ExportSettings, _coreml_convert, _save_mlpackage
+from convert_parakeet_eou import ExportSettings, _coreml_convert, _save_mlpackage, apply_stft_patch
 from individual_components import (
     DecoderWrapper,
     JointDecisionSingleStep,
@@ -30,7 +34,20 @@ from individual_components import (
 )
 
 
-class PreEncodeWrapper(nn.Module):
+class BypassPreEncode(nn.Module):
+    """Helper to bypass pre_encode in ConformerEncoder."""
+    def forward(self, *args, **kwargs):
+        # If positional args, return first two
+        if args:
+            return args[0], args[1] if len(args) > 1 else kwargs.get('length') or kwargs.get('lengths')
+        
+        # If kwargs, look for 'audio_signal' or 'x'
+        x = kwargs.get('audio_signal') or kwargs.get('x')
+        length = kwargs.get('length') or kwargs.get('lengths')
+        return x, length
+
+
+class MyPreEncodeWrapper(nn.Module):
     """Wrapper for pre_encode (ConvSubsampling) with pre-encode cache.
 
     The pre_encode module performs 4x subsampling via two conv layers:
@@ -45,10 +62,32 @@ class PreEncodeWrapper(nn.Module):
     def __init__(self, pre_encode: nn.Module, mel_dim: int = 128, pre_cache_size: int = 9):
         super().__init__()
         self.pre_encode = pre_encode
+        # self.pre_encode = nn.Linear(mel_dim, mel_dim) # Dummy for debugging trace
         self.mel_dim = mel_dim
         self.pre_cache_size = pre_cache_size
 
-    def forward(
+    def forward(self, mel: torch.Tensor, mel_length: torch.Tensor, pre_cache: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # if len(args) == 3:
+        #     mel, mel_length, pre_cache = args
+        # elif len(args) == 2:
+        #     mel, mel_length = args
+        #     pre_cache = kwargs.get('pre_cache')
+        # else:
+        #     mel = kwargs.get('mel')
+        #     mel_length = kwargs.get('mel_length')
+        #     pre_cache = kwargs.get('pre_cache')
+            
+        if pre_cache is None:
+             # print("DEBUG: pre_cache is None! Creating zeros.", file=sys.stderr)
+             batch_size = mel.shape[0]
+             pre_cache = torch.zeros(batch_size, self.pre_cache_size, self.mel_dim, device=mel.device, dtype=mel.dtype)
+
+        return self._forward_impl(mel, mel_length, pre_cache)
+        
+        # Dummy return
+        # return mel, mel_length, pre_cache
+
+    def _forward_impl(
         self,
         mel: torch.Tensor,
         mel_length: torch.Tensor,
@@ -79,7 +118,12 @@ class PreEncodeWrapper(nn.Module):
             adjusted_length = mel_length
 
         # Run pre_encode - expects [B, T, F]
-        encoded, encoded_length = self.pre_encode(mel_with_cache, adjusted_length)
+        # encoded, encoded_length = self.pre_encode(mel_with_cache, adjusted_length)
+        
+        out = self.pre_encode(mel_with_cache, adjusted_length)
+        # Use indexing to avoid script compiler issues with unpacking
+        encoded = out[0]
+        encoded_length = out[1]
 
         # Extract new cache from end of original mel (before pre_encode)
         if self.pre_cache_size > 0:
@@ -152,15 +196,29 @@ class ConformerStackWrapper(nn.Module):
         # Since pre_encoded is [B, T', hidden_dim], transpose to [B, hidden_dim, T']
         x = pre_encoded.transpose(1, 2)  # [B, hidden, T']
 
-        # Call cache_aware_stream_step
-        outputs = self.encoder.cache_aware_stream_step(
-            processed_signal=x,
-            processed_signal_length=pre_encoded_length,
-            cache_last_channel=cache_last_channel,
-            cache_last_time=cache_last_time,
-            cache_last_channel_len=cache_last_channel_len,
-            bypass_pre_encode=True,
-        )
+        # HACK: Temporarily replace pre_encode with BypassPreEncode to bypass it
+        # since bypass_pre_encode=True is not supported in this NeMo version
+        original_pre_encode = self.encoder.pre_encode
+        self.encoder.pre_encode = BypassPreEncode()
+        
+        try:
+            print("DEBUG: Calling cache_aware_stream_step...", file=sys.stderr)
+            # Call cache_aware_stream_step
+            outputs = self.encoder.cache_aware_stream_step(
+                processed_signal=x,
+                processed_signal_length=pre_encoded_length,
+                cache_last_channel=cache_last_channel,
+                cache_last_time=cache_last_time,
+                cache_last_channel_len=cache_last_channel_len,
+                # bypass_pre_encode=True, # Removed
+            )
+            print("DEBUG: cache_aware_stream_step returned successfully", file=sys.stderr)
+        except Exception as e:
+            print(f"DEBUG: cache_aware_stream_step failed: {e}", file=sys.stderr)
+            raise e
+        finally:
+            # Restore original pre_encode
+            self.encoder.pre_encode = original_pre_encode
 
         # Outputs: (encoded, encoded_len, new_cache_channel, new_cache_time, new_cache_len)
         return outputs[0], outputs[1], outputs[2], outputs[3], outputs[4]
@@ -380,7 +438,7 @@ class SingleStreamingEncoderWrapper(torch.nn.Module):
             cache_last_channel=cache_last_channel,
             cache_last_time=cache_last_time,
             cache_last_channel_len=cache_last_channel_len,
-            bypass_pre_encode=False # IMPORTANT: Do NOT bypass. Let it do Mel + Subsampling.
+            # bypass_pre_encode=False # Removed: Not supported in installed NeMo
         )
         
         # outputs: (encoded, encoded_len, new_cache_last_channel, new_cache_last_time, new_cache_last_channel_len)
@@ -424,10 +482,9 @@ def main(
     asr_model.eval()
     
     # Set streaming params
-    # chunk_size=16 (default)
-    # chunk_size=16 (128 mel frames)
-    # shift_size=15 (120 mel frames) -> 1 frame overlap (8 mel frames)
-    asr_model.encoder.setup_streaming_params(chunk_size=16, shift_size=15)
+    # chunk_size=32 (128 mel frames)
+    # shift_size=30 (120 mel frames) -> 2 frame overlap (8 mel frames)
+    asr_model.encoder.setup_streaming_params(chunk_size=32, shift_size=30)
     print(f"DEBUG: Streaming Config: {asr_model.encoder.streaming_cfg}", flush=True)
 
     encoder = asr_model.encoder
@@ -528,6 +585,9 @@ def main(
         ct.TensorType(name="mel_length", dtype=np.int32),
     ]
 
+    # Apply monkey patch before conversion starts
+    apply_stft_patch()
+
     try:
         prep_model = _coreml_convert(
             traced_prep, prep_inputs, prep_outputs, export_settings,
@@ -545,8 +605,16 @@ def main(
     typer.echo("\n=== Exporting Pre-Encode ===")
 
     pre_encode = encoder.pre_encode
-    # Use fixed chunk wrapper for diagnostic (single large chunk)
-    pre_encode_wrapper = FixedChunkPreEncodeWrapper(pre_encode, mel_dim)
+    
+    # Trace pre_encode separately to avoid interference
+    print("DEBUG: Tracing pre_encode (ConvSubsampling) separately...")
+    pe_mel = torch.randn(1, mel_dim, 128)
+    pe_len = torch.tensor([128], dtype=torch.long)
+    traced_conv_subsampling = torch.jit.trace(pre_encode, (pe_mel, pe_len), strict=False, check_trace=False)
+    print("DEBUG: Tracing pre_encode done.")
+
+    # Use PreEncodeWrapper with caching, using the TRACED sub-module
+    pre_encode_wrapper = MyPreEncodeWrapper(traced_conv_subsampling, mel_dim, pre_cache_size=9)
 
     # Chunk size for input (1.28s = 128 frames)
     chunk_size_in = 128 
@@ -555,12 +623,30 @@ def main(
     # CRITICAL: Must match PreEncodeWrapper expectation [B, D, T]
     test_mel = torch.randn(1, mel_dim, chunk_size_in, dtype=torch.float32)
     test_mel_len = torch.tensor([chunk_size_in], dtype=torch.long)
+    test_pre_cache = torch.zeros(1, 9, mel_dim, dtype=torch.float32)
+
+    print(f"DEBUG: Calling pre_encode_wrapper with 3 args")
+    print(f"DEBUG: test_mel: {test_mel.shape}")
+    print(f"DEBUG: test_mel_len: {test_mel_len.shape}")
+    print(f"DEBUG: test_pre_cache: {test_pre_cache.shape}")
+    print(f"DEBUG: pre_encode_wrapper type: {type(pre_encode_wrapper)}")
 
     with torch.no_grad():
-        test_out, test_out_len = pre_encode_wrapper(test_mel, test_mel_len)
+        # test_out, test_out_len, test_new_cache = pre_encode_wrapper(test_mel, test_mel_len, test_pre_cache)
+        test_out, test_out_len, test_new_cache = pre_encode_wrapper.forward(test_mel, test_mel_len, test_pre_cache)
     typer.echo(f"Pre-encode test: [{chunk_size_in}x{mel_dim}] -> {list(test_out.shape)}")
 
-    traced_pre = torch.jit.trace(pre_encode_wrapper, (test_mel, test_mel_len), strict=False)
+    example_inputs = (test_mel, test_mel_len, test_pre_cache)
+    print(f"DEBUG: example_inputs len: {len(example_inputs)}")
+    print(f"DEBUG: example_inputs types: {[type(x) for x in example_inputs]}")
+    
+    print(f"DEBUG: pre_encode type: {type(pre_encode)}")
+    print(f"DEBUG: is ScriptModule: {isinstance(pre_encode, torch.jit.ScriptModule)}")
+
+    # traced_pre = torch.jit.trace(pre_encode_wrapper, example_inputs, strict=False, check_trace=False)
+    print("DEBUG: Tracing pre_encode_wrapper with trace_module...")
+    traced_pre = torch.jit.trace_module(pre_encode_wrapper, {'forward': example_inputs}, strict=False, check_trace=False)
+    print("DEBUG: Tracing done.")
     traced_pre.eval()
 
     pre_inputs = [
@@ -570,10 +656,12 @@ def main(
             dtype=np.float32,
         ),
         ct.TensorType(name="mel_length", shape=(1,), dtype=np.int32),
+        ct.TensorType(name="pre_cache", shape=(1, 9, 128), dtype=np.float32),
     ]
     pre_outputs = [
         ct.TensorType(name="pre_encoded", dtype=np.float32),
-        ct.TensorType(name="pre_encoded_length", dtype=np.int32),
+        ct.TensorType(name="pre_encoded_len", dtype=np.int32),
+        ct.TensorType(name="new_pre_cache", dtype=np.float32),
     ]
 
     try:
@@ -604,7 +692,7 @@ def main(
 
     # Test input shape (output from pre_encode)
     with torch.no_grad():
-        pre_out, pre_out_len = pre_encode_wrapper(test_mel, test_mel_len)
+        pre_out, pre_out_len, _ = pre_encode_wrapper(test_mel, test_mel_len, test_pre_cache)
 
     # For streaming, we process chunks. Let's use the pre_out as a "chunk"
     # pre_out is [B, T', hidden_dim]

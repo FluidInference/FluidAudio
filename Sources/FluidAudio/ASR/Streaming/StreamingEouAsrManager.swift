@@ -12,7 +12,8 @@ public actor StreamingEouAsrManager {
     
     // Models
     private var preprocessor: MLModel?
-    private var encoder: MLModel?
+    private var preEncode: MLModel?
+    private var conformer: MLModel?
     private var decoder: MLModel?
     private var joint: MLModel?
     
@@ -32,18 +33,23 @@ public actor StreamingEouAsrManager {
     // Audio Buffer
     private var audioBuffer: [Float] = []
     
-    public init() {}
+    public private(set) var configuration: MLModelConfiguration
+    public let debugFeatures: Bool
+    private var debugFeatureBuffer: [Float] = []
+
+    public init(configuration: MLModelConfiguration = MLModelConfiguration(), debugFeatures: Bool = false) {
+        self.configuration = configuration
+        self.debugFeatures = debugFeatures
+    }
     
-    public func loadModels(modelDir: URL) throws {
-        let config = MLModelConfiguration()
-        config.computeUnits = .cpuOnly // Verified in Python
-        
+    public func loadModels(modelDir: URL) async throws {
         logger.info("Loading CoreML models from \(modelDir.path)...")
         
-        self.preprocessor = try MLModel(contentsOf: modelDir.appendingPathComponent("parakeet_eou_preprocessor.mlmodelc"), configuration: config)
-        self.encoder = try MLModel(contentsOf: modelDir.appendingPathComponent("streaming_encoder.mlmodelc"), configuration: config)
-        self.decoder = try MLModel(contentsOf: modelDir.appendingPathComponent("decoder.mlmodelc"), configuration: config)
-        self.joint = try MLModel(contentsOf: modelDir.appendingPathComponent("joint_decision.mlmodelc"), configuration: config)
+        self.preprocessor = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("parakeet_eou_preprocessor.mlmodelc"), configuration: self.configuration)
+        self.preEncode = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("pre_encode.mlmodelc"), configuration: self.configuration)
+        self.conformer = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("conformer_streaming.mlmodelc"), configuration: self.configuration)
+        self.decoder = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("decoder.mlmodelc"), configuration: self.configuration)
+        self.joint = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("joint_decision.mlmodelc"), configuration: self.configuration)
         
         // Load Tokenizer
         let vocabUrl = modelDir.appendingPathComponent("vocab.json")
@@ -108,41 +114,24 @@ public actor StreamingEouAsrManager {
         return transcript
     }
     
-    public func reset() {
-        self.encoderState.reset()
-        self.rnntDecoder?.resetState()
-        self.audioBuffer.removeAll()
+    public func reset() async {
+        audioBuffer.removeAll()
+        debugFeatureBuffer.removeAll()
+        await encoderState.reset()
+        await rnntDecoder?.resetState() // Assuming rnntDecoder has a resetState method
         self.processedSteps = 0
     }
     
     private func processChunk(_ samples: [Float]) async throws -> String {
-        guard let preprocessor = preprocessor, let encoder = encoder, let rnntDecoder = rnntDecoder, let tokenizer = tokenizer else {
+        guard let preprocessor = preprocessor, let preEncode = preEncode, let conformer = conformer, let rnntDecoder = rnntDecoder, let tokenizer = tokenizer else {
             throw ASRError.notInitialized
         }
         
         // A. Preprocess
-        if self.processedSteps == 0 {
-            print("Swift Audio Start: \(samples.prefix(10))")
-            if let firstNonZeroIndex = samples.firstIndex(where: { $0 != 0 }) {
-                print("Swift First Non-Zero Index: \(firstNonZeroIndex)")
-                print("Swift First Non-Zero Value: \(samples[firstNonZeroIndex])")
-            } else {
-                print("Swift First Chunk is all zeros")
-            }
-        }
         // Input: audio_signal [1, N], audio_length [1]
         let audioData = try MLMultiArray(shape: [1, NSNumber(value: samples.count)], dataType: .float32)
         let ptr = audioData.dataPointer.bindMemory(to: Float.self, capacity: samples.count)
         ptr.assign(from: samples, count: samples.count)
-        
-        // Verify MLMultiArray Content
-        if self.processedSteps == 0 {
-            var first10: [Float] = []
-            for i in 0..<10 {
-                first10.append(ptr[i])
-            }
-            print("Swift MLMultiArray First 10: \(first10)")
-        }
         
         let audioLength = try MLMultiArray(shape: [1], dataType: .int32)
         audioLength[0] = NSNumber(value: samples.count)
@@ -154,9 +143,20 @@ public actor StreamingEouAsrManager {
         
         let prepOutput = try await preprocessor.prediction(from: prepInput)
         let mel = prepOutput.featureValue(for: "mel")!.multiArrayValue!
+        
+        // Debug: Accumulate features
+        if debugFeatures {
+            let melMultiArray = mel
+            let count = melMultiArray.count
+            let melPtr = melMultiArray.dataPointer.bindMemory(to: Float.self, capacity: count)
+            for i in 0..<count {
+                debugFeatureBuffer.append(melPtr[i])
+            }
+        }
+        
         let melLength = prepOutput.featureValue(for: "mel_length")!.multiArrayValue!
         
-        // B. Slice Mel (Critical Fix from Python)
+        // B. Slice Mel
         // Mel shape is [1, 128, T]. T might be 136, we need 135.
         let T = mel.shape[2].intValue
         var slicedMel = mel
@@ -166,43 +166,61 @@ public actor StreamingEouAsrManager {
             slicedMelLength[0] = NSNumber(value: chunkFrames)
         }
         
-        // C. Encode
-        let encInputDict: [String: Any] = [
+        // C. Pre-Encode
+        let preEncodeInputDict: [String: Any] = [
             "mel": slicedMel,
             "mel_length": slicedMelLength,
+            "pre_cache": encoderState.preCache
+        ]
+        let preEncodeInput = try MLDictionaryFeatureProvider(dictionary: preEncodeInputDict.mapValues { MLFeatureValue(multiArray: $0 as! MLMultiArray) })
+        let preEncodeOutput = try await preEncode.prediction(from: preEncodeInput)
+        
+        let preEncoded = preEncodeOutput.featureValue(for: "pre_encoded")!.multiArrayValue!
+        let preEncodedLen = preEncodeOutput.featureValue(for: "pre_encoded_len")!.multiArrayValue!
+        
+        // Update Pre-Cache
+        encoderState.updatePreCache(from: preEncodeOutput)
+        
+        // D. Conformer Encode
+        let confInputDict: [String: Any] = [
+            "pre_encoded": preEncoded,
+            "pre_encoded_length": preEncodedLen,
             "cache_last_channel": encoderState.cacheLastChannel,
             "cache_last_time": encoderState.cacheLastTime,
             "cache_last_channel_len": encoderState.cacheLastChannelLen
         ]
-        let encInput = try MLDictionaryFeatureProvider(dictionary: encInputDict.mapValues { MLFeatureValue(multiArray: $0 as! MLMultiArray) })
+        let confInput = try MLDictionaryFeatureProvider(dictionary: confInputDict.mapValues { MLFeatureValue(multiArray: $0 as! MLMultiArray) })
+        let confOutput = try await conformer.prediction(from: confInput)
         
-        let encOutput = try await encoder.prediction(from: encInput)
-        var encoded = encOutput.featureValue(for: "encoded")!.multiArrayValue! // [1, 512, T]
-        let encodedLen = encOutput.featureValue(for: "encoded_len")!.multiArrayValue!
-        
-
+        var encoded = confOutput.featureValue(for: "encoder")!.multiArrayValue!
         
         // Update Cache
-        encoderState.update(from: encOutput)
-        
-        // Get Encoded Output
-        var finalEncoded = encoded
+        encoderState.update(from: confOutput)
         
         // Slice Encoded Output (15 frames valid)
-        // Python: if ml_encoded.shape[2] > valid_out_len: ml_encoded = ml_encoded[:, :, :valid_out_len]
-        // valid_out_len = 15
         let validOutLen = 15
         if encoded.shape[2].intValue > validOutLen {
              encoded = try sliceEncoded(encoded, length: validOutLen)
         }
         
-        // D. Decode
+        // E. Decode
         let tokenIds = try rnntDecoder.decode(encoderOutput: encoded)
         
         // E. Detokenize
         return tokenizer.decode(ids: tokenIds)
     }
     
+    public func saveDebugFeatures(to url: URL) throws {
+        let outputData: [String: Any] = [
+            "mel_features": debugFeatureBuffer,
+            "count": debugFeatureBuffer.count
+        ]
+        
+        let data = try JSONSerialization.data(withJSONObject: outputData, options: .prettyPrinted)
+        try data.write(to: url)
+        logger.info("Dumped \(debugFeatureBuffer.count) features to \(url.path)")
+    }
+
     private func sliceMel(_ mel: MLMultiArray, length: Int) throws -> MLMultiArray {
         // Shape [1, 128, T] -> [1, 128, length]
         let newShape = [mel.shape[0], mel.shape[1], NSNumber(value: length)]

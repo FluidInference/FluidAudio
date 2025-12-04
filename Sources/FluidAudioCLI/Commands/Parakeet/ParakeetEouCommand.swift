@@ -13,6 +13,8 @@ struct ParakeetEouCommand {
         var benchmark: Bool = false
         var download: Bool = false
         var maxFiles: Int = 100
+        var computeUnits: String = "all"
+        var debugFeatures: Bool = false
 
         // Manual Argument Parsing
         var i = 0
@@ -37,6 +39,13 @@ struct ParakeetEouCommand {
                     maxFiles = Int(arguments[i + 1]) ?? 100
                     i += 1
                 }
+            case "--compute-units":
+                if i + 1 < arguments.count {
+                    computeUnits = arguments[i + 1]
+                    i += 1
+                }
+            case "--debug-features":
+                debugFeatures = true
             case "--verbose":
                 verbose = true
             default:
@@ -60,7 +69,18 @@ struct ParakeetEouCommand {
         }
         
         // 2. Initialize Manager
-        let manager = StreamingEouAsrManager()
+        let config = MLModelConfiguration()
+        switch computeUnits {
+        case "cpuOnly":
+            config.computeUnits = .cpuOnly
+        case "cpuAndGpu":
+            config.computeUnits = .cpuAndGPU
+        default:
+            config.computeUnits = .all
+        }
+        logger.info("Using compute units: \(config.computeUnits.rawValue)")
+        
+        let manager = StreamingEouAsrManager(configuration: config, debugFeatures: debugFeatures)
         do {
             logger.info("Loading models from: \(modelsUrl.path)")
             try await manager.loadModels(modelDir: modelsUrl)
@@ -132,6 +152,11 @@ struct ParakeetEouCommand {
             logger.info("------------------")
             logger.info("Processing time: \(String(format: "%.3f", duration))s")
             
+            if manager.debugFeatures {
+                let debugUrl = URL(fileURLWithPath: "debug_mel_features.json")
+                try manager.saveDebugFeatures(to: debugUrl)
+            }
+            
         } catch {
             logger.error("Failed to process file: \(error)")
             exit(1)
@@ -151,7 +176,9 @@ struct ParakeetEouCommand {
         }
         
         // 2. List Files
-        let datasetPath = benchmark.getLibriSpeechDirectory().appendingPathComponent("test-clean")
+        // 2. List Files
+        let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let datasetPath = applicationSupportURL.appendingPathComponent("FluidAudio/Datasets/LibriSpeech/test-clean")
         var files: [(url: URL, text: String)] = []
         
         let enumerator = FileManager.default.enumerator(at: datasetPath, includingPropertiesForKeys: nil)
@@ -206,7 +233,14 @@ struct ParakeetEouCommand {
                 transcript += try await manager.finish()
                 let duration = Date().timeIntervalSince(startTime)
                 
-                let wer = calculateWer(hypothesis: transcript, reference: reference)
+                // ITN: Normalize hypothesis
+                let normalizedTranscript = TextNormalizer.normalize(transcript)
+                
+                // Note: Reference is usually already normalized (digits), but we can normalize it too just in case
+                // For LibriSpeech, references are usually UPPERCASE WORDS, so "ONE HUNDRED" -> "100"
+                let normalizedReference = TextNormalizer.normalize(reference)
+                
+                let wer = calculateWer(hypothesis: normalizedTranscript, reference: normalizedReference)
                 totalWer += wer
                 totalTime += duration
                 
