@@ -212,6 +212,7 @@ struct ParakeetEouCommand {
         var totalWer = 0.0
         var totalTime = 0.0
         var totalAudioDuration = 0.0
+        var results: [BenchmarkFileResult] = []
         
         for (i, file) in testFiles.enumerated() {
             let (audioUrl, reference) = file
@@ -243,6 +244,16 @@ struct ParakeetEouCommand {
                 
                 logger.info("[\(i+1)/\(testFiles.count)] WER: \(String(format: "%.2f", wer * 100))% | RTFx: \(String(format: "%.2f", audioDuration/duration)) | Ref: \"\(reference.prefix(30))...\" | Hyp: \"\(transcript.prefix(30))...\"")
                 
+                results.append(BenchmarkFileResult(
+                    filename: audioUrl.lastPathComponent,
+                    wer: wer,
+                    rtfx: audioDuration/duration,
+                    reference: reference,
+                    hypothesis: transcript,
+                    audioDuration: audioDuration,
+                    processingTime: duration
+                ))
+                
             } catch {
                 logger.error("Failed to process \(audioUrl.lastPathComponent): \(error)")
             }
@@ -256,6 +267,44 @@ struct ParakeetEouCommand {
         logger.info("Average RTFx: \(String(format: "%.2f", avgRtf))")
         logger.info("Total Audio: \(String(format: "%.2f", totalAudioDuration))s")
         logger.info("Total Time: \(String(format: "%.2f", totalTime))s")
+        
+        // Save to JSON
+        let jsonResults = BenchmarkJSONOutput(
+            averageWer: avgWer,
+            averageRtfx: avgRtf,
+            totalAudioDuration: totalAudioDuration,
+            totalProcessingTime: totalTime,
+            results: results
+        )
+        
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(jsonResults)
+            let outputPath = URL(fileURLWithPath: "benchmark_results.json")
+            try data.write(to: outputPath)
+            logger.info("Results saved to \(outputPath.path)")
+        } catch {
+            logger.error("Failed to save results to JSON: \(error)")
+        }
+    }
+    
+    struct BenchmarkJSONOutput: Codable {
+        let averageWer: Double
+        let averageRtfx: Double
+        let totalAudioDuration: Double
+        let totalProcessingTime: Double
+        let results: [BenchmarkFileResult]
+    }
+    
+    struct BenchmarkFileResult: Codable {
+        let filename: String
+        let wer: Double
+        let rtfx: Double
+        let reference: String
+        let hypothesis: String
+        let audioDuration: Double
+        let processingTime: Double
     }
     
     static func calculateWer(hypothesis: String, reference: String) -> Double {
