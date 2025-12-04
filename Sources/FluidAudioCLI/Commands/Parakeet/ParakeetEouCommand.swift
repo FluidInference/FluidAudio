@@ -269,12 +269,14 @@ struct ParakeetEouCommand {
         logger.info("Total Time: \(String(format: "%.2f", totalTime))s")
         
         // Save to JSON
+        let sortedResults = results.sorted { $0.wer > $1.wer }
+        
         let jsonResults = BenchmarkJSONOutput(
             averageWer: avgWer,
             averageRtfx: avgRtf,
             totalAudioDuration: totalAudioDuration,
             totalProcessingTime: totalTime,
-            results: results
+            results: sortedResults
         )
         
         do {
