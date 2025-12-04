@@ -95,13 +95,27 @@ public class ASRBenchmark {
         var filteredFiles = audioFiles
 
         // Handle single file processing
+        // Handle single file processing
         if let singleFileName = singleFile {
-            let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
-            filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
-            if filteredFiles.isEmpty {
-                throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+            // Check if it's an absolute path that exists
+            let fileUrl = URL(fileURLWithPath: singleFileName)
+            if FileManager.default.fileExists(atPath: fileUrl.path) {
+                let file = LibriSpeechFile(
+                    fileName: fileUrl.lastPathComponent,
+                    audioPath: fileUrl,
+                    transcript: "i'm going to tell you a story that could change your life" // Known transcript
+                )
+                filteredFiles = [file]
+                logger.info("🔍 Processing custom file: \(fileUrl.path)")
+            } else {
+                // Fallback to searching in dataset
+                let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
+                filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
+                if filteredFiles.isEmpty {
+                    throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+                }
+                logger.info("🔍 Processing single file from dataset: \(targetFileName)")
             }
-            logger.info("🔍 Processing single file: \(targetFileName)")
         } else if config.longAudioOnly {
             filteredFiles = try await filterFilesByDuration(
                 audioFiles, minDuration: 4.0, maxDuration: 20.0)
@@ -122,13 +136,30 @@ public class ASRBenchmark {
 
         var results: [ASRBenchmarkResult] = []
 
+        // Initialize Pure CoreML Manager if needed
+        var pureCoreMLManager: StreamingEouAsrManager?
+        if config.pureCoreML {
+            pureCoreMLManager = StreamingEouAsrManager()
+            let modelDir = URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Models/ParakeetEOU/Streaming")
+            do {
+                try await pureCoreMLManager?.loadModels(modelDir: modelDir)
+                logger.info("Initialized Pure CoreML Manager")
+            } catch {
+                logger.error("Failed to initialize Pure CoreML Manager: \(error)")
+                throw error
+            }
+        }
+
         for (index, audioFile) in filesToProcess.enumerated() {
             do {
                 logger.info(
                     "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)")
 
                 let result: ASRBenchmarkResult
-                if config.testStreaming {
+                if config.pureCoreML {
+                    result = try await processLibriSpeechFilePureCoreML(
+                        manager: pureCoreMLManager!, file: audioFile)
+                } else if config.testStreaming {
                     result = try await processLibriSpeechFileStreaming(
                         asrManager: asrManager, file: audioFile)
                 } else {
@@ -143,6 +174,36 @@ public class ASRBenchmark {
         }
 
         return results
+    }
+
+    /// Process a single LibriSpeech file using Pure CoreML pipeline
+    private func processLibriSpeechFilePureCoreML(
+        manager: StreamingEouAsrManager, file: LibriSpeechFile
+    ) async throws
+        -> ASRBenchmarkResult
+    {
+        let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
+        let audioLength = TimeInterval(audioSamples.count) / 16000.0
+        
+        // Read file into buffer
+        let audioFile = try AVAudioFile(forReading: file.audioPath)
+        let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
+        try audioFile.read(into: buffer)
+
+        let inferenceStartTime = Date()
+        let transcript = try await manager.process(audioBuffer: buffer)
+        let processingTime = Date().timeIntervalSince(inferenceStartTime)
+
+        let metrics = calculateASRMetrics(hypothesis: transcript, reference: file.transcript)
+
+        return ASRBenchmarkResult(
+            fileName: file.fileName,
+            hypothesis: transcript,
+            reference: file.transcript,
+            metrics: metrics,
+            processingTime: processingTime,
+            audioLength: audioLength
+        )
     }
 
     /// Process a single LibriSpeech file
@@ -694,6 +755,7 @@ extension ASRBenchmark {
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
         var streamingChunkDuration = 10.0
+        var pureCoreML = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Check for help flag first
@@ -733,6 +795,8 @@ extension ASRBenchmark {
                 autoDownload = false
             case "--test-streaming":
                 testStreaming = true
+            case "--pure-coreml":
+                pureCoreML = true
             case "--chunk-duration":
                 if i + 1 < arguments.count {
                     if let duration = Double(arguments[i + 1]), duration > 0 {
@@ -773,6 +837,7 @@ extension ASRBenchmark {
         logger.info("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         logger.info("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
         logger.info("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
+        logger.info("   Pure CoreML: \(pureCoreML ? "enabled" : "disabled")")
         if testStreaming {
             logger.info("   Chunk duration: \(streamingChunkDuration)s")
         }
@@ -784,7 +849,8 @@ extension ASRBenchmark {
             debugMode: debugMode,
             longAudioOnly: false,
             testStreaming: testStreaming,
-            streamingChunkDuration: streamingChunkDuration
+            streamingChunkDuration: streamingChunkDuration,
+            pureCoreML: pureCoreML
         )
 
         let benchmark = ASRBenchmark(config: config)

@@ -431,6 +431,15 @@ def main(
 
     encoder = asr_model.encoder
     preprocessor = asr_model.preprocessor
+    
+    # Disable dither and padding for deterministic export
+    if hasattr(preprocessor, 'featurizer'):
+        if hasattr(preprocessor.featurizer, 'dither'):
+            print(f"DEBUG: Disabling dither (was {preprocessor.featurizer.dither})")
+            preprocessor.featurizer.dither = 0.0
+        if hasattr(preprocessor.featurizer, 'pad_to'):
+            print(f"DEBUG: Disabling pad_to (was {preprocessor.featurizer.pad_to})")
+            preprocessor.featurizer.pad_to = 0
 
     # Inspect structure
     # inspect_encoder_structure(encoder)
