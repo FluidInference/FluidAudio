@@ -12,6 +12,9 @@ public final class RnntDecoder {
     private var cState: MLMultiArray
     private var lastToken: Int32
     
+    // State for repetition detection
+    private var consecutiveTokenCount: Int = 0
+    
     // Constants
     private let blankId: Int32 = 1026
     private let eouId: Int32 = 1024 // Verified EOU ID
@@ -41,6 +44,7 @@ public final class RnntDecoder {
             ptr.baseAddress?.assign(repeating: 0, count: count)
         }
         lastToken = blankId
+        consecutiveTokenCount = 0
     }
     
     /// Decodes the encoder output using greedy search.
@@ -88,6 +92,7 @@ public final class RnntDecoder {
                 let tokenId = tokenIdMultiArray[0].int32Value
                 
                 if tokenId == blankId {
+                    consecutiveTokenCount = 0 // Reset on blank
                     break
                 } else {
                     // Check EOU
@@ -97,14 +102,26 @@ public final class RnntDecoder {
                         break 
                     }
                     
+                    // Repetition Detection
+                    if tokenId == lastToken {
+                        consecutiveTokenCount += 1
+                        // Stricter threshold: 2
+                        if consecutiveTokenCount >= 2 {
+                            // Force break (treat as blank) to break the loop
+                            // print("Repetition detected: \(tokenId) x\(consecutiveTokenCount). Breaking.")
+                            consecutiveTokenCount = 0
+                            break
+                        }
+                    } else {
+                        consecutiveTokenCount = 1
+                    }
+                    
                     predictedIds.append(Int(tokenId))
                     lastToken = tokenId
                     
                     // Update State
                     let newH = decoderOutput.featureValue(for: "h_out")!.multiArrayValue!
                     let newC = decoderOutput.featureValue(for: "c_out")!.multiArrayValue!
-                    
-
                     
                     hState = newH
                     cState = newC

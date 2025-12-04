@@ -109,61 +109,29 @@ struct ParakeetEouCommand {
     static func runSingleFile(manager: StreamingEouAsrManager, inputUrl: URL, logger: AppLogger) async {
         logger.info("Loading audio file: \(inputUrl.path)")
         
-        // Manual WAV Loading (reusing previous robust logic)
-        guard let data = try? Data(contentsOf: inputUrl) else {
-            logger.error("Failed to read file data")
-            exit(1)
-        }
-        
-        // Find "data" chunk
-        var dataOffset = 0
-        var dataSize = 0
-        let dataTag = "data".data(using: .utf8)!
-        var offset = 12
-        while offset < data.count - 8 {
-            let chunkId = data.subdata(in: offset..<offset+4)
-            let chunkSizeData = data.subdata(in: offset+4..<offset+8)
-            let chunkSize = chunkSizeData.withUnsafeBytes { $0.load(as: UInt32.self) }
-            if chunkId == dataTag {
-                dataOffset = offset + 8
-                dataSize = Int(chunkSize)
-                break
-            }
-            offset += 8 + Int(chunkSize)
-        }
-        
-        guard dataOffset > 0 else {
-            logger.error("Could not find data chunk")
-            exit(1)
-        }
-        
-        let sampleCount = dataSize / 2
-        guard let floatBuffer = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!, frameCapacity: AVAudioFrameCount(sampleCount)) else {
-            logger.error("Failed to create buffer")
-            exit(1)
-        }
-        floatBuffer.frameLength = AVAudioFrameCount(sampleCount)
-        if let floatChannelData = floatBuffer.floatChannelData {
-            let ptr = floatChannelData[0]
-            data.withUnsafeBytes { rawBuffer in
-                let int16Ptr = rawBuffer.baseAddress!.advanced(by: dataOffset).assumingMemoryBound(to: Int16.self)
-                for i in 0..<sampleCount {
-                    ptr[i] = Float(int16Ptr[i]) / 32768.0
-                }
-            }
-        }
-        
-        let startTime = Date()
         do {
-            let transcript = try await manager.process(audioBuffer: floatBuffer)
+            let audioFile = try AVAudioFile(forReading: inputUrl)
+            let format = audioFile.processingFormat
+            let frameCount = AVAudioFrameCount(audioFile.length)
+            
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                logger.error("Failed to create buffer")
+                exit(1)
+            }
+            
+            try audioFile.read(into: buffer)
+            
+            let startTime = Date()
+            let transcript = try await manager.process(audioBuffer: buffer)
             let duration = Date().timeIntervalSince(startTime)
             
             logger.info("--- Transcript ---")
             print(transcript)
             logger.info("------------------")
             logger.info("Processing time: \(String(format: "%.3f", duration))s")
+            
         } catch {
-            logger.error("Processing failed: \(error)")
+            logger.error("Failed to process file: \(error)")
             exit(1)
         }
     }
