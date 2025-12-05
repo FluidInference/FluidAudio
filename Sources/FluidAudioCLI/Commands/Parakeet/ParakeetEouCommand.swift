@@ -12,7 +12,7 @@ struct ParakeetEouCommand {
         var verbose: Bool = false
         var benchmark: Bool = false
         var download: Bool = false
-        var maxFiles: Int = 100
+        var maxFiles: Int = Int.max
         var computeUnits: String = "all"
         var debugFeatures: Bool = false
 
@@ -36,7 +36,7 @@ struct ParakeetEouCommand {
                 download = true
             case "--max-files":
                 if i + 1 < arguments.count {
-                    maxFiles = Int(arguments[i + 1]) ?? 100
+                    maxFiles = Int(arguments[i + 1]) ?? Int.max
                     i += 1
                 }
             case "--compute-units":
@@ -91,7 +91,7 @@ struct ParakeetEouCommand {
 
         // 3. Run Benchmark or Single File
         if benchmark {
-            await runBenchmark(manager: manager, maxFiles: maxFiles, logger: logger)
+            await runBenchmark(manager: manager, maxFiles: maxFiles, verbose: verbose, logger: logger)
         } else {
             guard let inputPath = input else {
                 logger.error("Missing required argument: --input <path> (or use --benchmark)")
@@ -163,8 +163,8 @@ struct ParakeetEouCommand {
         }
     }
     
-    static func runBenchmark(manager: StreamingEouAsrManager, maxFiles: Int, logger: AppLogger) async {
-        logger.info("Starting Benchmark (Max Files: \(maxFiles))...")
+    static func runBenchmark(manager: StreamingEouAsrManager, maxFiles: Int, verbose: Bool, logger: AppLogger) async {
+        logger.info("Starting Benchmark (Max Files: \(maxFiles == Int.max ? "All" : "\(maxFiles)"))...")
         
         // 1. Download LibriSpeech
         let benchmark = ASRBenchmark()
@@ -254,7 +254,12 @@ struct ParakeetEouCommand {
                 let audioDuration = Double(frameCount) / format.sampleRate
                 totalAudioDuration += audioDuration
                 
-                logger.info("[\(i+1)/\(testFiles.count)] WER: \(String(format: "%.2f", wer * 100))% | RTFx: \(String(format: "%.2f", audioDuration/duration)) | Ref: \"\(reference.prefix(30))...\" | Hyp: \"\(transcript.prefix(30))...\"")
+                if verbose {
+                    logger.info("[\(i+1)/\(testFiles.count)] WER: \(String(format: "%.2f", wer * 100))% | RTFx: \(String(format: "%.2f", audioDuration/duration)) | Ref: \"\(reference.prefix(30))...\" | Hyp: \"\(transcript.prefix(30))...\"")
+                } else if (i + 1) % 10 == 0 {
+                    print(".", terminator: "")
+                    fflush(stdout)
+                }
                 
                 results.append(BenchmarkFileResult(
                     filename: audioUrl.lastPathComponent,
