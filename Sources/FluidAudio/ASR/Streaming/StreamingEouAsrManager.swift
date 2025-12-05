@@ -92,19 +92,16 @@ public actor StreamingEouAsrManager {
     public func finish() async throws -> String {
         var transcript = ""
         
-        // If there is remaining audio, pad it and process
+        // 1. Process remaining audio (padded)
         if !audioBuffer.isEmpty {
             let remaining = audioBuffer.count
-            // Only process if we have a significant amount of audio left, or if it's the only audio
-            // But for safety, let's just process whatever is left if it's non-empty
-            
             let paddingNeeded = chunkSamples - remaining
+            
             if paddingNeeded > 0 {
                 audioBuffer.append(contentsOf: Array(repeating: 0.0, count: paddingNeeded))
             }
             
             // Process final chunk
-            // Note: We don't shift here because it's the end
             let chunk = Array(audioBuffer.prefix(chunkSamples))
             let newText = try await processChunk(chunk)
             transcript += newText
@@ -112,6 +109,12 @@ public actor StreamingEouAsrManager {
             // Clear buffer
             audioBuffer.removeAll()
         }
+        
+        // 2. Flush Chunk (Process pure silence to force emission)
+        // Many streaming models have a delay or need right context.
+        let silenceChunk = Array(repeating: Float(0.0), count: chunkSamples)
+        let flushText = try await processChunk(silenceChunk)
+        transcript += flushText
         
         return transcript
     }

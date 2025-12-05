@@ -97,9 +97,10 @@ public final class RnntDecoder {
                 } else {
                     // Check EOU
                     if tokenId == eouId {
-                        // print("EOU Detected at t=\(t)")
-                        resetState()
-                        break 
+                        // EOU detected. In file-based benchmark, we ignore it to transcribe the full file.
+                        // If we reset state here, we lose context for the rest of the file if EOU is premature.
+                        consecutiveTokenCount = 0
+                        break
                     }
                     
                     // Repetition Detection
