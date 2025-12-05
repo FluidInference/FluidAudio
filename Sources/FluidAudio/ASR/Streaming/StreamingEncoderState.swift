@@ -19,18 +19,20 @@ public struct StreamingEncoderState {
 
     public init() {
         // Initialize with zeros
+        // Shape: [Batch, Layers, Cache, Dim] = [1, 17, 70, 512]
         self.cacheLastChannel = try! MLMultiArray(
             shape: [
-                NSNumber(value: Self.numLayers),
                 NSNumber(value: 1),
+                NSNumber(value: Self.numLayers),
                 NSNumber(value: Self.cacheChannelSize),
                 NSNumber(value: Self.hiddenDim),
             ], dataType: .float32)
         
+        // Shape: [Batch, Layers, Dim, Time] = [1, 17, 512, 8]
         self.cacheLastTime = try! MLMultiArray(
             shape: [
-                NSNumber(value: Self.numLayers),
                 NSNumber(value: 1),
+                NSNumber(value: Self.numLayers),
                 NSNumber(value: Self.hiddenDim),
                 NSNumber(value: Self.cacheTimeSize),
             ], dataType: .float32)
@@ -38,13 +40,6 @@ public struct StreamingEncoderState {
         self.cacheLastChannelLen = try! MLMultiArray(
             shape: [NSNumber(value: 1)], dataType: .int32)
             
-        self.preCache = try! MLMultiArray(
-            shape: [
-                NSNumber(value: 1),
-                NSNumber(value: Self.preCacheSize),
-                NSNumber(value: Self.melDim)
-            ], dataType: .float32)
-        
         reset()
     }
 
@@ -61,11 +56,6 @@ public struct StreamingEncoderState {
         }
         
         cacheLastChannelLen[0] = 0
-        
-        let preCacheCount = preCache.count
-        preCache.withUnsafeMutableBufferPointer(ofType: Float.self) { ptr, _ in
-            ptr.baseAddress?.assign(repeating: 0, count: preCacheCount)
-        }
     }
     
     public func toFeatureProvider() -> MLFeatureProvider {
@@ -77,25 +67,14 @@ public struct StreamingEncoderState {
     }
     
     public mutating func update(from output: MLFeatureProvider) {
-        if let newChannel = output.featureValue(for: "new_cache_channel")?.multiArrayValue {
+        if let newChannel = output.featureValue(for: "cache_last_channel_next")?.multiArrayValue {
             self.cacheLastChannel = newChannel
         }
-        if let newTime = output.featureValue(for: "new_cache_time")?.multiArrayValue {
+        if let newTime = output.featureValue(for: "cache_last_time_next")?.multiArrayValue {
             self.cacheLastTime = newTime
         }
-        if let newLen = output.featureValue(for: "new_cache_len")?.multiArrayValue {
+        if let newLen = output.featureValue(for: "cache_last_channel_len_next")?.multiArrayValue {
             self.cacheLastChannelLen = newLen
-        }
-    }
-    
-    // MARK: - Pre-Encode Cache
-    public var preCache: MLMultiArray
-    private static let preCacheSize = 9
-    private static let melDim = 128
-    
-    public mutating func updatePreCache(from output: MLFeatureProvider) {
-        if let newPreCache = output.featureValue(for: "new_pre_cache")?.multiArrayValue {
-            self.preCache = newPreCache
         }
     }
 }

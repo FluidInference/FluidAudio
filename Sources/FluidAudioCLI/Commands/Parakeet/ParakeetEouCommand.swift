@@ -152,9 +152,9 @@ struct ParakeetEouCommand {
             logger.info("------------------")
             logger.info("Processing time: \(String(format: "%.3f", duration))s")
             
-            if manager.debugFeatures {
+            if await manager.debugFeatures {
                 let debugUrl = URL(fileURLWithPath: "debug_mel_features.json")
-                try manager.saveDebugFeatures(to: debugUrl)
+                try await manager.saveDebugFeatures(to: debugUrl)
             }
             
         } catch {
@@ -179,7 +179,13 @@ struct ParakeetEouCommand {
         // 2. List Files
         let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let datasetPath = applicationSupportURL.appendingPathComponent("FluidAudio/Datasets/LibriSpeech/test-clean")
+        logger.info("Searching for dataset at: \(datasetPath.path)")
+        
         var files: [(url: URL, text: String)] = []
+        
+        if !FileManager.default.fileExists(atPath: datasetPath.path) {
+            logger.error("Dataset path does not exist!")
+        }
         
         let enumerator = FileManager.default.enumerator(at: datasetPath, includingPropertiesForKeys: nil)
         while let url = enumerator?.nextObject() as? URL {
