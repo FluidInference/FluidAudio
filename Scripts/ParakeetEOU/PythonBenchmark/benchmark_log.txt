@@ -1,0 +1,96 @@
+Loading NeMo model nvidia/parakeet_realtime_eou_120m-v1...
+[NeMo I 2025-12-05 01:43:17 mixins:181] Tokenizer SentencePieceTokenizer initialized with 1026 tokens
+[NeMo W 2025-12-05 01:43:18 modelPT:180] If you intend to do training or fine-tuning, please call the ModelPT.setup_training_data() method and provide a valid configuration file to setup the train data loader.
+    Train config : 
+    manifest_filepath: /data/train_manifest.json
+    tarred_audio_filepaths: null
+    sample_rate: 16000
+    max_duration: 30.0
+    min_duration: 0.2
+    defer_setup: true
+    batch_duration: null
+    batch_size: 32
+    shuffle: true
+    drop_last: true
+    num_workers: 16
+    pin_memory: true
+    quadratic_duration: 30
+    num_buckets: 30
+    num_cuts_for_bins_estimate: 10000
+    bucket_buffer_size: 10000
+    shuffle_buffer_size: 10000
+    input_cfg: null
+    skip_missing_manifest_entries: true
+    ignore_eob_label: true
+    drop_pnc: true
+    
+[NeMo W 2025-12-05 01:43:18 modelPT:187] If you intend to do validation, please call the ModelPT.setup_validation_data() or ModelPT.setup_multiple_validation_data() method and provide a valid configuration file to setup the validation data loader(s). 
+    Validation config : 
+    manifest_filepath:
+    - /data/ASR-EOU/dev1_manifest.json
+    - /data/ASR-EOU/dev2_manifest.json
+    tarred_audio_filepaths: null
+    sample_rate: 16000
+    max_duration: 40.0
+    min_duration: 0.2
+    defer_setup: true
+    batch_duration: null
+    batch_size: 32
+    shuffle: false
+    num_workers: 16
+    pin_memory: true
+    quadratic_duration: 30
+    num_buckets: 30
+    num_cuts_for_bins_estimate: 10000
+    bucket_buffer_size: 10000
+    shuffle_buffer_size: 10000
+    name:
+    - dev1
+    - dev2
+    ignore_eob_label: true
+    drop_pnc: true
+    drop_last: true
+    
+[NeMo I 2025-12-05 01:43:18 features:305] PADDING: 0
+[NeMo I 2025-12-05 01:43:19 rnnt_models:226] Using RNNT Loss : warprnnt_numba
+    Loss warprnnt_numba_kwargs: {'fastemit_lambda': 0.03, 'clamp': -1.0}
+[NeMo I 2025-12-05 01:43:19 rnnt_models:226] Using RNNT Loss : warprnnt_numba
+    Loss warprnnt_numba_kwargs: {'fastemit_lambda': 0.03, 'clamp': -1.0}
+[NeMo W 2025-12-05 01:43:19 rnnt_loop_labels_computer:290] No conditional node support for Cuda.
+    Cuda graphs with while loops are disabled, decoding speed will be slower
+    Reason: CUDA is not available
+[NeMo I 2025-12-05 01:43:19 rnnt_models:226] Using RNNT Loss : warprnnt_numba
+    Loss warprnnt_numba_kwargs: {'fastemit_lambda': 0.03, 'clamp': -1.0}
+[NeMo W 2025-12-05 01:43:19 rnnt_loop_labels_computer:290] No conditional node support for Cuda.
+    Cuda graphs with while loops are disabled, decoding speed will be slower
+    Reason: CUDA is not available
+[NeMo I 2025-12-05 01:43:19 save_restore_connector:275] Model EncDecRNNTBPEModel was successfully restored from /Users/kikow/.cache/huggingface/hub/models--nvidia--parakeet_realtime_eou_120m-v1/snapshots/a7e2b4629593dce0ec19f600e00e9904353fda2d/parakeet_realtime_eou_120m-v1.nemo.
+[NeMo W 2025-12-05 01:43:19 conformer_encoder:869] left_chunks is not set. Setting it to default: 70.
+Scanning /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean...
+Found 2620 files.
+Model Config: N/A
+Running streaming benchmark...
+Processing 2620 files in batches of 50...
+
+=== Running Streaming Benchmark (160ms Chunks) ===
+Streaming Config: CacheAwareStreamingConfig(chunk_size=[25, 32], shift_size=[9, 16], cache_drop_size=2, last_channel_cache_size=70, valid_out_len=2, pre_encode_cache_size=[0, 9], drop_extra_pre_encoded=2, last_channel_num=0, last_time_num=0)
+Processing 2620 files in batches of 50...
+Processing 2620 files in batches of 50...
+DEBUG: files length: 2620
+DEBUG: start_idx: 0
+DEBUG: Processing batch 0 with 50 files
+Processing 0: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0000.flac...
+Processing 1: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0001.flac...
+Processing 2: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0002.flac...
+Processing 3: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0003.flac...
+Processing 4: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0004.flac...
+Processing 5: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0005.flac...
+Processing 6: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0006.flac...
+Processing 7: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0007.flac...
+Processing 8: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0008.flac...
+Processing 9: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0009.flac...
+Processing 10: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0010.flac...
+Processing 11: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0011.flac...
+Processing 12: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0012.flac...
+Processing 13: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0013.flac...
+Processing 14: /Users/kikow/Library/Application Support/FluidAudio/Datasets/LibriSpeech/test-clean/1089/134686/1089-134686-0014.flac...
