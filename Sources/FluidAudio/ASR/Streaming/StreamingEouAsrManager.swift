@@ -128,6 +128,11 @@ public actor StreamingEouAsrManager {
         self.processedSteps = 0
     }
     
+    public func injectSilence(_ seconds: Double) {
+        let silenceSamples = Int(seconds * 16000)
+        audioBuffer.append(contentsOf: Array(repeating: 0.0, count: silenceSamples))
+    }
+    
     private func processChunk(_ samples: [Float]) async throws -> String {
         guard let preprocessor = preprocessor, let encoder = encoder, let rnntDecoder = rnntDecoder, let tokenizer = tokenizer else {
             throw ASRError.notInitialized

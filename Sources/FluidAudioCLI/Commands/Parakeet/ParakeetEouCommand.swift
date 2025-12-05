@@ -141,7 +141,16 @@ struct ParakeetEouCommand {
             
             try audioFile.read(into: buffer)
             
+            // Calculate audio duration
+            let audioDuration = Double(frameCount) / format.sampleRate
+            
             await manager.reset()
+            
+            // Conditional Padding for Short Utterances
+            if audioDuration < 2.5 {
+                await manager.injectSilence(0.3)
+            }
+            
             let startTime = Date()
             var transcript = try await manager.process(audioBuffer: buffer)
             transcript += try await manager.finish()
@@ -233,7 +242,16 @@ struct ParakeetEouCommand {
                 // StreamingEouAsrManager handles resampling internally in `process(audioBuffer:)`?
                 // Yes, it calls `audioConverter.resampleBuffer(audioBuffer)`
                 
+                // Calculate audio duration
+                let audioDuration = Double(frameCount) / format.sampleRate
+                
                 await manager.reset()
+                
+                // Conditional Padding for Short Utterances
+                if audioDuration < 2.5 {
+                    await manager.injectSilence(0.3)
+                }
+                
                 let startTime = Date()
                 var transcript = try await manager.process(audioBuffer: buffer)
                 transcript += try await manager.finish()
@@ -250,8 +268,6 @@ struct ParakeetEouCommand {
                 totalWer += wer
                 totalTime += duration
                 
-                // Calculate audio duration
-                let audioDuration = Double(frameCount) / format.sampleRate
                 totalAudioDuration += audioDuration
                 
                 if verbose {

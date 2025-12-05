@@ -111,11 +111,64 @@ struct TextNormalizer {
         normalized = normalized.lowercased()
 
         // British to American normalization
+        if britishToAmerican.isEmpty {
+            print("WARNING: english.json failed to load or is empty!")
+        }
         for (british, american) in britishToAmerican {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: british) + "\\b"
             normalized = normalized.replacingOccurrences(
                 of: pattern,
                 with: american,
+                options: .regularExpression
+            )
+        }
+        
+        // Abbreviations (Moved to top)
+        let abbreviations = [
+            // Titles and names
+            "mr": "mister",
+            "mrs": "missus",
+            "ms": "miss",
+            "dr": "doctor",
+            "prof": "professor",
+            "st": "saint",
+            "jr": "junior",
+            "sr": "senior",
+            "esq": "esquire",
+
+            // Government and military titles
+            "capt": "captain",
+            "gov": "governor",
+            "ald": "alderman",
+            "gen": "general",
+            "sen": "senator",
+            "rep": "representative",
+            "pres": "president",
+            "rev": "reverend",
+            "hon": "honorable",
+            "asst": "assistant",
+            "assoc": "associate",
+            "lt": "lieutenant",
+            "col": "colonel",
+
+            // Business and other
+            "vs": "versus",
+            "inc": "incorporated",
+            "ltd": "limited",
+            "co": "company",
+
+            // Time and date abbreviations
+            "am": "a m",
+            "pm": "p m",
+            "ad": "ad",
+            "bc": "bc",
+        ]
+
+        for (abbrev, expansion) in abbreviations {
+            let pattern = "\\b" + abbrev + "\\b"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: expansion,
                 options: .regularExpression
             )
         }
@@ -268,54 +321,7 @@ struct TextNormalizer {
             normalized = normalized.replacingOccurrences(of: contraction, with: expansion)
         }
 
-        let abbreviations = [
-            // Titles and names
-            "mr": "mister",
-            "mrs": "missus",
-            "ms": "miss",
-            "dr": "doctor",
-            "prof": "professor",
-            "st": "saint",
-            "jr": "junior",
-            "sr": "senior",
-            "esq": "esquire",
-
-            // Government and military titles
-            "capt": "captain",
-            "gov": "governor",
-            "ald": "alderman",
-            "gen": "general",
-            "sen": "senator",
-            "rep": "representative",
-            "pres": "president",
-            "rev": "reverend",
-            "hon": "honorable",
-            "asst": "assistant",
-            "assoc": "associate",
-            "lt": "lieutenant",
-            "col": "colonel",
-
-            // Business and other
-            "vs": "versus",
-            "inc": "incorporated",
-            "ltd": "limited",
-            "co": "company",
-
-            // Time and date abbreviations
-            "am": "a m",
-            "pm": "p m",
-            "ad": "ad",
-            "bc": "bc",
-        ]
-
-        for (abbrev, expansion) in abbreviations {
-            let pattern = "\\b" + abbrev + "\\b"
-            normalized = normalized.replacingOccurrences(
-                of: pattern,
-                with: expansion,
-                options: .regularExpression
-            )
-        }
+        // Abbreviations moved to top
 
         let numberWords = [
             // English numbers
@@ -392,6 +398,8 @@ struct TextNormalizer {
             range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1$2"
         )
+        
+        // Merge consecutive digits logic removed due to regression
 
         // Remove periods not followed by numbers
         let periodPattern = try! NSRegularExpression(pattern: "\\.([^0-9]|$)", options: [])
