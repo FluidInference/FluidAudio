@@ -117,37 +117,42 @@ Task {
         semaphore.signal()
     }
 
-    switch command {
-    case "vad-benchmark":
-        await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
-    case "vad-analyze":
-        await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
-    case "asr-benchmark":
-        await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
-    case "fleurs-benchmark":
-        await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-    case "ctc-benchmark":
-        await CtcBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-    case "transcribe":
-        await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
-    case "multi-stream":
-        await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
+    do {
+        switch command {
+        case "vad-benchmark":
+            await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "vad-analyze":
+            await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "asr-benchmark":
+            await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "fleurs-benchmark":
+            await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "ctc-benchmark":
+            await CtcBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "transcribe":
+            await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "multi-stream":
+            await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 
-    case "tts":
-        await TTS.run(arguments: Array(arguments.dropFirst(2)))
+        case "tts":
+            await TTS.run(arguments: Array(arguments.dropFirst(2)))
 
-    case "diarization-benchmark":
-        await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
-    case "process":
-        await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
-    case "download":
-        await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
-    case "help", "--help", "-h":
-        printUsage()
-        exitWithPeakMemory(0)
-    default:
-        cliLogger.error("Unknown command: \(command)")
-        printUsage()
+        case "diarization-benchmark":
+            await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "process":
+            await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "download":
+            await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "help", "--help", "-h":
+            printUsage()
+            exitWithPeakMemory(0)
+        default:
+            cliLogger.error("Unknown command: \(command)")
+            printUsage()
+            exitWithPeakMemory(1)
+        }
+    } catch {
+        cliLogger.error("Top-level error: \(error)")
         exitWithPeakMemory(1)
     }
 }

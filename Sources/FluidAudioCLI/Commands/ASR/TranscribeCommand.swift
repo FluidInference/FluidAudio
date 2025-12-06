@@ -224,11 +224,14 @@ enum TranscribeCommand {
         var customWords: [String] = []
         var customVocabularyPath: String?
         var customVocabulary: CustomVocabularyContext?
+        var useBeamSearch = false
 
         // Parse options
         var i = 1
         while i < arguments.count {
             switch arguments[i] {
+            case "--beam-search":
+                useBeamSearch = true
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -347,7 +350,8 @@ enum TranscribeCommand {
                 wordTimestamps: wordTimestamps,
                 modelVersion: modelVersion,
                 customWords: customWords,
-                customVocabulary: customVocabulary
+                customVocabulary: customVocabulary,
+                useBeamSearch: useBeamSearch
             )
         }
     }
@@ -359,12 +363,27 @@ enum TranscribeCommand {
         wordTimestamps: Bool,
         modelVersion: AsrModelVersion,
         customWords: [String],
-        customVocabulary: CustomVocabularyContext?
+        customVocabulary: CustomVocabularyContext?,
+        useBeamSearch: Bool = false
     ) async {
         do {
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-            let asrManager = AsrManager(config: .default)
+
+            // Create ASR config with beam search if requested
+            let asrConfig: ASRConfig
+            if useBeamSearch {
+                asrConfig = ASRConfig(useBeamSearch: true)
+                if models.supportsBeamSearch {
+                    logger.info("Beam search enabled with vocabulary biasing")
+                } else {
+                    logger.warning("Beam search requested but Joint.mlmodelc not available - falling back to greedy")
+                }
+            } else {
+                asrConfig = .default
+            }
+
+            let asrManager = AsrManager(config: asrConfig)
             try await asrManager.initialize(models: models)
 
             logger.info("ASR Manager initialized successfully")
@@ -753,6 +772,8 @@ enum TranscribeCommand {
                 --metadata              Show confidence, start time, and end time in results
                 --word-timestamps       Show word-level timestamps for each word in the transcription
                 --model-version <ver>   ASR model version to use: v2 or v3 (default: v3)
+                --beam-search           Use beam search decoding with vocabulary biasing
+                                        (requires Joint.mlmodelc model and --custom-vocab)
                 --realtime-chunk-size   Size of chunks to simulate real-time streaming (default: 500ms)
                 <size>                  Format: e.g., "500ms", "100ms", "2000ms" (range: 10ms-5000ms)
                 --custom-vocab <path>   Custom vocabulary for CTC keyword boosting (batch only)
