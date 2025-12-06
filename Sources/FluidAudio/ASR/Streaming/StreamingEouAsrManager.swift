@@ -9,26 +9,25 @@ public actor StreamingEouAsrManager {
     
     // Debug
     private var processedSteps = 0
+    private var processedChunks = 0
     
     // Models
     private var preprocessor: MLModel?
-    // private var preEncode: MLModel? // Removed
-    private var encoder: MLModel? // Renamed from conformer
+    private var streamingEncoder: MLModel? // Single Loopback Model
     private var decoder: MLModel?
     private var joint: MLModel?
     
     // Components
     private var rnntDecoder: RnntDecoder?
-    private var encoderState = StreamingEncoderState()
     private let audioConverter = AudioConverter()
     private var tokenizer: Tokenizer?
     
     // Configuration
-    private let chunkFrames = 128
-    private let shiftFrames = 120
+    // 160ms chunk size (matches NeMo reference benchmark)
+    // 16 frames * 10ms = 160ms
+    private let chunkFrames = 16
     private let hopLength = 160
-    private var chunkSamples: Int { chunkFrames * hopLength } // 21600
-    private var shiftSamples: Int { shiftFrames * hopLength } // 19200
+    private var chunkSamples: Int { chunkFrames * hopLength }
     
     // Audio Buffer
     private var audioBuffer: [Float] = []
@@ -37,8 +36,17 @@ public actor StreamingEouAsrManager {
     public let debugFeatures: Bool
     private var debugFeatureBuffer: [Float] = []
     
-    // Mel Cache for Monolithic Encoder
-    private var melCache: MLMultiArray?
+    // --- Loopback States ---
+    // 1. Pre-Cache (Audio Context) [1, 128, 16]
+    private var preCache: MLMultiArray?
+    
+    // 2. Conformer Caches
+    // cache_last_channel: [17, 1, 70, 512]
+    // cache_last_time: [17, 1, 512, 8]
+    // cache_last_channel_len: [1]
+    private var cacheLastChannel: MLMultiArray?
+    private var cacheLastTime: MLMultiArray?
+    private var cacheLastChannelLen: MLMultiArray?
 
     public init(configuration: MLModelConfiguration = MLModelConfiguration(), debugFeatures: Bool = false) {
         self.configuration = configuration
@@ -49,25 +57,46 @@ public actor StreamingEouAsrManager {
         logger.info("Loading CoreML models from \(modelDir.path)...")
         
         self.preprocessor = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("parakeet_eou_preprocessor.mlmodelc"), configuration: self.configuration)
-        self.encoder = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("parakeet_eou_encoder_streaming.mlmodelc"), configuration: self.configuration)
-        self.decoder = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("parakeet_eou_decoder.mlmodelc"), configuration: self.configuration)
-        self.joint = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("parakeet_eou_joint_decision_single_step.mlmodelc"), configuration: self.configuration)
+        self.streamingEncoder = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("streaming_encoder.mlmodelc"), configuration: self.configuration)
+        self.decoder = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("decoder.mlmodelc"), configuration: self.configuration)
+        self.joint = try await MLModel.load(contentsOf: modelDir.appendingPathComponent("joint_decision.mlmodelc"), configuration: self.configuration)
         
         // Load Tokenizer
         let vocabUrl = modelDir.appendingPathComponent("vocab.json")
         self.tokenizer = try Tokenizer(vocabPath: vocabUrl)
         
         self.rnntDecoder = RnntDecoder(decoderModel: self.decoder!, jointModel: self.joint!)
-        self.encoderState.reset()
+        
+        // Initialize States
+        try self.resetStates()
+        
         self.audioBuffer.removeAll()
         
         logger.info("Models loaded successfully.")
     }
     
+    private func resetStates() throws {
+        // Initialize with Zeros
+        // pre_cache: [1, 128, 16]
+        self.preCache = try MLMultiArray(shape: [1, 128, 16], dataType: .float32)
+        self.preCache?.reset(to: 0)
+        
+        // cache_last_channel: [17, 1, 70, 512]
+        self.cacheLastChannel = try MLMultiArray(shape: [17, 1, 70, 512], dataType: .float32)
+        self.cacheLastChannel?.reset(to: 0)
+        
+        // cache_last_time: [17, 1, 512, 8]
+        self.cacheLastTime = try MLMultiArray(shape: [17, 1, 512, 8], dataType: .float32)
+        self.cacheLastTime?.reset(to: 0)
+        
+        // cache_last_channel_len: [1]
+        self.cacheLastChannelLen = try MLMultiArray(shape: [1], dataType: .int32)
+        self.cacheLastChannelLen?.reset(to: 0)
+    }
+    
     public func process(audioBuffer: AVAudioPCMBuffer) async throws -> String {
         // 1. Convert to 16kHz Mono Float32
         let samples = try audioConverter.resampleBuffer(audioBuffer)
-        // print("Audio Samples Prefix: \(samples.prefix(10))") // DEBUG
         self.audioBuffer.append(contentsOf: samples)
         
         var transcript = ""
@@ -81,8 +110,8 @@ public actor StreamingEouAsrManager {
             let newText = try await processChunk(chunk)
             transcript += newText
             
-            // 4. Shift buffer
-            self.audioBuffer.removeFirst(shiftSamples)
+            // 4. Shift buffer (No overlap needed, model handles context)
+            self.audioBuffer.removeFirst(chunkSamples)
         }
         
         processedSteps += 1
@@ -110,21 +139,14 @@ public actor StreamingEouAsrManager {
             audioBuffer.removeAll()
         }
         
-        // 2. Flush Chunk (Process pure silence to force emission)
-        // Many streaming models have a delay or need right context.
-        let silenceChunk = Array(repeating: Float(0.0), count: chunkSamples)
-        let flushText = try await processChunk(silenceChunk)
-        transcript += flushText
-        
         return transcript
     }
     
     public func reset() async {
         audioBuffer.removeAll()
         debugFeatureBuffer.removeAll()
-        melCache = nil
-        await encoderState.reset()
-        await rnntDecoder?.resetState() // Assuming rnntDecoder has a resetState method
+        try? resetStates()
+        await rnntDecoder?.resetState()
         self.processedSteps = 0
     }
     
@@ -134,7 +156,15 @@ public actor StreamingEouAsrManager {
     }
     
     private func processChunk(_ samples: [Float]) async throws -> String {
-        guard let preprocessor = preprocessor, let encoder = encoder, let rnntDecoder = rnntDecoder, let tokenizer = tokenizer else {
+        guard let preprocessor = preprocessor, 
+              let streamingEncoder = streamingEncoder, 
+              let rnntDecoder = rnntDecoder, 
+              let tokenizer = tokenizer,
+              let preCache = preCache,
+              let cacheLastChannel = cacheLastChannel,
+              let cacheLastTime = cacheLastTime,
+              let cacheLastChannelLen = cacheLastChannelLen
+        else {
             throw ASRError.notInitialized
         }
         
@@ -153,74 +183,69 @@ public actor StreamingEouAsrManager {
         ])
         
         let prepOutput = try await preprocessor.prediction(from: prepInput)
-        let mel = prepOutput.featureValue(for: "mel")!.multiArrayValue!
-        let melLength = prepOutput.featureValue(for: "mel_length")!.multiArrayValue!
         
-        // Debug: Accumulate features
+        // B. Streaming Encoder (Loopback)
+        // Inputs: audio_signal (Mel), audio_length, pre_cache, cache_last_channel, cache_last_time, cache_last_channel_len
+        guard let mel = prepOutput.featureValue(for: "mel")?.multiArrayValue,
+              let melLen = prepOutput.featureValue(for: "mel_length")?.multiArrayValue else {
+            let keys = prepOutput.featureNames.joined(separator: ", ")
+            throw ASRError.processingFailed("Missing mel output. Available: \(keys)")
+        }
+        
         if debugFeatures {
-            let melMultiArray = mel
-            let count = melMultiArray.count
-            let melPtr = melMultiArray.dataPointer.bindMemory(to: Float.self, capacity: count)
-            for i in 0..<count {
-                debugFeatureBuffer.append(melPtr[i])
+            let count = mel.count
+            mel.withUnsafeBufferPointer(ofType: Float.self) { ptr in
+                if let base = ptr.baseAddress {
+                    debugFeatureBuffer.append(contentsOf: UnsafeBufferPointer(start: base, count: count))
+                }
             }
         }
         
-        // B. Prepare Encoder Input (Mel Caching)
-        // Monolithic encoder expects [Cache(9) + Current(129)] = 138 frames
-        var inputMel: MLMultiArray
-        let cacheSize = 9
+        let encoderInput = try MLDictionaryFeatureProvider(dictionary: [
+            "audio_signal": MLFeatureValue(multiArray: mel),
+            "audio_length": MLFeatureValue(multiArray: melLen),
+            "pre_cache": MLFeatureValue(multiArray: preCache),
+            "cache_last_channel": MLFeatureValue(multiArray: cacheLastChannel),
+            "cache_last_time": MLFeatureValue(multiArray: cacheLastTime),
+            "cache_last_channel_len": MLFeatureValue(multiArray: cacheLastChannelLen)
+        ])
         
-        if let cache = melCache {
-            inputMel = try concatenateMel(cache, mel)
-        } else {
-            // First chunk: Pad with zeros
-            let zeroCache = try createZeroMel(channels: mel.shape[1].intValue, length: cacheSize)
-            inputMel = try concatenateMel(zeroCache, mel)
+        let encoderOutput = try await streamingEncoder.prediction(from: encoderInput)
+        
+        // C. Update States (Loopback)
+        if let newPreCache = encoderOutput.featureValue(for: "new_pre_cache")?.multiArrayValue {
+            self.preCache = newPreCache
         }
-        
-        // Update Cache (Keep last 9 frames of CURRENT mel)
-        // Note: We cache from 'mel', not 'inputMel'
-        let currentFrames = mel.shape[2].intValue
-        if currentFrames >= cacheSize {
-            melCache = try sliceMel(mel, start: currentFrames - cacheSize, length: cacheSize)
-        } else {
-            // Should not happen if chunk is large enough, but handle safely?
-            // Just keep what we have? Or pad?
-            // For now assume chunk is large enough (129 frames > 9)
-            melCache = mel
+        if let newChannel = encoderOutput.featureValue(for: "new_cache_last_channel")?.multiArrayValue {
+            self.cacheLastChannel = newChannel
         }
-        
-        let inputMelLength = try MLMultiArray(shape: [1], dataType: .int32)
-        inputMelLength[0] = NSNumber(value: inputMel.shape[2].intValue)
-        
-        // C. Encode
-        let encInputDict: [String: Any] = [
-            "mel": inputMel,
-            "mel_length": inputMelLength,
-            "cache_last_channel": encoderState.cacheLastChannel,
-            "cache_last_time": encoderState.cacheLastTime,
-            "cache_last_channel_len": encoderState.cacheLastChannelLen
-        ]
-        let encInput = try MLDictionaryFeatureProvider(dictionary: encInputDict.mapValues { MLFeatureValue(multiArray: $0 as! MLMultiArray) })
-        let encOutput = try await encoder.prediction(from: encInput)
-        
-        var encoded = encOutput.featureValue(for: "encoder")!.multiArrayValue!
-        
-        // Update Cache
-        encoderState.update(from: encOutput)
-        
-        // Slice Encoded Output (15 frames valid)
-        let validOutLen = 15
-        if encoded.shape[2].intValue > validOutLen {
-             encoded = try sliceEncoded(encoded, length: validOutLen)
+        if let newTime = encoderOutput.featureValue(for: "new_cache_last_time")?.multiArrayValue {
+            self.cacheLastTime = newTime
+        }
+        if let newChannelLen = encoderOutput.featureValue(for: "new_cache_last_channel_len")?.multiArrayValue {
+            self.cacheLastChannelLen = newChannelLen
         }
         
         // D. Decode
-        let tokenIds = try rnntDecoder.decode(encoderOutput: encoded)
+        guard let encoded = encoderOutput.featureValue(for: "encoded_output")?.multiArrayValue,
+              let encodedLen = encoderOutput.featureValue(for: "encoded_length")?.multiArrayValue else {
+             throw ASRError.processingFailed("Missing encoder output")
+        }
         
-        // E. Detokenize
-        return tokenizer.decode(ids: tokenIds)
+        // Decode tokens
+        // Note: encodedLen is [B], we need Int
+        // let len = encodedLen[0].intValue // Not used by RnntDecoder
+        
+        // Calculate time offset (for debug logs)
+        // 160ms chunk -> 16 frames -> subsampling 4 -> 4 frames?
+        // Actually Parakeet subsampling is 8? (4 from pre-encode, 2 from conformer?)
+        // Let's just use processedSteps * 4 for now.
+        let timeOffset = processedSteps * 4
+        
+        let tokenIds = try rnntDecoder.decode(encoderOutput: encoded, timeOffset: timeOffset)
+        let decodedText = tokenizer.decode(ids: tokenIds)
+        
+        return decodedText
     }
     
     public func saveDebugFeatures(to url: URL) throws {
@@ -233,123 +258,18 @@ public actor StreamingEouAsrManager {
         try data.write(to: url)
         logger.info("Dumped \(debugFeatureBuffer.count) features to \(url.path)")
     }
+}
 
-    private func sliceMel(_ mel: MLMultiArray, start: Int = 0, length: Int) throws -> MLMultiArray {
-        // Shape [1, 128, T] -> [1, 128, length]
-        let newShape = [mel.shape[0], mel.shape[1], NSNumber(value: length)]
-        let newArray = try MLMultiArray(shape: newShape, dataType: .float32)
-        
-        let channels = mel.shape[1].intValue
-        let srcPtr = mel.dataPointer.bindMemory(to: Float.self, capacity: mel.count)
-        let dstPtr = newArray.dataPointer.bindMemory(to: Float.self, capacity: newArray.count)
-        
-        let stride1 = mel.strides[1].intValue
-        let stride2 = mel.strides[2].intValue
-        
-        for c in 0..<channels {
-            for t in 0..<length {
-                let srcIdx = c * stride1 + (start + t) * stride2
-                let dstIdx = c * length + t // newArray is contiguous
-                dstPtr[dstIdx] = srcPtr[srcIdx]
-            }
+extension MLMultiArray {
+    func reset(to value: NSNumber) {
+        let count = self.count
+        let ptr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
+        // Assuming Float32 for simplicity, but should check dataType
+        if self.dataType == .float32 {
+            ptr.assign(repeating: value.floatValue, count: count)
+        } else if self.dataType == .int32 {
+            let intPtr = self.dataPointer.bindMemory(to: Int32.self, capacity: count)
+            intPtr.assign(repeating: value.int32Value, count: count)
         }
-        return newArray
-    }
-    
-    private func concatenateMel(_ mel1: MLMultiArray, _ mel2: MLMultiArray) throws -> MLMultiArray {
-        // Shape [1, 128, T1] + [1, 128, T2] -> [1, 128, T1+T2]
-        let t1 = mel1.shape[2].intValue
-        let t2 = mel2.shape[2].intValue
-        let totalLength = t1 + t2
-        
-        let newShape = [mel1.shape[0], mel1.shape[1], NSNumber(value: totalLength)]
-        let newArray = try MLMultiArray(shape: newShape, dataType: .float32)
-        
-        let channels = mel1.shape[1].intValue
-        let srcPtr1 = mel1.dataPointer.bindMemory(to: Float.self, capacity: mel1.count)
-        let srcPtr2 = mel2.dataPointer.bindMemory(to: Float.self, capacity: mel2.count)
-        let dstPtr = newArray.dataPointer.bindMemory(to: Float.self, capacity: newArray.count)
-        
-        let stride1_1 = mel1.strides[1].intValue
-        let stride2_1 = mel1.strides[2].intValue
-        let stride1_2 = mel2.strides[1].intValue
-        let stride2_2 = mel2.strides[2].intValue
-        
-        for c in 0..<channels {
-            // Copy mel1
-            for t in 0..<t1 {
-                let srcIdx = c * stride1_1 + t * stride2_1
-                let dstIdx = c * totalLength + t
-                dstPtr[dstIdx] = srcPtr1[srcIdx]
-            }
-            // Copy mel2
-            for t in 0..<t2 {
-                let srcIdx = c * stride1_2 + t * stride2_2
-                let dstIdx = c * totalLength + (t1 + t)
-                dstPtr[dstIdx] = srcPtr2[srcIdx]
-            }
-        }
-        return newArray
-    }
-    
-    private func createZeroMel(channels: Int, length: Int) throws -> MLMultiArray {
-        let shape = [NSNumber(value: 1), NSNumber(value: channels), NSNumber(value: length)]
-        let array = try MLMultiArray(shape: shape, dataType: .float32)
-        
-        // Zero init
-        let count = array.count
-        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: count)
-        ptr.update(repeating: 0, count: count)
-        
-        return array
-    }
-    
-    private func sliceEncoded(_ encoded: MLMultiArray, length: Int) throws -> MLMultiArray {
-        // Shape [1, 512, T] -> [1, 512, length]
-        let newShape = [encoded.shape[0], encoded.shape[1], NSNumber(value: length)]
-        let newArray = try MLMultiArray(shape: newShape, dataType: .float32)
-        
-        let channels = encoded.shape[1].intValue
-        let srcPtr = encoded.dataPointer.bindMemory(to: Float.self, capacity: encoded.count)
-        let dstPtr = newArray.dataPointer.bindMemory(to: Float.self, capacity: newArray.count)
-        
-        let stride1 = encoded.strides[1].intValue
-        let stride2 = encoded.strides[2].intValue
-        
-        for c in 0..<channels {
-            for t in 0..<length {
-                let srcIdx = c * stride1 + t * stride2
-                let dstIdx = c * length + t // newArray is contiguous
-                dstPtr[dstIdx] = srcPtr[srcIdx]
-            }
-        }
-        return newArray
-    }
-    
-    private func padMel(_ mel: MLMultiArray, targetLength: Int) throws -> MLMultiArray {
-        // Shape [1, 128, T] -> [1, 128, targetLength]
-        let newShape = [mel.shape[0], mel.shape[1], NSNumber(value: targetLength)]
-        let newArray = try MLMultiArray(shape: newShape, dataType: .float32)
-        
-        // Zero init
-        let count = newArray.count
-        let dstPtr = newArray.dataPointer.bindMemory(to: Float.self, capacity: count)
-        dstPtr.update(repeating: 0, count: count)
-        
-        let channels = mel.shape[1].intValue
-        let currentLength = mel.shape[2].intValue
-        let srcPtr = mel.dataPointer.bindMemory(to: Float.self, capacity: mel.count)
-        
-        let stride1 = mel.strides[1].intValue
-        let stride2 = mel.strides[2].intValue
-        
-        for c in 0..<channels {
-            for t in 0..<currentLength {
-                let srcIdx = c * stride1 + t * stride2
-                let dstIdx = c * targetLength + t // newArray is contiguous
-                dstPtr[dstIdx] = srcPtr[srcIdx]
-            }
-        }
-        return newArray
     }
 }

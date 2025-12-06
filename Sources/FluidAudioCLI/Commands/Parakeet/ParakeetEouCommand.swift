@@ -8,7 +8,7 @@ struct ParakeetEouCommand {
         let logger = AppLogger(category: "ParakeetEOU")
         
         var input: String?
-        var models: String = "Models/ParakeetEOU/Streaming" // Default relative path
+        var models: String = "Models/ParakeetEOU/Streaming/160ms" // Default relative path
         var verbose: Bool = false
         var benchmark: Bool = false
         var download: Bool = false
@@ -188,16 +188,22 @@ struct ParakeetEouCommand {
         // 2. List Files
         let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let datasetPath = applicationSupportURL.appendingPathComponent("FluidAudio/Datasets/LibriSpeech/test-clean")
-        logger.info("Searching for dataset at: \(datasetPath.path)")
+        print("DEBUG: Searching for dataset at: \(datasetPath.path)")
         
         var files: [(url: URL, text: String)] = []
         
         if !FileManager.default.fileExists(atPath: datasetPath.path) {
+            print("DEBUG: Dataset path does not exist!")
             logger.error("Dataset path does not exist!")
+        } else {
+            print("DEBUG: Dataset path exists.")
         }
         
         let enumerator = FileManager.default.enumerator(at: datasetPath, includingPropertiesForKeys: nil)
+        var fileCount = 0
         while let url = enumerator?.nextObject() as? URL {
+            fileCount += 1
+            if fileCount % 1000 == 0 { print("DEBUG: Scanned \(fileCount) files...") }
             if url.pathExtension == "txt" {
                 // Parse transcript file
                 if let content = try? String(contentsOf: url, encoding: .utf8) {
@@ -216,10 +222,28 @@ struct ParakeetEouCommand {
                 }
             }
         }
+        print("DEBUG: Total files scanned: \(fileCount)")
+        print("DEBUG: Found \(files.count) valid pairs.")
+        print("DEBUG: Alive 1")
         
-        files.shuffle()
+        print("DEBUG: Shuffling files...")
+        // files.shuffle()
+        print("DEBUG: Skipped shuffle.")
+        
+        print("DEBUG: Alive 2")
+        
         let testFiles = Array(files.prefix(maxFiles))
-        logger.info("Found \(files.count) files, running on \(testFiles.count)")
+        print("DEBUG: Selected \(testFiles.count) files.")
+        
+        // logger.info("Found \(files.count) files, running on \(testFiles.count)")
+        print("INFO: Found \(files.count) files, running on \(testFiles.count)")
+        
+        if testFiles.isEmpty {
+            print("DEBUG: No files to run benchmark on.")
+            return
+        }
+        
+        print("DEBUG: Starting benchmark loop...")
         
         var totalWer = 0.0
         var totalTime = 0.0
@@ -227,16 +251,29 @@ struct ParakeetEouCommand {
         var results: [BenchmarkFileResult] = []
         
         for (i, file) in testFiles.enumerated() {
+            print("DEBUG: Processing file \(i+1)/\(testFiles.count): \(file.url.lastPathComponent)")
             let (audioUrl, reference) = file
             // Convert FLAC to WAV/Float buffer
             // We can use AudioConverter helper if available, or just AVAudioFile
-            
             do {
                 let audioFile = try AVAudioFile(forReading: audioUrl)
-                let format = audioFile.processingFormat
-                let frameCount = AVAudioFrameCount(audioFile.length)
-                let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
-                try audioFile.read(into: buffer)
+            let format = audioFile.processingFormat
+            let frameCount = AVAudioFrameCount(audioFile.length)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+            try audioFile.read(into: buffer)
+                
+                let array = Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)))
+                
+                // Debug: Audio Stats
+                var minVal: Float = .greatestFiniteMagnitude
+                var maxVal: Float = -.greatestFiniteMagnitude
+                var sum: Float = 0
+                for x in array {
+                    if x < minVal { minVal = x }
+                    if x > maxVal { maxVal = x }
+                    sum += x
+                }
+                print("DEBUG: Audio Input - Min: \(minVal), Max: \(maxVal), Mean: \(sum / Float(array.count))")
                 
                 // Resample if needed (ASR expects 16k mono)
                 // StreamingEouAsrManager handles resampling internally in `process(audioBuffer:)`?
@@ -258,11 +295,11 @@ struct ParakeetEouCommand {
                 let duration = Date().timeIntervalSince(startTime)
                 
                 // ITN: Normalize hypothesis
-                let normalizedTranscript = TextNormalizer.normalize(transcript)
+                let normalizedTranscript = TextNormalizerOfficial.normalize(transcript)
                 
                 // Note: Reference is usually already normalized (digits), but we can normalize it too just in case
                 // For LibriSpeech, references are usually UPPERCASE WORDS, so "ONE HUNDRED" -> "100"
-                let normalizedReference = TextNormalizer.normalize(reference)
+                let normalizedReference = TextNormalizerOfficial.normalize(reference)
                 
                 let wer = calculateWer(hypothesis: normalizedTranscript, reference: normalizedReference)
                 totalWer += wer
@@ -274,7 +311,7 @@ struct ParakeetEouCommand {
                     logger.info("[\(i+1)/\(testFiles.count)] WER: \(String(format: "%.2f", wer * 100))% | RTFx: \(String(format: "%.2f", audioDuration/duration)) | Ref: \"\(reference.prefix(30))...\" | Hyp: \"\(transcript.prefix(30))...\"")
                 } else if (i + 1) % 10 == 0 {
                     print(".", terminator: "")
-                    fflush(stdout)
+                    // fflush(stdout)
                 }
                 
                 results.append(BenchmarkFileResult(
@@ -288,6 +325,7 @@ struct ParakeetEouCommand {
                 ))
                 
             } catch {
+                print("DEBUG: Error processing \(audioUrl.lastPathComponent): \(error)")
                 logger.error("Failed to process \(audioUrl.lastPathComponent): \(error)")
             }
         }
@@ -296,10 +334,15 @@ struct ParakeetEouCommand {
         let avgRtf = totalAudioDuration / totalTime
         
         logger.info("--- Benchmark Results ---")
+        print("--- Benchmark Results ---")
         logger.info("Average WER: \(String(format: "%.2f", avgWer * 100))%")
+        print("Average WER: \(String(format: "%.2f", avgWer * 100))%")
         logger.info("Average RTFx: \(String(format: "%.2f", avgRtf))")
+        print("Average RTFx: \(String(format: "%.2f", avgRtf))")
         logger.info("Total Audio: \(String(format: "%.2f", totalAudioDuration))s")
+        print("Total Audio: \(String(format: "%.2f", totalAudioDuration))s")
         logger.info("Total Time: \(String(format: "%.2f", totalTime))s")
+        print("Total Time: \(String(format: "%.2f", totalTime))s")
         
         // Save to JSON
         let sortedResults = results.sorted { $0.wer > $1.wer }

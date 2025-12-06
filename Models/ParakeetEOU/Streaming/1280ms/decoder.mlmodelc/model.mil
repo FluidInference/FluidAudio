@@ -1,0 +1,45 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3500.14.1"}, {"coremlc-version", "3500.32.1"}, {"coremltools-component-torch", "2.4.0"}, {"coremltools-source-dialect", "TorchScript"}, {"coremltools-version", "8.3.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 640]> c_in, tensor<fp32, [1, 1, 640]> h_in, tensor<int32, [1]> target_length, tensor<int32, [1, 1]> targets) {
+            tensor<int32, []> y_axis_0 = const()[name = tensor<string, []>("y_axis_0"), val = tensor<int32, []>(0)];
+            tensor<int32, []> y_batch_dims_0 = const()[name = tensor<string, []>("y_batch_dims_0"), val = tensor<int32, []>(0)];
+            tensor<bool, []> y_validate_indices_0 = const()[name = tensor<string, []>("y_validate_indices_0"), val = tensor<bool, []>(false)];
+            tensor<fp16, [1027, 640]> module_prediction_embed_weight_to_fp16 = const()[name = tensor<string, []>("module_prediction_embed_weight_to_fp16"), val = tensor<fp16, [1027, 640]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];
+            tensor<string, []> targets_to_int16_dtype_0 = const()[name = tensor<string, []>("targets_to_int16_dtype_0"), val = tensor<string, []>("int16")];
+            tensor<int16, [1, 1]> targets_to_int16 = cast(dtype = targets_to_int16_dtype_0, x = targets)[name = tensor<string, []>("cast_8")];
+            tensor<fp16, [1, 1, 640]> y_cast_fp16_cast_uint16 = gather(axis = y_axis_0, batch_dims = y_batch_dims_0, indices = targets_to_int16, validate_indices = y_validate_indices_0, x = module_prediction_embed_weight_to_fp16)[name = tensor<string, []>("y_cast_fp16_cast_uint16")];
+            tensor<int32, [3]> input_3_perm_0 = const()[name = tensor<string, []>("input_3_perm_0"), val = tensor<int32, [3]>([1, 0, 2])];
+            tensor<int32, [1]> input_lstm_h0_squeeze_axes_0 = const()[name = tensor<string, []>("input_lstm_h0_squeeze_axes_0"), val = tensor<int32, [1]>([0])];
+            tensor<string, []> h_in_to_fp16_dtype_0 = const()[name = tensor<string, []>("h_in_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, [1, 1, 640]> h_in_to_fp16 = cast(dtype = h_in_to_fp16_dtype_0, x = h_in)[name = tensor<string, []>("cast_7")];
+            tensor<fp16, [1, 640]> input_lstm_h0_squeeze_cast_fp16 = squeeze(axes = input_lstm_h0_squeeze_axes_0, x = h_in_to_fp16)[name = tensor<string, []>("input_lstm_h0_squeeze_cast_fp16")];
+            tensor<int32, [1]> input_lstm_c0_squeeze_axes_0 = const()[name = tensor<string, []>("input_lstm_c0_squeeze_axes_0"), val = tensor<int32, [1]>([0])];
+            tensor<string, []> c_in_to_fp16_dtype_0 = const()[name = tensor<string, []>("c_in_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, [1, 1, 640]> c_in_to_fp16 = cast(dtype = c_in_to_fp16_dtype_0, x = c_in)[name = tensor<string, []>("cast_6")];
+            tensor<fp16, [1, 640]> input_lstm_c0_squeeze_cast_fp16 = squeeze(axes = input_lstm_c0_squeeze_axes_0, x = c_in_to_fp16)[name = tensor<string, []>("input_lstm_c0_squeeze_cast_fp16")];
+            tensor<string, []> input_direction_0 = const()[name = tensor<string, []>("input_direction_0"), val = tensor<string, []>("forward")];
+            tensor<bool, []> input_output_sequence_0 = const()[name = tensor<string, []>("input_output_sequence_0"), val = tensor<bool, []>(true)];
+            tensor<string, []> input_recurrent_activation_0 = const()[name = tensor<string, []>("input_recurrent_activation_0"), val = tensor<string, []>("sigmoid")];
+            tensor<string, []> input_cell_activation_0 = const()[name = tensor<string, []>("input_cell_activation_0"), val = tensor<string, []>("tanh")];
+            tensor<string, []> input_activation_0 = const()[name = tensor<string, []>("input_activation_0"), val = tensor<string, []>("tanh")];
+            tensor<fp16, [2560, 640]> concat_1_to_fp16 = const()[name = tensor<string, []>("concat_1_to_fp16"), val = tensor<fp16, [2560, 640]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(1314688)))];
+            tensor<fp16, [2560, 640]> concat_2_to_fp16 = const()[name = tensor<string, []>("concat_2_to_fp16"), val = tensor<fp16, [2560, 640]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(4591552)))];
+            tensor<fp16, [2560]> concat_0_to_fp16 = const()[name = tensor<string, []>("concat_0_to_fp16"), val = tensor<fp16, [2560]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(7868416)))];
+            tensor<fp16, [1, 1, 640]> input_3_cast_fp16 = transpose(perm = input_3_perm_0, x = y_cast_fp16_cast_uint16)[name = tensor<string, []>("transpose_2")];
+            tensor<fp16, [1, 1, 640]> input_cast_fp16_0, tensor<fp16, [1, 640]> input_cast_fp16_1, tensor<fp16, [1, 640]> input_cast_fp16_2 = lstm(activation = input_activation_0, bias = concat_0_to_fp16, cell_activation = input_cell_activation_0, direction = input_direction_0, initial_c = input_lstm_c0_squeeze_cast_fp16, initial_h = input_lstm_h0_squeeze_cast_fp16, output_sequence = input_output_sequence_0, recurrent_activation = input_recurrent_activation_0, weight_hh = concat_2_to_fp16, weight_ih = concat_1_to_fp16, x = input_3_cast_fp16)[name = tensor<string, []>("input_cast_fp16")];
+            tensor<int32, [1]> obj_3_axes_0 = const()[name = tensor<string, []>("obj_3_axes_0"), val = tensor<int32, [1]>([0])];
+            tensor<fp16, [1, 1, 640]> obj_3_cast_fp16 = expand_dims(axes = obj_3_axes_0, x = input_cast_fp16_1)[name = tensor<string, []>("obj_3_cast_fp16")];
+            tensor<string, []> obj_3_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("obj_3_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [1]> obj_axes_0 = const()[name = tensor<string, []>("obj_axes_0"), val = tensor<int32, [1]>([0])];
+            tensor<fp16, [1, 1, 640]> obj_cast_fp16 = expand_dims(axes = obj_axes_0, x = input_cast_fp16_2)[name = tensor<string, []>("obj_cast_fp16")];
+            tensor<string, []> obj_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("obj_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [3]> transpose_0_perm_0 = const()[name = tensor<string, []>("transpose_0_perm_0"), val = tensor<int32, [3]>([1, 2, 0])];
+            tensor<string, []> transpose_0_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("transpose_0_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, [1, 640, 1]> transpose_0_cast_fp16 = transpose(perm = transpose_0_perm_0, x = input_cast_fp16_0)[name = tensor<string, []>("transpose_1")];
+            tensor<fp32, [1, 640, 1]> decoder = cast(dtype = transpose_0_cast_fp16_to_fp32_dtype_0, x = transpose_0_cast_fp16)[name = tensor<string, []>("cast_3")];
+            tensor<fp32, [1, 1, 640]> c_out = cast(dtype = obj_cast_fp16_to_fp32_dtype_0, x = obj_cast_fp16)[name = tensor<string, []>("cast_4")];
+            tensor<fp32, [1, 1, 640]> h_out = cast(dtype = obj_3_cast_fp16_to_fp32_dtype_0, x = obj_3_cast_fp16)[name = tensor<string, []>("cast_5")];
+            tensor<int32, [1]> target_length_tmp = identity(x = target_length)[name = tensor<string, []>("target_length_tmp")];
+        } -> (decoder, h_out, c_out);
+}

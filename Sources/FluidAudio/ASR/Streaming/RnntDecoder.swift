@@ -49,8 +49,9 @@ public final class RnntDecoder {
     
     /// Decodes the encoder output using greedy search.
     /// - Parameter encoderOutput: [1, 512, T]
+    /// - Parameter timeOffset: Global time offset for debugging
     /// - Returns: List of predicted token IDs
-    public func decode(encoderOutput: MLMultiArray) throws -> [Int] {
+    public func decode(encoderOutput: MLMultiArray, timeOffset: Int = 0) throws -> [Int] {
         var predictedIds: [Int] = []
         
         let T = encoderOutput.shape[2].intValue
@@ -61,12 +62,15 @@ public final class RnntDecoder {
         // We need [1, 512, 1] for joint model
         
         for t in 0..<T {
+            let globalT = timeOffset + t
+            
             // Extract encoder step
             let encoderStep = try extractEncoderStep(from: encoderOutput, timeIndex: t, hiddenDim: hiddenDim)
             
             var symbolsAdded = 0
             
             while symbolsAdded < maxSymbolsPerStep {
+                // 1. Run Decoder
                 // 1. Run Decoder
                 let decoderInput = try prepareDecoderInput(lastToken: lastToken, h: hState, c: cState)
                 let decoderOutput = try decoderModel.prediction(from: decoderInput)
@@ -78,6 +82,8 @@ public final class RnntDecoder {
                      decoderStep = try sliceDecoderStep(decoderStep)
                 }
                 
+
+                
                 // 2. Run Joint
                 let jointInput = try MLDictionaryFeatureProvider(dictionary: [
                     "encoder_step": MLFeatureValue(multiArray: encoderStep),
@@ -86,15 +92,22 @@ public final class RnntDecoder {
                 
                 let jointOutput = try jointModel.prediction(from: jointInput)
                 
+
+                
                 // 3. Get Token ID
                 // Output "token_id" is [1, 1, 1] (argmax)
                 let tokenIdMultiArray = jointOutput.featureValue(for: "token_id")!.multiArrayValue!
                 let tokenId = tokenIdMultiArray[0].int32Value
                 
+
+                
+
+                
                 if tokenId == blankId {
                     consecutiveTokenCount = 0 // Reset on blank
                     break
                 } else {
+
                     // Check EOU
                     if tokenId == eouId {
                         // EOU detected. In file-based benchmark, we ignore it to transcribe the full file.
@@ -205,4 +218,6 @@ public final class RnntDecoder {
         
         return output
     }
+    
+
 }

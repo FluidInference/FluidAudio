@@ -13,7 +13,7 @@ This allows proper streaming inference by:
 
 import json
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Dict
 
 import os
 import shutil
@@ -66,7 +66,7 @@ class MyPreEncodeWrapper(nn.Module):
         self.mel_dim = mel_dim
         self.pre_cache_size = pre_cache_size
 
-    def forward(self, mel: torch.Tensor, mel_length: torch.Tensor, pre_cache: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, mel: torch.Tensor, mel_length: torch.Tensor, pre_cache: torch.Tensor) -> Dict[str, torch.Tensor]:
         # if len(args) == 3:
         #     mel, mel_length, pre_cache = args
         # elif len(args) == 2:
@@ -92,7 +92,7 @@ class MyPreEncodeWrapper(nn.Module):
         mel: torch.Tensor,
         mel_length: torch.Tensor,
         pre_cache: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Dict[str, torch.Tensor]:
         """
         Args:
             mel: [B, mel_dim, T] - new mel frames (channel-major from preprocessor)
@@ -106,33 +106,72 @@ class MyPreEncodeWrapper(nn.Module):
         """
         batch_size = mel.shape[0]
 
-        # Transpose mel from [B, D, T] to [B, T, D]
-        mel = mel.transpose(1, 2)
+        # mel is [B, D, T] (channel-first from preprocessor)
+        # pre_cache is [B, T_cache, D] (channel-last from CoreML/Swift)
+        
+        with open("/tmp/debug_log.txt", "a") as f:
+            f.write(f"DEBUG: MyPreEncodeWrapper input mel: {mel.shape}\n")
+            f.write(f"DEBUG: MyPreEncodeWrapper input pre_cache: {pre_cache.shape}\n")
 
-        # Concatenate cache with new mel
+        # mel is [B, D, T]. pre_cache is [B, T_cache, D].
+        # pre_encode expects [B, D, T].
+        
+        # Transpose pre_cache to [B, D, T_cache]
+        pre_cache_T = pre_cache.transpose(1, 2)
+
+        # Concatenate cache with new mel along time (dim 2)
         if self.pre_cache_size > 0:
-            mel_with_cache = torch.cat([pre_cache, mel], dim=1)  # [B, cache+T, mel_dim]
+            mel_with_cache = torch.cat([pre_cache_T, mel], dim=2)  # [B, D, cache+T]
             adjusted_length = mel_length + self.pre_cache_size
         else:
             mel_with_cache = mel
             adjusted_length = mel_length
+            
+        with open("/tmp/debug_log.txt", "a") as f:
+            f.write(f"DEBUG: MyPreEncodeWrapper mel_with_cache: {mel_with_cache.shape}\n")
 
-        # Run pre_encode - expects [B, T, F]
-        # encoded, encoded_length = self.pre_encode(mel_with_cache, adjusted_length)
+        # Run pre_encode - expects [B, D, T] or [B, T, D]?
+        # Based on crash analysis (17x1024 vs 4352x512), it seems pre_encode expects [B, T, D].
+        # mel_with_cache is [B, D, T].
+        mel_with_cache_T = mel_with_cache.transpose(1, 2) # [B, T, D]
         
-        out = self.pre_encode(mel_with_cache, adjusted_length)
-        # Use indexing to avoid script compiler issues with unpacking
-        encoded = out[0]
-        encoded_length = out[1]
+        out = self.pre_encode(mel_with_cache_T, adjusted_length)
+        # Output is [B, T_out, D_out] (channel-last)
+        full_encoded = out[0]
+        full_encoded_length = out[1]
+        
+        with open("/tmp/debug_log.txt", "a") as f:
+            f.write(f"DEBUG: MyPreEncodeWrapper full_encoded: {full_encoded.shape}\n")
+
+        # Slice output to remove cache frames
+        # Cache size 9 -> 8x subsampling -> 2 frames to drop
+        # L1: (9+2*1-3)/2 + 1 = 5
+        # L2: (5+2*1-3)/2 + 1 = 3
+        # L3: (3+2*1-3)/2 + 1 = 2
+        frames_to_drop = 2
+        
+        if self.pre_cache_size > 0:
+            encoded = full_encoded[:, frames_to_drop:, :]
+            encoded_length = full_encoded_length - frames_to_drop
+        else:
+            encoded = full_encoded
+            encoded_length = full_encoded_length
 
         # Extract new cache from end of original mel (before pre_encode)
+        # mel is [B, D, T]. We want last 9 frames.
         if self.pre_cache_size > 0:
             # Take last pre_cache_size frames from input mel
-            new_cache = mel[:, -self.pre_cache_size:, :]
+            # mel is [B, 128, 16]. We want last 9 frames along dim 2.
+            # start_idx = 16 - 9 = 7. length = 9.
+            new_cache_T = mel.narrow(2, mel.shape[2] - self.pre_cache_size, self.pre_cache_size) # [B, D, 9]
+            # Transpose back to [B, 9, D] for output
+            new_cache = new_cache_T.transpose(1, 2)
         else:
             new_cache = torch.zeros(batch_size, 0, self.mel_dim, dtype=mel.dtype)
 
-        return encoded, encoded_length, new_cache
+        # Optimization: Don't return length, calculate it in Swift (Input / 4)
+        # This avoids the inhomogeneous shape error entirely.
+        return encoded, new_cache
 
 
 class ConformerStackWrapper(nn.Module):
@@ -255,7 +294,7 @@ class SimpleConformerWrapper(nn.Module):
             cache_last_channel_len: [B]
 
         Returns:
-            encoded, encoded_length, new_cache_channel, new_cache_time, new_cache_len
+            [encoded_out, encoded_len_out, new_cache_channel, new_cache_time, new_cache_len]
         """
         outputs = self.encoder.cache_aware_stream_step(
             processed_signal=mel,
@@ -484,7 +523,9 @@ def main(
     # Set streaming params
     # chunk_size=32 (128 mel frames)
     # shift_size=30 (120 mel frames) -> 2 frame overlap (8 mel frames)
-    asr_model.encoder.setup_streaming_params(chunk_size=32, shift_size=30)
+    # chunk_size=4 (16 mel frames)
+    # shift_size=2 (8 mel frames)
+    asr_model.encoder.setup_streaming_params(chunk_size=4, shift_size=2)
     print(f"DEBUG: Streaming Config: {asr_model.encoder.streaming_cfg}", flush=True)
 
     encoder = asr_model.encoder
@@ -514,6 +555,11 @@ def main(
     # Cache sizes from streaming config
     cache_channel_size = 70
     cache_time_size = 8
+    # Force pre_encode_cache_size to 16 to cover full receptive field (15)
+    # Original config says 9, but that leads to garbage output.
+    pre_cache_size = 16 # Original
+    # pre_cache_size = 0 # For 1s window test 
+    
     if streaming_cfg:
         if streaming_cfg.last_channel_cache_size:
             lcc = streaming_cfg.last_channel_cache_size
@@ -521,6 +567,9 @@ def main(
         if hasattr(streaming_cfg, 'last_time_cache_size') and streaming_cfg.last_time_cache_size:
             ltc = streaming_cfg.last_time_cache_size
             cache_time_size = int(ltc[0]) if isinstance(ltc, (list, tuple)) else int(ltc)
+            
+    # Update trace_len for new cache size
+    # trace_len = 16 + pre_cache_size
 
     typer.echo(f"\nEncoder config:")
     typer.echo(f"  mel_dim: {mel_dim}")
@@ -536,7 +585,7 @@ def main(
         return
 
     # Get chunk size from streaming config
-    chunk_size = 16  # Default
+    chunk_size = 2  # Default for 160ms experiment (16 mel frames / 8 subsampling)
     if streaming_cfg and streaming_cfg.chunk_size:
         cs = streaming_cfg.chunk_size
         chunk_size = int(cs[0]) if isinstance(cs, (list, tuple)) else int(cs)
@@ -545,9 +594,9 @@ def main(
 
     # Calculate mel frames needed for one chunk
     # The encoder expects mel in [B, mel_dim, T] format
-    # chunk_size is in encoder frames (after 4x subsampling)
-    # So we need ~chunk_size * 4 mel frames
-    mel_frames_per_chunk = chunk_size * 4 + 9  # Add pre_encode cache size buffer
+    # chunk_size is in encoder frames (after 8x subsampling)
+    # So we need ~chunk_size * 8 mel frames
+    mel_frames_per_chunk = chunk_size * 8 + 9  # Add pre_encode cache size buffer
 
     typer.echo(f"  mel_frames_per_chunk: {mel_frames_per_chunk}")
 
@@ -608,33 +657,40 @@ def main(
     
     # Trace pre_encode separately to avoid interference
     print("DEBUG: Tracing pre_encode (ConvSubsampling) separately...")
-    pe_mel = torch.randn(1, mel_dim, 128)
-    pe_len = torch.tensor([128], dtype=torch.long)
+    # Trace with exact size expected during streaming (Chunk=16 + Cache=pre_cache_size)
+    trace_len = 16 + pre_cache_size
+    # pre_encode expects [B, T, D]
+    pe_mel = torch.randn(1, trace_len, mel_dim)
+    pe_len = torch.tensor([trace_len], dtype=torch.long)
     traced_conv_subsampling = torch.jit.trace(pre_encode, (pe_mel, pe_len), strict=False, check_trace=False)
     print("DEBUG: Tracing pre_encode done.")
 
     # Use PreEncodeWrapper with caching, using the TRACED sub-module
-    pre_encode_wrapper = MyPreEncodeWrapper(traced_conv_subsampling, mel_dim, pre_cache_size=9)
+    pre_encode_wrapper = MyPreEncodeWrapper(traced_conv_subsampling, mel_dim, pre_cache_size=pre_cache_size)
 
-    # Chunk size for input (1.28s = 128 frames)
-    chunk_size_in = 128 
+    # Chunk size for input (0.16s = 16 frames)
+    chunk_size_in = 16
+    # pre_cache_size = 0 # Disable cache for 1s window test 
     
     # Test inputs
     # CRITICAL: Must match PreEncodeWrapper expectation [B, D, T]
     test_mel = torch.randn(1, mel_dim, chunk_size_in, dtype=torch.float32)
-    test_mel_len = torch.tensor([chunk_size_in], dtype=torch.long)
-    test_pre_cache = torch.zeros(1, 9, mel_dim, dtype=torch.float32)
+    test_mel_len = torch.tensor([chunk_size_in], dtype=torch.int32)
+    test_pre_cache = torch.zeros(1, pre_cache_size, mel_dim, dtype=torch.float32)
 
     print(f"DEBUG: Calling pre_encode_wrapper with 3 args")
     print(f"DEBUG: test_mel: {test_mel.shape}")
-    print(f"DEBUG: test_mel_len: {test_mel_len.shape}")
+    print(f"DEBUG: test_mel_len: {test_mel_len.shape}, dtype: {test_mel_len.dtype}")
     print(f"DEBUG: test_pre_cache: {test_pre_cache.shape}")
     print(f"DEBUG: pre_encode_wrapper type: {type(pre_encode_wrapper)}")
 
     with torch.no_grad():
         # test_out, test_out_len, test_new_cache = pre_encode_wrapper(test_mel, test_mel_len, test_pre_cache)
-        test_out, test_out_len, test_new_cache = pre_encode_wrapper.forward(test_mel, test_mel_len, test_pre_cache)
+        test_out, test_new_cache = pre_encode_wrapper.forward(test_mel, test_mel_len, test_pre_cache)
+    
     typer.echo(f"Pre-encode test: [{chunk_size_in}x{mel_dim}] -> {list(test_out.shape)}")
+    # typer.echo(f"Pre-encode len: {test_out_len.shape}")
+    typer.echo(f"Pre-encode cache: {test_new_cache.shape}")
 
     example_inputs = (test_mel, test_mel_len, test_pre_cache)
     print(f"DEBUG: example_inputs len: {len(example_inputs)}")
@@ -643,12 +699,17 @@ def main(
     print(f"DEBUG: pre_encode type: {type(pre_encode)}")
     print(f"DEBUG: is ScriptModule: {isinstance(pre_encode, torch.jit.ScriptModule)}")
 
-    # traced_pre = torch.jit.trace(pre_encode_wrapper, example_inputs, strict=False, check_trace=False)
-    print("DEBUG: Tracing pre_encode_wrapper with trace_module...")
-    traced_pre = torch.jit.trace_module(pre_encode_wrapper, {'forward': example_inputs}, strict=False, check_trace=False)
+    print("DEBUG: Tracing pre_encode_wrapper with trace...")
+    traced_pre = torch.jit.trace(pre_encode_wrapper, example_inputs, strict=False, check_trace=False)
+    # traced_pre = torch.jit.trace_module(pre_encode_wrapper, {'forward': example_inputs}, strict=False, check_trace=False)
     print("DEBUG: Tracing done.")
     traced_pre.eval()
+    print("DEBUG: Traced graph:")
+    print(traced_pre.graph)
+    print("DEBUG: Traced graph:")
+    print(traced_pre.graph)
 
+    print(f"DEBUG: pre_cache_size for CoreML: {pre_cache_size}")
     pre_inputs = [
         ct.TensorType(
             name="mel",
@@ -656,24 +717,25 @@ def main(
             dtype=np.float32,
         ),
         ct.TensorType(name="mel_length", shape=(1,), dtype=np.int32),
-        ct.TensorType(name="pre_cache", shape=(1, 9, 128), dtype=np.float32),
+        ct.TensorType(name="pre_cache", shape=(1, pre_cache_size, 128), dtype=np.float32),
     ]
     pre_outputs = [
-        ct.TensorType(name="pre_encoded", dtype=np.float32),
-        ct.TensorType(name="pre_encoded_len", dtype=np.int32),
-        ct.TensorType(name="new_pre_cache", dtype=np.float32),
+        ct.TensorType(name="pre_encoded", shape=(1, chunk_size_in // 4, hidden_dim), dtype=np.float32),
+        # ct.TensorType(name="pre_encoded_len", dtype=np.float32), # Removed
+        ct.TensorType(name="new_pre_cache", shape=(1, pre_cache_size, mel_dim), dtype=np.float32),
     ]
 
     try:
+        # Let CoreML infer outputs to avoid "inhomogeneous shape" error
         pre_model = _coreml_convert(
             traced_pre, pre_inputs, pre_outputs, export_settings,
             compute_units_override=ct.ComputeUnit.CPU_ONLY,
             compute_precision=ct.precision.FLOAT32,
         )
 
-        pre_path = output_path / "pre_encode.mlpackage"
-        _save_mlpackage(pre_model, pre_path, "PreEncode")
-        typer.echo(f"Saved: {pre_path}")
+        prep_path = output_path / "pre_encode.mlpackage"
+        _save_mlpackage(pre_model, prep_path, "Pre-Encode")
+        typer.echo(f"Saved: {prep_path}")
     except Exception as e:
         typer.echo(f"Pre-encode export failed: {e}")
         typer.echo("Continuing with other components...")

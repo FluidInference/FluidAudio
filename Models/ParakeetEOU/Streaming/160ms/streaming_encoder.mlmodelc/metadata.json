@@ -1,0 +1,187 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "storagePrecision" : "Float16",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 512 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 512, 3]",
+        "name" : "encoded_output",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "encoded_length",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 128 × 16)",
+        "shortDescription" : "",
+        "shape" : "[1, 128, 16]",
+        "name" : "new_pre_cache",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 17 × 1 × 70 × 512)",
+        "shortDescription" : "",
+        "shape" : "[17, 1, 70, 512]",
+        "name" : "new_cache_last_channel",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 17 × 1 × 512 × 8)",
+        "shortDescription" : "",
+        "shape" : "[17, 1, 512, 8]",
+        "name" : "new_cache_last_time",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "new_cache_last_channel_len",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 8,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios17.floor" : 3,
+      "Ios17.logicalAnd" : 3,
+      "Ios17.reshape" : 103,
+      "Ios16.softmax" : 17,
+      "Ios17.matmul" : 51,
+      "Ios17.transpose" : 157,
+      "Split" : 17,
+      "Ios17.expandDims" : 6,
+      "Select" : 51,
+      "Ios17.add" : 126,
+      "Tile" : 1,
+      "Ios17.sliceByIndex" : 106,
+      "Ios16.sigmoid" : 17,
+      "Pad" : 20,
+      "Ios17.logicalNot" : 2,
+      "Ios17.layerNorm" : 102,
+      "Ios17.less" : 1,
+      "Ios17.sub" : 1,
+      "Ios17.conv" : 56,
+      "Ios17.clip" : 2,
+      "Ios16.relu" : 3,
+      "Ios17.linear" : 137,
+      "Ios17.concat" : 52,
+      "Ios17.greaterEqual" : 1,
+      "Ios17.cast" : 14,
+      "Ios16.silu" : 51,
+      "Stack" : 2,
+      "Ios17.mul" : 72
+    },
+    "computePrecision" : "Mixed (Float16, Float32, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "10.0",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.source_dialect" : "TorchScript",
+      "com.github.apple.coremltools.source" : "torch==2.4.0",
+      "com.github.apple.coremltools.version" : "8.3.0"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 128 × 17)",
+        "shortDescription" : "",
+        "shape" : "[1, 128, 17]",
+        "name" : "audio_signal",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "audio_length",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 128 × 16)",
+        "shortDescription" : "",
+        "shape" : "[1, 128, 16]",
+        "name" : "pre_cache",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 17 × 1 × 70 × 512)",
+        "shortDescription" : "",
+        "shape" : "[17, 1, 70, 512]",
+        "name" : "cache_last_channel",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 17 × 1 × 512 × 8)",
+        "shortDescription" : "",
+        "shape" : "[17, 1, 512, 8]",
+        "name" : "cache_last_time",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "cache_last_channel_len",
+        "type" : "MultiArray"
+      }
+    ],
+    "generatedClassName" : "streaming_encoder",
+    "method" : "predict"
+  }
+]

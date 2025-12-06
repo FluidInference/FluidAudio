@@ -1,0 +1,105 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "shortDescription" : "Parakeet EOU preprocessor",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32)",
+        "shortDescription" : "",
+        "shape" : "[]",
+        "name" : "mel",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "mel_length",
+        "type" : "MultiArray"
+      }
+    ],
+    "storagePrecision" : "Float32",
+    "modelParameters" : [
+
+    ],
+    "author" : "Fluid Inference",
+    "specificationVersion" : 8,
+    "mlProgramOperationTypeHistogram" : {
+      "Range1d" : 1,
+      "Ios17.reshape" : 2,
+      "Identity" : 1,
+      "Ios17.matmul" : 1,
+      "Ios17.expandDims" : 5,
+      "Select" : 1,
+      "Ios17.add" : 3,
+      "Ios17.sliceByIndex" : 3,
+      "Ios16.reduceSum" : 1,
+      "Shape" : 1,
+      "Ios17.gather" : 1,
+      "Pad" : 1,
+      "Ios17.log" : 1,
+      "Ios17.conv" : 2,
+      "Ios17.sub" : 2,
+      "Ios17.pow" : 1,
+      "Ios17.cast" : 2,
+      "Stack" : 1,
+      "Ios17.concat" : 1,
+      "Ios17.floorDiv" : 1,
+      "Ios17.greaterEqual" : 1,
+      "Ios17.mul" : 1
+    },
+    "computePrecision" : "Mixed (Float32, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "10.0",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "dataType" : "Float32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "1 × 1...32000",
+        "shapeRange" : "[[1, 1], [1, 32000]]",
+        "formattedType" : "MultiArray (Float32 1 × 1)",
+        "type" : "MultiArray",
+        "shape" : "[1, 1]",
+        "name" : "audio_signal",
+        "shortDescription" : ""
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "audio_length",
+        "type" : "MultiArray"
+      }
+    ],
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.source_dialect" : "TorchScript",
+      "com.github.apple.coremltools.source" : "torch==2.4.0",
+      "com.github.apple.coremltools.version" : "8.3.0"
+    },
+    "generatedClassName" : "parakeet_eou_preprocessor",
+    "method" : "predict"
+  }
+]
