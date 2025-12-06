@@ -5,6 +5,7 @@ import CoreML
 
 struct ParakeetEouCommand {
     static func main(_ arguments: [String]) async {
+        print("DEBUG: ParakeetEouCommand.main called with \(arguments)")
         let logger = AppLogger(category: "ParakeetEOU")
         
         var input: String?
@@ -273,7 +274,25 @@ struct ParakeetEouCommand {
                     if x > maxVal { maxVal = x }
                     sum += x
                 }
-                print("DEBUG: Audio Input - Min: \(minVal), Max: \(maxVal), Mean: \(sum / Float(array.count))")
+                let mean = sum / Float(array.count)
+                print("DEBUG: Audio Input - Min: \(minVal), Max: \(maxVal), Mean: \(mean)")
+                
+                // Normalize Audio (Peak Normalization to 0.95) - DISABLED
+                // We are now doing per-feature normalization in StreamingEouAsrManager
+                /*
+                let maxAbs = max(abs(minVal), abs(maxVal))
+                let targetPeak: Float = 0.95
+                let gain = (maxAbs > 0) ? (targetPeak / maxAbs) : 1.0
+                
+                print("DEBUG: Applying normalization gain: \(gain)")
+                
+                if gain > 1.0 || gain < 1.0 {
+                    let ptr = buffer.floatChannelData![0]
+                    for j in 0..<Int(buffer.frameLength) {
+                        ptr[j] *= gain
+                    }
+                }
+                */
                 
                 // Resample if needed (ASR expects 16k mono)
                 // StreamingEouAsrManager handles resampling internally in `process(audioBuffer:)`?
@@ -386,8 +405,16 @@ struct ParakeetEouCommand {
     }
     
     static func calculateWer(hypothesis: String, reference: String) -> Double {
-        let hWords = hypothesis.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-        let rWords = reference.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        func normalize(_ s: String) -> [String] {
+             return s.lowercased()
+                 .components(separatedBy: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789 ").inverted)
+                 .joined()
+                 .components(separatedBy: .whitespacesAndNewlines)
+                 .filter { !$0.isEmpty }
+        }
+
+        let hWords = normalize(hypothesis)
+        let rWords = normalize(reference)
         
         let d = levenshtein(a: hWords, b: rWords)
         if rWords.isEmpty { return hWords.isEmpty ? 0.0 : 1.0 }

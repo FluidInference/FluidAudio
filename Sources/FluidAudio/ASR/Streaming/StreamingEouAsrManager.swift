@@ -28,6 +28,9 @@ public actor StreamingEouAsrManager {
     private let chunkFrames = 16
     private let hopLength = 160
     private var chunkSamples: Int { chunkFrames * hopLength }
+    private let contextSamples = 480
+    private let lookaheadSamples = 320
+    private var processSamples: Int { contextSamples + chunkSamples + lookaheadSamples }
     
     // Audio Buffer
     private var audioBuffer: [Float] = []
