@@ -34,7 +34,7 @@ public struct VocabularyRescorer {
 
         public static let `default` = Config(
             minScoreAdvantage: 2.0,  // Vocab term must score 2.0 better than original
-            minVocabScore: -8.0,  // Vocab term must have reasonable CTC score
+            minVocabScore: -12.0,  // Vocab term must have reasonable CTC score (lowered for alias support)
             maxOriginalScoreForReplacement: -4.0,  // Don't replace very confident words
             vocabBoostWeight: 1.5  // Boost for vocabulary terms
         )
@@ -99,21 +99,14 @@ public struct VocabularyRescorer {
             logger.info("Detections: \(detections.count)")
         }
 
-        // Build a map of detections by their time windows
-        var detectionsByTimeRange: [(detection: CtcKeywordSpotter.KeywordDetection, wordIndex: Int?)] = []
-        for detection in detections {
-            detectionsByTimeRange.append((detection, nil))
-        }
-
-        // Estimate word positions based on uniform distribution
-        // In a real implementation, we'd use TDT timestamps
-        let totalDuration = Double(audioSamples.count) / 16000.0
-        let wordDuration = totalDuration / Double(words.count)
-
         var replacements: [RescoringResult] = []
         var modifiedWords = words
 
-        // For each detection, find the best matching word and evaluate replacement
+        // Track which word indices have already been replaced to avoid double replacements
+        var replacedIndices = Set<Int>()
+
+        // For each detection, search the ENTIRE transcript for the best matching word
+        // Time-based indexing is unreliable, so we scan all words
         for detection in detections {
             let vocabTerm = detection.term.text
             let vocabScore = detection.score
@@ -128,41 +121,84 @@ public struct VocabularyRescorer {
                 continue
             }
 
-            // Find which word(s) this detection might replace
-            let detectionMidpoint = (detection.startTime + detection.endTime) / 2
-            let estimatedWordIndex = min(Int(detectionMidpoint / wordDuration), words.count - 1)
+            var bestCandidate: (wordIndex: Int, originalWord: String, similarity: Float, isHighConfidenceAlias: Bool, spanLength: Int)?
 
-            // Look at words near the detection
-            let searchRadius = 2
-            let startIdx = max(0, estimatedWordIndex - searchRadius)
-            let endIdx = min(words.count - 1, estimatedWordIndex + searchRadius)
+            // Build list of all forms to check (canonical + aliases)
+            // Look up the canonical term in the vocabulary to get ALL aliases
+            // (since detections may come from entries without alias info)
+            var allForms = [vocabTerm]
+            let vocabTermLower = vocabTerm.lowercased()
+            for term in vocabulary.terms {
+                if term.text.lowercased() == vocabTermLower {
+                    if let aliases = term.aliases {
+                        allForms.append(contentsOf: aliases)
+                    }
+                }
+            }
+            // Also add aliases from the detection itself (in case it has unique ones)
+            if let aliases = detection.term.aliases {
+                for alias in aliases where !allForms.contains(alias.lowercased()) {
+                    allForms.append(alias)
+                }
+            }
 
-            var bestCandidate: (wordIndex: Int, originalWord: String, similarity: Float)?
+            // Search the ENTIRE transcript for matching words or phrases
+            for idx in 0..<words.count {
+                // Skip already replaced words
+                guard !replacedIndices.contains(idx) else { continue }
 
-            for idx in startIdx...endIdx {
-                let word = words[idx].trimmingCharacters(in: .punctuationCharacters)
-
-                // Skip if this word is already the vocabulary term
-                if word.lowercased() == vocabTerm.lowercased() {
-                    continue
+                // Check for similarity match against canonical term and aliases
+                var bestSimilarity: Float = 0
+                var isHighConfidenceAliasMatch = false
+                var matchedSpanLength = 1
+                
+                for form in allForms {
+                    let formWords = form.split(whereSeparator: { $0.isWhitespace })
+                    let spanLength = formWords.count
+                    
+                    // Ensure span fits in transcript
+                    if idx + spanLength > words.count { continue }
+                    
+                    // Construct transcript span
+                    let transcriptSpan = words[idx..<idx+spanLength]
+                        .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+                        .joined(separator: " ")
+                    
+                    let similarity = Self.stringSimilarity(transcriptSpan, form)
+                    if similarity >= bestSimilarity {
+                        // Update best if strictly better, OR if equal and this is an alias match
+                        if similarity > bestSimilarity {
+                            bestSimilarity = similarity
+                            matchedSpanLength = spanLength
+                        }
+                        // High confidence if similarity >= 0.65 and matching an alias
+                        if similarity >= 0.65 && form != vocabTerm {
+                            isHighConfidenceAliasMatch = true
+                        }
+                    }
                 }
 
-                // Check phonetic/character similarity
-                let similarity = Self.stringSimilarity(word, vocabTerm)
-
-                if similarity >= vocabulary.minSimilarity {
+                if bestSimilarity >= vocabulary.minSimilarity {
+                    let originalSpan = words[idx..<idx+matchedSpanLength].joined(separator: " ")
+                    
                     if let existing = bestCandidate {
-                        if similarity > existing.similarity {
-                            bestCandidate = (idx, word, similarity)
+                        if bestSimilarity > existing.similarity {
+                            bestCandidate = (idx, originalSpan, bestSimilarity, isHighConfidenceAliasMatch, matchedSpanLength)
                         }
                     } else {
-                        bestCandidate = (idx, word, similarity)
+                        bestCandidate = (idx, originalSpan, bestSimilarity, isHighConfidenceAliasMatch, matchedSpanLength)
                     }
                 }
             }
 
             guard let candidate = bestCandidate else {
                 continue
+            }
+
+            if debugMode {
+                print(
+                    "  [CANDIDATE] '\(candidate.originalWord)' -> '\(vocabTerm)' (sim=\(String(format: "%.2f", candidate.similarity)), isHighConfAlias=\(candidate.isHighConfidenceAlias), span=\(candidate.spanLength))"
+                )
             }
 
             // Now the key decision: Should we replace?
@@ -194,22 +230,55 @@ public struct VocabularyRescorer {
             }
 
             // Decision criteria:
-            // 1. Vocabulary term must have significant score advantage
-            // 2. Original word shouldn't have very high confidence
-            let shouldReplace =
-                scoreAdvantage >= config.minScoreAdvantage
-                && originalEstimatedScore <= config.maxOriginalScoreForReplacement
-
+            // 1. HIGH CONFIDENCE ALIAS: If similarity >= 0.85 to a user-defined alias, trust the mapping
+            // 2. Otherwise: Vocabulary term must have significant score advantage AND original not too confident
+            let shouldReplace: Bool
             let reason: String
-            if shouldReplace {
-                reason = "Vocab score advantage: \(String(format: "%.2f", scoreAdvantage))"
+
+            if candidate.isHighConfidenceAlias && candidate.similarity >= 0.65 {
+                // User explicitly defined this alias mapping - trust it with moderate similarity
+                shouldReplace = true
+                reason = "High-confidence alias match (sim: \(String(format: "%.2f", candidate.similarity)))"
+                
+                // Replace span
+                // We need to replace words[idx..<idx+span] with [replacement]
+                // But we are modifying a copy. We can't easily do spans with simple array assignment if we are tracking indices.
+                // For simplicity, we replace the first word and clear the others.
                 modifiedWords[candidate.wordIndex] = preserveCapitalization(
                     original: candidate.originalWord,
                     replacement: vocabTerm
                 )
+                for i in 1..<candidate.spanLength {
+                    modifiedWords[candidate.wordIndex + i] = "" // Mark for removal
+                }
+                
+                for i in 0..<candidate.spanLength {
+                    replacedIndices.insert(candidate.wordIndex + i)
+                }
+                
+            } else if scoreAdvantage >= config.minScoreAdvantage
+                && originalEstimatedScore <= config.maxOriginalScoreForReplacement
+            {
+                // Standard CTC-based replacement
+                shouldReplace = true
+                reason = "Vocab score advantage: \(String(format: "%.2f", scoreAdvantage))"
+                
+                modifiedWords[candidate.wordIndex] = preserveCapitalization(
+                    original: candidate.originalWord,
+                    replacement: vocabTerm
+                )
+                for i in 1..<candidate.spanLength {
+                    modifiedWords[candidate.wordIndex + i] = ""
+                }
+                
+                for i in 0..<candidate.spanLength {
+                    replacedIndices.insert(candidate.wordIndex + i)
+                }
             } else if originalEstimatedScore > config.maxOriginalScoreForReplacement {
+                shouldReplace = false
                 reason = "Original word too confident: \(String(format: "%.2f", originalEstimatedScore))"
             } else {
+                shouldReplace = false
                 reason = "Score advantage too low: \(String(format: "%.2f", scoreAdvantage))"
             }
 
@@ -229,7 +298,9 @@ public struct VocabularyRescorer {
             }
         }
 
-        let modifiedText = modifiedWords.joined(separator: " ")
+        // Remove empty words (cleared spans)
+        let finalWords = modifiedWords.filter { !$0.isEmpty }
+        let modifiedText = finalWords.joined(separator: " ")
         let wasModified = modifiedText != transcript
 
         if debugMode {

@@ -6,17 +6,25 @@ public struct ASRConfig: Sendable {
     public let sampleRate: Int
     public let tdtConfig: TdtConfig
     public let localAgreementConfig: LocalAgreementConfig
+    /// Enable beam search decoding with vocabulary biasing (requires jointLogits model)
+    public let useBeamSearch: Bool
+    /// Configuration for beam search decoder
+    public let beamSearchConfig: BeamSearchDecoder.Config
 
     public static let `default` = ASRConfig()
 
     public init(
         sampleRate: Int = 16000,
         tdtConfig: TdtConfig = .default,
-        localAgreementConfig: LocalAgreementConfig = .default
+        localAgreementConfig: LocalAgreementConfig = .default,
+        useBeamSearch: Bool = false,
+        beamSearchConfig: BeamSearchDecoder.Config = .default
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
         self.localAgreementConfig = localAgreementConfig
+        self.useBeamSearch = useBeamSearch
+        self.beamSearchConfig = beamSearchConfig
     }
 }
 

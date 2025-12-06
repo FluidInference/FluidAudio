@@ -24,6 +24,8 @@ public struct AsrModels: Sendable {
     public let preprocessor: MLModel
     public let decoder: MLModel
     public let joint: MLModel
+    /// Joint model with raw logits output (for beam search). Optional.
+    public let jointLogits: MLModel?
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let version: AsrModelVersion
@@ -35,6 +37,7 @@ public struct AsrModels: Sendable {
         preprocessor: MLModel,
         decoder: MLModel,
         joint: MLModel,
+        jointLogits: MLModel? = nil,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
         version: AsrModelVersion
@@ -43,6 +46,7 @@ public struct AsrModels: Sendable {
         self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
+        self.jointLogits = jointLogits
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.version = version
@@ -50,6 +54,11 @@ public struct AsrModels: Sendable {
 
     public var usesSplitFrontend: Bool {
         true
+    }
+
+    /// Whether beam search decoding is available (jointLogits model loaded)
+    public var supportsBeamSearch: Bool {
+        jointLogits != nil
     }
 }
 
@@ -156,11 +165,28 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
 
+        // Try to load optional jointLogits model (for beam search)
+        var jointLogitsModel: MLModel? = nil
+        let jointLogitsPath = repoPath(from: directory, version: version)
+            .appendingPathComponent(Names.jointLogitsFile)
+        if FileManager.default.fileExists(atPath: jointLogitsPath.path) {
+            do {
+                jointLogitsModel = try await MLModel.load(
+                    contentsOf: jointLogitsPath,
+                    configuration: config
+                )
+                logger.info("Loaded jointLogits model for beam search from \(jointLogitsPath.path)")
+            } catch {
+                logger.warning("Failed to load jointLogits model: \(error.localizedDescription)")
+            }
+        }
+
         let asrModels = AsrModels(
             encoder: encoderModel,
             preprocessor: preprocessorModel,
             decoder: decoderModel,
             joint: jointModel,
+            jointLogits: jointLogitsModel,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory, version: version),
             version: version

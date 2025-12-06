@@ -148,10 +148,11 @@ public struct CustomVocabularyContext: Sendable {
                 terms.append(
                     CustomVocabularyTerm(
                         text: word,
+                        weight: 10.0, // Aggressive default weight for text list
                         aliases: aliases.isEmpty ? nil : aliases
                     ))
             } else {
-                terms.append(CustomVocabularyTerm(text: trimmed))
+                terms.append(CustomVocabularyTerm(text: trimmed, weight: 10.0)) // Aggressive default weight
             }
         }
 

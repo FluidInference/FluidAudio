@@ -6,12 +6,16 @@ import Foundation
 /// This structure is immutable after construction, making it inherently thread-safe.
 public struct VocabularyTrie: Sendable {
 
-    /// A node in the vocabulary trie (value type for Sendable conformance)
-    struct Node: Sendable {
-        var children: [Int: Node] = [:]
-        var isTerminal: Bool = false
-        var term: CustomVocabularyTerm?
-        var depth: Int = 0
+    /// A node in the vocabulary trie (class type for reference semantics in cursors)
+    public final class Node: Sendable {
+        public var children: [Int: Node] = [:]
+        public var isTerminal: Bool = false
+        public var term: CustomVocabularyTerm?
+        public var depth: Int = 0
+        
+        public init(depth: Int = 0) {
+            self.depth = depth
+        }
     }
 
     private let root: Node
@@ -25,83 +29,96 @@ public struct VocabularyTrie: Sendable {
 
     /// Initialize with vocabulary terms (builds immutable trie)
     public init(vocabulary: CustomVocabularyContext) {
-        var mutableRoot = Node()
+        let rootNode = Node()
         var count = 0
 
         for term in vocabulary.terms {
             guard let tokenIds = term.tokenIds, !tokenIds.isEmpty else { continue }
 
-            var path: [Int] = []
-
-            // Build path to insertion point
+            var current = rootNode
             for (depth, tokenId) in tokenIds.enumerated() {
-                path.append(tokenId)
-
-                // Navigate/create path
-                if Self.getNode(from: mutableRoot, path: path) == nil {
-                    Self.setNode(in: &mutableRoot, path: path, node: Node(depth: depth + 1))
+                if let next = current.children[tokenId] {
+                    current = next
+                } else {
+                    let newNode = Node(depth: depth + 1)
+                    current.children[tokenId] = newNode
+                    current = newNode
                 }
             }
 
-            // Mark terminal and set term
-            Self.updateNode(in: &mutableRoot, path: path) { node in
-                node.isTerminal = true
-                node.term = term
-            }
+            current.isTerminal = true
+            current.term = term
             count += 1
         }
 
-        self.root = mutableRoot
+        self.root = rootNode
         self.termCount = count
     }
 
-    // MARK: - Private helpers for building the trie
-
-    private static func getNode(from root: Node, path: [Int]) -> Node? {
-        var current = root
-        for tokenId in path {
-            guard let next = current.children[tokenId] else {
-                return nil
+    /// Cursor for stateful traversal of the trie
+    public struct Cursor {
+        private let root: Node
+        private var current: Node
+        
+        fileprivate init(root: Node) {
+            self.root = root
+            self.current = root
+        }
+        
+        /// Current depth in the trie
+        public var depth: Int { current.depth }
+        
+        /// Reset cursor to root
+        public mutating func reset() {
+            current = root
+        }
+        
+        /// Attempt to advance the cursor with a token
+        /// - Returns: Match result for the move
+        public mutating func advance(_ tokenId: Int) -> VocabularyMatchResult {
+            // 1. Try to extend current path
+            if let next = current.children[tokenId] {
+                current = next
+                if next.isTerminal, let term = next.term {
+                    return .complete(term: term, depth: next.depth)
+                }
+                return .partial(depth: next.depth, possibleContinuations: next.children.count)
             }
-            current = next
+            
+            // 2. If failed, this path is dead. Reset to root.
+            // Note: The caller might want to check if 'tokenId' starts a NEW match at root
+            // but that logic is best handled by the caller or a specific 'advanceOrReset' method.
+            // Here we just report no match for the *continuation*.
+            return .noMatch
         }
-        return current
+        
+        /// Check if a token would start a new match from root
+        public func startsMatch(_ tokenId: Int) -> VocabularyMatchResult {
+            if let next = root.children[tokenId] {
+                if next.isTerminal, let term = next.term {
+                    return .complete(term: term, depth: next.depth)
+                }
+                return .partial(depth: next.depth, possibleContinuations: next.children.count)
+            }
+            return .noMatch
+        }
+        
+        /// Force the cursor to a specific state (e.g. after finding a new match from root)
+        public mutating func forceAdvanceFromRoot(_ tokenId: Int) {
+            if let next = root.children[tokenId] {
+                current = next
+            } else {
+                current = root
+            }
+        }
+    }
+    
+    /// Create a new cursor at the root
+    public func makeCursor() -> Cursor {
+        return Cursor(root: root)
     }
 
-    private static func setNode(in root: inout Node, path: [Int], node: Node) {
-        guard !path.isEmpty else { return }
-
-        if path.count == 1 {
-            root.children[path[0]] = node
-            return
-        }
-
-        let tokenId = path[0]
-        var child = root.children[tokenId] ?? Node(depth: 1)
-        setNode(in: &child, path: Array(path.dropFirst()), node: node)
-        root.children[tokenId] = child
-    }
-
-    private static func updateNode(in root: inout Node, path: [Int], update: (inout Node) -> Void) {
-        guard !path.isEmpty else {
-            update(&root)
-            return
-        }
-
-        if path.count == 1 {
-            var child = root.children[path[0]] ?? Node()
-            update(&child)
-            root.children[path[0]] = child
-            return
-        }
-
-        let tokenId = path[0]
-        var child = root.children[tokenId] ?? Node()
-        updateNode(in: &child, path: Array(path.dropFirst()), update: update)
-        root.children[tokenId] = child
-    }
-
-    // MARK: - Public API
+    // MARK: - Legacy/Stateless API (kept for compatibility but implemented via Cursor)
 
     /// Check if a token sequence is a prefix of any vocabulary term
     /// - Parameter tokens: The token sequence to check
