@@ -121,7 +121,8 @@ public struct VocabularyRescorer {
                 continue
             }
 
-            var bestCandidate: (wordIndex: Int, originalWord: String, similarity: Float, isHighConfidenceAlias: Bool, spanLength: Int)?
+            var bestCandidate:
+                (wordIndex: Int, originalWord: String, similarity: Float, isHighConfidenceAlias: Bool, spanLength: Int)?
 
             // Build list of all forms to check (canonical + aliases)
             // Look up the canonical term in the vocabulary to get ALL aliases
@@ -151,19 +152,19 @@ public struct VocabularyRescorer {
                 var bestSimilarity: Float = 0
                 var isHighConfidenceAliasMatch = false
                 var matchedSpanLength = 1
-                
+
                 for form in allForms {
                     let formWords = form.split(whereSeparator: { $0.isWhitespace })
                     let spanLength = formWords.count
-                    
+
                     // Ensure span fits in transcript
                     if idx + spanLength > words.count { continue }
-                    
+
                     // Construct transcript span
-                    let transcriptSpan = words[idx..<idx+spanLength]
+                    let transcriptSpan = words[idx..<idx + spanLength]
                         .map { $0.trimmingCharacters(in: .punctuationCharacters) }
                         .joined(separator: " ")
-                    
+
                     let similarity = Self.stringSimilarity(transcriptSpan, form)
                     if similarity >= bestSimilarity {
                         // Update best if strictly better, OR if equal and this is an alias match
@@ -179,14 +180,18 @@ public struct VocabularyRescorer {
                 }
 
                 if bestSimilarity >= vocabulary.minSimilarity {
-                    let originalSpan = words[idx..<idx+matchedSpanLength].joined(separator: " ")
-                    
+                    let originalSpan = words[idx..<idx + matchedSpanLength].joined(separator: " ")
+
                     if let existing = bestCandidate {
                         if bestSimilarity > existing.similarity {
-                            bestCandidate = (idx, originalSpan, bestSimilarity, isHighConfidenceAliasMatch, matchedSpanLength)
+                            bestCandidate = (
+                                idx, originalSpan, bestSimilarity, isHighConfidenceAliasMatch, matchedSpanLength
+                            )
                         }
                     } else {
-                        bestCandidate = (idx, originalSpan, bestSimilarity, isHighConfidenceAliasMatch, matchedSpanLength)
+                        bestCandidate = (
+                            idx, originalSpan, bestSimilarity, isHighConfidenceAliasMatch, matchedSpanLength
+                        )
                     }
                 }
             }
@@ -239,7 +244,7 @@ public struct VocabularyRescorer {
                 // User explicitly defined this alias mapping - trust it with moderate similarity
                 shouldReplace = true
                 reason = "High-confidence alias match (sim: \(String(format: "%.2f", candidate.similarity)))"
-                
+
                 // Replace span
                 // We need to replace words[idx..<idx+span] with [replacement]
                 // But we are modifying a copy. We can't easily do spans with simple array assignment if we are tracking indices.
@@ -249,20 +254,20 @@ public struct VocabularyRescorer {
                     replacement: vocabTerm
                 )
                 for i in 1..<candidate.spanLength {
-                    modifiedWords[candidate.wordIndex + i] = "" // Mark for removal
+                    modifiedWords[candidate.wordIndex + i] = ""  // Mark for removal
                 }
-                
+
                 for i in 0..<candidate.spanLength {
                     replacedIndices.insert(candidate.wordIndex + i)
                 }
-                
+
             } else if scoreAdvantage >= config.minScoreAdvantage
                 && originalEstimatedScore <= config.maxOriginalScoreForReplacement
             {
                 // Standard CTC-based replacement
                 shouldReplace = true
                 reason = "Vocab score advantage: \(String(format: "%.2f", scoreAdvantage))"
-                
+
                 modifiedWords[candidate.wordIndex] = preserveCapitalization(
                     original: candidate.originalWord,
                     replacement: vocabTerm
@@ -270,7 +275,7 @@ public struct VocabularyRescorer {
                 for i in 1..<candidate.spanLength {
                     modifiedWords[candidate.wordIndex + i] = ""
                 }
-                
+
                 for i in 0..<candidate.spanLength {
                     replacedIndices.insert(candidate.wordIndex + i)
                 }
