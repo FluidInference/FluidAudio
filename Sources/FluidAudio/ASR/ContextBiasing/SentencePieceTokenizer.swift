@@ -119,7 +119,9 @@ extension CustomVocabularyContext {
         return try tokenizeContext(context)
     }
 
-    /// Add CTC token IDs to terms using SentencePiece tokenizer
+    /// Add CTC token IDs to terms using SentencePiece tokenizer.
+    /// Also expands aliases into separate CTC detection entries, allowing the acoustic
+    /// model to detect alias pronunciations while the canonical form is used for replacement.
     private static func tokenizeContext(_ context: CustomVocabularyContext) throws -> CustomVocabularyContext {
         // Try to use SentencePiece tokenizer, fall back to simple tokenizer if needed
         let tokenizer: SentencePieceCtcTokenizer
@@ -132,66 +134,117 @@ extension CustomVocabularyContext {
 
         let logger = Logger(subsystem: "com.fluidaudio", category: "CustomVocabulary")
 
-        // Tokenize terms that don't have ctcTokenIds
-        var updatedTerms: [CustomVocabularyTerm] = []
-        for term in context.terms {
-            if term.ctcTokenIds == nil || term.ctcTokenIds?.isEmpty == true {
-                // Tokenize the text using SentencePiece
-                let tokenIds = tokenizer.encode(term.text)
-                logger.debug("SentencePiece tokenized '\(term.text)': \(tokenIds)")
+        var expandedTerms: [CustomVocabularyTerm] = []
+        var tokenizedCount = 0
+        var aliasExpansionCount = 0
 
-                // Create updated term with ctcTokenIds
-                let updatedTerm = CustomVocabularyTerm(
-                    text: term.text,
-                    weight: term.weight,
-                    aliases: term.aliases,
-                    tokenIds: term.tokenIds,
-                    ctcTokenIds: tokenIds
-                )
-                updatedTerms.append(updatedTerm)
-            } else {
-                // Keep existing term with pre-computed ctcTokenIds
-                updatedTerms.append(term)
+        for term in context.terms {
+            // 1. Add the canonical term with its own CTC tokens
+            let canonicalTokenIds = term.ctcTokenIds ?? tokenizer.encode(term.text)
+            let canonicalTerm = CustomVocabularyTerm(
+                text: term.text,
+                weight: term.weight,
+                aliases: term.aliases,
+                tokenIds: term.tokenIds,
+                ctcTokenIds: canonicalTokenIds
+            )
+            expandedTerms.append(canonicalTerm)
+
+            if term.ctcTokenIds == nil {
+                tokenizedCount += 1
+                logger.debug("SentencePiece tokenized '\(term.text)': \(canonicalTokenIds)")
+            }
+
+            // 2. Expand aliases: create additional CTC detection entries for each alias
+            // These use the alias text for CTC acoustic matching, but keep the canonical
+            // term.text so rescoring replaces with the correct spelling.
+            if let aliases = term.aliases {
+                for alias in aliases {
+                    let aliasTokenIds = tokenizer.encode(alias)
+                    // Create a term that:
+                    // - Uses alias tokens for CTC acoustic detection
+                    // - Keeps canonical text for replacement
+                    let aliasTerm = CustomVocabularyTerm(
+                        text: term.text,  // Canonical form for replacement
+                        weight: term.weight,
+                        aliases: term.aliases,
+                        tokenIds: term.tokenIds,
+                        ctcTokenIds: aliasTokenIds  // Alias tokens for acoustic matching
+                    )
+                    expandedTerms.append(aliasTerm)
+                    aliasExpansionCount += 1
+                    logger.debug("SentencePiece tokenized alias '\(alias)' -> '\(term.text)': \(aliasTokenIds)")
+                }
             }
         }
 
-        // Return updated context with tokenized terms
+        if tokenizedCount > 0 || aliasExpansionCount > 0 {
+            logger.info(
+                "Auto-tokenized \(tokenizedCount) vocabulary terms, expanded \(aliasExpansionCount) aliases")
+        }
+
         return CustomVocabularyContext(
-            terms: updatedTerms,
+            terms: expandedTerms,
             minCtcScore: context.minCtcScore,
             minSimilarity: context.minSimilarity,
             minCombinedConfidence: context.minCombinedConfidence
         )
     }
 
-    /// Fallback tokenization using CtcTokenizer
+    /// Fallback tokenization using CtcTokenizer.
+    /// Also expands aliases into separate CTC detection entries.
     private static func tokenizeContextWithCtcTokenizer(
         _ context: CustomVocabularyContext
     ) throws -> CustomVocabularyContext {
         let tokenizer = try CtcTokenizer()
         let logger = Logger(subsystem: "com.fluidaudio", category: "CustomVocabulary")
 
-        var updatedTerms: [CustomVocabularyTerm] = []
-        for term in context.terms {
-            if term.ctcTokenIds == nil || term.ctcTokenIds?.isEmpty == true {
-                let tokenIds = tokenizer.encode(term.text)
-                logger.debug("CTC tokenized '\(term.text)': \(tokenIds)")
+        var expandedTerms: [CustomVocabularyTerm] = []
+        var tokenizedCount = 0
+        var aliasExpansionCount = 0
 
-                let updatedTerm = CustomVocabularyTerm(
-                    text: term.text,
-                    weight: term.weight,
-                    aliases: term.aliases,
-                    tokenIds: term.tokenIds,
-                    ctcTokenIds: tokenIds
-                )
-                updatedTerms.append(updatedTerm)
-            } else {
-                updatedTerms.append(term)
+        for term in context.terms {
+            // 1. Add the canonical term with its own CTC tokens
+            let canonicalTokenIds = term.ctcTokenIds ?? tokenizer.encode(term.text)
+            let canonicalTerm = CustomVocabularyTerm(
+                text: term.text,
+                weight: term.weight,
+                aliases: term.aliases,
+                tokenIds: term.tokenIds,
+                ctcTokenIds: canonicalTokenIds
+            )
+            expandedTerms.append(canonicalTerm)
+
+            if term.ctcTokenIds == nil {
+                tokenizedCount += 1
+                logger.debug("CTC tokenized '\(term.text)': \(canonicalTokenIds)")
+            }
+
+            // 2. Expand aliases: create additional CTC detection entries for each alias
+            if let aliases = term.aliases {
+                for alias in aliases {
+                    let aliasTokenIds = tokenizer.encode(alias)
+                    let aliasTerm = CustomVocabularyTerm(
+                        text: term.text,  // Canonical form for replacement
+                        weight: term.weight,
+                        aliases: term.aliases,
+                        tokenIds: term.tokenIds,
+                        ctcTokenIds: aliasTokenIds  // Alias tokens for acoustic matching
+                    )
+                    expandedTerms.append(aliasTerm)
+                    aliasExpansionCount += 1
+                    logger.debug("CTC tokenized alias '\(alias)' -> '\(term.text)': \(aliasTokenIds)")
+                }
             }
         }
 
+        if tokenizedCount > 0 || aliasExpansionCount > 0 {
+            logger.info(
+                "Auto-tokenized \(tokenizedCount) vocabulary terms, expanded \(aliasExpansionCount) aliases")
+        }
+
         return CustomVocabularyContext(
-            terms: updatedTerms,
+            terms: expandedTerms,
             minCtcScore: context.minCtcScore,
             minSimilarity: context.minSimilarity,
             minCombinedConfidence: context.minCombinedConfidence

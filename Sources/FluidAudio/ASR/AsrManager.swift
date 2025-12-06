@@ -182,6 +182,126 @@ public final class AsrManager {
         }
     }
 
+    /// Tokenize vocabulary terms for TDT beam search (uses Parakeet TDT vocabulary).
+    /// This is needed for beam search vocabulary biasing which operates on TDT token IDs.
+    private func tokenizeVocabularyForTdt(_ vocabulary: CustomVocabularyContext) -> CustomVocabularyContext {
+        // Skip if already tokenized
+        let needsTokenization = vocabulary.terms.contains { $0.tokenIds == nil }
+        guard needsTokenization else { return vocabulary }
+
+        var updatedTerms: [CustomVocabularyTerm] = []
+        var tokenizedCount = 0
+
+        for term in vocabulary.terms {
+            if let existingTokenIds = term.tokenIds {
+                // Already has TDT tokens
+                updatedTerms.append(term)
+            } else {
+                // Tokenize using TDT vocabulary
+                let tokenIds = tokenizeTextForTdt(term.text)
+                let updatedTerm = CustomVocabularyTerm(
+                    text: term.text,
+                    weight: term.weight,
+                    aliases: term.aliases,
+                    tokenIds: tokenIds.isEmpty ? nil : tokenIds,
+                    ctcTokenIds: term.ctcTokenIds
+                )
+                updatedTerms.append(updatedTerm)
+                if !tokenIds.isEmpty {
+                    tokenizedCount += 1
+                    logger.debug("TDT tokenized '\(term.text)': \(tokenIds)")
+                }
+                
+                // Also tokenize aliases to allow boosting them during beam search
+                if let aliases = term.aliases {
+                    for alias in aliases {
+                        let aliasTokens = tokenizeTextForTdt(alias)
+                        if !aliasTokens.isEmpty {
+                            // Add alias as a separate term, pointing to the same text/weight
+                            // Note: We keep the text as the canonical form, but this term effectively
+                            // boosts the alias path in the Trie. Beam search will output the alias tokens.
+                            // Post-processing (CTC/Rescorer) is needed to map it back if desired,
+                            // or we rely on the user providing the alias because they accept it as output.
+                            let aliasTerm = CustomVocabularyTerm(
+                                text: term.text,
+                                weight: term.weight,
+                                aliases: nil, // Prevent recursion
+                                tokenIds: aliasTokens,
+                                ctcTokenIds: nil
+                            )
+                            updatedTerms.append(aliasTerm)
+                            logger.debug("TDT tokenized alias '\(alias)' -> '\(term.text)': \(aliasTokens)")
+                        }
+                    }
+                }
+            }
+        }
+
+        if tokenizedCount > 0 {
+            logger.info("TDT tokenization: \(tokenizedCount) terms tokenized for beam search")
+        }
+
+        return CustomVocabularyContext(
+            terms: updatedTerms,
+            alpha: vocabulary.alpha,
+            contextScore: vocabulary.contextScore,
+            depthScaling: vocabulary.depthScaling,
+            scorePerPhrase: vocabulary.scorePerPhrase,
+            minCtcScore: vocabulary.minCtcScore,
+            minSimilarity: vocabulary.minSimilarity,
+            minCombinedConfidence: vocabulary.minCombinedConfidence
+        )
+    }
+
+    /// Tokenize text using TDT vocabulary (reverse lookup from vocabulary dictionary)
+    private func tokenizeTextForTdt(_ text: String) -> [Int] {
+        // Use simple subword tokenization based on the loaded vocabulary
+        // The vocabulary maps token_id -> text, we need text -> token_id
+        guard !vocabulary.isEmpty else { return [] }
+
+        // Build reverse mapping (text -> tokenId) if not cached
+        let reverseVocab = buildReverseVocabulary()
+
+        // Normalize text: lowercase and add leading space (SentencePiece convention)
+        let normalizedText = " " + text.lowercased()
+
+        var tokens: [Int] = []
+        var position = normalizedText.startIndex
+
+        while position < normalizedText.endIndex {
+            var bestMatch: (token: String, id: Int)? = nil
+            var bestLength = 0
+
+            // Try to find longest matching token at current position
+            for (tokenText, tokenId) in reverseVocab {
+                let remaining = String(normalizedText[position...])
+                if remaining.hasPrefix(tokenText) && tokenText.count > bestLength {
+                    bestMatch = (tokenText, tokenId)
+                    bestLength = tokenText.count
+                }
+            }
+
+            if let match = bestMatch {
+                tokens.append(match.id)
+                position = normalizedText.index(position, offsetBy: match.token.count)
+            } else {
+                // Skip single character if no match found
+                position = normalizedText.index(after: position)
+            }
+        }
+
+        return tokens
+    }
+
+    /// Build reverse vocabulary mapping (token_text -> token_id)
+    private func buildReverseVocabulary() -> [String: Int] {
+        var reverse: [String: Int] = [:]
+        for (id, text) in vocabulary {
+            reverse[text] = id
+        }
+        return reverse
+    }
+
     /// Get current custom vocabulary
     public func getCustomVocabulary() -> CustomVocabularyContext? {
         return customVocabulary
@@ -326,6 +446,21 @@ public final class AsrManager {
         globalFrameOffset: Int = 0,
         customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> TdtHypothesis {
+        // Use beam search if enabled and jointLogits model is available
+        if config.useBeamSearch,
+            let jointLogitsModel = asrModels?.jointLogits,
+            let customVocabulary = customVocabulary
+        {
+            logger.info("Using beam search decoding with vocabulary biasing")
+            return try await beamSearchDecode(
+                encoderOutput: encoderOutput,
+                jointLogitsModel: jointLogitsModel,
+                customVocabulary: customVocabulary,
+                decoderState: &decoderState,
+                globalFrameOffset: globalFrameOffset
+            )
+        }
+
         // Route to appropriate decoder based on model version
         switch asrModels!.version {
         case .v2:
@@ -356,6 +491,52 @@ public final class AsrManager {
                 globalFrameOffset: globalFrameOffset
             )
         }
+    }
+
+    /// Beam search decoding with vocabulary biasing
+    private func beamSearchDecode(
+        encoderOutput: MLMultiArray,
+        jointLogitsModel: MLModel,
+        customVocabulary: CustomVocabularyContext,
+        decoderState: inout TdtDecoderState,
+        globalFrameOffset: Int
+    ) async throws -> TdtHypothesis {
+        // Tokenize vocabulary using TDT tokens if not already tokenized
+        let tokenizedVocabulary = tokenizeVocabularyForTdt(customVocabulary)
+
+        // Build vocabulary trie for biasing
+        let trie = VocabularyTrie(vocabulary: tokenizedVocabulary)
+        logger.debug("Beam search trie has \(trie.count) entries")
+
+        // Create beam search decoder with vocabulary biasing
+        let beamDecoder = BeamSearchDecoder(
+            config: config.beamSearchConfig,
+            vocabularyTrie: trie
+        )
+
+        // Get initial decoder states
+        let initialH = decoderState.hiddenState
+        let initialC = decoderState.cellState
+
+        // Run beam search decoding
+        let (tokens, timestamps) = try beamDecoder.decode(
+            encoderOutput: encoderOutput,
+            jointModel: jointLogitsModel,
+            decoderModel: decoderModel!,
+            initialHState: initialH,
+            initialCState: initialC
+        )
+
+        // Convert to TdtHypothesis
+        var hypothesis = TdtHypothesis(decState: decoderState)
+        hypothesis.ySequence = tokens
+        hypothesis.timestamps = timestamps.map { $0 + globalFrameOffset }
+        hypothesis.tokenConfidences = [Float](repeating: 0.9, count: tokens.count)  // Beam search doesn't track per-token confidence
+        hypothesis.lastToken = tokens.last
+
+        logger.info("Beam search decoded \(tokens.count) tokens with vocabulary biasing")
+
+        return hypothesis
     }
 
     /// Transcribe audio from an AVAudioPCMBuffer.
@@ -496,8 +677,20 @@ public final class AsrManager {
                             let dedupeKey = "\(detection.term.text)@\(timeWindow)"
 
                             // Keep the detection with the highest score for each (term, time_window)
+                            // Prefer detections WITH aliases when scores are close (within 1.0)
                             if let existing = bestDetectionsByTermAndTime[dedupeKey] {
-                                if detection.score > existing.score {
+                                let hasNewAliases = detection.term.aliases != nil && !detection.term.aliases!.isEmpty
+                                let hasExistingAliases =
+                                    existing.term.aliases != nil && !existing.term.aliases!.isEmpty
+                                let scoreDiff = detection.score - existing.score
+
+                                // Replace if: (a) significantly better score, OR
+                                //             (b) similar score but new has aliases and existing doesn't
+                                let shouldReplace =
+                                    scoreDiff > 1.0
+                                    || (scoreDiff > -1.0 && hasNewAliases && !hasExistingAliases)
+
+                                if shouldReplace {
                                     // Replace with higher-scoring detection (adjusted times)
                                     let adjusted = CtcKeywordSpotter.KeywordDetection(
                                         term: detection.term,
