@@ -12,7 +12,7 @@ public struct VocabularyTrie: Sendable {
         public var isTerminal: Bool = false
         public var term: CustomVocabularyTerm?
         public var depth: Int = 0
-        
+
         public init(depth: Int = 0) {
             self.depth = depth
         }
@@ -59,20 +59,20 @@ public struct VocabularyTrie: Sendable {
     public struct Cursor {
         private let root: Node
         private var current: Node
-        
+
         fileprivate init(root: Node) {
             self.root = root
             self.current = root
         }
-        
+
         /// Current depth in the trie
         public var depth: Int { current.depth }
-        
+
         /// Reset cursor to root
         public mutating func reset() {
             current = root
         }
-        
+
         /// Attempt to advance the cursor with a token
         /// - Returns: Match result for the move
         public mutating func advance(_ tokenId: Int) -> VocabularyMatchResult {
@@ -84,14 +84,14 @@ public struct VocabularyTrie: Sendable {
                 }
                 return .partial(depth: next.depth, possibleContinuations: next.children.count)
             }
-            
+
             // 2. If failed, this path is dead. Reset to root.
             // Note: The caller might want to check if 'tokenId' starts a NEW match at root
             // but that logic is best handled by the caller or a specific 'advanceOrReset' method.
             // Here we just report no match for the *continuation*.
             return .noMatch
         }
-        
+
         /// Check if a token would start a new match from root
         public func startsMatch(_ tokenId: Int) -> VocabularyMatchResult {
             if let next = root.children[tokenId] {
@@ -102,7 +102,7 @@ public struct VocabularyTrie: Sendable {
             }
             return .noMatch
         }
-        
+
         /// Force the cursor to a specific state (e.g. after finding a new match from root)
         public mutating func forceAdvanceFromRoot(_ tokenId: Int) {
             if let next = root.children[tokenId] {
@@ -112,7 +112,7 @@ public struct VocabularyTrie: Sendable {
             }
         }
     }
-    
+
     /// Create a new cursor at the root
     public func makeCursor() -> Cursor {
         return Cursor(root: root)

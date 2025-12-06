@@ -211,7 +211,7 @@ public final class AsrManager {
                     tokenizedCount += 1
                     logger.debug("TDT tokenized '\(term.text)': \(tokenIds)")
                 }
-                
+
                 // Also tokenize aliases to allow boosting them during beam search
                 if let aliases = term.aliases {
                     for alias in aliases {
@@ -225,7 +225,7 @@ public final class AsrManager {
                             let aliasTerm = CustomVocabularyTerm(
                                 text: term.text,
                                 weight: term.weight,
-                                aliases: nil, // Prevent recursion
+                                aliases: nil,  // Prevent recursion
                                 tokenIds: aliasTokens,
                                 ctcTokenIds: nil
                             )

@@ -44,8 +44,8 @@ public final class BeamSearchDecoder {
         public let maxSymbolsPerStep: Int
 
         public static let `default` = Config(
-            beamWidth: 10, // Increased from 4 to capture lower probability prefixes
-            partialMatchBoost: 5.0, // Increased from 0.5 to keep prefixes alive
+            beamWidth: 10,  // Increased from 4 to capture lower probability prefixes
+            partialMatchBoost: 5.0,  // Increased from 0.5 to keep prefixes alive
             completeMatchBoost: 2.0,
             minLogProb: -15.0,
             numDurationBins: 5,
@@ -110,7 +110,7 @@ public final class BeamSearchDecoder {
 
         /// Current frame index
         var frameIndex: Int
-        
+
         /// Trie cursor for vocabulary biasing
         var trieCursor: VocabularyTrie.Cursor?
     }
@@ -259,7 +259,7 @@ public final class BeamSearchDecoder {
                         if var cursor = newHypothesis.trieCursor {
                             // 1. Try advancing current path
                             var match = cursor.advance(tokenId)
-                            
+
                             // 2. If no match, check if this token starts a NEW match from root
                             // (e.g. "The doc" -> "tor" (match) vs "The" -> "zebra" (no match, but "zebra" might be in vocab))
                             if !match.isMatch {
@@ -269,12 +269,12 @@ public final class BeamSearchDecoder {
                                     cursor.forceAdvanceFromRoot(tokenId)
                                     match = rootMatch
                                 } else {
-                                    cursor.reset() // Lost track, reset to root
+                                    cursor.reset()  // Lost track, reset to root
                                 }
                             }
-                            
+
                             newHypothesis.trieCursor = cursor
-                            
+
                             switch match {
                             case .partial(let depth, _):
                                 newHypothesis.vocabBoost += config.partialMatchBoost * Float(depth)
@@ -310,7 +310,7 @@ public final class BeamSearchDecoder {
 
         return (best.tokens, best.timestamps)
     }
-    
+
     private func runDecoder(
         model: MLModel,
         lastToken: Int,
