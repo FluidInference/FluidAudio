@@ -120,9 +120,36 @@ extension MLMultiArray {
             return
         }
 
-        // Use optimized memory copy
-        let destPtr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
-        let srcPtr = source.dataPointer.bindMemory(to: Float.self, capacity: count)
-        memcpy(destPtr, srcPtr, count * MemoryLayout<Float>.stride)
+        // Check if both arrays are contiguous (can use fast memcpy)
+        // Contiguous means strides are [dim2*dim1, dim1, 1] for 3D array
+        let isContiguous = isContiguousLayout() && source.isContiguousLayout()
+
+        if isContiguous {
+            // Use optimized memory copy for contiguous arrays
+            let destPtr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
+            let srcPtr = source.dataPointer.bindMemory(to: Float.self, capacity: count)
+            memcpy(destPtr, srcPtr, count * MemoryLayout<Float>.stride)
+        } else {
+            // Use element-by-element copy for non-contiguous arrays
+            // This respects MLMultiArray strides and handles different memory layouts
+            for i in 0..<count {
+                self[i] = source[i]
+            }
+        }
+    }
+
+    /// Check if the array has contiguous row-major memory layout
+    private func isContiguousLayout() -> Bool {
+        guard shape.count > 0 else { return true }
+
+        // Calculate expected strides for contiguous row-major layout
+        var expectedStride = 1
+        for i in (0..<shape.count).reversed() {
+            if strides[i].intValue != expectedStride {
+                return false
+            }
+            expectedStride *= shape[i].intValue
+        }
+        return true
     }
 }
