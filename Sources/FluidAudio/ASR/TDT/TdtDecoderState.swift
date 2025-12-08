@@ -51,8 +51,14 @@ struct TdtDecoderState {
     }
 
     mutating func update(from decoderOutput: MLFeatureProvider) {
-        hiddenState = decoderOutput.featureValue(for: "h_out")?.multiArrayValue ?? hiddenState
-        cellState = decoderOutput.featureValue(for: "c_out")?.multiArrayValue ?? cellState
+        // Copy data into existing arrays instead of replacing them to avoid memory leaks.
+        // Replacing arrays orphans the old MLMultiArray instances which accumulate over time.
+        if let newHidden = decoderOutput.featureValue(for: "h_out")?.multiArrayValue {
+            hiddenState.copyData(from: newHidden)
+        }
+        if let newCell = decoderOutput.featureValue(for: "c_out")?.multiArrayValue {
+            cellState.copyData(from: newCell)
+        }
     }
 
     init(from other: TdtDecoderState) throws {
