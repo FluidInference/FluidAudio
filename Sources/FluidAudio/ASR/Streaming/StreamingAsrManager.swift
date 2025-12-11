@@ -53,6 +53,7 @@ public actor StreamingAsrManager {
     private var hypothesisAccumulatedTokens: [Int] = []
     private var lastConfirmedAudioFrame: Int = 0  // Track confirmed audio boundary (encoder frames)
     private var lastConfirmedAudioSample: Int = 0  // Track confirmed audio boundary (samples)
+    private var confirmedTokenCount: Int = 0  // Number of tokens that have been confirmed
     private let maxHypothesisTokenHistory = 96
     private let maxHypothesisOverlapTokens = 64
 
@@ -162,6 +163,7 @@ public actor StreamingAsrManager {
         lastProcessedFrame = 0
         lastConfirmedAudioFrame = 0
         lastConfirmedAudioSample = 0
+        confirmedTokenCount = 0
         accumulatedTokens.removeAll()
         hypothesisAccumulatedTokens.removeAll()
         accumulatedHypothesisTokens.removeAll()
@@ -392,48 +394,57 @@ public actor StreamingAsrManager {
             logger.info("CTC detected \(detections.count) keywords: \(detections.map { $0.term.text })")
 
             guard !detections.isEmpty else {
-                return (text, [])
+                return (cleanedText, [])
             }
 
-            let mergeResult = KeywordMerger.applyCorrections(
-                detections: detections,
-                toTranscript: cleanedText,
-                vocabulary: vocabulary,
-                debugMode: true
+            // Use VocabularyRescorer for principled CTC-based rescoring
+            // This compares acoustic evidence for original words vs vocabulary terms
+            // and only replaces when vocabulary term has significantly higher score
+            let rescorer = VocabularyRescorer(
+                spotter: spotter,
+                vocabulary: vocabulary
             )
 
-            if !mergeResult.replacements.isEmpty {
+            let rescoreOutput = try await rescorer.rescore(
+                transcript: cleanedText,
+                audioSamples: audioSamples,
+                detections: detections
+            )
+
+            let replacementCount = rescoreOutput.replacements.filter { $0.shouldReplace }.count
+            if replacementCount > 0 {
                 logger.info(
-                    "Applied \(mergeResult.replacements.count) keyword corrections: \(mergeResult.replacements.map { "\($0.originalText) -> \($0.canonicalText)" })"
+                    "Applied \(replacementCount) vocabulary corrections via CTC rescoring"
                 )
             } else {
                 logger.debug(
-                    "CTC: \(detections.count) detections but no replacements applied to '\(text.prefix(50))...'")
+                    "CTC: \(detections.count) detections but no replacements applied to '\(cleanedText.prefix(50))...'")
             }
 
             // Compute character ranges by finding each corrected word in the result text
             var corrections: [CorrectedWord] = []
-            var searchStart = mergeResult.correctedText.startIndex
-            for replacement in mergeResult.replacements {
-                if let range = mergeResult.correctedText.range(
-                    of: replacement.canonicalText,
-                    range: searchStart..<mergeResult.correctedText.endIndex
+            var searchStart = rescoreOutput.text.startIndex
+            for replacement in rescoreOutput.replacements where replacement.shouldReplace {
+                guard let replacementWord = replacement.replacementWord else { continue }
+                if let range = rescoreOutput.text.range(
+                    of: replacementWord,
+                    range: searchStart..<rescoreOutput.text.endIndex
                 ) {
-                    let startOffset = mergeResult.correctedText.distance(
-                        from: mergeResult.correctedText.startIndex, to: range.lowerBound)
-                    let endOffset = mergeResult.correctedText.distance(
-                        from: mergeResult.correctedText.startIndex, to: range.upperBound)
+                    let startOffset = rescoreOutput.text.distance(
+                        from: rescoreOutput.text.startIndex, to: range.lowerBound)
+                    let endOffset = rescoreOutput.text.distance(
+                        from: rescoreOutput.text.startIndex, to: range.upperBound)
                     corrections.append(
                         CorrectedWord(
                             range: startOffset..<endOffset,
-                            original: replacement.originalText,
-                            corrected: replacement.canonicalText
+                            original: replacement.originalWord,
+                            corrected: replacementWord
                         ))
                     searchStart = range.upperBound
                 }
             }
 
-            return (mergeResult.correctedText, corrections)
+            return (rescoreOutput.text, corrections)
         } catch {
             logger.warning("CTC keyword correction failed: \(error.localizedDescription)")
             return (text, [])
@@ -469,33 +480,19 @@ public actor StreamingAsrManager {
             throw error
         }
 
-        // Use the already-corrected confirmed + pending text instead of re-converting from tokens
-        // This preserves the keyword corrections applied during streaming
+        // Build final text from confirmed transcript + unconfirmed tokens
+        // This ensures no content is lost between confirmations
         var finalText: String
-        if !confirmedTranscript.isEmpty || !pendingMainTranscription.isEmpty {
-            var components: [String] = []
-            if !confirmedTranscript.isEmpty {
-                components.append(confirmedTranscript)
-            }
-            if !pendingMainTranscription.isEmpty {
-                // Add any pending corrections to accumulated corrections with proper offset
-                let offsetBase = confirmedTranscript.isEmpty ? 0 : confirmedTranscript.count + 1  // +1 for space
-                for correction in pendingMainCorrections {
-                    let adjustedRange =
-                        (correction.range.lowerBound + offsetBase)..<(correction.range.upperBound + offsetBase)
-                    accumulatedCorrections.append(
-                        CorrectedWord(
-                            range: adjustedRange,
-                            original: correction.original,
-                            corrected: correction.corrected
-                        ))
-                }
-                components.append(pendingMainTranscription)
-            }
-            finalText = components.joined(separator: " ")
-        } else if let asrManager = asrManager, !accumulatedTokens.isEmpty {
-            // Fallback: convert accumulated tokens to text (uncorrected)
-            let tokenResult = asrManager.processTranscriptionResult(
+        var components: [String] = []
+
+        logger.debug(
+            "finish() state: confirmedTokenCount=\(confirmedTokenCount), accumulatedTokens=\(accumulatedTokens.count)"
+        )
+
+        // The most reliable approach: regenerate text from ALL accumulated tokens
+        // This ensures no content is lost, regardless of confirmation state issues
+        if let asrManager = asrManager, !accumulatedTokens.isEmpty {
+            let fullResult = asrManager.processTranscriptionResult(
                 tokenIds: accumulatedTokens,
                 timestamps: [],
                 confidences: [],
@@ -503,7 +500,28 @@ public actor StreamingAsrManager {
                 audioSamples: [],
                 processingTime: 0
             )
-            finalText = tokenResult.text
+            var fullText = fullResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Apply vocabulary corrections to the full text if available
+            if let vocabulary = customVocabulary, !vocabulary.terms.isEmpty, !sampleBuffer.isEmpty {
+                let (correctedText, _) = await applyKeywordCorrections(
+                    to: fullText,
+                    tokenTimings: fullResult.tokenTimings ?? [],
+                    audioSamples: sampleBuffer
+                )
+                fullText = correctedText
+            }
+
+            finalText = fullText
+        } else if !confirmedTranscript.isEmpty || !pendingMainTranscription.isEmpty {
+            // Fallback to text-based assembly if no tokens
+            if !confirmedTranscript.isEmpty {
+                components.append(confirmedTranscript)
+            }
+            if !pendingMainTranscription.isEmpty {
+                components.append(pendingMainTranscription)
+            }
+            finalText = components.joined(separator: " ")
         } else {
             finalText = ""
         }
@@ -540,6 +558,7 @@ public actor StreamingAsrManager {
         lastProcessedFrame = 0
         lastConfirmedAudioFrame = 0
         lastConfirmedAudioSample = 0
+        confirmedTokenCount = 0
         accumulatedTokens.removeAll()
         hypothesisAccumulatedTokens.removeAll()
         accumulatedHypothesisTokens.removeAll()
@@ -680,13 +699,20 @@ public actor StreamingAsrManager {
         do {
             let chunkStartTime = Date()
 
-            // Start frame offset is now handled by decoder's timeJump mechanism
+            // Reset decoder state before each chunk for stateless processing
+            // This ensures each overlapping window is transcribed independently
+            // and overlap is handled via token deduplication, not decoder state
+            try await asrManager.resetDecoderState(for: audioSource)
 
             // Call AsrManager directly with deduplication
             let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
                 windowSamples,
                 source: audioSource,
                 previousTokens: accumulatedTokens
+            )
+
+            logger.debug(
+                "processWindow chunk \(processedChunks): windowSamples=\(windowSamples.count) (\(Double(windowSamples.count)/16000.0)s), got \(tokens.count) new tokens, accumulated before: \(accumulatedTokens.count)"
             )
 
             let adjustedTimestamps = Self.applyGlobalFrameOffset(
@@ -780,6 +806,8 @@ public actor StreamingAsrManager {
                 lastConfirmedAudioFrame = lastProcessedFrame
                 // Track confirmed position in samples (end of the processed window)
                 lastConfirmedAudioSample = windowStartSample + windowSamples.count
+                // Track confirmed token count for proper finish() handling
+                confirmedTokenCount = accumulatedTokens.count
                 hypothesisAccumulatedTokens.removeAll(keepingCapacity: true)
                 // Clear accumulated hypothesis data since it's now confirmed
                 accumulatedHypothesisTokens.removeAll(keepingCapacity: true)
