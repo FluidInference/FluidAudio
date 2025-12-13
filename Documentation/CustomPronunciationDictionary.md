@@ -446,4 +446,4 @@ if __name__ == '__main__':
 3. **Comment your entries** to document pronunciation sources
 4. **Group by domain** for maintainability
 5. **Test incrementally** — add a few entries at a time and verify
-6a **Keep backups** of woraing lexicon files before major changes
+6a **Keep backups** of working lexicon files before major changes

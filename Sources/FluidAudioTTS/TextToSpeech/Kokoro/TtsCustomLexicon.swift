@@ -5,45 +5,6 @@ import Foundation
 /// Custom lexicons allow domain-specific pronunciation overrides that take precedence
 /// over all built-in dictionaries and grapheme-to-phoneme conversion.
 ///
-/// ## Use Cases
-/// - Medical terminology: "ketorolac" → /kˈɛtɔːɹˌɒlak/
-/// - Brand names: "xiaomi" → /zˌaɪəɹˈəʊmi/
-/// - Technical jargon: "kubectl" → /kuːbkʌtl/
-/// - Proper nouns: "Nguyen" → /wɪn/
-///
-/// ## File Format
-/// Simple line-based format where each line is `word=phonemes`.
-/// Prefer lowercase word keys for general entries, and add case-specific keys only when needed
-/// (exact match wins, then case-insensitive/normalized fallback).
-/// Phonemes are written as a compact IPA string; any whitespace inside the phoneme string becomes a word separator.
-/// Whitespace is reserved for word separation; do not space-separate individual phoneme tokens.
-/// ```
-/// # Comments start with #
-/// kokoro=kəkˈɔɹO
-/// ketorolac=kˈɛtɔːɹˌɒlak
-/// xiaomi=zˌaɪəɹˈəʊmi
-/// UN=junˈITᵻd nˈAʃənz
-/// ```
-///
-/// ## Example Usage
-/// ```swift
-/// // From file
-/// let lexicon = try TtsCustomLexicon.load(from: fileURL)
-///
-/// // From string
-/// let lexicon = try TtsCustomLexicon.parse("""
-///     kokoro=kəkˈɔɹO
-///     xiaomi=zˌaɪəɹˈəʊmi
-/// """)
-///
-/// // From dictionary
-/// let lexicon = TtsCustomLexicon(entries: [
-///     "kokoro": ["k", "ə", "k", "ˈ", "ɔ", "ɹ", "O"]
-/// ])
-///
-/// // Use with TtSManager
-/// let manager = TtSManager(customLexicon: lexicon)
-/// ```
 public struct TtsCustomLexicon: Sendable {
     /// Word-to-phoneme mappings. Keys are matched case-sensitively.
     public let entries: [String: [String]]
