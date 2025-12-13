@@ -118,12 +118,13 @@ final class TtsCustomLexiconTests: XCTestCase {
     }
 
     func testNormalizedFallback() throws {
-        let content = "dont=doʊnt"
+        let content = "hello=hɛˈloʊ"
         let lexicon = try TtsCustomLexicon.parse(content)
 
-        // "don't" with apostrophe should normalize to "dont"
-        let phonemes = lexicon.phonemes(for: "don't")
-        XCTAssertNotNil(phonemes)
+        // Words with extra punctuation should normalize and match
+        // Normalization strips non-letter/digit/apostrophe characters
+        let phonemes = lexicon.phonemes(for: "HELLO!")
+        XCTAssertNotNil(phonemes, "Should match via normalized fallback")
     }
 
     func testApostropheVariants() throws {
