@@ -41,6 +41,22 @@ public struct TTS {
         }
         return artifactsRoot.appendingPathComponent(expanded, isDirectory: expectsDirectory)
     }
+
+    private static func loadCustomLexicon(from path: String?) throws -> TtsCustomLexicon? {
+        guard let path = path else { return nil }
+        let expanded = (path as NSString).expandingTildeInPath
+        let url: URL
+        if expanded.hasPrefix("/") {
+            url = URL(fileURLWithPath: expanded)
+        } else {
+            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            url = cwd.appendingPathComponent(expanded)
+        }
+        let lexicon = try TtsCustomLexicon.load(from: url)
+        logger.info("Loaded custom lexicon with \(lexicon.count) entries from \(url.path)")
+        return lexicon
+    }
+
     private static let longFormBenchmark: String = """
         The purpose of this extended benchmark passage is to emulate a five minute narration that exercises every
         stage of the Kokoro text to speech pipeline. It begins with a calm introduction that invites the listener
@@ -199,21 +215,7 @@ public struct TTS {
             // Timing buckets
             let tStart = Date()
 
-            // Load custom lexicon if provided
-            var customLexicon: TtsCustomLexicon? = nil
-            if let lexiconPath = lexiconPath {
-                let expanded = (lexiconPath as NSString).expandingTildeInPath
-                let lexiconURL: URL
-                if expanded.hasPrefix("/") {
-                    lexiconURL = URL(fileURLWithPath: expanded)
-                } else {
-                    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-                    lexiconURL = cwd.appendingPathComponent(expanded)
-                }
-                customLexicon = try TtsCustomLexicon.load(from: lexiconURL)
-                logger.info("Loaded custom lexicon with \(customLexicon!.count) entries from \(lexiconURL.path)")
-            }
-
+            let customLexicon = try loadCustomLexicon(from: lexiconPath)
             let manager = TtSManager(customLexicon: customLexicon)
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let voiceOverride = requestedVoice.isEmpty ? nil : requestedVoice
@@ -488,23 +490,8 @@ extension TTS {
         variantPreference: ModelNames.TTS.Variant?
     ) async {
         do {
-            // Load custom lexicon if provided
-            var customLexicon: TtsCustomLexicon? = nil
-            if let lexiconPath = lexiconPath {
-                let expanded = (lexiconPath as NSString).expandingTildeInPath
-                let lexiconURL: URL
-                if expanded.hasPrefix("/") {
-                    lexiconURL = URL(fileURLWithPath: expanded)
-                } else {
-                    let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-                    lexiconURL = cwd.appendingPathComponent(expanded)
-                }
-                customLexicon = try TtsCustomLexicon.load(from: lexiconURL)
-                logger.info("Loaded custom lexicon with \(customLexicon!.count) entries from \(lexiconURL.path)")
-            }
-
+            let customLexicon = try loadCustomLexicon(from: lexiconPath)
             let manager = TtSManager(customLexicon: customLexicon)
-
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedVoice = requestedVoice.isEmpty ? nil : requestedVoice
             let preloadVoices = normalizedVoice.map { Set([$0]) }
