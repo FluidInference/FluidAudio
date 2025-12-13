@@ -333,5 +333,226 @@ final class TtsCustomLexiconTests: XCTestCase {
         XCTAssertNotNil(lexicon.phonemes(for: "HIPAA"))
         XCTAssertNotNil(lexicon.phonemes(for: "EBITDA"))
     }
+
+    // MARK: - Three-Tier Matching Priority Tests
+
+    func testMatchingPriorityExactOverCaseInsensitive() throws {
+        // When both exact and lowercase entries exist, exact should win
+        let content = """
+            Hello=EXACT
+            hello=LOWER
+            """
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let result = lexicon.phonemes(for: "Hello")
+        XCTAssertEqual(result, ["E", "X", "A", "C", "T"], "Exact match should take priority")
+
+        let lowerResult = lexicon.phonemes(for: "hello")
+        XCTAssertEqual(lowerResult, ["L", "O", "W", "E", "R"], "Lowercase query should match lowercase entry")
+    }
+
+    func testMatchingPriorityCaseInsensitiveOverNormalized() throws {
+        // Case-insensitive should be checked before normalized
+        let content = "hello=hɛˈloʊ"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        // "HELLO" should match via case-insensitive (tier 2), not normalized (tier 3)
+        let result = lexicon.phonemes(for: "HELLO")
+        XCTAssertNotNil(result)
+
+        // "hello!!!" has punctuation - should still match via normalized fallback
+        let normalizedResult = lexicon.phonemes(for: "hello!!!")
+        XCTAssertNotNil(normalizedResult, "Should fall back to normalized matching")
+    }
+
+    func testThreeTierMatchingComplete() throws {
+        // Test all three tiers with a single lexicon
+        let content = "Test=tɛst"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        // Tier 1: Exact match
+        XCTAssertNotNil(lexicon.phonemes(for: "Test"), "Tier 1: Exact match")
+
+        // Tier 2: Case-insensitive (no exact match for "TEST")
+        XCTAssertNotNil(lexicon.phonemes(for: "TEST"), "Tier 2: Case-insensitive")
+        XCTAssertNotNil(lexicon.phonemes(for: "test"), "Tier 2: Case-insensitive")
+
+        // Tier 3: Normalized (strips punctuation)
+        XCTAssertNotNil(lexicon.phonemes(for: "test!"), "Tier 3: Normalized")
+        XCTAssertNotNil(lexicon.phonemes(for: "@TEST@"), "Tier 3: Normalized with symbols")
+    }
+
+    // MARK: - Unicode Grapheme Cluster Tests
+
+    func testUnicodeGraphemeClusterTokenization() throws {
+        // Test that combining characters stay together as single tokens
+        // é can be represented as e + combining acute (U+0301) or as precomposed é (U+00E9)
+        let content = "cafe=kafˈeɪ"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let phonemes = lexicon.phonemes(for: "cafe")
+        XCTAssertNotNil(phonemes)
+        // Each character should be a separate token
+        XCTAssertEqual(phonemes?.count, 6, "Should have 6 phoneme tokens")
+    }
+
+    func testUnicodeDiacriticsInPhonemes() throws {
+        // IPA often uses combining diacritics (e.g., nasalization ̃, length mark ː)
+        let content = "nasal=nãsal"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let phonemes = lexicon.phonemes(for: "nasal")
+        XCTAssertNotNil(phonemes)
+        // ã should be one grapheme cluster (a + combining tilde)
+        XCTAssertTrue(phonemes!.contains { $0.contains("̃") || $0 == "ã" }, "Should preserve nasal diacritic")
+    }
+
+    func testUnicodeLengthMarker() throws {
+        // Test the length marker ː (U+02D0) which is common in IPA
+        let content = "beat=biːt"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let phonemes = lexicon.phonemes(for: "beat")
+        XCTAssertEqual(phonemes, ["b", "i", "ː", "t"], "Length marker should be separate token")
+    }
+
+    func testMultiWordExpansionTokenization() throws {
+        // Test that whitespace in phonemes creates word separator tokens
+        let content = "UN=juːˈnaɪtɪd ˈneɪʃənz"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let phonemes = lexicon.phonemes(for: "UN")
+        XCTAssertNotNil(phonemes)
+        XCTAssertTrue(phonemes!.contains(" "), "Should contain space as word separator")
+
+        // Count the space separators
+        let spaceCount = phonemes!.filter { $0 == " " }.count
+        XCTAssertEqual(spaceCount, 1, "Should have exactly one word separator")
+    }
+
+    // MARK: - Edge Case Tests
+
+    func testEqualsSignInPhonemes() throws {
+        // Edge case: what if phonemes contain = character?
+        // The parser should only split on the FIRST = sign
+        let content = "equals=iːkwəlz=saɪn"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let phonemes = lexicon.phonemes(for: "equals")
+        XCTAssertNotNil(phonemes)
+        // Should include everything after first =, including the second =
+        XCTAssertTrue(phonemes!.contains("="), "Phonemes should contain the = character")
+    }
+
+    func testMultipleEqualsInLine() throws {
+        // Another test for = handling
+        let content = "test=a=b=c"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let phonemes = lexicon.phonemes(for: "test")
+        XCTAssertNotNil(phonemes)
+        XCTAssertEqual(phonemes, ["a", "=", "b", "=", "c"])
+    }
+
+    func testMergeConflictResolutionExplicit() throws {
+        // Explicitly test that second lexicon wins on conflicts
+        let base = try TtsCustomLexicon.parse(
+            """
+            word1=AAA
+            word2=BBB
+            word3=CCC
+            """)
+
+        let overlay = try TtsCustomLexicon.parse(
+            """
+            word2=XXX
+            word4=DDD
+            """)
+
+        let merged = base.merged(with: overlay)
+
+        // word1: only in base, should be preserved
+        XCTAssertEqual(merged.phonemes(for: "word1"), ["A", "A", "A"])
+
+        // word2: in both, overlay should win
+        XCTAssertEqual(merged.phonemes(for: "word2"), ["X", "X", "X"])
+
+        // word3: only in base, should be preserved
+        XCTAssertEqual(merged.phonemes(for: "word3"), ["C", "C", "C"])
+
+        // word4: only in overlay, should be included
+        XCTAssertEqual(merged.phonemes(for: "word4"), ["D", "D", "D"])
+
+        XCTAssertEqual(merged.count, 4)
+    }
+
+    func testWhitespaceOnlyPhonemes() throws {
+        // Edge case: phonemes that are only whitespace should be rejected
+        let content = "test=   "
+
+        XCTAssertThrowsError(try TtsCustomLexicon.parse(content)) { error in
+            XCTAssertTrue(error is TTSError)
+        }
+    }
+
+    func testVeryLongPhonemeString() throws {
+        // Test handling of unusually long phoneme strings
+        let longPhonemes = String(repeating: "ə", count: 100)
+        let content = "long=\(longPhonemes)"
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        let phonemes = lexicon.phonemes(for: "long")
+        XCTAssertNotNil(phonemes)
+        XCTAssertEqual(phonemes?.count, 100)
+    }
+
+    func testSpecialCharactersInWord() throws {
+        // Test words with hyphens, numbers, etc.
+        let content = """
+            covid-19=ˈkoʊvɪd naɪnˈtiːn
+            3d=θriːˈdiː
+            """
+        let lexicon = try TtsCustomLexicon.parse(content)
+
+        XCTAssertEqual(lexicon.count, 2)
+        XCTAssertNotNil(lexicon.phonemes(for: "covid-19"))
+        XCTAssertNotNil(lexicon.phonemes(for: "3d"))
+    }
+
+    func testLoadEmptyFile() throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("empty_lexicon_\(UUID().uuidString).txt")
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        try "".write(to: tempURL, atomically: true, encoding: .utf8)
+
+        let lexicon = try TtsCustomLexicon.load(from: tempURL)
+        XCTAssertTrue(lexicon.isEmpty)
+    }
+
+    func testLoadFileWithOnlyWhitespaceAndComments() throws {
+        let content = """
+
+            # Comment 1
+
+            # Comment 2
+
+            """
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("comments_only_\(UUID().uuidString).txt")
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        try content.write(to: tempURL, atomically: true, encoding: .utf8)
+
+        let lexicon = try TtsCustomLexicon.load(from: tempURL)
+        XCTAssertTrue(lexicon.isEmpty)
+    }
 }
 #endif
