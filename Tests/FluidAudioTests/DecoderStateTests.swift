@@ -81,10 +81,6 @@ final class TdtDecoderStateTests: XCTestCase {
     func testDecoderStateUpdate() throws {
         var state = try TdtDecoderState()
 
-        // Store original array references to verify reuse
-        let originalHidden = state.hiddenState
-        let originalCell = state.cellState
-
         // Create mock decoder output
         let newHiddenState = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
         let newCellState = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
@@ -103,23 +99,9 @@ final class TdtDecoderStateTests: XCTestCase {
         // Update state
         state.update(from: mockOutput)
 
-        // Verify arrays are reused (same object references) to prevent memory leaks
-        XCTAssertTrue(state.hiddenState === originalHidden, "Should reuse original hidden state array")
-        XCTAssertTrue(state.cellState === originalCell, "Should reuse original cell state array")
-
-        // Verify values are copied correctly
-        for i in 0..<newHiddenState.count {
-            XCTAssertEqual(
-                state.hiddenState[i].floatValue,
-                newHiddenState[i].floatValue,
-                accuracy: 0.0001,
-                "Hidden state value at index \(i) should match")
-            XCTAssertEqual(
-                state.cellState[i].floatValue,
-                newCellState[i].floatValue,
-                accuracy: 0.0001,
-                "Cell state value at index \(i) should match")
-        }
+        // Verify state now references the new arrays
+        XCTAssertTrue(state.hiddenState === newHiddenState)
+        XCTAssertTrue(state.cellState === newCellState)
     }
 
     func testDecoderStateUpdateWithMissingFeatures() throws {
@@ -143,10 +125,6 @@ final class TdtDecoderStateTests: XCTestCase {
         var state = try TdtDecoderState()
 
         let originalHidden = state.hiddenState
-        let originalCell = state.cellState
-
-        // Store original hidden state values
-        let originalHiddenValues = (0..<state.hiddenState.count).map { state.hiddenState[$0].floatValue }
 
         // Create new cell state only
         let newCellState = try MLMultiArray(shape: decoderStateShape, dataType: .float32)
@@ -160,25 +138,10 @@ final class TdtDecoderStateTests: XCTestCase {
 
         state.update(from: partialOutput)
 
-        // Hidden state array should be reused and values unchanged
-        XCTAssertTrue(state.hiddenState === originalHidden, "Should reuse original hidden state array")
-        for i in 0..<state.hiddenState.count {
-            XCTAssertEqual(
-                state.hiddenState[i].floatValue,
-                originalHiddenValues[i],
-                accuracy: 0.0001,
-                "Hidden state value at index \(i) should be unchanged")
-        }
-
-        // Cell state array should be reused with new values copied in
-        XCTAssertTrue(state.cellState === originalCell, "Should reuse original cell state array")
-        for i in 0..<newCellState.count {
-            XCTAssertEqual(
-                state.cellState[i].floatValue,
-                newCellState[i].floatValue,
-                accuracy: 0.0001,
-                "Cell state value at index \(i) should match new values")
-        }
+        // Hidden state should be unchanged (same reference)
+        XCTAssertTrue(state.hiddenState === originalHidden)
+        // Cell state should be the new array
+        XCTAssertTrue(state.cellState === newCellState)
     }
 
     // MARK: - MLMultiArray Extension Tests

@@ -371,10 +371,10 @@ extension AsrModels {
     }
 
     /// Validates that Parakeet models exist and can be loaded.
-    public static func isModelValid(version: AsrModelVersion = .v3) async -> Bool {
+    /// Throws on Intel Mac since CoreML models require Apple Silicon.
+    public static func isModelValid(version: AsrModelVersion = .v3) async throws -> Bool {
         guard SystemInfo.isAppleSilicon else {
-            logger.warning("Model validation failed: Intel Mac detected")
-            return false
+            throw ASRError.unsupportedPlatform("Parakeet models require Apple Silicon")
         }
 
         let cacheDir = defaultCacheDirectory(for: version)

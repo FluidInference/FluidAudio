@@ -144,12 +144,12 @@ final class StressTests: XCTestCase {
 
         // Mix multiple frequencies to simulate speech harmonics
         let frequencies: [(freq: Float, amp: Float)] = [
-            (150, 0.3),   // Fundamental (male voice range)
-            (300, 0.2),   // First harmonic
-            (450, 0.1),   // Second harmonic
+            (150, 0.3),  // Fundamental (male voice range)
+            (300, 0.2),  // First harmonic
+            (450, 0.1),  // Second harmonic
             (600, 0.05),  // Third harmonic
-            (1200, 0.03), // Formant region
-            (2400, 0.02), // Higher formant
+            (1200, 0.03),  // Formant region
+            (2400, 0.02),  // Higher formant
         ]
 
         for i in 0..<sampleCount {
