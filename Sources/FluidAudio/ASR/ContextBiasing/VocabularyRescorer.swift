@@ -8,12 +8,15 @@ import OSLog
 /// Only replaces when the vocabulary term has significantly higher acoustic evidence.
 ///
 /// This implements "shallow fusion" or "CTC rescoring" - a standard technique in ASR.
+/// The rescorer computes ACTUAL CTC scores for both vocabulary terms AND original words,
+/// enabling a fair comparison rather than relying on heuristics.
 public struct VocabularyRescorer {
 
     private let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
     private let spotter: CtcKeywordSpotter
     private let vocabulary: CustomVocabularyContext
     private let trie: VocabularyTrie
+    private let ctcTokenizer: SentencePieceCtcTokenizer?
     private let debugMode: Bool
 
     /// Configuration for rescoring behavior
@@ -65,6 +68,15 @@ public struct VocabularyRescorer {
         self.trie = VocabularyTrie(vocabulary: vocabulary)
         self.config = config
         self.debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+
+        // Initialize CTC tokenizer for scoring original words
+        do {
+            self.ctcTokenizer = try SentencePieceCtcTokenizer()
+        } catch {
+            self.ctcTokenizer = nil
+            let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
+            logger.warning("Failed to initialize CTC tokenizer: \(error). Will fall back to heuristic scoring.")
+        }
     }
 
     /// Result of rescoring a word
@@ -77,26 +89,59 @@ public struct VocabularyRescorer {
         public let reason: String
     }
 
-    /// Rescore a transcript using CTC evidence
+    /// Rescore a transcript using CTC evidence (legacy API - uses heuristic for original word scoring)
     /// - Parameters:
     ///   - transcript: Original transcript from TDT decoder
     ///   - audioSamples: Audio samples for CTC scoring
     ///   - detections: CTC keyword detections for vocabulary terms
     /// - Returns: Rescored transcript with replacements only where acoustically justified
+    @available(*, deprecated, message: "Use rescore(transcript:spotResult:) for principled CTC scoring")
     public func rescore(
         transcript: String,
         audioSamples: [Float],
         detections: [CtcKeywordSpotter.KeywordDetection]
     ) async throws -> RescoreOutput {
+        // Wrap in SpotKeywordsResult without log-probs (will fall back to heuristic)
+        let spotResult = CtcKeywordSpotter.SpotKeywordsResult(
+            detections: detections,
+            logProbs: [],
+            frameDuration: 0,
+            totalFrames: 0
+        )
+        return rescore(transcript: transcript, spotResult: spotResult)
+    }
+
+    /// Rescore a transcript using CTC evidence with principled scoring.
+    /// This method computes ACTUAL CTC scores for original words using the cached log-probs,
+    /// enabling a fair comparison between vocabulary terms and original transcript words.
+    ///
+    /// - Parameters:
+    ///   - transcript: Original transcript from TDT decoder
+    ///   - spotResult: Result from spotKeywordsWithLogProbs containing detections and cached log-probs
+    /// - Returns: Rescored transcript with replacements only where acoustically justified
+    public func rescore(
+        transcript: String,
+        spotResult: CtcKeywordSpotter.SpotKeywordsResult
+    ) -> RescoreOutput {
         let words = transcript.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
         guard !words.isEmpty else {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
 
+        let detections = spotResult.detections
+        let logProbs = spotResult.logProbs
+        let hasLogProbs = !logProbs.isEmpty
+
         if debugMode {
             logger.info("=== VocabularyRescorer ===")
             logger.info("Transcript: \(transcript)")
             logger.info("Detections: \(detections.count)")
+            logger.info("CTC log-probs available: \(hasLogProbs) (frames: \(logProbs.count))")
+            if hasLogProbs && ctcTokenizer != nil {
+                logger.info("Using ACTUAL CTC scoring for original words")
+            } else {
+                logger.info("Using heuristic scoring (CTC log-probs or tokenizer unavailable)")
+            }
         }
 
         var replacements: [RescoringResult] = []
@@ -143,6 +188,9 @@ public struct VocabularyRescorer {
                 }
             }
 
+            // Use the standard similarity threshold
+            let effectiveMinSimilarity = vocabulary.minSimilarity
+
             // Search the ENTIRE transcript for matching words or phrases
             for idx in 0..<words.count {
                 // Skip already replaced words
@@ -177,9 +225,41 @@ public struct VocabularyRescorer {
                             isHighConfidenceAliasMatch = true
                         }
                     }
+
+                    // COMPOUND WORD MATCHING: For single-word vocabulary terms, also try
+                    // matching against concatenated adjacent transcript words.
+                    // This handles cases like "Newrez" being transcribed as "new res".
+                    if spanLength == 1 {
+                        // Try concatenating 2 adjacent words: "new res" → "newres"
+                        if idx + 2 <= words.count {
+                            let word1 = words[idx].trimmingCharacters(in: .punctuationCharacters)
+                            let word2 = words[idx + 1].trimmingCharacters(in: .punctuationCharacters)
+                            let concatenated = word1 + word2  // No space
+                            let concatSimilarity = Self.stringSimilarity(concatenated, form)
+
+                            if concatSimilarity > bestSimilarity {
+                                bestSimilarity = concatSimilarity
+                                matchedSpanLength = 2  // Replacing 2 words with 1
+                            }
+                        }
+
+                        // Try concatenating 3 adjacent words for longer compound words
+                        if idx + 3 <= words.count && form.count >= 8 {
+                            let word1 = words[idx].trimmingCharacters(in: .punctuationCharacters)
+                            let word2 = words[idx + 1].trimmingCharacters(in: .punctuationCharacters)
+                            let word3 = words[idx + 2].trimmingCharacters(in: .punctuationCharacters)
+                            let concatenated = word1 + word2 + word3
+                            let concatSimilarity = Self.stringSimilarity(concatenated, form)
+
+                            if concatSimilarity > bestSimilarity {
+                                bestSimilarity = concatSimilarity
+                                matchedSpanLength = 3
+                            }
+                        }
+                    }
                 }
 
-                if bestSimilarity >= vocabulary.minSimilarity {
+                if bestSimilarity >= effectiveMinSimilarity {
                     let originalSpan = words[idx..<idx + matchedSpanLength].joined(separator: " ")
 
                     if let existing = bestCandidate {
@@ -212,25 +292,50 @@ public struct VocabularyRescorer {
             // The vocab term already has a CTC score from the detection
             let vocabCtcScore = vocabScore + config.vocabBoostWeight
 
-            // For the original word, we estimate its CTC score
-            // This is approximate - ideally we'd run CTC DP on the original word's tokens
-            // For now, use a heuristic based on the detection's score relative to the word
-            let originalEstimatedScore = estimateOriginalWordScore(
-                detection: detection,
-                originalWord: candidate.originalWord,
-                similarity: candidate.similarity
-            )
+            // Compute the ACTUAL CTC score for the original word if we have log-probs and tokenizer
+            let originalScore: Float
+            let scoringMethod: String
 
-            let scoreAdvantage = vocabCtcScore - originalEstimatedScore
+            if hasLogProbs, let tokenizer = ctcTokenizer {
+                // PRINCIPLED APPROACH: Tokenize original word and run CTC DP
+                let cleanedOriginal = candidate.originalWord.trimmingCharacters(in: .punctuationCharacters)
+                let originalTokenIds = tokenizer.encode(cleanedOriginal)
+
+                if !originalTokenIds.isEmpty {
+                    let (ctcScore, _, _) = spotter.scoreWord(logProbs: logProbs, keywordTokens: originalTokenIds)
+                    originalScore = ctcScore
+                    scoringMethod = "actual"
+
+                    if debugMode {
+                        logger.debug(
+                            "    Original '\(cleanedOriginal)' tokenized to \(originalTokenIds), CTC score: \(String(format: "%.2f", ctcScore))"
+                        )
+                    }
+                } else {
+                    // Tokenization failed, fall back to heuristic
+                    originalScore = estimateOriginalWordScore(
+                        detection: detection,
+                        originalWord: candidate.originalWord,
+                        similarity: candidate.similarity
+                    )
+                    scoringMethod = "heuristic (tokenization failed)"
+                }
+            } else {
+                // FALLBACK: Use heuristic when log-probs or tokenizer unavailable
+                originalScore = estimateOriginalWordScore(
+                    detection: detection,
+                    originalWord: candidate.originalWord,
+                    similarity: candidate.similarity
+                )
+                scoringMethod = "heuristic"
+            }
+
+            let scoreAdvantage = vocabCtcScore - originalScore
 
             if debugMode {
-                logger.debug(
+                print(
                     """
-                    Candidate: '\(candidate.originalWord)' -> '\(vocabTerm)'
-                      Vocab CTC: \(String(format: "%.2f", vocabCtcScore))
-                      Original est: \(String(format: "%.2f", originalEstimatedScore))
-                      Advantage: \(String(format: "%.2f", scoreAdvantage))
-                      Similarity: \(String(format: "%.2f", candidate.similarity))
+                      Vocab CTC: \(String(format: "%.2f", vocabCtcScore)), Original (\(scoringMethod)): \(String(format: "%.2f", originalScore)), Advantage: \(String(format: "%.2f", scoreAdvantage))
                     """)
             }
 
@@ -261,8 +366,28 @@ public struct VocabularyRescorer {
                     replacedIndices.insert(candidate.wordIndex + i)
                 }
 
+            } else if candidate.spanLength >= 2 && candidate.similarity >= 0.75 && scoreAdvantage >= 0.5 {
+                // COMPOUND WORD MATCH: For multi-word spans (e.g., "new res" -> "Newrez"),
+                // high string similarity (>=0.75) is strong evidence even with lower CTC advantage.
+                // The fact that multiple words concatenate to match a vocabulary term is meaningful.
+                shouldReplace = true
+                reason =
+                    "Compound word match (span=\(candidate.spanLength), sim=\(String(format: "%.2f", candidate.similarity)), advantage=\(String(format: "%.2f", scoreAdvantage)))"
+
+                modifiedWords[candidate.wordIndex] = preserveCapitalization(
+                    original: candidate.originalWord,
+                    replacement: vocabTerm
+                )
+                for i in 1..<candidate.spanLength {
+                    modifiedWords[candidate.wordIndex + i] = ""
+                }
+
+                for i in 0..<candidate.spanLength {
+                    replacedIndices.insert(candidate.wordIndex + i)
+                }
+
             } else if scoreAdvantage >= config.minScoreAdvantage
-                && originalEstimatedScore <= config.maxOriginalScoreForReplacement
+                && originalScore <= config.maxOriginalScoreForReplacement
             {
                 // Standard CTC-based replacement
                 shouldReplace = true
@@ -279,9 +404,9 @@ public struct VocabularyRescorer {
                 for i in 0..<candidate.spanLength {
                     replacedIndices.insert(candidate.wordIndex + i)
                 }
-            } else if originalEstimatedScore > config.maxOriginalScoreForReplacement {
+            } else if originalScore > config.maxOriginalScoreForReplacement {
                 shouldReplace = false
-                reason = "Original word too confident: \(String(format: "%.2f", originalEstimatedScore))"
+                reason = "Original word too confident: \(String(format: "%.2f", originalScore))"
             } else {
                 shouldReplace = false
                 reason = "Score advantage too low: \(String(format: "%.2f", scoreAdvantage))"
@@ -290,7 +415,7 @@ public struct VocabularyRescorer {
             replacements.append(
                 RescoringResult(
                     originalWord: candidate.originalWord,
-                    originalScore: originalEstimatedScore,
+                    originalScore: originalScore,
                     replacementWord: shouldReplace ? vocabTerm : nil,
                     replacementScore: shouldReplace ? vocabCtcScore : nil,
                     shouldReplace: shouldReplace,
@@ -299,7 +424,7 @@ public struct VocabularyRescorer {
 
             if debugMode {
                 let action = shouldReplace ? "REPLACE" : "KEEP"
-                logger.info("  [\(action)] '\(candidate.originalWord)' -> '\(vocabTerm)': \(reason)")
+                print("  [\(action)] '\(candidate.originalWord)' -> '\(vocabTerm)': \(reason)")
             }
         }
 

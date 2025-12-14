@@ -626,15 +626,17 @@ public final class AsrManager {
                 let chunkOverlap = 32_000  // 2 seconds overlap to catch words at boundaries
                 let sampleRate = 16000.0
                 var allDetections: [CtcKeywordSpotter.KeywordDetection] = []
+                var spotResult: CtcKeywordSpotter.SpotKeywordsResult?
 
                 if audioSamples.count <= maxChunkSamples {
-                    // Short audio - process directly
-                    let detections = try await spotter.spotKeywords(
+                    // Short audio - use new API that returns log-probs for principled rescoring
+                    let result = try await spotter.spotKeywordsWithLogProbs(
                         audioSamples: audioSamples,
                         customVocabulary: effectiveVocabulary,
                         minScore: effectiveVocabulary.minCtcScore
                     )
-                    allDetections = detections
+                    allDetections = result.detections
+                    spotResult = result  // Keep log-probs for principled rescoring
                 } else {
                     // Long audio - process in overlapping chunks
                     // Overlap ensures words at chunk boundaries are detected
@@ -744,11 +746,29 @@ public final class AsrManager {
                         vocabulary: effectiveVocabulary
                     )
 
-                    let rescoreOutput = try await rescorer.rescore(
-                        transcript: result.text,
-                        audioSamples: audioSamples,
-                        detections: detections
-                    )
+                    // Use principled scoring when we have cached log-probs (short audio),
+                    // fall back to legacy API for chunked audio (log-probs not available)
+                    let rescoreOutput: VocabularyRescorer.RescoreOutput
+                    if let spotResult = spotResult {
+                        // Short audio: use principled CTC scoring with cached log-probs
+                        rescoreOutput = rescorer.rescore(
+                            transcript: result.text,
+                            spotResult: spotResult
+                        )
+                    } else {
+                        // Long audio (chunked): fall back to heuristic scoring
+                        // Log-probs from different chunks can't be easily combined
+                        let legacyResult = CtcKeywordSpotter.SpotKeywordsResult(
+                            detections: detections,
+                            logProbs: [],
+                            frameDuration: 0,
+                            totalFrames: 0
+                        )
+                        rescoreOutput = rescorer.rescore(
+                            transcript: result.text,
+                            spotResult: legacyResult
+                        )
+                    }
 
                     let appliedTerms = rescoreOutput.replacements
                         .filter { $0.shouldReplace }
