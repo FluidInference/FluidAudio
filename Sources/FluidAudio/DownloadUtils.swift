@@ -242,19 +242,22 @@ public class DownloadUtils {
             func processDirectory(path: String) async throws {
                 let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
                 let dirURL = try ModelRegistry.apiModels(repo.remotePath, apiPath)
-                let request = authorizedRequest(url: dirURL)
 
-                let (dirData, response) = try await sharedSession.data(for: request)
+                let items: [[String: Any]] = try await withRetry(description: "listing \(path.isEmpty ? "root" : path)") {
+                    let request = authorizedRequest(url: dirURL)
+                    let (dirData, response) = try await sharedSession.data(for: request)
 
-                if let httpResponse = response as? HTTPURLResponse,
-                    httpResponse.statusCode == 429
-                {
-                    throw HuggingFaceDownloadError.rateLimited(
-                        statusCode: 429, message: "Rate limited while listing files")
-                }
+                    if let httpResponse = response as? HTTPURLResponse {
+                        if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+                            throw HuggingFaceDownloadError.rateLimited(
+                                statusCode: httpResponse.statusCode, message: "Rate limited while listing files")
+                        }
+                    }
 
-                guard let items = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
-                    return
+                    guard let parsed = try JSONSerialization.jsonObject(with: dirData) as? [[String: Any]] else {
+                        return []
+                    }
+                    return parsed
                 }
 
                 for item in items {
@@ -309,46 +312,50 @@ public class DownloadUtils {
 
                 // Use streaming download for LFS files (typically larger)
                 if file.isLFS {
-                    let (tempFileURL, response) = try await sharedSession.download(for: request)
+                    try await withRetry(description: "downloading \(file.path)") {
+                        let (tempFileURL, response) = try await sharedSession.download(for: request)
 
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        throw HuggingFaceDownloadError.invalidResponse
+                        guard let httpResponse = response as? HTTPURLResponse else {
+                            throw HuggingFaceDownloadError.invalidResponse
+                        }
+
+                        if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+                            throw HuggingFaceDownloadError.rateLimited(
+                                statusCode: httpResponse.statusCode, message: "Rate limited while downloading \(file.path)")
+                        }
+
+                        guard (200..<300).contains(httpResponse.statusCode) else {
+                            throw HuggingFaceDownloadError.downloadFailed(
+                                path: file.path,
+                                underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                            )
+                        }
+
+                        try FileManager.default.moveItem(at: tempFileURL, to: destPath)
                     }
-
-                    if httpResponse.statusCode == 429 {
-                        throw HuggingFaceDownloadError.rateLimited(
-                            statusCode: 429, message: "Rate limited while downloading \(file.path)")
-                    }
-
-                    guard (200..<300).contains(httpResponse.statusCode) else {
-                        throw HuggingFaceDownloadError.downloadFailed(
-                            path: file.path,
-                            underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
-                        )
-                    }
-
-                    try FileManager.default.moveItem(at: tempFileURL, to: destPath)
                 } else {
                     // Use in-memory download for small files
-                    let (fileData, response) = try await sharedSession.data(for: request)
+                    try await withRetry(description: "downloading \(file.path)") {
+                        let (fileData, response) = try await sharedSession.data(for: request)
 
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        throw HuggingFaceDownloadError.invalidResponse
+                        guard let httpResponse = response as? HTTPURLResponse else {
+                            throw HuggingFaceDownloadError.invalidResponse
+                        }
+
+                        if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+                            throw HuggingFaceDownloadError.rateLimited(
+                                statusCode: httpResponse.statusCode, message: "Rate limited while downloading \(file.path)")
+                        }
+
+                        guard (200..<300).contains(httpResponse.statusCode) else {
+                            throw HuggingFaceDownloadError.downloadFailed(
+                                path: file.path,
+                                underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                            )
+                        }
+
+                        try fileData.write(to: destPath)
                     }
-
-                    if httpResponse.statusCode == 429 {
-                        throw HuggingFaceDownloadError.rateLimited(
-                            statusCode: 429, message: "Rate limited while downloading \(file.path)")
-                    }
-
-                    guard (200..<300).contains(httpResponse.statusCode) else {
-                        throw HuggingFaceDownloadError.downloadFailed(
-                            path: file.path,
-                            underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
-                        )
-                    }
-
-                    try fileData.write(to: destPath)
                 }
 
                 if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {
@@ -450,13 +457,49 @@ public class DownloadUtils {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 
+    /// Retry configuration for transient errors
+    private static let maxRetryAttempts = 4
+    private static let minBackoffSeconds: TimeInterval = 1.0
+
+    /// Execute a closure with retry logic for rate limiting (429/503)
+    private static func withRetry<T>(
+        description: String,
+        operation: () async throws -> T
+    ) async throws -> T {
+        var lastError: Error?
+
+        for attempt in 1...maxRetryAttempts {
+            do {
+                return try await operation()
+            } catch let error as HuggingFaceDownloadError {
+                // Only retry on rate limiting errors
+                if case .rateLimited = error {
+                    lastError = error
+                    if attempt < maxRetryAttempts {
+                        let backoffSeconds = pow(2.0, Double(attempt - 1)) * minBackoffSeconds
+                        logger.warning(
+                            "Attempt \(attempt) for \(description) rate limited. Retrying in \(String(format: "%.1f", backoffSeconds))s."
+                        )
+                        try await Task.sleep(nanoseconds: UInt64(backoffSeconds * 1_000_000_000))
+                        continue
+                    }
+                }
+                throw error
+            } catch {
+                throw error
+            }
+        }
+
+        throw lastError ?? HuggingFaceDownloadError.invalidResponse
+    }
+
     /// Content sniffing for HTML - checks data prefix for common HTML markers
     /// This catches HTML error pages even when MIME type is missing or incorrect
     private static func looksLikeHTML(_ data: Data) -> Bool {
-        // Check first 512 bytes for HTML markers (skip leading whitespace)
+        // Check first 512 bytes for HTML markers (skip leading whitespace and newlines)
         let checkLength = min(data.count, 512)
         guard checkLength > 0,
-              let prefix = String(data: data.prefix(checkLength), encoding: .utf8)?.lowercased().trimmingCharacters(in: .whitespaces)
+              let prefix = String(data: data.prefix(checkLength), encoding: .utf8)?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         else {
             return false
         }
