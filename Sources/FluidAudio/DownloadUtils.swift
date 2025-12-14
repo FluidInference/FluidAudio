@@ -89,9 +89,15 @@ public class DownloadUtils {
         // Ensure base directory exists
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        // Download repo if needed
+        // Download repo if needed - check that all required models exist, not just repo folder
         let repoPath = directory.appendingPathComponent(repo.folderName)
-        if !FileManager.default.fileExists(atPath: repoPath.path) {
+        let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+        let allModelsExist = requiredModels.allSatisfy { model in
+            let modelPath = repoPath.appendingPathComponent(model)
+            return FileManager.default.fileExists(atPath: modelPath.path)
+        }
+
+        if !allModelsExist {
             logger.info("Models not found in cache at \(repoPath.path)")
             try await downloadRepo(repo, to: directory, variant: variant)
         } else {
