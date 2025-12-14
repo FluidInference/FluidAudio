@@ -312,8 +312,10 @@ struct ChunkProcessor {
     }
 
     private func tokensMatch(_ left: IndexedToken, _ right: IndexedToken, tolerance: Double) -> Bool {
-        guard left.token.token == right.token.token else { return false }
         let timeDifference = abs(left.start - right.start)
+        // Require both: same token AND close in time
+        // With stateless decoding, we need exact token match to avoid false positives
+        guard left.token.token == right.token.token else { return false }
         return timeDifference < tolerance
     }
 
@@ -328,7 +330,9 @@ struct ChunkProcessor {
         let rightIndices = matches.map { overlapRight[$0.1].index }
 
         var result: [TokenWindow] = []
+        let frameDuration = Double(ASRConstants.samplesPerEncoderFrame) / Double(sampleRate)
 
+        // Add all tokens from left before the first match
         if let firstLeft = leftIndices.first, firstLeft > 0 {
             result.append(contentsOf: left[..<firstLeft])
         }
@@ -337,6 +341,7 @@ struct ChunkProcessor {
             let leftIndex = leftIndices[idx]
             let rightIndex = rightIndices[idx]
 
+            // Add the matched token (prefer left's version)
             result.append(left[leftIndex])
 
             guard idx < matches.count - 1 else { continue }
@@ -347,15 +352,43 @@ struct ChunkProcessor {
             let gapLeft = nextLeftIndex > leftIndex + 1 ? Array(left[(leftIndex + 1)..<nextLeftIndex]) : []
             let gapRight = nextRightIndex > rightIndex + 1 ? Array(right[(rightIndex + 1)..<nextRightIndex]) : []
 
-            if gapRight.count > gapLeft.count {
+            // Instead of picking one, merge both gaps intelligently
+            // This prevents content loss when chunks produce different tokens
+            if gapLeft.isEmpty {
                 result.append(contentsOf: gapRight)
-            } else {
+            } else if gapRight.isEmpty {
                 result.append(contentsOf: gapLeft)
+            } else {
+                // Both have content - merge by time, avoiding duplicates
+                let merged = mergeGapsByTime(gapLeft, gapRight, frameDuration: frameDuration)
+                result.append(contentsOf: merged)
             }
         }
 
         if let lastRight = rightIndices.last, lastRight + 1 < right.count {
             result.append(contentsOf: right[(lastRight + 1)...])
+        }
+
+        return result
+    }
+
+    /// Merge two gap sequences by time, preferring tokens that don't overlap
+    private func mergeGapsByTime(_ left: [TokenWindow], _ right: [TokenWindow], frameDuration: Double) -> [TokenWindow]
+    {
+        // Combine and sort by timestamp
+        var combined = left + right
+        combined.sort { $0.timestamp < $1.timestamp }
+
+        // Remove duplicates/overlaps - keep first occurrence at each time
+        var result: [TokenWindow] = []
+        var lastTimestamp: Int = -1
+
+        for token in combined {
+            // Skip if too close to previous token (within 1 frame)
+            if token.timestamp > lastTimestamp {
+                result.append(token)
+                lastTimestamp = token.timestamp
+            }
         }
 
         return result
@@ -368,9 +401,43 @@ struct ChunkProcessor {
         rightStartTime: Double,
         frameDuration: Double
     ) -> [TokenWindow] {
-        let cutoff = (leftEndTime + rightStartTime) / 2
-        let trimmedLeft = left.filter { Double($0.timestamp) * frameDuration <= cutoff }
-        let trimmedRight = right.filter { Double($0.timestamp) * frameDuration >= cutoff }
-        return trimmedLeft + trimmedRight
+        // Calculate the overlap region boundaries
+        let overlapStart = rightStartTime
+        let overlapEnd = leftEndTime
+
+        // If no actual overlap, just concatenate
+        if overlapStart >= overlapEnd {
+            return left + right
+        }
+
+        // Use the midpoint of the overlap region as cutoff
+        let cutoff = (overlapStart + overlapEnd) / 2
+
+        // Keep left tokens that END before or at the cutoff
+        // Keep right tokens that START after the cutoff
+        // This ensures no gap at the cutoff point
+        let trimmedLeft = left.filter { token in
+            let tokenEnd = Double(token.timestamp) * frameDuration + frameDuration
+            return tokenEnd <= cutoff + frameDuration  // Include tokens that end near cutoff
+        }
+
+        let trimmedRight = right.filter { token in
+            let tokenStart = Double(token.timestamp) * frameDuration
+            return tokenStart > cutoff - frameDuration  // Include tokens that start near cutoff
+        }
+
+        // Combine and deduplicate by removing tokens from right that overlap with left's end
+        var result = trimmedLeft
+        let leftEndTimestamp = trimmedLeft.last.map { Double($0.timestamp) * frameDuration } ?? 0
+
+        for token in trimmedRight {
+            let tokenStart = Double(token.timestamp) * frameDuration
+            // Only add if it doesn't significantly overlap with what we already have
+            if tokenStart >= leftEndTimestamp - frameDuration {
+                result.append(token)
+            }
+        }
+
+        return result
     }
 }
