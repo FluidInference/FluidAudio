@@ -18,9 +18,9 @@ public class DownloadUtils {
             ?? ProcessInfo.processInfo.environment["HUGGINGFACEHUB_API_TOKEN"]
     }
 
-    /// Create a URLRequest with optional auth header
-    private static func authorizedRequest(url: URL) -> URLRequest {
-        var request = URLRequest(url: url)
+    /// Create a URLRequest with optional auth header and timeout
+    private static func authorizedRequest(url: URL, timeout: TimeInterval = DownloadConfig.default.timeout) -> URLRequest {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         if let token = huggingFaceToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -412,8 +412,12 @@ public class DownloadUtils {
 
                 // Guard against HTML error pages that return 200 OK
                 // HuggingFace sometimes returns HTML rate-limit or error pages with 200 status
+                // Check both MIME type and content sniffing for HTML markers
                 let mimeType = httpResponse.mimeType?.lowercased()
-                if mimeType == "text/html" || mimeType?.contains("html") == true {
+                let isHtmlMime = mimeType == "text/html" || mimeType?.contains("html") == true
+                let isHtmlContent = looksLikeHTML(data)
+
+                if isHtmlMime || isHtmlContent {
                     let snippet = String(data: data.prefix(200), encoding: .utf8) ?? "<binary>"
                     throw HuggingFaceDownloadError.unexpectedContent(
                         statusCode: httpResponse.statusCode,
@@ -444,5 +448,26 @@ public class DownloadUtils {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .binary
         return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    /// Content sniffing for HTML - checks data prefix for common HTML markers
+    /// This catches HTML error pages even when MIME type is missing or incorrect
+    private static func looksLikeHTML(_ data: Data) -> Bool {
+        // Check first 512 bytes for HTML markers (skip leading whitespace)
+        let checkLength = min(data.count, 512)
+        guard checkLength > 0,
+              let prefix = String(data: data.prefix(checkLength), encoding: .utf8)?.lowercased().trimmingCharacters(in: .whitespaces)
+        else {
+            return false
+        }
+
+        // Common HTML document markers
+        let htmlMarkers = [
+            "<!doctype html",
+            "<html",
+            "<!doctype",
+        ]
+
+        return htmlMarkers.contains { prefix.hasPrefix($0) }
     }
 }
