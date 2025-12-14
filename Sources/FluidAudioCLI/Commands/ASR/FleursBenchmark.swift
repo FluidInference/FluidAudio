@@ -228,40 +228,35 @@ public class FLEURSBenchmark {
         // Download from Hugging Face dataset: FluidInference/fleurs
         logger.info("Downloading from HuggingFace: FluidInference/fleurs/\(language)...")
 
-        // Use the existing HuggingFace download infrastructure
         let datasetRepo = "FluidInference/fleurs"
-        // Use the official API with path query to list files in subfolder
-        let apiURL = try ModelRegistry.apiDatasets(datasetRepo, "tree/main/\(language)")
 
         do {
             // List files in the language directory using HuggingFace API
+            let apiURL = URL(string: "https://huggingface.co/api/datasets/\(datasetRepo)/tree/main/\(language)")!
+            let (listData, _) = try await DownloadUtils.sharedSession.data(from: apiURL)
 
-            let (data, response) = try await DownloadUtils.sharedSession.data(from: apiURL)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                httpResponse.statusCode == 200
-            else {
-                throw URLError(.badServerResponse)
+            guard let items = try JSONSerialization.jsonObject(with: listData) as? [[String: Any]] else {
+                throw NSError(
+                    domain: "FLEURSBenchmark",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Could not parse file list from HuggingFace"]
+                )
             }
-
-            // Parse the JSON response to get file list
-            struct HFFile: Codable {
-                let type: String
-                let path: String
-                let size: Int?
-            }
-
-            let files = try JSONDecoder().decode([HFFile].self, from: data)
 
             // Find transcript file and audio files
             var audioFiles: [String] = []
 
-            for file in files where file.type == "file" {
-                let fileName = URL(fileURLWithPath: file.path).lastPathComponent
+            for item in items {
+                guard let itemPath = item["path"] as? String,
+                    let itemType = item["type"] as? String,
+                    itemType == "file"
+                else { continue }
+
+                let fileName = URL(fileURLWithPath: itemPath).lastPathComponent
 
                 if fileName == "\(language).trans.txt" {
                     // Download transcript file
-                    let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, file.path)
+                    let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, itemPath)
                     let transData = try await DownloadUtils.fetchHuggingFaceFile(
                         from: downloadURL,
                         description: "\(language) transcript"
@@ -272,7 +267,7 @@ public class FLEURSBenchmark {
                     let lines = transcriptContent.components(separatedBy: .newlines).filter { !$0.isEmpty }
                     logger.info("Downloaded \(lines.count) transcriptions")
                 } else if fileName.hasSuffix(".wav") {
-                    audioFiles.append(file.path)
+                    audioFiles.append(itemPath)
                 }
             }
 
@@ -297,7 +292,7 @@ public class FLEURSBenchmark {
                     }
                 }
 
-                // Download audio file using HuggingFace infrastructure
+                // Download audio file
                 let downloadURL = try ModelRegistry.resolveDataset(datasetRepo, audioPath)
 
                 do {
