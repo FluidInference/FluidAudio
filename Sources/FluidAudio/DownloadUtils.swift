@@ -19,7 +19,9 @@ public class DownloadUtils {
     }
 
     /// Create a URLRequest with optional auth header and timeout
-    private static func authorizedRequest(url: URL, timeout: TimeInterval = DownloadConfig.default.timeout) -> URLRequest {
+    private static func authorizedRequest(
+        url: URL, timeout: TimeInterval = DownloadConfig.default.timeout
+    ) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         if let token = huggingFaceToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -243,7 +245,8 @@ public class DownloadUtils {
                 let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
                 let dirURL = try ModelRegistry.apiModels(repo.remotePath, apiPath)
 
-                let items: [[String: Any]] = try await withRetry(description: "listing \(path.isEmpty ? "root" : path)") {
+                let items: [[String: Any]] = try await withRetry(description: "listing \(path.isEmpty ? "root" : path)")
+                {
                     let request = authorizedRequest(url: dirURL)
                     let (dirData, response) = try await sharedSession.data(for: request)
 
@@ -321,7 +324,8 @@ public class DownloadUtils {
 
                         if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                             throw HuggingFaceDownloadError.rateLimited(
-                                statusCode: httpResponse.statusCode, message: "Rate limited while downloading \(file.path)")
+                                statusCode: httpResponse.statusCode,
+                                message: "Rate limited while downloading \(file.path)")
                         }
 
                         guard (200..<300).contains(httpResponse.statusCode) else {
@@ -344,7 +348,8 @@ public class DownloadUtils {
 
                         if httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
                             throw HuggingFaceDownloadError.rateLimited(
-                                statusCode: httpResponse.statusCode, message: "Rate limited while downloading \(file.path)")
+                                statusCode: httpResponse.statusCode,
+                                message: "Rate limited while downloading \(file.path)")
                         }
 
                         guard (200..<300).contains(httpResponse.statusCode) else {
@@ -499,7 +504,8 @@ public class DownloadUtils {
         // Check first 512 bytes for HTML markers (skip leading whitespace and newlines)
         let checkLength = min(data.count, 512)
         guard checkLength > 0,
-              let prefix = String(data: data.prefix(checkLength), encoding: .utf8)?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let prefix = String(data: data.prefix(checkLength), encoding: .utf8)?.lowercased().trimmingCharacters(
+                in: .whitespacesAndNewlines)
         else {
             return false
         }
