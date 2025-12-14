@@ -99,7 +99,7 @@ final class TdtDecoderStateTests: XCTestCase {
         // Update state
         state.update(from: mockOutput)
 
-        // Verify states are updated (should be same objects due to reference assignment)
+        // Verify state now references the new arrays
         XCTAssertTrue(state.hiddenState === newHiddenState)
         XCTAssertTrue(state.cellState === newCellState)
     }
@@ -138,9 +138,9 @@ final class TdtDecoderStateTests: XCTestCase {
 
         state.update(from: partialOutput)
 
-        // Hidden state should remain unchanged
+        // Hidden state should be unchanged (same reference)
         XCTAssertTrue(state.hiddenState === originalHidden)
-        // Cell state should be updated
+        // Cell state should be the new array
         XCTAssertTrue(state.cellState === newCellState)
     }
 
