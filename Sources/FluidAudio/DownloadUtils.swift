@@ -10,6 +10,22 @@ public class DownloadUtils {
     /// Shared URLSession with registry and proxy configuration
     public static let sharedSession: URLSession = ModelRegistry.configuredSession()
 
+    /// Get HuggingFace token from environment if available
+    /// Checks HF_TOKEN and HUGGING_FACE_HUB_TOKEN environment variables
+    private static var huggingFaceToken: String? {
+        ProcessInfo.processInfo.environment["HF_TOKEN"]
+            ?? ProcessInfo.processInfo.environment["HUGGING_FACE_HUB_TOKEN"]
+    }
+
+    /// Create a URLRequest with optional auth header
+    private static func authorizedRequest(url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let token = huggingFaceToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
     public enum HuggingFaceDownloadError: LocalizedError {
         case invalidResponse
         case rateLimited(statusCode: Int, message: String)
@@ -216,16 +232,11 @@ public class DownloadUtils {
             var filesToDownload: [(path: String, isLFS: Bool)] = []
 
             func processDirectory(path: String) async throws {
-                let dirURL: URL
-                if path.isEmpty {
-                    dirURL = URL(string: "https://huggingface.co/api/models/\(repo.remotePath)/tree/main")!
-                } else {
-                    let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-                    dirURL = URL(
-                        string: "https://huggingface.co/api/models/\(repo.remotePath)/tree/main/\(encodedPath)")!
-                }
+                let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
+                let dirURL = try ModelRegistry.apiModels(repo.remotePath, apiPath)
+                let request = authorizedRequest(url: dirURL)
 
-                let (dirData, response) = try await sharedSession.data(from: dirURL)
+                let (dirData, response) = try await sharedSession.data(for: request)
 
                 if let httpResponse = response as? HTTPURLResponse,
                     httpResponse.statusCode == 429
@@ -282,29 +293,55 @@ public class DownloadUtils {
                     continue
                 }
 
-                // Download file
+                // Download file using registry-aware URL
                 let encodedFilePath =
                     file.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.path
-                let fileURL = URL(string: "https://huggingface.co/\(repo.remotePath)/resolve/main/\(encodedFilePath)")!
-                let (fileData, response) = try await sharedSession.data(from: fileURL)
+                let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
+                let request = authorizedRequest(url: fileURL)
 
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw HuggingFaceDownloadError.invalidResponse
+                // Use streaming download for LFS files (typically larger)
+                if file.isLFS {
+                    let (tempFileURL, response) = try await sharedSession.download(for: request)
+
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        throw HuggingFaceDownloadError.invalidResponse
+                    }
+
+                    if httpResponse.statusCode == 429 {
+                        throw HuggingFaceDownloadError.rateLimited(
+                            statusCode: 429, message: "Rate limited while downloading \(file.path)")
+                    }
+
+                    guard (200..<300).contains(httpResponse.statusCode) else {
+                        throw HuggingFaceDownloadError.downloadFailed(
+                            path: file.path,
+                            underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                        )
+                    }
+
+                    try FileManager.default.moveItem(at: tempFileURL, to: destPath)
+                } else {
+                    // Use in-memory download for small files
+                    let (fileData, response) = try await sharedSession.data(for: request)
+
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        throw HuggingFaceDownloadError.invalidResponse
+                    }
+
+                    if httpResponse.statusCode == 429 {
+                        throw HuggingFaceDownloadError.rateLimited(
+                            statusCode: 429, message: "Rate limited while downloading \(file.path)")
+                    }
+
+                    guard (200..<300).contains(httpResponse.statusCode) else {
+                        throw HuggingFaceDownloadError.downloadFailed(
+                            path: file.path,
+                            underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
+                        )
+                    }
+
+                    try fileData.write(to: destPath)
                 }
-
-                if httpResponse.statusCode == 429 {
-                    throw HuggingFaceDownloadError.rateLimited(
-                        statusCode: 429, message: "Rate limited while downloading \(file.path)")
-                }
-
-                guard (200..<300).contains(httpResponse.statusCode) else {
-                    throw HuggingFaceDownloadError.downloadFailed(
-                        path: file.path,
-                        underlying: NSError(domain: "HTTP", code: httpResponse.statusCode)
-                    )
-                }
-
-                try fileData.write(to: destPath)
 
                 if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {
                     logger.info("Downloaded \(index + 1)/\(filesToDownload.count) files")
@@ -344,10 +381,11 @@ public class DownloadUtils {
         minBackoff: TimeInterval = 1.0
     ) async throws -> Data {
         var lastError: Error?
+        let request = authorizedRequest(url: url)
 
         for attempt in 1...maxAttempts {
             do {
-                let (data, response) = try await sharedSession.data(from: url)
+                let (data, response) = try await sharedSession.data(for: request)
 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     throw HuggingFaceDownloadError.invalidResponse
