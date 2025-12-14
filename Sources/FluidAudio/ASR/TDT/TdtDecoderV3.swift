@@ -288,7 +288,6 @@ internal struct TdtDecoderV3 {
             // durationBins typically = [0,1,2,3,4] meaning skip 0-4 frames
             var duration = try mapDurationBin(
                 decision.durationBin, durationBins: config.tdtConfig.durationBins)
-            // Duration prediction logging removed for cleaner output
 
             let blankId = config.tdtConfig.blankId  // 8192 for v3 models
             var blankMask = (label == blankId)  // Is this a blank (silence) token?
