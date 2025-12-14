@@ -11,10 +11,11 @@ public class DownloadUtils {
     public static let sharedSession: URLSession = ModelRegistry.configuredSession()
 
     /// Get HuggingFace token from environment if available
-    /// Checks HF_TOKEN and HUGGING_FACE_HUB_TOKEN environment variables
+    /// Checks HF_TOKEN, HUGGING_FACE_HUB_TOKEN, and HUGGINGFACEHUB_API_TOKEN environment variables
     private static var huggingFaceToken: String? {
         ProcessInfo.processInfo.environment["HF_TOKEN"]
             ?? ProcessInfo.processInfo.environment["HUGGING_FACE_HUB_TOKEN"]
+            ?? ProcessInfo.processInfo.environment["HUGGINGFACEHUB_API_TOKEN"]
     }
 
     /// Create a URLRequest with optional auth header
@@ -400,6 +401,18 @@ public class DownloadUtils {
 
                 guard (200..<300).contains(httpResponse.statusCode) else {
                     throw HuggingFaceDownloadError.invalidResponse
+                }
+
+                // Guard against HTML error pages that return 200 OK
+                // HuggingFace sometimes returns HTML rate-limit or error pages with 200 status
+                let mimeType = httpResponse.mimeType?.lowercased()
+                if mimeType == "text/html" || mimeType?.contains("html") == true {
+                    let snippet = String(data: data.prefix(200), encoding: .utf8) ?? "<binary>"
+                    throw HuggingFaceDownloadError.unexpectedContent(
+                        statusCode: httpResponse.statusCode,
+                        mimeType: mimeType,
+                        snippet: snippet
+                    )
                 }
 
                 return data
