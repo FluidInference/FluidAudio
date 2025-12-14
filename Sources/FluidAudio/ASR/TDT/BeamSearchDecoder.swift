@@ -111,6 +111,10 @@ public final class BeamSearchDecoder {
         /// Current frame index
         var frameIndex: Int
 
+        /// Number of non-blank symbols emitted without advancing frames.
+        /// Used to guard against duration=0 infinite loops (mirrors TDT maxSymbolsPerStep).
+        var symbolsAtCurrentFrame: Int
+
         /// Trie cursor for vocabulary biasing
         var trieCursor: VocabularyTrie.Cursor?
     }
@@ -157,8 +161,8 @@ public final class BeamSearchDecoder {
             return ([], [])
         }
 
-        // Prime decoder with blank token to get initial decoder output
-        let (initialDecoderOut, _, _) = try runDecoder(
+        // Prime decoder with SOS (blank) token to get initial decoder output and state.
+        let (initialDecoderOut, primedH, primedC) = try runDecoder(
             model: decoderModel,
             lastToken: config.blankId,
             hState: initialHState,
@@ -171,12 +175,13 @@ public final class BeamSearchDecoder {
                 tokens: [],
                 acousticScore: 0.0,
                 vocabBoost: 0.0,
-                hState: try copyMLMultiArray(initialHState),
-                cState: try copyMLMultiArray(initialCState),
+                hState: try copyMLMultiArray(primedH),
+                cState: try copyMLMultiArray(primedC),
                 decoderOutput: initialDecoderOut,
                 lastToken: config.blankId,
                 timestamps: [],
                 frameIndex: 0,
+                symbolsAtCurrentFrame: 0,
                 trieCursor: vocabularyTrie?.makeCursor()
             )
         ]
@@ -196,15 +201,13 @@ public final class BeamSearchDecoder {
                     continue
                 }
 
-                // Get decoder output (use cached if available)
+                // Ensure we have decoder output/state for the current lastToken.
+                // If missing, run the decoder once and treat the resulting state as "after lastToken".
+                var baseHypothesis = hypothesis
                 let decoderOut: MLMultiArray
-                let newH: MLMultiArray
-                let newC: MLMultiArray
 
                 if let cached = hypothesis.decoderOutput {
                     decoderOut = cached
-                    newH = hypothesis.hState
-                    newC = hypothesis.cState
                 } else {
                     let result = try runDecoder(
                         model: decoderModel,
@@ -213,8 +216,10 @@ public final class BeamSearchDecoder {
                         cState: hypothesis.cState
                     )
                     decoderOut = result.output
-                    newH = result.hOut
-                    newC = result.cOut
+
+                    baseHypothesis.hState = try copyMLMultiArray(result.hOut)
+                    baseHypothesis.cState = try copyMLMultiArray(result.cOut)
+                    baseHypothesis.decoderOutput = decoderOut
                 }
 
                 // Run joint to get logits for all frames given this decoder state
@@ -236,23 +241,30 @@ public final class BeamSearchDecoder {
                 for (tokenId, logProb) in topK {
                     guard logProb >= config.minLogProb else { continue }
 
-                    var newHypothesis = hypothesis
+                    var newHypothesis = baseHypothesis
                     newHypothesis.acousticScore += logProb
 
                     // Get duration for frame advancement
-                    let duration = max(1, argmax(durationLogits))
+                    let durationBin = argmax(durationLogits)
+                    var duration = durationBin
+
+                    // In TDT, blank duration=0 can cause stalls; always advance at least 1 frame.
+                    if tokenId == config.blankId && duration == 0 {
+                        duration = 1
+                    }
 
                     if tokenId == config.blankId {
                         // Blank token - advance frame, keep same decoder state
                         newHypothesis.frameIndex = hypothesis.frameIndex + duration
                         // Keep cached decoder output for blank
                         // Trie cursor doesn't change on blank
+                        newHypothesis.symbolsAtCurrentFrame = 0
                     } else {
                         // Non-blank token - emit token, need to update decoder
                         newHypothesis.tokens.append(tokenId)
                         newHypothesis.lastToken = tokenId
-                        newHypothesis.hState = try copyMLMultiArray(newH)
-                        newHypothesis.cState = try copyMLMultiArray(newC)
+                        // Keep state after previous token; the new token will be incorporated
+                        // the next time this hypothesis is expanded.
                         newHypothesis.decoderOutput = nil  // Invalidate cache
 
                         // Apply vocabulary boost using cursor
@@ -289,6 +301,17 @@ public final class BeamSearchDecoder {
 
                         // Record timestamp
                         newHypothesis.timestamps.append(hypothesis.frameIndex)
+
+                        // Track symbols emitted without advancing frames (duration=0 case)
+                        if duration == 0 {
+                            let nextSymbols = newHypothesis.symbolsAtCurrentFrame + 1
+                            let exceedsLimit = nextSymbols >= config.maxSymbolsPerStep
+                            // Force advancement to avoid infinite loops at a single frame.
+                            duration = exceedsLimit ? 1 : duration
+                            newHypothesis.symbolsAtCurrentFrame = exceedsLimit ? 0 : nextSymbols
+                        } else {
+                            newHypothesis.symbolsAtCurrentFrame = 0
+                        }
 
                         // Advance frame by duration
                         newHypothesis.frameIndex = hypothesis.frameIndex + duration

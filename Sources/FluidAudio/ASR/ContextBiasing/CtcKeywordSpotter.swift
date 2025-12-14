@@ -31,6 +31,19 @@ public struct CtcKeywordSpotter {
         let frameTimes: [Double]?
     }
 
+    /// Public result type containing detections and cached CTC log-probabilities.
+    /// The log-probs can be reused for scoring additional words without re-running the CTC model.
+    public struct SpotKeywordsResult: Sendable {
+        /// Keyword detections for vocabulary terms
+        public let detections: [KeywordDetection]
+        /// CTC log-probabilities [T, V] for reuse in rescoring
+        public let logProbs: [[Float]]
+        /// Duration of each CTC frame in seconds
+        public let frameDuration: Double
+        /// Total number of CTC frames
+        public let totalFrames: Int
+    }
+
     /// Result for a single keyword detection.
     public struct KeywordDetection: Sendable {
         public let term: CustomVocabularyTerm
@@ -214,6 +227,89 @@ public struct CtcKeywordSpotter {
         }
 
         return results
+    }
+
+    /// Spot keywords and return both detections and cached log-probabilities.
+    /// The log-probs can be reused for scoring additional words (e.g., original transcript words)
+    /// without re-running the expensive CTC model inference.
+    ///
+    /// - Parameters:
+    ///   - audioSamples: 16kHz mono audio samples.
+    ///   - customVocabulary: Vocabulary context with pre-tokenized terms.
+    ///   - minScore: Optional minimum score threshold for detections.
+    /// - Returns: SpotKeywordsResult containing detections and reusable log-probs.
+    public func spotKeywordsWithLogProbs(
+        audioSamples: [Float],
+        customVocabulary: CustomVocabularyContext,
+        minScore: Float? = nil
+    ) async throws -> SpotKeywordsResult {
+        let ctcResult = try await computeLogProbs(for: audioSamples)
+        let logProbs = ctcResult.logProbs
+        guard !logProbs.isEmpty else {
+            return SpotKeywordsResult(detections: [], logProbs: [], frameDuration: 0, totalFrames: 0)
+        }
+
+        let frameDuration = ctcResult.frameDuration
+        let totalFrames = ctcResult.totalFrames
+
+        var results: [KeywordDetection] = []
+
+        for term in customVocabulary.terms {
+            let ids = term.ctcTokenIds ?? term.tokenIds
+            guard let ids, !ids.isEmpty else { continue }
+
+            let (score, start, end) = ctcWordSpot(logProbs: logProbs, keywordTokens: ids)
+
+            // Adjust threshold for multi-token phrases
+            let tokenCount = ids.count
+            let adjustedThreshold: Float? = minScore.map { base in
+                let extraTokens = max(0, tokenCount - 3)
+                return base - Float(extraTokens) * 1.0
+            }
+
+            if let threshold = adjustedThreshold, score <= threshold {
+                continue
+            }
+
+            let startTime =
+                ctcResult.frameTimes.flatMap { start < $0.count ? $0[start] : nil }
+                ?? TimeInterval(start) * frameDuration
+            let endTime =
+                ctcResult.frameTimes.flatMap { end < $0.count ? $0[end] : nil }
+                ?? TimeInterval(end) * frameDuration
+
+            let detection = KeywordDetection(
+                term: term,
+                score: score,
+                totalFrames: totalFrames,
+                startFrame: start,
+                endFrame: end,
+                startTime: startTime,
+                endTime: endTime
+            )
+            results.append(detection)
+        }
+
+        return SpotKeywordsResult(
+            detections: results,
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            totalFrames: totalFrames
+        )
+    }
+
+    /// Score a single word against cached CTC log-probabilities.
+    /// This allows scoring arbitrary words (e.g., original transcript words) without re-running the CTC model.
+    ///
+    /// - Parameters:
+    ///   - logProbs: Cached CTC log-probabilities from spotKeywordsWithLogProbs.
+    ///   - keywordTokens: Token IDs for the word to score.
+    /// - Returns: Tuple (score, startFrame, endFrame) where score is average log-prob per token.
+    public func scoreWord(
+        logProbs: [[Float]],
+        keywordTokens: [Int]
+    ) -> (score: Float, startFrame: Int, endFrame: Int) {
+        return ctcWordSpot(logProbs: logProbs, keywordTokens: keywordTokens)
     }
 
     // MARK: - CoreML pipeline
