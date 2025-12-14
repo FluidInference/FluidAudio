@@ -69,7 +69,6 @@ public enum ModelNames {
         public static let embeddingFile = embedding + ".mlmodelc"
         public static let pldaRhoFile = pldaRho + ".mlmodelc"
 
-        // Model paths (at repo root, no subfolder)
         public static let segmentationPath = segmentationFile
         public static let fbankPath = fbankFile
         public static let embeddingPath = embeddingFile
