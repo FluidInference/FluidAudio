@@ -231,9 +231,9 @@ public class FLEURSBenchmark {
         let datasetRepo = "FluidInference/fleurs"
 
         do {
-            // List files in the language directory using HuggingFace API (registry-aware)
+            // List files in the language directory using HuggingFace API (registry-aware with auth)
             let apiURL = try ModelRegistry.apiDatasets(datasetRepo, "tree/main/\(language)")
-            let (listData, _) = try await DownloadUtils.sharedSession.data(from: apiURL)
+            let (listData, _) = try await DownloadUtils.fetchWithAuth(from: apiURL)
 
             guard let items = try JSONSerialization.jsonObject(with: listData) as? [[String: Any]] else {
                 throw NSError(

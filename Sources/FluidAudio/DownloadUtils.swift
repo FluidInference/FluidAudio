@@ -27,6 +27,13 @@ public class DownloadUtils {
         return request
     }
 
+    /// Fetch data from a URL with HuggingFace authentication if available
+    /// Use this for API calls that need auth tokens for private repos or higher rate limits
+    public static func fetchWithAuth(from url: URL) async throws -> (Data, URLResponse) {
+        let request = authorizedRequest(url: url)
+        return try await sharedSession.data(for: request)
+    }
+
     public enum HuggingFaceDownloadError: LocalizedError {
         case invalidResponse
         case rateLimited(statusCode: Int, message: String)
