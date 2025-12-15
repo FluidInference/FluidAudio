@@ -26,27 +26,42 @@ public final class TtSManager {
     private var defaultSpeakerId: Int
     private var ensuredVoices: Set<String> = []
 
+    /// Custom pronunciation dictionary that takes precedence over built-in lexicons.
+    private var customLexicon: TtsCustomLexicon?
+
+    /// Creates a new TTS manager.
+    ///
+    /// - Parameters:
+    ///   - defaultVoice: Default voice identifier for synthesis.
+    ///   - defaultSpeakerId: Default speaker ID for multi-speaker voices.
+    ///   - modelCache: Cache for loaded CoreML models.
+    ///   - customLexicon: Optional custom pronunciation dictionary. Entries in this dictionary
+    ///     take precedence over all built-in dictionaries and grapheme-to-phoneme conversion.
     public init(
         defaultVoice: String = TtsConstants.recommendedVoice,
         defaultSpeakerId: Int = 0,
-        modelCache: KokoroModelCache = KokoroModelCache()
+        modelCache: KokoroModelCache = KokoroModelCache(),
+        customLexicon: TtsCustomLexicon? = nil
     ) {
         self.modelCache = modelCache
         self.lexiconAssets = LexiconAssetManager()
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
+        self.customLexicon = customLexicon
     }
 
     init(
         defaultVoice: String = TtsConstants.recommendedVoice,
         defaultSpeakerId: Int = 0,
         modelCache: KokoroModelCache = KokoroModelCache(),
-        lexiconAssets: LexiconAssetManager
+        lexiconAssets: LexiconAssetManager,
+        customLexicon: TtsCustomLexicon? = nil
     ) {
         self.modelCache = modelCache
         self.lexiconAssets = lexiconAssets
         self.defaultVoice = Self.normalizeVoice(defaultVoice)
         self.defaultSpeakerId = defaultSpeakerId
+        self.customLexicon = customLexicon
     }
 
     public var isAvailable: Bool {
@@ -110,13 +125,15 @@ public final class TtSManager {
 
         return try await KokoroSynthesizer.withLexiconAssets(lexiconAssets) {
             try await KokoroSynthesizer.withModelCache(modelCache) {
-                try await KokoroSynthesizer.synthesizeDetailed(
-                    text: cleanedText,
-                    voice: selectedVoice,
-                    voiceSpeed: voiceSpeed,
-                    variantPreference: variantPreference,
-                    phoneticOverrides: preprocessing.phoneticOverrides
-                )
+                try await KokoroSynthesizer.withCustomLexicon(customLexicon) {
+                    try await KokoroSynthesizer.synthesizeDetailed(
+                        text: cleanedText,
+                        voice: selectedVoice,
+                        voiceSpeed: voiceSpeed,
+                        variantPreference: variantPreference,
+                        phoneticOverrides: preprocessing.phoneticOverrides
+                    )
+                }
             }
         }
     }
@@ -151,6 +168,21 @@ public final class TtSManager {
         defaultVoice = normalized
         defaultSpeakerId = speakerId
         ensuredVoices.insert(normalized)
+    }
+
+    /// Sets or updates the custom pronunciation dictionary.
+    ///
+    /// Custom lexicon entries take precedence over built-in dictionaries and
+    /// grapheme-to-phoneme conversion. Pass `nil` to clear the custom lexicon.
+    ///
+    /// - Parameter lexicon: The custom lexicon to use, or `nil` to clear.
+    public func setCustomLexicon(_ lexicon: TtsCustomLexicon?) {
+        customLexicon = lexicon
+    }
+
+    /// Returns the current custom lexicon, if any.
+    public var currentCustomLexicon: TtsCustomLexicon? {
+        customLexicon
     }
 
     private func resolveVoice(_ requested: String?, speakerId: Int) -> String {
