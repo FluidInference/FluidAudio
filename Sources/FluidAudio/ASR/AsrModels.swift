@@ -370,6 +370,43 @@ extension AsrModels {
         return modelsPresent && vocabPresent
     }
 
+    /// Validates that Parakeet models exist and can be loaded.
+    /// Throws on Intel Mac since CoreML models require Apple Silicon.
+    public static func isModelValid(version: AsrModelVersion = .v3) async throws -> Bool {
+        guard SystemInfo.isAppleSilicon else {
+            throw ASRError.unsupportedPlatform("Parakeet models require Apple Silicon")
+        }
+
+        let cacheDir = defaultCacheDirectory(for: version)
+        guard modelsExist(at: cacheDir, version: version) else {
+            logger.info("Model validation failed: model files not found")
+            return false
+        }
+
+        let repoPath = repoPath(from: cacheDir, version: version)
+        let config = MLModelConfiguration()
+        config.computeUnits = .cpuOnly
+
+        let modelsToValidate = [
+            ("Preprocessor", ModelNames.ASR.preprocessorFile),
+            ("Encoder", ModelNames.ASR.encoderFile),
+            ("Decoder", ModelNames.ASR.decoderFile),
+            ("Joint", ModelNames.ASR.jointFile),
+        ]
+
+        for (name, fileName) in modelsToValidate {
+            let modelPath = repoPath.appendingPathComponent(fileName)
+            do {
+                _ = try MLModel(contentsOf: modelPath, configuration: config)
+            } catch {
+                logger.error("Model validation failed: \(name) - \(error.localizedDescription)")
+                return false
+            }
+        }
+
+        return true
+    }
+
     public static func defaultCacheDirectory(for version: AsrModelVersion = .v3) -> URL {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask

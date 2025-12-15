@@ -1,4 +1,3 @@
-import Accelerate
 import CoreML
 import Foundation
 
@@ -90,33 +89,14 @@ struct TdtDecoderState {
 
 extension MLMultiArray {
     func resetData(to value: NSNumber) {
-        guard dataType == .float32 else {
-            // Fallback for non-float types
-            for i in 0..<count {
-                self[i] = value
-            }
-            return
-        }
-
-        // Use vDSP for optimized memory fill
-        var floatValue = value.floatValue
-        self.dataPointer.withMemoryRebound(to: Float.self, capacity: count) { ptr in
-            vDSP_vfill(&floatValue, ptr, 1, vDSP_Length(count))
+        for i in 0..<count {
+            self[i] = value
         }
     }
 
     func copyData(from source: MLMultiArray) {
-        guard dataType == .float32 && source.dataType == .float32 else {
-            // Fallback for non-float types
-            for i in 0..<count {
-                self[i] = source[i]
-            }
-            return
+        for i in 0..<count {
+            self[i] = source[i]
         }
-
-        // Use optimized memory copy
-        let destPtr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
-        let srcPtr = source.dataPointer.bindMemory(to: Float.self, capacity: count)
-        memcpy(destPtr, srcPtr, count * MemoryLayout<Float>.stride)
     }
 }

@@ -7,6 +7,23 @@ import Darwin
 
 /// System information utilities and one-time environment reporting.
 public enum SystemInfo {
+    // MARK: - Architecture detection
+
+    public static var isAppleSilicon: Bool {
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    public static var isIntelMac: Bool {
+        #if arch(x86_64)
+        return true
+        #else
+        return false
+        #endif
+    }
     /// Collects a concise set of host and OS details.
     public static func summary() -> String {
         let pinfo = ProcessInfo.processInfo
