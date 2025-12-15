@@ -19,6 +19,7 @@ struct ParakeetEouCommand {
         var fileList: String?
         var chunkSizeMs: Int = 160  // Default to 160ms
         var useCache: Bool = false  // Use cached models from Application Support
+        var eouDebounceMs: Int = 1280  // Minimum silence duration before EOU triggers
 
         // Manual Argument Parsing
         var i = 0
@@ -64,6 +65,11 @@ struct ParakeetEouCommand {
                 }
             case "--use-cache":
                 useCache = true
+            case "--eou-debounce":
+                if i + 1 < arguments.count {
+                    eouDebounceMs = Int(arguments[i + 1]) ?? 1280
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -94,7 +100,8 @@ struct ParakeetEouCommand {
             modelsUrl = getModelsDirectory().appendingPathComponent(chunkSize.modelSubdirectory)
         } else {
             // Legacy behavior: use local Models directory
-            modelsUrl = URL(fileURLWithPath: "Models/\(chunkSize.modelSubdirectory)/\(chunkSize.modelSubdirectory)")
+            modelsUrl =
+                URL(fileURLWithPath: "Models/\(chunkSize.modelSubdirectory)/\(chunkSize.modelSubdirectory)")
                 .standardized
         }
 
@@ -122,8 +129,10 @@ struct ParakeetEouCommand {
             config.computeUnits = .all
         }
         print("Using compute units: \(config.computeUnits.rawValue)")
+        print("EOU debounce: \(eouDebounceMs)ms")
 
-        let manager = StreamingEouAsrManager(configuration: config, chunkSize: chunkSize, debugFeatures: debugFeatures)
+        let manager = StreamingEouAsrManager(
+            configuration: config, chunkSize: chunkSize, eouDebounceMs: eouDebounceMs, debugFeatures: debugFeatures)
         do {
             print("Loading models from: \(modelsUrl.path)")
             try await manager.loadModels(modelDir: modelsUrl)
@@ -473,6 +482,7 @@ struct ParakeetEouCommand {
                 --benchmark              Run benchmark on LibriSpeech test-clean
                 --max-files <number>     Maximum files for benchmark (default: all)
                 --chunk-size <ms>        Streaming chunk size: 160, 320, or 1600 (default: 160)
+                --eou-debounce <ms>      Minimum silence duration before EOU triggers (default: 1280)
                 --use-cache              Download models to Application Support cache
                 --models <path>          Custom path to models directory
                 --download               Force re-download models

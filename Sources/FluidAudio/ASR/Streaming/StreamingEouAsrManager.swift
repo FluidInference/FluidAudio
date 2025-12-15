@@ -199,6 +199,14 @@ public actor StreamingEouAsrManager {
     /// Optional callback invoked when EOU is detected
     private var eouCallback: EouCallback?
 
+    // EOU Debouncing - requires sustained silence before triggering
+    /// Minimum duration of silence (in ms) before EOU is confirmed
+    public var eouDebounceMs: Int = 1280
+    /// Timestamp when EOU was first detected (for debouncing)
+    private var eouFirstDetectedAt: Int?  // in processed samples
+    /// Total samples processed (for timing)
+    private var totalSamplesProcessed: Int = 0
+
     public private(set) var configuration: MLModelConfiguration
     public let debugFeatures: Bool
     private var debugFeatureBuffer: [Float] = []
@@ -218,12 +226,14 @@ public actor StreamingEouAsrManager {
     public init(
         configuration: MLModelConfiguration = MLModelConfiguration(),
         chunkSize: StreamingChunkSize = .ms160,
+        eouDebounceMs: Int = 1280,
         debugFeatures: Bool = false
     ) {
         self.configuration = configuration
         self.chunkSize = chunkSize
+        self.eouDebounceMs = eouDebounceMs
         self.debugFeatures = debugFeatures
-        logger.info("Initialized with chunk size: \(chunkSize.durationMs)ms")
+        logger.info("Initialized with chunk size: \(chunkSize.durationMs)ms, EOU debounce: \(eouDebounceMs)ms")
     }
 
     /// Set a callback to be invoked when End-of-Utterance is detected.
@@ -424,6 +434,8 @@ public actor StreamingEouAsrManager {
         debugFeatureBuffer.removeAll()
         accumulatedTokenIds.removeAll()
         eouDetected = false
+        eouFirstDetectedAt = nil
+        totalSamplesProcessed = 0
         try? resetStates()
         rnntDecoder?.resetState()
         self.processedSteps = 0
@@ -516,16 +528,40 @@ public actor StreamingEouAsrManager {
             validOutLen: chunkSize.validOutputLen)
         accumulatedTokenIds.append(contentsOf: decodeResult.tokenIds)
 
-        // Handle EOU detection
-        if decodeResult.eouDetected && !eouDetected {
-            eouDetected = true
-            logger.info("EOU detected at chunk \(processedChunks)")
+        // Track total samples for timing
+        totalSamplesProcessed += shiftSamples
 
-            // Invoke callback with current transcript
-            if let callback = eouCallback, let tokenizer = tokenizer {
-                let transcript = tokenizer.decode(ids: accumulatedTokenIds)
-                callback(transcript)
+        // Handle EOU detection with debouncing
+        // EOU requires sustained silence for eouDebounceMs before triggering
+        if decodeResult.eouDetected {
+            // If new tokens were produced, speech is ongoing - reset debounce timer
+            if !decodeResult.tokenIds.isEmpty {
+                eouFirstDetectedAt = nil
+            } else if eouFirstDetectedAt == nil {
+                // First EOU detection - start debounce timer
+                eouFirstDetectedAt = totalSamplesProcessed
+                logger.debug("EOU candidate at chunk \(processedChunks), starting debounce timer")
             }
+
+            // Check if debounce period has elapsed
+            if let firstDetected = eouFirstDetectedAt {
+                let elapsedSamples = totalSamplesProcessed - firstDetected
+                let elapsedMs = (elapsedSamples * 1000) / 16000  // Convert samples to ms at 16kHz
+
+                if elapsedMs >= eouDebounceMs && !eouDetected {
+                    eouDetected = true
+                    logger.info("EOU confirmed at chunk \(processedChunks) after \(elapsedMs)ms silence")
+
+                    // Invoke callback with current transcript
+                    if let callback = eouCallback, let tokenizer = tokenizer {
+                        let transcript = tokenizer.decode(ids: accumulatedTokenIds)
+                        callback(transcript)
+                    }
+                }
+            }
+        } else {
+            // Model did not predict EOU - speech is ongoing, reset debounce timer
+            eouFirstDetectedAt = nil
         }
 
         processedChunks += 1
