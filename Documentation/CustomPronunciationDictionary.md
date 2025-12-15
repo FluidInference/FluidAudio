@@ -25,13 +25,13 @@ word=phonemes
 
 ### Rules
 
-| Element | Description |
-|---------|-------------|
-| `#` | Lines starting with `#` are comments |
-| `=` | Separator between word and phonemes |
-| Phonemes | Compact IPA string (no spaces between phoneme characters) |
-| Whitespace in phonemes | Creates word boundaries for multi-word expansions |
-| Empty lines | Ignored |
+| Element                | Description                                               |
+|------------------------|-----------------------------------------------------------|
+| `#`                    | Lines starting with `#` are comments                      |
+| `=`                    | Separator between word and phonemes                       |
+| Phonemes               | Compact IPA string (no spaces between phoneme characters) |
+| Whitespace in phonemes | Creates word boundaries for multi-word expansions         |
+| Empty lines            | Ignored                                                   |
 
 ### Phoneme Notation
 
@@ -286,7 +286,7 @@ The Kokoro vocabulary uses a specific phoneme set. To find valid phonemes:
 3. Test with short phrases to verify pronunciation
 
 ### Phoneme Generator
-Here's an example of Python code for a phoneme generator based on [this](
+The Swift code handles the mapping of IPA tokens to Kokoro vocabulary via PhonemeMapper and EspeakG2P and the Python code here is purely an example of generating and experimenting with phonemes. It serves no other purpose. The code is based on [this](
 https://github.com/hexgrad/misaki/blob/main/EN_PHONES.md#%EF%B8%8F-from-espeak-to-misaki)
 ```python
 #!/usr/bin/env python3
