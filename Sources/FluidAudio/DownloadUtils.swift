@@ -175,19 +175,24 @@ public class DownloadUtils {
         return models
     }
 
-    /// Download a HuggingFace repository using URLSession
-    private static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
+    /// Download a HuggingFace repository using URLSession (does not load models)
+    public static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+        let subPath = repo.subPath  // e.g., "160ms" for parakeetEou160
 
-        // Build patterns for filtering
+        // Build patterns for filtering (relative to subPath if present)
         var patterns: [String] = []
         for model in requiredModels {
-            patterns.append("\(model)/")
+            if let sub = subPath {
+                patterns.append("\(sub)/\(model)/")
+            } else {
+                patterns.append("\(model)/")
+            }
         }
 
         // Get all files recursively using HuggingFace API
@@ -217,16 +222,34 @@ public class DownloadUtils {
                 else { continue }
 
                 if itemType == "directory" {
-                    let shouldProcess =
-                        patterns.isEmpty
-                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                    // For subPath repos, only process paths within the subPath
+                    let shouldProcess: Bool
+                    if let sub = subPath {
+                        shouldProcess =
+                            itemPath == sub || itemPath.hasPrefix("\(sub)/")
+                            || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                    } else {
+                        shouldProcess =
+                            patterns.isEmpty
+                            || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                    }
                     if shouldProcess {
                         try await listDirectory(path: itemPath)
                     }
                 } else if itemType == "file" {
-                    let shouldInclude =
-                        patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                        || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+                    // For subPath repos, only include files within the subPath
+                    let shouldInclude: Bool
+                    if let sub = subPath {
+                        let isInSubPath = itemPath.hasPrefix("\(sub)/")
+                        let matchesPattern =
+                            patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                        let isMetadata = itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model")
+                        shouldInclude = isInSubPath && (matchesPattern || isMetadata)
+                    } else {
+                        shouldInclude =
+                            patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                            || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+                    }
                     if shouldInclude {
                         filesToDownload.append(itemPath)
                     }
@@ -234,12 +257,18 @@ public class DownloadUtils {
             }
         }
 
-        try await listDirectory(path: "")
+        // Start listing from subPath if specified, otherwise from root
+        try await listDirectory(path: subPath ?? "")
         logger.info("Found \(filesToDownload.count) files to download")
 
         // Download each file
         for (index, filePath) in filesToDownload.enumerated() {
-            let destPath = repoPath.appendingPathComponent(filePath)
+            // Strip subPath prefix when saving locally
+            var localPath = filePath
+            if let sub = subPath, filePath.hasPrefix("\(sub)/") {
+                localPath = String(filePath.dropFirst(sub.count + 1))
+            }
+            let destPath = repoPath.appendingPathComponent(localPath)
 
             // Skip if already exists
             if FileManager.default.fileExists(atPath: destPath.path) {
@@ -252,7 +281,7 @@ public class DownloadUtils {
                 withIntermediateDirectories: true
             )
 
-            // Download file
+            // Download file (use original path for HuggingFace URL)
             let encodedFilePath = filePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filePath
             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedFilePath)
             let request = authorizedRequest(url: fileURL)

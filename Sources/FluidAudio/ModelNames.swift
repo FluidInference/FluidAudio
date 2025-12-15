@@ -5,6 +5,8 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+    case parakeetEou160 = "alexwengg/parakeet-realtime-eou-120m-coreml/160ms"
+    case parakeetEou320 = "alexwengg/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
 
@@ -17,6 +19,10 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-0.6b-v3-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
+        case .parakeetEou160:
+            return "parakeet-realtime-eou-120m-coreml/160ms"
+        case .parakeetEou320:
+            return "parakeet-realtime-eou-120m-coreml/320ms"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -26,7 +32,26 @@ public enum Repo: String, CaseIterable {
 
     /// Fully qualified HuggingFace repo path (owner/name)
     public var remotePath: String {
-        "FluidInference/\(name)"
+        switch self {
+        case .parakeetEou160:
+            return "alexwengg/parakeet-realtime-eou-120m-coreml"
+        case .parakeetEou320:
+            return "alexwengg/parakeet-realtime-eou-120m-coreml"
+        default:
+            return "FluidInference/\(name)"
+        }
+    }
+
+    /// Subdirectory within repo (for repos with multiple model variants)
+    public var subPath: String? {
+        switch self {
+        case .parakeetEou160:
+            return "160ms"
+        case .parakeetEou320:
+            return "320ms"
+        default:
+            return nil
+        }
     }
 
     /// Local folder name used for caching
@@ -34,6 +59,10 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .kokoro:
             return "kokoro"
+        case .parakeetEou160:
+            return "parakeet-eou-streaming/160ms"
+        case .parakeetEou320:
+            return "parakeet-eou-streaming/320ms"
         default:
             return name
         }
@@ -121,6 +150,30 @@ public enum ModelNames {
         ]
     }
 
+    /// Parakeet EOU streaming model names
+    public enum ParakeetEOU {
+        public static let preprocessor = "parakeet_eou_preprocessor"
+        public static let encoder = "streaming_encoder"
+        public static let decoder = "decoder"
+        public static let joint = "joint_decision"
+        public static let vocab = "vocab.json"
+        public static let tokenizer = "tokenizer.model"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile,
+            jointFile,
+            vocab,
+            tokenizer,
+        ]
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -175,6 +228,8 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
+        case .parakeetEou160, .parakeetEou320:
+            return ModelNames.ParakeetEOU.requiredModels
         case .diarizer:
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels

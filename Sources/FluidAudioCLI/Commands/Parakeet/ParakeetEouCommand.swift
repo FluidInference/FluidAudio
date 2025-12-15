@@ -166,9 +166,17 @@ struct ParakeetEouCommand {
     }
 
     static func downloadModels(to destination: URL, chunkSize: StreamingChunkSize) async throws {
-        let downloader = HuggingFaceDownloader()
-        let repoId = "alexwengg/parakeet-realtime-eou-120m-coreml"
-        let subPath = chunkSize.modelSubdirectory  // "160ms" or "320ms"
+        // Determine which repo to use based on chunk size
+        let repo: Repo
+        switch chunkSize {
+        case .ms160:
+            repo = .parakeetEou160
+        case .ms320:
+            repo = .parakeetEou320
+        case .ms1600:
+            // 1600ms uses 320ms models (same architecture, different streaming config)
+            repo = .parakeetEou320
+        }
 
         // Check if models already exist
         let encoderPath = destination.appendingPathComponent("streaming_encoder.mlmodelc")
@@ -180,19 +188,13 @@ struct ParakeetEouCommand {
             return
         }
 
-        print("Fetching \(subPath) models from \(repoId)...")
-        try await downloader.downloadSubdirectory(repoId: repoId, subPath: subPath, destinationDir: destination)
+        print("Fetching \(chunkSize.modelSubdirectory) models from \(repo.remotePath)...")
 
-        // Compile .mlpackage files
-        let enumerator = FileManager.default.enumerator(at: destination, includingPropertiesForKeys: nil)
-        while let fileUrl = enumerator?.nextObject() as? URL {
-            if fileUrl.pathExtension == "mlpackage" {
-                let compiledUrl = fileUrl.deletingPathExtension().appendingPathExtension("mlmodelc")
-                if !FileManager.default.fileExists(atPath: compiledUrl.path) {
-                    _ = try downloader.compileModel(at: fileUrl)
-                }
-            }
-        }
+        // Use DownloadUtils to download - handles auth, rate limiting, retries
+        // Downloads to: directory/repo.folderName (e.g., .../parakeet-eou-streaming/160ms)
+        let modelsDir = destination.deletingLastPathComponent().deletingLastPathComponent()
+        try await DownloadUtils.downloadRepo(repo, to: modelsDir)
+        print("Models downloaded to \(destination.path)")
     }
 
     static func runSingleFile(manager: StreamingEouAsrManager, inputUrl: URL, logger: AppLogger) async {
