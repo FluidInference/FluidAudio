@@ -59,7 +59,6 @@ public enum ModelNames {
 
     /// Offline diarizer model names (VBx-based clustering)
     public enum OfflineDiarizer {
-        public static let subfolder = "speaker-diarization-offline"
         public static let segmentation = "Segmentation"
         public static let fbank = "FBank"
         public static let embedding = "Embedding"
@@ -70,11 +69,10 @@ public enum ModelNames {
         public static let embeddingFile = embedding + ".mlmodelc"
         public static let pldaRhoFile = pldaRho + ".mlmodelc"
 
-        // Full paths including subfolder (for DownloadUtils)
-        public static let segmentationPath = subfolder + "/" + segmentationFile
-        public static let fbankPath = subfolder + "/" + fbankFile
-        public static let embeddingPath = subfolder + "/" + embeddingFile
-        public static let pldaRhoPath = subfolder + "/" + pldaRhoFile
+        public static let segmentationPath = segmentationFile
+        public static let fbankPath = fbankFile
+        public static let embeddingPath = embeddingFile
+        public static let pldaRhoPath = pldaRhoFile
 
         public static let requiredModels: Set<String> = [
             segmentationPath,
