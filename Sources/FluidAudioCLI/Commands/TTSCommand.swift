@@ -41,6 +41,22 @@ public struct TTS {
         }
         return artifactsRoot.appendingPathComponent(expanded, isDirectory: expectsDirectory)
     }
+
+    private static func loadCustomLexicon(from path: String?) throws -> TtsCustomLexicon? {
+        guard let path = path else { return nil }
+        let expanded = (path as NSString).expandingTildeInPath
+        let url: URL
+        if expanded.hasPrefix("/") {
+            url = URL(fileURLWithPath: expanded)
+        } else {
+            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            url = cwd.appendingPathComponent(expanded)
+        }
+        let lexicon = try TtsCustomLexicon.load(from: url)
+        logger.info("Loaded custom lexicon with \(lexicon.count) entries from \(url.path)")
+        return lexicon
+    }
+
     private static let longFormBenchmark: String = """
         The purpose of this extended benchmark passage is to emulate a five minute narration that exercises every
         stage of the Kokoro text to speech pipeline. It begins with a calm introduction that invites the listener
@@ -114,6 +130,7 @@ public struct TTS {
         var metricsPath: String? = nil
         var chunkDirectory: String? = nil
         var variantPreference: ModelNames.TTS.Variant? = nil
+        var lexiconPath: String? = nil
         var text: String? = nil
         var benchmarkMode = false
 
@@ -157,6 +174,11 @@ public struct TTS {
                     }
                     i += 1
                 }
+            case "--lexicon", "-l":
+                if i + 1 < arguments.count {
+                    lexiconPath = arguments[i + 1]
+                    i += 1
+                }
             case "--auto-download":
                 // No-op: downloads are always ensured by the CLI
                 ()
@@ -176,6 +198,7 @@ public struct TTS {
             await runBenchmark(
                 outputPath: output,
                 voice: voice,
+                lexiconPath: lexiconPath,
                 metricsPath: metricsPath,
                 chunkDirectory: chunkDirectory,
                 variantPreference: variantPreference
@@ -192,7 +215,8 @@ public struct TTS {
             // Timing buckets
             let tStart = Date()
 
-            let manager = TtSManager()
+            let customLexicon = try loadCustomLexicon(from: lexiconPath)
+            let manager = TtSManager(customLexicon: customLexicon)
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let voiceOverride = requestedVoice.isEmpty ? nil : requestedVoice
             let preloadVoices = voiceOverride.map { Set([$0]) }
@@ -424,17 +448,24 @@ public struct TTS {
     private static func printUsage() {
         print(
             """
-            Usage: fluidaudio tts "text" [--output file.wav] [--voice af_heart] [--metrics metrics.json]
+            Usage: fluidaudio tts "text" [--output file.wav] [--voice af_heart] [--lexicon custom.txt] [--metrics metrics.json]
 
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart)
+              --lexicon, -l        Custom pronunciation lexicon file (word=phonemes format)
               --benchmark          Run a predefined benchmarking suite with multiple sentences
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)
               --chunk-dir          Directory where individual chunk WAVs will be written
               (models/dictionary auto-download is always on in CLI)
               --help, -h           Show this help
+
+            Lexicon file format:
+              # Comments start with #
+              kokoro=kəkˈɔɹO
+              ketorolac=kˈɛtɔːɹˌɒlak
+              xiaomi=zˌaɪəɹˈəʊmi
             """
         )
     }
@@ -453,13 +484,14 @@ extension TTS {
     private static func runBenchmark(
         outputPath: String,
         voice: String,
+        lexiconPath: String?,
         metricsPath: String?,
         chunkDirectory: String?,
         variantPreference: ModelNames.TTS.Variant?
     ) async {
         do {
-            let manager = TtSManager()
-
+            let customLexicon = try loadCustomLexicon(from: lexiconPath)
+            let manager = TtSManager(customLexicon: customLexicon)
             let requestedVoice = voice.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedVoice = requestedVoice.isEmpty ? nil : requestedVoice
             let preloadVoices = normalizedVoice.map { Set([$0]) }

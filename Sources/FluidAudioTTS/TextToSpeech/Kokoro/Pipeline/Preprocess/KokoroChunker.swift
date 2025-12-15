@@ -37,6 +37,7 @@ enum KokoroChunker {
         text: String,
         wordToPhonemes: [String: [String]],
         caseSensitiveLexicon: [String: [String]],
+        customLexicon: TtsCustomLexicon?,
         targetTokens: Int,
         hasLanguageToken: Bool,
         allowedPhonemes: Set<String>,
@@ -65,6 +66,7 @@ enum KokoroChunker {
             refinedSentences,
             lexicon: wordToPhonemes,
             caseSensitiveLexicon: caseSensitiveLexicon,
+            customLexicon: customLexicon,
             allowed: allowedPhonemes,
             capacity: capacity
         )
@@ -79,6 +81,7 @@ enum KokoroChunker {
                 for: segment,
                 lexicon: wordToPhonemes,
                 caseSensitiveLexicon: caseSensitiveLexicon,
+                customLexicon: customLexicon,
                 allowed: allowedPhonemes,
                 capacity: capacity
             )
@@ -89,6 +92,7 @@ enum KokoroChunker {
                     fragments,
                     lexicon: wordToPhonemes,
                     caseSensitiveLexicon: caseSensitiveLexicon,
+                    customLexicon: customLexicon,
                     allowed: allowedPhonemes,
                     capacity: capacity
                 )
@@ -125,6 +129,7 @@ enum KokoroChunker {
                 from: chunkText,
                 lexicon: wordToPhonemes,
                 caseSensitiveLexicon: caseSensitiveLexicon,
+                customLexicon: customLexicon,
                 allowed: allowedPhonemes,
                 capacity: capacity,
                 wordIndex: &globalWordIndex,
@@ -180,6 +185,7 @@ enum KokoroChunker {
         _ sentences: [String],
         lexicon: [String: [String]],
         caseSensitiveLexicon: [String: [String]],
+        customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
         capacity: Int
     ) throws -> [String] {
@@ -208,6 +214,7 @@ enum KokoroChunker {
                 for: trimmed,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
+                customLexicon: customLexicon,
                 allowed: allowed,
                 capacity: capacity
             )
@@ -236,6 +243,7 @@ enum KokoroChunker {
                 for: candidate,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
+                customLexicon: customLexicon,
                 allowed: allowed,
                 capacity: capacity
             )
@@ -266,6 +274,7 @@ enum KokoroChunker {
         from text: String,
         lexicon: [String: [String]],
         caseSensitiveLexicon: [String: [String]],
+        customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
         capacity: Int,
         wordIndex: inout Int,
@@ -282,6 +291,7 @@ enum KokoroChunker {
         var chunkTokenCount = 0
         var needsWordSeparator = false
         var missing: Set<String> = []
+        var invalidCustomLexiconWords: Set<String> = []
 
         func flushChunk() {
             guard !chunkPhonemes.isEmpty else { return }
@@ -341,6 +351,33 @@ enum KokoroChunker {
                             overrideIndex += 1
                         }
                         break
+                    }
+                }
+
+                // Check custom lexicon (highest priority after per-word overrides)
+                if resolved == nil,
+                    let customLexicon,
+                    let customPhonemes = customLexicon.phonemes(for: original)
+                {
+                    let filtered = customPhonemes.filter { allowed.contains($0) }
+                    if filtered.isEmpty {
+                        if invalidCustomLexiconWords.insert(original).inserted {
+                            let invalid = customPhonemes.filter { !allowed.contains($0) }
+                            let preview = invalid.prefix(12).joined(separator: " ")
+                            if preview.isEmpty {
+                                logger.warning(
+                                    "Custom lexicon entry for '\(original)' produced no usable phoneme tokens."
+                                )
+                            } else {
+                                logger.warning(
+                                    "Custom lexicon entry for '\(original)' has no tokens in Kokoro vocabulary "
+                                        + "(first invalid: \(preview)). "
+                                        + "Ensure your custom phonemes match the Kokoro vocabulary."
+                                )
+                            }
+                        }
+                    } else {
+                        resolved = filtered
                     }
                 }
 
@@ -573,6 +610,7 @@ enum KokoroChunker {
         for text: String,
         lexicon: [String: [String]],
         caseSensitiveLexicon: [String: [String]],
+        customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
         capacity: Int
     ) throws -> Int {
@@ -589,8 +627,20 @@ enum KokoroChunker {
             case .word(let original):
                 let normalized = normalize(original)
                 guard !normalized.isEmpty else { continue }
-                guard
-                    let phonemes = try resolvePhonemes(
+
+                // Check custom lexicon first
+                var phonemes: [String]?
+                if let customLexicon = customLexicon,
+                    let customPhonemes = customLexicon.phonemes(for: original)
+                {
+                    let filtered = customPhonemes.filter { allowed.contains($0) }
+                    if !filtered.isEmpty {
+                        phonemes = filtered
+                    }
+                }
+
+                if phonemes == nil {
+                    phonemes = try resolvePhonemes(
                         for: original,
                         normalized: normalized,
                         lexicon: lexicon,
@@ -598,10 +648,13 @@ enum KokoroChunker {
                         allowed: allowed,
                         missing: &dummyMissing
                     )
-                else {
+                }
+
+                guard let resolvedPhonemes = phonemes else {
                     continue
                 }
-                tokenCount += phonemes.count
+
+                tokenCount += resolvedPhonemes.count
                 if needsWordSeparator {
                     tokenCount += 1
                 }
@@ -624,6 +677,7 @@ enum KokoroChunker {
         _ fragments: [String],
         lexicon: [String: [String]],
         caseSensitiveLexicon: [String: [String]],
+        customLexicon: TtsCustomLexicon?,
         allowed: Set<String>,
         capacity: Int
     ) throws -> [String] {
@@ -652,6 +706,7 @@ enum KokoroChunker {
                 for: candidate,
                 lexicon: lexicon,
                 caseSensitiveLexicon: caseSensitiveLexicon,
+                customLexicon: customLexicon,
                 allowed: allowed,
                 capacity: capacity
             )
@@ -665,6 +720,7 @@ enum KokoroChunker {
                     for: current,
                     lexicon: lexicon,
                     caseSensitiveLexicon: caseSensitiveLexicon,
+                    customLexicon: customLexicon,
                     allowed: allowed,
                     capacity: capacity
                 )
