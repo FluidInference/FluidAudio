@@ -375,9 +375,11 @@ enum TranscribeCommand {
             if useBeamSearch {
                 asrConfig = ASRConfig(useBeamSearch: true)
                 if models.supportsBeamSearch {
-                    logger.info("Beam search enabled with vocabulary biasing")
+                    logger.info("Beam search enabled with vocabulary biasing (frame-by-frame)")
                 } else {
-                    logger.warning("Beam search requested but Joint.mlmodelc not available - falling back to greedy")
+                    logger.warning(
+                        "Beam search requested but JointDecisionSingleStep.mlmodelc not available - falling back to greedy"
+                    )
                 }
             } else {
                 asrConfig = .default

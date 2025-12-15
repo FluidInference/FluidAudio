@@ -262,8 +262,9 @@ public final class AsrManager {
         // Build reverse mapping (text -> tokenId) if not cached
         let reverseVocab = buildReverseVocabulary()
 
-        // Normalize text: lowercase and add leading space (SentencePiece convention)
-        let normalizedText = " " + text.lowercased()
+        // Add leading space (SentencePiece convention) but preserve case
+        // The model outputs case-sensitive tokens, so we need case-sensitive matching
+        let normalizedText = " " + text
 
         var tokens: [Int] = []
         var position = normalizedText.startIndex
@@ -446,15 +447,15 @@ public final class AsrManager {
         globalFrameOffset: Int = 0,
         customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> TdtHypothesis {
-        // Use beam search if enabled and jointLogits model is available
+        // Use beam search if enabled and jointSingleStep model is available
         if config.useBeamSearch,
-            let jointLogitsModel = asrModels?.jointLogits,
+            let jointSingleStepModel = asrModels?.jointSingleStep,
             let customVocabulary = customVocabulary
         {
-            logger.info("Using beam search decoding with vocabulary biasing")
+            logger.info("Using beam search decoding with vocabulary biasing (frame-by-frame)")
             return try await beamSearchDecode(
                 encoderOutput: encoderOutput,
-                jointLogitsModel: jointLogitsModel,
+                jointSingleStepModel: jointSingleStepModel,
                 customVocabulary: customVocabulary,
                 decoderState: &decoderState,
                 globalFrameOffset: globalFrameOffset
@@ -493,10 +494,10 @@ public final class AsrManager {
         }
     }
 
-    /// Beam search decoding with vocabulary biasing
+    /// Beam search decoding with vocabulary biasing using frame-by-frame JointDecisionSingleStep model
     private func beamSearchDecode(
         encoderOutput: MLMultiArray,
-        jointLogitsModel: MLModel,
+        jointSingleStepModel: MLModel,
         customVocabulary: CustomVocabularyContext,
         decoderState: inout TdtDecoderState,
         globalFrameOffset: Int
@@ -518,10 +519,10 @@ public final class AsrManager {
         let initialH = decoderState.hiddenState
         let initialC = decoderState.cellState
 
-        // Run beam search decoding
+        // Run beam search decoding with frame-by-frame joint model
         let (tokens, timestamps) = try beamDecoder.decode(
             encoderOutput: encoderOutput,
-            jointModel: jointLogitsModel,
+            jointSingleStepModel: jointSingleStepModel,
             decoderModel: decoderModel!,
             initialHState: initialH,
             initialCState: initialC
@@ -534,7 +535,7 @@ public final class AsrManager {
         hypothesis.tokenConfidences = [Float](repeating: 0.9, count: tokens.count)  // Beam search doesn't track per-token confidence
         hypothesis.lastToken = tokens.last
 
-        logger.info("Beam search decoded \(tokens.count) tokens with vocabulary biasing")
+        logger.info("Beam search decoded \(tokens.count) tokens with vocabulary biasing (frame-by-frame)")
 
         return hypothesis
     }
