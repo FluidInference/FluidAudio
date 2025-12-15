@@ -18,6 +18,7 @@ public struct KokoroSynthesizer {
     private enum Context {
         @TaskLocal static var modelCache: KokoroModelCache?
         @TaskLocal static var lexiconAssets: LexiconAssetManager?
+        @TaskLocal static var customLexicon: TtsCustomLexicon?
     }
 
     static func withModelCache<T>(
@@ -36,6 +37,19 @@ public struct KokoroSynthesizer {
         try await Context.$lexiconAssets.withValue(assets) {
             try await operation()
         }
+    }
+
+    static func withCustomLexicon<T>(
+        _ lexicon: TtsCustomLexicon?,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        try await Context.$customLexicon.withValue(lexicon) {
+            try await operation()
+        }
+    }
+
+    static func currentCustomLexicon() -> TtsCustomLexicon? {
+        Context.customLexicon
     }
 
     static func currentModelCache() throws -> KokoroModelCache {
@@ -69,10 +83,12 @@ public struct KokoroSynthesizer {
         try await loadSimplePhonemeDictionary()
         let hasLang = false
         let lexicons = await lexiconCache.lexicons()
+        let customLexicon = currentCustomLexicon()
         return try KokoroChunker.chunk(
             text: text,
             wordToPhonemes: lexicons.word,
             caseSensitiveLexicon: lexicons.caseSensitive,
+            customLexicon: customLexicon,
             targetTokens: longVariantTokenBudget,
             hasLanguageToken: hasLang,
             allowedPhonemes: Set(vocabulary.keys),
