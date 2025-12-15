@@ -102,8 +102,11 @@ public enum ModelNames {
         public static let jointV2 = "JointDecision"  // v2 uses JointDecision
         public static let jointV3 = "JointDecisionv2"  // v3 uses JointDecisionv2
 
-        // Joint model with raw logits output (for beam search)
+        // Joint model with raw logits output (for beam search - deprecated, use jointSingleStep)
         public static let jointLogits = "Joint"  // Outputs raw logits [B, T, U, 8198]
+
+        // Single-step joint decision with top-K outputs (for beam search)
+        public static let jointSingleStep = "JointDecisionSingleStep"  // Per-frame with top-64 candidates
 
         // Shared vocabulary file across all model versions
         public static let vocabularyFile = "parakeet_vocab.json"
@@ -112,6 +115,7 @@ public enum ModelNames {
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointLogitsFile = jointLogits + ".mlmodelc"
+        public static let jointSingleStepFile = jointSingleStep + ".mlmodelc"
 
         // Get joint file name based on repo/version
         public static func jointFile(for repo: Repo) -> String {

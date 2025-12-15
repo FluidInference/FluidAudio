@@ -24,8 +24,10 @@ public struct AsrModels: Sendable {
     public let preprocessor: MLModel
     public let decoder: MLModel
     public let joint: MLModel
-    /// Joint model with raw logits output (for beam search). Optional.
+    /// Joint model with raw logits output (for beam search - deprecated). Optional.
     public let jointLogits: MLModel?
+    /// Single-step joint decision with top-K outputs (for beam search). Optional.
+    public let jointSingleStep: MLModel?
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let version: AsrModelVersion
@@ -38,6 +40,7 @@ public struct AsrModels: Sendable {
         decoder: MLModel,
         joint: MLModel,
         jointLogits: MLModel? = nil,
+        jointSingleStep: MLModel? = nil,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
         version: AsrModelVersion
@@ -47,6 +50,7 @@ public struct AsrModels: Sendable {
         self.decoder = decoder
         self.joint = joint
         self.jointLogits = jointLogits
+        self.jointSingleStep = jointSingleStep
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.version = version
@@ -56,9 +60,9 @@ public struct AsrModels: Sendable {
         true
     }
 
-    /// Whether beam search decoding is available (jointLogits model loaded)
+    /// Whether beam search decoding is available (jointSingleStep model loaded)
     public var supportsBeamSearch: Bool {
-        jointLogits != nil
+        jointSingleStep != nil
     }
 }
 
@@ -165,7 +169,7 @@ extension AsrModels {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
         }
 
-        // Try to load optional jointLogits model (for beam search)
+        // Try to load optional jointLogits model (deprecated, for old beam search)
         var jointLogitsModel: MLModel? = nil
         let jointLogitsPath = repoPath(from: directory, version: version)
             .appendingPathComponent(Names.jointLogitsFile)
@@ -175,9 +179,25 @@ extension AsrModels {
                     contentsOf: jointLogitsPath,
                     configuration: config
                 )
-                logger.info("Loaded jointLogits model for beam search from \(jointLogitsPath.path)")
+                logger.info("Loaded jointLogits model from \(jointLogitsPath.path)")
             } catch {
                 logger.warning("Failed to load jointLogits model: \(error.localizedDescription)")
+            }
+        }
+
+        // Try to load optional jointSingleStep model (for beam search with top-K)
+        var jointSingleStepModel: MLModel? = nil
+        let jointSingleStepPath = repoPath(from: directory, version: version)
+            .appendingPathComponent(Names.jointSingleStepFile)
+        if FileManager.default.fileExists(atPath: jointSingleStepPath.path) {
+            do {
+                jointSingleStepModel = try await MLModel.load(
+                    contentsOf: jointSingleStepPath,
+                    configuration: config
+                )
+                logger.info("Loaded jointSingleStep model for beam search from \(jointSingleStepPath.path)")
+            } catch {
+                logger.warning("Failed to load jointSingleStep model: \(error.localizedDescription)")
             }
         }
 
@@ -187,6 +207,7 @@ extension AsrModels {
             decoder: decoderModel,
             joint: jointModel,
             jointLogits: jointLogitsModel,
+            jointSingleStep: jointSingleStepModel,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory, version: version),
             version: version
