@@ -366,10 +366,10 @@ public struct VocabularyRescorer {
                     replacedIndices.insert(candidate.wordIndex + i)
                 }
 
-            } else if candidate.spanLength >= 2 && candidate.similarity >= 0.75 && scoreAdvantage >= 0.5 {
+            } else if candidate.spanLength >= 2 && candidate.similarity >= 0.80 && scoreAdvantage >= 0.5 {
                 // COMPOUND WORD MATCH: For multi-word spans (e.g., "new res" -> "Newrez"),
-                // high string similarity (>=0.75) is strong evidence even with lower CTC advantage.
-                // The fact that multiple words concatenate to match a vocabulary term is meaningful.
+                // high string similarity (>=0.80) is strong evidence even with lower CTC advantage.
+                // Threshold raised from 0.75 to 0.80 to avoid false positives like "and I" -> "Audi" (sim=0.75)
                 shouldReplace = true
                 reason =
                     "Compound word match (span=\(candidate.spanLength), sim=\(String(format: "%.2f", candidate.similarity)), advantage=\(String(format: "%.2f", scoreAdvantage)))"
@@ -389,20 +389,41 @@ public struct VocabularyRescorer {
             } else if scoreAdvantage >= config.minScoreAdvantage
                 && originalScore <= config.maxOriginalScoreForReplacement
             {
-                // Standard CTC-based replacement
-                shouldReplace = true
-                reason = "Vocab score advantage: \(String(format: "%.2f", scoreAdvantage))"
-
-                modifiedWords[candidate.wordIndex] = preserveCapitalization(
-                    original: candidate.originalWord,
-                    replacement: vocabTerm
-                )
-                for i in 1..<candidate.spanLength {
-                    modifiedWords[candidate.wordIndex + i] = ""
+                // Similarity threshold depends on span length and word length:
+                // - Multi-word (span≥2): higher threshold (0.80) - prevents "want to"→"Santoro", "and I"→"Audi"
+                // - Single word, short (≤3 chars): very high threshold (0.85) - prevents "you"→"Yu"
+                // - Single word, longer (>3 chars): lower threshold (0.55) - allows "NECI"→"Nequi"
+                let minSimilarityForSpan: Float
+                if candidate.spanLength >= 2 {
+                    minSimilarityForSpan = 0.80
+                } else if candidate.originalWord.count <= 3 {
+                    // Short words are often common English words - require very high similarity
+                    minSimilarityForSpan = 0.85
+                } else {
+                    minSimilarityForSpan = 0.55
                 }
 
-                for i in 0..<candidate.spanLength {
-                    replacedIndices.insert(candidate.wordIndex + i)
+                if candidate.similarity >= minSimilarityForSpan {
+                    // Standard CTC-based replacement
+                    shouldReplace = true
+                    reason =
+                        "Vocab score advantage: \(String(format: "%.2f", scoreAdvantage)), sim=\(String(format: "%.2f", candidate.similarity))"
+
+                    modifiedWords[candidate.wordIndex] = preserveCapitalization(
+                        original: candidate.originalWord,
+                        replacement: vocabTerm
+                    )
+                    for i in 1..<candidate.spanLength {
+                        modifiedWords[candidate.wordIndex + i] = ""
+                    }
+
+                    for i in 0..<candidate.spanLength {
+                        replacedIndices.insert(candidate.wordIndex + i)
+                    }
+                } else {
+                    shouldReplace = false
+                    reason =
+                        "Similarity too low for span \(candidate.spanLength): \(String(format: "%.2f", candidate.similarity)) < \(String(format: "%.2f", minSimilarityForSpan))"
                 }
             } else if originalScore > config.maxOriginalScoreForReplacement {
                 shouldReplace = false
