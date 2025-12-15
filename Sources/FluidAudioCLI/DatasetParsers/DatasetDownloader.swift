@@ -521,7 +521,7 @@ struct DatasetDownloader {
         return testFiles
     }
 
-    /// Get file list from HuggingFace API
+    /// Get file list from HuggingFace using the API
     static func getHuggingFaceFileList(apiUrl: String) async throws -> [String] {
         guard let url = URL(string: apiUrl) else {
             throw NSError(
@@ -577,6 +577,13 @@ struct DatasetDownloader {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(urlString)"])
         }
 
+        // Create destination directory
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        // Download using URLSession
         let (data, _) = try await DownloadUtils.sharedSession.data(from: url)
         try data.write(to: destination)
 
