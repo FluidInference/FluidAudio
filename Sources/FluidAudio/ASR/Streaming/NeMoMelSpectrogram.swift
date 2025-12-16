@@ -31,7 +31,17 @@ public final class NeMoMelSpectrogram {
     // Pre-computed
     private let hannWindow: [Float]
     private let melFilterbank: [[Float]]  // [nMels, nFFT/2 + 1]
+    private let melFilterbankFlat: [Float]  // Flat [nMels * (nFFT/2 + 1)] for vDSP
     private var fftSetup: vDSP_DFT_Setup?
+
+    // Reusable buffers to avoid allocations in hot path
+    private var realIn: [Float]
+    private var imagIn: [Float]
+    private var realOut: [Float]
+    private var imagOut: [Float]
+    private var powerSpec: [Float]
+    private var imagSq: [Float]
+    private var frame: [Float]
 
     public init() {
         // 1. Create symmetric Hann window (matches PyTorch hann_window(periodic=False))
@@ -46,12 +56,31 @@ public final class NeMoMelSpectrogram {
             fMax: fMax
         )
 
-        // 3. Setup FFT
+        // 3. Flatten filterbank for vDSP matrix multiply: [nMels, numFreqBins] row-major
+        let numFreqBins = nFFT / 2 + 1
+        var flat = [Float](repeating: 0, count: nMels * numFreqBins)
+        for m in 0..<nMels {
+            for f in 0..<numFreqBins {
+                flat[m * numFreqBins + f] = melFilterbank[m][f]
+            }
+        }
+        self.melFilterbankFlat = flat
+
+        // 4. Setup FFT
         self.fftSetup = vDSP_DFT_zop_CreateSetup(
             nil,
             vDSP_Length(nFFT),
             .FORWARD
         )
+
+        // 5. Pre-allocate reusable buffers
+        self.realIn = [Float](repeating: 0, count: nFFT)
+        self.imagIn = [Float](repeating: 0, count: nFFT)
+        self.realOut = [Float](repeating: 0, count: nFFT)
+        self.imagOut = [Float](repeating: 0, count: nFFT)
+        self.powerSpec = [Float](repeating: 0, count: numFreqBins)
+        self.imagSq = [Float](repeating: 0, count: numFreqBins)
+        self.frame = [Float](repeating: 0, count: nFFT)
     }
 
     deinit {
@@ -120,27 +149,33 @@ public final class NeMoMelSpectrogram {
             return (mel: [Float](repeating: logZero, count: nMels), melLength: 0, numFrames: 1)
         }
 
-        // Step 1: Apply preemphasis filter (y[n] = x[n] - preemph * x[n-1])
-        var preemphAudio = [Float](repeating: 0, count: audio.count)
-        preemphAudio[0] = audio[0]  // Keep first sample unchanged
-        for i in 1..<audio.count {
-            preemphAudio[i] = audio[i] - preemph * audio[i - 1]
+        let audioCount = audio.count
+
+        // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
+        var preemphAudio = [Float](repeating: 0, count: audioCount)
+        preemphAudio[0] = audio[0]
+        if audioCount > 1 {
+            // Compute x[n] - preemph * x[n-1] vectorized
+            var negPreemph = -preemph
+            vDSP_vsma(
+                audio, 1, &negPreemph, audio[1...].withUnsafeBufferPointer { $0.baseAddress! }, 1, &preemphAudio[1], 1,
+                vDSP_Length(audioCount - 1))
         }
 
-        // Step 2: Apply center padding with CONSTANT (zeros), not reflect
-        // NeMo uses pad_mode='constant' in torch.stft
+        // Step 2: Apply center padding with CONSTANT (zeros)
         let padLength = nFFT / 2
-        var paddedAudio = [Float](repeating: 0, count: preemphAudio.count + 2 * padLength)
+        let paddedCount = audioCount + 2 * padLength
+        var paddedAudio = [Float](repeating: 0, count: paddedCount)
 
-        // Zero padding at start (already zeros from initialization)
-        // Copy preemph audio to center
-        for i in 0..<preemphAudio.count {
-            paddedAudio[padLength + i] = preemphAudio[i]
+        // Copy preemph audio to center using memcpy
+        preemphAudio.withUnsafeBufferPointer { src in
+            paddedAudio.withUnsafeMutableBufferPointer { dst in
+                memcpy(dst.baseAddress! + padLength, src.baseAddress!, audioCount * MemoryLayout<Float>.size)
+            }
         }
-        // Zero padding at end (already zeros from initialization)
 
-        // Calculate number of frames with center padding
-        let numFrames = 1 + (paddedAudio.count - winLength) / hopLength
+        // Calculate number of frames
+        let numFrames = 1 + (paddedCount - winLength) / hopLength
 
         guard numFrames > 0 else {
             return (mel: [Float](repeating: logZero, count: nMels), melLength: 0, numFrames: 1)
@@ -148,43 +183,92 @@ public final class NeMoMelSpectrogram {
 
         // Allocate output: [nMels, numFrames] in row-major order
         var mel = [Float](repeating: logZero, count: nMels * numFrames)
+        let numFreqBins = nFFT / 2 + 1
 
-        // Window centering offset: torch.stft centers the window within n_fft when win_length < n_fft
-        let windowOffset = (nFFT - winLength) / 2  // = 56 for nFFT=512, winLength=400
+        // Window centering offset
+        let windowOffset = (nFFT - winLength) / 2
+
+        // Temporary buffer for mel values of current frame
+        var melFrame = [Float](repeating: 0, count: nMels)
 
         // Process each frame
         for frameIdx in 0..<numFrames {
             let startIdx = frameIdx * hopLength
 
-            // Extract and window the frame
-            // torch.stft extracts n_fft samples, then applies window centered within the frame
-            var frame = [Float](repeating: 0, count: nFFT)
+            // Clear frame buffer
+            vDSP_vclr(&frame, 1, vDSP_Length(nFFT))
 
-            // Apply centered window: window covers frame[windowOffset : windowOffset + winLength]
-            // The samples at position windowOffset+i in the frame come from paddedAudio[startIdx + windowOffset + i]
-            for i in 0..<winLength {
-                let audioIdx = startIdx + windowOffset + i
-                if audioIdx < paddedAudio.count {
-                    frame[windowOffset + i] = paddedAudio[audioIdx] * hannWindow[i]
+            // Extract and window using vDSP_vmul
+            let audioStart = startIdx + windowOffset
+            let availableSamples = min(winLength, paddedCount - audioStart)
+
+            if availableSamples > 0 {
+                paddedAudio.withUnsafeBufferPointer { paddedPtr in
+                    hannWindow.withUnsafeBufferPointer { windowPtr in
+                        frame.withUnsafeMutableBufferPointer { framePtr in
+                            vDSP_vmul(
+                                paddedPtr.baseAddress! + audioStart, 1,
+                                windowPtr.baseAddress!, 1,
+                                framePtr.baseAddress! + windowOffset, 1,
+                                vDSP_Length(availableSamples)
+                            )
+                        }
+                    }
                 }
             }
 
-            // Compute power spectrum (magnitude squared)
-            let powerSpec = computePowerSpectrum(frame: frame)
+            // Compute power spectrum using reusable buffers
+            computePowerSpectrumInPlace()
 
-            // Apply mel filterbank and log with NeMo's log_zero_guard_type='add'
-            for melIdx in 0..<nMels {
-                var sum: Float = 0
-                for freqIdx in 0..<(nFFT / 2 + 1) {
-                    sum += melFilterbank[melIdx][freqIdx] * powerSpec[freqIdx]
+            // Apply mel filterbank using vDSP matrix-vector multiply
+            // melFrame = melFilterbankFlat * powerSpec (matrix [nMels x numFreqBins] * vector [numFreqBins])
+            melFilterbankFlat.withUnsafeBufferPointer { filterPtr in
+                powerSpec.withUnsafeBufferPointer { specPtr in
+                    melFrame.withUnsafeMutableBufferPointer { outPtr in
+                        vDSP_mmul(
+                            filterPtr.baseAddress!, 1,
+                            specPtr.baseAddress!, 1,
+                            outPtr.baseAddress!, 1,
+                            vDSP_Length(nMels),
+                            vDSP_Length(1),
+                            vDSP_Length(numFreqBins)
+                        )
+                    }
                 }
-                // NeMo uses log(x + guard_value), not log(max(x, guard_value))
-                let logVal = log(sum + logZeroGuard)
-                mel[melIdx * numFrames + frameIdx] = logVal
+            }
+
+            // Apply log(x + guard_value) and store in output
+            for melIdx in 0..<nMels {
+                mel[melIdx * numFrames + frameIdx] = log(melFrame[melIdx] + logZeroGuard)
             }
         }
 
         return (mel: mel, melLength: numFrames, numFrames: numFrames)
+    }
+
+    /// Compute power spectrum in-place using pre-allocated buffers
+    private func computePowerSpectrumInPlace() {
+        guard let setup = fftSetup else { return }
+
+        // Copy frame to real input and clear imaginary
+        frame.withUnsafeBufferPointer { src in
+            realIn.withUnsafeMutableBufferPointer { dst in
+                memcpy(dst.baseAddress!, src.baseAddress!, nFFT * MemoryLayout<Float>.size)
+            }
+        }
+        vDSP_vclr(&imagIn, 1, vDSP_Length(nFFT))
+
+        // Execute FFT
+        vDSP_DFT_Execute(setup, realIn, imagIn, &realOut, &imagOut)
+
+        // Compute power: real^2 + imag^2 using vDSP
+        let numFreqBins = nFFT / 2 + 1
+        // real^2
+        vDSP_vsq(realOut, 1, &powerSpec, 1, vDSP_Length(numFreqBins))
+        // imag^2 into pre-allocated buffer
+        vDSP_vsq(imagOut, 1, &imagSq, 1, vDSP_Length(numFreqBins))
+        // powerSpec += imagSq
+        vDSP_vadd(powerSpec, 1, imagSq, 1, &powerSpec, 1, vDSP_Length(numFreqBins))
     }
 
     // MARK: - Debug Methods
