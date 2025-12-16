@@ -103,27 +103,38 @@ public struct OfflineDiarizerConfig: Sendable {
         public var warmStartFa: Double
         public var warmStartFb: Double
 
-        // NOTE: minClusterSize is NOT used in community-1 (VBx-based pipeline).
-        // VBx is designed to handle 100+ under-clustered initial assignments from AHC
-        // and naturally merge them during Bayesian refinement. Pre-merging small clusters
-        // with minClusterSize enforcement (used in pyannote 3.1 AHC-only pipeline)
-        // is counterproductive for VBx and loses speaker distinctions.
+        /// Minimum number of speakers. Ignored if `numSpeakers` is set.
+        public var minSpeakers: Int?
+
+        /// Maximum number of speakers. Ignored if `numSpeakers` is set.
+        public var maxSpeakers: Int?
+
+        /// Exact number of speakers. Overrides `minSpeakers` and `maxSpeakers` when set.
+        public var numSpeakers: Int?
 
         public static let community = Clustering(
             threshold: 0.6,
-            // Default 0.07
             warmStartFa: 0.07,
-            warmStartFb: 0.8
+            warmStartFb: 0.8,
+            minSpeakers: nil,
+            maxSpeakers: nil,
+            numSpeakers: nil
         )
 
         public init(
             threshold: Double,
             warmStartFa: Double,
-            warmStartFb: Double
+            warmStartFb: Double,
+            minSpeakers: Int? = nil,
+            maxSpeakers: Int? = nil,
+            numSpeakers: Int? = nil
         ) {
             self.threshold = threshold
             self.warmStartFa = warmStartFa
             self.warmStartFb = warmStartFb
+            self.minSpeakers = minSpeakers
+            self.maxSpeakers = maxSpeakers
+            self.numSpeakers = numSpeakers
         }
     }
 
