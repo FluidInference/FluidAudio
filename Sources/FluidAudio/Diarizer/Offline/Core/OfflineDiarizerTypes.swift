@@ -527,13 +527,21 @@ public struct VBxOutput: Sendable {
     public let numClusters: Int
     public let elbos: [Double]
 
+    /// Whether the speaker count was adjusted due to constraints.
+    public var wasAdjusted: Bool = false
+
+    /// Original cluster count before constraint adjustment (nil if not adjusted).
+    public var originalClusterCount: Int?
+
     public init(
         gamma: [[Double]],
         pi: [Double],
         hardClusters: [[Int]],
         centroids: [[Double]],
         numClusters: Int,
-        elbos: [Double]
+        elbos: [Double],
+        wasAdjusted: Bool = false,
+        originalClusterCount: Int? = nil
     ) {
         self.gamma = gamma
         self.pi = pi
@@ -541,6 +549,8 @@ public struct VBxOutput: Sendable {
         self.centroids = centroids
         self.numClusters = numClusters
         self.elbos = elbos
+        self.wasAdjusted = wasAdjusted
+        self.originalClusterCount = originalClusterCount
     }
 }
 
