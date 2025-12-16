@@ -555,7 +555,7 @@ struct ParakeetEouCommand {
                 fluidaudio parakeet-eou --benchmark --models /path/to/models/160ms
 
             Note:
-                Models are downloaded from HuggingFace: alexwengg/parakeet-realtime-eou-120m-coreml
+                Models are downloaded from HuggingFace: FluidInference/parakeet-realtime-eou-120m-coreml
                 LibriSpeech test-clean dataset is downloaded automatically for benchmarking.
             """
         )

@@ -226,7 +226,7 @@ swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --thresh
 
 Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 120M CoreML model.
 
-Model: [alexwengg/parakeet-realtime-eou-120m-coreml](https://huggingface.co/alexwengg/parakeet-realtime-eou-120m-coreml)
+Model: [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml)
 
 Hardware: Apple M2, 2022, masOS 26
 

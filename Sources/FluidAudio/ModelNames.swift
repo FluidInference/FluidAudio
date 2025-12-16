@@ -5,8 +5,8 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
-    case parakeetEou160 = "alexwengg/parakeet-realtime-eou-120m-coreml/160ms"
-    case parakeetEou320 = "alexwengg/parakeet-realtime-eou-120m-coreml/320ms"
+    case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
+    case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
 
@@ -33,10 +33,8 @@ public enum Repo: String, CaseIterable {
     /// Fully qualified HuggingFace repo path (owner/name)
     public var remotePath: String {
         switch self {
-        case .parakeetEou160:
-            return "alexwengg/parakeet-realtime-eou-120m-coreml"
-        case .parakeetEou320:
-            return "alexwengg/parakeet-realtime-eou-120m-coreml"
+        case .parakeetEou160, .parakeetEou320:
+            return "FluidInference/parakeet-realtime-eou-120m-coreml"
         default:
             return "FluidInference/\(name)"
         }
