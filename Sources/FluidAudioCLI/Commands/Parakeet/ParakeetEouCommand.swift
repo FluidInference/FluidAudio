@@ -20,6 +20,7 @@ struct ParakeetEouCommand {
         var chunkSizeMs: Int = 160  // Default to 160ms
         var useCache: Bool = false  // Use cached models from Application Support
         var eouDebounceMs: Int = 1280  // Minimum silence duration before EOU triggers
+        var outputPath: String?  // Output path for benchmark results JSON
 
         // Manual Argument Parsing
         var i = 0
@@ -68,6 +69,11 @@ struct ParakeetEouCommand {
             case "--eou-debounce":
                 if i + 1 < arguments.count {
                     eouDebounceMs = Int(arguments[i + 1]) ?? 1280
+                    i += 1
+                }
+            case "--output":
+                if i + 1 < arguments.count {
+                    outputPath = arguments[i + 1]
                     i += 1
                 }
             case "--help", "-h":
@@ -145,7 +151,8 @@ struct ParakeetEouCommand {
         // 3. Run Benchmark or Single File
         if benchmark {
             await runBenchmark(
-                manager: manager, maxFiles: maxFiles, verbose: verbose, fileList: fileList, logger: logger)
+                manager: manager, maxFiles: maxFiles, verbose: verbose, fileList: fileList, outputPath: outputPath,
+                logger: logger)
         } else {
             guard let inputPath = input else {
                 logger.error("Missing required argument: --input <path> (or use --benchmark)")
@@ -240,7 +247,8 @@ struct ParakeetEouCommand {
     }
 
     static func runBenchmark(
-        manager: StreamingEouAsrManager, maxFiles: Int, verbose: Bool, fileList: String?, logger: AppLogger
+        manager: StreamingEouAsrManager, maxFiles: Int, verbose: Bool, fileList: String?, outputPath: String?,
+        logger: AppLogger
     ) async {
         logger.info("Starting Benchmark (Max Files: \(maxFiles == Int.max ? "All" : "\(maxFiles)"))...")
 
@@ -422,9 +430,9 @@ struct ParakeetEouCommand {
             let encoder = JSONEncoder()
             encoder.outputFormatting = .prettyPrinted
             let data = try encoder.encode(jsonResults)
-            let outputPath = URL(fileURLWithPath: "benchmark_results.json")
-            try data.write(to: outputPath)
-            print("Results saved to \(outputPath.path)")
+            let resultPath = URL(fileURLWithPath: outputPath ?? "benchmark_results.json")
+            try data.write(to: resultPath)
+            print("Results saved to \(resultPath.path)")
         } catch {
             logger.error("Failed to save results to JSON: \(error)")
         }
@@ -526,6 +534,7 @@ struct ParakeetEouCommand {
                 --compute-units <type>   Compute units: all, cpuOnly, cpuAndGpu (default: all)
                 --verbose                Show detailed output during benchmark
                 --file-list <path>       JSON file with list of filenames to benchmark
+                --output <path>          Output path for benchmark results JSON (default: benchmark_results.json)
                 --debug-features         Enable debug feature dumping
                 --help, -h               Show this help message
 
