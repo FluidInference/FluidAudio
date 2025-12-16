@@ -58,11 +58,6 @@ public enum StreamingChunkSize: Sendable {
         }
     }
 
-    /// Number of audio frames per chunk (at hop_length=160, 10ms per frame)
-    public var chunkFrames: Int {
-        return chunkSamples / 160
-    }
-
     /// Number of mel spectrogram frames (from NeMo's chunk_size config)
     /// For 160ms: 17 mel frames → 2 valid encoder outputs
     /// For 320ms: 64 mel frames → 4 valid encoder outputs
@@ -119,12 +114,6 @@ public enum StreamingChunkSize: Sendable {
         }
     }
 
-    /// Number of encoder output frames to skip per chunk due to overlap.
-    /// With the loopback pre_cache mechanism, no skipping is needed.
-    public var skipFramesPerChunk: Int {
-        return 0
-    }
-
     /// Audio samples to shift between chunks.
     ///
     /// For the loopback encoder architecture:
@@ -165,8 +154,6 @@ public typealias EouCallback = @Sendable (String) -> Void
 public actor StreamingEouAsrManager {
     private let logger = AppLogger(category: "StreamingEOU")
 
-    // Debug
-    private var processedSteps = 0
     private var processedChunks = 0
 
     // Models
@@ -313,7 +300,6 @@ public actor StreamingEouAsrManager {
             self.audioBuffer.removeFirst(shiftSamples)
         }
 
-        processedSteps += 1
         // Return empty - actual transcription happens in finish()
         return ""
     }
@@ -349,86 +335,6 @@ public actor StreamingEouAsrManager {
         return transcript
     }
 
-    /// Process the entire accumulated audio buffer at once (Simulated Streaming)
-    ///
-    /// **WARNING**: This method is NOT SUPPORTED with the current CoreML model.
-    /// The streaming_encoder.mlmodelc expects fixed input shape [1, 128, 17] (17 frames = 160ms).
-    /// Attempting to pass full audio (e.g., 1045 frames for 10s audio) will fail with:
-    /// "MultiArray shape (1 x 128 x 1045) does not match the shape (1 x 128 x 17)"
-    ///
-    /// NeMo's "simulated streaming" benchmark uses a different code path with variable input,
-    /// but our CoreML model was exported with fixed chunk size for true streaming.
-    ///
-    /// To achieve NeMo's 3.61% WER benchmark result, you would need:
-    /// 1. A CoreML model exported with flexible input shapes, OR
-    /// 2. Use NeMo directly with compare_vs_offline=true
-    ///
-    /// For production use, use the true streaming methods: process() + finish()
-    public func processFullAudio() async throws -> String {
-        guard let streamingEncoder = streamingEncoder,
-            let tokenizer = tokenizer
-        else {
-            throw ASRError.notInitialized
-        }
-
-        if audioBuffer.isEmpty { return "" }
-
-        // A. Compute Full Mel Spectrogram
-        let (melFlat, melLength, numFrames) = melProcessor.computeFlat(audio: audioBuffer)
-
-        // Create MLMultiArray for mel: [1, 128, numFrames]
-        // NOTE: This will FAIL because the model expects fixed shape [1, 128, 17]
-        let mel = try MLMultiArray(shape: [1, 128, NSNumber(value: numFrames)], dataType: .float32)
-        let melPtr = mel.dataPointer.bindMemory(to: Float.self, capacity: mel.count)
-        melPtr.assign(from: melFlat, count: melFlat.count)
-
-        // Create mel_length: [1]
-        let melLen = try MLMultiArray(shape: [1], dataType: .int32)
-        melLen[0] = NSNumber(value: melLength)
-
-        // Reset states
-        try resetStates()
-
-        guard let preCache = preCache,
-            let cacheLastChannel = cacheLastChannel,
-            let cacheLastTime = cacheLastTime,
-            let cacheLastChannelLen = cacheLastChannelLen,
-            let rnntDecoder = rnntDecoder
-        else {
-            throw ASRError.notInitialized
-        }
-
-        // B. Run Encoder (will fail with shape mismatch)
-        let encoderInput = try MLDictionaryFeatureProvider(dictionary: [
-            "audio_signal": MLFeatureValue(multiArray: mel),
-            "audio_length": MLFeatureValue(multiArray: melLen),
-            "pre_cache": MLFeatureValue(multiArray: preCache),
-            "cache_last_channel": MLFeatureValue(multiArray: cacheLastChannel),
-            "cache_last_time": MLFeatureValue(multiArray: cacheLastTime),
-            "cache_last_channel_len": MLFeatureValue(multiArray: cacheLastChannelLen),
-        ])
-
-        let encoderOutput = try await streamingEncoder.prediction(from: encoderInput)
-
-        // C. Decode Full Output
-        guard let encoded = encoderOutput.featureValue(for: "encoded_output")?.multiArrayValue else {
-            throw ASRError.processingFailed("Missing encoded_output")
-        }
-
-        // Reset decoder state for full decode
-        rnntDecoder.resetState()
-
-        let newTokens = try rnntDecoder.decode(encoderOutput: encoded, timeOffset: 0)
-        let transcript = tokenizer.decode(ids: newTokens)
-
-        // Clear buffer
-        audioBuffer.removeAll()
-        accumulatedTokenIds.removeAll()
-        processedSteps += 1
-
-        return transcript
-    }
-
     public func reset() async {
         audioBuffer.removeAll()
         debugFeatureBuffer.removeAll()
@@ -438,17 +344,10 @@ public actor StreamingEouAsrManager {
         totalSamplesProcessed = 0
         try? resetStates()
         rnntDecoder?.resetState()
-        self.processedSteps = 0
-        self.processedChunks = 0
+        processedChunks = 0
     }
 
     public func injectSilence(_ seconds: Double) {
-        let silenceSamples = Int(seconds * 16000)
-        audioBuffer.append(contentsOf: Array(repeating: 0.0, count: silenceSamples))
-    }
-
-    /// Inject trailing silence for short utterances (helps decoder emit final tokens)
-    public func injectTrailingSilence(_ seconds: Double) {
         let silenceSamples = Int(seconds * 16000)
         audioBuffer.append(contentsOf: Array(repeating: 0.0, count: silenceSamples))
     }
@@ -515,16 +414,10 @@ public actor StreamingEouAsrManager {
             throw ASRError.processingFailed("Missing encoder output")
         }
 
-        // Skip overlapping frames: With 50% audio overlap, the first frame(s) represent
-        // audio that was already processed in the previous chunk.
-        // For 160ms: 3 frames output, valid_out_len=2, skip 1 (except first chunk)
-        // For 320ms: 5 frames output, valid_out_len=4, skip 1 (except first chunk)
-        let skipFrames = processedChunks == 0 ? 0 : chunkSize.skipFramesPerChunk
-
         // Decode this chunk - RNNT decoder state (h, c, lastToken) carries across chunks
         // NeMo truncates encoder output to valid_out_len frames before decoding
         let decodeResult = try rnntDecoder.decodeWithEOU(
-            encoderOutput: encoded, timeOffset: processedChunks, skipFrames: skipFrames,
+            encoderOutput: encoded, timeOffset: processedChunks, skipFrames: 0,
             validOutLen: chunkSize.validOutputLen)
         accumulatedTokenIds.append(contentsOf: decodeResult.tokenIds)
 

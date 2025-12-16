@@ -122,7 +122,7 @@ struct TextNormalizer {
                 options: .regularExpression
             )
         }
-        
+
         // Abbreviations (Moved to top)
         let abbreviations = [
             // Titles and names
@@ -398,7 +398,7 @@ struct TextNormalizer {
             range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1$2"
         )
-        
+
         // Merge consecutive digits logic removed due to regression
 
         // Remove periods not followed by numbers
@@ -466,9 +466,9 @@ struct TextNormalizer {
 
         return normalized
     }
-    
+
     // MARK: - Advanced Number Parsing
-    
+
     private static let numberValues: [String: Int] = [
         "zero": 0, "oh": 0,
         "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -476,21 +476,21 @@ struct TextNormalizer {
         "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
         "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
         "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
-        "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90
+        "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
     ]
-    
+
     private static let multipliers: [String: Int] = [
         "hundred": 100,
         "thousand": 1000,
-        "million": 1000000,
-        "billion": 1000000000
+        "million": 1_000_000,
+        "billion": 1_000_000_000,
     ]
-    
+
     private static func convertNumbers(_ text: String) -> String {
         let words = text.components(separatedBy: .whitespaces)
         var result: [String] = []
         var currentNumberWords: [String] = []
-        
+
         for word in words {
             if isNumberWord(word) {
                 currentNumberWords.append(word)
@@ -502,27 +502,27 @@ struct TextNormalizer {
                 result.append(word)
             }
         }
-        
+
         if !currentNumberWords.isEmpty {
             result.append(parseNumberSequence(currentNumberWords))
         }
-        
+
         return result.joined(separator: " ")
     }
-    
+
     private static func isNumberWord(_ word: String) -> Bool {
         return numberValues.keys.contains(word) || multipliers.keys.contains(word)
     }
-    
+
     private static func parseNumberSequence(_ words: [String]) -> String {
         var results: [String] = []
         var currentSum = 0
         var lastScale = 0
-        
+
         for word in words {
             let val = numberValues[word] ?? multipliers[word] ?? 0
             let isMultiplier = multipliers.keys.contains(word)
-            
+
             if isMultiplier {
                 if currentSum == 0 {
                     currentSum = 1
@@ -537,14 +537,14 @@ struct TextNormalizer {
                     // Merge conditions:
                     // 1. Previous was a multiplier larger than current (e.g. "hundred" ... "five")
                     // 2. Previous was a ten (20-90) and current is unit (1-9)
-                    
+
                     var canMerge = false
                     if lastScale >= 100 && val < lastScale {
                         canMerge = true
                     } else if lastScale == 1 && (currentSum % 100 >= 20 && currentSum % 10 == 0) && val < 10 {
                         canMerge = true
                     }
-                    
+
                     if canMerge {
                         currentSum += val
                         lastScale = 1
@@ -556,11 +556,11 @@ struct TextNormalizer {
                 }
             }
         }
-        
+
         if currentSum > 0 {
             results.append(String(currentSum))
         }
-        
+
         return results.joined(separator: " ")
     }
 

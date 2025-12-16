@@ -103,7 +103,7 @@ public class ASRBenchmark {
                 let file = LibriSpeechFile(
                     fileName: fileUrl.lastPathComponent,
                     audioPath: fileUrl,
-                    transcript: "i'm going to tell you a story that could change your life" // Known transcript
+                    transcript: "i'm going to tell you a story that could change your life"  // Known transcript
                 )
                 filteredFiles = [file]
                 logger.info("🔍 Processing custom file: \(fileUrl.path)")
@@ -112,7 +112,8 @@ public class ASRBenchmark {
                 let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
                 filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
                 if filteredFiles.isEmpty {
-                    throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+                    throw ASRError.processingFailed(
+                        "Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
                 }
                 logger.info("🔍 Processing single file from dataset: \(targetFileName)")
             }
@@ -184,10 +185,11 @@ public class ASRBenchmark {
     {
         let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
         let audioLength = TimeInterval(audioSamples.count) / 16000.0
-        
+
         // Read file into buffer
         let audioFile = try AVAudioFile(forReading: file.audioPath)
-        let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
         try audioFile.read(into: buffer)
 
         let inferenceStartTime = Date()
@@ -862,42 +864,43 @@ extension ASRBenchmark {
         )
 
         let asrManager = AsrManager(config: asrConfig)
-        
+
         do {
             // If dumping features, we must be in pure-coreml mode and single file
             let dumpFeatures = arguments.contains("--dump-features")
-            
+
             if dumpFeatures {
                 guard pureCoreML, let singleFile = singleFile else {
                     logger.error("Error: --dump-features requires --pure-coreml and --single-file")
                     exit(1)
                 }
-                
+
                 logger.info("Running in Feature Dump Mode")
-                
+
                 let pureCoreMLManager = StreamingEouAsrManager(debugFeatures: true)
                 let modelDir = URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Models/ParakeetEOU/Streaming")
                 try await pureCoreMLManager.loadModels(modelDir: modelDir)
-                
+
                 // Process single file
                 let fileUrl = URL(fileURLWithPath: singleFile)
-                
+
                 let audioFile = try AVAudioFile(forReading: fileUrl)
-                let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
+                let buffer = AVAudioPCMBuffer(
+                    pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
                 try audioFile.read(into: buffer)
-                
+
                 _ = try await pureCoreMLManager.process(audioBuffer: buffer)
                 _ = try await pureCoreMLManager.finish()
-                
+
                 let outputUrl = URL(fileURLWithPath: "coreml_mel_features.json")
                 try await pureCoreMLManager.saveDebugFeatures(to: outputUrl)
-                
+
                 logger.info("Done. Features dumped to coreml_mel_features.json")
                 exit(0)
             }
 
             let startBenchmark = Date()
-            
+
             logger.info("Initializing ASR system...")
             do {
                 let models = try await AsrModels.downloadAndLoad(version: modelVersion)

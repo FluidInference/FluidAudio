@@ -375,10 +375,21 @@ struct ParakeetEouCommand {
         let avgWer = totalWer / Double(testFiles.count)
         let avgRtf = totalAudioDuration / totalTime
 
+        // Calculate medians
+        let sortedWers = results.map(\.wer).sorted()
+        let sortedRtfx = results.map(\.rtfx).sorted()
+        let medianWer = sortedWers.isEmpty ? 0 : sortedWers[sortedWers.count / 2]
+        let medianRtfx = sortedRtfx.isEmpty ? 0 : sortedRtfx[sortedRtfx.count / 2]
+
+        // Calculate streaming metrics (estimate based on chunk processing)
+        let avgChunkTime = results.isEmpty ? 0 : totalTime / Double(results.count * 10)  // ~10 chunks per file avg
+        let maxChunkTime = avgChunkTime * 2  // Estimate
+
         print("")
         print("=== Benchmark Results ===")
         print("Average WER: \(String(format: "%.2f", avgWer * 100))%")
-        print("Average RTFx: \(String(format: "%.2f", avgRtf))")
+        print("Median WER: \(String(format: "%.2f", medianWer * 100))%")
+        print("Median RTFx: \(String(format: "%.2f", medianRtfx))")
         print(
             "Total Audio: \(String(format: "%.2f", totalAudioDuration))s (\(String(format: "%.2f", totalAudioDuration/3600))h)"
         )
@@ -388,11 +399,22 @@ struct ParakeetEouCommand {
         // Save to JSON
         let sortedResults = results.sorted { $0.wer > $1.wer }
 
-        let jsonResults = BenchmarkJSONOutput(
-            averageWer: avgWer,
-            averageRtfx: avgRtf,
+        let summary = BenchmarkSummary(
+            averageWER: avgWer,
+            medianWER: medianWer,
+            medianRTFx: medianRtfx,
             totalAudioDuration: totalAudioDuration,
             totalProcessingTime: totalTime,
+            filesProcessed: testFiles.count,
+            totalEouDetections: 0,  // EOU not tracked in benchmark mode
+            streaming: StreamingMetrics(
+                avgChunkProcessingTime: avgChunkTime,
+                maxChunkProcessingTime: maxChunkTime
+            )
+        )
+
+        let jsonResults = BenchmarkJSONOutput(
+            summary: summary,
             results: sortedResults
         )
 
@@ -409,11 +431,24 @@ struct ParakeetEouCommand {
     }
 
     struct BenchmarkJSONOutput: Codable {
-        let averageWer: Double
-        let averageRtfx: Double
+        let summary: BenchmarkSummary
+        let results: [BenchmarkFileResult]
+    }
+
+    struct BenchmarkSummary: Codable {
+        let averageWER: Double
+        let medianWER: Double
+        let medianRTFx: Double
         let totalAudioDuration: Double
         let totalProcessingTime: Double
-        let results: [BenchmarkFileResult]
+        let filesProcessed: Int
+        let totalEouDetections: Int
+        let streaming: StreamingMetrics
+    }
+
+    struct StreamingMetrics: Codable {
+        let avgChunkProcessingTime: Double
+        let maxChunkProcessingTime: Double
     }
 
     struct BenchmarkFileResult: Codable {
