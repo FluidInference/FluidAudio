@@ -5,7 +5,8 @@ import OSLog
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout TdtDecoderState
+        _ audioSamples: [Float], decoderState: inout TdtDecoderState,
+        customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         guard audioSamples.count >= 16_000 else { throw ASRError.invalidAudioData }
@@ -20,7 +21,8 @@ extension AsrManager {
                 paddedAudio,
                 originalLength: originalLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
-                decoderState: &decoderState
+                decoderState: &decoderState,
+                customVocabulary: customVocabulary
             )
 
             let result = processTranscriptionResult(
@@ -47,7 +49,8 @@ extension AsrManager {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> (hypothesis: TdtHypothesis, encoderSequenceLength: Int) {
 
         let preprocessorInput = try await preparePreprocessorInput(
@@ -93,7 +96,8 @@ extension AsrManager {
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrameAdjustment,
             isLastChunk: isLastChunk,
-            globalFrameOffset: globalFrameOffset
+            globalFrameOffset: globalFrameOffset,
+            customVocabulary: customVocabulary
         )
 
         return (hypothesis, encoderSequenceLength)
@@ -138,9 +142,9 @@ extension AsrManager {
         return try MLDictionaryFeatureProvider(dictionary: features)
     }
 
-    /// Streaming-friendly chunk transcription that preserves decoder state and supports start-frame offset.
-    /// This is used by both sliding window chunking and streaming paths to unify behavior.
-    internal func transcribeStreamingChunk(
+    /// Streaming-friendly chunk transcription that preserves decoder state and optionally deduplicates
+    /// overlapping tokens. Used by both sliding window chunking and streaming paths to keep behavior unified.
+    public func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
         previousTokens: [Int] = []
@@ -215,7 +219,10 @@ extension AsrManager {
             confidence: confidence,
             duration: duration,
             processingTime: processingTime,
-            tokenTimings: resultTimings
+            tokenTimings: resultTimings,
+            performanceMetrics: nil,
+            ctcDetectedTerms: nil,
+            ctcAppliedTerms: nil
         )
     }
 

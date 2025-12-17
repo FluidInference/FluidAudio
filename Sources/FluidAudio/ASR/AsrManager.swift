@@ -33,6 +33,11 @@ public final class AsrManager {
     }
     #endif
 
+    /// Custom vocabulary context for context biasing
+    private var customVocabulary: CustomVocabularyContext?
+    /// Cached CTC keyword spotter to avoid per-call initialization cost
+    private var cachedCtcKeywordSpotter: CtcKeywordSpotter?
+
     // TODO:: the decoder state should be moved higher up in the API interface
     internal var microphoneDecoderState: TdtDecoderState
     internal var systemDecoderState: TdtDecoderState
@@ -90,6 +95,25 @@ public final class AsrManager {
         logger.info("Token duration optimization model loaded successfully")
 
         logger.info("AsrManager initialized successfully with provided models")
+    }
+
+    /// Update custom vocabulary for context biasing without reinitializing ASR
+    /// - Parameter vocabulary: New custom vocabulary context, or nil to disable context biasing
+    public func setCustomVocabulary(_ vocabulary: CustomVocabularyContext?) {
+        self.customVocabulary = vocabulary
+        if let vocab = vocabulary {
+            logger.info(
+                "Custom vocabulary updated: \(vocab.terms.count) terms, "
+                    + "thresholds: similarity=\(String(format: "%.2f", vocab.minSimilarity)), "
+                    + "combined=\(String(format: "%.2f", vocab.minCombinedConfidence))")
+        } else {
+            logger.info("Custom vocabulary disabled")
+        }
+    }
+
+    /// Get current custom vocabulary
+    public func getCustomVocabulary() -> CustomVocabularyContext? {
+        return customVocabulary
     }
 
     private func createFeatureProvider(
@@ -228,7 +252,8 @@ public final class AsrManager {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
-        globalFrameOffset: Int = 0
+        globalFrameOffset: Int = 0,
+        customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> TdtHypothesis {
         // Route to appropriate decoder based on model version
         switch asrModels!.version {
@@ -243,7 +268,8 @@ public final class AsrManager {
                 decoderState: &decoderState,
                 contextFrameAdjustment: contextFrameAdjustment,
                 isLastChunk: isLastChunk,
-                globalFrameOffset: globalFrameOffset
+                globalFrameOffset: globalFrameOffset,
+                customVocabulary: customVocabulary
             )
         case .v3:
             let decoder = TdtDecoderV3(config: config)
@@ -272,11 +298,14 @@ public final class AsrManager {
     ///   - source: The audio source type (microphone or system audio)
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
-    public func transcribe(_ audioBuffer: AVAudioPCMBuffer, source: AudioSource = .microphone) async throws -> ASRResult
-    {
+    public func transcribe(
+        _ audioBuffer: AVAudioPCMBuffer,
+        source: AudioSource = .microphone,
+        customVocabulary: CustomVocabularyContext? = nil
+    ) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleBuffer(audioBuffer)
 
-        let result = try await transcribe(audioFloatArray, source: source)
+        let result = try await transcribe(audioFloatArray, source: source, customVocabulary: customVocabulary)
 
         return result
     }
@@ -291,10 +320,14 @@ public final class AsrManager {
     ///   - source: The audio source type (defaults to .system)
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
-    public func transcribe(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+    public func transcribe(
+        _ url: URL,
+        source: AudioSource = .system,
+        customVocabulary: CustomVocabularyContext? = nil
+    ) async throws -> ASRResult {
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
 
-        let result = try await transcribe(audioFloatArray, source: source)
+        let result = try await transcribe(audioFloatArray, source: source, customVocabulary: customVocabulary)
 
         return result
     }
@@ -312,15 +345,77 @@ public final class AsrManager {
     /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
         _ audioSamples: [Float],
-        source: AudioSource = .microphone
+        source: AudioSource = .microphone,
+        customVocabulary: CustomVocabularyContext? = nil
     ) async throws -> ASRResult {
         var result: ASRResult
         switch source {
         case .microphone:
             result = try await transcribeWithState(
-                audioSamples, decoderState: &microphoneDecoderState)
+                audioSamples, decoderState: &microphoneDecoderState, customVocabulary: customVocabulary)
         case .system:
-            result = try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
+            result = try await transcribeWithState(
+                audioSamples, decoderState: &systemDecoderState, customVocabulary: customVocabulary)
+        }
+
+        // Optional CTC keyword boosting and metrics
+        if let customVocabulary, !customVocabulary.terms.isEmpty {
+            let debug = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+            do {
+                let spotter = try await getKeywordSpotter()
+                let detections = try await spotter.spotKeywords(
+                    audioSamples: audioSamples,
+                    customVocabulary: customVocabulary,
+                    minScore: customVocabulary.minCtcScore
+                )
+
+                let detectedTerms = detections.map { $0.term.text }
+
+                if debug {
+                    logger.info("CTC boost: detected \(detections.count) keywords")
+                }
+
+                if !detections.isEmpty {
+                    let mergeResult = KeywordMerger.applyCorrections(
+                        detections: detections,
+                        toTranscript: result.text,
+                        vocabulary: customVocabulary,
+                        debugMode: debug
+                    )
+
+                    let appliedTerms = mergeResult.replacements.map { $0.canonicalText }
+                    let loweredCorrected = mergeResult.correctedText.lowercased()
+                    let filteredDetected =
+                        detectedTerms
+                        .filter { loweredCorrected.contains($0.lowercased()) }
+
+                    result = ASRResult(
+                        text: mergeResult.correctedText,
+                        confidence: result.confidence,
+                        duration: result.duration,
+                        processingTime: result.processingTime,
+                        tokenTimings: result.tokenTimings,
+                        performanceMetrics: result.performanceMetrics,
+                        ctcDetectedTerms: filteredDetected.isEmpty ? nil : filteredDetected,
+                        ctcAppliedTerms: appliedTerms.isEmpty ? nil : appliedTerms
+                    )
+                } else if !detectedTerms.isEmpty {
+                    let loweredText = result.text.lowercased()
+                    let filteredDetected = detectedTerms.filter { loweredText.contains($0.lowercased()) }
+                    result = ASRResult(
+                        text: result.text,
+                        confidence: result.confidence,
+                        duration: result.duration,
+                        processingTime: result.processingTime,
+                        tokenTimings: result.tokenTimings,
+                        performanceMetrics: result.performanceMetrics,
+                        ctcDetectedTerms: filteredDetected.isEmpty ? nil : filteredDetected,
+                        ctcAppliedTerms: nil
+                    )
+                }
+            } catch {
+                logger.warning("CTC keyword boost failed: \(error.localizedDescription)")
+            }
         }
 
         // Stateless architecture: reset decoder state after each transcription to ensure
@@ -328,6 +423,15 @@ public final class AsrManager {
         try await self.resetDecoderState()
 
         return result
+    }
+
+    private func getKeywordSpotter() async throws -> CtcKeywordSpotter {
+        if let cachedCtcKeywordSpotter {
+            return cachedCtcKeywordSpotter
+        }
+        let spotter = try await CtcKeywordSpotter.makeDefault()
+        cachedCtcKeywordSpotter = spotter
+        return spotter
     }
 
     // Reset both decoder states

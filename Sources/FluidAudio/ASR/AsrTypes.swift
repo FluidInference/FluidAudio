@@ -26,11 +26,15 @@ public struct ASRResult: Sendable {
     public let processingTime: TimeInterval
     public let tokenTimings: [TokenTiming]?
     public let performanceMetrics: ASRPerformanceMetrics?
+    public let ctcDetectedTerms: [String]?
+    public let ctcAppliedTerms: [String]?
 
     public init(
         text: String, confidence: Float, duration: TimeInterval, processingTime: TimeInterval,
         tokenTimings: [TokenTiming]? = nil,
-        performanceMetrics: ASRPerformanceMetrics? = nil
+        performanceMetrics: ASRPerformanceMetrics? = nil,
+        ctcDetectedTerms: [String]? = nil,
+        ctcAppliedTerms: [String]? = nil
     ) {
         self.text = text
         self.confidence = confidence
@@ -38,6 +42,8 @@ public struct ASRResult: Sendable {
         self.processingTime = processingTime
         self.tokenTimings = tokenTimings
         self.performanceMetrics = performanceMetrics
+        self.ctcDetectedTerms = ctcDetectedTerms
+        self.ctcAppliedTerms = ctcAppliedTerms
     }
 
     /// Real-time factor (RTFx) - how many times faster than real-time
