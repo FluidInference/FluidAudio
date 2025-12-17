@@ -35,4 +35,14 @@ final class OfflineConfigTests: XCTestCase {
         )
         XCTAssertEqual(clustering.numSpeakers, 3)
     }
+
+    func testFullConfigIncludesSpeakerConstraints() {
+        var config = OfflineDiarizerConfig.default
+        config.clustering.minSpeakers = 2
+        config.clustering.maxSpeakers = 5
+
+        XCTAssertEqual(config.clustering.minSpeakers, 2)
+        XCTAssertEqual(config.clustering.maxSpeakers, 5)
+        XCTAssertNil(config.clustering.numSpeakers)
+    }
 }
