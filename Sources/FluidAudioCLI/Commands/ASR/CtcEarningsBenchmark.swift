@@ -394,8 +394,9 @@ public enum CtcEarningsBenchmark {
         return result
     }
 
-    /// Apply CTC keyword corrections to TDT transcription using fuzzy matching.
-    /// For each detected keyword, find similar-sounding words in TDT output and replace them.
+    /// Apply CTC keyword corrections to TDT transcription using a two-pass approach:
+    /// 1. First pass: fuzzy matching (for words that are phonetically similar)
+    /// 2. Second pass: timestamp alignment (for words that are very different)
     private static func applyKeywordCorrections(
         tdtResult: ASRResult,
         detections: [CtcKeywordSpotter.KeywordDetection],
@@ -408,46 +409,259 @@ public enum CtcEarningsBenchmark {
         }
 
         var text = tdtResult.text
+        var usedDetections: Set<String> = []
 
-        // For each detected keyword, try to find and replace similar words
+        // PASS 1: Fuzzy matching for phonetically similar words
         for detection in validDetections {
             let keyword = detection.term.text
             let keywordLower = keyword.lowercased()
+            let keywordParts = keywordLower.components(separatedBy: " ").filter { !$0.isEmpty }
 
-            // Split text into words while preserving structure
-            let words = text.components(separatedBy: .whitespacesAndNewlines)
+            let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
 
-            for word in words {
-                let wordClean = word.trimmingCharacters(in: .punctuationCharacters).lowercased()
-                guard !wordClean.isEmpty else { continue }
+            // Handle multi-word keywords
+            if keywordParts.count > 1 {
+                for i in 0..<(words.count - keywordParts.count + 1) {
+                    var allMatch = true
+                    var matchedWords: [String] = []
 
-                // Check if this word is similar to the keyword (fuzzy match)
-                if isSimilar(wordClean, keywordLower) && wordClean != keywordLower {
-                    // Replace this word with the keyword, preserving case pattern
-                    let replacement = matchCase(keyword, to: word)
-                    text = text.replacingOccurrences(of: word, with: replacement)
-                    break // Only replace first occurrence per keyword
+                    for j in 0..<keywordParts.count {
+                        let wordClean = words[i + j].trimmingCharacters(in: .punctuationCharacters).lowercased()
+                        if isSimilar(wordClean, keywordParts[j]) {
+                            matchedWords.append(words[i + j])
+                        } else {
+                            allMatch = false
+                            break
+                        }
+                    }
+
+                    if allMatch && !matchedWords.isEmpty {
+                        let originalPhrase = matchedWords.joined(separator: " ")
+                        let replacement = matchCase(keyword, to: matchedWords[0])
+                        text = text.replacingOccurrences(of: originalPhrase, with: replacement)
+                        usedDetections.insert(keyword)
+                        break
+                    }
                 }
+            } else {
+                // Single word keyword
+                for word in words {
+                    let wordClean = word.trimmingCharacters(in: .punctuationCharacters).lowercased()
+                    guard !wordClean.isEmpty else { continue }
+
+                    if isSimilar(wordClean, keywordLower) && wordClean != keywordLower {
+                        let replacement = matchCase(keyword, to: word)
+                        text = text.replacingOccurrences(of: word, with: replacement)
+                        usedDetections.insert(keyword)
+                        break
+                    }
+                }
+            }
+        }
+
+        // PASS 2: Timestamp-based alignment for keywords not matched by fuzzy matching
+        guard let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty else {
+            return text
+        }
+
+        // Build word timings from token timings (merge subword tokens)
+        let wordTimings = buildWordTimings(from: tokenTimings)
+
+        for detection in validDetections {
+            let keyword = detection.term.text
+            guard !usedDetections.contains(keyword) else { continue }
+
+            // Find TDT word(s) overlapping with CTC detection time
+            let ctcStart = detection.startTime
+            let ctcEnd = detection.endTime
+            let ctcMid = (ctcStart + ctcEnd) / 2
+
+            // Find word with maximum overlap
+            var bestMatch: (index: Int, overlap: Double)? = nil
+            for (idx, wt) in wordTimings.enumerated() {
+                let overlapStart = max(ctcStart, wt.startTime)
+                let overlapEnd = min(ctcEnd, wt.endTime)
+                let overlap = max(0, overlapEnd - overlapStart)
+
+                // Also check if CTC midpoint falls within word
+                let containsMidpoint = wt.startTime <= ctcMid && ctcMid <= wt.endTime
+
+                if overlap > 0 || containsMidpoint {
+                    let score = overlap + (containsMidpoint ? 0.1 : 0)
+                    if bestMatch == nil || score > bestMatch!.overlap {
+                        bestMatch = (idx, score)
+                    }
+                }
+            }
+
+            if let match = bestMatch {
+                let originalWord = wordTimings[match.index].word
+                let originalClean = originalWord.trimmingCharacters(in: .punctuationCharacters).lowercased()
+
+                // Skip if already correct or is a stop word
+                if originalClean == keyword.lowercased() || stopWords.contains(originalClean) {
+                    continue
+                }
+
+                // Skip if the word is very different in length (might be wrong alignment)
+                // Allow replacement if original word is shorter (TDT truncated the keyword)
+                // or if they have similar lengths
+                let lenRatio = Double(originalClean.count) / Double(keyword.count)
+                if lenRatio > 2.0 {
+                    continue // Original much longer than keyword - likely wrong alignment
+                }
+
+                let replacement = matchCase(keyword, to: originalWord)
+                text = text.replacingOccurrences(of: originalWord, with: replacement)
             }
         }
 
         return text
     }
 
+    /// Build word timings by merging subword tokens (tokens starting with "▁" begin new words)
+    private static func buildWordTimings(from tokenTimings: [TokenTiming]) -> [(word: String, startTime: Double, endTime: Double)] {
+        var wordTimings: [(word: String, startTime: Double, endTime: Double)] = []
+        var currentWord = ""
+        var wordStart: Double = 0
+        var wordEnd: Double = 0
+
+        for timing in tokenTimings {
+            let token = timing.token
+
+            // Skip special tokens
+            if token.isEmpty || token == "<blank>" || token == "<pad>" {
+                continue
+            }
+
+            // Check if this starts a new word (has ▁ prefix or is first token)
+            let startsNewWord = token.hasPrefix("▁") || currentWord.isEmpty
+
+            if startsNewWord && !currentWord.isEmpty {
+                // Save previous word
+                wordTimings.append((word: currentWord, startTime: wordStart, endTime: wordEnd))
+                currentWord = ""
+            }
+
+            if startsNewWord {
+                currentWord = token.hasPrefix("▁") ? String(token.dropFirst()) : token
+                wordStart = timing.startTime
+            } else {
+                currentWord += token
+            }
+            wordEnd = timing.endTime
+        }
+
+        // Save final word
+        if !currentWord.isEmpty {
+            wordTimings.append((word: currentWord, startTime: wordStart, endTime: wordEnd))
+        }
+
+        return wordTimings
+    }
+
+    /// Common English words that should never be replaced by keyword matching
+    private static let stopWords: Set<String> = [
+        // Pronouns
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "my", "your", "his", "its", "our", "their", "mine", "yours", "hers", "ours", "theirs",
+        "this", "that", "these", "those", "who", "whom", "what", "which", "whose",
+        // Common verbs
+        "is", "are", "was", "were", "be", "been", "being", "am",
+        "have", "has", "had", "having", "do", "does", "did", "doing", "done",
+        "will", "would", "shall", "should", "may", "might", "must", "can", "could",
+        "get", "got", "getting", "go", "goes", "went", "going", "gone",
+        "come", "came", "coming", "see", "saw", "seen", "know", "knew", "known",
+        "think", "thought", "make", "made", "take", "took", "taken", "give", "gave", "given",
+        "say", "said", "tell", "told", "ask", "asked", "use", "used", "want", "wanted",
+        "need", "needed", "try", "tried", "let", "put", "keep", "kept", "look", "looked",
+        // Articles and determiners
+        "a", "an", "the", "some", "any", "no", "every", "each", "all", "both", "few", "many",
+        "much", "more", "most", "other", "another", "such",
+        // Prepositions
+        "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "down", "out",
+        "about", "into", "over", "after", "before", "between", "under", "through", "during",
+        // Conjunctions
+        "and", "or", "but", "so", "yet", "nor", "if", "then", "than", "because", "while",
+        "although", "unless", "since", "when", "where", "as",
+        // Adverbs
+        "not", "very", "just", "also", "only", "even", "still", "already", "always", "never",
+        "often", "sometimes", "usually", "really", "well", "now", "here", "there", "how", "why",
+        // Common words
+        "yes", "no", "okay", "ok", "thank", "thanks", "please", "sorry", "hello", "hi", "bye",
+        "good", "great", "bad", "new", "old", "first", "last", "long", "short", "big", "small",
+        "high", "low", "right", "left", "next", "back", "same", "different", "own", "able",
+        "way", "thing", "things", "time", "times", "year", "years", "day", "days", "week", "weeks",
+        "part", "place", "case", "point", "fact", "end", "kind", "lot", "set",
+        // Numbers
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+        "hundred", "thousand", "million", "billion"
+    ]
+
     /// Check if two words are similar (edit distance / length ratio)
     private static func isSimilar(_ a: String, _ b: String) -> Bool {
-        let maxLen = max(a.count, b.count)
-        guard maxLen > 0 else { return false }
+        // Never match stop words - they're too common to be proper nouns
+        if stopWords.contains(a) || stopWords.contains(b) {
+            return false
+        }
 
-        // Must be similar length
+        let maxLen = max(a.count, b.count)
+        let minLen = min(a.count, b.count)
+        guard maxLen > 0, minLen >= 3 else { return false }
+
+        // Allow more length difference for longer words
         let lenDiff = abs(a.count - b.count)
-        if lenDiff > max(2, maxLen / 3) { return false }
+        if lenDiff > max(3, maxLen / 2) { return false }
 
         // Calculate edit distance
         let distance = editDistance(a, b)
-        let threshold = max(1, maxLen / 3)
+
+        // More aggressive threshold: allow up to 40% of max length as edits
+        let threshold = max(2, Int(Double(maxLen) * 0.4))
+
+        // Also check if one is substring of other (handles "Erik" in "Ririek")
+        if a.contains(b) || b.contains(a) {
+            return true
+        }
+
+        // Check common prefix/suffix (handles "Heri" vs "Harry")
+        let commonPrefix = commonPrefixLength(a, b)
+        let commonSuffix = commonSuffixLength(a, b)
+        if commonPrefix >= 2 || commonSuffix >= 2 {
+            return distance <= threshold + 1
+        }
 
         return distance <= threshold
+    }
+
+    /// Get length of common prefix
+    private static func commonPrefixLength(_ a: String, _ b: String) -> Int {
+        let aChars = Array(a)
+        let bChars = Array(b)
+        var count = 0
+        for i in 0..<min(aChars.count, bChars.count) {
+            if aChars[i] == bChars[i] {
+                count += 1
+            } else {
+                break
+            }
+        }
+        return count
+    }
+
+    /// Get length of common suffix
+    private static func commonSuffixLength(_ a: String, _ b: String) -> Int {
+        let aChars = Array(a.reversed())
+        let bChars = Array(b.reversed())
+        var count = 0
+        for i in 0..<min(aChars.count, bChars.count) {
+            if aChars[i] == bChars[i] {
+                count += 1
+            } else {
+                break
+            }
+        }
+        return count
     }
 
     /// Simple edit distance calculation
