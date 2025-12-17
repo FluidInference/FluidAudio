@@ -347,8 +347,8 @@ struct ParakeetEouCommand {
                 let duration = Date().timeIntervalSince(startTime)
 
                 // Normalize for WER calculation
-                let normalizedTranscript = TextNormalizerOfficial.normalize(transcript)
-                let normalizedReference = TextNormalizerOfficial.normalize(reference)
+                let normalizedTranscript = TextNormalizer.normalize(transcript)
+                let normalizedReference = TextNormalizer.normalize(reference)
 
                 let wer = calculateWer(hypothesis: normalizedTranscript, reference: normalizedReference)
                 totalWer += wer
