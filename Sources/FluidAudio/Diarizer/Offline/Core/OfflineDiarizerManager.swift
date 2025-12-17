@@ -225,11 +225,13 @@ public final class OfflineDiarizerManager {
 
         let vbxOutput: VBxOutput
         if !trainingRho.isEmpty, !initialClusters.isEmpty {
-            let hasConstraints = config.clustering.numSpeakers != nil
+            let hasConstraints =
+                config.clustering.numSpeakers != nil
                 || config.clustering.minSpeakers != nil
                 || config.clustering.maxSpeakers != nil
 
-            let constraints: SpeakerCountConstraints? = hasConstraints
+            let constraints: SpeakerCountConstraints? =
+                hasConstraints
                 ? SpeakerCountConstraints.resolve(
                     numEmbeddings: trainingEmbeddings.count,
                     numSpeakers: config.clustering.numSpeakers,

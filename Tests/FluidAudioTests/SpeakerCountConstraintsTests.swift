@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import FluidAudio
 
 @available(macOS 14.0, iOS 17.0, *)

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import FluidAudio
 
 @available(macOS 14.0, iOS 17.0, *)
@@ -13,7 +14,7 @@ final class KMeansClusteringTests: XCTestCase {
             [0.0, 1.0],
             [0.1, 1.1],
             [-1.0, 0.0],
-            [-0.9, 0.1]
+            [-0.9, 0.1],
         ]
 
         // Use seed for reproducibility (Expert Panel: Crispin)
@@ -33,7 +34,7 @@ final class KMeansClusteringTests: XCTestCase {
         let embeddings: [[Double]] = [
             [1.0, 0.0],
             [1.1, 0.1],
-            [0.9, 0.2]
+            [0.9, 0.2],
         ]
 
         let clusters = KMeansClustering.cluster(
@@ -50,7 +51,7 @@ final class KMeansClusteringTests: XCTestCase {
     func testKMeansReturnsSequentialAssignmentsForMoreClustersThanEmbeddings() {
         let embeddings: [[Double]] = [
             [1.0, 0.0],
-            [0.0, 1.0]
+            [0.0, 1.0],
         ]
 
         let clusters = KMeansClustering.cluster(
@@ -70,7 +71,7 @@ final class KMeansClusteringTests: XCTestCase {
             [1.0, 0.0],
             [1.0, 0.0],
             [0.0, 1.0],
-            [0.0, 1.0]
+            [0.0, 1.0],
         ]
 
         let (clusters, centroids) = KMeansClustering.clusterWithCentroids(
@@ -89,7 +90,7 @@ final class KMeansClusteringTests: XCTestCase {
     func testKMeansIsDeterministicWithSameSeed() {
         let embeddings: [[Double]] = [
             [1.0, 0.0], [1.1, 0.1], [0.0, 1.0],
-            [0.1, 1.1], [-1.0, 0.0], [-0.9, 0.1]
+            [0.1, 1.1], [-1.0, 0.0], [-0.9, 0.1],
         ]
 
         let clusters1 = KMeansClustering.cluster(
@@ -138,7 +139,7 @@ struct SeededRandomNumberGenerator: RandomNumberGenerator {
     }
 
     mutating func next() -> UInt64 {
-        state = state &* 6364136223846793005 &+ 1442695040888963407
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
         return state
     }
 }

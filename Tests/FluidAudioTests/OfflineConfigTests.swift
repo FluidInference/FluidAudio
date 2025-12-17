@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import FluidAudio
 
 final class OfflineConfigTests: XCTestCase {
