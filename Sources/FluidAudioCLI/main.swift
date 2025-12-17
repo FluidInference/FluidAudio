@@ -22,6 +22,7 @@ func printUsage() {
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
+            parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
             download                Download evaluation datasets
             help                    Show this help message
 
@@ -139,6 +140,13 @@ Task {
         await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "download":
         await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "parakeet-eou":
+        // Pass arguments starting from "parakeet-eou" so ArgumentParser sees it as the command?
+        // Or just the flags?
+        // AsyncParsableCommand.main() usually takes the full list including command name if it's root.
+        // But here we are manually dispatching.
+        // Let's try passing just the flags.
+        await ParakeetEouCommand.main(Array(arguments.dropFirst(2)))
     case "help", "--help", "-h":
         printUsage()
         exitWithPeakMemory(0)
