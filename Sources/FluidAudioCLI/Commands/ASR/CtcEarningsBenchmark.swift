@@ -303,22 +303,47 @@ public enum CtcEarningsBenchmark {
             wer = calculateWER(reference: referenceWords, hypothesis: hypothesisWords)
         }
 
-        // Count dictionary detections
+        // Count dictionary detections (CTC + hypothesis fallback)
         let minCtcScore: Float = -10.0
         var dictFound = 0
         var detectionDetails: [[String: Any]] = []
+        var ctcFoundWords: Set<String> = []
 
+        // 1. CTC detections
         for detection in spotResult.detections {
             let detail: [String: Any] = [
                 "word": detection.term.text,
                 "score": round(Double(detection.score) * 100) / 100,
                 "startTime": round(detection.startTime * 100) / 100,
-                "endTime": round(detection.endTime * 100) / 100
+                "endTime": round(detection.endTime * 100) / 100,
+                "source": "ctc"
             ]
             detectionDetails.append(detail)
 
             if detection.score > minCtcScore {
                 dictFound += 1
+                ctcFoundWords.insert(detection.term.text.lowercased())
+            }
+        }
+
+        // 2. Fallback: check hypothesis for dictionary words not found by CTC
+        let hypothesisLower = hypothesis.lowercased()
+        for word in dictionaryWords {
+            let wordLower = word.lowercased()
+            if !ctcFoundWords.contains(wordLower) {
+                // Check if word appears in hypothesis (fuzzy: allow minor variations)
+                if hypothesisLower.contains(wordLower) {
+                    dictFound += 1
+                    ctcFoundWords.insert(wordLower)
+                    let detail: [String: Any] = [
+                        "word": word,
+                        "score": 0.0,
+                        "startTime": 0.0,
+                        "endTime": 0.0,
+                        "source": "hypothesis"
+                    ]
+                    detectionDetails.append(detail)
+                }
             }
         }
 

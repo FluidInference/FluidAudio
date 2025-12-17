@@ -77,8 +77,7 @@ public struct CtcKeywordSpotter {
         self.models = models
         self.blankId = blankId
         self.predictionOptions = AsrModels.optimizedPredictionOptions()
-        // CTC staged models have dynamic shapes; force CPU to avoid CoreML NE/GPU crashes.
-        self.predictionOptions.usesCPUOnly = true
+        // Input is fixed-size (240k samples padded), so ANE/GPU should work fine.
     }
 
     /// Convenience helper to create a spotter using the default cache location.
@@ -537,9 +536,25 @@ public struct CtcKeywordSpotter {
 
     private func prepareAudioArray(_ audioSamples: [Float]) throws -> (MLMultiArray, Int) {
         let clampedCount = min(audioSamples.count, maxModelSamples)
-        // Use Float16 to match the CoreML model's expected input type.
-        // Canary-1b-v2 expects 1-D: [maxSamples].
-        let array = try MLMultiArray(shape: [NSNumber(value: maxModelSamples)], dataType: .float16)
+
+        // Detect expected input rank from the MelSpectrogram model's 'audio' feature description.
+        // Canary-1b-v2 expects rank 1 [samples], parakeet-ctc-0.6b expects rank 2 [1, samples].
+        let melModel = models.melSpectrogram
+        let audioDesc = melModel.modelDescription.inputDescriptionsByName["audio"]
+        let expectedRank = audioDesc?.multiArrayConstraint?.shape.count ?? 1
+
+        // Determine data type - prefer float16 if model expects it, otherwise float32
+        let dataType: MLMultiArrayDataType =
+            audioDesc?.multiArrayConstraint?.dataType == .float16 ? .float16 : .float32
+
+        let array: MLMultiArray
+        if expectedRank == 2 {
+            // Rank 2: [1, maxSamples]
+            array = try MLMultiArray(shape: [1, NSNumber(value: maxModelSamples)], dataType: dataType)
+        } else {
+            // Rank 1: [maxSamples]
+            array = try MLMultiArray(shape: [NSNumber(value: maxModelSamples)], dataType: dataType)
+        }
 
         // Copy actual samples.
         for i in 0..<clampedCount {

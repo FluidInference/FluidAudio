@@ -78,6 +78,17 @@ extension CtcModels {
             encoderModel = try MLModel(contentsOf: compiledEncoderURL, configuration: config)
         }
 
+        // Log compute units configuration
+        let computeUnitsStr: String
+        switch config.computeUnits {
+        case .cpuOnly: computeUnitsStr = "cpuOnly"
+        case .cpuAndGPU: computeUnitsStr = "cpuAndGPU"
+        case .cpuAndNeuralEngine: computeUnitsStr = "cpuAndNeuralEngine"
+        case .all: computeUnitsStr = "all"
+        @unknown default: computeUnitsStr = "unknown"
+        }
+        logger.info("CTC models loaded with computeUnits: \(computeUnitsStr)")
+
         // Load vocabulary
         let vocab = try loadVocabularyDirect(from: directory)
 
