@@ -538,7 +538,7 @@ public struct CtcKeywordSpotter {
     private func prepareAudioArray(_ audioSamples: [Float]) throws -> (MLMultiArray, Int) {
         let clampedCount = min(audioSamples.count, maxModelSamples)
         // Use Float16 to match the CoreML model's expected input type.
-        // Current staged Mel expects 1-D: [maxSamples].
+        // Canary-1b-v2 expects 1-D: [maxSamples].
         let array = try MLMultiArray(shape: [NSNumber(value: maxModelSamples)], dataType: .float16)
 
         // Copy actual samples.
