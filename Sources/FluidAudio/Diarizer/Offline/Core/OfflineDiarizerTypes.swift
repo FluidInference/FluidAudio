@@ -567,3 +567,33 @@ struct TimedEmbedding: Sendable {
     let embedding256: [Float]
     let rho128: [Double]
 }
+
+// MARK: - Convenience Methods
+
+extension OfflineDiarizerConfig {
+    /// Returns a copy with speaker count constraints applied.
+    ///
+    /// - Parameters:
+    ///   - min: Minimum number of speakers (nil for no minimum).
+    ///   - max: Maximum number of speakers (nil for no maximum).
+    /// - Returns: New config with constraints applied.
+    public func withSpeakers(min: Int? = nil, max: Int? = nil) -> OfflineDiarizerConfig {
+        var copy = self
+        copy.clustering.minSpeakers = min
+        copy.clustering.maxSpeakers = max
+        copy.clustering.numSpeakers = nil
+        return copy
+    }
+
+    /// Returns a copy with exact speaker count.
+    ///
+    /// - Parameter exactly: Exact number of speakers to detect.
+    /// - Returns: New config with exact speaker count.
+    public func withSpeakers(exactly count: Int) -> OfflineDiarizerConfig {
+        var copy = self
+        copy.clustering.numSpeakers = count
+        copy.clustering.minSpeakers = nil
+        copy.clustering.maxSpeakers = nil
+        return copy
+    }
+}
