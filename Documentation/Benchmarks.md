@@ -239,6 +239,30 @@ swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --thresh
 [23:02:35.744] [INFO] [VAD] Results saved to: vad_benchmark_results.json
 ```
 
+## Streaming ASR (Parakeet EOU)
+
+Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 120M CoreML model.
+
+Model: [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml)
+
+Hardware: Apple M2, 2022, masOS 26
+
+### LibriSpeech test-clean (2620 files, 5.40h audio)
+
+| Chunk Size | WER (Avg) | RTFx | Total Time |
+|------------|-----------|------|------------|
+| 320ms      | 4.92%     | 12.48x | 1558s (26m) |
+| 160ms      | 8.29%     | 4.78x  | 4070s (68m) |
+
+
+```bash
+# Run 320ms benchmark
+swift run -c release fluidaudio parakeet-eou --benchmark --chunk-size 320 --use-cache
+
+# Run 160ms benchmark
+swift run -c release fluidaudio parakeet-eou --benchmark --chunk-size 160 --use-cache
+```
+
 ## Speaker Diarization
 
 The offline version uses the community-1 model, the online version uses the legacy speaker-diarization-3.1 model.
