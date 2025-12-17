@@ -331,8 +331,10 @@ public enum CtcEarningsBenchmark {
         for word in dictionaryWords {
             let wordLower = word.lowercased()
             if !ctcFoundWords.contains(wordLower) {
-                // Check if word appears in hypothesis (fuzzy: allow minor variations)
-                if hypothesisLower.contains(wordLower) {
+                // Check if word appears as whole word in hypothesis (avoid substring false positives)
+                let pattern = "\\b\(NSRegularExpression.escapedPattern(for: wordLower))\\b"
+                if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                   regex.firstMatch(in: hypothesisLower, options: [], range: NSRange(hypothesisLower.startIndex..., in: hypothesisLower)) != nil {
                     dictFound += 1
                     ctcFoundWords.insert(wordLower)
                     let detail: [String: Any] = [
