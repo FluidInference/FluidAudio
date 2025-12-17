@@ -1,11 +1,18 @@
 # Automatic Speech Recognition (ASR) / Transcription
 
+## Batch Transcription
+
 - Model (multilingual): `FluidInference/parakeet-tdt-0.6b-v3-coreml`
 - Model (English-only): `FluidInference/parakeet-tdt-0.6b-v2-coreml`
 - Languages: v3 spans 25 European languages; v2 focuses on English accuracy
 - Processing Mode: Batch transcription for complete audio files
 - Real-time Factor: ~120x on M4 Pro (1 minute ≈ 0.5 seconds)
-- Streaming Support: Coming soon — batch processing recommended for production use
+
+## Streaming ASR (Parakeet EOU)
+
+- Model: `FluidInference/parakeet-eou-1.1b-coreml`
+- Chunk Sizes: 160ms (lowest latency), 320ms, 1600ms (highest throughput)
+- End-of-Utterance Detection: Built-in silence detection with configurable debounce
 
 ## Choosing a model version
 
@@ -89,3 +96,15 @@ swift run fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
 swift run fluidaudio download --dataset librispeech-test-clean
 swift run fluidaudio download --dataset librispeech-test-other
 ```
+
+## Streaming CLI (Parakeet EOU)
+
+```bash
+# Transcribe a file (--use-cache auto-downloads models)
+swift run fluidaudio parakeet-eou --input audio.wav --use-cache
+
+# Run benchmark on LibriSpeech test-clean
+swift run fluidaudio parakeet-eou --benchmark --chunk-size 160 --max-files 100 --use-cache
+```
+
+**Options:** `--input <path>`, `--benchmark`, `--max-files <n>`, `--chunk-size <160|320|1600>`, `--eou-debounce <ms>`, `--use-cache`, `--models <path>`, `--output <path>`, `--verbose`
