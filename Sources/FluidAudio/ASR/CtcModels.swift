@@ -28,6 +28,90 @@ public struct CtcModels: Sendable {
 
 extension CtcModels {
 
+    /// Load CTC models directly from a custom directory (e.g., canary-1b-v2).
+    ///
+    /// This method loads models directly without going through DownloadUtils,
+    /// allowing support for custom CTC models like canary-1b-v2.
+    ///
+    /// Expected directory structure:
+    /// - MelSpectrogram.mlmodelc/
+    /// - AudioEncoder.mlmodelc/
+    /// - vocab.json
+    ///
+    /// - Parameter directory: Directory containing the CoreML bundles and vocab.json
+    /// - Returns: Loaded `CtcModels` instance.
+    public static func loadDirect(from directory: URL) async throws -> CtcModels {
+        logger.info("Loading CTC models directly from: \(directory.path)")
+
+        let config = defaultConfiguration()
+
+        // Load MelSpectrogram model
+        let melPath = directory.appendingPathComponent("MelSpectrogram.mlmodelc")
+        guard FileManager.default.fileExists(atPath: melPath.path) else {
+            throw AsrModelsError.modelNotFound("MelSpectrogram", melPath)
+        }
+
+        // Try loading directly first (for pre-compiled models), then try compiling
+        let melModel: MLModel
+        do {
+            melModel = try MLModel(contentsOf: melPath, configuration: config)
+            logger.info("Loaded MelSpectrogram directly from: \(melPath.path)")
+        } catch {
+            logger.info("Direct load failed, attempting compilation...")
+            let compiledMelURL = try await MLModel.compileModel(at: melPath)
+            melModel = try MLModel(contentsOf: compiledMelURL, configuration: config)
+        }
+
+        // Load AudioEncoder model
+        let encoderPath = directory.appendingPathComponent("AudioEncoder.mlmodelc")
+        guard FileManager.default.fileExists(atPath: encoderPath.path) else {
+            throw AsrModelsError.modelNotFound("AudioEncoder", encoderPath)
+        }
+
+        let encoderModel: MLModel
+        do {
+            encoderModel = try MLModel(contentsOf: encoderPath, configuration: config)
+            logger.info("Loaded AudioEncoder directly from: \(encoderPath.path)")
+        } catch {
+            logger.info("Direct load failed, attempting compilation...")
+            let compiledEncoderURL = try await MLModel.compileModel(at: encoderPath)
+            encoderModel = try MLModel(contentsOf: compiledEncoderURL, configuration: config)
+        }
+
+        // Load vocabulary
+        let vocab = try loadVocabularyDirect(from: directory)
+
+        logger.info("Successfully loaded CTC models directly (\(vocab.count) vocab tokens)")
+
+        return CtcModels(
+            melSpectrogram: melModel,
+            encoder: encoderModel,
+            configuration: config,
+            vocabulary: vocab
+        )
+    }
+
+    /// Load vocabulary from vocab.json in the given directory.
+    private static func loadVocabularyDirect(from directory: URL) throws -> [Int: String] {
+        let vocabPath = directory.appendingPathComponent("vocab.json")
+        guard FileManager.default.fileExists(atPath: vocabPath.path) else {
+            throw AsrModelsError.modelNotFound("vocab.json", vocabPath)
+        }
+
+        let data = try Data(contentsOf: vocabPath)
+        let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
+
+        var vocabulary: [Int: String] = [:]
+        for (key, value) in jsonDict {
+            if let tokenId = Int(key) {
+                vocabulary[tokenId] = value
+            }
+        }
+
+        logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
+        return vocabulary
+    }
+
     /// Load CTC models from a directory.
     ///
     /// - Parameter directory: Directory containing the downloaded CoreML bundles
