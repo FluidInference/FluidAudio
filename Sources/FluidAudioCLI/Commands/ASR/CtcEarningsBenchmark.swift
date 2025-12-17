@@ -248,10 +248,9 @@ public enum CtcEarningsBenchmark {
 
         // 1. TDT transcription for low WER
         let tdtResult = try await asrManager.transcribe(wavFile)
-        let hypothesis = tdtResult.text
 
         // Skip files where TDT returns empty (some audio files fail)
-        if hypothesis.isEmpty {
+        if tdtResult.text.isEmpty {
             print("  SKIPPED: TDT returned empty transcription")
             return nil
         }
@@ -278,6 +277,13 @@ public enum CtcEarningsBenchmark {
             audioSamples: samples,
             customVocabulary: customVocab,
             minScore: nil
+        )
+
+        // 4. Post-process: Replace TDT words with CTC-detected keywords using timestamps
+        let hypothesis = applyKeywordCorrections(
+            tdtResult: tdtResult,
+            detections: spotResult.detections,
+            minScore: -10.0
         )
 
         let processingTime = Date().timeIntervalSince(startTime)
@@ -386,6 +392,102 @@ public enum CtcEarningsBenchmark {
         }
 
         return result
+    }
+
+    /// Apply CTC keyword corrections to TDT transcription using fuzzy matching.
+    /// For each detected keyword, find similar-sounding words in TDT output and replace them.
+    private static func applyKeywordCorrections(
+        tdtResult: ASRResult,
+        detections: [CtcKeywordSpotter.KeywordDetection],
+        minScore: Float
+    ) -> String {
+        // Filter detections by score
+        let validDetections = detections.filter { $0.score > minScore }
+        guard !validDetections.isEmpty else {
+            return tdtResult.text
+        }
+
+        var text = tdtResult.text
+
+        // For each detected keyword, try to find and replace similar words
+        for detection in validDetections {
+            let keyword = detection.term.text
+            let keywordLower = keyword.lowercased()
+
+            // Split text into words while preserving structure
+            let words = text.components(separatedBy: .whitespacesAndNewlines)
+
+            for word in words {
+                let wordClean = word.trimmingCharacters(in: .punctuationCharacters).lowercased()
+                guard !wordClean.isEmpty else { continue }
+
+                // Check if this word is similar to the keyword (fuzzy match)
+                if isSimilar(wordClean, keywordLower) && wordClean != keywordLower {
+                    // Replace this word with the keyword, preserving case pattern
+                    let replacement = matchCase(keyword, to: word)
+                    text = text.replacingOccurrences(of: word, with: replacement)
+                    break // Only replace first occurrence per keyword
+                }
+            }
+        }
+
+        return text
+    }
+
+    /// Check if two words are similar (edit distance / length ratio)
+    private static func isSimilar(_ a: String, _ b: String) -> Bool {
+        let maxLen = max(a.count, b.count)
+        guard maxLen > 0 else { return false }
+
+        // Must be similar length
+        let lenDiff = abs(a.count - b.count)
+        if lenDiff > max(2, maxLen / 3) { return false }
+
+        // Calculate edit distance
+        let distance = editDistance(a, b)
+        let threshold = max(1, maxLen / 3)
+
+        return distance <= threshold
+    }
+
+    /// Simple edit distance calculation
+    private static func editDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a)
+        let b = Array(b)
+        let m = a.count
+        let n = b.count
+
+        if m == 0 { return n }
+        if n == 0 { return m }
+
+        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+
+        for i in 0...m { dp[i][0] = i }
+        for j in 0...n { dp[0][j] = j }
+
+        for i in 1...m {
+            for j in 1...n {
+                if a[i-1] == b[j-1] {
+                    dp[i][j] = dp[i-1][j-1]
+                } else {
+                    dp[i][j] = 1 + min(dp[i-1][j-1], min(dp[i-1][j], dp[i][j-1]))
+                }
+            }
+        }
+
+        return dp[m][n]
+    }
+
+    /// Match the case pattern of the original word
+    private static func matchCase(_ keyword: String, to original: String) -> String {
+        let origClean = original.trimmingCharacters(in: .punctuationCharacters)
+
+        // Check case pattern
+        if origClean.first?.isUppercase == true {
+            // Capitalize first letter
+            return keyword.prefix(1).uppercased() + keyword.dropFirst()
+        }
+        return keyword
     }
 
     private static func calculateWER(reference: [String], hypothesis: [String]) -> Double {

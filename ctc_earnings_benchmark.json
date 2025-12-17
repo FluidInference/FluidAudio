@@ -1,0 +1,230 @@
+{
+  "model" : "\/Users\/kikow\/Library\/Application Support\/FluidAudio\/Models\/canary-1b-v2",
+  "results" : [
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 13.960000000000001,
+          "score" : -3.1600000000000001,
+          "startTime" : 13.880000000000001,
+          "word" : "LATAM Airlines"
+        }
+      ],
+      "dictFound" : 1,
+      "dictTotal" : 1,
+      "fileId" : "4329526_chunk0",
+      "hypothesis" : "day everyone and welcome to Lam Airlines Group Aires R Conference C. Just as a reminder this conference is being recorded. Letham Airlinesnings Rase for the.",
+      "processingTime" : 2.0459999999999998,
+      "reference" : "Good day everyone and welcome to LATAM Airlines Group Earnings Release conference call. Just as a reminder this conference is being recorded. LATAM Airlines Group earnings released for the",
+      "wer" : 34.479999999999997
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 3.9900000000000002,
+          "score" : -7.8200000000000003,
+          "startTime" : 3.9100000000000001,
+          "word" : "Bruno"
+        },
+        {
+          "endTime" : 6.9400000000000004,
+          "score" : -9.3300000000000001,
+          "startTime" : 6.8600000000000003,
+          "word" : "Lorenzo"
+        }
+      ],
+      "dictFound" : 2,
+      "dictTotal" : 2,
+      "fileId" : "4329526_chunk109",
+      "hypothesis" : "provided this point. Thank you very much. just to clari, we are not taking out capacity. I was trying to explain that incorporation of the 4 Airraft happened around mid year.",
+      "processingTime" : 2.0600000000000001,
+      "reference" : "provide at this point? Thank you very much. Hi, Bruno. This is Lorenzo. Uh, just to clarify, we are not taking out capacity. What I was trying to explain is that incorporation of the 14 aircraft happened around mid next- uh, last year",
+      "wer" : 34.149999999999999
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 0.47999999999999998,
+          "score" : -8.0500000000000007,
+          "startTime" : 0.40000000000000002,
+          "word" : "Joe"
+        },
+        {
+          "endTime" : 9.6500000000000004,
+          "score" : -4.5599999999999996,
+          "startTime" : 9.5700000000000003,
+          "word" : "Kogan"
+        },
+        {
+          "endTime" : 14.359999999999999,
+          "score" : -5.29,
+          "startTime" : 14.279999999999999,
+          "word" : "Scotiabank"
+        }
+      ],
+      "dictFound" : 3,
+      "dictTotal" : 3,
+      "fileId" : "4329526_chunk118",
+      "hypothesis" : "ous conversations. Okay, thank you.. Thank you. And our next question comes from Joe Cogan withcotia Bank. Hello, thank you for the. I wanted to ask another question.",
+      "processingTime" : 2.0630000000000002,
+      "reference" : "business conversations. Okay, thank you. No problem. Thank you. And our next question comes from Joe Kogan with Scotiabank. Hello, and thank you for the call. I wanted to ask another question",
+      "wer" : 25
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 9.5700000000000003,
+          "score" : -10.609999999999999,
+          "startTime" : 9.4900000000000002,
+          "word" : "Sabby"
+        }
+      ],
+      "dictFound" : 0,
+      "dictTotal" : 1,
+      "fileId" : "4329526_chunk132",
+      "hypothesis" : "with you kind of corporate discussions, or Is that something that're going to develop up over time. Sorry, I just wondering if that helps you with your corporate.",
+      "processingTime" : 2.0329999999999999,
+      "reference" : "term with your, kind of, corporate discussions? Or is that something that kind of develops over time? Sorry, Sabby, does it- does it help on what type of discussions? Uh, uh, is- just wondering if- if that helps you with your corporate",
+      "wer" : 50
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 7.7400000000000002,
+          "score" : -6.6200000000000001,
+          "startTime" : 7.6600000000000001,
+          "word" : "Jerome"
+        }
+      ],
+      "dictFound" : 1,
+      "dictTotal" : 1,
+      "fileId" : "4329526_chunk135",
+      "hypothesis" : "Got it. Than. And then just one clarification on the heding. know, you have come good positions, but hereious what level you've had given the pull back in fi prices here.",
+      "processingTime" : 2.0609999999999999,
+      "reference" : "it. Th- thanks, Jerome. Uh, and then, just, uh, o- one, uh, clarification on the, the hedging, y- you know, you got com- good hedging positions, so curious of what level you've hedged given the sharp pull-back in- in- in fuel prices here",
+      "wer" : 47.619999999999997
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 7.8200000000000003,
+          "score" : -2.4300000000000002,
+          "startTime" : 7.7400000000000002,
+          "word" : "LATAM"
+        }
+      ],
+      "dictFound" : 1,
+      "dictTotal" : 1,
+      "fileId" : "4329526_chunk16",
+      "hypothesis" : "never before. We acquired multiplices and renunce ourUied fre fire program under the lat and fast, becoming the fourth largest wefire program in the world. Weowed the first gl",
+      "processingTime" : 2.0760000000000001,
+      "reference" : "never before. We acquired multiples and we announced our now unified frequent flyer program under the LATAM Pass brand becoming the fourth largest frequent flyer program in the world. We announced the first planes with",
+      "wer" : 48.57
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 14.279999999999999,
+          "score" : -6.1200000000000001,
+          "startTime" : 14.199999999999999,
+          "word" : "Andres"
+        }
+      ],
+      "dictFound" : 1,
+      "dictTotal" : 1,
+      "fileId" : "4329526_chunk18",
+      "hypothesis" : "that will be concluded by the end of this year 2020. In addition, we nowunch our new business service and the Bringan economonomy service that later on detail. As result.",
+      "processingTime" : 2.1440000000000001,
+      "reference" : "this phase and that will be concluded by the end of this year 2020. In addition, we announced our new business service and a premium economy service that later Andres will detail. As a result",
+      "wer" : 28.57
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 13.16,
+          "score" : -3.5,
+          "startTime" : 13.09,
+          "word" : "Skytrax"
+        },
+        {
+          "endTime" : 14.68,
+          "score" : -5.6600000000000001,
+          "startTime" : 14.6,
+          "word" : "Apex Passenger Choice Awards"
+        }
+      ],
+      "dictFound" : 2,
+      "dictTotal" : 2,
+      "fileId" : "4329526_chunk19",
+      "hypothesis" : "Our pasers recognize us with several others, such as the best in South America by sp tracks for the Airline Awards and the best global airline of South America. According to the APx Mger Choice Award.",
+      "processingTime" : 2.0259999999999998,
+      "reference" : "our passengers recognized us with several awards such as the best airline in South America by Skytrax for the Airline Awards and the best global airline of South America according to the Apex Passenger Choice Awards",
+      "wer" : 25
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 7.9800000000000004,
+          "score" : -4.8799999999999999,
+          "startTime" : 7.9000000000000004,
+          "word" : "Delta"
+        },
+        {
+          "endTime" : 11.73,
+          "score" : -4.7599999999999998,
+          "startTime" : 11.65,
+          "word" : "LATAM"
+        }
+      ],
+      "dictFound" : 2,
+      "dictTotal" : 2,
+      "fileId" : "4329526_chunk27",
+      "hypothesis" : "for the following years, which will give us even more financial flexibility for the upcoming years. The agreement with Delta announced September It a recognition of the footprint lot than half in the region, and we are excited about the benefits.",
+      "processingTime" : 2.0489999999999999,
+      "reference" : "for the following years which will give us even more financial flexibility for the upcoming years. The agreement with Delta, announced last September, is a recognition of the footprint that LATAM have in the region and we are excited about the benefits that",
+      "wer" : 13.949999999999999
+    },
+    {
+      "audioLength" : 15,
+      "ctcDetections" : [
+        {
+          "endTime" : 11.73,
+          "score" : -4.0999999999999996,
+          "startTime" : 11.65,
+          "word" : "Delta"
+        },
+        {
+          "endTime" : 13.24,
+          "score" : -5.3799999999999999,
+          "startTime" : 13.16,
+          "word" : "LATAM"
+        }
+      ],
+      "dictFound" : 2,
+      "dictTotal" : 2,
+      "fileId" : "4329526_chunk30",
+      "hypothesis" : "the first half of 2020. We also find a lot program agreement that will enable reciprocal bene startted April 1, 2020 with Delta. Let members will be able to",
+      "processingTime" : 2.044,
+      "reference" : "first half of 2020. We also signed a loyalty program agreement that will enable reciprocal frequent flyer benefits starting April 1st 2020 with Delta. LATAM Pass members will be able to",
+      "wer" : 32.259999999999998
+    }
+  ],
+  "summary" : {
+    "avgWer" : 33.960000000000001,
+    "dictPass" : 15,
+    "dictRate" : 93.75,
+    "dictTotal" : 16,
+    "totalAudioDuration" : 150,
+    "totalProcessingTime" : 20.600000000000001,
+    "totalTests" : 10
+  }
+}
