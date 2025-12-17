@@ -19,6 +19,7 @@ func printUsage() {
             vad-analyze             Inspect VAD segmentation and streaming events
             asr-benchmark           Run ASR benchmark on LibriSpeech
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
+            ctc-benchmark           Run CTC keyword boosting benchmark
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
@@ -125,6 +126,8 @@ Task {
         await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
     case "fleurs-benchmark":
         await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+    case "ctc-benchmark":
+        await CtcBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
     case "transcribe":
         await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "multi-stream":

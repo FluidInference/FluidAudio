@@ -135,6 +135,18 @@ public final class ANEMemoryOptimizer {
                     vDSP_Length(count)
                 )
             }
+        } else if let contiguous = source as? ContiguousArray<Float> {
+            // ContiguousArray is also contiguous
+            contiguous.withUnsafeBufferPointer { srcBuffer in
+                vDSP_mmov(
+                    srcBuffer.baseAddress!,
+                    destPtr.advanced(by: offset),
+                    vDSP_Length(count),
+                    vDSP_Length(1),
+                    vDSP_Length(1),
+                    vDSP_Length(count)
+                )
+            }
         } else {
             // Fallback for other collections - copy element by element
             var destIndex = offset
