@@ -323,7 +323,7 @@ public class DownloadUtils {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels(for: repo)
-        case .parakeetCtc110m:
+        case .parakeetCtc110m, .canaryCtc:
             return ModelNames.CTC.requiredModels
         case .diarizer:
             return ModelNames.Diarizer.requiredModels
@@ -344,8 +344,8 @@ public class DownloadUtils {
         // Get the required model names for this repo from the appropriate manager
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
 
-        // Download all repository contents
-        let files = try await listRepoFiles(repo)
+        // Download all repository contents (use subfolder if repo has one)
+        let files = try await listRepoFiles(repo, path: repo.subfolder ?? "")
 
         for file in files {
             switch file.type {
