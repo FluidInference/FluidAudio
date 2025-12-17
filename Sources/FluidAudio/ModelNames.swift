@@ -22,7 +22,7 @@ public enum Repo: String, CaseIterable {
         case .parakeetCtc110m:
             return "parakeet-ctc-110m-coreml"
         case .canaryCtc:
-            return "canary-1b-v2"
+            return "canary-1b-v2_474MB"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -46,7 +46,7 @@ public enum Repo: String, CaseIterable {
     public var subfolder: String? {
         switch self {
         case .canaryCtc:
-            return "canary-1b-v2"
+            return "canary-1b-v2_474MB"
         default:
             return nil
         }
@@ -58,7 +58,7 @@ public enum Repo: String, CaseIterable {
         case .kokoro:
             return "kokoro"
         case .canaryCtc:
-            return "canary-1b-v2"
+            return "canary-1b-v2_474MB"
         default:
             return name
         }
