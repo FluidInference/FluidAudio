@@ -110,6 +110,34 @@ struct TextNormalizer {
 
         normalized = normalized.lowercased()
 
+        // Remove bare "inaudible" word (reference annotations)
+        normalized = normalized.replacingOccurrences(
+            of: "\\binaudible\\b",
+            with: "",
+            options: .regularExpression
+        )
+
+        // Remove stuttering/disfluency patterns like "th-", "o-", "i-"
+        let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]{1,3}-\\s", options: [])
+        normalized = stutterPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: ""
+        )
+
+        // Remove word repetitions like "we, we, we" → "we" or "the the" → "the"
+        let repetitionPattern = try! NSRegularExpression(pattern: "\\b(\\w+)(\\s*,?\\s+\\1)+\\b", options: [])
+        normalized = repetitionPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: "$1"
+        )
+
+        // Normalize "g'day" → "good day"
+        normalized = normalized.replacingOccurrences(of: "g'day", with: "good day")
+
         // British to American normalization
         for (british, american) in britishToAmerican {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: british) + "\\b"
@@ -136,8 +164,8 @@ struct TextNormalizer {
             withTemplate: ""
         )
 
-        // Remove filler words and interjections
-        let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um)\\b", options: [])
+        // Remove filler words and interjections (conservative list)
+        let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um|er|ah|eh|huh)\\b", options: [])
         normalized = fillerPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
@@ -313,6 +341,36 @@ struct TextNormalizer {
             normalized = normalized.replacingOccurrences(
                 of: pattern,
                 with: expansion,
+                options: .regularExpression
+            )
+        }
+
+        // Handle year formats FIRST (e.g., "twenty twenty one" → "2021")
+        // Must come before compound number handling
+        // Process longest patterns first (2029 down to 2020) to avoid partial matches
+        let yearWords = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+        for year in stride(from: 9, through: 0, by: -1) {
+            let yearWord = year == 0 ? "" : " " + yearWords[year]
+            let pattern = "\\btwenty twenty\(yearWord)\\b"
+            let replacement = "202\(year)"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        // Handle 2010s: "twenty nineteen", "twenty eighteen", etc.
+        let teens = [
+            ("ten", "10"), ("eleven", "11"), ("twelve", "12"), ("thirteen", "13"),
+            ("fourteen", "14"), ("fifteen", "15"), ("sixteen", "16"), ("seventeen", "17"),
+            ("eighteen", "18"), ("nineteen", "19")
+        ]
+        for (teenWord, teenNum) in teens {
+            let pattern = "\\btwenty \(teenWord)\\b"
+            let replacement = "20\(teenNum)"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: replacement,
                 options: .regularExpression
             )
         }
