@@ -317,10 +317,53 @@ struct TextNormalizer {
             )
         }
 
+        // Handle compound numbers BEFORE individual word replacements
+        // e.g., "twenty one" → "21", "thirty two" → "32"
+        let tens = [
+            ("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50),
+            ("sixty", 60), ("seventy", 70), ("eighty", 80), ("ninety", 90)
+        ]
+        let ones = [
+            ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5),
+            ("six", 6), ("seven", 7), ("eight", 8), ("nine", 9)
+        ]
+
+        // Replace compound numbers (e.g., "twenty one" → "21")
+        for (tensWord, tensVal) in tens {
+            for (onesWord, onesVal) in ones {
+                let compound = tensWord + " " + onesWord
+                let value = String(tensVal + onesVal)
+                normalized = normalized.replacingOccurrences(
+                    of: "\\b" + compound + "\\b",
+                    with: value,
+                    options: .regularExpression
+                )
+            }
+        }
+
+        // Handle "point" for decimals: "21 point 5" → "21.5", "point 5" → "0.5"
+        // First handle cases like "21 point 5"
+        let pointPattern = try! NSRegularExpression(pattern: "(\\d+)\\s+point\\s+(\\d+)", options: [])
+        normalized = pointPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: "$1.$2"
+        )
+
+        // Handle "point X" at start or after space → "0.X"
+        let leadingPointPattern = try! NSRegularExpression(pattern: "\\bpoint\\s+(\\d+)", options: [])
+        normalized = leadingPointPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: "0.$1"
+        )
+
         let numberWords = [
             // English numbers
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-            "five": "5", "seven": "7", "eight": "8", "nine": "9",
+            "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
             "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
             "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
             "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
@@ -354,9 +397,9 @@ struct TextNormalizer {
             "tredicesimo": "13th", "quattordicesimo": "14th", "quindicesimo": "15th",
             "ventesimo": "20th", "trentesimo": "30th", "centesimo": "100th",
 
-            // French numbers
+            // French numbers (note: "six" is same as English, omitted to avoid duplicate key)
             "zéro": "0", "un": "1", "deux": "2", "trois": "3", "quatre": "4",
-            "cinq": "5", "six": "6", "sept": "7", "huit": "8", "neuf": "9",
+            "cinq": "5", "sept": "7", "huit": "8", "neuf": "9",
             "dix": "10", "onze": "11", "douze": "12", "treize": "13", "quatorze": "14",
             "quinze": "15", "seize": "16", "dix-sept": "17", "dix-huit": "18",
             "dix-neuf": "19", "vingt": "20", "trente": "30", "quarante": "40",
