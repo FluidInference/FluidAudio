@@ -6,6 +6,7 @@ public enum Repo: String, CaseIterable {
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "alexwengg/parakeet-ctc-110m-coreml"
+    case canaryCtc = "argmaxinc/ctckit-pro"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
 
@@ -20,6 +21,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
             return "parakeet-ctc-110m-coreml"
+        case .canaryCtc:
+            return "canary-1b-v2"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -31,9 +34,21 @@ public enum Repo: String, CaseIterable {
     public var remotePath: String {
         switch self {
         case .parakeetCtc110m:
-            return "alexwengg/\(name)"
+            return "alexwengg/parakeet-ctc-110m-coreml"
+        case .canaryCtc:
+            return "argmaxinc/ctckit-pro"
         default:
             return "FluidInference/\(name)"
+        }
+    }
+
+    /// Subfolder within the repo (for repos with multiple models)
+    public var subfolder: String? {
+        switch self {
+        case .canaryCtc:
+            return "canary-1b-v2"
+        default:
+            return nil
         }
     }
 
@@ -42,6 +57,8 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .kokoro:
             return "kokoro"
+        case .canaryCtc:
+            return "canary-1b-v2"
         default:
             return name
         }
@@ -225,7 +242,7 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels(for: repo)
-        case .parakeetCtc110m:
+        case .parakeetCtc110m, .canaryCtc:
             return ModelNames.CTC.requiredModels
         case .diarizer:
             if variant == "offline" {
