@@ -143,4 +143,54 @@ Automatic speech recognition using Parakeet TDT models (v2 English-only, v3 mult
 **Performance:**
 - Real-time factor: ~120x on M4 Pro (processes 1min audio in 0.5s)
 - Languages: 25 European languages supported
-- Streaming: Available via `StreamingAsrManager` (beta)
+
+### StreamingEouAsrManager
+Real-time streaming ASR with End-of-Utterance detection using Parakeet EOU models.
+
+**Key Methods:**
+- `init(configuration:chunkSize:eouDebounceMs:debugFeatures:)`
+  - Create manager with MLModel configuration and chunk size
+  - `chunkSize`: `.ms160` (default), `.ms320`, or `.ms1600`
+  - `eouDebounceMs`: Minimum silence duration before EOU triggers (default: 1280)
+- `loadModels(modelDir:) async throws`
+  - Load CoreML models from directory (encoder, decoder, joint, vocab)
+- `process(audioBuffer:) async throws -> String`
+  - Process audio incrementally, returns empty string (use `finish()` for transcript)
+- `finish() async throws -> String`
+  - Finalize processing and return accumulated transcript
+- `reset() async`
+  - Reset all state for next utterance
+- `setEouCallback(_:)`
+  - Set callback invoked when End-of-Utterance is detected
+- `appendAudio(_:) throws`
+  - Append audio to buffer without processing (for VAD integration)
+
+**Properties:**
+- `eouDetected: Bool` — Whether EOU was detected in the last chunk
+- `eouDebounceMs: Int` — Minimum silence duration before EOU triggers
+- `chunkSize: StreamingChunkSize` — Current chunk size configuration
+
+**StreamingChunkSize:**
+- `.ms160` — 160ms chunks, lowest latency, ~8% WER
+- `.ms320` — 320ms chunks, balanced, ~5% WER
+- `.ms1600` — 1600ms chunks, highest throughput
+
+**Usage:**
+```swift
+let manager = StreamingEouAsrManager(chunkSize: .ms160, eouDebounceMs: 1280)
+try await manager.loadModels(modelDir: modelsURL)
+
+// Process audio incrementally
+_ = try await manager.process(audioBuffer: buffer1)
+_ = try await manager.process(audioBuffer: buffer2)
+
+// Get final transcript
+let transcript = try await manager.finish()
+
+// Reset for next utterance
+await manager.reset()
+```
+
+**Performance:**
+- Real-time factor: ~5x RTF (160ms), ~12x RTF (320ms) on Apple Silicon
+- WER: ~8% (160ms), ~5% (320ms) on LibriSpeech test-clean
