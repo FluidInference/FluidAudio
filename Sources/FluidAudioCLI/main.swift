@@ -3,6 +3,9 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
+// Ignore SIGPIPE to prevent crash when piping output
+signal(SIGPIPE, SIG_IGN)
+
 let cliLogger = AppLogger(category: "Main")
 
 func printUsage() {
@@ -20,6 +23,7 @@ func printUsage() {
             asr-benchmark           Run ASR benchmark on LibriSpeech
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
             ctc-benchmark           Run CTC keyword boosting benchmark
+            ctc-earnings-benchmark  Run Earnings22 benchmark with CTC model (canary)
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
@@ -129,6 +133,8 @@ Task {
             await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "ctc-benchmark":
             await CtcBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "ctc-earnings-benchmark":
+            await CtcEarningsBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "transcribe":
             await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "multi-stream":
