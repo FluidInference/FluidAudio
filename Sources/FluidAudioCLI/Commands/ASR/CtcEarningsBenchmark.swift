@@ -8,6 +8,27 @@ import Foundation
 /// TDT provides low WER transcription, CTC provides high recall dictionary detection.
 public enum CtcEarningsBenchmark {
 
+    /// Default CTC model directory
+    private static func defaultCtcModelPath() -> String? {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        let modelPath = appSupport.appendingPathComponent("FluidAudio/Models/parakeet-ctc-110m-coreml")
+        if FileManager.default.fileExists(atPath: modelPath.path) {
+            return modelPath.path
+        }
+        return nil
+    }
+
+    /// Default data directory (from download command)
+    private static func defaultDataDir() -> String? {
+        let dataDir = DatasetDownloader.getEarnings22Directory().appendingPathComponent("test-dataset")
+        if FileManager.default.fileExists(atPath: dataDir.path) {
+            return dataDir.path
+        }
+        return nil
+    }
+
     public static func runCLI(arguments: [String]) async {
         // Check for help
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -16,11 +37,12 @@ public enum CtcEarningsBenchmark {
         }
 
         // Parse arguments
-        var dataDir = "test-dataset"
+        var dataDir: String? = nil
         var outputFile = "ctc_earnings_benchmark.json"
         var maxFiles: Int? = nil
         var ctcModelPath: String? = nil
         var tdtVersion: AsrModelVersion = .v3
+        var autoDownload = false
 
         var i = 0
         while i < arguments.count {
@@ -52,23 +74,53 @@ public enum CtcEarningsBenchmark {
                     }
                     i += 1
                 }
+            case "--auto-download":
+                autoDownload = true
             default:
                 break
             }
             i += 1
         }
 
+        // Use defaults if not specified
+        if dataDir == nil {
+            dataDir = defaultDataDir()
+        }
+        if ctcModelPath == nil {
+            ctcModelPath = defaultCtcModelPath()
+        }
+
+        // Handle auto-download for dataset
+        if autoDownload && dataDir == nil {
+            print("📥 Downloading earnings22-kws dataset...")
+            await DatasetDownloader.downloadEarnings22KWS(force: false)
+            dataDir = defaultDataDir()
+        }
+
         print("Earnings Benchmark (TDT transcription + CTC keyword spotting)")
-        print("  Data directory: \(dataDir)")
+        print("  Data directory: \(dataDir ?? "not found")")
         print("  Output file: \(outputFile)")
         print("  TDT version: \(tdtVersion == .v2 ? "v2" : "v3")")
-        print("  CTC model: \(ctcModelPath ?? "required")")
+        print("  CTC model: \(ctcModelPath ?? "not found")")
 
-        guard let modelPath = ctcModelPath else {
-            print("ERROR: --ctc-model path is required")
+        guard let finalDataDir = dataDir else {
+            print("ERROR: Data directory not found")
+            print("💡 Download with: fluidaudio download --dataset earnings22-kws")
+            print("   Or specify: --data-dir <path>")
             printUsage()
             return
         }
+
+        guard let modelPath = ctcModelPath else {
+            print("ERROR: CTC model not found")
+            print("💡 Download parakeet-ctc-110m-coreml model to:")
+            print("   ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml/")
+            print("   Or specify: --ctc-model <path>")
+            printUsage()
+            return
+        }
+
+        let dataDirResolved = finalDataDir
 
         do {
             // Load TDT models for transcription
@@ -91,11 +143,11 @@ public enum CtcEarningsBenchmark {
             print("Created CTC spotter with blankId=\(blankId)")
 
             // Collect test files
-            let dataDirURL = URL(fileURLWithPath: dataDir)
+            let dataDirURL = URL(fileURLWithPath: dataDirResolved)
             let fileIds = try collectFileIds(from: dataDirURL, maxFiles: maxFiles)
 
             if fileIds.isEmpty {
-                print("ERROR: No test files found in \(dataDir)")
+                print("ERROR: No test files found in \(dataDirResolved)")
                 return
             }
 
@@ -159,13 +211,13 @@ public enum CtcEarningsBenchmark {
                 "dictTotal": totalDictChecks,
                 "dictRate": round(dictRate * 100) / 100,
                 "totalAudioDuration": round(totalAudioDuration * 100) / 100,
-                "totalProcessingTime": round(totalProcessingTime * 100) / 100
+                "totalProcessingTime": round(totalProcessingTime * 100) / 100,
             ]
 
             let output: [String: Any] = [
                 "model": modelPath,
                 "summary": summaryDict,
-                "results": results
+                "results": results,
             ]
 
             let jsonData = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
@@ -214,19 +266,22 @@ public enum CtcEarningsBenchmark {
 
         let fm = FileManager.default
         guard fm.fileExists(atPath: wavFile.path),
-              fm.fileExists(atPath: dictionaryFile.path) else {
+            fm.fileExists(atPath: dictionaryFile.path)
+        else {
             return nil
         }
 
         // Load dictionary words
         let dictionaryContent = try String(contentsOf: dictionaryFile, encoding: .utf8)
-        let dictionaryWords = dictionaryContent
+        let dictionaryWords =
+            dictionaryContent
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
         // Load reference text
-        let referenceRaw = (try? String(contentsOf: textFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let referenceRaw =
+            (try? String(contentsOf: textFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         // Get audio samples
         let audioFile = try AVAudioFile(forReading: wavFile)
@@ -235,7 +290,8 @@ public enum CtcEarningsBenchmark {
         let frameCount = AVAudioFrameCount(audioFile.length)
 
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            throw NSError(domain: "CtcEarningsBenchmark", code: 1,
+            throw NSError(
+                domain: "CtcEarningsBenchmark", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
         }
         try audioFile.read(into: buffer)
@@ -292,8 +348,12 @@ public enum CtcEarningsBenchmark {
         let referenceNormalized = TextNormalizer.normalize(referenceRaw)
         let hypothesisNormalized = TextNormalizer.normalize(hypothesis)
 
-        let referenceWords = referenceNormalized.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter { !$0.isEmpty }
-        let hypothesisWords = hypothesisNormalized.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter { !$0.isEmpty }
+        let referenceWords = referenceNormalized.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter {
+            !$0.isEmpty
+        }
+        let hypothesisWords = hypothesisNormalized.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter {
+            !$0.isEmpty
+        }
 
         // Calculate WER
         let wer: Double
@@ -316,7 +376,7 @@ public enum CtcEarningsBenchmark {
                 "score": round(Double(detection.score) * 100) / 100,
                 "startTime": round(detection.startTime * 100) / 100,
                 "endTime": round(detection.endTime * 100) / 100,
-                "source": "ctc"
+                "source": "ctc",
             ]
             detectionDetails.append(detail)
 
@@ -334,7 +394,10 @@ public enum CtcEarningsBenchmark {
                 // Check if word appears as whole word in hypothesis (avoid substring false positives)
                 let pattern = "\\b\(NSRegularExpression.escapedPattern(for: wordLower))\\b"
                 if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-                   regex.firstMatch(in: hypothesisLower, options: [], range: NSRange(hypothesisLower.startIndex..., in: hypothesisLower)) != nil {
+                    regex.firstMatch(
+                        in: hypothesisLower, options: [],
+                        range: NSRange(hypothesisLower.startIndex..., in: hypothesisLower)) != nil
+                {
                     dictFound += 1
                     ctcFoundWords.insert(wordLower)
                     let detail: [String: Any] = [
@@ -342,7 +405,7 @@ public enum CtcEarningsBenchmark {
                         "score": 0.0,
                         "startTime": 0.0,
                         "endTime": 0.0,
-                        "source": "hypothesis"
+                        "source": "hypothesis",
                     ]
                     detectionDetails.append(detail)
                 }
@@ -358,7 +421,7 @@ public enum CtcEarningsBenchmark {
             "dictTotal": dictionaryWords.count,
             "audioLength": round(audioLength * 100) / 100,
             "processingTime": round(processingTime * 1000) / 1000,
-            "ctcDetections": detectionDetails
+            "ctcDetections": detectionDetails,
         ]
         return result
     }
@@ -535,7 +598,7 @@ public enum CtcEarningsBenchmark {
                 // or if they have similar lengths
                 let lenRatio = Double(originalClean.count) / Double(keyword.count)
                 if lenRatio > 2.0 {
-                    continue // Original much longer than keyword - likely wrong alignment
+                    continue  // Original much longer than keyword - likely wrong alignment
                 }
 
                 let replacement = matchCase(keyword, to: originalWord)
@@ -547,7 +610,9 @@ public enum CtcEarningsBenchmark {
     }
 
     /// Build word timings by merging subword tokens (tokens starting with "▁" begin new words)
-    private static func buildWordTimings(from tokenTimings: [TokenTiming]) -> [(word: String, startTime: Double, endTime: Double)] {
+    private static func buildWordTimings(
+        from tokenTimings: [TokenTiming]
+    ) -> [(word: String, startTime: Double, endTime: Double)] {
         var wordTimings: [(word: String, startTime: Double, endTime: Double)] = []
         var currentWord = ""
         var wordStart: Double = 0
@@ -622,7 +687,7 @@ public enum CtcEarningsBenchmark {
         "part", "place", "case", "point", "fact", "end", "kind", "lot", "set",
         // Numbers
         "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "hundred", "thousand", "million", "billion"
+        "hundred", "thousand", "million", "billion",
     ]
 
     /// Check if two words are similar (edit distance / length ratio)
@@ -708,10 +773,10 @@ public enum CtcEarningsBenchmark {
 
         for i in 1...m {
             for j in 1...n {
-                if a[i-1] == b[j-1] {
-                    dp[i][j] = dp[i-1][j-1]
+                if a[i - 1] == b[j - 1] {
+                    dp[i][j] = dp[i - 1][j - 1]
                 } else {
-                    dp[i][j] = 1 + min(dp[i-1][j-1], min(dp[i-1][j], dp[i][j-1]))
+                    dp[i][j] = 1 + min(dp[i - 1][j - 1], min(dp[i - 1][j], dp[i][j - 1]))
                 }
             }
         }
@@ -757,23 +822,41 @@ public enum CtcEarningsBenchmark {
     }
 
     private static func printUsage() {
-        print("""
-        CTC Earnings Benchmark (canary)
+        print(
+            """
+            CTC Earnings Benchmark (TDT + CTC keyword spotting)
 
-        Usage: fluidaudio ctc-earnings-benchmark [options]
+            Usage: fluidaudio ctc-earnings-benchmark [options]
 
-        Options:
-            --data-dir <path>     Path to earnings test dataset (default: test-dataset)
-            --ctc-model <path>    Path to CTC model directory (required, e.g., canary-1b-v2)
-            --max-files <n>       Maximum number of files to process
-            --output, -o <path>   Output JSON file (default: ctc_earnings_benchmark.json)
+            Options:
+                --data-dir <path>     Path to earnings test dataset (auto-detected if downloaded)
+                --ctc-model <path>    Path to CTC model directory (auto-detected if in standard location)
+                --max-files <n>       Maximum number of files to process
+                --output, -o <path>   Output JSON file (default: ctc_earnings_benchmark.json)
+                --auto-download       Download earnings22-kws dataset if not found
 
-        Example:
-            fluidaudio ctc-earnings-benchmark \\
-                --data-dir test-earnings/test-dataset \\
-                --ctc-model "/Users/kikow/Library/Application Support/FluidAudio/Models/canary-1b-v2" \\
-                --max-files 10
-        """)
+            Default locations:
+                Dataset: ~/Library/Application Support/FluidAudio/earnings22-kws/test-dataset/
+                CTC Model: ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml/
+
+            Setup:
+                1. Download dataset: fluidaudio download --dataset earnings22-kws
+                2. Place CTC model in standard location
+                3. Run: fluidaudio ctc-earnings-benchmark
+
+            Examples:
+                # Run with auto-detected paths
+                fluidaudio ctc-earnings-benchmark
+
+                # Run with auto-download
+                fluidaudio ctc-earnings-benchmark --auto-download
+
+                # Run with explicit paths
+                fluidaudio ctc-earnings-benchmark \\
+                    --data-dir /path/to/test-dataset \\
+                    --ctc-model /path/to/parakeet-ctc-110m-coreml \\
+                    --max-files 100
+            """)
     }
 }
 #endif

@@ -47,7 +47,6 @@ let package = Package(
             path: "Sources/FluidAudio",
             exclude: [
                 "Frameworks",
-                "ASR/ContextBiasing",
             ]
         ),
         .target(

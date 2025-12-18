@@ -242,6 +242,35 @@ struct DatasetDownloader {
         }
     }
 
+    /// Download a binary file (parquet, etc.)
+    static func downloadBinaryFile(from urlString: String, to outputPath: URL) async -> Bool {
+        guard let url = URL(string: urlString) else {
+            logger.error("     ⚠️ Invalid URL: \(urlString)")
+            return false
+        }
+
+        do {
+            let (data, response) = try await DownloadUtils.sharedSession.data(from: url)
+
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    try data.write(to: outputPath)
+                    let fileSizeMB = Double(data.count) / (1024 * 1024)
+                    logger.info("     Downloaded \(String(format: "%.1f", fileSizeMB)) MB")
+                    return data.count > 0
+                } else {
+                    logger.warning("     ⚠️ HTTP error: \(httpResponse.statusCode)")
+                    return false
+                }
+            }
+        } catch {
+            logger.warning("     ⚠️ Download error: \(error.localizedDescription)")
+            return false
+        }
+
+        return false
+    }
+
     /// Download a single annotation file from AMI corpus
     static func downloadAnnotationFile(from urlString: String, to outputPath: URL) async -> Bool {
         guard let url = URL(string: urlString) else {
@@ -714,6 +743,164 @@ struct DatasetDownloader {
             }
         }
         return count
+    }
+
+    // MARK: - Earnings22 KWS Dataset
+
+    /// Get Earnings22 KWS dataset cache directory
+    static func getEarnings22Directory() -> URL {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first!
+        return appSupport.appendingPathComponent("FluidAudio/earnings22-kws", isDirectory: true)
+    }
+
+    /// Download Earnings22 KWS dataset from argmaxinc/earnings22-kws-golden
+    static func downloadEarnings22KWS(force: Bool) async {
+        let cacheDir = getEarnings22Directory()
+        let testDatasetDir = cacheDir.appendingPathComponent("test-dataset")
+
+        logger.info("📥 Downloading Earnings22 KWS dataset...")
+        logger.info("   Target directory: \(cacheDir.path)")
+
+        // Check if already downloaded
+        if !force && FileManager.default.fileExists(atPath: testDatasetDir.path) {
+            let files =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: testDatasetDir, includingPropertiesForKeys: nil
+                )) ?? []
+            let wavFiles = files.filter { $0.pathExtension == "wav" }
+            if wavFiles.count > 100 {
+                logger.info("📂 Earnings22 KWS dataset already exists (use --force to re-download)")
+                logger.info("   Test files: \(wavFiles.count)")
+                return
+            }
+        }
+
+        // Create directories
+        do {
+            try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: testDatasetDir, withIntermediateDirectories: true)
+        } catch {
+            logger.error("Failed to create directories: \(error)")
+            return
+        }
+
+        // Download parquet file
+        let parquetURL =
+            "https://huggingface.co/datasets/argmaxinc/earnings22-kws-golden/resolve/main/data/test-00000-of-00001.parquet"
+        let parquetFile = cacheDir.appendingPathComponent("test-00000-of-00001.parquet")
+
+        logger.info("📥 Downloading parquet file (~25MB)...")
+        let parquetSuccess = await downloadBinaryFile(from: parquetURL, to: parquetFile)
+
+        if !parquetSuccess {
+            logger.error("Failed to download parquet file")
+            logger.info("💡 Manual download:")
+            logger.info("   cd \(cacheDir.path)")
+            logger.info("   wget \(parquetURL)")
+            return
+        }
+
+        logger.info("Parquet file downloaded")
+
+        // Extract using Python script
+        logger.info("📦 Extracting dataset with Python...")
+
+        // Create extraction script
+        let scriptContent = """
+            #!/usr/bin/env python3
+            import pandas as pd
+            from pathlib import Path
+            import sys
+            import numpy as np
+
+            parquet_path = Path(sys.argv[1])
+            output_dir = Path(sys.argv[2])
+
+            df = pd.read_parquet(parquet_path)
+            print(f"Found {len(df)} rows")
+
+            for row in df.to_dict(orient="records"):
+                file_id = row["file_id"]
+
+                wav_path = output_dir / f"{file_id}.wav"
+                audio_field = row["audio"]
+                if isinstance(audio_field, dict) and "bytes" in audio_field:
+                    wav_path.write_bytes(audio_field["bytes"])
+                else:
+                    wav_path.write_bytes(bytes(audio_field))
+
+                (output_dir / f"{file_id}.text.txt").write_text(str(row.get("text", "")))
+
+                # Handle dictionary field (may be numpy array, list, or None)
+                dictionary = row.get("dictionary")
+                if dictionary is None:
+                    dict_text = ""
+                elif isinstance(dictionary, np.ndarray):
+                    dict_text = "\\n".join(str(x) for x in dictionary.tolist())
+                elif isinstance(dictionary, (list, tuple)):
+                    dict_text = "\\n".join(str(x) for x in dictionary)
+                else:
+                    dict_text = str(dictionary)
+                (output_dir / f"{file_id}.dictionary.txt").write_text(dict_text)
+
+                print(f"Extracted: {file_id}")
+
+            print(f"Done! Extracted {len(df)} files")
+            """
+
+        let scriptFile = cacheDir.appendingPathComponent("extract.py")
+        do {
+            try scriptContent.write(to: scriptFile, atomically: true, encoding: .utf8)
+        } catch {
+            logger.error("Failed to create extraction script: \(error)")
+            return
+        }
+
+        // Run Python extraction
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [scriptFile.path, parquetFile.path, testDatasetDir.path]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            logger.info(output)
+
+            if process.terminationStatus == 0 {
+                // Count extracted files
+                let files =
+                    (try? FileManager.default.contentsOfDirectory(
+                        at: testDatasetDir, includingPropertiesForKeys: nil
+                    )) ?? []
+                let wavFiles = files.filter { $0.pathExtension == "wav" }
+
+                logger.info("Earnings22 KWS dataset ready")
+                logger.info("   Test files: \(wavFiles.count)")
+                logger.info("💡 Run benchmark:")
+                logger.info(
+                    "   swift run fluidaudio ctc-earnings-benchmark --data-dir \(testDatasetDir.path) --ctc-model <path>"
+                )
+
+                // Clean up
+                try? FileManager.default.removeItem(at: scriptFile)
+            } else {
+                logger.error("Extraction failed. Please ensure pandas is installed:")
+                logger.info("   pip3 install pandas pyarrow")
+            }
+        } catch {
+            logger.error("Failed to run extraction: \(error)")
+            logger.info("💡 Manual extraction:")
+            logger.info("   pip3 install pandas pyarrow")
+            logger.info("   python3 -c \"import pandas as pd; df = pd.read_parquet('\(parquetFile.path)'); ...\"")
+        }
     }
 
     /// Download VOiCES subset dataset from GitHub

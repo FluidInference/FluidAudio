@@ -79,6 +79,8 @@ enum DownloadCommand {
                 logger.error("Failed to download LibriSpeech test-other: \(error)")
                 exit(1)
             }
+        case "earnings22-kws":
+            await DatasetDownloader.downloadEarnings22KWS(force: forceDownload)
         case "all":
             await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: forceDownload)
             await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: forceDownload)
@@ -113,6 +115,7 @@ enum DownloadCommand {
                 voices-subset               VOiCES small subset (clean/noisy pairs)
                 librispeech-test-clean      LibriSpeech test-clean subset
                 librispeech-test-other      LibriSpeech test-other subset
+                earnings22-kws              Earnings22 keyword spotting dataset
                 parakeet-models             Parakeet ASR models
                 all                         All diarization datasets
 
