@@ -418,6 +418,79 @@ struct TextNormalizer {
             withTemplate: "0.$1"
         )
 
+        // Handle year formats FIRST (e.g., "twenty twenty one" → "2021")
+        // Must come before compound number handling
+        // Process longest patterns first (2029 down to 2020) to avoid partial matches
+        let yearWords = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+        for year in stride(from: 9, through: 0, by: -1) {
+            let yearWord = year == 0 ? "" : " " + yearWords[year]
+            let pattern = "\\btwenty twenty\(yearWord)\\b"
+            let replacement = "202\(year)"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+        // Handle 2010s: "twenty nineteen", "twenty eighteen", etc.
+        let teens = [
+            ("ten", "10"), ("eleven", "11"), ("twelve", "12"), ("thirteen", "13"),
+            ("fourteen", "14"), ("fifteen", "15"), ("sixteen", "16"), ("seventeen", "17"),
+            ("eighteen", "18"), ("nineteen", "19"),
+        ]
+        for (teenWord, teenNum) in teens {
+            let pattern = "\\btwenty \(teenWord)\\b"
+            let replacement = "20\(teenNum)"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: replacement,
+                options: .regularExpression
+            )
+        }
+
+        // Handle compound numbers BEFORE individual word replacements
+        // e.g., "twenty one" → "21", "thirty two" → "32"
+        let tens = [
+            ("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50),
+            ("sixty", 60), ("seventy", 70), ("eighty", 80), ("ninety", 90),
+        ]
+        let ones = [
+            ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5),
+            ("six", 6), ("seven", 7), ("eight", 8), ("nine", 9),
+        ]
+
+        // Replace compound numbers (e.g., "twenty one" → "21")
+        for (tensWord, tensVal) in tens {
+            for (onesWord, onesVal) in ones {
+                let compound = tensWord + " " + onesWord
+                let value = String(tensVal + onesVal)
+                normalized = normalized.replacingOccurrences(
+                    of: "\\b" + compound + "\\b",
+                    with: value,
+                    options: .regularExpression
+                )
+            }
+        }
+
+        // Handle "point" for decimals: "21 point 5" → "21.5", "point 5" → "0.5"
+        // First handle cases like "21 point 5"
+        let pointPattern = try! NSRegularExpression(pattern: "(\\d+)\\s+point\\s+(\\d+)", options: [])
+        normalized = pointPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: "$1.$2"
+        )
+
+        // Handle "point X" at start or after space → "0.X"
+        let leadingPointPattern = try! NSRegularExpression(pattern: "\\bpoint\\s+(\\d+)", options: [])
+        normalized = leadingPointPattern.stringByReplacingMatches(
+            in: normalized,
+            options: [],
+            range: NSRange(location: 0, length: normalized.count),
+            withTemplate: "0.$1"
+        )
+
         let numberWords = [
             // English numbers
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",

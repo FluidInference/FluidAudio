@@ -3,9 +3,6 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-// Ignore SIGPIPE to prevent crash when piping output
-signal(SIGPIPE, SIG_IGN)
-
 let cliLogger = AppLogger(category: "Main")
 
 func printUsage() {
@@ -22,11 +19,11 @@ func printUsage() {
             vad-analyze             Inspect VAD segmentation and streaming events
             asr-benchmark           Run ASR benchmark on LibriSpeech
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
-            ctc-benchmark           Run CTC keyword boosting benchmark
-            ctc-earnings-benchmark  Run Earnings22 benchmark with CTC model (canary)
+            ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
+            parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
             download                Download evaluation datasets
             help                    Show this help message
 
@@ -38,13 +35,15 @@ func printUsage() {
             fluidaudio diarization-benchmark --single-file ES2004a
 
             fluidaudio asr-benchmark --subset test-clean --max-files 100
-            
+
             fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+            fluidaudio ctc-earnings-benchmark --auto-download
 
             fluidaudio transcribe audio.wav --low-latency
 
             fluidaudio multi-stream audio1.wav audio2.wav
-            
+
             fluidaudio tts "Hello world" --output hello.wav
 
             fluidaudio vad-analyze audio.wav --streaming
@@ -121,44 +120,39 @@ Task {
         semaphore.signal()
     }
 
-    do {
-        switch command {
-        case "vad-benchmark":
-            await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
-        case "vad-analyze":
-            await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
-        case "asr-benchmark":
-            await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
-        case "fleurs-benchmark":
-            await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-        case "ctc-benchmark":
-            await CtcBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-        case "ctc-earnings-benchmark":
-            await CtcEarningsBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
-        case "transcribe":
-            await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
-        case "multi-stream":
-            await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
+    switch command {
+    case "vad-benchmark":
+        await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
+    case "vad-analyze":
+        await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "asr-benchmark":
+        await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
+    case "fleurs-benchmark":
+        await FLEURSBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+    case "transcribe":
+        await TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "multi-stream":
+        await MultiStreamCommand.run(arguments: Array(arguments.dropFirst(2)))
 
-        case "tts":
-            await TTS.run(arguments: Array(arguments.dropFirst(2)))
+    case "tts":
+        await TTS.run(arguments: Array(arguments.dropFirst(2)))
 
-        case "diarization-benchmark":
-            await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
-        case "process":
-            await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
-        case "download":
-            await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
-        case "help", "--help", "-h":
-            printUsage()
-            exitWithPeakMemory(0)
-        default:
-            cliLogger.error("Unknown command: \(command)")
-            printUsage()
-            exitWithPeakMemory(1)
-        }
-    } catch {
-        cliLogger.error("Top-level error: \(error)")
+    case "diarization-benchmark":
+        await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+    case "process":
+        await ProcessCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "download":
+        await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
+    case "parakeet-eou":
+        await ParakeetEouCommand.main(Array(arguments.dropFirst(2)))
+    case "ctc-earnings-benchmark":
+        await CtcEarningsBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+    case "help", "--help", "-h":
+        printUsage()
+        exitWithPeakMemory(0)
+    default:
+        cliLogger.error("Unknown command: \(command)")
+        printUsage()
         exitWithPeakMemory(1)
     }
 }
