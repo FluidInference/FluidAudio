@@ -209,11 +209,7 @@ extension CtcModels {
             _ = try await DownloadUtils.loadModels(
                 .parakeetCtc110m,
                 modelNames: [name],
-                directory: parentDir,
-                progress: { fileProgress in
-                    let scaledProgress = accumulatedProgress + (fileProgress * weight)
-                    progress?(scaledProgress)
-                }
+                directory: parentDir
             )
             accumulatedProgress += weight
         }

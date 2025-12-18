@@ -1,5 +1,6 @@
 import AVFoundation
 import Accelerate
+import CoreMedia
 import Foundation
 import OSLog
 
@@ -12,9 +13,14 @@ import OSLog
 final public class AudioConverter {
     private let logger = AppLogger(category: "AudioConverter")
     private let targetFormat: AVAudioFormat
+    private let debug: Bool
 
     /// Public initializer so external modules (e.g. CLI) can construct the converter
-    public init(targetFormat: AVAudioFormat? = nil) {
+    /// - Parameters:
+    ///   - targetFormat: Target audio format
+    ///   - debug: Whether to log debug messages
+    public init(targetFormat: AVAudioFormat? = nil, debug: Bool = false) {
+        self.debug = debug
         if let format = targetFormat {
             self.targetFormat = format
         } else {
@@ -63,6 +69,57 @@ final public class AudioConverter {
     public func resampleAudioFile(path: String) throws -> [Float] {
         let url = URL(fileURLWithPath: path)
         return try resampleAudioFile(url)
+    }
+
+    /// Convert a CMSampleBuffer to the target format
+    /// - Parameter sampleBuffer: Input CMSampleBuffer containing PCM data
+    /// - Returns: Float array at 16kHz mono
+    /// - Throws: `AudioConverterError.sampleBufferFormatMissing` (most likely caused by the sample buffer belonging
+    ///  to a video frame)
+    public func resampleSampleBuffer(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
+        let buffer = try extractAVAudioPCMBuffer(from: sampleBuffer)
+        return try convertBuffer(buffer, to: targetFormat)
+    }
+
+    /// Extract the `AVAudioPCMBuffer` from a `CMSampleBuffer`
+    /// - Parameter sampleBuffer: Input CMSampleBuffer containing PCM data
+    /// - Returns: An `AVAudioPCMBuffer`
+    /// - Throws: `AudioConverterError.sampleBufferFormatMissing` (most likely caused by the sample buffer belonging
+    ///  to a video frame)
+    public func extractAVAudioPCMBuffer(from sampleBuffer: CMSampleBuffer) throws -> AVAudioPCMBuffer {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+            let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+        else {
+            throw AudioConverterError.sampleBufferFormatMissing
+        }
+
+        guard let sourceFormat = AVAudioFormat(streamDescription: streamDescription) else {
+            throw AudioConverterError.failedToCreateSourceFormat
+        }
+
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+        buffer.frameLength = frameCount
+
+        guard frameCount > 0 else {
+            return buffer
+        }
+
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: buffer.mutableAudioBufferList
+        )
+
+        guard status == noErr else {
+            throw AudioConverterError.sampleBufferCopyFailed(status)
+        }
+
+        return buffer
     }
 
     /// Convert a buffer to the target format.
@@ -121,6 +178,13 @@ final public class AudioConverter {
             guard status != .error else { throw AudioConverterError.conversionFailed(error) }
             if out.frameLength > 0 { aggregated.append(contentsOf: extractFloatArray(from: out)) }
             if status == .endOfStream { break }
+        }
+
+        let outputSampleCount = aggregated.count
+        if debug {
+            logger.debug(
+                "Audio conversion: \(inputSampleCount) samples → \(outputSampleCount) samples, ratio: \(Double(outputSampleCount)/Double(inputSampleCount))"
+            )
         }
 
         return aggregated
@@ -184,9 +248,11 @@ final public class AudioConverter {
             }
         }
 
-        logger.debug(
-            "Manual resampling: \(channelCount) channels → mono, \(inputSampleRate)Hz → \(targetSampleRate)Hz"
-        )
+        if debug {
+            logger.debug(
+                "Manual resampling: \(channelCount) channels → mono, \(inputSampleRate)Hz → \(targetSampleRate)Hz"
+            )
+        }
 
         return outputSamples
     }
@@ -278,6 +344,9 @@ public enum AudioConverterError: LocalizedError {
     case failedToCreateConverter
     case failedToCreateBuffer
     case conversionFailed(Error?)
+    case sampleBufferFormatMissing
+    case failedToCreateSourceFormat
+    case sampleBufferCopyFailed(OSStatus)
 
     public var errorDescription: String? {
         switch self {
@@ -287,6 +356,13 @@ public enum AudioConverterError: LocalizedError {
             return "Failed to create conversion buffer"
         case .conversionFailed(let error):
             return "Audio conversion failed: \(error?.localizedDescription ?? "Unknown error")"
+        case .sampleBufferFormatMissing:
+            return "Sample buffer is missing a valid audio format description."
+        case .failedToCreateSourceFormat:
+            // This edge case usually arises when a video sample is provided instead of an audio sample
+            return "Failed to create a source audio format description for CMSampleBuffer."
+        case .sampleBufferCopyFailed(let status):
+            return "Failed to copy samples from CMSampleBuffer (status: \(status))"
         }
     }
 }

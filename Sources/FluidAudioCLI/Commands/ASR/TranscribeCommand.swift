@@ -3,27 +3,6 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Terminal color codes for ANSI output
-enum TerminalColor {
-    static let green = "\u{001B}[32m"  // Confirmed text
-    static let purple = "\u{001B}[35m"  // Volatile text (magenta)
-    static let reset = "\u{001B}[0m"  // Reset color
-
-    static var enabled: Bool {
-        ProcessInfo.processInfo.environment["TERM"] != nil
-    }
-}
-
-// Helper for stderr output
-fileprivate struct StderrOutputStream: TextOutputStream {
-    func write(_ string: String) {
-        if let data = string.data(using: .utf8) {
-            FileHandle.standardError.write(data)
-        }
-    }
-}
-fileprivate var stderr = StderrOutputStream()
-
 /// Thread-safe tracker for transcription updates and audio position
 actor TranscriptionTracker {
     private var volatileUpdates: [String] = []
@@ -201,12 +180,6 @@ enum TranscribeCommand {
     private static let logger = AppLogger(category: "Transcribe")
 
     static func run(arguments: [String]) async {
-        // Check for help flag first
-        if arguments.contains("--help") || arguments.contains("-h") {
-            printUsage()
-            exit(0)
-        }
-
         // Parse arguments
         guard !arguments.isEmpty else {
             logger.error("No audio file specified")
@@ -219,19 +192,11 @@ enum TranscribeCommand {
         var showMetadata = false
         var wordTimestamps = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
-        var realtimeChunkMs: Int = 500  // Default 500ms chunks for realistic streaming
-        var customWordsPath: String?
-        var customWords: [String] = []
-        var customVocabularyPath: String?
-        var customVocabulary: CustomVocabularyContext?
-        var useBeamSearch = false
 
         // Parse options
         var i = 1
         while i < arguments.count {
             switch arguments[i] {
-            case "--beam-search":
-                useBeamSearch = true
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -254,138 +219,35 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
-            case "--custom-words":
-                if i + 1 < arguments.count {
-                    customWordsPath = arguments[i + 1]
-                    i += 1
-                } else {
-                    logger.error("Missing path after --custom-words")
-                    exit(1)
-                }
-            case "--custom-vocab":
-                if i + 1 < arguments.count {
-                    customVocabularyPath = arguments[i + 1]
-                    i += 1
-                } else {
-                    logger.error("Missing path after --custom-vocab")
-                    exit(1)
-                }
-            case "--realtime-chunk-size":
-                if i + 1 < arguments.count {
-                    let sizeStr = arguments[i + 1].lowercased()
-                    if let ms = Int(sizeStr.replacingOccurrences(of: "ms", with: "")) {
-                        realtimeChunkMs = max(10, min(5000, ms))  // Clamp to 10ms-5000ms
-                    } else {
-                        logger.error("Invalid chunk size: \(arguments[i + 1]). Use format like '500ms'")
-                        exit(1)
-                    }
-                    i += 1
-                }
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
             i += 1
         }
 
-        // Load custom words if provided
-        if let path = customWordsPath {
-            do {
-                let url = URL(fileURLWithPath: path)
-                let contents = try String(contentsOf: url, encoding: .utf8)
-                customWords =
-                    contents
-                    .split(whereSeparator: { $0.isNewline })
-                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                logger.info("Loaded \(customWords.count) custom words from \(path)")
-            } catch {
-                logger.error("Failed to load custom words at \(path): \(error.localizedDescription)")
-                exit(1)
-            }
-        }
-
-        // Load structured custom vocabulary (for CTC keyword boosting) if provided
-        // Supports both JSON format and simple text format (auto-detected by extension)
-        if let vocabPath = customVocabularyPath {
-            do {
-                let url = URL(fileURLWithPath: vocabPath)
-                let isJson = url.pathExtension.lowercased() == "json"
-
-                if isJson {
-                    customVocabulary = try CustomVocabularyContext.loadWithSentencePieceTokenization(from: url)
-                    logger.info(
-                        "Loaded custom vocabulary (JSON) from \(vocabPath) (terms: \(customVocabulary?.terms.count ?? 0))"
-                    )
-                } else {
-                    // Simple text format: one word per line, optionally "word: alias1, alias2, ..."
-                    customVocabulary = try CustomVocabularyContext.loadFromSimpleFormatWithTokenization(from: url)
-                    logger.info(
-                        "Loaded custom vocabulary (text) from \(vocabPath) (terms: \(customVocabulary?.terms.count ?? 0))"
-                    )
-                }
-            } catch {
-                logger.error("Failed to load custom vocabulary at \(vocabPath): \(error.localizedDescription)")
-                exit(1)
-            }
-        }
-
         if streamingMode {
             logger.info(
-                "Streaming mode enabled: simulating real-time audio with \(realtimeChunkMs)ms chunks.\n"
+                "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
             await testStreamingTranscription(
-                audioFile: audioFile,
-                showMetadata: showMetadata,
-                wordTimestamps: wordTimestamps,
-                modelVersion: modelVersion,
-                realtimeChunkMs: realtimeChunkMs,
-                customWords: customWords,
-                customVocabulary: customVocabulary
-            )
+                audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
+                modelVersion: modelVersion)
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
-                audioFile: audioFile,
-                showMetadata: showMetadata,
-                wordTimestamps: wordTimestamps,
-                modelVersion: modelVersion,
-                customWords: customWords,
-                customVocabulary: customVocabulary,
-                useBeamSearch: useBeamSearch
-            )
+                audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
+                modelVersion: modelVersion)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
-        audioFile: String,
-        showMetadata: Bool,
-        wordTimestamps: Bool,
-        modelVersion: AsrModelVersion,
-        customWords: [String],
-        customVocabulary: CustomVocabularyContext?,
-        useBeamSearch: Bool = false
+        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, modelVersion: AsrModelVersion
     ) async {
         do {
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-
-            // Create ASR config with beam search if requested
-            let asrConfig: ASRConfig
-            if useBeamSearch {
-                asrConfig = ASRConfig(useBeamSearch: true)
-                if models.supportsBeamSearch {
-                    logger.info("Beam search enabled with vocabulary biasing (frame-by-frame)")
-                } else {
-                    logger.warning(
-                        "Beam search requested but JointDecisionSingleStep.mlmodelc not available - falling back to greedy"
-                    )
-                }
-            } else {
-                asrConfig = .default
-            }
-
-            let asrManager = AsrManager(config: asrConfig)
+            let asrManager = AsrManager(config: .default)
             try await asrManager.initialize(models: models)
 
             logger.info("ASR Manager initialized successfully")
@@ -404,36 +266,16 @@ enum TranscribeCommand {
 
             try audioFileHandle.read(into: buffer)
 
-            let samples = try AudioConverter().resampleBuffer(buffer)
+            // Convert audio to the format expected by ASR (16kHz mono Float array)
+            let samples = try AudioConverter().resampleAudioFile(path: audioFile)
             let duration = Double(audioFileHandle.length) / format.sampleRate
-            logger.info(
-                "Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
+            logger.info("Processing \(String(format: "%.2f", duration))s of audio (\(samples.count) samples)\n")
 
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let baseResult = try await asrManager.transcribe(
-                audioFileURL, customVocabulary: customVocabulary)
+            let result = try await asrManager.transcribe(audioFileURL)
             let processingTime = Date().timeIntervalSince(startTime)
-
-            var result = baseResult
-
-            // Note: CTC keyword boosting is already applied internally by AsrManager.transcribe()
-            // when customVocabulary is provided. No need to call applyCtcKeywordBoostIfNeeded again.
-
-            if !customWords.isEmpty {
-                let rewritten = rewrite(text: result.text, using: customWords)
-                result = ASRResult(
-                    text: rewritten,
-                    confidence: result.confidence,
-                    duration: result.duration,
-                    processingTime: result.processingTime,
-                    tokenTimings: result.tokenTimings,
-                    performanceMetrics: result.performanceMetrics,
-                    ctcDetectedTerms: result.ctcDetectedTerms,
-                    ctcAppliedTerms: result.ctcAppliedTerms
-                )
-            }
 
             // Print results
             logger.info("" + String(repeating: "=", count: 50))
@@ -508,48 +350,9 @@ enum TranscribeCommand {
         }
     }
 
-    /// Simple post-processing rewrite that replaces `<unk>` placeholders with
-    /// the supplied custom words (in order) if they are not already present.
-    private static func rewrite(text: String, using customWords: [String]) -> String {
-        guard !customWords.isEmpty else { return text }
-
-        let lowercased = text.lowercased()
-        let remaining = customWords.filter { !lowercased.contains($0.lowercased()) }
-        guard !remaining.isEmpty else { return text }
-
-        let nsText = text as NSString
-        let pattern = "(?i)<unk>"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-
-        let mutable = NSMutableString(string: text)
-        var offset = 0
-        var replacementIndex = 0
-
-        for match in regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
-            guard replacementIndex < remaining.count else { break }
-            let replacement = remaining[replacementIndex]
-            replacementIndex += 1
-
-            let adjustedRange = NSRange(
-                location: match.range.location + offset,
-                length: match.range.length
-            )
-            mutable.replaceCharacters(in: adjustedRange, with: replacement)
-            offset += (replacement as NSString).length - match.range.length
-        }
-
-        return String(mutable)
-    }
-
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String,
-        showMetadata: Bool,
-        wordTimestamps: Bool,
-        modelVersion: AsrModelVersion,
-        realtimeChunkMs: Int,
-        customWords: [String],
-        customVocabulary: CustomVocabularyContext?
+        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, modelVersion: AsrModelVersion
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -563,12 +366,6 @@ enum TranscribeCommand {
 
             // Start the engine with the models
             try await streamingAsr.start(models: models)
-
-            // Enable custom vocabulary for CTC keyword boosting in streaming mode
-            if let vocabulary = customVocabulary {
-                await streamingAsr.setCustomVocabulary(vocabulary)
-                logger.info("Custom vocabulary enabled for streaming with \(vocabulary.terms.count) terms")
-            }
 
             // Load audio file
             let audioFileURL = URL(fileURLWithPath: audioFile)
@@ -584,9 +381,9 @@ enum TranscribeCommand {
 
             try audioFileHandle.read(into: buffer)
 
-            // Calculate streaming parameters - use requested chunk size for simulation
-            let chunkDurationSeconds = Double(realtimeChunkMs) / 1000.0
-            let samplesPerChunk = Int(chunkDurationSeconds * format.sampleRate)
+            // Calculate streaming parameters - align with StreamingAsrConfig chunk size
+            let chunkDuration = config.chunkSeconds  // Use same chunk size as streaming config
+            let samplesPerChunk = Int(chunkDuration * format.sampleRate)
             let totalDuration = Double(audioFileHandle.length) / format.sampleRate
 
             // Track transcription updates
@@ -603,19 +400,25 @@ enum TranscribeCommand {
                 for await update in await streamingAsr.transcriptionUpdates {
                     await tracker.record(update: update)
 
-                    // Color-coded output: green = confirmed, purple = volatile
-                    let color = update.isConfirmed ? TerminalColor.green : TerminalColor.purple
-                    let coloredText =
-                        TerminalColor.enabled ? "\(color)\(update.text)\(TerminalColor.reset)" : update.text
-
+                    // Debug: show transcription updates
+                    let updateType = update.isConfirmed ? "CONFIRMED" : "VOLATILE"
                     if showMetadata {
                         let timestampString = timestampFormatter.string(from: update.timestamp)
-                        print(
-                            "\(coloredText) (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
+                        let timingSummary = streamingTimingSummary(for: update)
+                        logger.info(
+                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.3f", update.confidence)), timestamp: \(timestampString))"
                         )
+                        logger.info("  \(timingSummary)")
+                        if !update.tokenTimings.isEmpty {
+                            for (index, timing) in update.tokenTimings.enumerated() {
+                                logger.info(
+                                    "    [\(index)] '\(timing.token)' (id: \(timing.tokenId), start: \(String(format: "%.3f", timing.startTime))s, end: \(String(format: "%.3f", timing.endTime))s, conf: \(String(format: "%.3f", timing.confidence)))"
+                                )
+                            }
+                        }
                     } else {
-                        print(
-                            "\(coloredText) (conf: \(String(format: "%.2f", update.confidence)))")
+                        logger.info(
+                            "[\(updateType)] '\(update.text)' (conf: \(String(format: "%.2f", update.confidence)))")
                     }
 
                     if update.isConfirmed {
@@ -626,12 +429,14 @@ enum TranscribeCommand {
                 }
             }
 
-            // Stream audio chunks with real-time simulation
+            // Stream audio chunks continuously - no artificial delays
             var position = 0
 
-            logger.info("Streaming audio with real-time simulation (\(realtimeChunkMs)ms chunks)...")
-            logger.info("Waiting \(realtimeChunkMs)ms between chunks to simulate real-time audio arrival")
-            logger.info("Purple text = volatile (awaiting validation), Green text = confirmed by LocalAgreement-2\n")
+            logger.info("Streaming audio continuously (no artificial delays)...")
+            logger.info(
+                "Using \(String(format: "%.1f", chunkDuration))s chunks with \(String(format: "%.1f", config.leftContextSeconds))s left context, \(String(format: "%.1f", config.rightContextSeconds))s right context"
+            )
+            logger.info("Watch for real-time hypothesis updates being replaced by confirmed text\n")
 
             while position < Int(buffer.frameLength) {
                 let remainingSamples = Int(buffer.frameLength) - position
@@ -663,14 +468,13 @@ enum TranscribeCommand {
                 let audioTimePosition = Double(position) / format.sampleRate
                 await tracker.updateAudioPosition(audioTimePosition)
 
-                // Stream the chunk
+                // Stream the chunk immediately - no waiting
                 await streamingAsr.streamAudio(chunkBuffer)
 
                 position += chunkSize
 
-                // Simulate real-time audio arrival by waiting chunk duration
-                let chunkDurationNanoseconds = UInt64(chunkDurationSeconds * 1_000_000_000)
-                try await Task.sleep(nanoseconds: chunkDurationNanoseconds)
+                // Small yield to allow other tasks to progress
+                await Task.yield()
             }
 
             // Allow brief time for final processing
@@ -678,7 +482,6 @@ enum TranscribeCommand {
 
             // Finalize transcription
             let finalText = try await streamingAsr.finish()
-            let finalOutput = customWords.isEmpty ? finalText : rewrite(text: finalText, using: customWords)
 
             // Cancel update task
             updateTask.cancel()
@@ -691,7 +494,7 @@ enum TranscribeCommand {
             logger.info("STREAMING TRANSCRIPTION RESULTS")
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
-            print(finalOutput)
+            print(finalText)
 
             // Print word-level timestamps if requested
             if wordTimestamps {
@@ -762,53 +565,35 @@ enum TranscribeCommand {
     }
 
     private static func printUsage() {
-        print(
+        let logger = AppLogger(category: "Transcribe")
+        logger.info(
             """
 
             Transcribe Command Usage:
                 fluidaudio transcribe <audio_file> [options]
 
             Options:
-                --help, -h              Show this help message
-                --streaming             Use streaming mode with chunk simulation
-                --metadata              Show confidence, start time, and end time in results
-                --word-timestamps       Show word-level timestamps for each word in the transcription
-                --model-version <ver>   ASR model version to use: v2 or v3 (default: v3)
-                --beam-search           Use beam search decoding with vocabulary biasing
-                                        (requires Joint.mlmodelc model and --custom-vocab)
-                --realtime-chunk-size   Size of chunks to simulate real-time streaming (default: 500ms)
-                <size>                  Format: e.g., "500ms", "100ms", "2000ms" (range: 10ms-5000ms)
-                --custom-vocab <path>   Custom vocabulary for CTC keyword boosting (batch only)
-                                        Supports JSON format (.json) or simple text format (.txt):
-                                        - JSON: {"terms": [{"text": "word", "aliases": ["alias1"]}]}
-                                        - Text: One word per line, optionally "word: alias1, alias2, ..."
-                --custom-words <path>   Newline-delimited custom words to replace <unk> tokens (post-process only)
+                --help, -h         Show this help message
+                --streaming        Use streaming mode with chunk simulation
+                --metadata         Show confidence, start time, and end time in results
+                --word-timestamps  Show word-level timestamps for each word in the transcription
+                --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
 
             Examples:
-                fluidaudio transcribe audio.wav                           # Batch mode (default)
-                fluidaudio transcribe audio.wav --streaming               # Streaming mode with 500ms chunks
-                fluidaudio transcribe audio.wav --streaming --metadata    # Streaming with metadata
-                fluidaudio transcribe audio.wav --streaming --realtime-chunk-size 100ms   # Small chunks (more realistic)
-                fluidaudio transcribe audio.wav --streaming --realtime-chunk-size 2000ms  # Larger chunks
+                fluidaudio transcribe audio.wav                    # Batch mode (default)
+                fluidaudio transcribe audio.wav --streaming        # Streaming mode
+                fluidaudio transcribe audio.wav --metadata         # Batch mode with metadata
+                fluidaudio transcribe audio.wav --word-timestamps  # Batch mode with word timestamps
+                fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results
             - Processes entire audio file at once
 
             Streaming mode:
-            - Immediate chunk-by-chunk processing using VAD-style API
-            - Processes chunks as they arrive without buffering (true streaming)
-            - Shows incremental transcription updates using LocalAgreement-2 validation
-            - Color-coded output: Purple = provisional (awaiting validation), Green = confirmed
-            - Confirmed text grows as LocalAgreement-2 validates tokens across chunks
-            - Stateful decoder maintains context across chunks for better continuity
-            - Default 500ms chunks simulate realistic microphone input at real-time speed
-
-            Realtime chunk size:
-            - Simulates how audio arrives from a microphone (e.g., 500ms at a time)
-            - Smaller chunks (100-300ms) more closely simulate real microphones
-            - Larger chunks (1000-5000ms) reduce processing frequency
-            - Each chunk waits for its duration before the next arrives (e.g., 500ms wait for 500ms chunk)
+            - Simulates real-time streaming with chunk processing
+            - Shows incremental transcription updates
+            - Uses StreamingAsrManager with sliding window processing
 
             Metadata option:
             - Shows confidence score for transcription accuracy

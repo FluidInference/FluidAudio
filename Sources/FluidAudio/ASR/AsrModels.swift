@@ -17,19 +17,13 @@ public enum AsrModelVersion: Sendable {
 
 public struct AsrModels: Sendable {
 
-    /// Get required model names for a specific ASR version
-    public static func requiredModelNames(for version: AsrModelVersion) -> Set<String> {
-        return ModelNames.ASR.requiredModels(for: version.repo)
-    }
+    /// Required model names for ASR
+    public static let requiredModelNames = ModelNames.ASR.requiredModels
 
     public let encoder: MLModel
     public let preprocessor: MLModel
     public let decoder: MLModel
     public let joint: MLModel
-    /// Joint model with raw logits output (for beam search - deprecated). Optional.
-    public let jointLogits: MLModel?
-    /// Single-step joint decision with top-K outputs (for beam search). Optional.
-    public let jointSingleStep: MLModel?
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let version: AsrModelVersion
@@ -41,8 +35,6 @@ public struct AsrModels: Sendable {
         preprocessor: MLModel,
         decoder: MLModel,
         joint: MLModel,
-        jointLogits: MLModel? = nil,
-        jointSingleStep: MLModel? = nil,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
         version: AsrModelVersion
@@ -51,8 +43,6 @@ public struct AsrModels: Sendable {
         self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
-        self.jointLogits = jointLogits
-        self.jointSingleStep = jointSingleStep
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.version = version
@@ -60,11 +50,6 @@ public struct AsrModels: Sendable {
 
     public var usesSplitFrontend: Bool {
         true
-    }
-
-    /// Whether beam search decoding is available (jointSingleStep model loaded)
-    public var supportsBeamSearch: Bool {
-        jointSingleStep != nil
     }
 }
 
@@ -158,50 +143,17 @@ extension AsrModels {
         }
 
         // Load decoder and joint as well
-        let jointFileName = Names.jointFile(for: version.repo)
         let decoderAndJoint = try await DownloadUtils.loadModels(
             version.repo,
-            modelNames: [Names.decoderFile, jointFileName],
+            modelNames: [Names.decoderFile, Names.jointFile],
             directory: parentDirectory,
             computeUnits: config.computeUnits
         )
 
         guard let decoderModel = decoderAndJoint[Names.decoderFile],
-            let jointModel = decoderAndJoint[jointFileName]
+            let jointModel = decoderAndJoint[Names.jointFile]
         else {
             throw AsrModelsError.loadingFailed("Failed to load decoder or joint model")
-        }
-
-        // Try to load optional jointLogits model (deprecated, for old beam search)
-        var jointLogitsModel: MLModel? = nil
-        let jointLogitsPath = repoPath(from: directory, version: version)
-            .appendingPathComponent(Names.jointLogitsFile)
-        if FileManager.default.fileExists(atPath: jointLogitsPath.path) {
-            do {
-                jointLogitsModel = try await MLModel.load(
-                    contentsOf: jointLogitsPath,
-                    configuration: config
-                )
-                logger.info("Loaded jointLogits model from \(jointLogitsPath.path)")
-            } catch {
-                logger.warning("Failed to load jointLogits model: \(error.localizedDescription)")
-            }
-        }
-
-        // Try to load optional jointSingleStep model (for beam search with top-K)
-        var jointSingleStepModel: MLModel? = nil
-        let jointSingleStepPath = repoPath(from: directory, version: version)
-            .appendingPathComponent(Names.jointSingleStepFile)
-        if FileManager.default.fileExists(atPath: jointSingleStepPath.path) {
-            do {
-                jointSingleStepModel = try await MLModel.load(
-                    contentsOf: jointSingleStepPath,
-                    configuration: config
-                )
-                logger.info("Loaded jointSingleStep model for beam search from \(jointSingleStepPath.path)")
-            } catch {
-                logger.warning("Failed to load jointSingleStep model: \(error.localizedDescription)")
-            }
         }
 
         let asrModels = AsrModels(
@@ -209,8 +161,6 @@ extension AsrModels {
             preprocessor: preprocessorModel,
             decoder: decoderModel,
             joint: jointModel,
-            jointLogits: jointLogitsModel,
-            jointSingleStep: jointSingleStepModel,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory, version: version),
             version: version
@@ -341,8 +291,7 @@ extension AsrModels {
     public static func download(
         to directory: URL? = nil,
         force: Bool = false,
-        version: AsrModelVersion = .v3,
-        progress: ((Double) -> Void)? = nil
+        version: AsrModelVersion = .v3
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(for: version)
         logger.info("Downloading ASR models to: \(targetDir.path)")
@@ -372,33 +321,16 @@ extension AsrModels {
             DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
             DownloadSpec(fileName: Names.encoderFile, computeUnits: defaultUnits),
             DownloadSpec(fileName: Names.decoderFile, computeUnits: defaultUnits),
-            DownloadSpec(fileName: Names.jointFile(for: version.repo), computeUnits: defaultUnits),
+            DownloadSpec(fileName: Names.jointFile, computeUnits: defaultUnits),
         ]
-
-        // Calculate weights for progress reporting
-        // Encoder is approx 110MB, others are small.
-        // Weights: Encoder=0.9, others split the rest
-        let weights: [String: Double] = [
-            Names.encoderFile: 0.90
-        ]
-        let defaultWeight = 0.03
-
-        var accumulatedProgress = 0.0
 
         for spec in specs {
-            let weight = weights[spec.fileName] ?? defaultWeight
-
             _ = try await DownloadUtils.loadModels(
                 version.repo,
                 modelNames: [spec.fileName],
                 directory: parentDir,
-                computeUnits: spec.computeUnits,
-                progress: { fileProgress in
-                    let scaledProgress = accumulatedProgress + (fileProgress * weight)
-                    progress?(scaledProgress)
-                }
+                computeUnits: spec.computeUnits
             )
-            accumulatedProgress += weight
         }
 
         logger.info("Successfully downloaded ASR models")
@@ -408,10 +340,9 @@ extension AsrModels {
     public static func downloadAndLoad(
         to directory: URL? = nil,
         configuration: MLModelConfiguration? = nil,
-        version: AsrModelVersion = .v3,
-        progress: ((Double) -> Void)? = nil
+        version: AsrModelVersion = .v3
     ) async throws -> AsrModels {
-        let targetDir = try await download(to: directory, version: version, progress: progress)
+        let targetDir = try await download(to: directory, version: version)
         return try await load(from: targetDir, configuration: configuration, version: version)
     }
 
@@ -422,7 +353,7 @@ extension AsrModels {
 
     public static func modelsExist(at directory: URL, version: AsrModelVersion) -> Bool {
         let fileManager = FileManager.default
-        let requiredFiles = ModelNames.ASR.requiredModels(for: version.repo)
+        let requiredFiles = ModelNames.ASR.requiredModels
 
         // Check in the DownloadUtils repo structure
         let repoPath = repoPath(from: directory, version: version)
@@ -437,43 +368,6 @@ extension AsrModels {
         let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
 
         return modelsPresent && vocabPresent
-    }
-
-    /// Validates that Parakeet models exist and can be loaded.
-    /// Throws on Intel Mac since CoreML models require Apple Silicon.
-    public static func isModelValid(version: AsrModelVersion = .v3) async throws -> Bool {
-        guard SystemInfo.isAppleSilicon else {
-            throw ASRError.unsupportedPlatform("Parakeet models require Apple Silicon")
-        }
-
-        let cacheDir = defaultCacheDirectory(for: version)
-        guard modelsExist(at: cacheDir, version: version) else {
-            logger.info("Model validation failed: model files not found")
-            return false
-        }
-
-        let repoPath = repoPath(from: cacheDir, version: version)
-        let config = MLModelConfiguration()
-        config.computeUnits = .cpuOnly
-
-        let modelsToValidate = [
-            ("Preprocessor", ModelNames.ASR.preprocessorFile),
-            ("Encoder", ModelNames.ASR.encoderFile),
-            ("Decoder", ModelNames.ASR.decoderFile),
-            ("Joint", ModelNames.ASR.jointFile),
-        ]
-
-        for (name, fileName) in modelsToValidate {
-            let modelPath = repoPath.appendingPathComponent(fileName)
-            do {
-                _ = try MLModel(contentsOf: modelPath, configuration: config)
-            } catch {
-                logger.error("Model validation failed: \(name) - \(error.localizedDescription)")
-                return false
-            }
-        }
-
-        return true
     }
 
     public static func defaultCacheDirectory(for version: AsrModelVersion = .v3) -> URL {

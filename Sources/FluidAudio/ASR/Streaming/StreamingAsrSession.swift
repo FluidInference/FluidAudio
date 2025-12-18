@@ -6,7 +6,6 @@ import OSLog
 public actor StreamingAsrSession {
     private let logger = AppLogger(category: "StreamingSession")
     private var loadedModels: AsrModels?
-    private var loadedCtcModels: CtcModels?
     private var streams: [AudioSource: StreamingAsrManager] = [:]
 
     /// Initialize a new streaming session
@@ -16,18 +15,9 @@ public actor StreamingAsrSession {
 
     /// Load ASR models for the session (called automatically if needed)
     /// Models are cached and shared across all streams in this session
-    public func initialize(models: AsrModels? = nil, ctcModels: CtcModels? = nil) async throws {
-        if let models = models {
-            self.loadedModels = models
-            logger.info("Initialized session with provided ASR models")
-        }
-
-        if let ctcModels = ctcModels {
-            self.loadedCtcModels = ctcModels
-            logger.info("Initialized session with provided CTC models")
-        }
-
+    public func initialize() async throws {
         guard loadedModels == nil else {
+            logger.info("Models already loaded, skipping initialization")
             return
         }
 
@@ -67,10 +57,6 @@ public actor StreamingAsrSession {
         let stream = StreamingAsrManager(config: config)
         try await stream.start(models: models, source: source)
 
-        if let ctcModels = loadedCtcModels {
-            await stream.setCtcModels(ctcModels)
-        }
-
         // Store reference
         streams[source] = stream
 
@@ -95,26 +81,6 @@ public actor StreamingAsrSession {
     /// Get all active streams
     public var activeStreams: [AudioSource: StreamingAsrManager] {
         return streams
-    }
-
-    /// Set custom vocabulary for all active streams
-    /// - Parameter vocabulary: Custom vocabulary context, or nil to disable
-    public func setCustomVocabulary(_ vocabulary: CustomVocabularyContext?) async {
-        for (source, stream) in streams {
-            await stream.setCustomVocabulary(vocabulary)
-            logger.info("Set custom vocabulary for stream: \(String(describing: source))")
-        }
-    }
-
-    /// Set custom vocabulary for a specific stream
-    /// - Parameters:
-    ///   - vocabulary: Custom vocabulary context, or nil to disable
-    ///   - source: The audio source to update
-    public func setCustomVocabulary(_ vocabulary: CustomVocabularyContext?, for source: AudioSource) async {
-        if let stream = streams[source] {
-            await stream.setCustomVocabulary(vocabulary)
-            logger.info("Set custom vocabulary for stream: \(String(describing: source))")
-        }
     }
 
     /// Clean up all streams and release resources
