@@ -61,14 +61,14 @@ struct KMeansClustering {
             return (Array(0..<count), embeddings)
         }
 
+        var rng = SeededRNG(seed: seed ?? UInt64.random(in: 0...UInt64.max))
         let normalized = normalizeEmbeddings(embeddings)
-        var centroids = initializeCentroids(from: normalized, k: k, seed: seed)
+        var centroids = initializeCentroids(from: normalized, k: k, rng: &rng)
         var assignments = [Int](repeating: 0, count: count)
 
         for iteration in 0..<maxIterations {
             let newAssignments = assignToCentroids(normalized, centroids: centroids)
             if newAssignments == assignments {
-                logger.debug("K-Means converged after \(iteration + 1) iterations")
                 assignments = newAssignments
                 break
             }
@@ -77,10 +77,11 @@ struct KMeansClustering {
                 embeddings: normalized,
                 assignments: assignments,
                 k: k,
-                dimension: dimension
+                dimension: dimension,
+                rng: &rng
             )
 
-            if iteration > 50 {
+            if iteration > 80 {
                 logger.warning("K-Means slow convergence at iteration \(iteration + 1)")
             }
         }
@@ -104,15 +105,10 @@ struct KMeansClustering {
     private static func initializeCentroids(
         from embeddings: [[Double]],
         k: Int,
-        seed: UInt64?
+        rng: inout SeededRNG
     ) -> [[Double]] {
         var indices = Array(embeddings.indices)
-        if let seed = seed {
-            var rng = SeededRNG(seed: seed)
-            indices.shuffle(using: &rng)
-        } else {
-            indices.shuffle()
-        }
+        indices.shuffle(using: &rng)
         return Array(indices.prefix(k).map { embeddings[$0] })
     }
 
@@ -144,7 +140,8 @@ struct KMeansClustering {
         embeddings: [[Double]],
         assignments: [Int],
         k: Int,
-        dimension: Int
+        dimension: Int,
+        rng: inout SeededRNG
     ) -> [[Double]] {
         var sums = [[Double]](repeating: [Double](repeating: 0, count: dimension), count: k)
         var counts = [Int](repeating: 0, count: k)
@@ -160,7 +157,8 @@ struct KMeansClustering {
         return (0..<k).map { cluster in
             let count = counts[cluster]
             guard count > 0 else {
-                return sums[cluster]
+                // Empty cluster: reinitialize from random data point (sklearn approach)
+                return embeddings.randomElement(using: &rng) ?? sums[cluster]
             }
             var invCount = 1.0 / Double(count)
             var result = [Double](repeating: 0, count: dimension)
@@ -169,8 +167,9 @@ struct KMeansClustering {
         }
     }
 
-    /// Simple seeded RNG for reproducible initialization
-    private struct SeededRNG: RandomNumberGenerator {
+    /// Seeded random number generator for reproducible clustering.
+    /// Uses LCG (Linear Congruential Generator) algorithm.
+    struct SeededRNG: RandomNumberGenerator {
         var state: UInt64
 
         init(seed: UInt64) {

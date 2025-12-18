@@ -57,7 +57,7 @@ final class SpeakerCountConstraintsTests: XCTestCase {
 
     // MARK: - Boundary Condition Tests (Expert Panel: Wiegers)
 
-    func testResolveWithZeroNumSpeakersClamsToOne() {
+    func testResolveWithZeroNumSpeakersClampsToOne() {
         let result = SpeakerCountConstraints.resolve(
             numEmbeddings: 100,
             numSpeakers: 0,
@@ -68,7 +68,7 @@ final class SpeakerCountConstraintsTests: XCTestCase {
         XCTAssertEqual(result.maxSpeakers, 1)
     }
 
-    func testResolveWithNegativeNumSpeakersClamsToOne() {
+    func testResolveWithNegativeNumSpeakersClampsToOne() {
         let result = SpeakerCountConstraints.resolve(
             numEmbeddings: 100,
             numSpeakers: -5,
@@ -79,7 +79,7 @@ final class SpeakerCountConstraintsTests: XCTestCase {
         XCTAssertEqual(result.maxSpeakers, 1)
     }
 
-    func testResolveWithZeroMinSpeakersClamsToOne() {
+    func testResolveWithZeroMinSpeakersClampsToOne() {
         let result = SpeakerCountConstraints.resolve(
             numEmbeddings: 100,
             numSpeakers: nil,
@@ -89,7 +89,7 @@ final class SpeakerCountConstraintsTests: XCTestCase {
         XCTAssertEqual(result.minSpeakers, 1)
     }
 
-    func testResolveWithNegativeMinSpeakersClamsToOne() {
+    func testResolveWithNegativeMinSpeakersClampsToOne() {
         let result = SpeakerCountConstraints.resolve(
             numEmbeddings: 100,
             numSpeakers: nil,

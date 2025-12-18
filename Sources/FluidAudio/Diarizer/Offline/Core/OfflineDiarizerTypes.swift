@@ -573,10 +573,14 @@ struct TimedEmbedding: Sendable {
 extension OfflineDiarizerConfig {
     /// Returns a copy with speaker count constraints applied.
     ///
+    /// Following pyannote's behavior, `numSpeakers` takes precedence over `min`/`max`.
+    /// This method clears any previously set `numSpeakers` value.
+    ///
     /// - Parameters:
-    ///   - min: Minimum number of speakers (nil for no minimum).
-    ///   - max: Maximum number of speakers (nil for no maximum).
+    ///   - min: Minimum number of speakers (nil for no minimum, defaults to 1).
+    ///   - max: Maximum number of speakers (nil for no maximum, defaults to embedding count).
     /// - Returns: New config with constraints applied.
+    /// - Note: Clears `numSpeakers`. Use `withSpeakers(exactly:)` for exact count.
     public func withSpeakers(min: Int? = nil, max: Int? = nil) -> OfflineDiarizerConfig {
         var copy = self
         copy.clustering.minSpeakers = min
@@ -587,8 +591,12 @@ extension OfflineDiarizerConfig {
 
     /// Returns a copy with exact speaker count.
     ///
+    /// Following pyannote's behavior, `numSpeakers` takes precedence over `min`/`max`.
+    /// This method clears any previously set `minSpeakers` and `maxSpeakers` values.
+    ///
     /// - Parameter exactly: Exact number of speakers to detect.
     /// - Returns: New config with exact speaker count.
+    /// - Note: Clears `minSpeakers` and `maxSpeakers`. Use `withSpeakers(min:max:)` for range.
     public func withSpeakers(exactly count: Int) -> OfflineDiarizerConfig {
         var copy = self
         copy.clustering.numSpeakers = count

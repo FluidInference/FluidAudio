@@ -112,7 +112,7 @@ final class KMeansClusteringTests: XCTestCase {
 
     func testKMeansWithRealisticEmbeddingDimension() {
         let dimension = 192  // Real speaker embedding dimension
-        var rng = SeededRandomNumberGenerator(seed: 42)
+        var rng = KMeansClustering.SeededRNG(seed: 42)
 
         let embeddings = (0..<20).map { _ in
             (0..<dimension).map { _ in Double.random(in: -1...1, using: &rng) }
@@ -127,19 +127,5 @@ final class KMeansClusteringTests: XCTestCase {
 
         XCTAssertEqual(clusters.count, 20)
         XCTAssertEqual(Set(clusters).count, 3)
-    }
-}
-
-/// Seeded RNG for reproducible tests
-struct SeededRandomNumberGenerator: RandomNumberGenerator {
-    var state: UInt64
-
-    init(seed: UInt64) {
-        self.state = seed
-    }
-
-    mutating func next() -> UInt64 {
-        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-        return state
     }
 }
