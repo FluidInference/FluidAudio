@@ -658,7 +658,8 @@ struct TextNormalizer {
             }
         }
 
-        if currentSum > 0 {
+        // Always append if we processed any words (handles "zero" case)
+        if !words.isEmpty && (currentSum > 0 || (words.count == 1 && numberValues[words[0]] == 0)) {
             results.append(String(currentSum))
         }
 
