@@ -139,11 +139,64 @@ struct TextNormalizer {
         normalized = normalized.replacingOccurrences(of: "g'day", with: "good day")
 
         // British to American normalization
+        if britishToAmerican.isEmpty {
+            print("WARNING: english.json failed to load or is empty!")
+        }
         for (british, american) in britishToAmerican {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: british) + "\\b"
             normalized = normalized.replacingOccurrences(
                 of: pattern,
                 with: american,
+                options: .regularExpression
+            )
+        }
+
+        // Abbreviations (Moved to top)
+        let abbreviations = [
+            // Titles and names
+            "mr": "mister",
+            "mrs": "missus",
+            "ms": "miss",
+            "dr": "doctor",
+            "prof": "professor",
+            "st": "saint",
+            "jr": "junior",
+            "sr": "senior",
+            "esq": "esquire",
+
+            // Government and military titles
+            "capt": "captain",
+            "gov": "governor",
+            "ald": "alderman",
+            "gen": "general",
+            "sen": "senator",
+            "rep": "representative",
+            "pres": "president",
+            "rev": "reverend",
+            "hon": "honorable",
+            "asst": "assistant",
+            "assoc": "associate",
+            "lt": "lieutenant",
+            "col": "colonel",
+
+            // Business and other
+            "vs": "versus",
+            "inc": "incorporated",
+            "ltd": "limited",
+            "co": "company",
+
+            // Time and date abbreviations
+            "am": "a m",
+            "pm": "p m",
+            "ad": "ad",
+            "bc": "bc",
+        ]
+
+        for (abbrev, expansion) in abbreviations {
+            let pattern = "\\b" + abbrev + "\\b"
+            normalized = normalized.replacingOccurrences(
+                of: pattern,
+                with: expansion,
                 options: .regularExpression
             )
         }
@@ -296,127 +349,7 @@ struct TextNormalizer {
             normalized = normalized.replacingOccurrences(of: contraction, with: expansion)
         }
 
-        let abbreviations = [
-            // Titles and names
-            "mr": "mister",
-            "mrs": "missus",
-            "ms": "miss",
-            "dr": "doctor",
-            "prof": "professor",
-            "st": "saint",
-            "jr": "junior",
-            "sr": "senior",
-            "esq": "esquire",
-
-            // Government and military titles
-            "capt": "captain",
-            "gov": "governor",
-            "ald": "alderman",
-            "gen": "general",
-            "sen": "senator",
-            "rep": "representative",
-            "pres": "president",
-            "rev": "reverend",
-            "hon": "honorable",
-            "asst": "assistant",
-            "assoc": "associate",
-            "lt": "lieutenant",
-            "col": "colonel",
-
-            // Business and other
-            "vs": "versus",
-            "inc": "incorporated",
-            "ltd": "limited",
-            "co": "company",
-
-            // Time and date abbreviations
-            "am": "a m",
-            "pm": "p m",
-            "ad": "ad",
-            "bc": "bc",
-        ]
-
-        for (abbrev, expansion) in abbreviations {
-            let pattern = "\\b" + abbrev + "\\b"
-            normalized = normalized.replacingOccurrences(
-                of: pattern,
-                with: expansion,
-                options: .regularExpression
-            )
-        }
-
-        // Handle year formats FIRST (e.g., "twenty twenty one" → "2021")
-        // Must come before compound number handling
-        // Process longest patterns first (2029 down to 2020) to avoid partial matches
-        let yearWords = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-        for year in stride(from: 9, through: 0, by: -1) {
-            let yearWord = year == 0 ? "" : " " + yearWords[year]
-            let pattern = "\\btwenty twenty\(yearWord)\\b"
-            let replacement = "202\(year)"
-            normalized = normalized.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-        // Handle 2010s: "twenty nineteen", "twenty eighteen", etc.
-        let teens = [
-            ("ten", "10"), ("eleven", "11"), ("twelve", "12"), ("thirteen", "13"),
-            ("fourteen", "14"), ("fifteen", "15"), ("sixteen", "16"), ("seventeen", "17"),
-            ("eighteen", "18"), ("nineteen", "19")
-        ]
-        for (teenWord, teenNum) in teens {
-            let pattern = "\\btwenty \(teenWord)\\b"
-            let replacement = "20\(teenNum)"
-            normalized = normalized.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-
-        // Handle compound numbers BEFORE individual word replacements
-        // e.g., "twenty one" → "21", "thirty two" → "32"
-        let tens = [
-            ("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50),
-            ("sixty", 60), ("seventy", 70), ("eighty", 80), ("ninety", 90)
-        ]
-        let ones = [
-            ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5),
-            ("six", 6), ("seven", 7), ("eight", 8), ("nine", 9)
-        ]
-
-        // Replace compound numbers (e.g., "twenty one" → "21")
-        for (tensWord, tensVal) in tens {
-            for (onesWord, onesVal) in ones {
-                let compound = tensWord + " " + onesWord
-                let value = String(tensVal + onesVal)
-                normalized = normalized.replacingOccurrences(
-                    of: "\\b" + compound + "\\b",
-                    with: value,
-                    options: .regularExpression
-                )
-            }
-        }
-
-        // Handle "point" for decimals: "21 point 5" → "21.5", "point 5" → "0.5"
-        // First handle cases like "21 point 5"
-        let pointPattern = try! NSRegularExpression(pattern: "(\\d+)\\s+point\\s+(\\d+)", options: [])
-        normalized = pointPattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: "$1.$2"
-        )
-
-        // Handle "point X" at start or after space → "0.X"
-        let leadingPointPattern = try! NSRegularExpression(pattern: "\\bpoint\\s+(\\d+)", options: [])
-        normalized = leadingPointPattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: "0.$1"
-        )
+        // Abbreviations moved to top
 
         // Handle year formats FIRST (e.g., "twenty twenty one" → "2021")
         // Must come before compound number handling
@@ -546,6 +479,9 @@ struct TextNormalizer {
             "seizième": "16th", "vingtième": "20th", "trentième": "30th", "centième": "100th",
         ]
 
+        // Advanced Number Conversion (e.g. "one hundred" -> "100")
+        normalized = convertNumbers(normalized)
+
         for (word, digit) in numberWords {
             let pattern = "\\b" + word + "\\b"
             normalized = normalized.replacingOccurrences(
@@ -563,6 +499,8 @@ struct TextNormalizer {
             range: NSRange(location: 0, length: normalized.count),
             withTemplate: "$1$2"
         )
+
+        // Merge consecutive digits logic removed due to regression
 
         // Remove periods not followed by numbers
         let periodPattern = try! NSRegularExpression(pattern: "\\.([^0-9]|$)", options: [])
@@ -628,6 +566,104 @@ struct TextNormalizer {
         normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return normalized
+    }
+
+    // MARK: - Advanced Number Parsing
+
+    private static let numberValues: [String: Int] = [
+        "zero": 0, "oh": 0,
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+        "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+        "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+    ]
+
+    private static let multipliers: [String: Int] = [
+        "hundred": 100,
+        "thousand": 1000,
+        "million": 1_000_000,
+        "billion": 1_000_000_000,
+    ]
+
+    private static func convertNumbers(_ text: String) -> String {
+        let words = text.components(separatedBy: .whitespaces)
+        var result: [String] = []
+        var currentNumberWords: [String] = []
+
+        for word in words {
+            if isNumberWord(word) {
+                currentNumberWords.append(word)
+            } else {
+                if !currentNumberWords.isEmpty {
+                    result.append(parseNumberSequence(currentNumberWords))
+                    currentNumberWords = []
+                }
+                result.append(word)
+            }
+        }
+
+        if !currentNumberWords.isEmpty {
+            result.append(parseNumberSequence(currentNumberWords))
+        }
+
+        return result.joined(separator: " ")
+    }
+
+    private static func isNumberWord(_ word: String) -> Bool {
+        return numberValues.keys.contains(word) || multipliers.keys.contains(word)
+    }
+
+    private static func parseNumberSequence(_ words: [String]) -> String {
+        var results: [String] = []
+        var currentSum = 0
+        var lastScale = 0
+
+        for word in words {
+            let val = numberValues[word] ?? multipliers[word] ?? 0
+            let isMultiplier = multipliers.keys.contains(word)
+
+            if isMultiplier {
+                if currentSum == 0 {
+                    currentSum = 1
+                }
+                currentSum *= val
+                lastScale = val
+            } else {
+                if currentSum == 0 {
+                    currentSum = val
+                    lastScale = 1
+                } else {
+                    // Merge conditions:
+                    // 1. Previous was a multiplier larger than current (e.g. "hundred" ... "five")
+                    // 2. Previous was a ten (20-90) and current is unit (1-9)
+
+                    var canMerge = false
+                    if lastScale >= 100 && val < lastScale {
+                        canMerge = true
+                    } else if lastScale == 1 && (currentSum % 100 >= 20 && currentSum % 10 == 0) && val < 10 {
+                        canMerge = true
+                    }
+
+                    if canMerge {
+                        currentSum += val
+                        lastScale = 1
+                    } else {
+                        results.append(String(currentSum))
+                        currentSum = val
+                        lastScale = 1
+                    }
+                }
+            }
+        }
+
+        // Always append if we processed any words (handles "zero" case)
+        if !words.isEmpty && (currentSum > 0 || (words.count == 1 && numberValues[words[0]] == 0)) {
+            results.append(String(currentSum))
+        }
+
+        return results.joined(separator: " ")
     }
 
 }
