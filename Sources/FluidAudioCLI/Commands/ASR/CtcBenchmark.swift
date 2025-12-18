@@ -222,10 +222,9 @@ public class CtcBenchmark {
         let audioURL = URL(fileURLWithPath: audioPath)
 
         // Use AsrManager's built-in file transcription
-        let result = try await asrManager.transcribe(
-            audioURL,
-            customVocabulary: customVocab
-        )
+        // Note: customVocab parameter is ignored - custom vocabulary boosting requires
+        // additional AsrManager API that's not yet in main
+        let result = try await asrManager.transcribe(audioURL)
 
         return result.text
     }

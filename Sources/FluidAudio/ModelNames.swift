@@ -7,6 +7,8 @@ public enum Repo: String, CaseIterable {
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "alexwengg/parakeet-ctc-110m-coreml"
     case canaryCtc = "argmaxinc/ctckit-pro"
+    case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
+    case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
 
@@ -23,6 +25,10 @@ public enum Repo: String, CaseIterable {
             return "parakeet-ctc-110m-coreml"
         case .canaryCtc:
             return "canary-1b-v2_474MB"
+        case .parakeetEou160:
+            return "parakeet-realtime-eou-120m-coreml/160ms"
+        case .parakeetEou320:
+            return "parakeet-realtime-eou-120m-coreml/320ms"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -37,16 +43,22 @@ public enum Repo: String, CaseIterable {
             return "alexwengg/parakeet-ctc-110m-coreml"
         case .canaryCtc:
             return "argmaxinc/ctckit-pro"
+        case .parakeetEou160, .parakeetEou320:
+            return "FluidInference/parakeet-realtime-eou-120m-coreml"
         default:
             return "FluidInference/\(name)"
         }
     }
 
-    /// Subfolder within the repo (for repos with multiple models)
-    public var subfolder: String? {
+    /// Subdirectory within repo (for repos with multiple model variants)
+    public var subPath: String? {
         switch self {
         case .canaryCtc:
             return "canary-1b-v2_474MB"
+        case .parakeetEou160:
+            return "160ms"
+        case .parakeetEou320:
+            return "320ms"
         default:
             return nil
         }
@@ -57,8 +69,10 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .kokoro:
             return "kokoro"
-        case .canaryCtc:
-            return "canary-1b-v2_474MB"
+        case .parakeetEou160:
+            return "parakeet-eou-streaming/160ms"
+        case .parakeetEou320:
+            return "parakeet-eou-streaming/320ms"
         default:
             return name
         }
@@ -84,7 +98,6 @@ public enum ModelNames {
 
     /// Offline diarizer model names (VBx-based clustering)
     public enum OfflineDiarizer {
-        public static let subfolder = "speaker-diarization-offline"
         public static let segmentation = "Segmentation"
         public static let fbank = "FBank"
         public static let embedding = "Embedding"
@@ -95,11 +108,10 @@ public enum ModelNames {
         public static let embeddingFile = embedding + ".mlmodelc"
         public static let pldaRhoFile = pldaRho + ".mlmodelc"
 
-        // Full paths including subfolder (for DownloadUtils)
-        public static let segmentationPath = subfolder + "/" + segmentationFile
-        public static let fbankPath = subfolder + "/" + fbankFile
-        public static let embeddingPath = subfolder + "/" + embeddingFile
-        public static let pldaRhoPath = subfolder + "/" + pldaRhoFile
+        public static let segmentationPath = segmentationFile
+        public static let fbankPath = fbankFile
+        public static let embeddingPath = embeddingFile
+        public static let pldaRhoPath = pldaRhoFile
 
         public static let requiredModels: Set<String> = [
             segmentationPath,
@@ -114,16 +126,7 @@ public enum ModelNames {
         public static let preprocessor = "Preprocessor"
         public static let encoder = "Encoder"
         public static let decoder = "Decoder"
-
-        // Joint model names differ between versions
-        public static let jointV2 = "JointDecision"  // v2 uses JointDecision
-        public static let jointV3 = "JointDecisionv2"  // v3 uses JointDecisionv2
-
-        // Joint model with raw logits output (for beam search - deprecated, use jointSingleStep)
-        public static let jointLogits = "Joint"  // Outputs raw logits [B, T, U, 8198]
-
-        // Single-step joint decision with top-K outputs (for beam search)
-        public static let jointSingleStep = "JointDecisionSingleStep"  // Per-frame with top-64 candidates
+        public static let joint = "JointDecision"
 
         // Shared vocabulary file across all model versions
         public static let vocabularyFile = "parakeet_vocab.json"
@@ -131,30 +134,14 @@ public enum ModelNames {
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
-        public static let jointLogitsFile = jointLogits + ".mlmodelc"
-        public static let jointSingleStepFile = jointSingleStep + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
 
-        // Get joint file name based on repo/version
-        public static func jointFile(for repo: Repo) -> String {
-            switch repo {
-            case .parakeetV2:
-                return jointV2 + ".mlmodelc"
-            case .parakeet:
-                return jointV3 + ".mlmodelc"
-            default:
-                return jointV3 + ".mlmodelc"  // Default to v3
-            }
-        }
-
-        // Get required models based on repo/version
-        public static func requiredModels(for repo: Repo) -> Set<String> {
-            return [
-                preprocessorFile,
-                encoderFile,
-                decoderFile,
-                jointFile(for: repo),
-            ]
-        }
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile,
+            jointFile,
+        ]
 
         /// Get vocabulary filename for specific model version
         public static func vocabulary(for repo: Repo) -> String {
@@ -162,7 +149,7 @@ public enum ModelNames {
         }
     }
 
-    /// CTC keyword spotting model names (Parakeet-TDT CTC 110M).
+    /// CTC model names
     public enum CTC {
         public static let melSpectrogram = "MelSpectrogram"
         public static let audioEncoder = "AudioEncoder"
@@ -187,6 +174,30 @@ public enum ModelNames {
 
         public static let requiredModels: Set<String> = [
             sileroVadFile
+        ]
+    }
+
+    /// Parakeet EOU streaming model names
+    public enum ParakeetEOU {
+        public static let preprocessor = "parakeet_eou_preprocessor"
+        public static let encoder = "streaming_encoder"
+        public static let decoder = "decoder"
+        public static let joint = "joint_decision"
+        public static let vocab = "vocab.json"
+        public static let tokenizer = "tokenizer.model"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile,
+            jointFile,
+            vocab,
+            tokenizer,
         ]
     }
 
@@ -243,9 +254,11 @@ public enum ModelNames {
         case .vad:
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
-            return ModelNames.ASR.requiredModels(for: repo)
+            return ModelNames.ASR.requiredModels
         case .parakeetCtc110m, .canaryCtc:
             return ModelNames.CTC.requiredModels
+        case .parakeetEou160, .parakeetEou320:
+            return ModelNames.ParakeetEOU.requiredModels
         case .diarizer:
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels

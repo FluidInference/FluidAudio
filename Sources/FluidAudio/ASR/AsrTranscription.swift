@@ -358,20 +358,6 @@ extension AsrManager {
         previous: [Int], current: [Int], maxOverlap: Int = 12
     ) -> (deduped: [Int], removedCount: Int) {
 
-        // 1. Fast path: Exact token match
-        let (exactDeduped, exactRemoved) = removeDuplicateTokenSequenceExact(
-            previous: previous, current: current, maxOverlap: maxOverlap)
-        if exactRemoved > 0 {
-            return (exactDeduped, exactRemoved)
-        }
-
-        // 2. Text-based normalization
-        return removeDuplicateTokenSequenceTextNormalized(previous: previous, current: current, maxOverlap: maxOverlap)
-    }
-
-    private func removeDuplicateTokenSequenceExact(
-        previous: [Int], current: [Int], maxOverlap: Int
-    ) -> (deduped: [Int], removedCount: Int) {
         // Handle single punctuation token duplicates first
         let punctuationTokens = [7883, 7952, 7948]  // period, question, exclamation
         var workingCurrent = current
@@ -380,10 +366,12 @@ extension AsrManager {
         if !previous.isEmpty && !workingCurrent.isEmpty && previous.last == workingCurrent.first
             && punctuationTokens.contains(workingCurrent.first!)
         {
+            // Remove the duplicate punctuation token from the beginning of current
             workingCurrent = Array(workingCurrent.dropFirst())
             removedCount += 1
         }
 
+        // Check for suffix-prefix overlap: end of previous matches beginning of current
         let maxSearchLength = min(15, previous.count)  // last 15 tokens of previous
         let maxMatchLength = min(maxOverlap, workingCurrent.count)  // first 12 tokens of current
 
@@ -391,64 +379,54 @@ extension AsrManager {
             return (workingCurrent, removedCount)
         }
 
+        // Search for overlapping sequences from longest to shortest
         for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
+            // Check if the last `overlapLength` tokens of previous match the first `overlapLength` tokens of current
             let prevSuffix = Array(previous.suffix(overlapLength))
             let currPrefix = Array(workingCurrent.prefix(overlapLength))
 
             if prevSuffix == currPrefix {
-                logger.debug("Found exact suffix-prefix overlap of length \(overlapLength)")
+                logger.debug("Found exact suffix-prefix overlap of length \(overlapLength): \(prevSuffix)")
                 let finalRemoved = removedCount + overlapLength
                 return (Array(workingCurrent.dropFirst(overlapLength)), finalRemoved)
             }
         }
 
-        return (workingCurrent, 0)  // if no exact match found (to fall through)
-    }
+        // Extended search: look for partial overlaps within the sequences
+        // Use boundary search frames from TDT config for NeMo-compatible alignment
+        let boundarySearchFrames = config.tdtConfig.boundarySearchFrames
+        for overlapLength in (2...min(maxSearchLength, maxMatchLength)).reversed() {
+            let prevStart = max(0, previous.count - maxSearchLength)
+            let prevEnd = previous.count - overlapLength + 1
+            if prevEnd <= prevStart { continue }
 
-    private func removeDuplicateTokenSequenceTextNormalized(
-        previous: [Int], current: [Int], maxOverlap: Int
-    ) -> (deduped: [Int], removedCount: Int) {
+            for startIndex in prevStart..<prevEnd {
+                let prevSub = Array(previous[startIndex..<(startIndex + overlapLength)])
+                let currEnd = max(0, workingCurrent.count - overlapLength + 1)
 
-        // Helper to get normalized text
-        func getText(_ tokens: [Int]) -> String {
-            tokens.compactMap { vocabulary[$0] }
-                .joined()
-                .replacingOccurrences(of: " ", with: " ")
-                .lowercased()
-                .filter { !$0.isPunctuation && !$0.isWhitespace }
-        }
-
-        // Ignore trailing punctuation in previous for the overlap check
-        let punctuationTokens: Set<Int> = [7883, 7952, 7948]  // . ? !
-        var effectivePrevious = previous
-        while let last = effectivePrevious.last, punctuationTokens.contains(last) {
-            effectivePrevious.removeLast()
-        }
-
-        let maxCheck = min(maxOverlap, effectivePrevious.count, current.count)
-        if maxCheck < 1 { return (current, 0) }
-
-        for length in (1...maxCheck).reversed() {
-            // Compare suffix of effectivePrevious vs prefix of current
-            let prevSuffixTokens = Array(effectivePrevious.suffix(length))
-            let currPrefixTokens = Array(current.prefix(length))
-
-            let prevText = getText(prevSuffixTokens)
-            let currText = getText(currPrefixTokens)
-
-            if !prevText.isEmpty && prevText == currText {
-                logger.debug("Found normalized overlap: '\(prevText)' (len \(length))")
-                return (Array(current.dropFirst(length)), length)
+                // Use boundarySearchFrames to limit search window (NeMo tdt_search_boundary pattern)
+                let searchLimit = min(boundarySearchFrames, currEnd)
+                for currentStart in 0..<searchLimit {
+                    let currSub = Array(workingCurrent[currentStart..<(currentStart + overlapLength)])
+                    if prevSub == currSub {
+                        logger.debug(
+                            "Found duplicate sequence length=\(overlapLength) at currStart=\(currentStart): \(prevSub) (boundarySearch=\(boundarySearchFrames))"
+                        )
+                        let finalRemoved = removedCount + currentStart + overlapLength
+                        return (Array(workingCurrent.dropFirst(currentStart + overlapLength)), finalRemoved)
+                    }
+                }
             }
         }
 
-        return (current, 0)
+        return (workingCurrent, removedCount)
     }
-}
 
-/// Calculate start frame offset for a sliding window segment (deprecated - now handled by timeJump)
-internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
-    // This method is deprecated as frame tracking is now handled by the decoder's timeJump mechanism
-    // Kept for test compatibility
-    return 0
+    /// Calculate start frame offset for a sliding window segment (deprecated - now handled by timeJump)
+    internal func calculateStartFrameOffset(segmentIndex: Int, leftContextSeconds: Double) -> Int {
+        // This method is deprecated as frame tracking is now handled by the decoder's timeJump mechanism
+        // Kept for test compatibility
+        return 0
+    }
+
 }
