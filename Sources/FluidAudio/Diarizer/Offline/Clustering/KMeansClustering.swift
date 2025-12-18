@@ -24,7 +24,7 @@ struct KMeansClustering {
     static func cluster(
         embeddings: [[Double]],
         numClusters: Int,
-        maxIterations: Int = 100,
+        maxIterations: Int = 300,
         seed: UInt64? = nil
     ) -> [Int] {
         clusterWithCentroids(
@@ -39,7 +39,7 @@ struct KMeansClustering {
     static func clusterWithCentroids(
         embeddings: [[Double]],
         numClusters: Int,
-        maxIterations: Int = 100,
+        maxIterations: Int = 300,
         seed: UInt64? = nil
     ) -> (clusters: [Int], centroids: [[Double]]) {
         let kmeansState = signposter.beginInterval("KMeans Clustering")
