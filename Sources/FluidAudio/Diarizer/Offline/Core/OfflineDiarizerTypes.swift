@@ -103,27 +103,38 @@ public struct OfflineDiarizerConfig: Sendable {
         public var warmStartFa: Double
         public var warmStartFb: Double
 
-        // NOTE: minClusterSize is NOT used in community-1 (VBx-based pipeline).
-        // VBx is designed to handle 100+ under-clustered initial assignments from AHC
-        // and naturally merge them during Bayesian refinement. Pre-merging small clusters
-        // with minClusterSize enforcement (used in pyannote 3.1 AHC-only pipeline)
-        // is counterproductive for VBx and loses speaker distinctions.
+        /// Minimum number of speakers. Ignored if `numSpeakers` is set.
+        public var minSpeakers: Int?
+
+        /// Maximum number of speakers. Ignored if `numSpeakers` is set.
+        public var maxSpeakers: Int?
+
+        /// Exact number of speakers. Overrides `minSpeakers` and `maxSpeakers` when set.
+        public var numSpeakers: Int?
 
         public static let community = Clustering(
             threshold: 0.6,
-            // Default 0.07
             warmStartFa: 0.07,
-            warmStartFb: 0.8
+            warmStartFb: 0.8,
+            minSpeakers: nil,
+            maxSpeakers: nil,
+            numSpeakers: nil
         )
 
         public init(
             threshold: Double,
             warmStartFa: Double,
-            warmStartFb: Double
+            warmStartFb: Double,
+            minSpeakers: Int? = nil,
+            maxSpeakers: Int? = nil,
+            numSpeakers: Int? = nil
         ) {
             self.threshold = threshold
             self.warmStartFa = warmStartFa
             self.warmStartFb = warmStartFb
+            self.minSpeakers = minSpeakers
+            self.maxSpeakers = maxSpeakers
+            self.numSpeakers = numSpeakers
         }
     }
 
@@ -516,13 +527,21 @@ public struct VBxOutput: Sendable {
     public let numClusters: Int
     public let elbos: [Double]
 
+    /// Whether the speaker count was adjusted due to constraints.
+    public var wasAdjusted: Bool = false
+
+    /// Original cluster count before constraint adjustment (nil if not adjusted).
+    public var originalClusterCount: Int?
+
     public init(
         gamma: [[Double]],
         pi: [Double],
         hardClusters: [[Int]],
         centroids: [[Double]],
         numClusters: Int,
-        elbos: [Double]
+        elbos: [Double],
+        wasAdjusted: Bool = false,
+        originalClusterCount: Int? = nil
     ) {
         self.gamma = gamma
         self.pi = pi
@@ -530,6 +549,8 @@ public struct VBxOutput: Sendable {
         self.centroids = centroids
         self.numClusters = numClusters
         self.elbos = elbos
+        self.wasAdjusted = wasAdjusted
+        self.originalClusterCount = originalClusterCount
     }
 }
 
@@ -545,4 +566,42 @@ struct TimedEmbedding: Sendable {
     let endTime: Double
     let embedding256: [Float]
     let rho128: [Double]
+}
+
+// MARK: - Convenience Methods
+
+extension OfflineDiarizerConfig {
+    /// Returns a copy with speaker count constraints applied.
+    ///
+    /// Following pyannote's behavior, `numSpeakers` takes precedence over `min`/`max`.
+    /// This method clears any previously set `numSpeakers` value.
+    ///
+    /// - Parameters:
+    ///   - min: Minimum number of speakers (nil for no minimum, defaults to 1).
+    ///   - max: Maximum number of speakers (nil for no maximum, defaults to embedding count).
+    /// - Returns: New config with constraints applied.
+    /// - Note: Clears `numSpeakers`. Use `withSpeakers(exactly:)` for exact count.
+    public func withSpeakers(min: Int? = nil, max: Int? = nil) -> OfflineDiarizerConfig {
+        var copy = self
+        copy.clustering.minSpeakers = min
+        copy.clustering.maxSpeakers = max
+        copy.clustering.numSpeakers = nil
+        return copy
+    }
+
+    /// Returns a copy with exact speaker count.
+    ///
+    /// Following pyannote's behavior, `numSpeakers` takes precedence over `min`/`max`.
+    /// This method clears any previously set `minSpeakers` and `maxSpeakers` values.
+    ///
+    /// - Parameter exactly: Exact number of speakers to detect.
+    /// - Returns: New config with exact speaker count.
+    /// - Note: Clears `minSpeakers` and `maxSpeakers`. Use `withSpeakers(min:max:)` for range.
+    public func withSpeakers(exactly count: Int) -> OfflineDiarizerConfig {
+        var copy = self
+        copy.clustering.numSpeakers = count
+        copy.clustering.minSpeakers = nil
+        copy.clustering.maxSpeakers = nil
+        return copy
+    }
 }
