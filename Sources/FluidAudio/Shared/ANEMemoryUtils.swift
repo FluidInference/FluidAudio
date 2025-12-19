@@ -109,6 +109,10 @@ public enum ANEMemoryUtils {
         case .int32:
             return MemoryLayout<Int32>.stride
         @unknown default:
+            // Back-compat: Handle any future types not known at compile time
+            // This includes .int8 which may not be available in all SDK versions
+            let name = String(describing: dataType).lowercased()
+            if name.contains("int8") { return MemoryLayout<Int8>.stride }
             return MemoryLayout<Float>.stride
         }
     }

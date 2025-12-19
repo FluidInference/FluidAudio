@@ -12,7 +12,9 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertEqual(ModelNames.ASR.preprocessorFile, "Preprocessor.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.encoderFile, "Encoder.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.decoderFile, "Decoder.mlmodelc")
-        XCTAssertEqual(ModelNames.ASR.jointFile, "JointDecision.mlmodelc")
+        // Test version-specific joint files
+        XCTAssertEqual(ModelNames.ASR.jointFile(for: .parakeetV2), "JointDecision.mlmodelc")
+        XCTAssertEqual(ModelNames.ASR.jointFile(for: .parakeet), "JointDecisionv2.mlmodelc")
         XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeet), "parakeet_vocab.json")
         XCTAssertEqual(ModelNames.ASR.vocabulary(for: .parakeetV2), "parakeet_vocab.json")
     }
@@ -68,7 +70,7 @@ final class AsrModelsTests: XCTestCase {
             ModelNames.ASR.preprocessorFile,
             ModelNames.ASR.encoderFile,
             ModelNames.ASR.decoderFile,
-            ModelNames.ASR.jointFile,
+            ModelNames.ASR.jointFile(for: .parakeet),
             ModelNames.ASR.vocabulary(for: .parakeet),
         ]
 

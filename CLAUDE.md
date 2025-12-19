@@ -36,6 +36,15 @@ FluidAudio is a comprehensive Swift framework for local, low-latency audio proce
 - **DO NOT** implement alternatives without asking
 - Only after your approval: Implementation, then explanation of results
 
+### ⚠️ CUSTOM VOCABULARY MANAGEMENT
+
+- **NEVER** create per-file custom vocabulary JSON files
+- **ALWAYS** use consolidated vocabulary files that work across all test cases
+- **Rationale**: Per-file vocabularies don't scale to real-world unknown environments
+- **Correct approach**: Single consolidated vocabulary (e.g., `custom_vocab_min_ctc_ids.json`)
+- **Incorrect approach**: Individual files like `custom_vocab_01_file.json`, `custom_vocab_02_file.json`, etc.
+- This ensures the system is tested in realistic conditions where the vocabulary must generalize
+
 ### Code Style and Formatting
 
 - **Swift Format**: This project uses swift-format for consistent code style

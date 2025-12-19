@@ -19,6 +19,7 @@ func printUsage() {
             vad-analyze             Inspect VAD segmentation and streaming events
             asr-benchmark           Run ASR benchmark on LibriSpeech
             fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
+            ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
@@ -34,13 +35,15 @@ func printUsage() {
             fluidaudio diarization-benchmark --single-file ES2004a
 
             fluidaudio asr-benchmark --subset test-clean --max-files 100
-            
+
             fluidaudio fleurs-benchmark --languages en_us,fr_fr --samples 10
+
+            fluidaudio ctc-earnings-benchmark --auto-download
 
             fluidaudio transcribe audio.wav --low-latency
 
             fluidaudio multi-stream audio1.wav audio2.wav
-            
+
             fluidaudio tts "Hello world" --output hello.wav
 
             fluidaudio vad-analyze audio.wav --streaming
@@ -141,12 +144,9 @@ Task {
     case "download":
         await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
     case "parakeet-eou":
-        // Pass arguments starting from "parakeet-eou" so ArgumentParser sees it as the command?
-        // Or just the flags?
-        // AsyncParsableCommand.main() usually takes the full list including command name if it's root.
-        // But here we are manually dispatching.
-        // Let's try passing just the flags.
         await ParakeetEouCommand.main(Array(arguments.dropFirst(2)))
+    case "ctc-earnings-benchmark":
+        await CtcEarningsBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
     case "help", "--help", "-h":
         printUsage()
         exitWithPeakMemory(0)
