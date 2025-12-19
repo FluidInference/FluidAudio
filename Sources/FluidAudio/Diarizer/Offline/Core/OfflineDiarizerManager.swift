@@ -225,9 +225,26 @@ public final class OfflineDiarizerManager {
 
         let vbxOutput: VBxOutput
         if !trainingRho.isEmpty, !initialClusters.isEmpty {
-            vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refine(
+            let hasConstraints =
+                config.clustering.numSpeakers != nil
+                || config.clustering.minSpeakers != nil
+                || config.clustering.maxSpeakers != nil
+
+            let constraints: SpeakerCountConstraints? =
+                hasConstraints
+                ? SpeakerCountConstraints.resolve(
+                    numEmbeddings: trainingEmbeddings.count,
+                    numSpeakers: config.clustering.numSpeakers,
+                    minSpeakers: config.clustering.minSpeakers,
+                    maxSpeakers: config.clustering.maxSpeakers
+                )
+                : nil
+
+            vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refineWithConstraints(
                 rhoFeatures: trainingRho,
-                initialClusters: initialClusters
+                trainingEmbeddings: trainingEmbeddings,
+                initialClusters: initialClusters,
+                constraints: constraints
             )
         } else {
             vbxOutput = VBxOutput(
