@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// Performance metrics for ASR processing
-public struct ASRPerformanceMetrics: Sendable {
+public struct ASRPerformanceMetrics: Codable, Sendable {
     public let preprocessorTime: TimeInterval
     public let encoderTime: TimeInterval
     public let decoderTime: TimeInterval
