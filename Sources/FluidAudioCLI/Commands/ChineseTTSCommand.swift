@@ -6,12 +6,23 @@ public struct ChineseTTS {
 
     private static let logger = AppLogger(category: "ChineseTTSCommand")
 
+    /// HuggingFace repo for Chinese TTS model
+    private static let hfRepo = "FluidInference/kokoro-82m-v1.1-zh-mlx"
+
+    /// Required files for Chinese TTS
+    private static let requiredFiles = [
+        "model.safetensors",
+        "config.json",
+        "g2p/jieba.bin.gz",
+        "g2p/pinyin_single.bin.gz",
+        "g2p/pinyin_phrases.bin.gz",
+    ]
+
     public static func run(arguments: [String]) async {
         var output = "output_zh.wav"
         var voice = "zf_001"  // Default Chinese female voice
         var text: String? = nil
         var modelPath: String? = nil
-        var dataPath: String? = nil
         var rawPhonemes: String? = nil  // Direct phonemes, bypassing G2P
 
         var i = 0
@@ -34,11 +45,6 @@ public struct ChineseTTS {
             case "--model", "-m":
                 if i + 1 < arguments.count {
                     modelPath = arguments[i + 1]
-                    i += 1
-                }
-            case "--data", "-d":
-                if i + 1 < arguments.count {
-                    dataPath = arguments[i + 1]
                     i += 1
                 }
             case "--phonemes", "-p":
@@ -65,31 +71,34 @@ public struct ChineseTTS {
         do {
             let tStart = Date()
 
-            // Resolve paths
-            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-
-            // Find model directory
+            // Resolve model directory
             let modelDir: URL
             if let modelPath = modelPath {
                 let expanded = (modelPath as NSString).expandingTildeInPath
                 modelDir =
                     expanded.hasPrefix("/")
                     ? URL(fileURLWithPath: expanded, isDirectory: true)
-                    : cwd.appendingPathComponent(expanded, isDirectory: true)
+                    : URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                        .appendingPathComponent(expanded, isDirectory: true)
             } else {
-                // Default: look for kokoro-82m-v1.1-zh-mlx in convert directory
-                modelDir = cwd.appendingPathComponent(
-                    "convert/kokoro-82m-v1.1-zh/kokoro-82m-v1.1-zh-mlx", isDirectory: true)
+                // Default: use cache directory
+                let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("FluidAudio/kokoro-zh", isDirectory: true)
+                modelDir = cacheDir
+            }
+
+            // Check if model needs downloading
+            let needsDownload = !FileManager.default.fileExists(
+                atPath: modelDir.appendingPathComponent("model.safetensors").path)
+
+            if needsDownload {
+                print("Downloading Chinese TTS model from HuggingFace...")
+                print("Repository: \(hfRepo)")
+                try await downloadModel(to: modelDir, voice: voice)
+                print("Download complete!")
             }
 
             logger.info("Model directory: \(modelDir.path)")
-
-            // Check model path exists
-            guard FileManager.default.fileExists(atPath: modelDir.path) else {
-                logger.error("Model directory not found: \(modelDir.path)")
-                print("Model directory not found. Use --model to specify path.")
-                exit(1)
-            }
 
             // Initialize synthesizer
             logger.info("[1/3] Initializing Chinese TTS synthesizer...")
@@ -97,31 +106,12 @@ public struct ChineseTTS {
 
             // Load G2P dictionaries only if using text input (not raw phonemes)
             if rawPhonemes == nil {
-                // Find data directory (for G2P dictionaries)
-                let dataDir: URL
-                if let dataPath = dataPath {
-                    let expanded = (dataPath as NSString).expandingTildeInPath
-                    dataDir =
-                        expanded.hasPrefix("/")
-                        ? URL(fileURLWithPath: expanded, isDirectory: true)
-                        : cwd.appendingPathComponent(expanded, isDirectory: true)
-                } else {
-                    // Default: look for swift_data in convert directory
-                    dataDir = cwd.appendingPathComponent("convert/kokoro-82m-v1.1-zh/swift_data", isDirectory: true)
-                }
-
-                logger.info("Data directory: \(dataDir.path)")
-
-                guard FileManager.default.fileExists(atPath: dataDir.path) else {
-                    logger.error("Data directory not found: \(dataDir.path)")
-                    print("Data directory not found. Use --data to specify path.")
-                    exit(1)
-                }
+                let g2pDir = modelDir.appendingPathComponent("g2p", isDirectory: true)
 
                 logger.info("[2/3] Loading G2P dictionaries...")
-                let jiebaURL = dataDir.appendingPathComponent("jieba.bin.gz")
-                let pinyinSingleURL = dataDir.appendingPathComponent("pinyin_single.bin.gz")
-                let pinyinPhrasesURL = dataDir.appendingPathComponent("pinyin_phrases.bin.gz")
+                let jiebaURL = g2pDir.appendingPathComponent("jieba.bin.gz")
+                let pinyinSingleURL = g2pDir.appendingPathComponent("pinyin_single.bin.gz")
+                let pinyinPhrasesURL = g2pDir.appendingPathComponent("pinyin_phrases.bin.gz")
 
                 try synthesizer.loadG2P(
                     jiebaURL: jiebaURL,
@@ -177,7 +167,8 @@ public struct ChineseTTS {
                 if expanded.hasPrefix("/") {
                     return URL(fileURLWithPath: expanded)
                 }
-                return cwd.appendingPathComponent(expanded)
+                return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    .appendingPathComponent(expanded)
             }()
 
             try FileManager.default.createDirectory(
@@ -218,24 +209,68 @@ public struct ChineseTTS {
         }
     }
 
+    /// Download model files from HuggingFace
+    private static func downloadModel(to directory: URL, voice: String) async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let baseURL = "https://huggingface.co/\(hfRepo)/resolve/main"
+
+        // Files to download
+        var filesToDownload = requiredFiles
+        filesToDownload.append("voices/\(voice).npy")  // Add requested voice
+
+        // Create subdirectories
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("g2p"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("voices"), withIntermediateDirectories: true)
+
+        for file in filesToDownload {
+            let remoteURL = URL(string: "\(baseURL)/\(file)")!
+            let localURL = directory.appendingPathComponent(file)
+
+            // Skip if already exists
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                print("  ✓ \(file) (cached)")
+                continue
+            }
+
+            print("  ↓ \(file)...")
+            let (data, response) = try await URLSession.shared.data(from: remoteURL)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                httpResponse.statusCode == 200
+            else {
+                throw NSError(
+                    domain: "ChineseTTS", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to download \(file)"])
+            }
+
+            try data.write(to: localURL)
+
+            let sizeMB = Double(data.count) / 1_000_000
+            print("  ✓ \(file) (\(String(format: "%.1f", sizeMB)) MB)")
+        }
+    }
+
     private static func printUsage() {
         print(
             """
             Usage: fluidaudio tts-zh "Chinese text" [options]
 
             Synthesize Chinese text to speech using Kokoro TTS with Bopomofo G2P.
+            Model is auto-downloaded from HuggingFace on first run (~370MB).
 
             Options:
               --output, -o    Output WAV path (default: output_zh.wav)
               --voice, -v     Voice name (default: zf_001 - Chinese female)
-              --model, -m     Path to model directory (default: convert/kokoro-82m-v1.1-zh/kokoro-82m-v1.1-zh-mlx)
-              --data, -d      Path to G2P data directory (default: convert/kokoro-82m-v1.1-zh/swift_data)
+              --model, -m     Path to model directory (default: ~/Library/Caches/FluidAudio/kokoro-zh)
               --phonemes, -p  Raw Bopomofo phonemes (bypasses G2P, no text required)
               --help, -h      Show this help
 
             Available voices (Chinese):
-              zf_001 - zf_103   Chinese female voices
-              zm_010 - zm_020   Chinese male voices
+              zf_001 - zf_099   Chinese female voices
+              zm_009 - zm_100   Chinese male voices
 
             Examples:
               fluidaudio tts-zh "你好世界"
