@@ -289,15 +289,13 @@ final public class AudioConverter {
 // MARK: - WAV Utilities (shared by TTS/ASR)
 public enum AudioWAV {
     /// Convert float samples to 16-bit PCM mono WAV at the given sample rate.
+    /// Samples are expected to be in [-1, 1] range and will be clipped if outside.
+    /// No normalization is applied to preserve the natural dynamics of the audio.
     public static func data(from samples: [Float], sampleRate: Double) throws -> Data {
-        // Normalize to [-1, 1]
-        let maxVal = samples.map { abs($0) }.max() ?? 1.0
-        let norm = maxVal > 0 ? samples.map { $0 / maxVal } : samples
-
-        // Convert to 16-bit PCM
+        // Convert to 16-bit PCM (no normalization, just clip)
         var pcm = Data()
-        pcm.reserveCapacity(norm.count * MemoryLayout<Int16>.size)
-        for s in norm {
+        pcm.reserveCapacity(samples.count * MemoryLayout<Int16>.size)
+        for s in samples {
             let clipped = max(-1.0, min(1.0, s))
             let v = Int16(clipped * 32767)
             var le = v.littleEndian
