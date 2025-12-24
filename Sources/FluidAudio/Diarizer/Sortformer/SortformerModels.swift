@@ -179,6 +179,63 @@ extension SortformerModels {
         config.computeUnits = isCI ? .cpuAndNeuralEngine : .all
         return config
     }
+
+    /// Load Sortformer models from HuggingFace.
+    ///
+    /// Downloads models from alexwengg/diar-streaming-sortformer-coreml if not cached.
+    ///
+    /// - Parameters:
+    ///   - cacheDirectory: Directory to cache downloaded models (defaults to app support)
+    ///   - computeUnits: CoreML compute units to use (default: cpuOnly for consistency)
+    /// - Returns: Loaded SortformerModels
+    public static func loadFromHuggingFace(
+        cacheDirectory: URL? = nil,
+        computeUnits: MLComputeUnits = .cpuOnly
+    ) async throws -> SortformerModels {
+        logger.info("Loading Sortformer models from HuggingFace...")
+
+        let startTime = Date()
+
+        // Determine cache directory
+        let directory: URL
+        if let cache = cacheDirectory {
+            directory = cache
+        } else {
+            directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("FluidAudio/Models")
+        }
+
+        // Download models if needed
+        let modelNames = [
+            ModelNames.Sortformer.preprocessorFile,
+            ModelNames.Sortformer.preEncoderFile,
+            ModelNames.Sortformer.headFile,
+        ]
+
+        let models = try await DownloadUtils.loadModels(
+            .sortformer,
+            modelNames: modelNames,
+            directory: directory,
+            computeUnits: computeUnits
+        )
+
+        guard let preprocessor = models[ModelNames.Sortformer.preprocessorFile],
+            let preEncoder = models[ModelNames.Sortformer.preEncoderFile],
+            let head = models[ModelNames.Sortformer.headFile]
+        else {
+            throw SortformerError.modelLoadFailed("Failed to load Sortformer models from HuggingFace")
+        }
+
+        let duration = Date().timeIntervalSince(startTime)
+        logger.info("Sortformer models loaded from HuggingFace in \(String(format: "%.2f", duration))s")
+
+        return SortformerModels(
+            preprocessor: preprocessor,
+            preEncoder: preEncoder,
+            head: head,
+            compilationDuration: duration
+        )
+    }
 }
 
 // MARK: - Preprocessor Inference
