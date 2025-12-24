@@ -50,6 +50,10 @@ struct FluidAudioCLI {
             await DownloadCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "parakeet-eou":
             await ParakeetEouCommand.main(Array(arguments.dropFirst(2)))
+        case "sortformer":
+            await SortformerCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "sortformer-benchmark":
+            await SortformerBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -77,6 +81,8 @@ struct FluidAudioCLI {
                 multi-stream            Transcribe multiple audio files in parallel
                 tts                     Synthesize speech from text using Kokoro TTS
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
+                sortformer              Run Sortformer streaming diarization
+                sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 download                Download evaluation datasets
                 help                    Show this help message
 
