@@ -1,34 +1,35 @@
 import Foundation
 
 actor ProgressEmitter {
-    private var continuation: AsyncStream<Double>.Continuation?
-    private var streamStorage: AsyncStream<Double>?
+    private var continuation: AsyncThrowingStream<Double, Error>.Continuation?
+    private var streamStorage: AsyncThrowingStream<Double, Error>?
     private var isActive = false
 
     init() {}
 
-    func startSession() async throws -> AsyncStream<Double> {
+    func startSession() async throws -> AsyncThrowingStream<Double, Error> {
         guard !isActive else {
             throw ASRError.processingFailed("A transcription session is already in progress.")
         }
 
-        let (stream, continuation) = AsyncStream<Double>.makeStream()
+        let (stream, continuation) = AsyncThrowingStream<Double, Error>.makeStream()
         self.streamStorage = stream
         self.continuation = continuation
         self.isActive = true
 
-        continuation.onTermination = { @Sendable _ in
-            Task { [weak self] in
-                guard let self else { return }
-                await self.reset()
+        continuation.onTermination =
+            { [weak self] (_: AsyncThrowingStream<Double, Error>.Continuation.Termination) in
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.reset()
+                }
             }
-        }
 
         continuation.yield(0.0)
         return stream
     }
 
-    func currentStream() async -> AsyncStream<Double>? {
+    func currentStream() async -> AsyncThrowingStream<Double, Error>? {
         streamStorage
     }
 
@@ -46,8 +47,8 @@ actor ProgressEmitter {
         await reset()
     }
 
-    func failSession() async {
-        continuation?.finish()
+    func failSession(_ error: Error) async {
+        continuation?.finish(throwing: error)
         await reset()
     }
 

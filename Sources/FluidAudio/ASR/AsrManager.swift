@@ -69,7 +69,7 @@ public final class AsrManager {
     /// Returns the current transcription progress stream for offline long audio (>\(240_000) samples).
     /// Call this before `transcribe(_:source:)` to subscribe; will be `nil` for short audio or when no
     /// active session exists. Only one session is supported at a time.
-    public var transcriptionProgressStream: AsyncStream<Double>? {
+    public var transcriptionProgressStream: AsyncThrowingStream<Double, Error>? {
         get async {
             await progressEmitter.currentStream()
         }
@@ -353,7 +353,7 @@ public final class AsrManager {
             return result
         } catch {
             if startedProgressEmmitting {
-                await progressEmitter.failSession()
+                await progressEmitter.failSession(error)
             }
             throw error
         }
