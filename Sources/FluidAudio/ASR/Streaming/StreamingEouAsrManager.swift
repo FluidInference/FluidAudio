@@ -149,7 +149,7 @@ public enum StreamingChunkSize: Sendable {
 /// - Parameter transcript: The accumulated transcript up to the EOU point
 public typealias EouCallback = @Sendable (String) -> Void
 
-/// Callback invoked after each chunk with partial transcript (for ghost text).
+/// Callback invoked when new tokens are decoded (for ghost text).
 /// - Parameter transcript: The current accumulated partial transcript
 public typealias PartialCallback = @Sendable (String) -> Void
 
@@ -235,7 +235,7 @@ public actor StreamingEouAsrManager {
         self.eouCallback = callback
     }
 
-    /// Set a callback to be invoked after each chunk with partial transcript.
+    /// Set a callback to be invoked when new tokens are decoded.
     /// Useful for displaying "ghost text" during speech.
     public func setPartialCallback(_ callback: @escaping PartialCallback) {
         self.partialCallback = callback
