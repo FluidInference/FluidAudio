@@ -433,8 +433,8 @@ public actor StreamingEouAsrManager {
             validOutLen: chunkSize.validOutputLen)
         accumulatedTokenIds.append(contentsOf: decodeResult.tokenIds)
 
-        // Invoke partial callback for ghost text
-        if let callback = partialCallback, let tokenizer = tokenizer, !accumulatedTokenIds.isEmpty {
+        // Invoke partial callback for ghost text (only when new tokens decoded)
+        if let callback = partialCallback, let tokenizer = tokenizer, !decodeResult.tokenIds.isEmpty {
             let partial = tokenizer.decode(ids: accumulatedTokenIds)
             callback(partial)
         }
