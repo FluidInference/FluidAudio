@@ -64,12 +64,15 @@ public final class AsrManager {
                 ),
             ])
         }
+
+        Task {
+            await self.progressEmitter.ensureSession()
+        }
     }
 
     /// Returns the current transcription progress stream for offline long audio (>\(240_000) samples).
-    /// Call this before `transcribe(_:source:)` to subscribe; will be `nil` for short audio or when no
-    /// active session exists. Only one session is supported at a time.
-    public var transcriptionProgressStream: AsyncThrowingStream<Double, Error>? {
+    /// Only one session is supported at a time.
+    public var transcriptionProgressStream: AsyncThrowingStream<Double, Error> {
         get async {
             await progressEmitter.currentStream()
         }
@@ -327,10 +330,9 @@ public final class AsrManager {
         _ audioSamples: [Float],
         source: AudioSource = .microphone
     ) async throws -> ASRResult {
-        var startedProgressEmmitting = false
-        if audioSamples.count > 240_000 {
-            _ = try await progressEmitter.startSession()
-            startedProgressEmmitting = true
+        let shouldEmitProgress = audioSamples.count > 240_000
+        if shouldEmitProgress {
+            _ = await progressEmitter.ensureSession()
         }
         do {
             let result: ASRResult
@@ -346,13 +348,13 @@ public final class AsrManager {
             // Stateless architecture: reset decoder state after each transcription to ensure
             // independent processing for batch operations without state carryover
             try await self.resetDecoderState()
-            if startedProgressEmmitting {
+            if shouldEmitProgress {
                 await progressEmitter.finishSession()
             }
 
             return result
         } catch {
-            if startedProgressEmmitting {
+            if shouldEmitProgress {
                 await progressEmitter.failSession(error)
             }
             throw error
