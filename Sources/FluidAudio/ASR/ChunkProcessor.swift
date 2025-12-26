@@ -37,7 +37,9 @@ struct ChunkProcessor {
     }
 
     func process(
-        using manager: AsrManager, startTime: Date
+        using manager: AsrManager,
+        startTime: Date,
+        progressHandler: ((Double) async -> Void)? = nil
     ) async throws -> ASRResult {
         var chunkOutputs: [[TokenWindow]] = []
 
@@ -81,6 +83,12 @@ struct ChunkProcessor {
 
             if isLastChunk {
                 break
+            }
+
+            if let progressHandler {
+                let progress = min(
+                    1.0, max(0.0, Double(chunkEnd) / Double(audioSamples.count)))
+                await progressHandler(progress)
             }
 
             chunkStart += strideSamples
