@@ -149,6 +149,10 @@ public enum StreamingChunkSize: Sendable {
 /// - Parameter transcript: The accumulated transcript up to the EOU point
 public typealias EouCallback = @Sendable (String) -> Void
 
+/// Callback invoked when new tokens are decoded (for ghost text).
+/// - Parameter transcript: The current accumulated partial transcript
+public typealias PartialCallback = @Sendable (String) -> Void
+
 /// High-level manager for the Parakeet EOU streaming pipeline.
 /// Uses native Swift mel spectrogram for exact NeMo parity.
 public actor StreamingEouAsrManager {
@@ -185,6 +189,8 @@ public actor StreamingEouAsrManager {
     public private(set) var eouDetected: Bool = false
     /// Optional callback invoked when EOU is detected
     private var eouCallback: EouCallback?
+    /// Optional callback invoked after each chunk with partial transcript
+    private var partialCallback: PartialCallback?
 
     // EOU Debouncing - requires sustained silence before triggering
     /// Minimum duration of silence (in ms) before EOU is confirmed
@@ -227,6 +233,12 @@ public actor StreamingEouAsrManager {
     /// The callback receives the transcript accumulated up to the EOU point.
     public func setEouCallback(_ callback: @escaping EouCallback) {
         self.eouCallback = callback
+    }
+
+    /// Set a callback to be invoked when new tokens are decoded.
+    /// Useful for displaying "ghost text" during speech.
+    public func setPartialCallback(_ callback: @escaping PartialCallback) {
+        self.partialCallback = callback
     }
 
     public func loadModels(modelDir: URL) async throws {
@@ -420,6 +432,12 @@ public actor StreamingEouAsrManager {
             encoderOutput: encoded, timeOffset: processedChunks, skipFrames: 0,
             validOutLen: chunkSize.validOutputLen)
         accumulatedTokenIds.append(contentsOf: decodeResult.tokenIds)
+
+        // Invoke partial callback for ghost text (only when new tokens decoded)
+        if let callback = partialCallback, let tokenizer = tokenizer, !decodeResult.tokenIds.isEmpty {
+            let partial = tokenizer.decode(ids: accumulatedTokenIds)
+            callback(partial)
+        }
 
         // Track total samples for timing
         totalSamplesProcessed += shiftSamples
