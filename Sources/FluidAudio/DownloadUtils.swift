@@ -63,14 +63,14 @@ public class DownloadUtils {
     /// Progress handler type for download progress callbacks (unused but kept for API compatibility)
     public typealias ProgressHandler = (Double) -> Void
 
-    public struct DownloadConfig {
+    public struct DownloadConfig: Sendable {
         public let timeout: TimeInterval
 
         public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
             self.timeout = timeout
         }
 
-        public static let `default` = DownloadConfig()
+        nonisolated(unsafe) public static let `default` = DownloadConfig()
     }
 
     public static func loadModels(

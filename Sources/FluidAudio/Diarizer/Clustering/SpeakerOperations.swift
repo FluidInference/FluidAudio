@@ -13,7 +13,7 @@ public enum SpeakerUtilities {
     // MARK: - Configuration
 
     /// Platform-specific configuration for speaker assignment
-    public struct AssignmentConfig {
+    public struct AssignmentConfig: Sendable {
         public let maxDistanceForAssignment: Float
         public let maxDistanceForUpdate: Float
         public let minSpeakerDuration: Float
@@ -31,14 +31,14 @@ public enum SpeakerUtilities {
             self.minSegmentDuration = minSegmentDuration
         }
 
-        public static let macOS = AssignmentConfig(
+        nonisolated(unsafe) public static let macOS = AssignmentConfig(
             maxDistanceForAssignment: 0.65,
             maxDistanceForUpdate: 0.45,
             minSpeakerDuration: 4.0,
             minSegmentDuration: 1.0
         )
 
-        public static let iOS = AssignmentConfig(
+        nonisolated(unsafe) public static let iOS = AssignmentConfig(
             maxDistanceForAssignment: 0.55,
             maxDistanceForUpdate: 0.45,
             minSpeakerDuration: 4.0,

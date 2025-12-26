@@ -8,17 +8,13 @@ on:
 jobs:
   parakeet-eou-benchmark:
     name: Parakeet EOU Benchmark (320ms)
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read
       pull-requests: write
 
     steps:
       - uses: actions/checkout@v5
-
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.1"
 
       - name: Cache Dependencies
         uses: actions/cache@v4

@@ -1,5 +1,5 @@
 /// Hypothesis for TDT beam search decoding
-struct TdtHypothesis: Sendable {
+struct TdtHypothesis {
     var score: Float = 0.0
     var ySequence: [Int] = []
     var decState: TdtDecoderState?

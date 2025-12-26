@@ -22,7 +22,7 @@ public enum ModelRegistry {
 
     // MARK: - Registry URL Configuration
 
-    private static var _customBaseURL: String?
+    nonisolated(unsafe) private static var _customBaseURL: String?
 
     /// Base registry URL (default: HuggingFace)
     /// Can be overridden programmatically to use a different model registry or mirror.
