@@ -145,25 +145,38 @@ public struct SortformerResult: Sendable {
     }
 
     /// Compute statistics about the probability distribution
+    /// Returns frame-based activity: above05 = frames with at least one speaker > 0.5
     public func probabilityStats() -> (min: Float, max: Float, mean: Float, above05: Int, total: Int) {
         guard !allProbabilities.isEmpty else {
             return (0, 0, 0, 0, 0)
         }
+        let numSpeakers = 4
         var minProb: Float = 1.0
         var maxProb: Float = 0.0
         var sum: Float = 0.0
-        var above05 = 0
-        for p in allProbabilities {
-            minProb = min(minProb, p)
-            maxProb = max(maxProb, p)
-            sum += p
-            if p > 0.5 {
-                above05 += 1
+        var activeFrames = 0
+
+        for frame in 0..<totalFrames {
+            var frameHasActivity = false
+            for spk in 0..<numSpeakers {
+                let idx = frame * numSpeakers + spk
+                guard idx < allProbabilities.count else { continue }
+                let p = allProbabilities[idx]
+                minProb = min(minProb, p)
+                maxProb = max(maxProb, p)
+                sum += p
+                if p > 0.5 {
+                    frameHasActivity = true
+                }
+            }
+            if frameHasActivity {
+                activeFrames += 1
             }
         }
+
         return (
             min: minProb, max: maxProb, mean: sum / Float(allProbabilities.count),
-            above05: above05, total: allProbabilities.count
+            above05: activeFrames, total: totalFrames
         )
     }
 
