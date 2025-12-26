@@ -112,9 +112,16 @@ public struct SortformerModules {
 
         // Check if FIFO overflows
         if state.fifoLength > maxFifoLen {
+            // Debug: trace overflow handling
+            if config.debugMode {
+                print("[State] FIFO overflow: fifoLen=\(state.fifoLength) > max=\(maxFifoLen)")
+            }
+
             if config.useSimpleStateUpdate {
-                // Simple state update matching Python test
-                // Just keep the last maxFifoLen frames
+                // Simple sliding window: keep only most recent MAX_FIFO frames
+                // This matches Python's simple state behavior exactly:
+                // - No spkcache updates (spkcache stays empty/at 0)
+                // - FIFO acts as a sliding window of recent context
                 let overflow = state.fifoLength - maxFifoLen
                 state.fifo.removeFirst(overflow * fcDModel)
                 state.fifoLength = maxFifoLen
@@ -124,24 +131,9 @@ public struct SortformerModules {
                     state.fifoPreds = fifoPreds
                 }
 
-                // Simple spkcache update every spkcacheUpdatePeriod chunks
-                state.chunkCount += 1
-                if state.chunkCount % 5 == 0 {
-                    // Append some frames to spkcache
-                    let framesToAdd = min(chunkLen, maxSpkcacheLen - state.spkcacheLength)
-                    if framesToAdd > 0 {
-                        let newEmbs = Array(chunk.prefix(framesToAdd * fcDModel))
-                        state.spkcache.append(contentsOf: newEmbs)
-                        state.spkcacheLength += framesToAdd
-                    }
-
-                    // Trim spkcache if over limit
-                    if state.spkcacheLength > maxSpkcacheLen {
-                        let overflow = state.spkcacheLength - maxSpkcacheLen
-                        state.spkcache.removeFirst(overflow * fcDModel)
-                        state.spkcacheLength = maxSpkcacheLen
-                    }
-                }
+                // No spkcache updates - keep it empty for simple mode
+                // This avoids the complexity of compression and matches
+                // the Python baseline that achieves good DER
             } else {
                 // Full NeMo state update logic
                 // Calculate how many frames to pop
@@ -413,6 +405,12 @@ public struct SortformerModules {
     }
 
     /// Get top-k frame indices based on scores.
+    ///
+    /// This mirrors NeMo's _get_topk_indices() exactly:
+    /// - Permutes scores from (frames, speakers) to (speakers, frames)
+    /// - Flattens and takes top-k indices
+    /// - Allows the same frame to appear multiple times (for different speakers)
+    /// - Uses modulo to convert back to frame indices
     private func getTopKIndices(
         scores: [Float],
         frameCount: Int,
@@ -420,52 +418,80 @@ public struct SortformerModules {
         k: Int
     ) -> (indices: [Int], isDisabled: [Bool]) {
         let silFramesPerSpk = config.spkcacheSilFramesPerSpk
-        let actualFrameCount = frameCount - silFramesPerSpk
+        let nFramesNoSil = frameCount - silFramesPerSpk
+        let maxIndex = config.maxIndex
 
-        // Flatten scores with frame indices
-        var allScores: [(frameIdx: Int, speaker: Int, score: Float)] = []
-
-        for frame in 0..<frameCount {
-            for spk in 0..<numSpeakers {
-                let score = scores[frame * numSpeakers + spk]
-                allScores.append((frame, spk, score))
+        // NeMo: scores.permute(0, 2, 1).reshape(batch_size, -1)
+        // scores is (frames, speakers), permute to (speakers, frames), then flatten
+        // Input: scores[frame * numSpeakers + spk]
+        // After permute: (spk, frame) order in flattened array
+        var scoresFlattened = [Float](repeating: 0.0, count: numSpeakers * frameCount)
+        for spk in 0..<numSpeakers {
+            for frame in 0..<frameCount {
+                let srcIdx = frame * numSpeakers + spk
+                let dstIdx = spk * frameCount + frame
+                scoresFlattened[dstIdx] = scores[srcIdx]
             }
         }
 
-        // Sort by score descending
-        allScores.sort { $0.score > $1.score }
+        // Get indices sorted by score (descending)
+        let indexedScores = scoresFlattened.enumerated().map { ($0.offset, $0.element) }
+        let sortedByScore = indexedScores.sorted { $0.1 > $1.1 }
 
-        // Take top-k unique frame indices
-        var selectedFrames: [Int] = []
-        var isDisabled: [Bool] = []
-        var usedFrames = Set<Int>()
+        // Take top-k indices
+        var topkIndices = [Int](repeating: 0, count: k)
+        var topkValues = [Float](repeating: 0.0, count: k)
 
-        for entry in allScores {
-            if selectedFrames.count >= k { break }
-
-            // Skip if already used (but we want all speakers, so just use frame)
-            let frameIdx = entry.frameIdx
-            if usedFrames.contains(frameIdx) { continue }
-
-            if entry.score == -.infinity || entry.score == .infinity || frameIdx >= actualFrameCount {
-                selectedFrames.append(0)  // Placeholder
-                isDisabled.append(true)
+        for i in 0..<k {
+            if i < sortedByScore.count {
+                topkIndices[i] = sortedByScore[i].0
+                topkValues[i] = sortedByScore[i].1
             } else {
-                selectedFrames.append(frameIdx)
-                isDisabled.append(false)
-                usedFrames.insert(frameIdx)
+                topkIndices[i] = maxIndex
+                topkValues[i] = -.infinity
             }
         }
 
-        // Fill remaining with placeholders
-        while selectedFrames.count < k {
-            selectedFrames.append(0)
-            isDisabled.append(true)
+        // Replace -inf indices with maxIndex placeholder
+        for i in 0..<k {
+            if topkValues[i] == -.infinity {
+                topkIndices[i] = maxIndex
+            }
         }
 
-        // Sort to preserve original order
-        let sortedWithDisabled = zip(selectedFrames, isDisabled).sorted { $0.0 < $1.0 }
-        return (sortedWithDisabled.map { $0.0 }, sortedWithDisabled.map { $0.1 })
+        // Sort indices to preserve original order
+        let sortedPairs = topkIndices.enumerated().sorted { $0.element < $1.element }
+        var topkIndicesSorted = sortedPairs.map { $0.element }
+
+        // Compute isDisabled BEFORE converting to frame indices
+        var isDisabled = [Bool](repeating: false, count: k)
+        for i in 0..<k {
+            if topkIndicesSorted[i] == maxIndex {
+                isDisabled[i] = true
+            }
+        }
+
+        // NeMo: topk_indices_sorted = torch.remainder(topk_indices_sorted, n_frames)
+        // Convert flattened index to frame index
+        for i in 0..<k {
+            if !isDisabled[i] {
+                topkIndicesSorted[i] = topkIndicesSorted[i] % frameCount
+            }
+        }
+
+        // Mark frames beyond actual content as disabled (silence padding frames)
+        for i in 0..<k {
+            if !isDisabled[i] && topkIndicesSorted[i] >= nFramesNoSil {
+                isDisabled[i] = true
+            }
+        }
+
+        // Set placeholder index for disabled frames
+        for i in 0..<k where isDisabled[i] {
+            topkIndicesSorted[i] = 0
+        }
+
+        return (topkIndicesSorted, isDisabled)
     }
 
     // MARK: - Silence Profile

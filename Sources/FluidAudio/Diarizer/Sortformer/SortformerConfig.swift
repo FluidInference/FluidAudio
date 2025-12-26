@@ -80,6 +80,9 @@ public struct SortformerConfig: Sendable {
     /// Minimum positive scores rate
     public var minPosScoresRate: Float = 0.5
 
+    /// Maximum index placeholder for disabled frames in spkcache compression
+    public let maxIndex: Int = 99999
+
     // MARK: - Debug
 
     /// Enable debug logging
