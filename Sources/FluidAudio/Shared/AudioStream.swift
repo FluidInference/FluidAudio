@@ -2,11 +2,11 @@ import AVFoundation
 import Foundation
 
 /// A sliding window buffer for a real-time audio stream.
-public class AudioStream: @unchecked Sendable {
+public final class AudioStream {
     public typealias Callback<C> = (C, TimeInterval) throws -> Void
     where C: RangeReplaceableCollection, C.Element == Float
 
-    public typealias AsyncCallback<C> = (C, TimeInterval) async -> Void
+    public typealias AsyncCallback<C> = @Sendable (C, TimeInterval) async -> Void
     where C: RangeReplaceableCollection, C.Element == Float
 
     // MARK: - public properties
@@ -166,8 +166,10 @@ public class AudioStream: @unchecked Sendable {
     ) {
         queue.sync(flags: .barrier) {
             self.callback = { (chunk: [Float], timestamp: TimeInterval) -> Void in
+                let capturedChunk = chunk
+                let capturedTimestamp = timestamp
                 Task.detached(priority: priority) {
-                    await callback(chunk, timestamp)
+                    await callback(capturedChunk, capturedTimestamp)
                 }
             }
         }
@@ -181,11 +183,13 @@ public class AudioStream: @unchecked Sendable {
         priority: TaskPriority = .medium,
         _ callback: @escaping AsyncCallback<C>
     )
-    where C: RangeReplaceableCollection, C.Element == Float {
+    where C: RangeReplaceableCollection, C.Element == Float, C: Sendable {
         queue.sync(flags: .barrier) {
             self.callback = { (chunk: [Float], timestamp: TimeInterval) -> Void in
+                let capturedChunk = C(chunk)
+                let capturedTimestamp = timestamp
                 Task.detached(priority: priority) {
-                    await callback(C(chunk), timestamp)
+                    await callback(capturedChunk, capturedTimestamp)
                 }
             }
         }

@@ -1,5 +1,5 @@
 #if os(macOS)
-import AVFoundation
+@preconcurrency import AVFoundation
 import FluidAudio
 import Foundation
 

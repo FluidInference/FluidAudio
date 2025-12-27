@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import OSLog
 
@@ -17,7 +17,9 @@ public actor StreamingAsrManager {
     private var updateContinuation: AsyncStream<StreamingTranscriptionUpdate>.Continuation?
 
     // ASR components
-    private var asrManager: AsrManager?
+    // AsrManager contains CoreML models which are not Sendable.
+    // We manage the safety ourselves by only accessing it from within the actor.
+    nonisolated(unsafe) private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 

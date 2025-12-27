@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -27,6 +27,7 @@ let package = Package(
             name: "FluidAudio",
             dependencies: [
                 "FastClusterWrapper",
+                "MachTaskSelfWrapper",
             ],
             path: "Sources/FluidAudio",
             exclude: [
@@ -38,6 +39,11 @@ let package = Package(
         .target(
             name: "FastClusterWrapper",
             path: "Sources/FastClusterWrapper",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "MachTaskSelfWrapper",
+            path: "Sources/MachTaskSelfWrapper",
             publicHeadersPath: "include"
         ),
         // TTS targets are always available for FluidAudioWithTTS product

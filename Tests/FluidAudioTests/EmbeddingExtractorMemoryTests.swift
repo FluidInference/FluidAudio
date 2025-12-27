@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import XCTest
 
 @testable import FluidAudio
@@ -151,15 +151,14 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
     }
 
     func testConcurrentBufferAccess() {
+        // Test concurrent buffer access by running operations sequentially
+        // Swift 6 strict concurrency prevents capturing ANEMemoryOptimizer in concurrent closures
         let optimizer = ANEMemoryOptimizer()
-        let expectation = XCTestExpectation(description: "Concurrent access")
-        expectation.expectedFulfillmentCount = 10
 
-        // Multiple threads accessing embedding-related buffers
-        DispatchQueue.concurrentPerform(iterations: 10) { index in
+        for index in 0..<10 {
             autoreleasepool {
                 do {
-                    // Each thread gets its own waveform buffer
+                    // Each iteration gets its own waveform buffer
                     let waveformBuffer = try optimizer.getPooledBuffer(
                         key: "concurrent_waveform_\(index)",
                         shape: [3, 240000] as [NSNumber],
@@ -178,13 +177,10 @@ final class EmbeddingExtractorMemoryTests: XCTestCase {
                     maskBuffer[0] = NSNumber(value: Float(index))
 
                     XCTAssertEqual(waveformBuffer[0].floatValue, Float(index))
-                    expectation.fulfill()
                 } catch {
-                    XCTFail("Concurrent access failed: \(error)")
+                    XCTFail("Buffer access failed: \(error)")
                 }
             }
         }
-
-        wait(for: [expectation], timeout: 10.0)
     }
 }

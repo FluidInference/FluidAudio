@@ -5,14 +5,14 @@ import OSLog
 /// Provides reusable logic for simple file/data transfers used across FluidAudio modules.
 public enum AssetDownloader {
 
-    public typealias DataWriter = (Data, URL) throws -> Void
-    public typealias FileMover = (URL, URL) throws -> Void
+    public typealias DataWriter = @Sendable (Data, URL) throws -> Void
+    public typealias FileMover = @Sendable (URL, URL) throws -> Void
 
-    public static let defaultDataWriter: DataWriter = { data, destination in
+    nonisolated(unsafe) public static let defaultDataWriter: DataWriter = { data, destination in
         try data.write(to: destination, options: [.atomic])
     }
 
-    public static let defaultFileMover: FileMover = { tempURL, destination in
+    nonisolated(unsafe) public static let defaultFileMover: FileMover = { tempURL, destination in
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }

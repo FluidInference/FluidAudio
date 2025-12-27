@@ -1,5 +1,5 @@
 import AVFoundation
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -65,8 +65,9 @@ public final class AsrManager {
             ])
         }
 
+        let emitter = progressEmitter
         Task {
-            await self.progressEmitter.ensureSession()
+            await emitter.ensureSession()
         }
     }
 

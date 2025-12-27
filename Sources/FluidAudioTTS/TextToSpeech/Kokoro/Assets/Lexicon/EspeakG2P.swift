@@ -28,7 +28,8 @@ final class EspeakG2P {
         }
     }
 
-    static let shared = EspeakG2P()
+    // Thread-safe singleton using DispatchQueue internally
+    nonisolated(unsafe) static let shared = EspeakG2P()
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "EspeakG2P")
 
     private let queue = DispatchQueue(label: "com.fluidaudio.tts.espeak.g2p")

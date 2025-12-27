@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import XCTest
 
@@ -284,6 +284,7 @@ final class TdtDecoderStateTests: XCTestCase {
 
     // MARK: - Thread Safety Tests
 
+    @MainActor
     func testDecoderStateConcurrentAccess() throws {
         let state = try TdtDecoderState()
         let iterations = 100

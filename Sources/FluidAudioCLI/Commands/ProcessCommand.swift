@@ -3,7 +3,7 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-var standardError = FileHandle.standardError
+nonisolated(unsafe) var standardError = FileHandle.standardError
 
 /// Handler for the 'process' command - processes a single audio file
 enum ProcessCommand {

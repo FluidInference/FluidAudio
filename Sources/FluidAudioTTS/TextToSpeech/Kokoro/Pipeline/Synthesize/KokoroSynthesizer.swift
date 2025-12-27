@@ -1,5 +1,5 @@
 import Accelerate
-import CoreML
+@preconcurrency import CoreML
 import FluidAudio
 import Foundation
 import OSLog
@@ -70,8 +70,9 @@ public struct KokoroSynthesizer {
         return assets
     }
 
-    static var voiceEmbeddingPayloads: [String: VoiceEmbeddingPayload] = [:]
-    static var voiceEmbeddingVectors: [VoiceEmbeddingCacheKey: [Float]] = [:]
+    // Voice embedding caches protected by voiceEmbeddingLock
+    nonisolated(unsafe) static var voiceEmbeddingPayloads: [String: VoiceEmbeddingPayload] = [:]
+    nonisolated(unsafe) static var voiceEmbeddingVectors: [VoiceEmbeddingCacheKey: [Float]] = [:]
     static let voiceEmbeddingLock = NSLock()
 
     private static func chunkText(

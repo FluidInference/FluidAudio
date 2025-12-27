@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import XCTest
 
 @testable import FluidAudio
