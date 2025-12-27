@@ -21,7 +21,9 @@ let package = Package(
             targets: ["FluidAudioCLI"]
         ),
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.0"),
+    ],
     targets: [
         .target(
             name: "FluidAudio",
@@ -50,6 +52,8 @@ let package = Package(
             dependencies: [
                 "FluidAudio",
                 "ESpeakNG",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
             ],
             path: "Sources/FluidAudioTTS"
         ),

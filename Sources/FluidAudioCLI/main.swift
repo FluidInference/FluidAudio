@@ -22,6 +22,7 @@ func printUsage() {
             transcribe              Transcribe audio file using streaming ASR
             multi-stream            Transcribe multiple audio files in parallel
             tts                     Synthesize speech from text using Kokoro TTS
+            tts-zh                  Synthesize Chinese speech using Kokoro with Bopomofo G2P
             parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
             download                Download evaluation datasets
             help                    Show this help message
@@ -42,6 +43,8 @@ func printUsage() {
             fluidaudio multi-stream audio1.wav audio2.wav
             
             fluidaudio tts "Hello world" --output hello.wav
+
+            fluidaudio tts-zh "你好世界" --output hello_zh.wav
 
             fluidaudio vad-analyze audio.wav --streaming
 
@@ -133,6 +136,9 @@ Task {
 
     case "tts":
         await TTS.run(arguments: Array(arguments.dropFirst(2)))
+
+    case "tts-zh":
+        await ChineseTTS.run(arguments: Array(arguments.dropFirst(2)))
 
     case "diarization-benchmark":
         await StreamDiarizationBenchmark.run(arguments: Array(arguments.dropFirst(2)))
