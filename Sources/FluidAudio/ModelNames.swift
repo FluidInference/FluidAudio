@@ -9,6 +9,7 @@ public enum Repo: String, CaseIterable {
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
+    case sortformer = "alexwengg/diar-streaming-sortformer-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -27,6 +28,8 @@ public enum Repo: String, CaseIterable {
             return "speaker-diarization-coreml"
         case .kokoro:
             return "kokoro-82m-coreml"
+        case .sortformer:
+            return "diar-streaming-sortformer-coreml"
         }
     }
 
@@ -35,6 +38,8 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
+        case .sortformer:
+            return "alexwengg/diar-streaming-sortformer-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -61,6 +66,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
             return "parakeet-eou-streaming/320ms"
+        case .sortformer:
+            return "sortformer"
         default:
             return name
         }
@@ -172,6 +179,23 @@ public enum ModelNames {
         ]
     }
 
+    /// Sortformer streaming diarization model names
+    public enum Sortformer {
+        public static let preprocessor = "Pipeline_Preprocessor"
+        public static let preEncoder = "Pipeline_PreEncoder"
+        public static let head = "Pipeline_Head_Fixed"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let preEncoderFile = preEncoder + ".mlmodelc"
+        public static let headFile = head + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            preEncoderFile,
+            headFile,
+        ]
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -235,6 +259,8 @@ public enum ModelNames {
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
             return ModelNames.TTS.requiredModels
+        case .sortformer:
+            return ModelNames.Sortformer.requiredModels
         }
     }
 
