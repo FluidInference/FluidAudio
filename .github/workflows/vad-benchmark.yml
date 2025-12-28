@@ -31,7 +31,7 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-swift-6.0-${{ hashFiles('Package.swift', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+          key: ${{ runner.os }}-swift-6.1-${{ hashFiles('Package.swift', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
 
       - name: Cache VAD models
         uses: actions/cache@v4
