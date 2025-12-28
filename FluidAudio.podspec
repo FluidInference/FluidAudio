@@ -44,7 +44,8 @@ Pod::Spec.new do |spec|
     wrapper.private_header_files = "Sources/FastClusterWrapper/fastcluster_internal.hpp"
     wrapper.header_mappings_dir = "Sources/FastClusterWrapper"
     wrapper.pod_target_xcconfig = {
-      'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17'
+      'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+      'DEFINES_MODULE' => 'YES'
     }
   end
 
@@ -52,6 +53,9 @@ Pod::Spec.new do |spec|
     mach.source_files = "Sources/MachTaskSelfWrapper/**/*.{c,h}"
     mach.public_header_files = "Sources/MachTaskSelfWrapper/include/MachTaskSelf.h"
     mach.header_mappings_dir = "Sources/MachTaskSelfWrapper"
+    mach.pod_target_xcconfig = {
+      'DEFINES_MODULE' => 'YES'
+    }
   end
 
   spec.subspec "Core" do |core|
