@@ -27,5 +27,10 @@ jobs:
           ruby --version
           pod --version
 
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          swift --version
+
       - name: Lint podspec against working tree
-        run: pod lib lint FluidAudio.podspec --allow-warnings
+        run: pod lib lint FluidAudio.podspec --allow-warnings --verbose
