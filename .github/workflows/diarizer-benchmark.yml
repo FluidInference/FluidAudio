@@ -22,7 +22,7 @@ jobs:
 
       - uses: swift-actions/setup-swift@v2
         with:
-          swift-version: "6.0"
+          swift-version: "6.1"
 
       - name: Cache Swift packages and build
         uses: actions/cache@v4
