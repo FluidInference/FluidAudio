@@ -20,6 +20,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
       - name: Cache Swift packages and build
         uses: actions/cache@v4
         with:

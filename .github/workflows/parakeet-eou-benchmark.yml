@@ -16,6 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
       - name: Cache Dependencies
         uses: actions/cache@v4
         with:
