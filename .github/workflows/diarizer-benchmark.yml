@@ -68,7 +68,7 @@ jobs:
           EXECUTION_SECS=$((EXECUTION_TIME % 60))
 
           echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
-        timeout-minutes: 25
+        timeout-minutes: 35
 
       - name: Show benchmark_results.json
         if: always()
