@@ -17,19 +17,15 @@ from glob import glob
 
 AMI_DIR = os.path.expanduser("~/FluidAudioDatasets/ami_official/sdm")
 RTTM_DIR = os.path.join(AMI_DIR, "rttm")
-PROGRESS_FILE = "ami_nemo_progress.json"
+PROGRESS_FILE = "ami_nemo_gd_progress.json"
 
 print("=" * 70)
-print("NeMo LOW-LATENCY Config - AMI Benchmark")
+print("NeMo GRADIENT DESCENT Config - AMI Benchmark")
 print("=" * 70)
 
-# Check for MPS (Apple GPU) availability
-if torch.backends.mps.is_available():
-    DEVICE = 'mps'
-    print(f"\n🚀 Using MPS (Apple GPU) for acceleration")
-else:
-    DEVICE = 'cpu'
-    print(f"\n⚠️  MPS not available, using CPU (slow)")
+# Force CPU - MPS has issues with NeMo preprocessor
+DEVICE = 'cpu'
+print(f"\n⚠️  Using CPU (MPS has compatibility issues with NeMo)")
 
 from nemo.collections.asr.models import SortformerEncLabelModel
 
@@ -43,13 +39,13 @@ nemo_model.streaming_mode = True
 
 modules = nemo_model.sortformer_modules
 
-# LOW-LATENCY CONFIG (matching Swift)
+# GRADIENT DESCENT CONFIG (matching Swift --gradient-descent)
 modules.chunk_len = 6
-modules.chunk_right_context = 1  # Low latency!
+modules.chunk_right_context = 7  # Higher quality, more context
 modules.chunk_left_context = 1
-modules.fifo_len = 40           # Smaller than NVIDIA
-modules.spkcache_len = 120      # Smaller than NVIDIA
-modules.spkcache_update_period = 30
+modules.fifo_len = 40
+modules.spkcache_len = 188
+modules.spkcache_update_period = 31
 
 if hasattr(nemo_model.preprocessor, 'featurizer'):
     if hasattr(nemo_model.preprocessor.featurizer, 'dither'):
@@ -210,7 +206,7 @@ if os.path.exists(PROGRESS_FILE):
 # Get all test files - AMI uses {session}.Mix-Headset.wav naming
 rttm_files = sorted(glob(os.path.join(RTTM_DIR, "*.rttm")))
 print(f"\nTotal AMI RTTM files: {len(rttm_files)}")
-print("Config: chunk_len=6, right_context=1, fifo=40, spkcache=120")
+print("Config: chunk_len=6, right_context=7, fifo=40, spkcache=188, period=31")
 print()
 
 results = []
@@ -277,6 +273,6 @@ if results:
     print(f"  Average RTFx: {avg_rtfx:.1f}x")
 
     # Save final results
-    with open("ami_nemo_results.json", "w") as f:
+    with open("ami_nemo_gd_results.json", "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\nResults saved to ami_nemo_results.json")
+    print(f"\nResults saved to ami_nemo_gd_results.json")

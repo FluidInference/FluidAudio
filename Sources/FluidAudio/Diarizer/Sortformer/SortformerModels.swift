@@ -100,7 +100,7 @@ extension SortformerModels {
         let preprocessor = try MLModel(contentsOf: compiledPreprocessorURL, configuration: preprocessorConfig)
         logger.info("Loaded preprocessor model")
 
-        // Load main model
+        // Load main model - .all lets CoreML pick optimal compute units
         let mainConfig = MLModelConfiguration()
         mainConfig.computeUnits = .all
         let mainModel = try MLModel(contentsOf: compiledMainModelURL, configuration: mainConfig)

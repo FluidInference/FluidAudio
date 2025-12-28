@@ -71,8 +71,9 @@ enum SortformerCommand {
             exit(1)
         }
 
-        // Initialize Sortformer
-        let config = SortformerConfig(debugMode: debugMode)
+        // Initialize Sortformer with Gradient Descent's config
+        var config = SortformerConfig.gradientDescent
+        config.debugMode = debugMode
         let diarizer = SortformerDiarizer(config: config)
 
         do {

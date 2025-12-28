@@ -179,6 +179,24 @@ public struct SortformerConfig: Sendable {
         return config
     }
 
+    /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models
+    /// Use with models from SGD2718/Streaming-Sortformer-Conversion
+    public static var gradientDescent: SortformerConfig {
+        var config = SortformerConfig(
+            chunkLen: 6,
+            chunkLeftContext: 1,
+            chunkRightContext: 7,
+            fifoLen: 40,
+            spkcacheLen: 188,
+            spkcacheUpdatePeriod: 31
+        )
+        // Use native preprocessing to match NeMo's full-audio mel spectrogram
+        config.useNativePreprocessing = true
+        // Model expects 18160 audio samples per preprocessor chunk (for CoreML path)
+        config.preprocessorAudioSamplesOverride = 18160
+        return config
+    }
+
     public init(
         chunkLen: Int = 6,
         chunkLeftContext: Int = 1,

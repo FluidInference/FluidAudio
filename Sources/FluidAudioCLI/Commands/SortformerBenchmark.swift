@@ -46,6 +46,7 @@ enum SortformerBenchmark {
                 --model <path>           Path to Sortformer.mlpackage
                 --nvidia-config          Use NVIDIA 1.04s latency config (20.57% DER target)
                 --low-latency            Use low-latency config (matches Python test)
+                --gradient-descent       Use Gradient Descent config (fifo=40, period=31, right_ctx=7)
                 --simple-state           Use simple state update (matches Python test logic)
                 --separate-models        Use separate PreEncoder+Head models (matches Python)
                 --native-preprocessing   Use native Swift mel spectrogram (matches NeMo full-audio)
@@ -88,6 +89,7 @@ enum SortformerBenchmark {
         var autoDownload = false
         var useNvidiaConfig = false
         var useLowLatency = false
+        var useGradientDescent = false
         var useSimpleState = false
         var useSeparateModels = false
         var useNativePreprocessing = false
@@ -154,6 +156,8 @@ enum SortformerBenchmark {
                 useNvidiaConfig = true
             case "--low-latency":
                 useLowLatency = true
+            case "--gradient-descent":
+                useGradientDescent = true
             case "--simple-state":
                 useSimpleState = true
             case "--separate-models":
@@ -175,7 +179,9 @@ enum SortformerBenchmark {
         fflush(stdout)
         print("   Dataset: \(dataset.rawValue)")
         print("   Threshold: \(threshold)")
-        let configName = useNvidiaConfig ? "NVIDIA 1.04s" : (useLowLatency ? "Low-latency" : "Default")
+        let configName =
+            useNvidiaConfig
+            ? "NVIDIA 1.04s" : (useLowLatency ? "Low-latency" : (useGradientDescent ? "Gradient Descent" : "Default"))
         print("   Config: \(configName)")
         print("   State Update: \(useSimpleState ? "Simple (Python test)" : "Full NeMo")")
         print("   Mode: \(useSeparateModels ? "Separate PreEncoder+Head" : "Combined Pipeline")")
@@ -289,12 +295,17 @@ enum SortformerBenchmark {
             config = SortformerConfig.nvidia
         } else if useLowLatency {
             config = SortformerConfig.lowLatency
+        } else if useGradientDescent {
+            config = SortformerConfig.gradientDescent
         } else {
             config = SortformerConfig.default
         }
         config.debugMode = debugMode
         config.useSimpleStateUpdate = useSimpleState
-        config.useNativePreprocessing = useNativePreprocessing
+        // Only override native preprocessing if explicitly set via flag
+        if useNativePreprocessing {
+            config.useNativePreprocessing = true
+        }
         let diarizer = SortformerDiarizer(config: config)
 
         do {
