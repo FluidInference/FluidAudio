@@ -177,6 +177,8 @@ public class DownloadUtils {
 
     /// Download a HuggingFace repository using URLSession (does not load models)
     public static func downloadRepo(_ repo: Repo, to directory: URL, variant: String? = nil) async throws {
+        print("[DownloadUtils] Entering downloadRepo for \(repo.folderName)")
+        fflush(stdout)
         logger.info("Downloading \(repo.folderName) from HuggingFace...")
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
@@ -258,7 +260,11 @@ public class DownloadUtils {
         }
 
         // Start listing from subPath if specified, otherwise from root
+        print("[DownloadUtils] Starting directory listing from path: '\(subPath ?? "")'")
+        fflush(stdout)
         try await listDirectory(path: subPath ?? "")
+        print("[DownloadUtils] Found \(filesToDownload.count) files to download")
+        fflush(stdout)
         logger.info("Found \(filesToDownload.count) files to download")
 
         // Download each file
