@@ -1,8 +1,9 @@
 import Foundation
+import os
+
 #if canImport(MachTaskSelfWrapper)
 import MachTaskSelfWrapper
 #endif
-import os
 
 /// Performance metrics for ASR processing
 public struct ASRPerformanceMetrics: Codable, Sendable {

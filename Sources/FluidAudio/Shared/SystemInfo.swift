@@ -1,11 +1,12 @@
 import Foundation
-#if canImport(MachTaskSelfWrapper)
-import MachTaskSelfWrapper
-#endif
 import OSLog
 
 #if canImport(Darwin)
 import Darwin
+#endif
+
+#if canImport(MachTaskSelfWrapper)
+import MachTaskSelfWrapper
 #endif
 
 /// System information utilities and one-time environment reporting.
