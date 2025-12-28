@@ -5,6 +5,8 @@ import OSLog
 import Darwin
 #endif
 
+// Conditional import for CocoaPods compatibility - SPM always has this module,
+// but CocoaPods may not expose it during compilation.
 #if canImport(MachTaskSelfWrapper)
 import MachTaskSelfWrapper
 #endif
