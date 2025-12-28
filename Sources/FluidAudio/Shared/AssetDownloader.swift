@@ -8,11 +8,11 @@ public enum AssetDownloader {
     public typealias DataWriter = @Sendable (Data, URL) throws -> Void
     public typealias FileMover = @Sendable (URL, URL) throws -> Void
 
-    nonisolated(unsafe) public static let defaultDataWriter: DataWriter = { data, destination in
+    public static let defaultDataWriter: DataWriter = { data, destination in
         try data.write(to: destination, options: [.atomic])
     }
 
-    nonisolated(unsafe) public static let defaultFileMover: FileMover = { tempURL, destination in
+    public static let defaultFileMover: FileMover = { tempURL, destination in
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }

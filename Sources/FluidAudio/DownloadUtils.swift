@@ -70,7 +70,7 @@ public class DownloadUtils {
             self.timeout = timeout
         }
 
-        nonisolated(unsafe) public static let `default` = DownloadConfig()
+        public static let `default` = DownloadConfig()
     }
 
     public static func loadModels(

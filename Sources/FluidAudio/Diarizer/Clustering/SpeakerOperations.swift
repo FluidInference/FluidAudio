@@ -31,14 +31,14 @@ public enum SpeakerUtilities {
             self.minSegmentDuration = minSegmentDuration
         }
 
-        nonisolated(unsafe) public static let macOS = AssignmentConfig(
+        public static let macOS = AssignmentConfig(
             maxDistanceForAssignment: 0.65,
             maxDistanceForUpdate: 0.45,
             minSpeakerDuration: 4.0,
             minSegmentDuration: 1.0
         )
 
-        nonisolated(unsafe) public static let iOS = AssignmentConfig(
+        public static let iOS = AssignmentConfig(
             maxDistanceForAssignment: 0.55,
             maxDistanceForUpdate: 0.45,
             minSpeakerDuration: 4.0,
