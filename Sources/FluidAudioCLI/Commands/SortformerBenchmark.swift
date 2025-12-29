@@ -46,10 +46,12 @@ enum SortformerBenchmark {
                 --model <path>           Path to Sortformer.mlpackage
                 --nvidia-config          Use NVIDIA 1.04s latency config (20.57% DER target)
                 --low-latency            Use low-latency config (matches Python test)
-                --gradient-descent       Use Gradient Descent config (fifo=40, period=31, right_ctx=7)
+                --gradient-descent       Use Gradient Descent config (downloads from HuggingFace by default)
                 --simple-state           Use simple state update (matches Python test logic)
                 --separate-models        Use separate PreEncoder+Head models (matches Python)
                 --native-preprocessing   Use native Swift mel spectrogram (matches NeMo full-audio)
+                --hf                     Download models from HuggingFace (clears cache first)
+                --local                  Use local models instead of HuggingFace (for --gradient-descent)
                 --output <file>          Output JSON file for results
                 --progress <file>        Progress file for resuming (default: .sortformer_progress.json)
                 --resume                 Resume from previous progress file
@@ -93,6 +95,8 @@ enum SortformerBenchmark {
         var useSimpleState = false
         var useSeparateModels = false
         var useNativePreprocessing = false
+        var useHuggingFace = false
+        var useLocalModels = false
         var progressFile: String = ".sortformer_progress.json"
         var resumeFromProgress = false
         var dataset: Dataset = .ami
@@ -162,6 +166,11 @@ enum SortformerBenchmark {
                 useSimpleState = true
             case "--separate-models":
                 useSeparateModels = true
+            case "--hf":
+                useHuggingFace = true
+                useSeparateModels = true  // HuggingFace always uses separate models
+            case "--local":
+                useLocalModels = true
             case "--native-preprocessing":
                 useNativePreprocessing = true
             case "--help":
@@ -175,6 +184,12 @@ enum SortformerBenchmark {
             i += 1
         }
 
+        // Gradient descent uses HuggingFace by default unless --local is specified
+        if useGradientDescent && !useLocalModels {
+            useHuggingFace = true
+            useSeparateModels = true
+        }
+
         print("🚀 Starting Sortformer Benchmark")
         fflush(stdout)
         print("   Dataset: \(dataset.rawValue)")
@@ -184,15 +199,20 @@ enum SortformerBenchmark {
             ? "NVIDIA 1.04s" : (useLowLatency ? "Low-latency" : (useGradientDescent ? "Gradient Descent" : "Default"))
         print("   Config: \(configName)")
         print("   State Update: \(useSimpleState ? "Simple (Python test)" : "Full NeMo")")
-        print("   Mode: \(useSeparateModels ? "Separate PreEncoder+Head" : "Combined Pipeline")")
+        let modeDesc = useHuggingFace ? "HuggingFace models" : (useSeparateModels ? "Separate PreEncoder+Head" : "Combined Pipeline")
+        print("   Mode: \(modeDesc)")
         print("   Preprocessing: \(useNativePreprocessing ? "Native Swift mel spectrogram" : "CoreML chunked")")
 
         // Default model paths based on config
-        // NVIDIA config uses different models with larger input dimensions
-        let modelDir =
-            useNvidiaConfig
-            ? "Streaming-Sortformer-Conversion/coreml_models_nvidia"
-            : "Streaming-Sortformer-Conversion/coreml_models"
+        // Different configs need different models with matching input dimensions
+        let modelDir: String
+        if useNvidiaConfig {
+            modelDir = "Streaming-Sortformer-Conversion/coreml_models_nvidia"
+        } else if useGradientDescent {
+            modelDir = "Streaming-Sortformer-Conversion/coreml_models_gradient_descent"
+        } else {
+            modelDir = "Streaming-Sortformer-Conversion/coreml_models"
+        }
         let defaultPreprocessor = "\(modelDir)/Pipeline_Preprocessor.mlpackage"
         let defaultPreEncoder = "\(modelDir)/Pipeline_PreEncoder.mlpackage"
         let defaultHead = "\(modelDir)/Pipeline_Head_Fixed.mlpackage"
@@ -309,7 +329,17 @@ enum SortformerBenchmark {
         let diarizer = SortformerDiarizer(config: config)
 
         do {
-            if useSeparateModels {
+            if useHuggingFace {
+                // Clear cache to force re-download
+                let cacheDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("FluidAudio/Models/sortformer")
+                try? FileManager.default.removeItem(at: cacheDir)
+                print("   Downloading models from HuggingFace...")
+                fflush(stdout)
+
+                let models = try await SortformerModels.loadFromHuggingFace()
+                diarizer.initialize(models: models)
+            } else if useSeparateModels {
                 try await diarizer.initializeSeparate(
                     preprocessorPath: preprocessorURL,
                     preEncoderPath: preEncoderURL,
