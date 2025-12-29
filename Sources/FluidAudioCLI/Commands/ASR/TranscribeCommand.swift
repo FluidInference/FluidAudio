@@ -258,7 +258,8 @@ enum TranscribeCommand {
             )
             await testStreamingTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion,
+                frameAlignShortAudio: frameAlignShortAudio)
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
@@ -402,10 +403,18 @@ enum TranscribeCommand {
     /// Test streaming transcription
     private static func testStreamingTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
-        modelVersion: AsrModelVersion
+        modelVersion: AsrModelVersion, frameAlignShortAudio: Bool
     ) async {
         // Use optimized streaming configuration
-        let config = StreamingAsrConfig.streaming
+        let config = StreamingAsrConfig(
+            chunkSeconds: StreamingAsrConfig.streaming.chunkSeconds,
+            hypothesisChunkSeconds: StreamingAsrConfig.streaming.hypothesisChunkSeconds,
+            leftContextSeconds: StreamingAsrConfig.streaming.leftContextSeconds,
+            rightContextSeconds: StreamingAsrConfig.streaming.rightContextSeconds,
+            minContextForConfirmation: StreamingAsrConfig.streaming.minContextForConfirmation,
+            confirmationThreshold: StreamingAsrConfig.streaming.confirmationThreshold,
+            frameAlignShortAudio: frameAlignShortAudio
+        )
 
         // Create StreamingAsrManager
         let streamingAsr = StreamingAsrManager(config: config)

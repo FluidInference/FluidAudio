@@ -490,6 +490,8 @@ public struct StreamingAsrConfig: Sendable {
 
     /// Confidence threshold for promoting volatile text to confirmed (0.0...1.0)
     public let confirmationThreshold: Double
+    /// Align short audio to encoder frame boundaries before decoding (TDT only)
+    public let frameAlignShortAudio: Bool
 
     /// Default configuration aligned with previous API expectations
     public static let `default` = StreamingAsrConfig(
@@ -498,7 +500,8 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: 10.0,
         rightContextSeconds: 2.0,
         minContextForConfirmation: 10.0,
-        confirmationThreshold: 0.85
+        confirmationThreshold: 0.85,
+        frameAlignShortAudio: false
     )
 
     /// Optimized streaming configuration: Dual-track processing for best experience
@@ -510,7 +513,8 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: 2.0,  // Match ChunkProcessor left context
         rightContextSeconds: 2.0,  // Match ChunkProcessor right context
         minContextForConfirmation: 10.0,  // Need sufficient context before confirming
-        confirmationThreshold: 0.80  // Higher threshold for more stable confirmations
+        confirmationThreshold: 0.80,  // Higher threshold for more stable confirmations
+        frameAlignShortAudio: false
     )
 
     public init(
@@ -519,7 +523,8 @@ public struct StreamingAsrConfig: Sendable {
         leftContextSeconds: TimeInterval = 2.0,
         rightContextSeconds: TimeInterval = 2.0,
         minContextForConfirmation: TimeInterval = 10.0,
-        confirmationThreshold: Double = 0.85
+        confirmationThreshold: Double = 0.85,
+        frameAlignShortAudio: Bool = false
     ) {
         self.chunkSeconds = chunkSeconds
         self.hypothesisChunkSeconds = hypothesisChunkSeconds
@@ -527,6 +532,7 @@ public struct StreamingAsrConfig: Sendable {
         self.rightContextSeconds = rightContextSeconds
         self.minContextForConfirmation = minContextForConfirmation
         self.confirmationThreshold = confirmationThreshold
+        self.frameAlignShortAudio = frameAlignShortAudio
     }
 
     /// Backward-compatible convenience initializer used by tests (chunkDuration label)
@@ -563,7 +569,8 @@ public struct StreamingAsrConfig: Sendable {
     var asrConfig: ASRConfig {
         ASRConfig(
             sampleRate: 16000,
-            tdtConfig: TdtConfig()
+            tdtConfig: TdtConfig(),
+            frameAlignShortAudio: frameAlignShortAudio
         )
     }
 

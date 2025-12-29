@@ -17,8 +17,7 @@ extension AsrManager {
             let originalLength = audioSamples.count
             let frameAlignedLength: Int
             let alignedSamples: [Float]
-            let shouldAlign = config.frameAlignShortAudio && asrModels?.version != nil
-            if shouldAlign {
+            if config.frameAlignShortAudio {
                 frameAlignedLength =
                     ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
                         / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
@@ -172,10 +171,26 @@ extension AsrManager {
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
 
         let originalLength = chunkSamples.count
-        let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
+        var frameAlignedLength: Int
+        let alignedSamples: [Float]
+        if config.frameAlignShortAudio {
+            frameAlignedLength =
+                ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                    / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+            if frameAlignedLength > originalLength && frameAlignedLength <= 240_000 {
+                alignedSamples = chunkSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
+            } else {
+                frameAlignedLength = originalLength
+                alignedSamples = chunkSamples
+            }
+        } else {
+            frameAlignedLength = originalLength
+            alignedSamples = chunkSamples
+        }
+        let padded = padAudioIfNeeded(alignedSamples, targetLength: 240_000)
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
-            originalLength: originalLength,
+            originalLength: frameAlignedLength,
             actualAudioFrames: nil,  // Will be calculated from originalLength
             decoderState: &state,
             contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context
