@@ -225,9 +225,26 @@ public final class OfflineDiarizerManager {
 
         let vbxOutput: VBxOutput
         if !trainingRho.isEmpty, !initialClusters.isEmpty {
-            vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refine(
+            let hasConstraints =
+                config.clustering.numSpeakers != nil
+                || config.clustering.minSpeakers != nil
+                || config.clustering.maxSpeakers != nil
+
+            let constraints: SpeakerCountConstraints? =
+                hasConstraints
+                ? SpeakerCountConstraints.resolve(
+                    numEmbeddings: trainingEmbeddings.count,
+                    numSpeakers: config.clustering.numSpeakers,
+                    minSpeakers: config.clustering.minSpeakers,
+                    maxSpeakers: config.clustering.maxSpeakers
+                )
+                : nil
+
+            vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refineWithConstraints(
                 rhoFeatures: trainingRho,
-                initialClusters: initialClusters
+                trainingEmbeddings: trainingEmbeddings,
+                initialClusters: initialClusters,
+                constraints: constraints
             )
         } else {
             vbxOutput = VBxOutput(
@@ -320,7 +337,7 @@ public final class OfflineDiarizerManager {
     private func prewarmModelsIfNeeded(_ models: OfflineDiarizerModels) async {
         do {
             let start = Date()
-            try prewarmSegmentationModel(models.segmentationModel)
+            try await prewarmSegmentationModel(models.segmentationModel)
             let elapsed = Date().timeIntervalSince(start)
             let elapsedString = String(format: "%.3f", elapsed)
             logger.debug("Segmentation model prewarmed in \(elapsedString)s")
@@ -339,7 +356,17 @@ public final class OfflineDiarizerManager {
         }
     }
 
-    private func prewarmSegmentationModel(_ model: MLModel) throws {
+    /// Prewarm the segmentation model using Core ML's async prediction API.
+    ///
+    /// The original implementation invoked `MLModel.prediction(from:options:)` synchronously,
+    /// which blocks the current thread while waiting for compute units on the Neural Engine.
+    /// When the ANE is contended (for example after model compilation), the synchronous call
+    /// can hang indefinitely because there is no way to specify a timeout. iOS 17 introduces
+    /// an asynchronous prediction API that integrates with Swift concurrency. By marking
+    /// this method `async throws` and awaiting the prediction, we let the task yield while
+    /// Core ML schedules the work, avoid deadlocks, and allow cancellation if the caller
+    /// decides to abort prewarming.
+    private func prewarmSegmentationModel(_ model: MLModel) async throws {
         let shape: [NSNumber] = [
             1,
             1,
@@ -354,7 +381,7 @@ public final class OfflineDiarizerManager {
         )
         let options = MLPredictionOptions()
         array.prefetchToNeuralEngine()
-        _ = try model.prediction(from: provider, options: options)
+        _ = try await model.prediction(from: provider, options: options)
     }
 
     private func prewarmEmbeddingStack(models: OfflineDiarizerModels) async throws {
