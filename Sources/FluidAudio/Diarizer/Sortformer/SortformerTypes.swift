@@ -97,28 +97,83 @@ public struct SortformerStreamingState: Sendable {
 
 // MARK: - Result Types
 
+/// Result from streaming state update containing both confirmed and tentative predictions.
+///
+/// - `confirmed`: Predictions for frames that have passed beyond the right context window.
+///   These are final and will not change.
+/// - `tentative`: Predictions for frames still within the right context window.
+///   These may change when the next chunk arrives with more future context.
+///
+/// This enables real-time UI display without waiting for the full right context delay.
+/// With rightContext=7 and 80ms frames, tentative predictions provide 560ms earlier feedback.
+public struct StreamingUpdateResult: Sendable {
+    /// Final predictions for confirmed frames [chunkLen * numSpeakers]
+    public let confirmed: [Float]
+
+    /// Tentative predictions for right context frames [rightContext * numSpeakers]
+    /// May change with next chunk. Empty if rightContext=0.
+    public let tentative: [Float]
+
+    /// Number of confirmed frames
+    public var confirmedFrameCount: Int { confirmed.count / 4 }  // Assumes 4 speakers
+
+    /// Number of tentative frames
+    public var tentativeFrameCount: Int { tentative.count / 4 }  // Assumes 4 speakers
+
+    public init(confirmed: [Float], tentative: [Float]) {
+        self.confirmed = confirmed
+        self.tentative = tentative
+    }
+}
+
 /// Result from a single streaming diarization step
 public struct SortformerChunkResult: Sendable {
-    /// Speaker probabilities for this chunk
+    /// Speaker probabilities for confirmed frames in this chunk
     /// Shape: [chunkLen, numSpeakers] (e.g., [4, 4])
     public let probabilities: [Float]
 
-    /// Number of frames in this result
+    /// Number of confirmed frames in this result
     public let frameCount: Int
 
-    /// Time offset of first frame in seconds
+    /// Time offset of first confirmed frame in seconds
     public let startTimeSeconds: Float
 
-    public init(probabilities: [Float], frameCount: Int, startTimeSeconds: Float) {
+    /// Tentative predictions for right context frames (may change with next chunk)
+    /// Shape: [rightContext, numSpeakers]. Empty if no right context.
+    public let tentativeProbabilities: [Float]
+
+    /// Number of tentative frames
+    public let tentativeFrameCount: Int
+
+    /// Time offset of first tentative frame in seconds
+    public var tentativeStartTimeSeconds: Float {
+        startTimeSeconds + Float(frameCount) * 0.08  // 80ms per frame
+    }
+
+    public init(
+        probabilities: [Float],
+        frameCount: Int,
+        startTimeSeconds: Float,
+        tentativeProbabilities: [Float] = [],
+        tentativeFrameCount: Int = 0
+    ) {
         self.probabilities = probabilities
         self.frameCount = frameCount
         self.startTimeSeconds = startTimeSeconds
+        self.tentativeProbabilities = tentativeProbabilities
+        self.tentativeFrameCount = tentativeFrameCount
     }
 
-    /// Get probability for a specific speaker at a specific frame
+    /// Get probability for a specific speaker at a specific confirmed frame
     public func probability(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
         guard frame < frameCount, speaker < numSpeakers else { return 0.0 }
         return probabilities[frame * numSpeakers + speaker]
+    }
+
+    /// Get tentative probability for a specific speaker at a specific tentative frame
+    public func tentativeProbability(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
+        guard frame < tentativeFrameCount, speaker < numSpeakers else { return 0.0 }
+        return tentativeProbabilities[frame * numSpeakers + speaker]
     }
 }
 
