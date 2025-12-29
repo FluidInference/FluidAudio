@@ -4,6 +4,8 @@ import FluidAudio
 import Foundation
 import MachTaskSelfWrapper
 
+// Using @main instead of main.swift for Swift 6 compatibility.
+// This provides an explicit async context and clear isolation semantics.
 @main
 struct FluidAudioCLI {
     static let cliLogger = AppLogger(category: "Main")
