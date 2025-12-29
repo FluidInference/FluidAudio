@@ -204,11 +204,8 @@ struct ParakeetEouCommand {
         // Use DownloadUtils to download - handles auth, rate limiting, retries
         // Downloads to: directory/repo.folderName (e.g., .../parakeet-eou-streaming/160ms)
         let modelsDir = destination.deletingLastPathComponent().deletingLastPathComponent()
-        print("Downloading to parent directory: \(modelsDir.path)")
-        fflush(stdout)
         try await DownloadUtils.downloadRepo(repo, to: modelsDir)
         print("Models downloaded to \(destination.path)")
-        fflush(stdout)
     }
 
     static func runSingleFile(manager: StreamingEouAsrManager, inputUrl: URL, logger: AppLogger) async {
