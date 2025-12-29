@@ -22,6 +22,8 @@ public enum ModelRegistry {
 
     // MARK: - Registry URL Configuration
 
+    // Mutable static for runtime configuration. nonisolated(unsafe) because it's
+    // typically set once at startup before any concurrent access.
     nonisolated(unsafe) private static var _customBaseURL: String?
 
     /// Base registry URL (default: HuggingFace)
