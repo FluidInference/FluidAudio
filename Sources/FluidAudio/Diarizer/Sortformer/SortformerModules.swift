@@ -36,7 +36,7 @@ public struct SortformerModules {
     ///   - rightContext: Right context frames to skip
     ///   - modelSpkcacheLen: Spkcache length passed to model (may differ from state due to padding)
     ///   - modelFifoLen: Fifo length passed to model (may differ from state due to padding)
-    /// - Returns: Updated state and chunk predictions [chunkLen, numSpeakers]
+    /// - Returns: StreamingUpdateResult with confirmed predictions and tentative right-context predictions
     public func streamingUpdate(
         state: inout SortformerStreamingState,
         chunkEmbeddings: [Float],
@@ -45,7 +45,7 @@ public struct SortformerModules {
         rightContext: Int,
         modelSpkcacheLen: Int? = nil,
         modelFifoLen: Int? = nil
-    ) -> [Float] {
+    ) -> StreamingUpdateResult {
         let fcDModel = config.fcDModel
         let numSpeakers = config.numSpeakers
         let maxFifoLen = config.fifoLen
@@ -75,6 +75,19 @@ public struct SortformerModules {
         for i in 0..<chunkPredCount {
             if predOffset + i < predictions.count {
                 chunkPreds[i] = predictions[predOffset + i]
+            }
+        }
+
+        // Extract tentative predictions for right context frames
+        // These are predictions for audio that hasn't fully passed through the context window yet
+        // They may change when the next chunk arrives with more future context
+        let tentativeOffset = predOffset + chunkPredCount
+        let tentativePredCount = rightContext * numSpeakers
+        var tentativePreds = [Float](repeating: 0.0, count: tentativePredCount)
+
+        for i in 0..<tentativePredCount {
+            if tentativeOffset + i < predictions.count {
+                tentativePreds[i] = predictions[tentativeOffset + i]
             }
         }
 
@@ -189,7 +202,7 @@ public struct SortformerModules {
             }
         }
 
-        return chunkPreds
+        return StreamingUpdateResult(confirmed: chunkPreds, tentative: tentativePreds)
     }
 
     // MARK: - Speaker Cache Compression

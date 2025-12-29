@@ -177,7 +177,9 @@ public final class SortformerDiarizer: @unchecked Sendable {
         }
 
         var newProbabilities: [Float]?
+        var newTentativeProbabilities: [Float]?
         var newFrameCount = 0
+        var newTentativeFrameCount = 0
 
         let audioCountBefore = audioBuffer.count
 
@@ -352,7 +354,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
             let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor  // ceil
 
             // Update state with correct context values
-            let chunkPreds = modules.streamingUpdate(
+            let updateResult = modules.streamingUpdate(
                 state: &state,
                 chunkEmbeddings: chunkEmbs,
                 predictions: probabilities,
@@ -362,14 +364,16 @@ public final class SortformerDiarizer: @unchecked Sendable {
                 modelFifoLen: modelFifoLen
             )
 
-            // Accumulate results
-            allProbabilities.append(contentsOf: chunkPreds)
-            newProbabilities = chunkPreds
-            newFrameCount = chunkPreds.count / config.numSpeakers
+            // Accumulate confirmed results
+            allProbabilities.append(contentsOf: updateResult.confirmed)
+            newProbabilities = updateResult.confirmed
+            newTentativeProbabilities = updateResult.tentative
+            newFrameCount = updateResult.confirmed.count / config.numSpeakers
+            newTentativeFrameCount = updateResult.tentative.count / config.numSpeakers
 
             if config.debugMode && diarizerChunkIndex < 5 {
                 print(
-                    "[DEBUG] Diarizer chunk \(diarizerChunkIndex): chunkPreds.count=\(chunkPreds.count), totalProbs=\(allProbabilities.count)"
+                    "[DEBUG] Diarizer chunk \(diarizerChunkIndex): confirmed=\(updateResult.confirmed.count), tentative=\(updateResult.tentative.count), totalProbs=\(allProbabilities.count)"
                 )
                 fflush(stdout)
             }
@@ -387,7 +391,9 @@ public final class SortformerDiarizer: @unchecked Sendable {
             return SortformerChunkResult(
                 probabilities: probs,
                 frameCount: newFrameCount,
-                startTimeSeconds: startTime
+                startTimeSeconds: startTime,
+                tentativeProbabilities: newTentativeProbabilities ?? [],
+                tentativeFrameCount: newTentativeFrameCount
             )
         }
 
@@ -638,7 +644,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
             let debugFifoLen = state.fifoLength
 
             // Update state
-            let chunkPreds = modules.streamingUpdate(
+            let updateResult = modules.streamingUpdate(
                 state: &state,
                 chunkEmbeddings: chunkEmbs,
                 predictions: probabilities,
@@ -654,9 +660,9 @@ public final class SortformerDiarizer: @unchecked Sendable {
                     "[Swift] Chunk \(diarizerChunkIndex): lc=\(leftContext), rc=\(rightContext), spkcache=\(debugSpkcacheLen), fifo=\(debugFifoLen)"
                 )
 
-                let actualFrames = chunkPreds.count / config.numSpeakers
-                let chunkMin = chunkPreds.min() ?? 0
-                let chunkMax = chunkPreds.max() ?? 0
+                let actualFrames = updateResult.confirmed.count / config.numSpeakers
+                let chunkMin = updateResult.confirmed.min() ?? 0
+                let chunkMax = updateResult.confirmed.max() ?? 0
                 print(
                     "         chunk_probs shape: [\(actualFrames), \(config.numSpeakers)], min=\(String(format: "%.4f", chunkMin)), max=\(String(format: "%.4f", chunkMax))"
                 )
@@ -665,8 +671,8 @@ public final class SortformerDiarizer: @unchecked Sendable {
                     let frameStart = frame * config.numSpeakers
                     var vals: [String] = []
                     for spk in 0..<config.numSpeakers {
-                        if frameStart + spk < chunkPreds.count {
-                            vals.append(String(format: "%.4f", chunkPreds[frameStart + spk]))
+                        if frameStart + spk < updateResult.confirmed.count {
+                            vals.append(String(format: "%.4f", updateResult.confirmed[frameStart + spk]))
                         }
                     }
                     print("         Frame \(frame): [\(vals.joined(separator: ", "))]")
@@ -675,8 +681,8 @@ public final class SortformerDiarizer: @unchecked Sendable {
                 fflush(stdout)
             }
 
-            // Accumulate results
-            allProbabilities.append(contentsOf: chunkPreds)
+            // Accumulate confirmed results (tentative not needed for batch processing)
+            allProbabilities.append(contentsOf: updateResult.confirmed)
             chunksProcessed += 1
             diarizerChunkIndex += 1
 
