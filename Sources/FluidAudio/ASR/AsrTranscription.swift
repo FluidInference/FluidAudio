@@ -14,12 +14,23 @@ extension AsrManager {
 
         // Route to appropriate processing method based on audio length
         if audioSamples.count <= 240_000 {
-            let originalLength = audioSamples.count
-            let paddedAudio: [Float] = padAudioIfNeeded(audioSamples, targetLength: 240_000)
+            let originalSamples = audioSamples
+            let originalLength = originalSamples.count
+            let frameAlignedLength =
+                ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                    / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+            let alignedSamples: [Float]
+            if frameAlignedLength > originalLength {
+                alignedSamples = originalSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
+            } else {
+                alignedSamples = originalSamples
+            }
+            let paddedAudio: [Float] = padAudioIfNeeded(alignedSamples, targetLength: 240_000)
+            let actualAudioFrames = ASRConstants.calculateEncoderFrames(from: frameAlignedLength)
             let (hypothesis, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
-                originalLength: originalLength,
-                actualAudioFrames: nil,  // Will be calculated from originalLength
+                originalLength: frameAlignedLength,
+                actualAudioFrames: actualAudioFrames,
                 decoderState: &decoderState
             )
 
@@ -29,7 +40,7 @@ extension AsrManager {
                 confidences: hypothesis.tokenConfidences,
                 tokenDurations: hypothesis.tokenDurations,
                 encoderSequenceLength: encoderSequenceLength,
-                audioSamples: audioSamples,
+                audioSamples: originalSamples,
                 processingTime: Date().timeIntervalSince(startTime)
             )
             return result
