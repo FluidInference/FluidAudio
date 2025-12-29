@@ -211,6 +211,7 @@ enum TranscribeCommand {
         var wordTimestamps = false
         var outputJsonPath: String?
         var modelVersion: AsrModelVersion = .v3  // Default to v3
+        var frameAlignShortAudio = false
 
         // Parse options
         var i = 1
@@ -230,6 +231,8 @@ enum TranscribeCommand {
                     outputJsonPath = arguments[i + 1]
                     i += 1
                 }
+            case "--frame-align":
+                frameAlignShortAudio = true
             case "--model-version":
                 if i + 1 < arguments.count {
                     switch arguments[i + 1].lowercased() {
@@ -260,19 +263,21 @@ enum TranscribeCommand {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion,
+                frameAlignShortAudio: frameAlignShortAudio)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
-        modelVersion: AsrModelVersion
+        modelVersion: AsrModelVersion, frameAlignShortAudio: Bool
     ) async {
         do {
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-            let asrManager = AsrManager(config: .default)
+            let asrConfig = ASRConfig(frameAlignShortAudio: frameAlignShortAudio)
+            let asrManager = AsrManager(config: asrConfig)
             try await asrManager.initialize(models: models)
 
             logger.info("ASR Manager initialized successfully")
@@ -638,12 +643,13 @@ enum TranscribeCommand {
             Transcribe Command Usage:
                 fluidaudio transcribe <audio_file> [options]
 
-            Options:
+                Options:
                 --help, -h         Show this help message
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --word-timestamps  Show word-level timestamps for each word in the transcription
                 --output-json <file>  Save full transcription result to JSON (includes word timings)
+                --frame-align      Enable short-audio frame-aligned padding
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
 
             Examples:

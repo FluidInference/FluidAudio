@@ -15,13 +15,20 @@ extension AsrManager {
         // Route to appropriate processing method based on audio length
         if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
-            let frameAlignedLength =
-                ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
-                    / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+            let frameAlignedLength: Int
             let alignedSamples: [Float]
-            if frameAlignedLength > originalLength {
-                alignedSamples = audioSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
+            let shouldAlign = config.frameAlignShortAudio && asrModels?.version != nil
+            if shouldAlign {
+                frameAlignedLength =
+                    ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                        / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+                if frameAlignedLength > originalLength {
+                    alignedSamples = audioSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
+                } else {
+                    alignedSamples = audioSamples
+                }
             } else {
+                frameAlignedLength = originalLength
                 alignedSamples = audioSamples
             }
             let paddedAudio: [Float] = padAudioIfNeeded(alignedSamples, targetLength: 240_000)
