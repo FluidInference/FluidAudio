@@ -165,7 +165,8 @@ extension AsrManager {
     public func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
-        previousTokens: [Int] = []
+        previousTokens: [Int] = [],
+        isLastChunk: Bool = false
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
@@ -173,7 +174,8 @@ extension AsrManager {
         let originalLength = chunkSamples.count
         var frameAlignedLength: Int
         let alignedSamples: [Float]
-        if config.frameAlignShortAudio {
+        let shouldAlign = config.frameAlignShortAudio && previousTokens.isEmpty
+        if shouldAlign {
             frameAlignedLength =
                 ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
                     / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
@@ -193,7 +195,8 @@ extension AsrManager {
             originalLength: frameAlignedLength,
             actualAudioFrames: nil,  // Will be calculated from originalLength
             decoderState: &state,
-            contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context
+            contextFrameAdjustment: 0,  // Non-streaming chunks don't use adaptive context
+            isLastChunk: isLastChunk
         )
 
         // Persist updated state back to the source-specific slot
