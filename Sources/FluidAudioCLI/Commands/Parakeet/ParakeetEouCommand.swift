@@ -111,15 +111,14 @@ struct ParakeetEouCommand {
                 .standardized
         }
 
-        print("Using chunk size: \(chunkSize.durationMs)ms")
+        logger.info("Using chunk size: \(chunkSize.durationMs)ms")
 
         // 1. Download Models if requested or missing
         if download || useCache || !FileManager.default.fileExists(atPath: modelsUrl.path) {
-            print("Downloading models to: \(modelsUrl.path)")
+            logger.info("Downloading models to: \(modelsUrl.path)")
             do {
                 try await downloadModels(to: modelsUrl, chunkSize: chunkSize)
             } catch {
-                print("ERROR: Failed to download models: \(error)")
                 logger.error("Failed to download models: \(error)")
                 exit(1)
             }
@@ -135,18 +134,17 @@ struct ParakeetEouCommand {
         default:
             config.computeUnits = .all
         }
-        print("Using compute units: \(config.computeUnits.rawValue)")
-        print("EOU debounce: \(eouDebounceMs)ms")
+        logger.info("Using compute units: \(config.computeUnits.rawValue)")
+        logger.info("EOU debounce: \(eouDebounceMs)ms")
 
-        print("Initializing StreamingEouAsrManager...")
+        logger.info("Initializing StreamingEouAsrManager...")
         let manager = StreamingEouAsrManager(
             configuration: config, chunkSize: chunkSize, eouDebounceMs: eouDebounceMs, debugFeatures: debugFeatures)
         do {
-            print("Loading models from: \(modelsUrl.path)")
+            logger.info("Loading models from: \(modelsUrl.path)")
             try await manager.loadModels(modelDir: modelsUrl)
-            print("Models loaded successfully.")
+            logger.info("Models loaded successfully.")
         } catch {
-            print("ERROR: Failed to load models: \(error)")
             logger.error("Failed to load models: \(error)")
             exit(1)
         }
