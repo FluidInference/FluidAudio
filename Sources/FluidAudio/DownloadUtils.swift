@@ -305,6 +305,10 @@ public class DownloadUtils {
                 )
             }
 
+            // Remove existing file if present (handles parallel download race conditions)
+            if FileManager.default.fileExists(atPath: destPath.path) {
+                try? FileManager.default.removeItem(at: destPath)
+            }
             try FileManager.default.moveItem(at: tempFileURL, to: destPath)
 
             if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {
