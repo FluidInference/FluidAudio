@@ -1,11 +1,6 @@
 import Foundation
-import os
-
-// Conditional import for CocoaPods compatibility - SPM always has this module,
-// but CocoaPods may not expose it during compilation.
-#if canImport(MachTaskSelfWrapper)
 import MachTaskSelfWrapper
-#endif
+import os
 
 /// Performance metrics for ASR processing
 public struct ASRPerformanceMetrics: Codable, Sendable {
