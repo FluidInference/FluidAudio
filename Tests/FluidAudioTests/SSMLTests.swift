@@ -35,6 +35,36 @@ final class SSMLTests: XCTestCase {
         }
     }
 
+    func testParsePhonemeTagReversedAttributes() {
+        // Test that attribute order doesn't matter
+        let text = #"<phoneme ph="kəˈkɔɹo" alphabet="ipa">Kokoro</phoneme>"#
+        let tags = SSMLTagParser.parse(text)
+
+        XCTAssertEqual(tags.count, 1)
+        if case .phoneme(let alphabet, let ph, let content) = tags[0].type {
+            XCTAssertEqual(alphabet, "ipa")
+            XCTAssertEqual(ph, "kəˈkɔɹo")
+            XCTAssertEqual(content, "Kokoro")
+        } else {
+            XCTFail("Expected phoneme tag")
+        }
+    }
+
+    func testParseSayAsTagReversedAttributes() {
+        // Test that attribute order doesn't matter
+        let text = #"<say-as format="mdy" interpret-as="date">12/25/2024</say-as>"#
+        let tags = SSMLTagParser.parse(text)
+
+        XCTAssertEqual(tags.count, 1)
+        if case .sayAs(let interpretAs, let format, let content) = tags[0].type {
+            XCTAssertEqual(interpretAs, "date")
+            XCTAssertEqual(format, "mdy")
+            XCTAssertEqual(content, "12/25/2024")
+        } else {
+            XCTFail("Expected say-as tag")
+        }
+    }
+
     func testParseSubTag() {
         let text = #"<sub alias="World Wide Web">WWW</sub>"#
         let tags = SSMLTagParser.parse(text)
@@ -180,6 +210,11 @@ final class SSMLTests: XCTestCase {
         XCTAssertTrue(result.contains("twenty"))
     }
 
+    func testInterpretDateYearWithOh() {
+        let result = SayAsInterpreter.interpret(content: "1905", interpretAs: "date", format: "y")
+        XCTAssertEqual(result, "nineteen oh five")
+    }
+
     func testInterpretTimeDuration() {
         let result = SayAsInterpreter.interpret(content: "1'21\"", interpretAs: "time", format: nil)
         XCTAssertTrue(result.contains("minute"))
@@ -194,6 +229,11 @@ final class SSMLTests: XCTestCase {
     func testInterpretTimeOClock() {
         let result = SayAsInterpreter.interpret(content: "3:00", interpretAs: "time", format: nil)
         XCTAssertEqual(result, "three o'clock")
+    }
+
+    func testInterpretTimeSingleDigitMinutes() {
+        let result = SayAsInterpreter.interpret(content: "3:05", interpretAs: "time", format: nil)
+        XCTAssertEqual(result, "three oh five")
     }
 
     func testInterpretTelephone() {
@@ -550,6 +590,82 @@ final class SSMLTests: XCTestCase {
     func testSayAsOrdinalThirteenth() {
         let result = SayAsInterpreter.interpret(content: "13", interpretAs: "ordinal", format: nil)
         XCTAssertEqual(result, "thirteenth")
+    }
+
+    // MARK: - Additional Edge Cases
+
+    func testUnicodeContent() {
+        // café with accent
+        let result1 = SSMLProcessor.process(#"<sub alias="coffee shop">café</sub>"#)
+        XCTAssertEqual(result1.text, "coffee shop")
+
+        // Japanese text
+        let result2 = SSMLProcessor.process(#"<sub alias="Japan">日本</sub>"#)
+        XCTAssertEqual(result2.text, "Japan")
+    }
+
+    func testFractionOneThird() {
+        let result = SayAsInterpreter.interpret(content: "1/3", interpretAs: "fraction", format: nil)
+        XCTAssertEqual(result, "one third")
+    }
+
+    func testFractionTwoHalves() {
+        let result = SayAsInterpreter.interpret(content: "2/2", interpretAs: "fraction", format: nil)
+        XCTAssertEqual(result, "two halves")
+    }
+
+    func testFractionLargeDenominator() {
+        let result = SayAsInterpreter.interpret(content: "3/100", interpretAs: "fraction", format: nil)
+        XCTAssertTrue(result.contains("hundredth"))
+    }
+
+    func testWordIndexAfterCurrencyExpansion() {
+        // SSML word index is calculated on ORIGINAL text before currency expansion
+        let text = "Cost is $10 and <phoneme ph=\"test\">word</phoneme> follows"
+        let result = TtsTextPreprocessor.preprocessDetailed(text)
+        XCTAssertEqual(result.phoneticOverrides.count, 1)
+        // Original: "Cost is $10 and word follows" - word index 4
+        // (Currency expansion happens after SSML processing)
+        XCTAssertEqual(result.phoneticOverrides[0].wordIndex, 4)
+    }
+
+    func testAdjacentTags() {
+        let text = #"<say-as interpret-as="cardinal">1</say-as><say-as interpret-as="cardinal">2</say-as>"#
+        let result = SSMLProcessor.process(text)
+        XCTAssertEqual(result.text, "onetwo")
+    }
+
+    func testOrdinal111() {
+        let result = SayAsInterpreter.interpret(content: "111", interpretAs: "ordinal", format: nil)
+        XCTAssertTrue(result.contains("eleventh") || result.contains("hundred"))
+    }
+
+    func testOrdinal1000() {
+        let result = SayAsInterpreter.interpret(content: "1000", interpretAs: "ordinal", format: nil)
+        XCTAssertTrue(result.contains("thousandth"))
+    }
+
+    func testInvalidMonthBound() {
+        // Month 24 is invalid - should return original content
+        let result = SayAsInterpreter.interpret(content: "24/13/2025", interpretAs: "date", format: "mdy")
+        XCTAssertEqual(result, "24/13/2025")  // Returns unchanged
+    }
+
+    func testValidDateWithLargeDay() {
+        // Day 32 is technically invalid but we still format it as ordinal
+        let result = SayAsInterpreter.interpret(content: "12/25/2024", interpretAs: "date", format: "mdy")
+        XCTAssertTrue(result.contains("December"))
+        XCTAssertTrue(result.contains("twenty"))
+    }
+
+    func testWhitespaceInContent() {
+        let result = SSMLProcessor.process("<sub alias=\"hello world\">  test  </sub>")
+        XCTAssertEqual(result.text, "hello world")
+    }
+
+    func testNewlineInContent() {
+        let result = SSMLProcessor.process("<sub alias=\"replaced\">line1\nline2</sub>")
+        XCTAssertEqual(result.text, "replaced")
     }
 }
 

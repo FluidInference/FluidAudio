@@ -22,3 +22,38 @@ struct SSMLParsedTag: Sendable {
     let type: TagType
     let range: Range<String.Index>
 }
+
+// MARK: - Shared Utilities
+
+/// Apostrophe characters that should be treated as part of a word
+/// Used by both SSML processing and text preprocessing for consistent word boundary detection
+let phoneticApostropheCharacters: Set<Character> = ["'", "'", "ʼ", "‛", "‵", "′"]
+
+/// Check if a character is an emoji
+/// Used by both SSML processing and text preprocessing for consistent word boundary detection
+func isEmoji(_ character: Character) -> Bool {
+    character.unicodeScalars.contains { scalar in
+        scalar.properties.isEmojiPresentation || scalar.properties.isEmoji
+    }
+}
+
+/// Shared NumberFormatter for spelling out numbers (expensive to create)
+/// Used by SSML processing, text preprocessing, and chunking
+let spellOutFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .spellOut
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.maximumFractionDigits = 0
+    formatter.roundingMode = .down
+    return formatter
+}()
+
+/// Digit words for spelling individual digits (0-9)
+/// Used by SSML processing and text preprocessing
+let digitWords = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+
+/// Convert a digit character to its word representation
+func digitToWord(_ char: Character) -> String? {
+    guard let digit = Int(String(char)), digit >= 0, digit <= 9 else { return nil }
+    return digitWords[digit]
+}

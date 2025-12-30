@@ -6,20 +6,6 @@ public enum SayAsInterpreter {
 
     // MARK: - Cached Static Resources
 
-    /// Shared NumberFormatter for spelling out numbers (expensive to create)
-    private static let spellOutFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .spellOut
-        formatter.locale = Locale(identifier: "en_US")
-        return formatter
-    }()
-
-    /// Digit words for spelling individual digits
-    private static let digitWords = [
-        "zero", "one", "two", "three", "four",
-        "five", "six", "seven", "eight", "nine",
-    ]
-
     /// Ordinal words for numbers 1-19
     private static let ordinalWords: [Int: String] = [
         1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
@@ -90,7 +76,7 @@ public enum SayAsInterpreter {
         guard let number = Int(content.filter { $0.isNumber || $0 == "-" }) else {
             return content
         }
-        return spellOutFormatter.string(from: NSNumber(value: number)) ?? content
+        return FluidAudioTTS.spellOutFormatter.string(from: NSNumber(value: number)) ?? content
     }
 
     /// Ordinal number: "1" -> "first", "23" -> "twenty third"
@@ -104,10 +90,7 @@ public enum SayAsInterpreter {
     /// Spell each digit: "123" -> "one two three"
     private static func interpretDigits(_ content: String) -> String {
         content.compactMap { char -> String? in
-            guard let digit = Int(String(char)), digit >= 0, digit <= 9 else {
-                return nil
-            }
-            return digitWords[digit]
+            FluidAudioTTS.digitToWord(char)
         }.joined(separator: " ")
     }
 
@@ -118,7 +101,9 @@ public enum SayAsInterpreter {
         guard !components.isEmpty else { return content }
 
         let formatKey = format?.lowercased() ?? "mdy"
-        return formatDate(components: components, format: formatKey)
+        let result = formatDate(components: components, format: formatKey)
+        // Return original content if formatting failed (e.g., invalid month)
+        return result.isEmpty ? content : result
     }
 
     /// Time/duration: "1'21\"" -> "one minute twenty one seconds"
@@ -174,7 +159,7 @@ public enum SayAsInterpreter {
         }
 
         // For numbers 20+, spell out the cardinal and add appropriate suffix
-        guard let spelled = spellOutFormatter.string(from: NSNumber(value: number)) else {
+        guard let spelled = FluidAudioTTS.spellOutFormatter.string(from: NSNumber(value: number)) else {
             return "\(number)th"
         }
 
@@ -254,41 +239,36 @@ public enum SayAsInterpreter {
         switch format {
         case "mdy":
             if components.count >= 3 {
-                if components[0] >= 1 && components[0] <= 12 {
-                    result.append(monthNames[components[0]])
-                }
+                guard components[0] >= 1 && components[0] <= 12 else { return "" }
+                result.append(monthNames[components[0]])
                 result.append(ordinalWord(for: components[1]))
                 result.append(interpretYear(components[2]))
             }
         case "dmy":
             if components.count >= 3 {
+                guard components[1] >= 1 && components[1] <= 12 else { return "" }
                 result.append(ordinalWord(for: components[0]))
-                if components[1] >= 1 && components[1] <= 12 {
-                    result.append(monthNames[components[1]])
-                }
+                result.append(monthNames[components[1]])
                 result.append(interpretYear(components[2]))
             }
         case "ymd":
             if components.count >= 3 {
+                guard components[1] >= 1 && components[1] <= 12 else { return "" }
                 result.append(interpretYear(components[0]))
-                if components[1] >= 1 && components[1] <= 12 {
-                    result.append(monthNames[components[1]])
-                }
+                result.append(monthNames[components[1]])
                 result.append(ordinalWord(for: components[2]))
             }
         case "md":
             if components.count >= 2 {
-                if components[0] >= 1 && components[0] <= 12 {
-                    result.append(monthNames[components[0]])
-                }
+                guard components[0] >= 1 && components[0] <= 12 else { return "" }
+                result.append(monthNames[components[0]])
                 result.append(ordinalWord(for: components[1]))
             }
         case "dm":
             if components.count >= 2 {
+                guard components[1] >= 1 && components[1] <= 12 else { return "" }
                 result.append(ordinalWord(for: components[0]))
-                if components[1] >= 1 && components[1] <= 12 {
-                    result.append(monthNames[components[1]])
-                }
+                result.append(monthNames[components[1]])
             }
         case "y":
             if !components.isEmpty {
@@ -325,6 +305,10 @@ public enum SayAsInterpreter {
             } else if year >= 2000 && year <= 2009 {
                 // 2001-2009 -> "two thousand one" etc.
                 return "two thousand " + interpretCardinal(String(remainder))
+            } else if remainder >= 1 && remainder <= 9 {
+                // 1905 -> "nineteen oh five", 2101 -> "twenty one oh one"
+                let centuryPart = interpretCardinal(String(century))
+                return "\(centuryPart) oh \(interpretCardinal(String(remainder)))"
             } else {
                 // 1985 -> "nineteen eighty five", 2024 -> "twenty twenty four"
                 let centuryPart = interpretCardinal(String(century))
@@ -373,6 +357,11 @@ public enum SayAsInterpreter {
 
         if minutes == 0 {
             return "\(interpretCardinal(String(hours))) o'clock"
+        }
+
+        // Single-digit minutes: "3:05" -> "three oh five"
+        if minutes >= 1 && minutes <= 9 {
+            return "\(interpretCardinal(String(hours))) oh \(interpretCardinal(String(minutes)))"
         }
 
         return "\(interpretCardinal(String(hours))) \(interpretCardinal(String(minutes)))"

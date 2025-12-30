@@ -176,19 +176,14 @@ enum TtsTextPreprocessor {
             // Convert integer part to words
             let integerWords: String
             if let integerValue = Int(integerPart) {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .spellOut
-                integerWords = formatter.string(from: NSNumber(value: integerValue)) ?? integerPart
+                integerWords =
+                    FluidAudioTTS.spellOutFormatter.string(from: NSNumber(value: integerValue)) ?? integerPart
             } else {
                 integerWords = integerPart
             }
 
             // Convert each decimal digit to individual words
-            let digitWords = [
-                "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
-                "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
-            ]
-            let decimalWords = decimalPart.compactMap { digitWords[String($0)] }.joined(separator: " ")
+            let decimalWords = decimalPart.compactMap { FluidAudioTTS.digitToWord($0) }.joined(separator: " ")
 
             let replacement = "\(integerWords) point \(decimalWords)"
 
@@ -451,7 +446,7 @@ enum TtsTextPreprocessor {
 
         var accumulator = WordAccumulator(
             expectedScalarCount: text.unicodeScalars.count,
-            apostrophes: phoneticApostropheCharacters
+            apostrophes: FluidAudioTTS.phoneticApostropheCharacters
         )
 
         let end = text.endIndex
@@ -627,7 +622,7 @@ enum TtsTextPreprocessor {
                 return true
             }
 
-            if isEmoji(character) {
+            if FluidAudioTTS.isEmoji(character) {
                 return true
             }
 
@@ -644,12 +639,6 @@ enum TtsTextPreprocessor {
                 }
             }
         }
-
-        private static func isEmoji(_ character: Character) -> Bool {
-            character.unicodeScalars.contains { scalar in
-                scalar.properties.isEmojiPresentation || scalar.properties.isEmoji
-            }
-        }
     }
 
     // MARK: - Constants
@@ -662,8 +651,6 @@ enum TtsTextPreprocessor {
             "\\[[^\\[\\]]{1,\(aliasWordMaxLength)}\\]\\(\\s*([^\\)]{1,\(aliasReplacementMaxLength)}?)\\s*\\)"
         return try! NSRegularExpression(pattern: pattern, options: [])
     }()
-
-    private static let phoneticApostropheCharacters: Set<Character> = ["'", "’", "ʼ", "‛", "‵", "′"]
 
     private static let currencies: [Character: (bill: String, cent: String)] = [
         "$": ("dollar", "cent"),

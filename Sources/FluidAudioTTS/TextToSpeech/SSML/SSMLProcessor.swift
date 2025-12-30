@@ -22,7 +22,7 @@ public enum SSMLProcessor {
         // Process tags in reverse order (from end to start) to preserve indices
         for tag in tags {
             switch tag.type {
-            case .phoneme(let alphabet, let ph, let content):
+            case .phoneme(_, let ph, let content):
                 // Calculate word index BEFORE replacement
                 let wordIndex = countWordsBeforeIndex(in: workingText, index: tag.range.lowerBound)
 
@@ -73,7 +73,10 @@ public enum SSMLProcessor {
         var inWord = false
 
         for char in prefix {
-            let isWordChar = char.isLetter || char.isNumber || char == "'" || isEmoji(char)
+            let isWordChar =
+                char.isLetter || char.isNumber
+                || FluidAudioTTS.phoneticApostropheCharacters.contains(char)
+                || FluidAudioTTS.isEmoji(char)
             if isWordChar && !inWord {
                 inWord = true
             } else if !isWordChar && inWord {
@@ -85,12 +88,6 @@ public enum SSMLProcessor {
         // If we ended in a word, it's a partial word - don't count it
         // The word index points to the word that will contain our phoneme
         return wordCount
-    }
-
-    /// Check if a character is an emoji
-    private static func isEmoji(_ char: Character) -> Bool {
-        guard let scalar = char.unicodeScalars.first else { return false }
-        return scalar.properties.isEmoji && scalar.properties.isEmojiPresentation
     }
 
     /// Tokenize phoneme string into tokens

@@ -6,44 +6,77 @@ enum SSMLTagParser {
 
     // MARK: - Regex Patterns
 
-    /// Pattern for <phoneme alphabet="ipa" ph="...">content</phoneme>
-    /// Captures: (1) alphabet (optional), (2) ph (required), (3) content
+    /// Pattern for <phoneme ...>content</phoneme>
+    /// Captures: (1) attributes, (2) content
     private static let phonemePattern = try! NSRegularExpression(
-        pattern: #"<phoneme(?:\s+alphabet\s*=\s*["']([^"']*)["'])?\s+ph\s*=\s*["']([^"']+)["']\s*>([^<]*)</phoneme>"#,
+        pattern: #"<phoneme\s+([^>]+)>([^<]*)</phoneme>"#,
         options: [.caseInsensitive]
     )
 
-    /// Pattern for <sub alias="...">content</sub>
-    /// Captures: (1) alias, (2) content
+    /// Pattern for <sub ...>content</sub>
+    /// Captures: (1) attributes, (2) content
     private static let subPattern = try! NSRegularExpression(
-        pattern: #"<sub\s+alias\s*=\s*["']([^"']+)["']\s*>([^<]*)</sub>"#,
+        pattern: #"<sub\s+([^>]+)>([^<]*)</sub>"#,
         options: [.caseInsensitive]
     )
 
-    /// Pattern for <say-as interpret-as="..." format="...">content</say-as>
-    /// Captures: (1) interpret-as, (2) format (optional), (3) content
+    /// Pattern for <say-as ...>content</say-as>
+    /// Captures: (1) attributes, (2) content
     private static let sayAsPattern = try! NSRegularExpression(
-        pattern:
-            #"<say-as\s+interpret-as\s*=\s*["']([^"']+)["'](?:\s+format\s*=\s*["']([^"']*)["'])?\s*>([^<]*)</say-as>"#,
+        pattern: #"<say-as\s+([^>]+)>([^<]*)</say-as>"#,
         options: [.caseInsensitive]
     )
+
+    /// Pattern for extracting attribute values
+    private static func extractAttribute(_ name: String, from attributes: String) -> String? {
+        let pattern = try! NSRegularExpression(
+            pattern: #"\b"# + name + #"\s*=\s*["']([^"']*)["']"#,
+            options: [.caseInsensitive]
+        )
+        let nsAttributes = attributes as NSString
+        let range = NSRange(location: 0, length: nsAttributes.length)
+        guard let match = pattern.firstMatch(in: attributes, options: [], range: range) else { return nil }
+        let valueRange = match.range(at: 1)
+        guard valueRange.location != NSNotFound else { return nil }
+        return nsAttributes.substring(with: valueRange)
+    }
 
     // MARK: - Public API
 
     /// Parse all SSML tags from text
     /// Returns tags in reverse document order (safe for sequential replacement)
     static func parse(_ text: String) -> [SSMLParsedTag] {
-        var tags: [SSMLParsedTag] = []
         let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
 
-        // Parse phoneme tags
-        tags.append(contentsOf: parsePhoneme(text, nsText: nsText))
+        var tags: [SSMLParsedTag] = []
 
-        // Parse sub tags
-        tags.append(contentsOf: parseSub(text, nsText: nsText))
+        // Parse all tag types using shared enumeration
+        enumerateMatches(phonemePattern, in: text, nsText: nsText, range: range) { match in
+            guard let attributes = extractGroup(match, group: 1, from: nsText),
+                let content = extractGroup(match, group: 2, from: nsText),
+                let ph = extractAttribute("ph", from: attributes)
+            else { return nil }
+            let alphabet = extractAttribute("alphabet", from: attributes) ?? "ipa"
+            return .phoneme(alphabet: alphabet, ph: ph, content: content)
+        }.forEach { tags.append($0) }
 
-        // Parse say-as tags
-        tags.append(contentsOf: parseSayAs(text, nsText: nsText))
+        enumerateMatches(subPattern, in: text, nsText: nsText, range: range) { match in
+            guard let attributes = extractGroup(match, group: 1, from: nsText),
+                let content = extractGroup(match, group: 2, from: nsText),
+                let alias = extractAttribute("alias", from: attributes)
+            else { return nil }
+            return .sub(alias: alias, content: content)
+        }.forEach { tags.append($0) }
+
+        enumerateMatches(sayAsPattern, in: text, nsText: nsText, range: range) { match in
+            guard let attributes = extractGroup(match, group: 1, from: nsText),
+                let content = extractGroup(match, group: 2, from: nsText),
+                let interpretAs = extractAttribute("interpret-as", from: attributes)
+            else { return nil }
+            let format = extractAttribute("format", from: attributes)
+            return .sayAs(interpretAs: interpretAs, format: format, content: content)
+        }.forEach { tags.append($0) }
 
         // Sort in reverse order by position for safe replacement
         return tags.sorted { $0.range.lowerBound > $1.range.lowerBound }
@@ -51,70 +84,23 @@ enum SSMLTagParser {
 
     // MARK: - Private Parsing Methods
 
-    private static func parsePhoneme(_ text: String, nsText: NSString) -> [SSMLParsedTag] {
+    /// Enumerate regex matches and convert to SSMLParsedTag using provided closure
+    private static func enumerateMatches(
+        _ pattern: NSRegularExpression,
+        in text: String,
+        nsText: NSString,
+        range: NSRange,
+        createTagType: (NSTextCheckingResult) -> SSMLParsedTag.TagType?
+    ) -> [SSMLParsedTag] {
         var tags: [SSMLParsedTag] = []
-        let range = NSRange(location: 0, length: nsText.length)
 
-        phonemePattern.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            guard let match = match else { return }
-
-            let alphabet = extractGroup(match, group: 1, from: nsText) ?? "ipa"
-            guard let ph = extractGroup(match, group: 2, from: nsText),
-                let content = extractGroup(match, group: 3, from: nsText),
-                let swiftRange = Range(match.range, in: text)
+        pattern.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+            guard let match = match,
+                let swiftRange = Range(match.range, in: text),
+                let tagType = createTagType(match)
             else { return }
 
-            tags.append(
-                SSMLParsedTag(
-                    type: .phoneme(alphabet: alphabet, ph: ph, content: content),
-                    range: swiftRange
-                ))
-        }
-
-        return tags
-    }
-
-    private static func parseSub(_ text: String, nsText: NSString) -> [SSMLParsedTag] {
-        var tags: [SSMLParsedTag] = []
-        let range = NSRange(location: 0, length: nsText.length)
-
-        subPattern.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            guard let match = match else { return }
-
-            guard let alias = extractGroup(match, group: 1, from: nsText),
-                let content = extractGroup(match, group: 2, from: nsText),
-                let swiftRange = Range(match.range, in: text)
-            else { return }
-
-            tags.append(
-                SSMLParsedTag(
-                    type: .sub(alias: alias, content: content),
-                    range: swiftRange
-                ))
-        }
-
-        return tags
-    }
-
-    private static func parseSayAs(_ text: String, nsText: NSString) -> [SSMLParsedTag] {
-        var tags: [SSMLParsedTag] = []
-        let range = NSRange(location: 0, length: nsText.length)
-
-        sayAsPattern.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            guard let match = match else { return }
-
-            guard let interpretAs = extractGroup(match, group: 1, from: nsText),
-                let content = extractGroup(match, group: 3, from: nsText),
-                let swiftRange = Range(match.range, in: text)
-            else { return }
-
-            let format = extractGroup(match, group: 2, from: nsText)
-
-            tags.append(
-                SSMLParsedTag(
-                    type: .sayAs(interpretAs: interpretAs, format: format, content: content),
-                    range: swiftRange
-                ))
+            tags.append(SSMLParsedTag(type: tagType, range: swiftRange))
         }
 
         return tags

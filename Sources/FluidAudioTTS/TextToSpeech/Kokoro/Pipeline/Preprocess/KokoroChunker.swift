@@ -809,12 +809,7 @@ enum KokoroChunker {
             return nil
         }
         guard let value = Int(token) else { return nil }
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.numberStyle = .spellOut
-        formatter.maximumFractionDigits = 0
-        formatter.roundingMode = .down
-        guard let spelled = formatter.string(from: NSNumber(value: value)) else { return nil }
+        guard let spelled = FluidAudioTTS.spellOutFormatter.string(from: NSNumber(value: value)) else { return nil }
         let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-"))
         let components =
             spelled
