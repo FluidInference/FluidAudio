@@ -596,6 +596,7 @@ extension SortformerModels {
         // Check which naming convention to use by seeing if NVIDIA names work
         // NVIDIA model has pre_encoder_embs input, low-latency has concat_embs
         let headInputNames = headModel.modelDescription.inputDescriptionsByName.keys
+
         if headInputNames.contains("pre_encoder_embs") {
             // NVIDIA naming
             headInput = try MLDictionaryFeatureProvider(dictionary: [

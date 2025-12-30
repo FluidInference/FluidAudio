@@ -49,27 +49,8 @@ enum SortformerCommand {
             i += 1
         }
 
-        // Default model paths (relative to working directory)
-        let defaultPreprocessor = "Streaming-Sortformer-Conversion/coreml_models/SortformerPreprocessor.mlpackage"
-        let defaultModel = "Streaming-Sortformer-Conversion/coreml_models/Sortformer.mlpackage"
-
-        let preprocessorURL = URL(fileURLWithPath: preprocessorPath ?? defaultPreprocessor)
-        let modelURL = URL(fileURLWithPath: modelPath ?? defaultModel)
-
         print("Sortformer Streaming Diarization")
         print("   Audio: \(audioFile)")
-        print("   Preprocessor: \(preprocessorURL.path)")
-        print("   Model: \(modelURL.path)")
-
-        // Check models exist
-        guard FileManager.default.fileExists(atPath: preprocessorURL.path) else {
-            print("ERROR: Preprocessor model not found: \(preprocessorURL.path)")
-            exit(1)
-        }
-        guard FileManager.default.fileExists(atPath: modelURL.path) else {
-            print("ERROR: Main model not found: \(modelURL.path)")
-            exit(1)
-        }
 
         // Initialize Sortformer with Gradient Descent's config
         var config = SortformerConfig.gradientDescent
@@ -77,12 +58,10 @@ enum SortformerCommand {
         let diarizer = SortformerDiarizer(config: config)
 
         do {
-            print("Loading models...")
+            print("Loading models from HuggingFace...")
             let loadStart = Date()
-            try await diarizer.initialize(
-                preprocessorPath: preprocessorURL,
-                mainModelPath: modelURL
-            )
+            let models = try await SortformerModels.loadFromHuggingFace()
+            diarizer.initialize(models: models)
             let loadTime = Date().timeIntervalSince(loadStart)
             print("Models loaded in \(String(format: "%.2f", loadTime))s")
         } catch {
