@@ -41,6 +41,11 @@ enum TtsTextPreprocessor {
     static func preprocessDetailed(_ text: String) -> TtsPreprocessingResult {
         var processed = text
 
+        // 0. Process SSML tags first (before all other preprocessing)
+        let ssmlResult = SSMLProcessor.process(processed)
+        processed = ssmlResult.text
+        let ssmlOverrides = ssmlResult.phoneticOverrides
+
         // 1. Remove commas from numbers (1,000 → 1000)
         processed = removeCommasFromNumbers(processed)
 
@@ -69,7 +74,49 @@ enum TtsTextPreprocessor {
         let phoneticResult = processPhoneticReplacement(processed)
         processed = phoneticResult.text
 
-        return TtsPreprocessingResult(text: processed, phoneticOverrides: phoneticResult.overrides)
+        // Merge SSML overrides with markdown-style overrides
+        // SSML overrides come first (processed first), then markdown-style
+        let mergedOverrides = mergePhoneticOverrides(
+            ssmlOverrides: ssmlOverrides,
+            markdownOverrides: phoneticResult.overrides
+        )
+
+        return TtsPreprocessingResult(text: processed, phoneticOverrides: mergedOverrides)
+    }
+
+    /// Merge phonetic overrides from SSML and markdown sources
+    /// Both are already sorted by word index; merge them maintaining sort order
+    private static func mergePhoneticOverrides(
+        ssmlOverrides: [TtsPhoneticOverride],
+        markdownOverrides: [TtsPhoneticOverride]
+    ) -> [TtsPhoneticOverride] {
+        // If either is empty, return the other
+        if ssmlOverrides.isEmpty { return markdownOverrides }
+        if markdownOverrides.isEmpty { return ssmlOverrides }
+
+        // Merge maintaining sort order by word index
+        var merged: [TtsPhoneticOverride] = []
+        var ssmlIndex = 0
+        var markdownIndex = 0
+
+        while ssmlIndex < ssmlOverrides.count && markdownIndex < markdownOverrides.count {
+            let ssml = ssmlOverrides[ssmlIndex]
+            let markdown = markdownOverrides[markdownIndex]
+
+            if ssml.wordIndex <= markdown.wordIndex {
+                merged.append(ssml)
+                ssmlIndex += 1
+            } else {
+                merged.append(markdown)
+                markdownIndex += 1
+            }
+        }
+
+        // Append remaining
+        merged.append(contentsOf: ssmlOverrides[ssmlIndex...])
+        merged.append(contentsOf: markdownOverrides[markdownIndex...])
+
+        return merged
     }
 
     // MARK: - Number Processing
