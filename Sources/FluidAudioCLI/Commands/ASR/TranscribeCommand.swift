@@ -211,7 +211,6 @@ enum TranscribeCommand {
         var wordTimestamps = false
         var outputJsonPath: String?
         var modelVersion: AsrModelVersion = .v3  // Default to v3
-        var frameAlignShortAudio = false
 
         // Parse options
         var i = 1
@@ -231,8 +230,6 @@ enum TranscribeCommand {
                     outputJsonPath = arguments[i + 1]
                     i += 1
                 }
-            case "--frame-align":
-                frameAlignShortAudio = true
             case "--model-version":
                 if i + 1 < arguments.count {
                     switch arguments[i + 1].lowercased() {
@@ -258,27 +255,24 @@ enum TranscribeCommand {
             )
             await testStreamingTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                outputJsonPath: outputJsonPath, modelVersion: modelVersion,
-                frameAlignShortAudio: frameAlignShortAudio)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                outputJsonPath: outputJsonPath, modelVersion: modelVersion,
-                frameAlignShortAudio: frameAlignShortAudio)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
-        modelVersion: AsrModelVersion, frameAlignShortAudio: Bool
+        modelVersion: AsrModelVersion
     ) async {
         do {
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-            let asrConfig = ASRConfig(frameAlignShortAudio: frameAlignShortAudio)
-            let asrManager = AsrManager(config: asrConfig)
+            let asrManager = AsrManager()
             try await asrManager.initialize(models: models)
 
             logger.info("ASR Manager initialized successfully")
@@ -403,7 +397,7 @@ enum TranscribeCommand {
     /// Test streaming transcription
     private static func testStreamingTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
-        modelVersion: AsrModelVersion, frameAlignShortAudio: Bool
+        modelVersion: AsrModelVersion
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig(
@@ -412,8 +406,7 @@ enum TranscribeCommand {
             leftContextSeconds: StreamingAsrConfig.streaming.leftContextSeconds,
             rightContextSeconds: StreamingAsrConfig.streaming.rightContextSeconds,
             minContextForConfirmation: StreamingAsrConfig.streaming.minContextForConfirmation,
-            confirmationThreshold: StreamingAsrConfig.streaming.confirmationThreshold,
-            frameAlignShortAudio: frameAlignShortAudio
+            confirmationThreshold: StreamingAsrConfig.streaming.confirmationThreshold
         )
 
         // Create StreamingAsrManager
@@ -658,7 +651,6 @@ enum TranscribeCommand {
                 --metadata         Show confidence, start time, and end time in results
                 --word-timestamps  Show word-level timestamps for each word in the transcription
                 --output-json <file>  Save full transcription result to JSON (includes word timings)
-                --frame-align      Enable short-audio frame-aligned padding
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
 
             Examples:

@@ -15,17 +15,14 @@ extension AsrManager {
         // Route to appropriate processing method based on audio length
         if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
+            let frameAlignedCandidate =
+                ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                    / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
             let frameAlignedLength: Int
             let alignedSamples: [Float]
-            if config.frameAlignShortAudio {
-                frameAlignedLength =
-                    ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
-                        / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
-                if frameAlignedLength > originalLength {
-                    alignedSamples = audioSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
-                } else {
-                    alignedSamples = audioSamples
-                }
+            if frameAlignedCandidate > originalLength && frameAlignedCandidate <= 240_000 {
+                frameAlignedLength = frameAlignedCandidate
+                alignedSamples = audioSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
             } else {
                 frameAlignedLength = originalLength
                 alignedSamples = audioSamples
@@ -172,19 +169,17 @@ extension AsrManager {
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
 
         let originalLength = chunkSamples.count
-        var frameAlignedLength: Int
+        let frameAlignedCandidate =
+            ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+        let frameAlignedLength: Int
         let alignedSamples: [Float]
-        let shouldAlign = config.frameAlignShortAudio && previousTokens.isEmpty
-        if shouldAlign {
-            frameAlignedLength =
-                ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
-                    / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
-            if frameAlignedLength > originalLength && frameAlignedLength <= 240_000 {
-                alignedSamples = chunkSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
-            } else {
-                frameAlignedLength = originalLength
-                alignedSamples = chunkSamples
-            }
+        if previousTokens.isEmpty
+            && frameAlignedCandidate > originalLength
+            && frameAlignedCandidate <= 240_000
+        {
+            frameAlignedLength = frameAlignedCandidate
+            alignedSamples = chunkSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
         } else {
             frameAlignedLength = originalLength
             alignedSamples = chunkSamples

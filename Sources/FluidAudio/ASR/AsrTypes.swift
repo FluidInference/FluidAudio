@@ -5,18 +5,15 @@ import Foundation
 public struct ASRConfig: Sendable {
     public let sampleRate: Int
     public let tdtConfig: TdtConfig
-    public let frameAlignShortAudio: Bool
 
     public static let `default` = ASRConfig()
 
     public init(
         sampleRate: Int = 16000,
-        tdtConfig: TdtConfig = .default,
-        frameAlignShortAudio: Bool = false
+        tdtConfig: TdtConfig = .default
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
-        self.frameAlignShortAudio = frameAlignShortAudio
     }
 }
 
