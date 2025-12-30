@@ -181,8 +181,6 @@ public final class SortformerDiarizer: @unchecked Sendable {
         var newFrameCount = 0
         var newTentativeFrameCount = 0
 
-        let audioCountBefore = audioBuffer.count
-
         // Step 1: Run preprocessor on available audio
         while audioBuffer.count >= config.preprocessorAudioSamples {
             let audioChunk = Array(audioBuffer.prefix(config.preprocessorAudioSamples))
@@ -545,11 +543,13 @@ public final class SortformerDiarizer: @unchecked Sendable {
         while true {
             // Python's streaming_feat_loader logic
             let sttFeat = diarizerChunkIndex * coreFrames
-            let endFeat = min(sttFeat + coreFrames, totalFeatureFrames)
 
-            if endFeat > totalFeatureFrames {
+            // Exit when we've processed all frames
+            if sttFeat >= totalFeatureFrames {
                 break
             }
+
+            let endFeat = min(sttFeat + coreFrames, totalFeatureFrames)
 
             let leftOffset = min(leftContextFrames, sttFeat)
             let rightOffset = min(rightContextFrames, totalFeatureFrames - endFeat)
@@ -565,6 +565,10 @@ public final class SortformerDiarizer: @unchecked Sendable {
             // Extract features and pad if needed
             let featStart = chunkStart * config.melFeatures
             let featEnd = chunkEnd * config.melFeatures
+
+            guard featStart >= 0 && featEnd <= featureBuffer.count && featStart < featEnd else {
+                break
+            }
             var chunkFeatures = Array(featureBuffer[featStart..<featEnd])
 
             // Pad to chunkFrames if needed
@@ -596,9 +600,6 @@ public final class SortformerDiarizer: @unchecked Sendable {
             }
 
             // Run main model
-            // Pass the actual valid chunk length (like Python's feat_lengths), not the padded size.
-            // Python computes: feat_lengths = clamp(feat_seq_length - stt_feat + left_offset, 0, chunk_shape)
-            // For chunk 0: feat_lengths = clamp(104935 - 0 + 0, 0, 104) = 104
             let output = try models.runMainModel(
                 chunk: transposedChunk,
                 chunkLength: actualChunkFrames,
@@ -620,15 +621,18 @@ public final class SortformerDiarizer: @unchecked Sendable {
                     "[DEBUG] Model output: predictions=\(probabilities.count), embLength=\(embLength), actualChunkFrames=\(actualChunkFrames)"
                 )
                 // Check predictions at different offsets
-                // Model input: padded_spkcache(188) + padded_fifo(188) + chunk(14) = 390 frames
-                for testOffset in [0, 14, 188, 376] {
-                    print("[DEBUG] Testing offset \(testOffset):")
-                    for frame in 0..<min(3, (probabilities.count / 4) - testOffset) {
-                        let idx = (testOffset + frame) * 4
-                        if idx + 3 < probabilities.count {
-                            let vals = (0..<4).map { String(format: "%.4f", probabilities[idx + $0]) }.joined(
-                                separator: ", ")
-                            print("[DEBUG]   Frame \(frame): [\(vals)]")
+                // Model input: padded_spkcache(188) + padded_fifo(40) + chunk(14) = 242 frames
+                for testOffset in [0, 14, 188] {
+                    let maxFrames = probabilities.count / 4 - testOffset
+                    if maxFrames > 0 {
+                        print("[DEBUG] Testing offset \(testOffset):")
+                        for frame in 0..<min(3, maxFrames) {
+                            let idx = (testOffset + frame) * 4
+                            if idx + 3 < probabilities.count {
+                                let vals = (0..<4).map { String(format: "%.4f", probabilities[idx + $0]) }.joined(
+                                    separator: ", ")
+                                print("[DEBUG]   Frame \(frame): [\(vals)]")
+                            }
                         }
                     }
                 }

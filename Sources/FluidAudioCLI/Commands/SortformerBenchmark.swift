@@ -199,7 +199,9 @@ enum SortformerBenchmark {
             ? "NVIDIA 1.04s" : (useLowLatency ? "Low-latency" : (useGradientDescent ? "Gradient Descent" : "Default"))
         print("   Config: \(configName)")
         print("   State Update: \(useSimpleState ? "Simple (Python test)" : "Full NeMo")")
-        let modeDesc = useHuggingFace ? "HuggingFace models" : (useSeparateModels ? "Separate PreEncoder+Head" : "Combined Pipeline")
+        let modeDesc =
+            useHuggingFace
+            ? "HuggingFace models" : (useSeparateModels ? "Separate PreEncoder+Head" : "Combined Pipeline")
         print("   Mode: \(modeDesc)")
         print("   Preprocessing: \(useNativePreprocessing ? "Native Swift mel spectrogram" : "CoreML chunked")")
 
