@@ -272,7 +272,7 @@ enum TranscribeCommand {
         do {
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
-            let asrManager = AsrManager()
+            let asrManager = AsrManager(config: .default)
             try await asrManager.initialize(models: models)
 
             logger.info("ASR Manager initialized successfully")
@@ -400,14 +400,7 @@ enum TranscribeCommand {
         modelVersion: AsrModelVersion
     ) async {
         // Use optimized streaming configuration
-        let config = StreamingAsrConfig(
-            chunkSeconds: StreamingAsrConfig.streaming.chunkSeconds,
-            hypothesisChunkSeconds: StreamingAsrConfig.streaming.hypothesisChunkSeconds,
-            leftContextSeconds: StreamingAsrConfig.streaming.leftContextSeconds,
-            rightContextSeconds: StreamingAsrConfig.streaming.rightContextSeconds,
-            minContextForConfirmation: StreamingAsrConfig.streaming.minContextForConfirmation,
-            confirmationThreshold: StreamingAsrConfig.streaming.confirmationThreshold
-        )
+        let config = StreamingAsrConfig.streaming
 
         // Create StreamingAsrManager
         let streamingAsr = StreamingAsrManager(config: config)
@@ -645,7 +638,7 @@ enum TranscribeCommand {
             Transcribe Command Usage:
                 fluidaudio transcribe <audio_file> [options]
 
-                Options:
+            Options:
                 --help, -h         Show this help message
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
