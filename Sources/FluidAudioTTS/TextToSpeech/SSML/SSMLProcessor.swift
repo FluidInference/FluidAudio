@@ -73,13 +73,11 @@ public enum SSMLProcessor {
         var inWord = false
 
         for char in prefix {
-            let isWordChar =
-                char.isLetter || char.isNumber
-                || FluidAudioTTS.phoneticApostropheCharacters.contains(char)
-                || FluidAudioTTS.isEmoji(char)
-            if isWordChar && !inWord {
-                inWord = true
-            } else if !isWordChar && inWord {
+            if FluidAudioTTS.isWordCharacter(char) {
+                if !inWord {
+                    inWord = true
+                }
+            } else if inWord {
                 wordCount += 1
                 inWord = false
             }

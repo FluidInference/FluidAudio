@@ -618,15 +618,7 @@ enum TtsTextPreprocessor {
         }
 
         private static func isWordLike(_ character: Character, apostrophes: Set<Character>) -> Bool {
-            if character.isLetter || character.isNumber || apostrophes.contains(character) {
-                return true
-            }
-
-            if FluidAudioTTS.isEmoji(character) {
-                return true
-            }
-
-            return false
+            FluidAudioTTS.isWordCharacter(character, apostrophes: apostrophes)
         }
 
         private static func isCombiningMark(_ character: Character) -> Bool {

@@ -37,6 +37,15 @@ func isEmoji(_ character: Character) -> Bool {
     }
 }
 
+/// Check if a character is considered part of a word for TTS processing
+/// Used for word boundary detection in SSML and text preprocessing
+func isWordCharacter(
+    _ char: Character,
+    apostrophes: Set<Character> = phoneticApostropheCharacters
+) -> Bool {
+    char.isLetter || char.isNumber || apostrophes.contains(char) || isEmoji(char)
+}
+
 /// Shared NumberFormatter for spelling out numbers (expensive to create)
 /// Used by SSML processing, text preprocessing, and chunking
 let spellOutFormatter: NumberFormatter = {
