@@ -233,3 +233,5 @@ let text = """
 ## Reference
 
 Based on [W3C SSML 1.1](https://www.w3.org/TR/speech-synthesis11/) and [Amazon Polly SSML](https://docs.aws.amazon.com/polly/latest/dg/supportedtags.html).
+
+[Interactive IPA Chart](https://www.ipachart.com/#google_vignette)
