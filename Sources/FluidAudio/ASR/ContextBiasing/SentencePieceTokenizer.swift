@@ -13,25 +13,30 @@ public class SentencePieceCtcTokenizer {
         // Get the CTC model directory
         let modelDir = Self.getCtcModelDirectory()
 
-        // Prefer the CTC tokenizer model name, fallback to legacy spm.model
-        let preferredModelPath = modelDir.appendingPathComponent("ctc_tokenizer.model")
-        let legacyModelPath = modelDir.appendingPathComponent("spm.model")
-        let spModelPath: URL
-        if FileManager.default.fileExists(atPath: preferredModelPath.path) {
-            spModelPath = preferredModelPath
-        } else {
-            spModelPath = legacyModelPath
+        // Check for SentencePiece model files in order of preference
+        let modelCandidates = [
+            "tokenizer.model",  // Standard HuggingFace name
+            "ctc_tokenizer.model",
+            "spm.model",
+        ]
+        var spModelPath: URL?
+        for candidate in modelCandidates {
+            let path = modelDir.appendingPathComponent(candidate)
+            if FileManager.default.fileExists(atPath: path.path) {
+                spModelPath = path
+                break
+            }
         }
 
         // Check if SentencePiece model exists
-        if FileManager.default.fileExists(atPath: spModelPath.path) {
-            self.modelPath = spModelPath
-            self.processor = spModelPath.path.withCString { path -> SentencePieceProcessor? in
+        if let foundPath = spModelPath {
+            self.modelPath = foundPath
+            self.processor = foundPath.path.withCString { path -> SentencePieceProcessor? in
                 sentencepiece_create(path)
             }
 
             if processor != nil {
-                logger.info("Loaded SentencePiece model from \(spModelPath.path)")
+                logger.info("Loaded SentencePiece model from \(foundPath.path)")
             } else {
                 logger.warning("Failed to load SentencePiece model, falling back to simple tokenizer")
             }
@@ -98,7 +103,6 @@ public class SentencePieceCtcTokenizer {
             applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent("alexwengg", isDirectory: true)
             .appendingPathComponent("parakeet-ctc-110m-coreml", isDirectory: true)
     }
 }
