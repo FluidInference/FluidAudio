@@ -5,17 +5,16 @@ on:
 
 jobs:
   swift-format:
-    runs-on: macos-latest
+    runs-on: macos-15
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v2
+
+      - uses: swift-actions/setup-swift@v2
         with:
-          swift-version: '6.1'
-          
+          swift-version: "6.1"
+
       - name: Run swift-format lint
         run: |
           swift format lint --recursive --configuration .swift-format Sources/ Tests/ Examples/

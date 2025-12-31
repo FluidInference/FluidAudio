@@ -1,4 +1,5 @@
 import Foundation
+import MachTaskSelfWrapper
 import OSLog
 
 #if canImport(Darwin)
@@ -94,7 +95,7 @@ public enum SystemInfo {
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
                 task_info(
-                    mach_task_self_,
+                    get_current_task_port(),
                     task_flavor_t(TASK_VM_INFO),
                     $0,
                     &count)
@@ -115,7 +116,7 @@ public enum SystemInfo {
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
                 task_info(
-                    mach_task_self_,
+                    get_current_task_port(),
                     task_flavor_t(TASK_VM_INFO),
                     $0,
                     &count)

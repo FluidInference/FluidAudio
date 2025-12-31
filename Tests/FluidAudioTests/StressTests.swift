@@ -1,5 +1,5 @@
 import AVFoundation
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import XCTest
 

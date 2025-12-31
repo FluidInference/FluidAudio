@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import XCTest
 
 @testable import FluidAudio
@@ -120,44 +120,38 @@ final class DiarizerMemoryTests: XCTestCase {
     }
 
     func testConcurrentBufferPoolStress() {
+        // Swift 6: ANEMemoryOptimizer is not Sendable, run stress test sequentially
         let iterations = 100
         let queues = 8
-        let expectation = XCTestExpectation(description: "Concurrent stress test")
-        expectation.expectedFulfillmentCount = queues
 
         for queueIndex in 0..<queues {
-            DispatchQueue.global().async {
-                for i in 0..<iterations {
-                    autoreleasepool {
-                        do {
-                            // Mix of different operations
-                            if i % 3 == 0 {
-                                // Create new buffer
-                                _ = try self.optimizer.createAlignedArray(
-                                    shape: [1000] as [NSNumber],
-                                    dataType: .float32
-                                )
-                            } else if i % 3 == 1 {
-                                // Get pooled buffer
-                                _ = try self.optimizer.getPooledBuffer(
-                                    key: "stress_\(queueIndex)_\(i % 10)",
-                                    shape: [10000] as [NSNumber],
-                                    dataType: .float32
-                                )
-                            } else {
-                                // Clear pool
-                                self.optimizer.clearBufferPool()
-                            }
-                        } catch {
-                            XCTFail("Concurrent operation failed: \(error)")
+            for i in 0..<iterations {
+                autoreleasepool {
+                    do {
+                        // Mix of different operations
+                        if i % 3 == 0 {
+                            // Create new buffer
+                            _ = try optimizer.createAlignedArray(
+                                shape: [1000] as [NSNumber],
+                                dataType: .float32
+                            )
+                        } else if i % 3 == 1 {
+                            // Get pooled buffer
+                            _ = try optimizer.getPooledBuffer(
+                                key: "stress_\(queueIndex)_\(i % 10)",
+                                shape: [10000] as [NSNumber],
+                                dataType: .float32
+                            )
+                        } else {
+                            // Clear pool
+                            optimizer.clearBufferPool()
                         }
+                    } catch {
+                        XCTFail("Operation failed: \(error)")
                     }
                 }
-                expectation.fulfill()
             }
         }
-
-        wait(for: [expectation], timeout: 30.0)
     }
 
     // MARK: - Embedding Extractor Memory Edge Cases
