@@ -63,7 +63,7 @@ public class DownloadUtils {
     /// Progress handler type for download progress callbacks (unused but kept for API compatibility)
     public typealias ProgressHandler = (Double) -> Void
 
-    public struct DownloadConfig {
+    public struct DownloadConfig: Sendable {
         public let timeout: TimeInterval
 
         public init(timeout: TimeInterval = 1800) {  // 30 minutes for large models
@@ -305,6 +305,10 @@ public class DownloadUtils {
                 )
             }
 
+            // Remove existing file if present (handles parallel download race conditions)
+            if FileManager.default.fileExists(atPath: destPath.path) {
+                try? FileManager.default.removeItem(at: destPath)
+            }
             try FileManager.default.moveItem(at: tempFileURL, to: destPath)
 
             if (index + 1) % 10 == 0 || index == filesToDownload.count - 1 {

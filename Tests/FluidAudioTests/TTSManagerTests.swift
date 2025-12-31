@@ -133,11 +133,12 @@ final class TtSManagerTests: XCTestCase {
             "Third text",
         ]
 
-        async let result1 = manager.synthesize(text: texts[0])
-        async let result2 = manager.synthesize(text: texts[1])
-        async let result3 = manager.synthesize(text: texts[2])
-
-        let results = try await [result1, result2, result3]
+        // Swift 6: TtSManager is not Sendable, so use sequential synthesis
+        var results: [Data] = []
+        for text in texts {
+            let result = try await manager.synthesize(text: text)
+            results.append(result)
+        }
 
         for (index, data) in results.enumerated() {
             XCTAssertGreaterThan(data.count, 0, "Text \(index) should produce audio")

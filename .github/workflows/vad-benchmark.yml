@@ -12,7 +12,7 @@ concurrency:
 jobs:
   vad-benchmark:
     name: VAD Benchmark
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 30
     permissions:
       contents: read
@@ -20,6 +20,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
       - uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.1"

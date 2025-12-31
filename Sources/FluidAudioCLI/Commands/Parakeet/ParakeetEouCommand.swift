@@ -111,7 +111,7 @@ struct ParakeetEouCommand {
                 .standardized
         }
 
-        print("Using chunk size: \(chunkSize.durationMs)ms")
+        logger.info("Using chunk size: \(chunkSize.durationMs)ms")
 
         // 1. Download Models if requested or missing
         if download || useCache || !FileManager.default.fileExists(atPath: modelsUrl.path) {
@@ -134,17 +134,18 @@ struct ParakeetEouCommand {
         default:
             config.computeUnits = .all
         }
-        print("Using compute units: \(config.computeUnits.rawValue)")
-        print("EOU debounce: \(eouDebounceMs)ms")
+        logger.info("Using compute units: \(config.computeUnits.rawValue)")
+        logger.info("EOU debounce: \(eouDebounceMs)ms")
 
+        logger.info("Initializing StreamingEouAsrManager...")
         let manager = StreamingEouAsrManager(
             configuration: config, chunkSize: chunkSize, eouDebounceMs: eouDebounceMs, debugFeatures: debugFeatures)
         do {
-            print("Loading models from: \(modelsUrl.path)")
+            logger.info("Loading models from: \(modelsUrl.path)")
             try await manager.loadModels(modelDir: modelsUrl)
-            print("Models loaded successfully.")
+            logger.info("Models loaded successfully.")
         } catch {
-            print("ERROR: Failed to load models: \(error)")
+            logger.error("Failed to load models: \(error)")
             exit(1)
         }
 
@@ -196,6 +197,7 @@ struct ParakeetEouCommand {
         }
 
         print("Fetching \(chunkSize.modelSubdirectory) models from \(repo.remotePath)...")
+        fflush(stdout)
 
         // Use DownloadUtils to download - handles auth, rate limiting, retries
         // Downloads to: directory/repo.folderName (e.g., .../parakeet-eou-streaming/160ms)

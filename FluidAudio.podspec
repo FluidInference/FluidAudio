@@ -18,8 +18,7 @@ Pod::Spec.new do |spec|
 
   spec.source       = { :git => "https://github.com/FluidInference/FluidAudio.git", :tag => "v#{spec.version}" }
   # CocoaPods sets SWIFT_VERSION based on this list; use values Xcode recognizes.
-  # Our code remains compatible with Swift 5 toolchains (uses conditional compilation for 6.x APIs).
-  spec.swift_versions = ["5.10"]
+  spec.swift_versions = ["6.0"]
 
   spec.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
@@ -49,8 +48,15 @@ Pod::Spec.new do |spec|
     }
   end
 
+  spec.subspec "MachTaskSelfWrapper" do |mach|
+    mach.source_files = "Sources/MachTaskSelfWrapper/**/*.{c,h}"
+    mach.public_header_files = "Sources/MachTaskSelfWrapper/include/MachTaskSelf.h"
+    mach.header_mappings_dir = "Sources/MachTaskSelfWrapper"
+  end
+
   spec.subspec "Core" do |core|
     core.dependency "#{spec.name}/FastClusterWrapper"
+    core.dependency "#{spec.name}/MachTaskSelfWrapper"
     core.source_files = "Sources/FluidAudio/**/*.swift"
 
     # iOS Configuration

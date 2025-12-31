@@ -11,7 +11,7 @@ concurrency:
 jobs:
   benchmark:
     name: Single File Performance Benchmark
-    runs-on: macos-latest
+    runs-on: macos-15
     permissions:
       contents: read
       pull-requests: write
@@ -20,8 +20,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup Swift 6.1
-        uses: swift-actions/setup-swift@v2
+      - uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.1"
 
@@ -46,7 +45,7 @@ jobs:
           key: ${{ runner.os }}-ami-dataset-${{ hashFiles('Sources/FluidAudioCLI/DatasetParsers/DatasetDownloader.swift') }}
 
       - name: Build package
-        run: swift build
+        run: swift build -c release
 
       - name: Run Single File Benchmark
         id: benchmark
@@ -73,7 +72,7 @@ jobs:
           EXECUTION_SECS=$((EXECUTION_TIME % 60))
 
           echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
-        timeout-minutes: 25
+        timeout-minutes: 35
 
       - name: Show benchmark_results.json
         if: always()
