@@ -1,6 +1,7 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import OSLog
+import os
 
 public struct StreamingAudioSourceFactory {
     private let logger = AppLogger(category: "StreamingAudioSourceFactory")
@@ -121,11 +122,11 @@ public struct StreamingAudioSourceFactory {
         }
 
         var totalSamples = 0
-        var inputComplete = false
-        var readError: Error?
+        let inputComplete = OSAllocatedUnfairLock(initialState: false)
+        let readError = OSAllocatedUnfairLock<Error?>(initialState: nil)
 
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if inputComplete {
+            if inputComplete.withLock({ $0 }) {
                 status.pointee = .endOfStream
                 return nil
             }
@@ -139,12 +140,12 @@ public struct StreamingAudioSourceFactory {
                     inputBuffer.frameLength = 0
                 }
             } catch {
-                readError = error
+                readError.withLock { $0 = error }
                 inputBuffer.frameLength = 0
             }
 
             guard inputBuffer.frameLength > 0 else {
-                inputComplete = true
+                inputComplete.withLock { $0 = true }
                 status.pointee = .endOfStream
                 return nil
             }
@@ -168,9 +169,9 @@ public struct StreamingAudioSourceFactory {
                 )
             }
 
-            if let readError {
+            if let error = readError.withLock({ $0 }) {
                 throw StreamingAudioError.processingFailed(
-                    "Failed while reading audio: \(readError.localizedDescription)"
+                    "Failed while reading audio: \(error.localizedDescription)"
                 )
             }
 
