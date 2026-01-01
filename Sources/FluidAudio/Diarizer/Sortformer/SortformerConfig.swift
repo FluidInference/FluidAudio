@@ -103,9 +103,21 @@ public struct SortformerConfig: Sendable {
     public var preprocessorAudioSamples: Int {
         ((chunkMelFrames - 1) * melStride + melWindow)
     }
+    
+    /// Audio samples needed for one preprocessor chunk
+    /// NeMo adds 16 samples padding on each side, so naive formula doesn't work exactly.
+    /// Use preprocessorAudioSamplesOverride for accurate values determined empirically.
+    public var chunkAudioSamples: Int {
+        ((chunkLen * subsamplingFactor - 1) * melStride + melWindow)
+    }
 
     /// Audio hop between preprocessor chunks
     public var audioHopSamples: Int {
+        chunkMelFrames * melStride
+    }
+    
+    /// Audio hop between preprocessor chunks
+    public var chunkHopSamples: Int {
         chunkLen * subsamplingFactor * melStride
     }
 
