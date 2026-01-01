@@ -5,6 +5,9 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
+    case parakeetCtc110m = "alexwengg/parakeet-ctc-110m-coreml"
+    case parakeetHybrid110m = "alexwengg/parakeet-tdt-ctc-110m-hybrid"
+    case canaryCtc = "argmaxinc/ctckit-pro"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
@@ -19,6 +22,12 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-0.6b-v3-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
+        case .parakeetCtc110m:
+            return "parakeet-ctc-110m-coreml"
+        case .parakeetHybrid110m:
+            return "parakeet-tdt-ctc-110m-hybrid"
+        case .canaryCtc:
+            return "canary-1b-v2_474MB"
         case .parakeetEou160:
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
@@ -33,6 +42,10 @@ public enum Repo: String, CaseIterable {
     /// Fully qualified HuggingFace repo path (owner/name)
     public var remotePath: String {
         switch self {
+        case .parakeetCtc110m, .parakeetHybrid110m:
+            return "alexwengg/parakeet-ctc-110m-coreml"
+        case .canaryCtc:
+            return "argmaxinc/ctckit-pro"
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         default:
@@ -43,6 +56,8 @@ public enum Repo: String, CaseIterable {
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {
+        case .canaryCtc:
+            return "canary-1b-v2_474MB"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -137,6 +152,50 @@ public enum ModelNames {
         }
     }
 
+    /// CTC model names
+    public enum CTC {
+        public static let melSpectrogram = "MelSpectrogram"
+        public static let audioEncoder = "AudioEncoder"
+
+        public static let melSpectrogramPath = melSpectrogram + ".mlmodelc"
+        public static let audioEncoderPath = audioEncoder + ".mlmodelc"
+
+        // Vocabulary JSON path (shared by Python/Nemo and CoreML exports).
+        public static let vocabularyPath = "vocab.json"
+
+        public static let requiredModels: Set<String> = [
+            melSpectrogramPath,
+            audioEncoderPath,
+        ]
+    }
+
+    /// Hybrid 110M model names (CTC + TDT)
+    public enum Hybrid110M {
+        public static let preprocessor = "Preprocessor"
+        public static let encoder = "Encoder"
+        public static let ctcHead = "CTCHead"
+        public static let decoder = "Decoder"
+        public static let joint = "JointDecision"
+        public static let vocabulary = "vocab.json"
+        public static let metadata = "metadata.json"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let ctcHeadFile = ctcHead + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            ctcHeadFile,
+            decoderFile,
+            jointFile,
+            vocabulary,
+            metadata,
+        ]
+    }
+
     /// VAD model names
     public enum VAD {
         public static let sileroVad = "silero-vad-unified-256ms-v6.0.0"
@@ -226,6 +285,10 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
+        case .parakeetCtc110m, .canaryCtc:
+            return ModelNames.CTC.requiredModels
+        case .parakeetHybrid110m:
+            return ModelNames.Hybrid110M.requiredModels
         case .parakeetEou160, .parakeetEou320:
             return ModelNames.ParakeetEOU.requiredModels
         case .diarizer:

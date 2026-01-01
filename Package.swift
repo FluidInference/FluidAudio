@@ -32,8 +32,6 @@ let package = Package(
             path: "Sources/FluidAudio",
             exclude: [
                 "Frameworks",
-                "ASR/ContextBiasing",
-                "ASR/CtcModels.swift",
             ]
         ),
         .target(
