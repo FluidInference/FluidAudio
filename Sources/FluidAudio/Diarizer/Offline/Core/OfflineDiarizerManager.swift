@@ -448,6 +448,15 @@ public final class OfflineDiarizerManager {
             return ([], [:])
         }
 
+        // When K-Means was applied due to speaker count constraints,
+        // use the K-Means centroids directly instead of computing from gamma/pi
+        if vbxOutput.wasAdjusted, !vbxOutput.centroids.isEmpty {
+            let mapping = Dictionary(
+                uniqueKeysWithValues: (0..<vbxOutput.centroids.count).map { ($0, $0) }
+            )
+            return (vbxOutput.centroids, mapping)
+        }
+
         let epsilon = 1e-7
         let gamma = vbxOutput.gamma
         let pi = vbxOutput.pi
