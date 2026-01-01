@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Accelerate
 import CoreMedia
 import Foundation
@@ -150,12 +150,18 @@ final public class AudioConverter {
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
         // Provide input once, then signal end-of-stream
-        var provided = false
+        // Use a class wrapper to satisfy @Sendable requirement (closure runs synchronously)
+        final class InputState: @unchecked Sendable {
+            var provided = false
+            let buffer: AVAudioPCMBuffer
+            init(buffer: AVAudioPCMBuffer) { self.buffer = buffer }
+        }
+        let state = InputState(buffer: buffer)
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
-                provided = true
+            if !state.provided {
+                state.provided = true
                 status.pointee = .haveData
-                return buffer
+                return state.buffer
             } else {
                 status.pointee = .endOfStream
                 return nil

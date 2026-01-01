@@ -8,6 +8,8 @@ enum DownloadCommand {
     static func run(arguments: [String]) async {
         var dataset = "all"
         var forceDownload = false
+        var outputDirectory: String?
+        var maxFiles: Int?
 
         // Parse arguments
         var i = 0
@@ -18,8 +20,18 @@ enum DownloadCommand {
                     dataset = arguments[i + 1]
                     i += 1
                 }
+            case "--output-dir":
+                if i + 1 < arguments.count {
+                    outputDirectory = arguments[i + 1]
+                    i += 1
+                }
             case "--force":
                 forceDownload = true
+            case "--max-files":
+                if i + 1 < arguments.count {
+                    maxFiles = Int(arguments[i + 1])
+                    i += 1
+                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
@@ -38,7 +50,9 @@ enum DownloadCommand {
         case "ami-annotations":
             await DatasetDownloader.downloadAMIAnnotations(force: forceDownload)
         case "vad":
-            await DatasetDownloader.downloadVadDataset(force: forceDownload, dataset: "mini100")  // Default to mini100 for more test data
+            // Default to mini100 for more test data
+            await DatasetDownloader.downloadVadDataset(
+                force: forceDownload, dataset: "mini100")
         case "vad-mini50":
             await DatasetDownloader.downloadVadDataset(force: forceDownload, dataset: "mini50")
         case "vad-mini100":
@@ -65,6 +79,8 @@ enum DownloadCommand {
                 logger.error("Failed to download LibriSpeech test-other: \(error)")
                 exit(1)
             }
+        case "earnings22-kws":
+            await DatasetDownloader.downloadEarnings22KWS(force: forceDownload)
         case "all":
             await DatasetDownloader.downloadAMIDataset(variant: .sdm, force: forceDownload)
             await DatasetDownloader.downloadAMIDataset(variant: .ihm, force: forceDownload)
@@ -86,19 +102,22 @@ enum DownloadCommand {
             Options:
                 --dataset <name>    Dataset to download (default: all)
                 --force            Force re-download even if exists
+                --output-dir <path> Output directory for supported datasets
+                --max-files <n>    Limit downloads (supported datasets)
 
             Available datasets:
-                ami-sdm                 AMI SDM subset
-                ami-ihm                 AMI IHM subset
-                ami-annotations         AMI annotation files
-                vad, vad-mini50,       VAD evaluation datasets
+                ami-sdm                     AMI SDM subset
+                ami-ihm                     AMI IHM subset
+                ami-annotations             AMI annotation files
+                vad, vad-mini50,           VAD evaluation datasets
                 vad-mini100
-                musan-full              Full MUSAN dataset (~109 hours)
-                voices-subset           VOiCES small subset (clean/noisy pairs)
-                librispeech-test-clean  LibriSpeech test-clean subset
-                librispeech-test-other  LibriSpeech test-other subset
-                parakeet-models         Parakeet ASR models
-                all                     All diarization datasets
+                musan-full                  Full MUSAN dataset (~109 hours)
+                voices-subset               VOiCES small subset (clean/noisy pairs)
+                librispeech-test-clean      LibriSpeech test-clean subset
+                librispeech-test-other      LibriSpeech test-other subset
+                earnings22-kws              Earnings22 keyword spotting dataset
+                parakeet-models             Parakeet ASR models
+                all                         All diarization datasets
 
             Examples:
                 fluidaudio download --dataset ami-sdm
