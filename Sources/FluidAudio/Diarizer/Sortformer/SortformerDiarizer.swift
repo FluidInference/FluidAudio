@@ -36,6 +36,10 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
     // Audio buffering
     private var audioBuffer: [Float] = []
+    private var lastAudioSample: Float = 0
+    
+    // Feature buffering
+    private var featureBuffer: [Float] = []
 
     // Chunk tracking
     private var preprocessorChunkIndex: Int = 0
@@ -75,6 +79,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
         self.models = loadedModels
         self.state = modules.initStreamingState()
+        self.lastAudioSample = 0
         
         // Reset buffers
         resetBuffers()
@@ -85,6 +90,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
     public func initialize(models: SortformerModels) {
         self.models = models
         self.state = modules.initStreamingState()
+        self.lastAudioSample = 0
         resetBuffers()
         logger.info("Sortformer initialized with pre-loaded models")
     }
@@ -92,18 +98,22 @@ public final class SortformerDiarizer: @unchecked Sendable {
     /// Reset all internal state for a new audio stream.
     public func reset() {
         state = modules.initStreamingState()
+        lastAudioSample = 0
         resetBuffers()
         logger.debug("Sortformer state reset")
     }
 
     private func resetBuffers() {
         audioBuffer = []
+        featureBuffer = []
+        lastAudioSample = 0
         preprocessorChunkIndex = 0
         diarizerChunkIndex = 0
         allProbabilities = []
         totalFramesProcessed = 0
         
         audioBuffer.reserveCapacity(config.preprocessorAudioSamples + config.audioHopSamples)
+        featureBuffer.reserveCapacity((config.chunkMelFrames + config.chunkLen * config.subsamplingFactor) * config.melFeatures)
     }
 
     /// Cleanup resources.
@@ -119,13 +129,9 @@ public final class SortformerDiarizer: @unchecked Sendable {
     /// Add audio samples to the processing buffer.
     ///
     /// - Parameter samples: Audio samples (16kHz mono)
-    public func addAudio(_ samples: [Float]) {
-        audioBuffer.append(contentsOf: samples)
-    }
-
-    /// Add audio samples from any collection.
     public func addAudio<C: Collection>(_ samples: C) where C.Element == Float {
         audioBuffer.append(contentsOf: samples)
+        preprocessAudioToFeatures()
     }
 
     /// Process buffered audio and return any new results.
@@ -144,7 +150,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
         var newTentativeFrameCount = 0
 
         // Step 1: Run preprocessor on available audio
-        while let (chunkFeatures, chunkLengths) = preprocessStreaming() {
+        while let (chunkFeatures, chunkLengths) = getNextChunkFeatures() {
             let output = try models.runMainModel(
                 chunk: chunkFeatures,
                 chunkLength: chunkLengths,
@@ -179,7 +185,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
                 state: &state,
                 chunk: chunkEmbs,
                 preds: probabilities,
-                leftContext: config.chunkLeftContext,
+                leftContext: diarizerChunkIndex > 0 ? config.chunkLeftContext : 0,
                 rightContext: config.chunkRightContext
             )
 
@@ -396,23 +402,70 @@ public final class SortformerDiarizer: @unchecked Sendable {
     
     // MARK: - Helpers
     
-    private func preprocessStreaming() -> (mel: [Float], melLength: Int)? {
-        let numAudioSamples = config.preprocessorAudioSamples
-        let audioHopSamples = config.audioHopSamples
+    /// Preprocess audio into mel features and append to feature buffer.
+    /// Only processes audio when there's enough to produce new mel frames.
+    private func preprocessAudioToFeatures() {
+        // Minimum audio samples needed to produce at least one mel frame
+        // Formula: window_size + (num_frames - 1) * stride
+        // For 1 frame: just window_size = 400 samples
+        // But mel spectrogram has overlap, so we need to think in terms of hop size
         
-        guard audioBuffer.count >= numAudioSamples else {
+        // For first chunk, we need enough audio for full chunkMelFrames
+        // For subsequent chunks, we only need one chunk's worth of new audio
+        // But we always preprocess using the same sliding window approach
+        
+        // Process audio when we have enough for the preprocessor
+        let numAudioSamples: Int
+        let audioHopSamples: Int
+        
+        if preprocessorChunkIndex > 0 {
+            numAudioSamples = config.chunkAudioSamples
+            audioHopSamples = config.chunkHopSamples
+        } else {
+            // First chunk: compute full 112 frames, hop audio by full amount.
+            // This positions the next preprocessing at mel frame 112, which when appended
+            // to the 64 remaining frames in featureBuffer creates the next full chunk.
+            numAudioSamples = config.preprocessorAudioSamples
+            audioHopSamples = config.audioHopSamples
+        }
+        
+        while audioBuffer.count >= numAudioSamples {
+            let audioSamples = Array(audioBuffer.prefix(numAudioSamples))
+            let (mel, melLength, _) = melSpectrogram.computeFlatTransposed(
+                audio: audioSamples, 
+                lastAudioSample: lastAudioSample
+            )
+            
+            guard melLength > 0 else {
+                break
+            }
+            
+            featureBuffer.append(contentsOf: mel)
+            
+            lastAudioSample = audioSamples[audioHopSamples - 1]
+            audioBuffer.removeFirst(audioHopSamples)
+            preprocessorChunkIndex += 1
+        }
+    }
+    
+    private func getNextChunkFeatures() -> (mel: [Float], melLength: Int)? {
+        let chunkMelFrames = config.chunkMelFrames
+        let requiredFeats = chunkMelFrames * config.melFeatures
+        
+        // Need enough features for a full chunk (core + left context + right context)
+        guard featureBuffer.count >= requiredFeats else {
             return nil
         }
         
-        let audioSamples = Array(audioBuffer.prefix(numAudioSamples))
-        let (mel, melLength, _) = melSpectrogram.computeFlatTransposed(audio: audioSamples)
+        // Extract features for current chunk
+        let mel = Array(featureBuffer.prefix(requiredFeats))
         
-        guard melLength > 0 else {
-            return nil
-        }
+        // Only remove core frames from buffer, keeping context for next chunk
+        // This allows left/right context to overlap between chunks
+        let coreFrames = config.coreFrames
+        let melHop = coreFrames * config.melFeatures
+        featureBuffer.removeFirst(melHop)
         
-        audioBuffer.removeFirst(audioHopSamples)
-        
-        return (mel, melLength)
+        return (mel, chunkMelFrames)
     }
 }

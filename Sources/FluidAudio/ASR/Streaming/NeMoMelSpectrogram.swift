@@ -42,7 +42,7 @@ public final class NeMoMelSpectrogram {
     private var powerSpec: [Float]
     private var imagSq: [Float]
     private var frame: [Float]
-
+    
     public init() {
         // 1. Create symmetric Hann window (matches PyTorch hann_window(periodic=False))
         self.hannWindow = Self.createHannWindow(length: winLength, periodic: false)
@@ -142,9 +142,11 @@ public final class NeMoMelSpectrogram {
     }
 
     /// Compute mel spectrogram and return as flat array for MLMultiArray compatibility.
-    /// - Parameter audio: Audio samples at 16kHz
+    /// - Parameters:
+    ///   - audio: Audio samples at 16kHz
+    ///   - lastAudioSample: The last audio sample that's not in the audio buffer. Used to initialize the preemphasis state
     /// - Returns: (mel, mel_length, numFrames) where mel is flat [nMels * T]
-    public func computeFlat(audio: [Float]) -> (mel: [Float], melLength: Int, numFrames: Int) {
+    public func computeFlat(audio: [Float], lastAudioSample: Float = 0) -> (mel: [Float], melLength: Int, numFrames: Int) {
         guard !audio.isEmpty else {
             return (mel: [Float](repeating: logZero, count: nMels), melLength: 0, numFrames: 1)
         }
@@ -153,7 +155,7 @@ public final class NeMoMelSpectrogram {
 
         // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
         var preemphAudio = [Float](repeating: 0, count: audioCount)
-        preemphAudio[0] = audio[0]
+        preemphAudio[0] = audio[0] - preemph * lastAudioSample
         if audioCount > 1 {
             // Compute x[n] - preemph * x[n-1] vectorized
             var negPreemph = -preemph
@@ -247,9 +249,11 @@ public final class NeMoMelSpectrogram {
     }
     
     /// Compute mel spectrogram and return as flat array for MLMultiArray compatibility.
-    /// - Parameter audio: Audio samples at 16kHz
+    /// - Parameters:
+    ///   - audio: Audio samples at 16kHz
+    ///   - lastAudioSample: The last audio sample that's not in the audio buffer. Used to initialize the preemphasis state
     /// - Returns: (mel, mel_length, numFrames) where mel is flat [T * nMels]
-    public func computeFlatTransposed(audio: [Float]) -> (mel: [Float], melLength: Int, numFrames: Int) {
+    public func computeFlatTransposed(audio: [Float], lastAudioSample: Float = 0) -> (mel: [Float], melLength: Int, numFrames: Int) {
         guard !audio.isEmpty else {
             return (mel: [Float](repeating: logZero, count: nMels), melLength: 0, numFrames: 1)
         }
@@ -258,7 +262,7 @@ public final class NeMoMelSpectrogram {
 
         // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
         var preemphAudio = [Float](repeating: 0, count: audioCount)
-        preemphAudio[0] = audio[0]
+        preemphAudio[0] = audio[0] - preemph * lastAudioSample
         if audioCount > 1 {
             // Compute x[n] - preemph * x[n-1] vectorized
             var negPreemph = -preemph
