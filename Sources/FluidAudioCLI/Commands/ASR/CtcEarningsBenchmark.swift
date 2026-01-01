@@ -41,7 +41,9 @@ public enum CtcEarningsBenchmark {
         var outputFile = "ctc_earnings_benchmark.json"
         var maxFiles: Int? = nil
         var ctcModelPath: String? = nil
-        var tdtVersion: AsrModelVersion = .v3
+        // Note: Using v2 by default because v3 has issues with certain audio files
+        // (returns empty transcription for ~7 files in Earnings22 dataset)
+        var tdtVersion: AsrModelVersion = .v2
         var autoDownload = false
 
         var i = 0
@@ -305,7 +307,7 @@ public enum CtcEarningsBenchmark {
         // 1. TDT transcription for low WER
         let tdtResult = try await asrManager.transcribe(wavFile)
 
-        // Skip files where TDT returns empty (some audio files fail)
+        // Skip files where TDT returns empty (some audio files cause model issues)
         if tdtResult.text.isEmpty {
             print("  SKIPPED: TDT returned empty transcription")
             return nil
@@ -335,12 +337,27 @@ public enum CtcEarningsBenchmark {
             minScore: nil
         )
 
-        // 4. Post-process: Replace TDT words with CTC-detected keywords
-        let hypothesis = applyKeywordCorrections(
-            tdtResult: tdtResult,
-            detections: spotResult.detections,
-            minScore: -15.0  // More permissive threshold to include more detections
-        )
+        // 4. Post-process: Use VocabularyRescorer with Argmax-style parameters
+        // Argmax uses cbw=3.0 (context-biasing weight) for boosting vocab terms
+        let useRescorer = ProcessInfo.processInfo.environment["NO_CTC_RESCORING"] != "1"
+        let hypothesis: String
+        if useRescorer {
+            let rescorerConfig = VocabularyRescorer.Config(
+                minScoreAdvantage: 1.0,  // Lower threshold - rely more on CTC scoring
+                minVocabScore: -15.0,  // Permissive to include more detections
+                maxOriginalScoreForReplacement: -2.0,  // Don't replace very confident words
+                vocabBoostWeight: 3.0  // Argmax cbw=3.0
+            )
+            let rescorer = VocabularyRescorer(
+                spotter: spotter,
+                vocabulary: customVocab,
+                config: rescorerConfig
+            )
+            let rescoreResult = rescorer.rescore(transcript: tdtResult.text, spotResult: spotResult)
+            hypothesis = rescoreResult.text
+        } else {
+            hypothesis = tdtResult.text  // Baseline: no CTC corrections
+        }
 
         let processingTime = Date().timeIntervalSince(startTime)
 
