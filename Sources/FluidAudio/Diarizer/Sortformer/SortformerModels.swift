@@ -22,12 +22,6 @@ public struct SortformerModels: Sendable {
     /// Preprocessor model for mel spectrogram extraction
     public let preprocessorModel: CoreMLSortformer.PreprocessorModel
 
-    /// PreEncoder model (features → embeddings)
-    public let preEncoderModel: MLModel
-
-    /// Head model (embeddings → predictions)
-    public let headModel: MLModel
-
     /// Main Sortformer model for diarization (combined pipeline, deprecated)
     public let mainModel: CoreMLSortformer.MainModel?
 
@@ -36,32 +30,34 @@ public struct SortformerModels: Sendable {
 
     /// Whether to use separate PreEncoder + Head models (recommended)
     public let useSeparateModels: Bool
-
+    
+    /// Cached buffers
+    private let memoryOptimizer: ANEMemoryOptimizer
+    private let chunkArray: MLMultiArray
+    private let chunkLengthArray: MLMultiArray
+    private let fifoArray: MLMultiArray
+    private let fifoLengthArray: MLMultiArray
+    private let spkcacheArray: MLMultiArray
+    private let spkcacheLengthArray: MLMultiArray
+    
     public init(
+        config: SortformerConfig,
         preprocessor: MLModel,
         main: MLModel,
         compilationDuration: TimeInterval = 0
-    ) {
+    ) throws {
         self.preprocessorModel = preprocessor
         self.mainModel = main
-        self.preEncoderModel = main  // Fallback
-        self.headModel = main  // Fallback
         self.useSeparateModels = false
         self.compilationDuration = compilationDuration
-    }
-
-    public init(
-        preprocessor: MLModel,
-        preEncoder: MLModel,
-        head: MLModel,
-        compilationDuration: TimeInterval = 0
-    ) {
-        self.preprocessorModel = preprocessor
-        self.preEncoderModel = preEncoder
-        self.headModel = head
-        self.mainModel = nil
-        self.useSeparateModels = true
-        self.compilationDuration = compilationDuration
+        
+        self.memoryOptimizer = .init()
+        self.chunkArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.chunkMelFrames), NSNumber(value: config.melFeatures)], dataType: .float32)
+        self.fifoArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.fifoLen), NSNumber(value: config.fcDModel)], dataType: .float32)
+        self.spkcacheArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.spkcacheLen), NSNumber(value: config.fcDModel)], dataType: .float32)
+        self.chunkLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
+        self.fifoLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
+        self.spkcacheLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
     }
 }
 
@@ -79,6 +75,7 @@ extension SortformerModels {
     ///   - configuration: Optional MLModel configuration
     /// - Returns: Loaded SortformerModels
     public static func load(
+        config: SortformerConfig,
         preprocessorPath: URL,
         mainModelPath: URL,
         configuration: MLModelConfiguration? = nil
@@ -95,7 +92,7 @@ extension SortformerModels {
 
         // Load preprocessor
         let preprocessorConfig = MLModelConfiguration()
-        preprocessorConfig.computeUnits = .all
+        preprocessorConfig.computeUnits = .cpuOnly
 
         let preprocessor = try MLModel(contentsOf: compiledPreprocessorURL, configuration: preprocessorConfig)
         logger.info("Loaded preprocessor model")
@@ -109,64 +106,10 @@ extension SortformerModels {
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Models loaded in \(String(format: "%.2f", duration))s")
 
-        return SortformerModels(
+        return try SortformerModels(
+            config: config,
             preprocessor: preprocessor,
             main: mainModel,
-            compilationDuration: duration
-        )
-    }
-
-    /// Load models from local file paths (separate PreEncoder + Head mode).
-    /// This matches Python's behavior and avoids combined pipeline issues.
-    ///
-    /// - Parameters:
-    ///   - preprocessorPath: Path to Pipeline_Preprocessor.mlpackage
-    ///   - preEncoderPath: Path to Pipeline_PreEncoder.mlpackage
-    ///   - headPath: Path to Pipeline_Head_Fixed.mlpackage
-    /// - Returns: Loaded SortformerModels
-    public static func loadSeparate(
-        preprocessorPath: URL,
-        preEncoderPath: URL,
-        headPath: URL
-    ) async throws -> SortformerModels {
-        logger.info("Loading Sortformer models from local paths (separate models mode)")
-
-        let startTime = Date()
-
-        // Compile all models
-        logger.info("Compiling preprocessor model...")
-        let compiledPreprocessorURL = try await MLModel.compileModel(at: preprocessorPath)
-        logger.info("Compiling PreEncoder model...")
-        let compiledPreEncoderURL = try await MLModel.compileModel(at: preEncoderPath)
-        logger.info("Compiling Head model...")
-        let compiledHeadURL = try await MLModel.compileModel(at: headPath)
-
-        // Load preprocessor
-        // Use cpuOnly to match Python's CPU_ONLY for numerical consistency
-        let preprocessorConfig = MLModelConfiguration()
-        preprocessorConfig.computeUnits = .cpuOnly
-        let preprocessor = try MLModel(contentsOf: compiledPreprocessorURL, configuration: preprocessorConfig)
-        logger.info("Loaded preprocessor model")
-
-        // Load PreEncoder
-        let preEncoderConfig = MLModelConfiguration()
-        preEncoderConfig.computeUnits = .cpuOnly
-        let preEncoder = try MLModel(contentsOf: compiledPreEncoderURL, configuration: preEncoderConfig)
-        logger.info("Loaded PreEncoder model")
-
-        // Load Head
-        let headConfig = MLModelConfiguration()
-        headConfig.computeUnits = .cpuOnly
-        let head = try MLModel(contentsOf: compiledHeadURL, configuration: headConfig)
-        logger.info("Loaded Head model")
-
-        let duration = Date().timeIntervalSince(startTime)
-        logger.info("Models loaded in \(String(format: "%.2f", duration))s (separate mode)")
-
-        return SortformerModels(
-            preprocessor: preprocessor,
-            preEncoder: preEncoder,
-            head: head,
             compilationDuration: duration
         )
     }
@@ -189,13 +132,14 @@ extension SortformerModels {
     ///   - computeUnits: CoreML compute units to use (default: cpuOnly for consistency)
     /// - Returns: Loaded SortformerModels
     public static func loadFromHuggingFace(
+        config: SortformerConfig,
         cacheDirectory: URL? = nil,
-        computeUnits: MLComputeUnits = .cpuOnly
+        computeUnits: MLComputeUnits = .all
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
-
+        
         let startTime = Date()
-
+        
         // Determine cache directory
         let directory: URL
         if let cache = cacheDirectory {
@@ -204,35 +148,33 @@ extension SortformerModels {
             directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("FluidAudio/Models")
         }
-
+        
         // Download models if needed
         let modelNames = [
             ModelNames.Sortformer.preprocessorFile,
-            ModelNames.Sortformer.preEncoderFile,
-            ModelNames.Sortformer.headFile,
+            ModelNames.Sortformer.unifiedFile,
         ]
-
+        
         let models = try await DownloadUtils.loadModels(
             .sortformer,
             modelNames: modelNames,
             directory: directory,
             computeUnits: computeUnits
         )
-
+        
         guard let preprocessor = models[ModelNames.Sortformer.preprocessorFile],
-            let preEncoder = models[ModelNames.Sortformer.preEncoderFile],
-            let head = models[ModelNames.Sortformer.headFile]
+              let sortformer = models[ModelNames.Sortformer.unifiedFile]
         else {
             throw SortformerError.modelLoadFailed("Failed to load Sortformer models from HuggingFace")
         }
-
+        
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Sortformer models loaded from HuggingFace in \(String(format: "%.2f", duration))s")
-
-        return SortformerModels(
+        
+        return try SortformerModels(
+            config: config,
             preprocessor: preprocessor,
-            preEncoder: preEncoder,
-            head: head,
+            main: sortformer,
             compilationDuration: duration
         )
     }
@@ -247,7 +189,7 @@ extension SortformerModels {
     /// - Parameters:
     ///   - audioSamples: Audio samples (16kHz mono)
     ///   - config: Sortformer configuration
-    /// - Returns: Mel features [1, 80, T] flattened and feature length
+    /// - Returns: Mel features [1, 128, T] flattened and feature length
     public func runPreprocessor(
         audioSamples: [Float],
         config: SortformerConfig
@@ -288,7 +230,7 @@ extension SortformerModels {
 
         let featureLength = featureLengthArray[0].intValue
 
-        // Convert to flat array [1, 80, T] -> [T * 80] row-major
+        // Convert to flat array [1, 128, T] -> [T * 128] row-major
         var features: [Float] = []
         let shape = featuresArray.shape.map { $0.intValue }
         let melBins = shape[1]
@@ -324,7 +266,7 @@ extension SortformerModels {
     /// Run main Sortformer model.
     ///
     /// - Parameters:
-    ///   - chunk: Feature chunk [T, 80] transposed from mel
+    ///   - chunk: Feature chunk [T, 128] transposed from mel
     ///   - chunkLength: Actual chunk length
     ///   - spkcache: Speaker cache embeddings [spkcache_len, 512]
     ///   - spkcacheLength: Actual speaker cache length
@@ -341,98 +283,45 @@ extension SortformerModels {
         fifoLength: Int,
         config: SortformerConfig
     ) throws -> MainModelOutput {
-        if useSeparateModels {
-            return try runSeparateModels(
-                chunk: chunk,
-                chunkLength: chunkLength,
-                spkcache: spkcache,
-                spkcacheLength: spkcacheLength,
-                fifo: fifo,
-                fifoLength: fifoLength,
-                config: config
-            )
-        } else {
-            return try runCombinedModel(
-                chunk: chunk,
-                chunkLength: chunkLength,
-                spkcache: spkcache,
-                spkcacheLength: spkcacheLength,
-                fifo: fifo,
-                fifoLength: fifoLength,
-                config: config
-            )
-        }
-    }
-
-    /// Run combined SortformerPipeline model (legacy mode).
-    private func runCombinedModel(
-        chunk: [Float],
-        chunkLength: Int,
-        spkcache: [Float],
-        spkcacheLength: Int,
-        fifo: [Float],
-        fifoLength: Int,
-        config: SortformerConfig
-    ) throws -> MainModelOutput {
         guard let mainModel = mainModel else {
             throw SortformerError.inferenceFailed("Combined model not loaded")
         }
 
-        let chunkFrames = config.chunkFrames
+        let chunkFrames = config.chunkMelFrames
         let spkcacheLen = config.spkcacheLen
         let fifoLen = config.fifoLen
         let fcDModel = config.fcDModel
         let melFeatures = config.melFeatures
 
-        // Create chunk input [1, chunkFrames, melFeatures] - FP32 for pipeline mode
-        let chunkArray = try MLMultiArray(
-            shape: [1, NSNumber(value: chunkFrames), NSNumber(value: melFeatures)],
-            dataType: .float32
+        // Copy chunk features
+        memoryOptimizer.optimizedCopy(
+            from: chunk,
+            to: chunkArray,
+            pad: true
         )
-
-        // Copy chunk data (pad if needed)
-        let chunkPtr = chunkArray.dataPointer.bindMemory(to: Float32.self, capacity: chunkFrames * melFeatures)
-        for t in 0..<chunkFrames {
-            for f in 0..<melFeatures {
-                let srcIdx = t * melFeatures + f
-                let dstIdx = t * melFeatures + f
-                if srcIdx < chunk.count {
-                    chunkPtr[dstIdx] = Float32(chunk[srcIdx])
-                } else {
-                    chunkPtr[dstIdx] = Float32(0.0)
-                }
-            }
-        }
-
+        
+        // Copy FIFO queue
+        memoryOptimizer.optimizedCopy(
+            from: fifo,
+            to: fifoArray,
+            pad: true
+        )
+        
+        // Copy speaker cache
+        memoryOptimizer.optimizedCopy(
+            from: spkcache,
+            to: spkcacheArray,
+            pad: true
+        )
+        
         // Create chunk length input
-        let chunkLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
         chunkLengthArray[0] = NSNumber(value: Int32(chunkLength))
-
-        // Create spkcache input [1, spkcacheLen, fcDModel] - FP32 for pipeline mode
-        let spkcacheArray = try MLMultiArray(
-            shape: [1, NSNumber(value: spkcacheLen), NSNumber(value: fcDModel)],
-            dataType: .float32
-        )
-        let spkcachePtr = spkcacheArray.dataPointer.bindMemory(to: Float32.self, capacity: spkcacheLen * fcDModel)
-        for i in 0..<min(spkcache.count, spkcacheLen * fcDModel) {
-            spkcachePtr[i] = Float32(spkcache[i])
-        }
-
-        let spkcacheLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
-        spkcacheLengthArray[0] = NSNumber(value: Int32(spkcacheLength))
-
-        // Create fifo input [1, fifoLen, fcDModel] - FP32 for pipeline mode
-        let fifoArray = try MLMultiArray(
-            shape: [1, NSNumber(value: fifoLen), NSNumber(value: fcDModel)],
-            dataType: .float32
-        )
-        let fifoPtr = fifoArray.dataPointer.bindMemory(to: Float32.self, capacity: fifoLen * fcDModel)
-        for i in 0..<min(fifo.count, fifoLen * fcDModel) {
-            fifoPtr[i] = Float32(fifo[i])
-        }
-
-        let fifoLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
+        
+        // Create FIFO length input
         fifoLengthArray[0] = NSNumber(value: Int32(fifoLength))
+        
+        // Create speaker cache length input
+        spkcacheLengthArray[0] = NSNumber(value: Int32(spkcacheLength))
 
         // Run inference
         let inputFeatures = try MLDictionaryFeatureProvider(dictionary: [
@@ -447,216 +336,17 @@ extension SortformerModels {
         let output = try mainModel.prediction(from: inputFeatures)
 
         // Extract outputs (names must match CoreML SortformerPipeline model)
-        guard let predsArray = output.featureValue(for: "speaker_preds")?.multiArrayValue,
-            let chunkEmbsArray = output.featureValue(for: "chunk_pre_encoder_embs")?.multiArrayValue,
-            let chunkEmbLenArray = output.featureValue(for: "chunk_pre_encoder_lengths")?.multiArrayValue
+        guard let predictions = output.featureValue(for: "speaker_preds")?.shapedArrayValue(of: Float32.self)?.scalars,
+              let chunkEmbeddings = output.featureValue(for: "chunk_pre_encoder_embs")?.shapedArrayValue(of: Float32.self)?.scalars,
+              let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths")?.shapedArrayValue(of: Int32.self)?.scalars.first
         else {
             throw SortformerError.inferenceFailed("Missing model outputs")
         }
 
-        // Convert predictions to flat array
-        var predictions: [Float] = []
-        for i in 0..<predsArray.count {
-            predictions.append(predsArray[i].floatValue)
-        }
-
-        // Convert chunk embeddings to flat array
-        var chunkEmbeddings: [Float] = []
-        for i in 0..<chunkEmbsArray.count {
-            chunkEmbeddings.append(chunkEmbsArray[i].floatValue)
-        }
-
-        let chunkEmbLength = chunkEmbLenArray[0].intValue
-
         return MainModelOutput(
             predictions: predictions,
             chunkEmbeddings: chunkEmbeddings,
-            chunkEmbeddingLength: chunkEmbLength
-        )
-    }
-
-    /// Run separate PreEncoder + Head models (matches Python behavior).
-    ///
-    /// This approach avoids combined pipeline issues where embeddings might
-    /// get corrupted during the pipeline merge process.
-    private func runSeparateModels(
-        chunk: [Float],
-        chunkLength: Int,
-        spkcache: [Float],
-        spkcacheLength: Int,
-        fifo: [Float],
-        fifoLength: Int,
-        config: SortformerConfig
-    ) throws -> MainModelOutput {
-        let chunkFrames = config.chunkFrames
-        let spkcacheLen = config.spkcacheLen
-        let fifoLen = config.fifoLen
-        let fcDModel = config.fcDModel
-        let melFeatures = config.melFeatures
-
-        // Create chunk input [1, chunkFrames, melFeatures]
-        // IMPORTANT: Zero-fill first to ensure padding frames are zeros
-        let chunkArray = try MLMultiArray(
-            shape: [1, NSNumber(value: chunkFrames), NSNumber(value: melFeatures)],
-            dataType: .float32
-        )
-        let chunkPtr = chunkArray.dataPointer.bindMemory(to: Float32.self, capacity: chunkFrames * melFeatures)
-        // Zero-fill first
-        for i in 0..<(chunkFrames * melFeatures) {
-            chunkPtr[i] = 0.0
-        }
-        // Then copy actual data
-        for i in 0..<min(chunk.count, chunkFrames * melFeatures) {
-            chunkPtr[i] = Float32(chunk[i])
-        }
-
-        let chunkLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
-        chunkLengthArray[0] = NSNumber(value: Int32(chunkLength))
-
-        // Create spkcache input [1, spkcacheLen, fcDModel]
-        // IMPORTANT: Initialize to zeros first (MLMultiArray doesn't zero-fill by default)
-        let spkcacheArray = try MLMultiArray(
-            shape: [1, NSNumber(value: spkcacheLen), NSNumber(value: fcDModel)],
-            dataType: .float32
-        )
-        let spkcachePtr = spkcacheArray.dataPointer.bindMemory(to: Float32.self, capacity: spkcacheLen * fcDModel)
-        // Zero-fill first
-        for i in 0..<(spkcacheLen * fcDModel) {
-            spkcachePtr[i] = 0.0
-        }
-        // Then copy actual data
-        for i in 0..<min(spkcache.count, spkcacheLen * fcDModel) {
-            spkcachePtr[i] = Float32(spkcache[i])
-        }
-
-        let spkcacheLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
-        spkcacheLengthArray[0] = NSNumber(value: Int32(spkcacheLength))
-
-        // Create fifo input [1, fifoLen, fcDModel]
-        // IMPORTANT: Initialize to zeros first
-        let fifoArray = try MLMultiArray(
-            shape: [1, NSNumber(value: fifoLen), NSNumber(value: fcDModel)],
-            dataType: .float32
-        )
-        let fifoPtr = fifoArray.dataPointer.bindMemory(to: Float32.self, capacity: fifoLen * fcDModel)
-        // Zero-fill first
-        for i in 0..<(fifoLen * fcDModel) {
-            fifoPtr[i] = 0.0
-        }
-        // Then copy actual data
-        for i in 0..<min(fifo.count, fifoLen * fcDModel) {
-            fifoPtr[i] = Float32(fifo[i])
-        }
-
-        let fifoLengthArray = try MLMultiArray(shape: [1], dataType: .int32)
-        fifoLengthArray[0] = NSNumber(value: Int32(fifoLength))
-
-        // Step 1: Run PreEncoder
-        let preEncoderInput = try MLDictionaryFeatureProvider(dictionary: [
-            "chunk": MLFeatureValue(multiArray: chunkArray),
-            "chunk_lengths": MLFeatureValue(multiArray: chunkLengthArray),
-            "spkcache": MLFeatureValue(multiArray: spkcacheArray),
-            "spkcache_lengths": MLFeatureValue(multiArray: spkcacheLengthArray),
-            "fifo": MLFeatureValue(multiArray: fifoArray),
-            "fifo_lengths": MLFeatureValue(multiArray: fifoLengthArray),
-        ])
-
-        let preEncoderOutput = try preEncoderModel.prediction(from: preEncoderInput)
-
-        // Extract PreEncoder outputs
-        // Note: NVIDIA model uses chunk_embs_in/chunk_lens_in, low-latency uses chunk_pre_encoder_embs/chunk_pre_encoder_lengths
-        guard let preEncoderEmbs = preEncoderOutput.featureValue(for: "pre_encoder_embs")?.multiArrayValue,
-            let preEncoderLengths = preEncoderOutput.featureValue(for: "pre_encoder_lengths")?.multiArrayValue
-        else {
-            throw SortformerError.inferenceFailed("Missing PreEncoder embs/lengths outputs")
-        }
-
-        // Try both naming conventions for chunk embeddings
-        let chunkEmbsIn: MLMultiArray
-        let chunkLensIn: MLMultiArray
-        if let nvidia = preEncoderOutput.featureValue(for: "chunk_embs_in")?.multiArrayValue,
-            let nvidiaLens = preEncoderOutput.featureValue(for: "chunk_lens_in")?.multiArrayValue
-        {
-            chunkEmbsIn = nvidia
-            chunkLensIn = nvidiaLens
-        } else if let lowLatency = preEncoderOutput.featureValue(for: "chunk_pre_encoder_embs")?.multiArrayValue,
-            let lowLatencyLens = preEncoderOutput.featureValue(for: "chunk_pre_encoder_lengths")?.multiArrayValue
-        {
-            chunkEmbsIn = lowLatency
-            chunkLensIn = lowLatencyLens
-        } else {
-            throw SortformerError.inferenceFailed("Missing PreEncoder chunk outputs")
-        }
-
-        // Step 2: Run Head
-        // NVIDIA model uses pre_encoder_embs/pre_encoder_lengths/chunk_embs_in/chunk_lens_in
-        // Low-latency model uses concat_embs/concat_lens/chunk_embs/chunk_lens
-        let headInput: MLDictionaryFeatureProvider
-
-        // Check which naming convention to use by seeing if NVIDIA names work
-        // NVIDIA model has pre_encoder_embs input, low-latency has concat_embs
-        let headInputNames = headModel.modelDescription.inputDescriptionsByName.keys
-
-        if headInputNames.contains("pre_encoder_embs") {
-            // NVIDIA naming
-            headInput = try MLDictionaryFeatureProvider(dictionary: [
-                "pre_encoder_embs": MLFeatureValue(multiArray: preEncoderEmbs),
-                "pre_encoder_lengths": MLFeatureValue(multiArray: preEncoderLengths),
-                "chunk_embs_in": MLFeatureValue(multiArray: chunkEmbsIn),
-                "chunk_lens_in": MLFeatureValue(multiArray: chunkLensIn),
-            ])
-        } else {
-            // Low-latency naming
-            headInput = try MLDictionaryFeatureProvider(dictionary: [
-                "concat_embs": MLFeatureValue(multiArray: preEncoderEmbs),
-                "concat_lens": MLFeatureValue(multiArray: preEncoderLengths),
-                "chunk_embs": MLFeatureValue(multiArray: chunkEmbsIn),
-                "chunk_lens": MLFeatureValue(multiArray: chunkLensIn),
-            ])
-        }
-
-        let headOutput = try headModel.prediction(from: headInput)
-
-        // Extract Head outputs - speaker_preds is common
-        guard let predsArray = headOutput.featureValue(for: "speaker_preds")?.multiArrayValue else {
-            throw SortformerError.inferenceFailed("Missing speaker_preds output")
-        }
-
-        // Try different naming conventions for chunk embeddings output
-        let chunkEmbsArray: MLMultiArray
-        let chunkEmbLenArray: MLMultiArray
-        if let nvidia = headOutput.featureValue(for: "chunk_pre_encoder_embs")?.multiArrayValue,
-            let nvidiaLen = headOutput.featureValue(for: "chunk_pre_encoder_lengths")?.multiArrayValue
-        {
-            chunkEmbsArray = nvidia
-            chunkEmbLenArray = nvidiaLen
-        } else if let lowLatency = headOutput.featureValue(for: "output_chunk_embs")?.multiArrayValue,
-            let lowLatencyLen = headOutput.featureValue(for: "output_chunk_lens")?.multiArrayValue
-        {
-            chunkEmbsArray = lowLatency
-            chunkEmbLenArray = lowLatencyLen
-        } else {
-            throw SortformerError.inferenceFailed("Missing Head chunk embedding outputs")
-        }
-
-        // Convert predictions to flat array
-        var predictions: [Float] = []
-        for i in 0..<predsArray.count {
-            predictions.append(predsArray[i].floatValue)
-        }
-
-        // Convert chunk embeddings to flat array
-        var chunkEmbeddings: [Float] = []
-        for i in 0..<chunkEmbsArray.count {
-            chunkEmbeddings.append(chunkEmbsArray[i].floatValue)
-        }
-
-        let chunkEmbLength = chunkEmbLenArray[0].intValue
-
-        return MainModelOutput(
-            predictions: predictions,
-            chunkEmbeddings: chunkEmbeddings,
-            chunkEmbeddingLength: chunkEmbLength
+            chunkEmbeddingLength: Int(chunkEmbeddingsLength)
         )
     }
 }
