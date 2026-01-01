@@ -1,4 +1,4 @@
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -209,7 +209,7 @@ internal actor LocalAgreementStreamingProcessor {
     /// Transcribe a chunk with fresh decoder state (stateless pattern).
     private func transcribeChunkWithFreshState(
         _ samples: [Float],
-        asrManager: AsrManager,
+        asrManager: sending AsrManager,
         globalFrameOffset: Int
     ) async throws -> TdtHypothesis {
         let paddedChunk = asrManager.padAudioIfNeeded(samples, targetLength: 240_000)

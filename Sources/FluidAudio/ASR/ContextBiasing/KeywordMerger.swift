@@ -27,7 +27,7 @@ public struct KeywordMerger {
     }
 
     /// Track whether we've logged the encoder selection
-    private static var hasLoggedEncoderSelection = false
+    private nonisolated(unsafe) static var hasLoggedEncoderSelection = false
 
     /// The active phonetic encoder (determined at compile time)
     private static var activeEncoder: PhoneticEncoder {

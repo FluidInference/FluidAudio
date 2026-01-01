@@ -52,7 +52,7 @@ public struct LocalAgreementConfig: Sendable {
 // MARK: - Results
 
 /// Represents a word correction applied during transcription (for UI highlighting)
-public struct WordCorrection: Sendable, Equatable {
+public struct WordCorrection: Codable, Sendable, Equatable {
     /// Character range in the corrected/final text string
     public let range: Range<Int>
     /// The original (misspelled) word from the raw transcription
