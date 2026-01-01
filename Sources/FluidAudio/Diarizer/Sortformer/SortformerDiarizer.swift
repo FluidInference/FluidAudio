@@ -40,7 +40,6 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
     // Feature buffering
     private var featureBuffer: [Float] = []
-    private var featuresProcessed: Int = 0
 
     // Chunk tracking
     private var preprocessorChunkIndex: Int = 0
@@ -74,6 +73,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
         logger.info("Initializing Sortformer diarizer (combined pipeline mode)")
 
         let loadedModels = try await SortformerModels.load(
+            config: config,
             preprocessorPath: preprocessorPath,
             mainModelPath: mainModelPath
         )
@@ -86,39 +86,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
         logger.info("Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s")
     }
-
-    /// Initialize with separate CoreML models (matches Python behavior).
-    ///
-    /// This mode uses separate PreEncoder + Head models instead of a combined pipeline,
-    /// which avoids potential embedding corruption issues during CoreML pipeline merging.
-    ///
-    /// - Parameters:
-    ///   - preprocessorPath: Path to Pipeline_Preprocessor.mlpackage
-    ///   - preEncoderPath: Path to Pipeline_PreEncoder.mlpackage
-    ///   - headPath: Path to Pipeline_Head_Fixed.mlpackage
-    public func initializeSeparate(
-        preprocessorPath: URL,
-        preEncoderPath: URL,
-        headPath: URL
-    ) async throws {
-        logger.info("Initializing Sortformer diarizer (separate models mode)")
-
-        let loadedModels = try await SortformerModels.loadSeparate(
-            preprocessorPath: preprocessorPath,
-            preEncoderPath: preEncoderPath,
-            headPath: headPath
-        )
-
-        self.models = loadedModels
-        self.state = modules.initStreamingState()
-
-        // Reset buffers
-        resetBuffers()
-
-        logger.info(
-            "Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s (separate models)")
-    }
-
+    
     /// Initialize with pre-loaded models.
     public func initialize(models: SortformerModels) {
         self.models = models
@@ -137,7 +105,6 @@ public final class SortformerDiarizer: @unchecked Sendable {
     private func resetBuffers() {
         audioBuffer = []
         featureBuffer = []
-        featuresProcessed = 0
         preprocessorChunkIndex = 0
         diarizerChunkIndex = 0
         allProbabilities = []
@@ -182,146 +149,14 @@ public final class SortformerDiarizer: @unchecked Sendable {
         var newTentativeFrameCount = 0
 
         // Step 1: Run preprocessor on available audio
-        while audioBuffer.count >= config.preprocessorAudioSamples {
-            let audioChunk = Array(audioBuffer.prefix(config.preprocessorAudioSamples))
-
-            let (features, featureLength) = try models.runPreprocessor(
-                audioSamples: audioChunk,
-                config: config
-            )
-            if config.debugMode {
-                print(
-                    "[DEBUG] Preprocessor output: \(features.count) floats, featureLength=\(featureLength), expected chunkFrames=\(config.chunkFrames)"
-                )
-                fflush(stdout)
-            }
-
-            // Handle feature overlap
-            let validFeatures: [Float]
-            if preprocessorChunkIndex == 0 {
-                validFeatures = Array(features.prefix(featureLength * config.melFeatures))
-            } else {
-                let skipFrames = config.overlapFrames * config.melFeatures
-                validFeatures = Array(
-                    features.dropFirst(skipFrames).prefix((featureLength - config.overlapFrames) * config.melFeatures))
-            }
-
-            featureBuffer.append(contentsOf: validFeatures)
-            audioBuffer.removeFirst(config.audioHopSamples)
-            preprocessorChunkIndex += 1
-        }
-
-        if config.debugMode {
-            print(
-                "[DEBUG] After Step 1: featureBuffer=\(featureBuffer.count) floats (\(featureBuffer.count/config.melFeatures) frames), audioBuffer=\(audioBuffer.count) samples, preprocessorIdx=\(preprocessorChunkIndex)"
-            )
-            fflush(stdout)
-        }
-
-        // Step 2: Run diarization on available features
-        // Match Python's streaming_feat_loader exactly:
-        // - Each chunk covers core_frames (48) + context frames
-        // - left_offset = min(left_context * subsampling, current_position)
-        // - right_offset = min(right_context * subsampling, remaining_frames)
-        let totalFeatureFrames = featureBuffer.count / config.melFeatures
-        let chunkFrames = config.chunkFrames  // 112 mel frames for NVIDIA
-        let coreFrames = config.chunkLen * config.subsamplingFactor  // 48 mel frames core
-        let leftContextFrames = config.chunkLeftContext * config.subsamplingFactor  // 8 frames
-        let rightContextFrames = config.chunkRightContext * config.subsamplingFactor  // 56 frames
-
-        if config.debugMode && diarizerChunkIndex < 3 {
-            print(
-                "[DEBUG] Feature buffer: \(featureBuffer.count) floats = \(totalFeatureFrames) frames, need \(chunkFrames) frames, core=\(coreFrames), diarizerIdx=\(diarizerChunkIndex)"
-            )
-            fflush(stdout)
-        }
-
-        while true {
-            // Python's streaming_feat_loader logic:
-            // stt_feat = current start position (advances by core_frames each iteration)
-            // end_feat = stt_feat + core_frames
-            // left_offset = min(left_context_frames, stt_feat)
-            // right_offset = min(right_context_frames, total_frames - end_feat)
-            // chunk = features[stt_feat - left_offset : end_feat + right_offset]
-            let sttFeat = diarizerChunkIndex * coreFrames
-            let endFeat = min(sttFeat + coreFrames, totalFeatureFrames)
-
-            // Check if we have enough frames to process
-            if endFeat > totalFeatureFrames {
-                break
-            }
-
-            let leftOffset = min(leftContextFrames, sttFeat)
-            let rightOffset = min(rightContextFrames, totalFeatureFrames - endFeat)
-
-            let chunkStart = sttFeat - leftOffset
-            let chunkEnd = endFeat + rightOffset
-            let actualChunkFrames = chunkEnd - chunkStart
-
-            // Need at least some frames to process
-            if actualChunkFrames <= 0 {
-                break
-            }
-
-            // Extract features and pad if needed
-            let featStart = chunkStart * config.melFeatures
-            let featEnd = chunkEnd * config.melFeatures
-            var chunkFeatures = Array(featureBuffer[featStart..<featEnd])
-
-            // Pad to chunkFrames if needed (first chunk may have fewer frames due to missing left context)
-            if actualChunkFrames < chunkFrames {
-                let padCount = (chunkFrames - actualChunkFrames) * config.melFeatures
-                chunkFeatures.append(contentsOf: [Float](repeating: 0.0, count: padCount))
-            }
-
-            // Features are already in [T, D] format from preprocessor extraction
-            // Just copy directly
-            let transposedChunk = chunkFeatures
-
-            // Prepare state for model
-            // Use actual state lengths (0 is valid for empty state - matches Python/NeMo)
-            let modelSpkcacheLen = state.spkcacheLength
-            let modelFifoLen = state.fifoLength
-
-            if config.debugMode {
-                print("[DEBUG] State lengths: spkcache=\(modelSpkcacheLen), fifo=\(modelFifoLen)")
-                fflush(stdout)
-            }
-
-            // Ensure spkcache has exactly config.spkcacheLen frames (padded with zeros)
-            var paddedSpkcache = state.spkcache
-            let requiredSpkcacheSize = config.spkcacheLen * config.fcDModel
-            if paddedSpkcache.count < requiredSpkcacheSize {
-                paddedSpkcache.append(
-                    contentsOf: [Float](repeating: 0.0, count: requiredSpkcacheSize - paddedSpkcache.count))
-            }
-
-            // Ensure fifo has exactly config.fifoLen frames (padded with zeros)
-            var paddedFifo = state.fifo
-            let requiredFifoSize = config.fifoLen * config.fcDModel
-            if paddedFifo.count < requiredFifoSize {
-                paddedFifo.append(contentsOf: [Float](repeating: 0.0, count: requiredFifoSize - paddedFifo.count))
-            }
-
-            // Run main model
-            // Pass the actual valid chunk length (like Python's feat_lengths)
-            if config.debugMode {
-                print(
-                    "[DEBUG] Main model input: chunk=\(transposedChunk.count) floats (actualFrames=\(actualChunkFrames)), spkcache=\(paddedSpkcache.count) (len=\(modelSpkcacheLen)), fifo=\(paddedFifo.count) (len=\(modelFifoLen))"
-                )
-                print(
-                    "[DEBUG] Expected: chunk=\(config.chunkFrames * config.melFeatures), spkcache=\(config.spkcacheLen * config.fcDModel), fifo=\(config.fifoLen * config.fcDModel)"
-                )
-                print("[DEBUG] Calling main model...")
-                fflush(stdout)
-            }
+        while let (chunkFeatures, chunkLengths) = preprocessStreaming() {
             let output = try models.runMainModel(
-                chunk: transposedChunk,
-                chunkLength: actualChunkFrames,
-                spkcache: paddedSpkcache,
-                spkcacheLength: modelSpkcacheLen,
-                fifo: paddedFifo,
-                fifoLength: modelFifoLen,
+                chunk: chunkFeatures,
+                chunkLength: chunkLengths,
+                spkcache: state.spkcache,
+                spkcacheLength: state.spkcacheLength,
+                fifo: state.fifo,
+                fifoLength: state.fifoLength,
                 config: config
             )
 
@@ -344,22 +179,13 @@ public final class SortformerDiarizer: @unchecked Sendable {
             let embLength = output.chunkEmbeddingLength
             let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.fcDModel))
 
-            // Compute left/right context for prediction extraction
-            // These are in encoder frames (after subsampling), not mel frames
-            // Python: lc = round(left_offset / subsampling_factor)
-            //         rc = ceil(right_offset / subsampling_factor)
-            let leftContext = (leftOffset + config.subsamplingFactor / 2) / config.subsamplingFactor  // round
-            let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor  // ceil
-
             // Update state with correct context values
-            let updateResult = modules.streamingUpdate(
+            let updateResult = try modules.streamingUpdate(
                 state: &state,
-                chunkEmbeddings: chunkEmbs,
-                predictions: probabilities,
-                leftContext: leftContext,
-                rightContext: rightContext,
-                modelSpkcacheLen: modelSpkcacheLen,
-                modelFifoLen: modelFifoLen
+                chunk: chunkEmbs,
+                preds: probabilities,
+                leftContext: config.chunkLeftContext,
+                rightContext: config.chunkRightContext
             )
 
             // Accumulate confirmed results
@@ -404,7 +230,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
     ///
     /// - Parameter samples: Audio samples (16kHz mono)
     /// - Returns: New chunk results if enough audio was processed
-    public func processChunk(_ samples: [Float]) throws -> SortformerChunkResult? {
+    public func processSamples(_ samples: [Float]) throws -> SortformerChunkResult? {
         addAudio(samples)
         return try process()
     }
@@ -431,154 +257,16 @@ public final class SortformerDiarizer: @unchecked Sendable {
         // Reset for fresh processing
         reset()
 
-        let totalSamples = samples.count
-
-        // PHASE 1: Preprocess ALL audio first (matches Python's approach)
-        // Python processes entire audio through NeMo's preprocessor before diarization
-        if config.debugMode {
-            print(
-                "[DEBUG] Phase 1: Preprocessing all audio (\(totalSamples) samples) using \(config.useNativePreprocessing ? "native Swift" : "CoreML")"
-            )
-            fflush(stdout)
-        }
-
-        if config.useNativePreprocessing {
-            // Use native Swift mel spectrogram (matches NeMo's full-audio preprocessing)
-            let (melFlat, melLength, _) = melSpectrogram.computeFlat(audio: samples)
-
-            // Convert from [nMels, T] row-major to [T, nMels] for feature buffer
-            // melFlat is [nMels * numFrames] in row-major (mel 0 all frames, mel 1 all frames, ...)
-            // featureBuffer needs [T * nMels] (frame 0 all mels, frame 1 all mels, ...)
-            let nMels = config.melFeatures
-            featureBuffer = [Float](repeating: 0, count: melLength * nMels)
-            for frameIdx in 0..<melLength {
-                for melIdx in 0..<nMels {
-                    featureBuffer[frameIdx * nMels + melIdx] = melFlat[melIdx * melLength + frameIdx]
-                }
-            }
-            preprocessorChunkIndex = 1  // Treat as single chunk
-        } else {
-            // Use CoreML preprocessor (chunked approach)
-            var audioOffset = 0
-            while audioOffset + config.preprocessorAudioSamples <= totalSamples {
-                let audioChunk = Array(samples[audioOffset..<(audioOffset + config.preprocessorAudioSamples)])
-
-                let (features, featureLength) = try models.runPreprocessor(
-                    audioSamples: audioChunk,
-                    config: config
-                )
-
-                // Handle feature overlap
-                let validFeatures: [Float]
-                if preprocessorChunkIndex == 0 {
-                    validFeatures = Array(features.prefix(featureLength * config.melFeatures))
-                } else {
-                    let skipFrames = config.overlapFrames * config.melFeatures
-                    validFeatures = Array(
-                        features.dropFirst(skipFrames).prefix(
-                            (featureLength - config.overlapFrames) * config.melFeatures))
-                }
-
-                featureBuffer.append(contentsOf: validFeatures)
-                audioOffset += config.audioHopSamples
-                preprocessorChunkIndex += 1
-            }
-
-            // Handle remaining audio with padding
-            if audioOffset < totalSamples {
-                var lastChunk = Array(samples[audioOffset...])
-                let padCount = config.preprocessorAudioSamples - lastChunk.count
-                lastChunk.append(contentsOf: [Float](repeating: 0.0, count: padCount))
-
-                let (features, featureLength) = try models.runPreprocessor(
-                    audioSamples: lastChunk,
-                    config: config
-                )
-
-                let validFeatures: [Float]
-                if preprocessorChunkIndex == 0 {
-                    validFeatures = Array(features.prefix(featureLength * config.melFeatures))
-                } else {
-                    let skipFrames = config.overlapFrames * config.melFeatures
-                    validFeatures = Array(
-                        features.dropFirst(skipFrames).prefix(
-                            (featureLength - config.overlapFrames) * config.melFeatures))
-                }
-
-                featureBuffer.append(contentsOf: validFeatures)
-                preprocessorChunkIndex += 1
-            }
-        }
-
-        let totalFeatureFrames = featureBuffer.count / config.melFeatures
-
-        if config.debugMode {
-            print(
-                "[DEBUG] Phase 1 complete: \(featureBuffer.count) floats = \(totalFeatureFrames) mel frames from \(preprocessorChunkIndex) chunks"
-            )
-            // Print feature statistics
-            let fMin = featureBuffer.min() ?? 0
-            let fMax = featureBuffer.max() ?? 0
-            let fMean = featureBuffer.reduce(0, +) / Float(featureBuffer.count)
-            print("[DEBUG] Feature stats: min=\(fMin), max=\(fMax), mean=\(fMean)")
-            fflush(stdout)
-        }
-
-        // PHASE 2: Run diarization on all features
-        if config.debugMode {
-            print("[DEBUG] Phase 2: Running diarization on \(totalFeatureFrames) mel frames")
-            fflush(stdout)
-        }
-
+        var featureProvider = SortformerStreamingFeatureProvider(config: self.config, audio: samples)
+        
         var chunksProcessed = 0
         guard var state = state else {
             throw SortformerError.notInitialized
         }
 
-        let chunkFrames = config.chunkFrames  // 112 mel frames for NVIDIA
         let coreFrames = config.chunkLen * config.subsamplingFactor  // 48 mel frames core
-        let leftContextFrames = config.chunkLeftContext * config.subsamplingFactor  // 8 frames
-        let rightContextFrames = config.chunkRightContext * config.subsamplingFactor  // 56 frames
 
-        while true {
-            // Python's streaming_feat_loader logic
-            let sttFeat = diarizerChunkIndex * coreFrames
-
-            // Exit when we've processed all frames
-            if sttFeat >= totalFeatureFrames {
-                break
-            }
-
-            let endFeat = min(sttFeat + coreFrames, totalFeatureFrames)
-
-            let leftOffset = min(leftContextFrames, sttFeat)
-            let rightOffset = min(rightContextFrames, totalFeatureFrames - endFeat)
-
-            let chunkStart = sttFeat - leftOffset
-            let chunkEnd = endFeat + rightOffset
-            let actualChunkFrames = chunkEnd - chunkStart
-
-            if actualChunkFrames <= 0 {
-                break
-            }
-
-            // Extract features and pad if needed
-            let featStart = chunkStart * config.melFeatures
-            let featEnd = chunkEnd * config.melFeatures
-
-            guard featStart >= 0 && featEnd <= featureBuffer.count && featStart < featEnd else {
-                break
-            }
-            var chunkFeatures = Array(featureBuffer[featStart..<featEnd])
-
-            // Pad to chunkFrames if needed
-            if actualChunkFrames < chunkFrames {
-                let padCount = (chunkFrames - actualChunkFrames) * config.melFeatures
-                chunkFeatures.append(contentsOf: [Float](repeating: 0.0, count: padCount))
-            }
-
-            let transposedChunk = chunkFeatures
-
+        while let (_, chunkFeatures, chunkLength, leftOffset, rightOffset) = featureProvider.next() {
             // Prepare state for model
             // Use actual state lengths (0 is valid for empty state - matches Python/NeMo)
             let modelSpkcacheLen = state.spkcacheLength
@@ -601,8 +289,8 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
             // Run main model
             let output = try models.runMainModel(
-                chunk: transposedChunk,
-                chunkLength: actualChunkFrames,
+                chunk: chunkFeatures,
+                chunkLength: chunkLength,
                 spkcache: paddedSpkcache,
                 spkcacheLength: modelSpkcacheLen,
                 fifo: paddedFifo,
@@ -618,7 +306,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
             if config.debugMode && diarizerChunkIndex < 1 {
                 print(
-                    "[DEBUG] Model output: predictions=\(probabilities.count), embLength=\(embLength), actualChunkFrames=\(actualChunkFrames)"
+                    "[DEBUG] Model output: predictions=\(probabilities.count), embLength=\(embLength), actualChunkFrames=\(chunkLength)"
                 )
                 // Check predictions at different offsets
                 // Model input: padded_spkcache(188) + padded_fifo(40) + chunk(14) = 242 frames
@@ -641,21 +329,19 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
             // Compute left/right context for prediction extraction
             let leftContext = (leftOffset + config.subsamplingFactor / 2) / config.subsamplingFactor
-            let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor
+            let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor + 1
 
             // Debug first 5 chunks - capture state BEFORE update
             let debugSpkcacheLen = state.spkcacheLength
             let debugFifoLen = state.fifoLength
 
             // Update state
-            let updateResult = modules.streamingUpdate(
+            let updateResult = try modules.streamingUpdate(
                 state: &state,
-                chunkEmbeddings: chunkEmbs,
-                predictions: probabilities,
+                chunk: chunkEmbs,
+                preds: probabilities,
                 leftContext: leftContext,
-                rightContext: rightContext,
-                modelSpkcacheLen: modelSpkcacheLen,
-                modelFifoLen: modelFifoLen
+                rightContext: rightContext
             )
 
             // Debug first 5 chunks - format to match Python output for comparison
@@ -694,8 +380,8 @@ public final class SortformerDiarizer: @unchecked Sendable {
             // processedFrames is in mel frames (after subsampling)
             // Each mel frame corresponds to melStride samples
             let processedMelFrames = diarizerChunkIndex * coreFrames
-            let progress = min(processedMelFrames * config.melStride, totalSamples)
-            progressCallback?(progress, totalSamples, chunksProcessed)
+            let progress = min(processedMelFrames * config.melStride, samples.count)
+            progressCallback?(progress, samples.count, chunksProcessed)
         }
 
         // Save updated state
@@ -736,5 +422,27 @@ public final class SortformerDiarizer: @unchecked Sendable {
     /// Get configuration.
     public func getConfig() -> SortformerConfig {
         return config
+    }
+    
+    // MARK: - Helpers
+    
+    private func preprocessStreaming() -> (mel: [Float], melLength: Int)? {
+        let numAudioSamples = config.preprocessorAudioSamples
+        let audioHopSamples = config.audioHopSamples
+        
+        guard audioBuffer.count >= numAudioSamples else {
+            return nil
+        }
+        
+        let audioSamples = Array(audioBuffer.prefix(numAudioSamples))
+        let (mel, melLength, _) = melSpectrogram.computeFlatTransposed(audio: audioSamples)
+        
+        guard melLength > 0 else {
+            return nil
+        }
+        
+        audioBuffer.removeFirst(audioHopSamples)
+        
+        return (mel, melLength)
     }
 }

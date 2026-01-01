@@ -4,7 +4,7 @@ import Foundation
 import Metal
 
 /// ANE-optimized memory management for speaker diarization pipeline
-public final class ANEMemoryOptimizer {
+public final class ANEMemoryOptimizer: @unchecked Sendable {
     // Use shared ANE constants
     public static let aneAlignment = ANEMemoryUtils.aneAlignment
     public static let aneTileSize = ANEMemoryUtils.aneTileSize
@@ -104,7 +104,8 @@ public final class ANEMemoryOptimizer {
     public func optimizedCopy<C>(
         from source: C,
         to destination: MLMultiArray,
-        offset: Int = 0
+        offset: Int = 0,
+        pad: Bool = false
     ) where C: Collection, C.Element == Float {
         guard destination.dataType == .float32 else { return }
 
@@ -153,6 +154,14 @@ public final class ANEMemoryOptimizer {
             for element in source.prefix(count) {
                 destPtr[destIndex] = element
                 destIndex += 1
+            }
+        }
+        
+        if pad {
+            let padStart = offset + count
+            let remaining = destination.count - padStart
+            if remaining > 0 {
+                vDSP_vclr(destPtr.advanced(by: padStart), 1, vDSP_Length(remaining))
             }
         }
     }

@@ -31,18 +31,18 @@ public struct SortformerModules {
     ///
     /// - Parameters:
     ///   - state: Current streaming state (mutated in place)
-    ///   - chunk: Chunk embeddings from encoder [chunkLen, fcDModel] flattened (already trimmed, no context)
-    ///   - preds: Full predictions [spkcache+fifo+chunkTotalFrames, numSpeakers] flattened
+    ///   - chunk: Chunk embeddings from encoder [leftContext + chunkLen + rightContext, fcDModel] flattened
+    ///   - preds: Full predictions [spkcache + fifo + chunkTotalFrames, numSpeakers] flattened
     ///   - leftContext: Left context frames to skip in predictions
     ///   - rightContext: Right context frames (for info only)
-    /// - Returns: Confirmed predictions for this chunk [chunkLen * numSpeakers]
-    public func streamUpdate(
+    /// - Returns: `StreamingUpdateResult` with confirmed and tentative predictions for this chunk [chunkLen * numSpeakers]
+    public func streamingUpdate(
         state: inout SortformerStreamingState,
         chunk: [Float],
         preds: [Float],
         leftContext: Int,
         rightContext: Int
-    ) -> [Float] {
+    ) throws -> StreamingUpdateResult {
         let fcDModel = config.fcDModel
         let numSpeakers = config.numSpeakers
         let spkcacheCapacity = config.spkcacheLen
@@ -50,7 +50,6 @@ public struct SortformerModules {
 
         let currentSpkcacheLength = state.spkcacheLength
         let currentFifoLength = state.fifoLength
-        let chunkStart = currentSpkcacheLength + currentFifoLength
 
         state.chunkCount += 1
 
@@ -58,52 +57,51 @@ public struct SortformerModules {
         if currentFifoLength > 0 {
             let fifoPredsStart = currentSpkcacheLength * numSpeakers
             let fifoPredsEnd = (currentSpkcacheLength + currentFifoLength) * numSpeakers
-            if fifoPredsEnd <= preds.count {
-                state.fifoPreds = Array(preds[fifoPredsStart..<fifoPredsEnd])
+            guard fifoPredsEnd <= preds.count else {
+                throw SortformerError.insufficientPredsLength("Not enough predictions for FIFO in streaming update: \(fifoPredsEnd) > \(preds.count)")
             }
+            state.fifoPreds = Array(preds[fifoPredsStart..<fifoPredsEnd])
         }
 
         // Extract only CORE frames from chunk embeddings (skip left context, take chunkLen frames)
         // This matches Gradient Descent's: chunk[0..., lc..<chunkLen+lc, 0...]
         // Use ACTUAL leftContext (varies by chunk position), not fixed config.chunkLeftContext
         let lc = leftContext
+        let rc = rightContext
         let coreFrames = config.chunkLen
 
         // Extract core embeddings only (frames lc..<lc+coreFrames)
-        let embStartIdx = lc * fcDModel
-        let embEndIdx = (lc + coreFrames) * fcDModel
-        var chunkEmbs: [Float]
-        if embEndIdx <= chunk.count {
-            chunkEmbs = Array(chunk[embStartIdx..<embEndIdx])
-        } else {
-            // Fallback for short chunks: use what we have after left context
-            let availableFrames = max(0, (chunk.count / fcDModel) - lc)
-            if availableFrames > 0 {
-                chunkEmbs = Array(chunk[embStartIdx..<(embStartIdx + availableFrames * fcDModel)])
-            } else {
-                chunkEmbs = []
-            }
+        let embsStartIdx = lc * fcDModel
+        let embsEndIdx = (lc + coreFrames) * fcDModel
+        guard embsEndIdx <= chunk.count else {
+            throw SortformerError.insufficientChunkLength("Not enough chunk embeddings for streaming update: \(embsEndIdx) > \(chunk.count)")
         }
-        let actualCoreFrames = chunkEmbs.count / fcDModel
+        let chunkEmbs = Array(chunk[embsStartIdx..<embsEndIdx])
 
         // Extract chunk predictions for CORE frames only
         // This matches Gradient Descent's: preds[0..., chunkStart+lc..<chunkStart+chunkLen+lc, 0...]
-        let chunkPredsStart = (chunkStart + lc) * numSpeakers
-        let chunkPredsEnd = (chunkStart + lc + actualCoreFrames) * numSpeakers
-
-        var chunkPreds: [Float]
-        if chunkPredsEnd <= preds.count {
-            chunkPreds = Array(preds[chunkPredsStart..<chunkPredsEnd])
-        } else {
-            // Fallback: just use zeros if we can't extract properly
-            chunkPreds = [Float](repeating: 0.0, count: actualCoreFrames * numSpeakers)
+        let chunkStart = currentSpkcacheLength + currentFifoLength + lc
+        let chunkEnd = chunkStart + coreFrames
+        
+        let chunkPredsStart = chunkStart * numSpeakers
+        let chunkPredsEnd = chunkEnd * numSpeakers
+        
+        let tentativePredsStart = chunkPredsEnd
+        let tentativePredsEnd = (chunkEnd + rc) * numSpeakers
+        
+        guard tentativePredsEnd <= preds.count else {
+            if chunkPredsEnd <= preds.count {
+                throw SortformerError.insufficientPredsLength("Not enough predictions for chunk in streaming update: \(chunkPredsEnd) > \(preds.count)")
+            }
+            throw SortformerError.insufficientPredsLength("Not enough predictions for tentative predictions in streaming update: \(tentativePredsEnd) > \(preds.count)")
         }
-
-        // Append CORE chunk embeddings to FIFO (not full chunk with context)
+        let chunkPreds: [Float] = Array(preds[chunkPredsStart..<chunkPredsEnd])
+        let tentativePreds: [Float] = Array(preds[tentativePredsStart..<tentativePredsEnd])
+        
+        // Append chunk core to FIFO
         state.fifo.append(contentsOf: chunkEmbs)
-        state.fifoLength += actualCoreFrames
+        state.fifoLength += coreFrames
 
-        // Append CORE chunk predictions to FIFO preds
         if state.fifoPreds != nil {
             state.fifoPreds?.append(contentsOf: chunkPreds)
         } else {
@@ -112,16 +110,17 @@ public struct SortformerModules {
 
         // Update speaker cache if FIFO overflows
         // Use actualCoreFrames (not full chunk), matching Gradient Descent's: chunkLen + currentFifoLength
-        let contextLength = actualCoreFrames + currentFifoLength
+        let contextLength = coreFrames + currentFifoLength
         if contextLength > fifoCapacity {
             guard let currentFifoPreds = state.fifoPreds else {
-                return chunkPreds
+                logger.error("FIFO predictions are nil immediately after updating them during streaming update. THIS SHOULD NEVER HAPPEN!")
+                return StreamingUpdateResult(confirmed: chunkPreds, tentative: tentativePreds)
             }
 
             // Calculate how many frames to pop
             var popOutLength = config.spkcacheUpdatePeriod
             popOutLength = max(popOutLength, contextLength - fifoCapacity)
-            popOutLength = min(popOutLength, state.fifoLength)
+            popOutLength = min(popOutLength, contextLength)
 
             // Extract frames to pop from FIFO
             let popOutEmbs = Array(state.fifo.prefix(popOutLength * fcDModel))
@@ -153,9 +152,8 @@ public struct SortformerModules {
             if state.spkcacheLength > spkcacheCapacity {
                 if state.spkcachePreds == nil {
                     // First time spkcache overflows - initialize predictions
-                    let prevSpkcachePreds = Array(preds.prefix(currentSpkcacheLength * numSpeakers))
                     if currentSpkcacheLength > 0 {
-                        state.spkcachePreds = prevSpkcachePreds + popOutPreds
+                        state.spkcachePreds = Array(preds.prefix(currentSpkcacheLength * numSpeakers)) + popOutPreds
                     } else {
                         state.spkcachePreds = popOutPreds
                     }
@@ -165,57 +163,17 @@ public struct SortformerModules {
             }
         }
 
-        return chunkPreds
+        return StreamingUpdateResult(confirmed: chunkPreds, tentative: tentativePreds)
     }
-
-    // MARK: - Legacy Streaming Update (for backwards compatibility)
-
-    /// Legacy streaming update that also returns tentative predictions.
-    ///
-    /// - Parameters:
-    ///   - state: Current streaming state (mutated in place)
-    ///   - chunkEmbeddings: Chunk embeddings from encoder [chunkLen, fcDModel]
-    ///   - predictions: Full predictions [spkcacheLen + fifoLen + chunkLen, numSpeakers]
-    ///   - leftContext: Left context frames to skip
-    ///   - rightContext: Right context frames to skip (used for tentative predictions)
-    ///   - modelSpkcacheLen: Spkcache length passed to model
-    ///   - modelFifoLen: Fifo length passed to model
-    /// - Returns: StreamingUpdateResult with confirmed and tentative predictions
-    public func streamingUpdate(
-        state: inout SortformerStreamingState,
-        chunkEmbeddings: [Float],
-        predictions: [Float],
-        leftContext: Int,
-        rightContext: Int,
-        modelSpkcacheLen: Int? = nil,
-        modelFifoLen: Int? = nil
-    ) -> StreamingUpdateResult {
-        // Use new streamUpdate logic
-        let confirmed = streamUpdate(
-            state: &state, chunk: chunkEmbeddings, preds: predictions, leftContext: leftContext,
-            rightContext: rightContext)
-
-        // Extract tentative predictions for right context frames
-        let numSpeakers = config.numSpeakers
-        let chunkStart = (modelSpkcacheLen ?? state.spkcacheLength) + (modelFifoLen ?? state.fifoLength)
-
-        // Tentative predictions are after the confirmed CORE frames
-        // Use config.chunkLen (6) as the core frame count, not full chunk with context
-        let coreFrames = config.chunkLen
-        let tentativeStart = (chunkStart + leftContext + coreFrames) * numSpeakers
-        let tentativeCount = rightContext * numSpeakers
-        var tentative: [Float] = []
-
-        if tentativeCount > 0 && tentativeStart + tentativeCount <= predictions.count {
-            tentative = Array(predictions[tentativeStart..<(tentativeStart + tentativeCount)])
-        }
-
-        return StreamingUpdateResult(confirmed: confirmed, tentative: tentative)
-    }
-
+    
     // MARK: - Silence Profile
 
     /// Update running mean of silence embeddings.
+    /// - Parameters:
+    ///   - state: Streaming state
+    ///   - embs: Frame-wise speaker embeddings  [frameCount, fcDModel] flattened
+    ///   - preds: Frame-wise speaker activity predictions  [frameCount, numSpeakers] flattened
+    ///   - frameCount: Number of frames
     private func updateSilenceProfile(
         state: inout SortformerStreamingState,
         embs: [Float],
@@ -356,22 +314,35 @@ public struct SortformerModules {
         let numSpeakers = config.numSpeakers
         let threshold = config.predScoreThreshold
         var scores = [Float](repeating: 0.0, count: frameCount * numSpeakers)
+        
+        var tmp = [Float](repeating: 0, count: preds.count)
+        var log1P = [Float](repeating: 0, count: preds.count)
+        
+        // Scores -> log(p)
+        vDSP.clip(preds, to: threshold...Float.greatestFiniteMagnitude, result: &tmp)
+        vForce.log(tmp, result: &scores)
+        
+        // Scores -> log(p) - log(1-p)
+        vDSP.clip(preds, to: 0...(1-threshold), result: &tmp)
+        vDSP.negative(tmp, result: &tmp)
+        vForce.log1p(tmp, result: &log1P)
+        vDSP.subtract(scores, log1P, result: &scores)
+        
+        // Scores -> log(p) - log(1-p) - log(0.5)
+        vDSP.add(logf(2), scores, result: &scores)
 
-        for frame in 0..<frameCount {
-            // Compute sum of log(1-p) for all speakers
-            var log1ProbsSum: Float = 0.0
-            for spk in 0..<numSpeakers {
-                let p = preds[frame * numSpeakers + spk]
-                log1ProbsSum += log(max(1.0 - p, threshold))
-            }
+        // Scores -> log(p) - log(1-p) + sum(log(1-p_others)) - log(0.5)
+        scores.withUnsafeMutableBufferPointer { sBuf in
+            log1P.withUnsafeBufferPointer { lBuf in
+                guard let s = sBuf.baseAddress, let l = lBuf.baseAddress else { return }
+                let S = numSpeakers
 
-            for spk in 0..<numSpeakers {
-                let p = preds[frame * numSpeakers + spk]
-                let logP = log(max(p, threshold))
-                let log1P = log(max(1.0 - p, threshold))
-
-                // Score: log(p) - log(1-p) + sum(log(1-p_all)) - log(0.5)
-                scores[frame * numSpeakers + spk] = logP - log1P + log1ProbsSum - log(0.5)
+                for frame in 0..<frameCount {
+                    let base = frame &* S
+                    var sum: Float = 0
+                    for spk in 0..<S { sum += l[base + spk] }
+                    for spk in 0..<S { s[base + spk] += sum }
+                }
             }
         }
 
@@ -392,19 +363,20 @@ public struct SortformerModules {
         var posScoreCounts = [Int](repeating: 0, count: numSpeakers)
         for frame in 0..<frameCount {
             for spk in 0..<numSpeakers {
-                if scores[frame * numSpeakers + spk] > 0 {
+                let index = frame * numSpeakers + spk
+                if preds[index] > 0.5 && scores[index] > 0 {
                     posScoreCounts[spk] += 1
                 }
             }
         }
 
-        for frame in 0..<frameCount {
-            for spk in 0..<numSpeakers {
+        for spk in 0..<numSpeakers {
+            for frame in 0..<frameCount {
                 let idx = frame * numSpeakers + spk
                 let p = preds[idx]
 
                 // Disable non-speech (p < 0.5)
-                if p < 0.5 {
+                if p <= 0.5 {
                     result[idx] = -.infinity
                     continue
                 }
@@ -426,27 +398,60 @@ public struct SortformerModules {
         k: Int,
         scaleFactor: Float
     ) -> [Float] {
-        let numSpeakers = config.numSpeakers
-        let boostValue = scaleFactor * log(0.5)
+        let S = config.numSpeakers
+        guard frameCount > 0, S > 0, k > 0 else { return scores }
+
+        let boostDelta: Float = -scaleFactor * logf(0.5) // positive
+
         var result = scores
+        let kEff = min(k, frameCount)
 
-        for spk in 0..<numSpeakers {
-            // Get scores for this speaker (excluding -infinity)
-            var speakerScores: [(Int, Float)] = []
-            for frame in 0..<frameCount {
-                let idx = frame * numSpeakers + spk
-                if result[idx] != -.infinity {
-                    speakerScores.append((frame, result[idx]))
+        result.withUnsafeMutableBufferPointer { resBuf in
+            guard let base = resBuf.baseAddress else { return }
+
+            for spk in 0..<S {
+                // Keep arrays sorted DESC by score: [0] is largest, [count-1] is smallest among kept.
+                var topFrames = [Int](repeating: 0, count: kEff)
+                var topScores = [Float](repeating: -Float.greatestFiniteMagnitude, count: kEff)
+                var count = 0
+
+                for frame in 0..<frameCount {
+                    let idx = frame &* S &+ spk
+                    let v = base[idx]
+                    if v == -.infinity { continue }
+
+                    if count < kEff {
+                        // Insert into [0..<count] maintaining DESC order.
+                        var pos = count
+                        while pos > 0 && v > topScores[pos - 1] {
+                            topScores[pos] = topScores[pos - 1]
+                            topFrames[pos] = topFrames[pos - 1]
+                            pos -= 1
+                        }
+                        topScores[pos] = v
+                        topFrames[pos] = frame
+                        count += 1
+                    } else {
+                        // If v isn't better than the smallest kept, skip.
+                        if v <= topScores[count - 1] { continue }
+
+                        // Insert v into the correct position, dropping the last element.
+                        var pos = count - 1
+                        while pos > 0 && v > topScores[pos - 1] {
+                            topScores[pos] = topScores[pos - 1]
+                            topFrames[pos] = topFrames[pos - 1]
+                            pos -= 1
+                        }
+                        topScores[pos] = v
+                        topFrames[pos] = frame
+                    }
                 }
-            }
 
-            // Sort by score descending
-            speakerScores.sort { $0.1 > $1.1 }
-
-            // Boost top-k
-            for i in 0..<min(k, speakerScores.count) {
-                let frame = speakerScores[i].0
-                result[frame * numSpeakers + spk] -= boostValue
+                // Apply boost to the top frames we found.
+                for i in 0..<count {
+                    let idx = topFrames[i] &* S &+ spk
+                    base[idx] += boostDelta
+                }
             }
         }
 
@@ -464,78 +469,114 @@ public struct SortformerModules {
         frameCount: Int,
         k: Int
     ) -> (indices: [Int], isDisabled: [Bool]) {
-        let numSpeakers = config.numSpeakers
+        let S = config.numSpeakers
         let silFramesPerSpk = config.spkcacheSilFramesPerSpk
         let nFramesNoSil = frameCount - silFramesPerSpk
         let maxIndex = config.maxIndex
 
-        // Permute scores: (frames, speakers) -> (speakers, frames), then flatten
-        var scoresFlattened = [Float](repeating: 0.0, count: numSpeakers * frameCount)
-        for spk in 0..<numSpeakers {
+        precondition(scores.count >= frameCount * S)
+        precondition(frameCount >= 0 && S > 0)
+
+        let N = frameCount * S
+        if k <= 0 {
+            return ([], [])
+        }
+
+        // We'll compute topK over at most N real elements, then pad to k with maxIndex.
+        let kEff = min(k, N)
+
+        // Top-k buffers (kept sorted by score DESC; tie-break by smaller index).
+        var bestIdx = [Int](repeating: 0, count: kEff)
+        var bestVal = [Float](repeating: -.infinity, count: kEff)
+        var count = 0
+
+        // Iterate over "permuted-flattened" indices without building the permuted array.
+        // permutedIdx = spk*frameCount + frame
+        // scoreAt(permutedIdx) = scores[frame*S + spk]
+        for spk in 0..<S {
             for frame in 0..<frameCount {
-                let srcIdx = frame * numSpeakers + spk
-                let dstIdx = spk * frameCount + frame
-                scoresFlattened[dstIdx] = scores[srcIdx]
+                let permutedIdx = spk * frameCount + frame
+                let v = scores[frame * S + spk]
+
+                if count < kEff {
+                    // Insert into [0..<count] in descending order (val, then smaller index).
+                    var pos = count
+                    while pos > 0 {
+                        let pv = bestVal[pos - 1]
+                        let pi = bestIdx[pos - 1]
+                        if v > pv || (v == pv && permutedIdx < pi) {
+                            bestVal[pos] = pv
+                            bestIdx[pos] = pi
+                            pos -= 1
+                        } else {
+                            break
+                        }
+                    }
+                    bestVal[pos] = v
+                    bestIdx[pos] = permutedIdx
+                    count += 1
+                } else {
+                    // Compare against the current worst kept (last element).
+                    let worstV = bestVal[kEff - 1]
+                    let worstI = bestIdx[kEff - 1]
+                    if v < worstV || (v == worstV && permutedIdx >= worstI) {
+                        continue
+                    }
+
+                    // Insert v, drop the last.
+                    var pos = kEff - 1
+                    while pos > 0 {
+                        let pv = bestVal[pos - 1]
+                        let pi = bestIdx[pos - 1]
+                        if v > pv || (v == pv && permutedIdx < pi) {
+                            bestVal[pos] = pv
+                            bestIdx[pos] = pi
+                            pos -= 1
+                        } else {
+                            break
+                        }
+                    }
+                    bestVal[pos] = v
+                    bestIdx[pos] = permutedIdx
+                }
             }
         }
 
-        // Get indices sorted by score (descending)
-        let indexedScores = scoresFlattened.enumerated().map { ($0.offset, $0.element) }
-        let sortedByScore = indexedScores.sorted { $0.1 > $1.1 }
-
-        // Take top-k indices
-        var topKIndices = [Int](repeating: 0, count: k)
-        var topKValues = [Float](repeating: 0.0, count: k)
-
-        for i in 0..<k {
-            if i < sortedByScore.count {
-                topKIndices[i] = sortedByScore[i].0
-                topKValues[i] = sortedByScore[i].1
-            } else {
-                topKIndices[i] = maxIndex
-                topKValues[i] = -.infinity
-            }
+        // Build topKIndices (length k), padding with maxIndex if k > N
+        var topKIndices = [Int](repeating: maxIndex, count: k)
+        for i in 0..<kEff {
+            topKIndices[i] = (bestVal[i] == -.infinity) ? maxIndex : bestIdx[i]
         }
 
-        // Replace -inf indices with maxIndex placeholder
-        for i in 0..<k {
-            if topKValues[i] == -.infinity {
-                topKIndices[i] = maxIndex
-            }
-        }
+        // Sort indices ascending (matches your "preserve original order" step)
+        topKIndices.sort()
 
-        // Sort indices to preserve original order
-        let sortedPairs = topKIndices.enumerated().sorted { $0.element < $1.element }
-        var topKIndicesSorted = sortedPairs.map { $0.element }
-
-        // Compute isDisabled BEFORE converting to frame indices
+        // Compute isDisabled BEFORE modulo conversion
         var isDisabled = [Bool](repeating: false, count: k)
         for i in 0..<k {
-            if topKIndicesSorted[i] == maxIndex {
+            if topKIndices[i] == maxIndex {
                 isDisabled[i] = true
             }
         }
 
-        // Convert flattened index to frame index using modulo
-        for i in 0..<k {
-            if !isDisabled[i] {
-                topKIndicesSorted[i] = topKIndicesSorted[i] % frameCount
-            }
+        // Convert flattened permuted idx -> frame idx via modulo
+        for i in 0..<k where !isDisabled[i] {
+            topKIndices[i] = topKIndices[i] % frameCount
         }
 
-        // Mark frames beyond actual content as disabled (silence padding frames)
-        for i in 0..<k {
-            if !isDisabled[i] && topKIndicesSorted[i] >= nFramesNoSil {
+        // Disable frames beyond actual content
+        for i in 0..<k where !isDisabled[i] {
+            if topKIndices[i] >= nFramesNoSil {
                 isDisabled[i] = true
             }
         }
 
         // Set placeholder index for disabled frames
         for i in 0..<k where isDisabled[i] {
-            topKIndicesSorted[i] = 0
+            topKIndices[i] = 0
         }
 
-        return (topKIndicesSorted, isDisabled)
+        return (topKIndices, isDisabled)
     }
 
     // MARK: - Sigmoid

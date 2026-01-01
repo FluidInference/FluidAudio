@@ -8,7 +8,6 @@ import Foundation
 /// This mirrors NeMo's StreamingSortformerState dataclass.
 /// Reference: NeMo sortformer_modules.py
 public struct SortformerStreamingState: Sendable {
-
     /// Speaker cache embeddings from start of audio
     /// Shape: [spkcacheLen, fcDModel] (e.g., [188, 512])
     public var spkcache: [Float]
@@ -41,57 +40,67 @@ public struct SortformerStreamingState: Sendable {
     /// Count of chunks processed (for simple state update)
     public var chunkCount: Int
 
-    /// Speaker permutation (for training, not used in inference)
-    public var speakerPermutation: [Int]?
-
     /// Initialize empty streaming state
     public init(config: SortformerConfig) {
         let fcDModel = config.fcDModel
 
         // Start with empty caches (synchronous mode)
         self.spkcache = []
-        self.spkcacheLength = 0
         self.spkcachePreds = nil
+        self.spkcacheLength = 0
 
         self.fifo = []
-        self.fifoLength = 0
         self.fifoPreds = nil
+        self.fifoLength = 0
 
         self.meanSilenceEmbedding = [Float](repeating: 0.0, count: fcDModel)
         self.silenceFrameCount = 0
         self.chunkCount = 0
-        self.speakerPermutation = nil
     }
+}
 
-    /// Initialize with pre-allocated buffers (async streaming mode)
-    public init(config: SortformerConfig, preallocate: Bool) {
-        let fcDModel = config.fcDModel
-        let numSpeakers = config.numSpeakers
-        let spkcacheLen = config.spkcacheLen
-        let fifoLen = config.fifoLen
+// MARK: - Streaming Feature Provider
 
-        if preallocate {
-            self.spkcache = [Float](repeating: 0.0, count: spkcacheLen * fcDModel)
-            self.spkcacheLength = 0
-            self.spkcachePreds = [Float](repeating: 0.0, count: spkcacheLen * numSpeakers)
-
-            self.fifo = [Float](repeating: 0.0, count: fifoLen * fcDModel)
-            self.fifoLength = 0
-            self.fifoPreds = [Float](repeating: 0.0, count: fifoLen * numSpeakers)
-        } else {
-            self.spkcache = []
-            self.spkcacheLength = 0
-            self.spkcachePreds = nil
-
-            self.fifo = []
-            self.fifoLength = 0
-            self.fifoPreds = nil
+public struct SortformerStreamingFeatureProvider: Sendable {
+    private let config: SortformerConfig
+    private let featSeq: [Float]
+    private let featLength: Int
+    private let numChunks: Int
+    private let featSeqLength: Int
+    
+    private var startFeat: Int
+    private var endFeat: Int
+    private var chunkIndex: Int
+    
+    public init(config: SortformerConfig, audio: [Float]) {
+        self.config = config
+        self.startFeat = 0
+        self.endFeat = 0
+        self.chunkIndex = 0
+        (self.featSeq, self.featLength, _) = NeMoMelSpectrogram().computeFlatTransposed(audio: audio)
+        self.numChunks = (self.featLength - 1) / (config.chunkLen * config.subsamplingFactor) + 1 // ceiling
+        self.featSeqLength = featSeq.count / config.melFeatures
+    }
+    
+    public mutating func next() -> (chunkIndex: Int, chunkFeatures: [Float], chunkLength: Int, leftOffset: Int, rightOffset: Int)? {
+        guard endFeat < featLength else {
+            return nil
         }
-
-        self.meanSilenceEmbedding = [Float](repeating: 0.0, count: fcDModel)
-        self.silenceFrameCount = 0
-        self.chunkCount = 0
-        self.speakerPermutation = nil
+        
+        let leftOffset = min(config.chunkLeftContext * config.subsamplingFactor, startFeat)
+        endFeat = min(startFeat + config.chunkLen * config.subsamplingFactor, featLength)
+        let rightOffset = min(config.chunkRightContext * config.subsamplingFactor, featLength - endFeat)
+        
+        let chunkStartIndex = (startFeat - leftOffset) * config.melFeatures
+        let chunkEndIndex = (endFeat + rightOffset) * config.melFeatures
+        let chunkFeatures = Array(featSeq[chunkStartIndex..<chunkEndIndex])
+        var chunkLength = featSeqLength - startFeat + leftOffset
+        chunkLength = max(chunkLength, 0)
+        chunkLength = min(chunkLength, (endFeat + rightOffset) - (startFeat - leftOffset))
+        
+        startFeat = endFeat
+        defer { chunkIndex += 1 }
+        return (chunkIndex, chunkFeatures, chunkLength, leftOffset, rightOffset)
     }
 }
 
@@ -374,6 +383,8 @@ public enum SortformerError: Error, LocalizedError {
     case invalidAudioData
     case invalidState(String)
     case configurationError(String)
+    case insufficientChunkLength(String)
+    case insufficientPredsLength(String)
 
     public var errorDescription: String? {
         switch self {
@@ -391,6 +402,10 @@ public enum SortformerError: Error, LocalizedError {
             return "Invalid state: \(message)"
         case .configurationError(let message):
             return "Configuration error: \(message)"
+        case .insufficientChunkLength(let message):
+            return "Insufficient chunk length: \(message)"
+        case .insufficientPredsLength(let message):
+            return "Insufficient preds length: \(message)"
         }
     }
 }

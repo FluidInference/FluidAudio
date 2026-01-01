@@ -100,7 +100,7 @@ public struct SortformerConfig: Sendable {
     /// Total chunk frames for CoreML model input (includes left/right context)
     /// Formula: (chunk_len + left_context + right_context) * subsampling
     /// Default: (6 + 1 + 1) * 8 = 64 frames
-    public var chunkFrames: Int {
+    public var chunkMelFrames: Int {
         (chunkLen + chunkLeftContext + chunkRightContext) * subsamplingFactor
     }
 
@@ -112,12 +112,12 @@ public struct SortformerConfig: Sendable {
     /// NeMo adds 16 samples padding on each side, so naive formula doesn't work exactly.
     /// Use preprocessorAudioSamplesOverride for accurate values determined empirically.
     public var preprocessorAudioSamples: Int {
-        preprocessorAudioSamplesOverride ?? ((chunkFrames - 1) * melStride + melWindow)
+        preprocessorAudioSamplesOverride ?? ((chunkMelFrames - 1) * melStride + melWindow)
     }
 
     /// Audio hop between preprocessor chunks
     public var audioHopSamples: Int {
-        preprocessorAudioSamples - melWindow
+        chunkLen * subsamplingFactor * melStride
     }
 
     /// Override for overlap frames (set explicitly to match Python's empirical value)
@@ -192,8 +192,6 @@ public struct SortformerConfig: Sendable {
         )
         // Use native preprocessing to match NeMo's full-audio mel spectrogram
         config.useNativePreprocessing = true
-        // Model expects 18160 audio samples per preprocessor chunk (for CoreML path)
-        config.preprocessorAudioSamplesOverride = 18160
         return config
     }
 
