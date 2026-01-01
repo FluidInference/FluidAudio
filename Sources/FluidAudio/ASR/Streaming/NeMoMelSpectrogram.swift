@@ -170,7 +170,7 @@ public final class NeMoMelSpectrogram {
         // Copy preemph audio to center using memcpy
         preemphAudio.withUnsafeBufferPointer { src in
             paddedAudio.withUnsafeMutableBufferPointer { dst in
-                memcpy(dst.baseAddress! + padLength, src.baseAddress!, audioCount * MemoryLayout<Float>.size)
+                _ = memcpy(dst.baseAddress! + padLength, src.baseAddress!, audioCount * MemoryLayout<Float>.size)
             }
         }
 
@@ -358,7 +358,7 @@ public final class NeMoMelSpectrogram {
         // Copy frame to real input and clear imaginary
         frame.withUnsafeBufferPointer { src in
             realIn.withUnsafeMutableBufferPointer { dst in
-                memcpy(dst.baseAddress!, src.baseAddress!, nFFT * MemoryLayout<Float>.size)
+                _ = memcpy(dst.baseAddress!, src.baseAddress!, nFFT * MemoryLayout<Float>.size)
             }
         }
         vDSP_vclr(&imagIn, 1, vDSP_Length(nFFT))

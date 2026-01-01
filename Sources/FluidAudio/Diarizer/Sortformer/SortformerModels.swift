@@ -2,13 +2,6 @@
 import Foundation
 import OSLog
 
-// MARK: - Model Type Aliases
-
-public enum CoreMLSortformer {
-    public typealias PreprocessorModel = MLModel
-    public typealias MainModel = MLModel
-}
-
 // MARK: - Models Container
 
 /// Container for Sortformer CoreML models.
@@ -18,18 +11,11 @@ public enum CoreMLSortformer {
 /// - PreEncoder: Mel features + State → Concatenated embeddings
 /// - Head: Concatenated embeddings → Predictions + Chunk embeddings
 public struct SortformerModels: Sendable {
-
-    /// Preprocessor model for mel spectrogram extraction
-    public let preprocessorModel: CoreMLSortformer.PreprocessorModel
-
     /// Main Sortformer model for diarization (combined pipeline, deprecated)
-    public let mainModel: CoreMLSortformer.MainModel?
+    public let mainModel: MLModel
 
     /// Time taken to compile/load models
     public let compilationDuration: TimeInterval
-
-    /// Whether to use separate PreEncoder + Head models (recommended)
-    public let useSeparateModels: Bool
     
     /// Cached buffers
     private let memoryOptimizer: ANEMemoryOptimizer
@@ -42,13 +28,10 @@ public struct SortformerModels: Sendable {
     
     public init(
         config: SortformerConfig,
-        preprocessor: MLModel,
         main: MLModel,
         compilationDuration: TimeInterval = 0
     ) throws {
-        self.preprocessorModel = preprocessor
         self.mainModel = main
-        self.useSeparateModels = false
         self.compilationDuration = compilationDuration
         
         self.memoryOptimizer = .init()
@@ -76,7 +59,6 @@ extension SortformerModels {
     /// - Returns: Loaded SortformerModels
     public static func load(
         config: SortformerConfig,
-        preprocessorPath: URL,
         mainModelPath: URL,
         configuration: MLModelConfiguration? = nil
     ) async throws -> SortformerModels {
@@ -85,17 +67,8 @@ extension SortformerModels {
         let startTime = Date()
 
         // Compile mlpackage to mlmodelc first
-        logger.info("Compiling preprocessor model...")
-        let compiledPreprocessorURL = try await MLModel.compileModel(at: preprocessorPath)
         logger.info("Compiling main model...")
         let compiledMainModelURL = try await MLModel.compileModel(at: mainModelPath)
-
-        // Load preprocessor
-        let preprocessorConfig = MLModelConfiguration()
-        preprocessorConfig.computeUnits = .cpuOnly
-
-        let preprocessor = try MLModel(contentsOf: compiledPreprocessorURL, configuration: preprocessorConfig)
-        logger.info("Loaded preprocessor model")
 
         // Load main model - .all lets CoreML pick optimal compute units
         let mainConfig = MLModelConfiguration()
@@ -108,7 +81,6 @@ extension SortformerModels {
 
         return try SortformerModels(
             config: config,
-            preprocessor: preprocessor,
             main: mainModel,
             compilationDuration: duration
         )
@@ -151,8 +123,7 @@ extension SortformerModels {
         
         // Download models if needed
         let modelNames = [
-            ModelNames.Sortformer.preprocessorFile,
-            ModelNames.Sortformer.unifiedFile,
+            ModelNames.Sortformer.sortformerFile,
         ]
         
         let models = try await DownloadUtils.loadModels(
@@ -162,8 +133,7 @@ extension SortformerModels {
             computeUnits: computeUnits
         )
         
-        guard let preprocessor = models[ModelNames.Sortformer.preprocessorFile],
-              let sortformer = models[ModelNames.Sortformer.unifiedFile]
+        guard let sortformer = models[ModelNames.Sortformer.sortformerFile]
         else {
             throw SortformerError.modelLoadFailed("Failed to load Sortformer models from HuggingFace")
         }
@@ -173,77 +143,9 @@ extension SortformerModels {
         
         return try SortformerModels(
             config: config,
-            preprocessor: preprocessor,
             main: sortformer,
             compilationDuration: duration
         )
-    }
-}
-
-// MARK: - Preprocessor Inference
-
-extension SortformerModels {
-
-    /// Run preprocessor to extract mel features from audio.
-    ///
-    /// - Parameters:
-    ///   - audioSamples: Audio samples (16kHz mono)
-    ///   - config: Sortformer configuration
-    /// - Returns: Mel features [1, 128, T] flattened and feature length
-    public func runPreprocessor(
-        audioSamples: [Float],
-        config: SortformerConfig
-    ) throws -> (features: [Float], featureLength: Int) {
-
-        let expectedSamples = config.preprocessorAudioSamples
-
-        // Create input array with padding if needed
-        var paddedAudio = audioSamples
-        if paddedAudio.count < expectedSamples {
-            paddedAudio.append(contentsOf: [Float](repeating: 0.0, count: expectedSamples - paddedAudio.count))
-        }
-
-        // Create MLMultiArray for audio input
-        let audioArray = try MLMultiArray(shape: [1, NSNumber(value: expectedSamples)], dataType: .float32)
-        for i in 0..<expectedSamples {
-            audioArray[i] = NSNumber(value: paddedAudio[i])
-        }
-
-        // Create length input
-        let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
-        lengthArray[0] = NSNumber(value: Int32(expectedSamples))
-
-        // Run inference
-        let inputFeatures = try MLDictionaryFeatureProvider(dictionary: [
-            "audio_signal": MLFeatureValue(multiArray: audioArray),
-            "length": MLFeatureValue(multiArray: lengthArray),
-        ])
-
-        let output = try preprocessorModel.prediction(from: inputFeatures)
-
-        // Extract features
-        guard let featuresArray = output.featureValue(for: "features")?.multiArrayValue,
-            let featureLengthArray = output.featureValue(for: "feature_lengths")?.multiArrayValue
-        else {
-            throw SortformerError.preprocessorFailed("Missing output features")
-        }
-
-        let featureLength = featureLengthArray[0].intValue
-
-        // Convert to flat array [1, 128, T] -> [T * 128] row-major
-        var features: [Float] = []
-        let shape = featuresArray.shape.map { $0.intValue }
-        let melBins = shape[1]
-        let timeSteps = shape[2]
-
-        for t in 0..<timeSteps {
-            for m in 0..<melBins {
-                let idx = m * timeSteps + t
-                features.append(featuresArray[idx].floatValue)
-            }
-        }
-
-        return (features, featureLength)
     }
 }
 
@@ -260,7 +162,7 @@ extension SortformerModels {
         public let chunkEmbeddings: [Float]
 
         /// Actual chunk embedding length
-        public let chunkEmbeddingLength: Int
+        public let chunkLength: Int
     }
 
     /// Run main Sortformer model.
@@ -283,16 +185,6 @@ extension SortformerModels {
         fifoLength: Int,
         config: SortformerConfig
     ) throws -> MainModelOutput {
-        guard let mainModel = mainModel else {
-            throw SortformerError.inferenceFailed("Combined model not loaded")
-        }
-
-        let chunkFrames = config.chunkMelFrames
-        let spkcacheLen = config.spkcacheLen
-        let fifoLen = config.fifoLen
-        let fcDModel = config.fcDModel
-        let melFeatures = config.melFeatures
-
         // Copy chunk features
         memoryOptimizer.optimizedCopy(
             from: chunk,
@@ -346,7 +238,7 @@ extension SortformerModels {
         return MainModelOutput(
             predictions: predictions,
             chunkEmbeddings: chunkEmbeddings,
-            chunkEmbeddingLength: Int(chunkEmbeddingsLength)
+            chunkLength: Int(chunkEmbeddingsLength)
         )
     }
 }

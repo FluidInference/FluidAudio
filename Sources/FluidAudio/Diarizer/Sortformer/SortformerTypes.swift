@@ -37,14 +37,8 @@ public struct SortformerStreamingState: Sendable {
     /// Count of silence frames observed
     public var silenceFrameCount: Int
 
-    /// Count of chunks processed (for simple state update)
-    public var chunkCount: Int
-
     /// Initialize empty streaming state
     public init(config: SortformerConfig) {
-        let fcDModel = config.fcDModel
-
-        // Start with empty caches (synchronous mode)
         self.spkcache = []
         self.spkcachePreds = nil
         self.spkcacheLength = 0
@@ -52,10 +46,23 @@ public struct SortformerStreamingState: Sendable {
         self.fifo = []
         self.fifoPreds = nil
         self.fifoLength = 0
+        
+        self.fifo.reserveCapacity((config.fifoLen + config.chunkLen) * config.fcDModel)
+        self.spkcache.reserveCapacity((config.spkcacheLen + config.spkcacheUpdatePeriod) * config.fcDModel)
 
-        self.meanSilenceEmbedding = [Float](repeating: 0.0, count: fcDModel)
+        self.meanSilenceEmbedding = [Float](repeating: 0.0, count: config.fcDModel)
         self.silenceFrameCount = 0
-        self.chunkCount = 0
+    }
+    
+    public mutating func cleanup() {
+        self.fifo.removeAll(keepingCapacity: false)
+        self.spkcache.removeAll(keepingCapacity: false)
+        self.fifoPreds = nil
+        self.spkcachePreds = nil
+        self.spkcacheLength = 0
+        self.fifoLength = 0
+        self.meanSilenceEmbedding.removeAll(keepingCapacity: false)
+        self.silenceFrameCount = 0
     }
 }
 
@@ -70,19 +77,17 @@ public struct SortformerStreamingFeatureProvider: Sendable {
     
     private var startFeat: Int
     private var endFeat: Int
-    private var chunkIndex: Int
     
     public init(config: SortformerConfig, audio: [Float]) {
         self.config = config
         self.startFeat = 0
         self.endFeat = 0
-        self.chunkIndex = 0
         (self.featSeq, self.featLength, _) = NeMoMelSpectrogram().computeFlatTransposed(audio: audio)
         self.numChunks = (self.featLength - 1) / (config.chunkLen * config.subsamplingFactor) + 1 // ceiling
         self.featSeqLength = featSeq.count / config.melFeatures
     }
     
-    public mutating func next() -> (chunkIndex: Int, chunkFeatures: [Float], chunkLength: Int, leftOffset: Int, rightOffset: Int)? {
+    public mutating func next() -> (chunkFeatures: [Float], chunkLength: Int, leftOffset: Int, rightOffset: Int)? {
         guard endFeat < featLength else {
             return nil
         }
@@ -91,16 +96,16 @@ public struct SortformerStreamingFeatureProvider: Sendable {
         endFeat = min(startFeat + config.chunkLen * config.subsamplingFactor, featLength)
         let rightOffset = min(config.chunkRightContext * config.subsamplingFactor, featLength - endFeat)
         
-        let chunkStartIndex = (startFeat - leftOffset) * config.melFeatures
-        let chunkEndIndex = (endFeat + rightOffset) * config.melFeatures
+        let chunkStartFrame = startFeat - leftOffset
+        let chunkEndFrame = endFeat + rightOffset
+        let chunkStartIndex = chunkStartFrame * config.melFeatures
+        let chunkEndIndex = chunkEndFrame * config.melFeatures
         let chunkFeatures = Array(featSeq[chunkStartIndex..<chunkEndIndex])
-        var chunkLength = featSeqLength - startFeat + leftOffset
-        chunkLength = max(chunkLength, 0)
-        chunkLength = min(chunkLength, (endFeat + rightOffset) - (startFeat - leftOffset))
+        let chunkLength = max(min(featSeqLength - startFeat + leftOffset, chunkEndFrame - chunkStartFrame), 0)
         
         startFeat = endFeat
-        defer { chunkIndex += 1 }
-        return (chunkIndex, chunkFeatures, chunkLength, leftOffset, rightOffset)
+        
+        return (chunkFeatures, chunkLength, leftOffset, rightOffset)
     }
 }
 

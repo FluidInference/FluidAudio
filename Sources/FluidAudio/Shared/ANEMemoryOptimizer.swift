@@ -61,6 +61,18 @@ public final class ANEMemoryOptimizer: @unchecked Sendable {
         bufferPool[key] = buffer
         return buffer
     }
+    
+    /// Initialize a reusable buffer in the pool
+    public func initializePooledBuffer(
+        key: String,
+        shape: [NSNumber],
+        dataType: MLMultiArrayDataType
+    ) throws {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        // Create new buffer
+        bufferPool[key] = try createAlignedArray(shape: shape, dataType: dataType)
+    }
 
     /// Clear buffer pool to free memory
     public func clearBufferPool() {

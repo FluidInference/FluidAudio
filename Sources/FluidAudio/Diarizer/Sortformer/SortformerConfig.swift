@@ -45,6 +45,11 @@ public struct SortformerConfig: Sendable {
 
     /// Silence frames per speaker in compressed cache
     public var spkcacheSilFramesPerSpk: Int = 3
+    
+    // MARK: - Debug
+
+    /// Enable debug logging
+    public var debugMode: Bool = false
 
     // MARK: - Audio Parameters
 
@@ -83,18 +88,6 @@ public struct SortformerConfig: Sendable {
     /// Maximum index placeholder for disabled frames in spkcache compression
     public let maxIndex: Int = 99999
 
-    // MARK: - Debug
-
-    /// Enable debug logging
-    public var debugMode: Bool = false
-
-    /// Use simple state update (like Python test) instead of full NeMo logic
-    public var useSimpleStateUpdate: Bool = false
-
-    /// Use native Swift mel spectrogram instead of CoreML preprocessor
-    /// This matches NeMo's full-audio preprocessing and produces exact frame counts
-    public var useNativePreprocessing: Bool = false
-
     // MARK: - Computed Properties
 
     /// Total chunk frames for CoreML model input (includes left/right context)
@@ -104,15 +97,11 @@ public struct SortformerConfig: Sendable {
         (chunkLen + chunkLeftContext + chunkRightContext) * subsamplingFactor
     }
 
-    /// Override for preprocessor audio samples (NeMo adds internal padding)
-    /// Set to nil to use the calculated value, or provide explicit count
-    public var preprocessorAudioSamplesOverride: Int?
-
     /// Audio samples needed for one preprocessor chunk
     /// NeMo adds 16 samples padding on each side, so naive formula doesn't work exactly.
     /// Use preprocessorAudioSamplesOverride for accurate values determined empirically.
     public var preprocessorAudioSamples: Int {
-        preprocessorAudioSamplesOverride ?? ((chunkMelFrames - 1) * melStride + melWindow)
+        ((chunkMelFrames - 1) * melStride + melWindow)
     }
 
     /// Audio hop between preprocessor chunks
@@ -120,13 +109,10 @@ public struct SortformerConfig: Sendable {
         chunkLen * subsamplingFactor * melStride
     }
 
-    /// Override for overlap frames (set explicitly to match Python's empirical value)
-    public var overlapFramesOverride: Int?
-
     /// Overlap frames in mel features
     /// Python test uses OVERLAP_FRAMES = 3 empirically determined, not the formula
     public var overlapFrames: Int {
-        overlapFramesOverride ?? ((melWindow - melStride) / melStride + 1)
+        ((melWindow - melStride) / melStride + 1)
     }
 
     /// Core frames per chunk (without context)
@@ -146,7 +132,7 @@ public struct SortformerConfig: Sendable {
     /// Low-latency configuration matching the Python test that achieves ~74% DER
     /// Use with models from coreml_models/ (not coreml_models_nvidia/)
     public static var lowLatency: SortformerConfig {
-        var config = SortformerConfig(
+        let config = SortformerConfig(
             chunkLen: 6,
             chunkLeftContext: 1,
             chunkRightContext: 1,
@@ -155,14 +141,13 @@ public struct SortformerConfig: Sendable {
             spkcacheUpdatePeriod: 30
         )
         // For low-latency: (6 + 1 + 1) * 8 = 64 mel frames = 10480 samples
-        config.preprocessorAudioSamplesOverride = 10480
         return config
     }
 
     /// NVIDIA's 1.04s latency configuration (20.57% DER on AMI SDM)
     /// Use with models from coreml_models_nvidia/
     public static var nvidia: SortformerConfig {
-        var config = SortformerConfig(
+        return SortformerConfig(
             chunkLen: 6,
             chunkLeftContext: 1,
             chunkRightContext: 7,
@@ -170,19 +155,12 @@ public struct SortformerConfig: Sendable {
             spkcacheLen: 188,
             spkcacheUpdatePeriod: 144
         )
-        // NeMo needs 17920 samples to produce exactly 112 mel frames
-        // (not 18160 from naive formula due to internal padding)
-        config.preprocessorAudioSamplesOverride = 17920
-        // Note: Swift produces 105492 feature frames vs Python's 104935 due to
-        // different preprocessing approaches (chunked CoreML vs full-audio NeMo).
-        // This causes frame count differences in DER calculation.
-        return config
     }
 
     /// Configuration matching Gradient Descent's Streaming-Sortformer-Conversion models
     /// Use with models from SGD2718/Streaming-Sortformer-Conversion
     public static var gradientDescent: SortformerConfig {
-        var config = SortformerConfig(
+        return SortformerConfig(
             chunkLen: 6,
             chunkLeftContext: 1,
             chunkRightContext: 7,
@@ -190,18 +168,15 @@ public struct SortformerConfig: Sendable {
             spkcacheLen: 188,
             spkcacheUpdatePeriod: 31
         )
-        // Use native preprocessing to match NeMo's full-audio mel spectrogram
-        config.useNativePreprocessing = true
-        return config
     }
 
     public init(
         chunkLen: Int = 6,
         chunkLeftContext: Int = 1,
-        chunkRightContext: Int = 1,
+        chunkRightContext: Int = 7,
         fifoLen: Int = 40,
-        spkcacheLen: Int = 120,
-        spkcacheUpdatePeriod: Int = 30,
+        spkcacheLen: Int = 188,
+        spkcacheUpdatePeriod: Int = 31,
         silenceThreshold: Float = 0.2,
         debugMode: Bool = false
     ) {
