@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import OSLog
 
@@ -121,36 +121,49 @@ public struct StreamingAudioSourceFactory {
         }
 
         var totalSamples = 0
-        var inputComplete = false
-        var readError: Error?
+
+        // Use a class wrapper to satisfy @Sendable requirement (closure runs synchronously)
+        final class InputState: @unchecked Sendable {
+            var inputComplete = false
+            var readError: Error?
+            let inputBuffer: AVAudioPCMBuffer
+            let audioFile: AVAudioFile
+            let inputCapacity: AVAudioFrameCount
+            init(inputBuffer: AVAudioPCMBuffer, audioFile: AVAudioFile, inputCapacity: AVAudioFrameCount) {
+                self.inputBuffer = inputBuffer
+                self.audioFile = audioFile
+                self.inputCapacity = inputCapacity
+            }
+        }
+        let state = InputState(inputBuffer: inputBuffer, audioFile: audioFile, inputCapacity: inputCapacity)
 
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if inputComplete {
+            if state.inputComplete {
                 status.pointee = .endOfStream
                 return nil
             }
 
             do {
-                let remainingFrames = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
-                let framesToRead = min(inputCapacity, remainingFrames)
+                let remainingFrames = AVAudioFrameCount(state.audioFile.length - state.audioFile.framePosition)
+                let framesToRead = min(state.inputCapacity, remainingFrames)
                 if framesToRead > 0 {
-                    try audioFile.read(into: inputBuffer, frameCount: framesToRead)
+                    try state.audioFile.read(into: state.inputBuffer, frameCount: framesToRead)
                 } else {
-                    inputBuffer.frameLength = 0
+                    state.inputBuffer.frameLength = 0
                 }
             } catch {
-                readError = error
-                inputBuffer.frameLength = 0
+                state.readError = error
+                state.inputBuffer.frameLength = 0
             }
 
-            guard inputBuffer.frameLength > 0 else {
-                inputComplete = true
+            guard state.inputBuffer.frameLength > 0 else {
+                state.inputComplete = true
                 status.pointee = .endOfStream
                 return nil
             }
 
             status.pointee = .haveData
-            return inputBuffer
+            return state.inputBuffer
         }
 
         while true {
@@ -168,7 +181,7 @@ public struct StreamingAudioSourceFactory {
                 )
             }
 
-            if let readError {
+            if let readError = state.readError {
                 throw StreamingAudioError.processingFailed(
                     "Failed while reading audio: \(readError.localizedDescription)"
                 )

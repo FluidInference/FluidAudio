@@ -7,11 +7,12 @@ import Foundation
 public struct VocabularyTrie: Sendable {
 
     /// A node in the vocabulary trie (class type for reference semantics in cursors)
+    /// Note: Properties are mutated only during trie construction, then immutable.
     public final class Node: Sendable {
-        public var children: [Int: Node] = [:]
-        public var isTerminal: Bool = false
-        public var term: CustomVocabularyTerm?
-        public var depth: Int = 0
+        public nonisolated(unsafe) var children: [Int: Node] = [:]
+        public nonisolated(unsafe) var isTerminal: Bool = false
+        public nonisolated(unsafe) var term: CustomVocabularyTerm?
+        public nonisolated(unsafe) var depth: Int = 0
 
         public init(depth: Int = 0) {
             self.depth = depth
