@@ -1,8 +1,9 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Accelerate
 import CoreMedia
 import Foundation
 import OSLog
+import os
 
 /// Converts audio buffers to the format required by ASR (16kHz, mono, Float32).
 ///
@@ -150,10 +151,16 @@ final public class AudioConverter {
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
         // Provide input once, then signal end-of-stream
-        var provided = false
+        let provided = OSAllocatedUnfairLock(initialState: false)
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !provided {
-                provided = true
+            let wasProvided = provided.withLock { state -> Bool in
+                if state {
+                    return true
+                }
+                state = true
+                return false
+            }
+            if !wasProvided {
                 status.pointee = .haveData
                 return buffer
             } else {
