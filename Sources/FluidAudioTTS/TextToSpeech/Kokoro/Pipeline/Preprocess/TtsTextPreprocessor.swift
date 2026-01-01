@@ -41,6 +41,11 @@ enum TtsTextPreprocessor {
     static func preprocessDetailed(_ text: String) -> TtsPreprocessingResult {
         var processed = text
 
+        // 0. Process SSML tags first (before all other preprocessing)
+        let ssmlResult = SSMLProcessor.process(processed)
+        processed = ssmlResult.text
+        let ssmlOverrides = ssmlResult.phoneticOverrides
+
         // 1. Remove commas from numbers (1,000 → 1000)
         processed = removeCommasFromNumbers(processed)
 
@@ -69,7 +74,49 @@ enum TtsTextPreprocessor {
         let phoneticResult = processPhoneticReplacement(processed)
         processed = phoneticResult.text
 
-        return TtsPreprocessingResult(text: processed, phoneticOverrides: phoneticResult.overrides)
+        // Merge SSML overrides with markdown-style overrides
+        // SSML overrides come first (processed first), then markdown-style
+        let mergedOverrides = mergePhoneticOverrides(
+            ssmlOverrides: ssmlOverrides,
+            markdownOverrides: phoneticResult.overrides
+        )
+
+        return TtsPreprocessingResult(text: processed, phoneticOverrides: mergedOverrides)
+    }
+
+    /// Merge phonetic overrides from SSML and markdown sources
+    /// Both are already sorted by word index; merge them maintaining sort order
+    private static func mergePhoneticOverrides(
+        ssmlOverrides: [TtsPhoneticOverride],
+        markdownOverrides: [TtsPhoneticOverride]
+    ) -> [TtsPhoneticOverride] {
+        // If either is empty, return the other
+        if ssmlOverrides.isEmpty { return markdownOverrides }
+        if markdownOverrides.isEmpty { return ssmlOverrides }
+
+        // Merge maintaining sort order by word index
+        var merged: [TtsPhoneticOverride] = []
+        var ssmlIndex = 0
+        var markdownIndex = 0
+
+        while ssmlIndex < ssmlOverrides.count && markdownIndex < markdownOverrides.count {
+            let ssml = ssmlOverrides[ssmlIndex]
+            let markdown = markdownOverrides[markdownIndex]
+
+            if ssml.wordIndex <= markdown.wordIndex {
+                merged.append(ssml)
+                ssmlIndex += 1
+            } else {
+                merged.append(markdown)
+                markdownIndex += 1
+            }
+        }
+
+        // Append remaining
+        merged.append(contentsOf: ssmlOverrides[ssmlIndex...])
+        merged.append(contentsOf: markdownOverrides[markdownIndex...])
+
+        return merged
     }
 
     // MARK: - Number Processing
@@ -129,19 +176,14 @@ enum TtsTextPreprocessor {
             // Convert integer part to words
             let integerWords: String
             if let integerValue = Int(integerPart) {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .spellOut
-                integerWords = formatter.string(from: NSNumber(value: integerValue)) ?? integerPart
+                integerWords =
+                    FluidAudioTTS.spellOutFormatter.string(from: NSNumber(value: integerValue)) ?? integerPart
             } else {
                 integerWords = integerPart
             }
 
             // Convert each decimal digit to individual words
-            let digitWords = [
-                "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
-                "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
-            ]
-            let decimalWords = decimalPart.compactMap { digitWords[String($0)] }.joined(separator: " ")
+            let decimalWords = decimalPart.compactMap { FluidAudioTTS.digitToWord($0) }.joined(separator: " ")
 
             let replacement = "\(integerWords) point \(decimalWords)"
 
@@ -404,7 +446,7 @@ enum TtsTextPreprocessor {
 
         var accumulator = WordAccumulator(
             expectedScalarCount: text.unicodeScalars.count,
-            apostrophes: phoneticApostropheCharacters
+            apostrophes: FluidAudioTTS.phoneticApostropheCharacters
         )
 
         let end = text.endIndex
@@ -576,15 +618,7 @@ enum TtsTextPreprocessor {
         }
 
         private static func isWordLike(_ character: Character, apostrophes: Set<Character>) -> Bool {
-            if character.isLetter || character.isNumber || apostrophes.contains(character) {
-                return true
-            }
-
-            if isEmoji(character) {
-                return true
-            }
-
-            return false
+            FluidAudioTTS.isWordCharacter(character, apostrophes: apostrophes)
         }
 
         private static func isCombiningMark(_ character: Character) -> Bool {
@@ -595,12 +629,6 @@ enum TtsTextPreprocessor {
                 default:
                     return false
                 }
-            }
-        }
-
-        private static func isEmoji(_ character: Character) -> Bool {
-            character.unicodeScalars.contains { scalar in
-                scalar.properties.isEmojiPresentation || scalar.properties.isEmoji
             }
         }
     }
@@ -615,8 +643,6 @@ enum TtsTextPreprocessor {
             "\\[[^\\[\\]]{1,\(aliasWordMaxLength)}\\]\\(\\s*([^\\)]{1,\(aliasReplacementMaxLength)}?)\\s*\\)"
         return try! NSRegularExpression(pattern: pattern, options: [])
     }()
-
-    private static let phoneticApostropheCharacters: Set<Character> = ["'", "’", "ʼ", "‛", "‵", "′"]
 
     private static let currencies: [Character: (bill: String, cent: String)] = [
         "$": ("dollar", "cent"),

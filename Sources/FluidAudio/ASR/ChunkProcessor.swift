@@ -15,26 +15,31 @@ struct ChunkProcessor {
     }
 
     // Stateless chunking aligned with CoreML reference:
-    // - process ~14.96s of audio per window (239,360 samples) to stay under encoder limit
-    // - 2.0s overlap (32,000 samples) to give the decoder slack when merging windows
+    // - process ~14.96s of audio per window (frame-aligned) to stay under encoder limit
+    // - 2.0s overlap (frame-aligned) to give the decoder slack when merging windows
     private let sampleRate: Int = 16000
     private let overlapSeconds: Double = 2.0
 
     private var maxModelSamples: Int { 240_000 }  // CoreML encoder capacity (15 seconds)
     private var chunkSamples: Int {
         // Match CoreML reference chunk length (239,840 samples ≈ 14.99s)
-        max(maxModelSamples - ASRConstants.melHopSize, ASRConstants.samplesPerEncoderFrame)
+        let raw = max(maxModelSamples - ASRConstants.melHopSize, ASRConstants.samplesPerEncoderFrame)
+        return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
     private var overlapSamples: Int {
         let requested = Int(overlapSeconds * Double(sampleRate))
-        return min(requested, chunkSamples / 2)
+        let capped = min(requested, chunkSamples / 2)
+        return capped / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
     private var strideSamples: Int {
-        max(chunkSamples - overlapSamples, ASRConstants.samplesPerEncoderFrame)
+        let raw = max(chunkSamples - overlapSamples, ASRConstants.samplesPerEncoderFrame)
+        return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
 
     func process(
-        using manager: AsrManager, startTime: Date
+        using manager: AsrManager,
+        startTime: Date,
+        progressHandler: ((Double) async -> Void)? = nil
     ) async throws -> ASRResult {
         var chunkOutputs: [[TokenWindow]] = []
 
@@ -78,6 +83,12 @@ struct ChunkProcessor {
 
             if isLastChunk {
                 break
+            }
+
+            if let progressHandler {
+                let progress = min(
+                    1.0, max(0.0, Double(chunkEnd) / Double(audioSamples.count)))
+                await progressHandler(progress)
             }
 
             chunkStart += strideSamples

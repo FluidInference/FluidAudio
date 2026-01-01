@@ -1,0 +1,176 @@
+name: Parakeet EOU Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  parakeet-eou-benchmark:
+    name: Parakeet EOU Benchmark (320ms)
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Application Support/FluidAudio/Models/parakeet-eou-streaming
+            ~/Library/Application Support/FluidAudio/Datasets/LibriSpeech
+            ~/Library/Caches/Homebrew
+            /usr/local/Cellar/ffmpeg
+            /opt/homebrew/Cellar/ffmpeg
+          key: ${{ runner.os }}-parakeet-eou-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/Frameworks/**', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
+
+      - name: Install ffmpeg
+        run: |
+          brew install ffmpeg || echo "ffmpeg may already be installed"
+          ffmpeg -version || echo "ffmpeg not available"
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Run Parakeet EOU Benchmark
+        id: benchmark
+        run: |
+          MAX_FILES="100"
+          CHUNK_SIZE="320"
+          BENCHMARK_START=$(date +%s)
+
+          set -o pipefail
+
+          echo "========================================="
+          echo "Running Parakeet EOU benchmark"
+          echo "Chunk size: ${CHUNK_SIZE}ms"
+          echo "Max files: ${MAX_FILES}"
+          echo "========================================="
+
+          if swift run -c release fluidaudio parakeet-eou \
+            --benchmark --chunk-size "$CHUNK_SIZE" --max-files "$MAX_FILES" \
+            --use-cache --output parakeet_eou_results.json > benchmark_log.txt 2>&1; then
+            echo "✅ Parakeet EOU benchmark completed successfully"
+            BENCHMARK_STATUS="SUCCESS"
+          else
+            echo "❌ Parakeet EOU benchmark FAILED with exit code $?"
+            echo "Full output:"
+            cat benchmark_log.txt
+            BENCHMARK_STATUS="FAILED"
+          fi
+
+          # Extract metrics
+          if [ -f parakeet_eou_results.json ]; then
+            WER_AVG=$(jq -r '.summary.averageWER * 100' parakeet_eou_results.json 2>/dev/null)
+            WER_MED=$(jq -r '.summary.medianWER * 100' parakeet_eou_results.json 2>/dev/null)
+            RTFx=$(jq -r '.summary.medianRTFx' parakeet_eou_results.json 2>/dev/null)
+            TOTAL_AUDIO=$(jq -r '.summary.totalAudioDuration' parakeet_eou_results.json 2>/dev/null)
+            TOTAL_TIME=$(jq -r '.summary.totalProcessingTime' parakeet_eou_results.json 2>/dev/null)
+            FILES_PROCESSED=$(jq -r '.summary.filesProcessed' parakeet_eou_results.json 2>/dev/null)
+            EOU_COUNT=$(jq -r '.summary.totalEouDetections // 0' parakeet_eou_results.json 2>/dev/null)
+            AVG_CHUNK_TIME=$(jq -r '.summary.streaming.avgChunkProcessingTime // "N/A"' parakeet_eou_results.json 2>/dev/null)
+            MAX_CHUNK_TIME=$(jq -r '.summary.streaming.maxChunkProcessingTime // "N/A"' parakeet_eou_results.json 2>/dev/null)
+
+            [ "$WER_AVG" != "null" ] && [ -n "$WER_AVG" ] && WER_AVG=$(printf "%.2f" "$WER_AVG") || WER_AVG="N/A"
+            [ "$WER_MED" != "null" ] && [ -n "$WER_MED" ] && WER_MED=$(printf "%.2f" "$WER_MED") || WER_MED="N/A"
+            [ "$RTFx" != "null" ] && [ -n "$RTFx" ] && RTFx=$(printf "%.2f" "$RTFx") || RTFx="N/A"
+            [ "$TOTAL_AUDIO" != "null" ] && [ -n "$TOTAL_AUDIO" ] && TOTAL_AUDIO=$(printf "%.1f" "$TOTAL_AUDIO") || TOTAL_AUDIO="N/A"
+            [ "$TOTAL_TIME" != "null" ] && [ -n "$TOTAL_TIME" ] && TOTAL_TIME=$(printf "%.1f" "$TOTAL_TIME") || TOTAL_TIME="N/A"
+            [ "$AVG_CHUNK_TIME" != "null" ] && [ -n "$AVG_CHUNK_TIME" ] && [ "$AVG_CHUNK_TIME" != "N/A" ] && AVG_CHUNK_TIME=$(printf "%.3f" "$AVG_CHUNK_TIME")
+            [ "$MAX_CHUNK_TIME" != "null" ] && [ -n "$MAX_CHUNK_TIME" ] && [ "$MAX_CHUNK_TIME" != "N/A" ] && MAX_CHUNK_TIME=$(printf "%.3f" "$MAX_CHUNK_TIME")
+          fi
+
+          EXECUTION_TIME=$(( ($(date +%s) - BENCHMARK_START) / 60 ))m$(( ($(date +%s) - BENCHMARK_START) % 60 ))s
+
+          echo "WER_AVG=${WER_AVG:-N/A}" >> $GITHUB_OUTPUT
+          echo "WER_MED=${WER_MED:-N/A}" >> $GITHUB_OUTPUT
+          echo "RTFx=${RTFx:-N/A}" >> $GITHUB_OUTPUT
+          echo "TOTAL_AUDIO=${TOTAL_AUDIO:-N/A}" >> $GITHUB_OUTPUT
+          echo "TOTAL_TIME=${TOTAL_TIME:-N/A}" >> $GITHUB_OUTPUT
+          echo "FILES_PROCESSED=${FILES_PROCESSED:-N/A}" >> $GITHUB_OUTPUT
+          echo "EOU_COUNT=${EOU_COUNT:-0}" >> $GITHUB_OUTPUT
+          echo "AVG_CHUNK_TIME=${AVG_CHUNK_TIME:-N/A}" >> $GITHUB_OUTPUT
+          echo "MAX_CHUNK_TIME=${MAX_CHUNK_TIME:-N/A}" >> $GITHUB_OUTPUT
+          echo "EXECUTION_TIME=$EXECUTION_TIME" >> $GITHUB_OUTPUT
+          echo "CHUNK_SIZE=$CHUNK_SIZE" >> $GITHUB_OUTPUT
+          echo "MAX_FILES=$MAX_FILES" >> $GITHUB_OUTPUT
+          echo "BENCHMARK_STATUS=$BENCHMARK_STATUS" >> $GITHUB_OUTPUT
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const benchmarkStatus = '${{ steps.benchmark.outputs.BENCHMARK_STATUS }}';
+            const statusEmoji = benchmarkStatus === 'SUCCESS' ? '✅' : '❌';
+            const statusText = benchmarkStatus === 'SUCCESS' ? 'Benchmark passed' : 'Benchmark failed (see logs)';
+
+            const body = `## Parakeet EOU Benchmark Results ${statusEmoji}
+
+            **Status:** ${statusText}
+            **Chunk Size:** ${{ steps.benchmark.outputs.CHUNK_SIZE }}ms
+            **Files Tested:** ${{ steps.benchmark.outputs.FILES_PROCESSED }}/${{ steps.benchmark.outputs.MAX_FILES }}
+
+            ### Performance Metrics
+            | Metric | Value | Description |
+            |--------|-------|-------------|
+            | WER (Avg) | ${{ steps.benchmark.outputs.WER_AVG }}% | Average Word Error Rate |
+            | WER (Med) | ${{ steps.benchmark.outputs.WER_MED }}% | Median Word Error Rate |
+            | RTFx | ${{ steps.benchmark.outputs.RTFx }}x | Real-time factor (higher = faster) |
+            | Total Audio | ${{ steps.benchmark.outputs.TOTAL_AUDIO }}s | Total audio duration processed |
+            | Total Time | ${{ steps.benchmark.outputs.TOTAL_TIME }}s | Total processing time |
+
+            ### Streaming Metrics
+            | Metric | Value | Description |
+            |--------|-------|-------------|
+            | Avg Chunk Time | ${{ steps.benchmark.outputs.AVG_CHUNK_TIME }}s | Average chunk processing time |
+            | Max Chunk Time | ${{ steps.benchmark.outputs.MAX_CHUNK_TIME }}s | Maximum chunk processing time |
+            | EOU Detections | ${{ steps.benchmark.outputs.EOU_COUNT }} | Total End-of-Utterance detections |
+
+            <sub>Test runtime: ${{ steps.benchmark.outputs.EXECUTION_TIME }} • ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true })} EST</sub>
+
+            <sub>**RTFx** = Real-Time Factor (higher is better) • Processing includes: Model inference, audio preprocessing, state management, and file I/O</sub>
+
+            <!-- fluidaudio-benchmark-parakeet-eou -->`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- fluidaudio-benchmark-parakeet-eou -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parakeet-eou-results
+          path: parakeet_eou_results.json

@@ -1,8 +1,9 @@
 import Foundation
+import MachTaskSelfWrapper
 import os
 
 /// Performance metrics for ASR processing
-public struct ASRPerformanceMetrics: Sendable {
+public struct ASRPerformanceMetrics: Codable, Sendable {
     public let preprocessorTime: TimeInterval
     public let encoderTime: TimeInterval
     public let decoderTime: TimeInterval
@@ -34,10 +35,10 @@ public actor PerformanceMonitor {
     private let signpostLogger = OSSignposter(subsystem: AppLogger.defaultSubsystem, category: "Performance")
 
     /// Track performance for a processing session
-    public func trackSession<T>(
+    public func trackSession<T: Sendable>(
         operation: String,
         audioLengthSeconds: Float,
-        block: () async throws -> T
+        block: @escaping () async throws -> T
     ) async throws -> (result: T, metrics: ASRPerformanceMetrics) {
         let sessionID = signpostLogger.makeSignpostID()
         let state = signpostLogger.beginInterval("ASR.Operation", id: sessionID)
@@ -76,9 +77,9 @@ public actor PerformanceMonitor {
     }
 
     /// Track a specific component's execution time
-    public func trackComponent<T>(
+    public func trackComponent<T: Sendable>(
         _ component: String,
-        block: () async throws -> T
+        block: @escaping () async throws -> T
     ) async throws -> (result: T, time: TimeInterval) {
         let componentID = signpostLogger.makeSignpostID()
         let state = signpostLogger.beginInterval("ASR.Component", id: componentID)
@@ -121,7 +122,7 @@ public actor PerformanceMonitor {
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
                 task_info(
-                    mach_task_self_,
+                    get_current_task_port(),
                     task_flavor_t(MACH_TASK_BASIC_INFO),
                     $0,
                     &count)
@@ -152,28 +153,3 @@ public struct AggregatedMetrics: Sendable {
         """
     }
 }
-
-/// Extension to AsrManager for performance tracking
-extension AsrManager {
-    /// Transcribe with performance metrics
-    public func transcribeWithMetrics(
-        _ audioSamples: [Float],
-        monitor: PerformanceMonitor? = nil
-    ) async throws -> (result: ASRResult, metrics: ASRPerformanceMetrics?) {
-        let audioLengthSeconds = Float(audioSamples.count) / Float(config.sampleRate)
-
-        if let monitor = monitor {
-            return try await monitor.trackSession(
-                operation: "Transcription",
-                audioLengthSeconds: audioLengthSeconds
-            ) {
-                try await self.transcribe(audioSamples)
-            }
-        } else {
-            let result = try await transcribe(audioSamples)
-            return (result, nil)
-        }
-    }
-}
-
-// Signpost extension removed - use built-in methods

@@ -67,7 +67,7 @@ public struct WordCorrection: Codable, Sendable, Equatable {
     }
 }
 
-public struct ASRResult: Sendable {
+public struct ASRResult: Codable, Sendable {
     public let text: String
     public let confidence: Float
     public let duration: TimeInterval
@@ -104,7 +104,7 @@ public struct ASRResult: Sendable {
     }
 }
 
-public struct TokenTiming: Sendable {
+public struct TokenTiming: Codable, Sendable {
     public let token: String
     public let tokenId: Int
     public let startTime: TimeInterval

@@ -1,5 +1,5 @@
 import Accelerate
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -8,7 +8,9 @@ public final class OfflineDiarizerManager {
     private let logger = AppLogger(category: "OfflineDiarizer")
     private let config: OfflineDiarizerConfig
 
-    private var models: OfflineDiarizerModels?
+    // CoreML models are not Sendable but are used read-only after initialization.
+    // We manage the safety ourselves by only writing during initialization.
+    nonisolated(unsafe) private var models: OfflineDiarizerModels?
 
     public init(config: OfflineDiarizerConfig = .default) {
         self.config = config
@@ -130,14 +132,19 @@ public final class OfflineDiarizerManager {
         let chunkStream = streamPair.stream
         let chunkContinuation = streamPair.continuation
 
-        let segmentationTask = Task(priority: .userInitiated) { () throws -> (SegmentationOutput, TimeInterval) in
+        // Capture models for concurrent tasks
+        let capturedModels = models
+        let capturedConfig = config
+
+        let segmentationTask = Task(priority: .userInitiated) {
+            [capturedModels, capturedConfig] () throws -> (SegmentationOutput, TimeInterval) in
             let processor = OfflineSegmentationProcessor()
             let start = Date()
             do {
                 let segmentation = try await processor.process(
                     audioSource: audioSource,
-                    segmentationModel: models.segmentationModel,
-                    config: config,
+                    segmentationModel: capturedModels.segmentationModel,
+                    config: capturedConfig,
                     chunkHandler: { chunk in
                         switch chunkContinuation.yield(chunk) {
                         case .enqueued, .dropped:
@@ -157,12 +164,13 @@ public final class OfflineDiarizerManager {
             }
         }
 
-        let embeddingTask = Task(priority: .userInitiated) { () throws -> ([TimedEmbedding], TimeInterval) in
+        let embeddingTask = Task(priority: .userInitiated) {
+            [capturedModels, capturedConfig] () throws -> ([TimedEmbedding], TimeInterval) in
             let extractor = OfflineEmbeddingExtractor(
-                fbankModel: models.fbankModel,
-                embeddingModel: models.embeddingModel,
-                pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
-                config: config
+                fbankModel: capturedModels.fbankModel,
+                embeddingModel: capturedModels.embeddingModel,
+                pldaTransform: PLDATransform(pldaRhoModel: capturedModels.pldaRhoModel, psi: capturedModels.pldaPsi),
+                config: capturedConfig
             )
             let start = Date()
             let embeddings = try await extractor.extractEmbeddings(
@@ -225,9 +233,26 @@ public final class OfflineDiarizerManager {
 
         let vbxOutput: VBxOutput
         if !trainingRho.isEmpty, !initialClusters.isEmpty {
-            vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refine(
+            let hasConstraints =
+                config.clustering.numSpeakers != nil
+                || config.clustering.minSpeakers != nil
+                || config.clustering.maxSpeakers != nil
+
+            let constraints: SpeakerCountConstraints? =
+                hasConstraints
+                ? SpeakerCountConstraints.resolve(
+                    numEmbeddings: trainingEmbeddings.count,
+                    numSpeakers: config.clustering.numSpeakers,
+                    minSpeakers: config.clustering.minSpeakers,
+                    maxSpeakers: config.clustering.maxSpeakers
+                )
+                : nil
+
+            vbxOutput = VBxClustering(config: config, pldaTransform: pldaTransform).refineWithConstraints(
                 rhoFeatures: trainingRho,
-                initialClusters: initialClusters
+                trainingEmbeddings: trainingEmbeddings,
+                initialClusters: initialClusters,
+                constraints: constraints
             )
         } else {
             vbxOutput = VBxOutput(
@@ -320,7 +345,7 @@ public final class OfflineDiarizerManager {
     private func prewarmModelsIfNeeded(_ models: OfflineDiarizerModels) async {
         do {
             let start = Date()
-            try prewarmSegmentationModel(models.segmentationModel)
+            try await prewarmSegmentationModel(models.segmentationModel)
             let elapsed = Date().timeIntervalSince(start)
             let elapsedString = String(format: "%.3f", elapsed)
             logger.debug("Segmentation model prewarmed in \(elapsedString)s")
@@ -339,7 +364,17 @@ public final class OfflineDiarizerManager {
         }
     }
 
-    private func prewarmSegmentationModel(_ model: MLModel) throws {
+    /// Prewarm the segmentation model using Core ML's async prediction API.
+    ///
+    /// The original implementation invoked `MLModel.prediction(from:options:)` synchronously,
+    /// which blocks the current thread while waiting for compute units on the Neural Engine.
+    /// When the ANE is contended (for example after model compilation), the synchronous call
+    /// can hang indefinitely because there is no way to specify a timeout. iOS 17 introduces
+    /// an asynchronous prediction API that integrates with Swift concurrency. By marking
+    /// this method `async throws` and awaiting the prediction, we let the task yield while
+    /// Core ML schedules the work, avoid deadlocks, and allow cancellation if the caller
+    /// decides to abort prewarming.
+    private func prewarmSegmentationModel(_ model: MLModel) async throws {
         let shape: [NSNumber] = [
             1,
             1,
@@ -354,7 +389,7 @@ public final class OfflineDiarizerManager {
         )
         let options = MLPredictionOptions()
         array.prefetchToNeuralEngine()
-        _ = try model.prediction(from: provider, options: options)
+        _ = try await model.prediction(from: provider, options: options)
     }
 
     private func prewarmEmbeddingStack(models: OfflineDiarizerModels) async throws {

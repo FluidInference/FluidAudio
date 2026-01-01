@@ -7,13 +7,13 @@ on:
 
 jobs:
   test-tts:
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       FLUIDAUDIO_ENABLE_TTS: "1"
     
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Build FluidAudio (with TTS)
       run: |
         swift build -c release

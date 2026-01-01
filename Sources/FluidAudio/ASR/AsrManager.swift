@@ -1,5 +1,5 @@
 import AVFoundation
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -21,6 +21,8 @@ public final class AsrManager {
 
     /// The AsrModels instance if initialized with models
     private var asrModels: AsrModels?
+
+    internal let progressEmitter = ProgressEmitter()
 
     /// Token duration optimization model
 
@@ -61,6 +63,19 @@ public final class AsrManager {
                     ], .float32
                 ),
             ])
+        }
+
+        let emitter = progressEmitter
+        Task {
+            await emitter.ensureSession()
+        }
+    }
+
+    /// Returns the current transcription progress stream for offline long audio (>\(240_000) samples).
+    /// Only one session is supported at a time.
+    public var transcriptionProgressStream: AsyncThrowingStream<Double, Error> {
+        get async {
+            await progressEmitter.currentStream()
         }
     }
 
@@ -308,26 +323,43 @@ public final class AsrManager {
     /// - Parameters:
     ///   - audioSamples: Array of 16-bit audio samples at 16kHz
     ///   - source: The audio source type (microphone or system audio)
+    /// - Note: Progress stream is emitted only when `audioSamples.count > 240_000` (~15s).
+    ///         Use `transcriptionProgressStream` before calling this method to observe progress.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
     public func transcribe(
         _ audioSamples: [Float],
         source: AudioSource = .microphone
     ) async throws -> ASRResult {
-        var result: ASRResult
-        switch source {
-        case .microphone:
-            result = try await transcribeWithState(
-                audioSamples, decoderState: &microphoneDecoderState)
-        case .system:
-            result = try await transcribeWithState(audioSamples, decoderState: &systemDecoderState)
+        let shouldEmitProgress = audioSamples.count > 240_000
+        if shouldEmitProgress {
+            _ = await progressEmitter.ensureSession()
         }
+        do {
+            let result: ASRResult
+            switch source {
+            case .microphone:
+                result = try await transcribeWithState(
+                    audioSamples, decoderState: &microphoneDecoderState)
+            case .system:
+                result = try await transcribeWithState(
+                    audioSamples, decoderState: &systemDecoderState)
+            }
 
-        // Stateless architecture: reset decoder state after each transcription to ensure
-        // independent processing for batch operations without state carryover
-        try await self.resetDecoderState()
+            // Stateless architecture: reset decoder state after each transcription to ensure
+            // independent processing for batch operations without state carryover
+            try await self.resetDecoderState()
+            if shouldEmitProgress {
+                await progressEmitter.finishSession()
+            }
 
-        return result
+            return result
+        } catch {
+            if shouldEmitProgress {
+                await progressEmitter.failSession(error)
+            }
+            throw error
+        }
     }
 
     // Reset both decoder states

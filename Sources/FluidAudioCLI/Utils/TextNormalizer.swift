@@ -110,34 +110,6 @@ struct TextNormalizer {
 
         normalized = normalized.lowercased()
 
-        // Remove bare "inaudible" word (reference annotations)
-        normalized = normalized.replacingOccurrences(
-            of: "\\binaudible\\b",
-            with: "",
-            options: .regularExpression
-        )
-
-        // Remove stuttering/disfluency patterns like "th-", "o-", "i-"
-        let stutterPattern = try! NSRegularExpression(pattern: "\\b[a-z]{1,3}-\\s", options: [])
-        normalized = stutterPattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: ""
-        )
-
-        // Remove word repetitions like "we, we, we" → "we" or "the the" → "the"
-        let repetitionPattern = try! NSRegularExpression(pattern: "\\b(\\w+)(\\s*,?\\s+\\1)+\\b", options: [])
-        normalized = repetitionPattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: "$1"
-        )
-
-        // Normalize "g'day" → "good day"
-        normalized = normalized.replacingOccurrences(of: "g'day", with: "good day")
-
         // British to American normalization
         if britishToAmerican.isEmpty {
             print("WARNING: english.json failed to load or is empty!")
@@ -217,8 +189,8 @@ struct TextNormalizer {
             withTemplate: ""
         )
 
-        // Remove filler words and interjections (conservative list)
-        let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um|er|ah|eh|huh)\\b", options: [])
+        // Remove filler words and interjections
+        let fillerPattern = try! NSRegularExpression(pattern: "\\b(hmm|mm|mhm|mmm|uh|um)\\b", options: [])
         normalized = fillerPattern.stringByReplacingMatches(
             in: normalized,
             options: [],
@@ -351,83 +323,10 @@ struct TextNormalizer {
 
         // Abbreviations moved to top
 
-        // Handle year formats FIRST (e.g., "twenty twenty one" → "2021")
-        // Must come before compound number handling
-        // Process longest patterns first (2029 down to 2020) to avoid partial matches
-        let yearWords = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-        for year in stride(from: 9, through: 0, by: -1) {
-            let yearWord = year == 0 ? "" : " " + yearWords[year]
-            let pattern = "\\btwenty twenty\(yearWord)\\b"
-            let replacement = "202\(year)"
-            normalized = normalized.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-        // Handle 2010s: "twenty nineteen", "twenty eighteen", etc.
-        let teens = [
-            ("ten", "10"), ("eleven", "11"), ("twelve", "12"), ("thirteen", "13"),
-            ("fourteen", "14"), ("fifteen", "15"), ("sixteen", "16"), ("seventeen", "17"),
-            ("eighteen", "18"), ("nineteen", "19"),
-        ]
-        for (teenWord, teenNum) in teens {
-            let pattern = "\\btwenty \(teenWord)\\b"
-            let replacement = "20\(teenNum)"
-            normalized = normalized.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-
-        // Handle compound numbers BEFORE individual word replacements
-        // e.g., "twenty one" → "21", "thirty two" → "32"
-        let tens = [
-            ("twenty", 20), ("thirty", 30), ("forty", 40), ("fifty", 50),
-            ("sixty", 60), ("seventy", 70), ("eighty", 80), ("ninety", 90),
-        ]
-        let ones = [
-            ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5),
-            ("six", 6), ("seven", 7), ("eight", 8), ("nine", 9),
-        ]
-
-        // Replace compound numbers (e.g., "twenty one" → "21")
-        for (tensWord, tensVal) in tens {
-            for (onesWord, onesVal) in ones {
-                let compound = tensWord + " " + onesWord
-                let value = String(tensVal + onesVal)
-                normalized = normalized.replacingOccurrences(
-                    of: "\\b" + compound + "\\b",
-                    with: value,
-                    options: .regularExpression
-                )
-            }
-        }
-
-        // Handle "point" for decimals: "21 point 5" → "21.5", "point 5" → "0.5"
-        // First handle cases like "21 point 5"
-        let pointPattern = try! NSRegularExpression(pattern: "(\\d+)\\s+point\\s+(\\d+)", options: [])
-        normalized = pointPattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: "$1.$2"
-        )
-
-        // Handle "point X" at start or after space → "0.X"
-        let leadingPointPattern = try! NSRegularExpression(pattern: "\\bpoint\\s+(\\d+)", options: [])
-        normalized = leadingPointPattern.stringByReplacingMatches(
-            in: normalized,
-            options: [],
-            range: NSRange(location: 0, length: normalized.count),
-            withTemplate: "0.$1"
-        )
-
         let numberWords = [
             // English numbers
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-            "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+            "five": "5", "seven": "7", "eight": "8", "nine": "9",
             "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
             "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
             "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
@@ -461,9 +360,9 @@ struct TextNormalizer {
             "tredicesimo": "13th", "quattordicesimo": "14th", "quindicesimo": "15th",
             "ventesimo": "20th", "trentesimo": "30th", "centesimo": "100th",
 
-            // French numbers (note: "six" is same as English, omitted to avoid duplicate key)
+            // French numbers
             "zéro": "0", "un": "1", "deux": "2", "trois": "3", "quatre": "4",
-            "cinq": "5", "sept": "7", "huit": "8", "neuf": "9",
+            "cinq": "5", "six": "6", "sept": "7", "huit": "8", "neuf": "9",
             "dix": "10", "onze": "11", "douze": "12", "treize": "13", "quatorze": "14",
             "quinze": "15", "seize": "16", "dix-sept": "17", "dix-huit": "18",
             "dix-neuf": "19", "vingt": "20", "trente": "30", "quarante": "40",
@@ -658,8 +557,7 @@ struct TextNormalizer {
             }
         }
 
-        // Always append if we processed any words (handles "zero" case)
-        if !words.isEmpty && (currentSum > 0 || (words.count == 1 && numberValues[words[0]] == 0)) {
+        if currentSum > 0 {
             results.append(String(currentSum))
         }
 

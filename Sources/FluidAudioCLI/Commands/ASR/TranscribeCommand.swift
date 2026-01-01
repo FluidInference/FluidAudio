@@ -1,5 +1,5 @@
 #if os(macOS)
-import AVFoundation
+@preconcurrency import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -85,6 +85,10 @@ actor TranscriptionTracker {
         return nil
     }
 
+    func latestUpdateSnapshot() -> StreamingTranscriptionUpdate? {
+        latestConfirmedUpdate ?? latestUpdate
+    }
+
     private struct TokenKey: Hashable {
         let tokenId: Int
         let startMilliseconds: Int
@@ -92,11 +96,25 @@ actor TranscriptionTracker {
 }
 
 /// Word-level timing information
-struct WordTiming: Sendable {
+struct WordTiming: Codable, Sendable {
     let word: String
     let startTime: TimeInterval
     let endTime: TimeInterval
     let confidence: Float
+}
+
+/// JSON output model for transcription results
+struct TranscriptionJSONOutput: Codable {
+    let audioFile: String
+    let mode: String
+    let modelVersion: String
+    let text: String
+    let durationSeconds: TimeInterval?
+    let processingTimeSeconds: TimeInterval?
+    let rtfx: Float?
+    let confidence: Float?
+    let wordTimings: [WordTiming]
+    let timingsConfirmed: Bool?
 }
 
 /// Helper to merge tokens into word-level timings
@@ -191,6 +209,7 @@ enum TranscribeCommand {
         var streamingMode = false
         var showMetadata = false
         var wordTimestamps = false
+        var outputJsonPath: String?
         var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Parse options
@@ -206,6 +225,11 @@ enum TranscribeCommand {
                 showMetadata = true
             case "--word-timestamps":
                 wordTimestamps = true
+            case "--output-json":
+                if i + 1 < arguments.count {
+                    outputJsonPath = arguments[i + 1]
+                    i += 1
+                }
             case "--model-version":
                 if i + 1 < arguments.count {
                     switch arguments[i + 1].lowercased() {
@@ -231,18 +255,19 @@ enum TranscribeCommand {
             )
             await testStreamingTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                modelVersion: modelVersion)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                modelVersion: modelVersion)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
-        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, modelVersion: AsrModelVersion
+        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
+        modelVersion: AsrModelVersion
     ) async {
         do {
             // Initialize ASR models
@@ -283,6 +308,25 @@ enum TranscribeCommand {
             logger.info(String(repeating: "=", count: 50))
             logger.info("Final transcription:")
             print(result.text)
+
+            if let outputJsonPath = outputJsonPath {
+                let wordTimings = WordTimingMerger.mergeTokensIntoWords(result.tokenTimings ?? [])
+                let modelVersionLabel = modelVersion == .v2 ? "v2" : "v3"
+                let output = TranscriptionJSONOutput(
+                    audioFile: audioFile,
+                    mode: "batch",
+                    modelVersion: modelVersionLabel,
+                    text: result.text,
+                    durationSeconds: result.duration,
+                    processingTimeSeconds: result.processingTime,
+                    rtfx: result.rtfx,
+                    confidence: result.confidence,
+                    wordTimings: wordTimings,
+                    timingsConfirmed: nil
+                )
+                try writeJsonOutput(output, to: outputJsonPath)
+                logger.info("💾 JSON results saved to: \(outputJsonPath)")
+            }
 
             // Print word-level timestamps if requested
             if wordTimestamps {
@@ -352,7 +396,8 @@ enum TranscribeCommand {
 
     /// Test streaming transcription
     private static func testStreamingTranscription(
-        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, modelVersion: AsrModelVersion
+        audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
+        modelVersion: AsrModelVersion
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -496,6 +541,27 @@ enum TranscribeCommand {
             logger.info("Final transcription:")
             print(finalText)
 
+            if let outputJsonPath = outputJsonPath {
+                let snapshot = await tracker.metadataSnapshot()
+                let wordTimings = WordTimingMerger.mergeTokensIntoWords(snapshot?.timings ?? [])
+                let latestUpdate = await tracker.latestUpdateSnapshot()
+                let modelVersionLabel = modelVersion == .v2 ? "v2" : "v3"
+                let output = TranscriptionJSONOutput(
+                    audioFile: audioFile,
+                    mode: "streaming",
+                    modelVersion: modelVersionLabel,
+                    text: finalText,
+                    durationSeconds: totalDuration,
+                    processingTimeSeconds: processingTime,
+                    rtfx: Float(finalRtfx),
+                    confidence: latestUpdate?.confidence,
+                    wordTimings: wordTimings,
+                    timingsConfirmed: snapshot?.isConfirmed
+                )
+                try writeJsonOutput(output, to: outputJsonPath)
+                logger.info("💾 JSON results saved to: \(outputJsonPath)")
+            }
+
             // Print word-level timestamps if requested
             if wordTimestamps {
                 if let snapshot = await tracker.metadataSnapshot() {
@@ -577,6 +643,7 @@ enum TranscribeCommand {
                 --streaming        Use streaming mode with chunk simulation
                 --metadata         Show confidence, start time, and end time in results
                 --word-timestamps  Show word-level timestamps for each word in the transcription
+                --output-json <file>  Save full transcription result to JSON (includes word timings)
                 --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
 
             Examples:
@@ -585,6 +652,7 @@ enum TranscribeCommand {
                 fluidaudio transcribe audio.wav --metadata         # Batch mode with metadata
                 fluidaudio transcribe audio.wav --word-timestamps  # Batch mode with word timestamps
                 fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
+                fluidaudio transcribe audio.wav --output-json results.json
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results
@@ -606,8 +674,20 @@ enum TranscribeCommand {
             - Merges subword tokens into complete words with timing information
             - Displays confidence scores for each word
             - Works with both batch and streaming modes
+
+            Output JSON option:
+            - Saves transcription output and timings to the specified JSON file
+            - Includes merged word-level timings
             """
         )
+    }
+
+    private static func writeJsonOutput(_ output: TranscriptionJSONOutput, to path: String) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(output)
+        let url = URL(fileURLWithPath: path)
+        try data.write(to: url)
     }
 }
 #endif

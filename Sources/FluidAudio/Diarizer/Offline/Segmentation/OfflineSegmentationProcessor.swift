@@ -1,5 +1,5 @@
 import Accelerate
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 import os.signpost
@@ -101,7 +101,6 @@ struct OfflineSegmentationProcessor {
         var previousOffset: Int?
         let reuseEnabled = stepSize < chunkSize
 
-        @Sendable
         func performWarmup() async throws {
             let warmupShape: [NSNumber] = [1, 1, NSNumber(value: chunkSize)]
             let warmupKey = "offline_segmentation_warmup_\(chunkSize)"

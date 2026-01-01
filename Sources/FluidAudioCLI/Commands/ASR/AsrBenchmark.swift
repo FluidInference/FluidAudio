@@ -94,14 +94,27 @@ public class ASRBenchmark {
 
         var filteredFiles = audioFiles
 
-        // Handle single file processing
         if let singleFileName = singleFile {
-            let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
-            filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
-            if filteredFiles.isEmpty {
-                throw ASRError.processingFailed("Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+            // Check if it's an absolute path that exists
+            let fileUrl = URL(fileURLWithPath: singleFileName)
+            if FileManager.default.fileExists(atPath: fileUrl.path) {
+                let file = LibriSpeechFile(
+                    fileName: fileUrl.lastPathComponent,
+                    audioPath: fileUrl,
+                    transcript: "i'm going to tell you a story that could change your life"  // Known transcript
+                )
+                filteredFiles = [file]
+                logger.info("🔍 Processing custom file: \(fileUrl.path)")
+            } else {
+                // Fallback to searching in dataset
+                let targetFileName = singleFileName.hasSuffix(".flac") ? singleFileName : "\(singleFileName).flac"
+                filteredFiles = audioFiles.filter { $0.fileName == targetFileName }
+                if filteredFiles.isEmpty {
+                    throw ASRError.processingFailed(
+                        "Single file '\(targetFileName)' not found in LibriSpeech \(subset)")
+                }
+                logger.info("🔍 Processing single file from dataset: \(targetFileName)")
             }
-            logger.info("🔍 Processing single file: \(targetFileName)")
         } else if config.longAudioOnly {
             filteredFiles = try await filterFilesByDuration(
                 audioFiles, minDuration: 4.0, maxDuration: 20.0)
@@ -122,13 +135,30 @@ public class ASRBenchmark {
 
         var results: [ASRBenchmarkResult] = []
 
+        // Initialize Streaming EOU Manager if needed
+        var streamingEouManager: StreamingEouAsrManager?
+        if config.useStreamingEou {
+            streamingEouManager = StreamingEouAsrManager()
+            let modelDir = URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Models/ParakeetEOU/Streaming")
+            do {
+                try await streamingEouManager?.loadModels(modelDir: modelDir)
+                logger.info("Initialized Streaming EOU Manager")
+            } catch {
+                logger.error("Failed to initialize Streaming EOU Manager: \(error)")
+                throw error
+            }
+        }
+
         for (index, audioFile) in filesToProcess.enumerated() {
             do {
                 logger.info(
                     "Processing file \(index + 1)/\(filesToProcess.count): \(audioFile.fileName)")
 
                 let result: ASRBenchmarkResult
-                if config.testStreaming {
+                if config.useStreamingEou {
+                    result = try await processLibriSpeechFilePureCoreML(
+                        manager: streamingEouManager!, file: audioFile)
+                } else if config.testStreaming {
                     result = try await processLibriSpeechFileStreaming(
                         asrManager: asrManager, file: audioFile)
                 } else {
@@ -143,6 +173,37 @@ public class ASRBenchmark {
         }
 
         return results
+    }
+
+    /// Process a single LibriSpeech file using Pure CoreML pipeline
+    private func processLibriSpeechFilePureCoreML(
+        manager: StreamingEouAsrManager, file: LibriSpeechFile
+    ) async throws
+        -> ASRBenchmarkResult
+    {
+        let audioSamples = try AudioConverter().resampleAudioFile(path: file.audioPath.path)
+        let audioLength = TimeInterval(audioSamples.count) / 16000.0
+
+        // Read file into buffer
+        let audioFile = try AVAudioFile(forReading: file.audioPath)
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
+        try audioFile.read(into: buffer)
+
+        let inferenceStartTime = Date()
+        let transcript = try await manager.process(audioBuffer: buffer)
+        let processingTime = Date().timeIntervalSince(inferenceStartTime)
+
+        let metrics = calculateASRMetrics(hypothesis: transcript, reference: file.transcript)
+
+        return ASRBenchmarkResult(
+            fileName: file.fileName,
+            hypothesis: transcript,
+            reference: file.transcript,
+            metrics: metrics,
+            processingTime: processingTime,
+            audioLength: audioLength
+        )
     }
 
     /// Process a single LibriSpeech file
@@ -325,7 +386,7 @@ public class ASRBenchmark {
         return filteredFiles
     }
 
-    private func getLibriSpeechDirectory() -> URL {
+    public func getLibriSpeechDirectory() -> URL {
         let applicationSupportURL = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
@@ -694,6 +755,7 @@ extension ASRBenchmark {
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
         var streamingChunkDuration = 10.0
+        var useStreamingEou = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
 
         // Check for help flag first
@@ -733,19 +795,22 @@ extension ASRBenchmark {
                 autoDownload = false
             case "--test-streaming":
                 testStreaming = true
+            case "--streaming-eou":
+                useStreamingEou = true
+            case "--dump-features":
+                // Enable debug features if this flag is present
+                debugMode = true
             case "--chunk-duration":
                 if i + 1 < arguments.count {
-                    if let duration = Double(arguments[i + 1]), duration > 0 {
+                    if let duration = Double(arguments[i + 1]) {
                         streamingChunkDuration = duration
-                    } else {
-                        logger.error("Invalid chunk duration: \(arguments[i + 1])")
-                        exit(1)
                     }
                     i += 1
                 }
             case "--model-version":
                 if i + 1 < arguments.count {
-                    switch arguments[i + 1].lowercased() {
+                    let versionString = arguments[i + 1].lowercased()
+                    switch versionString {
                     case "v2", "2":
                         modelVersion = .v2
                     case "v3", "3":
@@ -757,7 +822,7 @@ extension ASRBenchmark {
                     i += 1
                 }
             default:
-                logger.warning("Unknown option: \(arguments[i])")
+                break
             }
             i += 1
         }
@@ -773,6 +838,7 @@ extension ASRBenchmark {
         logger.info("   Debug mode: \(debugMode ? "enabled" : "disabled")")
         logger.info("   Auto-download: \(autoDownload ? "enabled" : "disabled")")
         logger.info("   Test streaming: \(testStreaming ? "enabled" : "disabled")")
+        logger.info("   Streaming EOU: \(useStreamingEou ? "enabled" : "disabled")")
         if testStreaming {
             logger.info("   Chunk duration: \(streamingChunkDuration)s")
         }
@@ -784,7 +850,8 @@ extension ASRBenchmark {
             debugMode: debugMode,
             longAudioOnly: false,
             testStreaming: testStreaming,
-            streamingChunkDuration: streamingChunkDuration
+            streamingChunkDuration: streamingChunkDuration,
+            useStreamingEou: useStreamingEou
         )
 
         let benchmark = ASRBenchmark(config: config)
@@ -797,6 +864,39 @@ extension ASRBenchmark {
         let asrManager = AsrManager(config: asrConfig)
 
         do {
+            // If dumping features, we must be in streaming-eou mode and single file
+            let dumpFeatures = arguments.contains("--dump-features")
+
+            if dumpFeatures {
+                guard useStreamingEou, let singleFile = singleFile else {
+                    logger.error("Error: --dump-features requires --streaming-eou and --single-file")
+                    exit(1)
+                }
+
+                logger.info("Running in Feature Dump Mode")
+
+                let streamingEouManager = StreamingEouAsrManager(debugFeatures: true)
+                let modelDir = URL(fileURLWithPath: "/Users/kikow/brandon/FluidAudioSwift/Models/ParakeetEOU/Streaming")
+                try await streamingEouManager.loadModels(modelDir: modelDir)
+
+                // Process single file
+                let fileUrl = URL(fileURLWithPath: singleFile)
+
+                let audioFile = try AVAudioFile(forReading: fileUrl)
+                let buffer = AVAudioPCMBuffer(
+                    pcmFormat: audioFile.processingFormat, frameCapacity: AVAudioFrameCount(audioFile.length))!
+                try audioFile.read(into: buffer)
+
+                _ = try await streamingEouManager.process(audioBuffer: buffer)
+                _ = try await streamingEouManager.finish()
+
+                let outputUrl = URL(fileURLWithPath: "coreml_mel_features.json")
+                try await streamingEouManager.saveDebugFeatures(to: outputUrl)
+
+                logger.info("Done. Features dumped to coreml_mel_features.json")
+                exit(0)
+            }
+
             let startBenchmark = Date()
 
             logger.info("Initializing ASR system...")

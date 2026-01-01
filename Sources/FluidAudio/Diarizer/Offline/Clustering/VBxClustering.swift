@@ -673,4 +673,52 @@ struct VBxClustering {
         }
         return result
     }
+
+    /// Refines clusters with optional speaker count constraints.
+    ///
+    /// - Parameters:
+    ///   - rhoFeatures: PLDA-transformed features.
+    ///   - trainingEmbeddings: Original embeddings for K-Means re-clustering.
+    ///   - initialClusters: Initial cluster assignments from AHC.
+    ///   - constraints: Optional speaker count constraints.
+    /// - Returns: VBx output with potentially adjusted speaker count.
+    func refineWithConstraints(
+        rhoFeatures: [[Double]],
+        trainingEmbeddings: [[Double]],
+        initialClusters: [Int],
+        constraints: SpeakerCountConstraints?
+    ) -> VBxOutput {
+        var output = refine(rhoFeatures: rhoFeatures, initialClusters: initialClusters)
+
+        guard let constraints = constraints else {
+            return output
+        }
+
+        let detectedCount = output.numClusters
+        guard constraints.needsAdjustment(detectedCount: detectedCount) else {
+            return output
+        }
+
+        let targetCount = constraints.targetCount(detectedCount: detectedCount)
+        logger.info(
+            "Speaker count \(detectedCount) outside bounds [\(constraints.minSpeakers), \(constraints.maxSpeakers)]; re-clustering to \(targetCount)"
+        )
+
+        let (kmeansClusters, centroids) = KMeansClustering.clusterWithCentroids(
+            embeddings: trainingEmbeddings,
+            numClusters: targetCount,
+            maxIterations: 100
+        )
+
+        return VBxOutput(
+            gamma: output.gamma,
+            pi: output.pi,
+            hardClusters: [kmeansClusters],
+            centroids: centroids,
+            numClusters: targetCount,
+            elbos: output.elbos,
+            wasAdjusted: true,
+            originalClusterCount: detectedCount
+        )
+    }
 }

@@ -15,10 +15,22 @@ extension AsrManager {
         // Route to appropriate processing method based on audio length
         if audioSamples.count <= 240_000 {
             let originalLength = audioSamples.count
-            let paddedAudio: [Float] = padAudioIfNeeded(audioSamples, targetLength: 240_000)
+            let frameAlignedCandidate =
+                ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                    / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+            let frameAlignedLength: Int
+            let alignedSamples: [Float]
+            if frameAlignedCandidate > originalLength && frameAlignedCandidate <= 240_000 {
+                frameAlignedLength = frameAlignedCandidate
+                alignedSamples = audioSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
+            } else {
+                frameAlignedLength = originalLength
+                alignedSamples = audioSamples
+            }
+            let paddedAudio: [Float] = padAudioIfNeeded(alignedSamples, targetLength: 240_000)
             let (hypothesis, encoderSequenceLength) = try await executeMLInferenceWithTimings(
                 paddedAudio,
-                originalLength: originalLength,
+                originalLength: frameAlignedLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
                 decoderState: &decoderState
             )
@@ -37,7 +49,14 @@ extension AsrManager {
 
         // ChunkProcessor handles stateless chunked transcription for long audio
         let processor = ChunkProcessor(audioSamples: audioSamples)
-        return try await processor.process(using: self, startTime: startTime)
+        return try await processor.process(
+            using: self,
+            startTime: startTime,
+            progressHandler: { [weak self] progress in
+                guard let self else { return }
+                await self.progressEmitter.report(progress: progress)
+            }
+        )
     }
 
     internal func executeMLInferenceWithTimings(
@@ -143,19 +162,36 @@ extension AsrManager {
     public func transcribeStreamingChunk(
         _ chunkSamples: [Float],
         source: AudioSource,
-        previousTokens: [Int] = []
+        previousTokens: [Int] = [],
+        isLastChunk: Bool = false
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
         // Select and copy decoder state for the source
         var state = (source == .microphone) ? microphoneDecoderState : systemDecoderState
 
         let originalLength = chunkSamples.count
-        let padded = padAudioIfNeeded(chunkSamples, targetLength: 240_000)
+        let frameAlignedCandidate =
+            ((originalLength + ASRConstants.samplesPerEncoderFrame - 1)
+                / ASRConstants.samplesPerEncoderFrame) * ASRConstants.samplesPerEncoderFrame
+        let frameAlignedLength: Int
+        let alignedSamples: [Float]
+        if previousTokens.isEmpty
+            && frameAlignedCandidate > originalLength
+            && frameAlignedCandidate <= 240_000
+        {
+            frameAlignedLength = frameAlignedCandidate
+            alignedSamples = chunkSamples + Array(repeating: 0, count: frameAlignedLength - originalLength)
+        } else {
+            frameAlignedLength = originalLength
+            alignedSamples = chunkSamples
+        }
+        let padded = padAudioIfNeeded(alignedSamples, targetLength: 240_000)
         let (hypothesis, encLen) = try await executeMLInferenceWithTimings(
             padded,
-            originalLength: originalLength,
+            originalLength: frameAlignedLength,
             actualAudioFrames: nil,  // Will be calculated from originalLength
             decoderState: &state,
-            contextFrameAdjustment: 0  // Non-streaming chunks don't use adaptive context
+            contextFrameAdjustment: 0,  // Non-streaming chunks don't use adaptive context
+            isLastChunk: isLastChunk
         )
 
         // Persist updated state back to the source-specific slot

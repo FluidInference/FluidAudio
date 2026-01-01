@@ -141,23 +141,24 @@ swift run fluidaudio asr-benchmark --verbose
 - `--max-files <n>`: Maximum files to process
 - `--verbose`: Show detailed progress
 
-### 7. `download` - Download Datasets
-Download evaluation datasets for benchmarking.
+### 7. `parakeet-eou` - Streaming ASR
+Real-time streaming transcription with end-of-utterance detection.
 
 ```bash
-# Download AMI-SDM dataset
+swift run fluidaudio parakeet-eou --input audio.wav --use-cache
+swift run fluidaudio parakeet-eou --benchmark --chunk-size 160 --max-files 100 --use-cache
+```
+
+**Options:** `--input <path>`, `--benchmark`, `--max-files <n>`, `--chunk-size <160|320|1600>`, `--eou-debounce <ms>`, `--use-cache`, `--models <path>`, `--output <path>`, `--verbose`
+
+### 8. `download` - Download Datasets
+
+```bash
 swift run fluidaudio download --dataset ami-sdm
-
-# Download multiple datasets
-swift run fluidaudio download --dataset ami-sdm --dataset voxconverse
-
-# List available datasets
 swift run fluidaudio download --list
 ```
 
-**Options:**
-- `--dataset <name>`: Dataset to download
-- `--list`: List available datasets
+**Options:** `--dataset <name>`, `--list`
 
 ## Output Formats
 

@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   benchmark:
-    runs-on: macos-latest
+    runs-on: macos-15
     permissions:
       contents: read
       pull-requests: write
@@ -20,13 +20,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup Swift 6.1
-        uses: swift-actions/setup-swift@v2
+      - uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.1"
 
       - name: Build package
-        run: swift build
+        run: swift build -c release
 
       - name: Run Offline Pipeline Benchmark
         id: benchmark

@@ -3,12 +3,13 @@ import OSLog
 
 /// Lightweight logger that writes to Unified Logging and, optionally, to console.
 /// Use this instead of `OSLog.Logger` so CLI runs can surface logs without `print`.
-public struct AppLogger {
+public struct AppLogger: Sendable {
     /// Default subsystem for all loggers in FluidAudio.
     /// Keep this consistent; categories should vary per component.
-    public static var defaultSubsystem: String = "com.fluidinference"
+    /// Note: Set this before creating any logger instances.
+    nonisolated(unsafe) public static var defaultSubsystem: String = "com.fluidinference"
 
-    public enum Level: Int {
+    public enum Level: Int, Sendable {
         case debug = 0
         case info
         case notice
@@ -73,18 +74,51 @@ public struct AppLogger {
             osLogger.notice("\(message)")
         case .warning:
             osLogger.warning("\(message)")
+            logToConsole(level, message)  // Also log warnings to console in release
         case .error:
             osLogger.error("\(message)")
+            logToConsole(level, message)  // Also log errors to console in release
         case .fault:
             osLogger.fault("\(message)")
+            logToConsole(level, message)  // Also log faults to console in release
         }
         #endif
     }
 
     private func logToConsole(_ level: Level, _ message: String) {
-        Task.detached(priority: .utility) {
-            await LogConsole.shared.write(level: level, category: category, message: message)
+        let capturedLevel = level
+        let capturedCategory = category
+        let capturedMessage = message
+
+        // For errors/warnings/faults in release mode, log synchronously to ensure
+        // the message appears before potential exit() calls
+        #if !DEBUG
+        if level.rawValue >= Level.warning.rawValue {
+            logToConsoleSynchronously(level: capturedLevel, category: capturedCategory, message: capturedMessage)
+            return
         }
+        #endif
+
+        Task.detached(priority: .utility) { [capturedLevel, capturedCategory, capturedMessage] in
+            await LogConsole.shared.write(level: capturedLevel, category: capturedCategory, message: capturedMessage)
+        }
+    }
+
+    private func logToConsoleSynchronously(level: Level, category: String, message: String) {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "HH:mm:ss.SSS"
+        let timestamp = dateFormatter.string(from: Date())
+        let levelLabel: String
+        switch level {
+        case .debug: levelLabel = "DEBUG"
+        case .info: levelLabel = "INFO"
+        case .notice: levelLabel = "NOTICE"
+        case .warning: levelLabel = "WARN"
+        case .error: levelLabel = "ERROR"
+        case .fault: levelLabel = "FAULT"
+        }
+        let line = "[\(timestamp)] [\(levelLabel)] [FluidAudio.\(category)] \(message)\n"
+        FileHandle.standardError.write(Data(line.utf8))
     }
 }
 

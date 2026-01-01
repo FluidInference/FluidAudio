@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import OSLog
 
@@ -17,7 +17,9 @@ public actor StreamingAsrManager {
     private var updateContinuation: AsyncStream<StreamingTranscriptionUpdate>.Continuation?
 
     // ASR components
-    private var asrManager: AsrManager?
+    // AsrManager contains CoreML models which are not Sendable.
+    // We manage the safety ourselves by only accessing it from within the actor.
+    nonisolated(unsafe) private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
     private var audioSource: AudioSource = .microphone
 
@@ -279,7 +281,12 @@ public actor StreamingAsrManager {
             if startIdx < 0 || endIdx > sampleBuffer.count || startIdx >= endIdx { break }
 
             let window = Array(sampleBuffer[startIdx..<endIdx])
-            await processWindow(window, windowStartSample: leftStartAbs)
+            let isLastWindow = (nextWindowCenterStart + effectiveChunk) >= currentAbsEnd
+            await processWindow(
+                window,
+                windowStartSample: leftStartAbs,
+                isLastChunk: isLastWindow
+            )
 
             nextWindowCenterStart += effectiveChunk
 
@@ -296,7 +303,11 @@ public actor StreamingAsrManager {
     }
 
     /// Process a single assembled window: [left, chunk, right]
-    private func processWindow(_ windowSamples: [Float], windowStartSample: Int) async {
+    private func processWindow(
+        _ windowSamples: [Float],
+        windowStartSample: Int,
+        isLastChunk: Bool = false
+    ) async {
         guard let asrManager = asrManager else { return }
 
         do {
@@ -308,7 +319,8 @@ public actor StreamingAsrManager {
             let (tokens, timestamps, confidences, _) = try await asrManager.transcribeStreamingChunk(
                 windowSamples,
                 source: audioSource,
-                previousTokens: accumulatedTokens
+                previousTokens: accumulatedTokens,
+                isLastChunk: isLastChunk
             )
 
             let adjustedTimestamps = Self.applyGlobalFrameOffset(
@@ -490,7 +502,6 @@ public struct StreamingAsrConfig: Sendable {
 
     /// Confidence threshold for promoting volatile text to confirmed (0.0...1.0)
     public let confirmationThreshold: Double
-
     /// Default configuration aligned with previous API expectations
     public static let `default` = StreamingAsrConfig(
         chunkSeconds: 15.0,
