@@ -176,23 +176,11 @@ public enum ModelNames {
 
     /// Sortformer streaming diarization model names
     public enum Sortformer {
-        public static let preprocessor = "Pipeline_Preprocessor"
-        public static let preEncoder = "Pipeline_PreEncoder"
-        public static let head = "Pipeline_Head_Fixed"
-
-        public static let unified = "Sortformer"
-
-        public static let preprocessorFile = preprocessor + ".mlmodelc"
-        public static let preEncoderFile = preEncoder + ".mlmodelc"
-        public static let headFile = head + ".mlmodelc"
-        public static let unifiedFile = unified + ".mlmodelc"
-        
+        public static let sortformer = "Sortformer"
+        public static let sortformerFile = sortformer + ".mlmodelc"
 
         public static let requiredModels: Set<String> = [
-            preprocessorFile,
-            preEncoderFile,
-            headFile,
-            unifiedFile
+            sortformerFile
         ]
     }
 

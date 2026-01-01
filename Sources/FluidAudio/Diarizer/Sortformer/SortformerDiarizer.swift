@@ -24,22 +24,18 @@ import OSLog
 /// let result = try diarizer.processComplete(audioSamples)
 /// ```
 public final class SortformerDiarizer: @unchecked Sendable {
-
     private let logger = AppLogger(category: "SortformerDiarizer")
     private let config: SortformerConfig
     private let modules: SortformerModules
 
     private var models: SortformerModels?
-    private var state: SortformerStreamingState?
+    private var state: SortformerStreamingState
 
     // Native mel spectrogram (used when useNativePreprocessing is enabled)
     private lazy var melSpectrogram: NeMoMelSpectrogram = NeMoMelSpectrogram()
 
     // Audio buffering
     private var audioBuffer: [Float] = []
-
-    // Feature buffering
-    private var featureBuffer: [Float] = []
 
     // Chunk tracking
     private var preprocessorChunkIndex: Int = 0
@@ -51,14 +47,15 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
     // MARK: - Initialization
 
-    public init(config: SortformerConfig = .default) {
+    public init(config: SortformerConfig = .gradientDescent) {
         self.config = config
         self.modules = SortformerModules(config: config)
+        self.state = modules.initStreamingState()
     }
 
     /// Check if diarizer is ready for processing.
     public var isAvailable: Bool {
-        models != nil && state != nil
+        models != nil
     }
 
     /// Initialize with CoreML models (combined pipeline mode).
@@ -67,23 +64,20 @@ public final class SortformerDiarizer: @unchecked Sendable {
     ///   - preprocessorPath: Path to SortformerPreprocessor.mlpackage
     ///   - mainModelPath: Path to Sortformer.mlpackage
     public func initialize(
-        preprocessorPath: URL,
         mainModelPath: URL
     ) async throws {
         logger.info("Initializing Sortformer diarizer (combined pipeline mode)")
 
         let loadedModels = try await SortformerModels.load(
             config: config,
-            preprocessorPath: preprocessorPath,
             mainModelPath: mainModelPath
         )
 
         self.models = loadedModels
         self.state = modules.initStreamingState()
-
+        
         // Reset buffers
         resetBuffers()
-
         logger.info("Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s")
     }
     
@@ -104,17 +98,18 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
     private func resetBuffers() {
         audioBuffer = []
-        featureBuffer = []
         preprocessorChunkIndex = 0
         diarizerChunkIndex = 0
         allProbabilities = []
         totalFramesProcessed = 0
+        
+        audioBuffer.reserveCapacity(config.preprocessorAudioSamples + config.audioHopSamples)
     }
 
     /// Cleanup resources.
     public func cleanup() {
         models = nil
-        state = nil
+        state.cleanup()
         resetBuffers()
         logger.info("Sortformer resources cleaned up")
     }
@@ -139,7 +134,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
     ///
     /// - Returns: New chunk results if enough audio was processed, nil otherwise
     public func process() throws -> SortformerChunkResult? {
-        guard let models = models, var state = state else {
+        guard let models = models else {
             throw SortformerError.notInitialized
         }
 
@@ -176,7 +171,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
             let probabilities = output.predictions
 
             // Trim embeddings to actual length
-            let embLength = output.chunkEmbeddingLength
+            let embLength = output.chunkLength
             let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.fcDModel))
 
             // Update state with correct context values
@@ -206,7 +201,6 @@ public final class SortformerDiarizer: @unchecked Sendable {
         }
 
         // Save updated state
-        self.state = state
         totalFramesProcessed = allProbabilities.count / config.numSpeakers
 
         // Return new results if any
@@ -260,48 +254,25 @@ public final class SortformerDiarizer: @unchecked Sendable {
         var featureProvider = SortformerStreamingFeatureProvider(config: self.config, audio: samples)
         
         var chunksProcessed = 0
-        guard var state = state else {
-            throw SortformerError.notInitialized
-        }
 
         let coreFrames = config.chunkLen * config.subsamplingFactor  // 48 mel frames core
 
-        while let (_, chunkFeatures, chunkLength, leftOffset, rightOffset) = featureProvider.next() {
-            // Prepare state for model
-            // Use actual state lengths (0 is valid for empty state - matches Python/NeMo)
-            let modelSpkcacheLen = state.spkcacheLength
-            let modelFifoLen = state.fifoLength
-
-            // Ensure spkcache has exactly config.spkcacheLen frames
-            var paddedSpkcache = state.spkcache
-            let requiredSpkcacheSize = config.spkcacheLen * config.fcDModel
-            if paddedSpkcache.count < requiredSpkcacheSize {
-                paddedSpkcache.append(
-                    contentsOf: [Float](repeating: 0.0, count: requiredSpkcacheSize - paddedSpkcache.count))
-            }
-
-            // Ensure fifo has exactly config.fifoLen frames
-            var paddedFifo = state.fifo
-            let requiredFifoSize = config.fifoLen * config.fcDModel
-            if paddedFifo.count < requiredFifoSize {
-                paddedFifo.append(contentsOf: [Float](repeating: 0.0, count: requiredFifoSize - paddedFifo.count))
-            }
-
+        while let (chunkFeatures, chunkLength, leftOffset, rightOffset) = featureProvider.next() {
             // Run main model
             let output = try models.runMainModel(
                 chunk: chunkFeatures,
                 chunkLength: chunkLength,
-                spkcache: paddedSpkcache,
-                spkcacheLength: modelSpkcacheLen,
-                fifo: paddedFifo,
-                fifoLength: modelFifoLen,
+                spkcache: state.spkcache,
+                spkcacheLength: state.spkcacheLength,
+                fifo: state.fifo,
+                fifoLength: state.fifoLength,
                 config: config
             )
 
             let probabilities = output.predictions
 
             // Trim embeddings to actual length
-            let embLength = output.chunkEmbeddingLength
+            let embLength = output.chunkLength
             let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.fcDModel))
 
             if config.debugMode && diarizerChunkIndex < 1 {
@@ -329,7 +300,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
             // Compute left/right context for prediction extraction
             let leftContext = (leftOffset + config.subsamplingFactor / 2) / config.subsamplingFactor
-            let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor + 1
+            let rightContext = (rightOffset - 1) / config.subsamplingFactor + 1
 
             // Debug first 5 chunks - capture state BEFORE update
             let debugSpkcacheLen = state.spkcacheLength
@@ -385,7 +356,6 @@ public final class SortformerDiarizer: @unchecked Sendable {
         }
 
         // Save updated state
-        self.state = state
         totalFramesProcessed = allProbabilities.count / config.numSpeakers
 
         if config.debugMode {

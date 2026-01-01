@@ -51,8 +51,6 @@ public struct SortformerModules {
         let currentSpkcacheLength = state.spkcacheLength
         let currentFifoLength = state.fifoLength
 
-        state.chunkCount += 1
-
         // Extract FIFO predictions if FIFO exists
         if currentFifoLength > 0 {
             let fifoPredsStart = currentSpkcacheLength * numSpeakers
