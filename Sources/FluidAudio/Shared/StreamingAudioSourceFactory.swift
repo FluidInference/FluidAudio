@@ -121,8 +121,12 @@ public struct StreamingAudioSourceFactory {
         }
 
         var totalSamples = 0
-        var inputComplete = false
-        var readError: Error?
+
+        // nonisolated(unsafe) is safe here because AVAudioConverter calls input blocks synchronously.
+        nonisolated(unsafe) var inputComplete = false
+        nonisolated(unsafe) var readError: Error?
+        nonisolated(unsafe) let capturedAudioFile = audioFile
+        nonisolated(unsafe) let capturedInputBuffer = inputBuffer
 
         let inputBlock: AVAudioConverterInputBlock = { _, status in
             if inputComplete {
@@ -131,26 +135,26 @@ public struct StreamingAudioSourceFactory {
             }
 
             do {
-                let remainingFrames = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
+                let remainingFrames = AVAudioFrameCount(capturedAudioFile.length - capturedAudioFile.framePosition)
                 let framesToRead = min(inputCapacity, remainingFrames)
                 if framesToRead > 0 {
-                    try audioFile.read(into: inputBuffer, frameCount: framesToRead)
+                    try capturedAudioFile.read(into: capturedInputBuffer, frameCount: framesToRead)
                 } else {
-                    inputBuffer.frameLength = 0
+                    capturedInputBuffer.frameLength = 0
                 }
             } catch {
                 readError = error
-                inputBuffer.frameLength = 0
+                capturedInputBuffer.frameLength = 0
             }
 
-            guard inputBuffer.frameLength > 0 else {
+            guard capturedInputBuffer.frameLength > 0 else {
                 inputComplete = true
                 status.pointee = .endOfStream
                 return nil
             }
 
             status.pointee = .haveData
-            return inputBuffer
+            return capturedInputBuffer
         }
 
         while true {

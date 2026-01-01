@@ -149,13 +149,15 @@ final public class AudioConverter {
         var aggregated: [Float] = []
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
-        // Provide input once, then signal end-of-stream
-        var provided = false
+        // Provide input once, then signal end-of-stream.
+        // nonisolated(unsafe) is safe here because AVAudioConverter calls input blocks synchronously.
+        nonisolated(unsafe) var provided = false
+        nonisolated(unsafe) let inputBuffer = buffer
         let inputBlock: AVAudioConverterInputBlock = { _, status in
             if !provided {
                 provided = true
                 status.pointee = .haveData
-                return buffer
+                return inputBuffer
             } else {
                 status.pointee = .endOfStream
                 return nil
