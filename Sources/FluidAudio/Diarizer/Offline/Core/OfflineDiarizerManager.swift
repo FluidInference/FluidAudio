@@ -1,5 +1,5 @@
 import Accelerate
-import CoreML
+@preconcurrency import CoreML
 import Foundation
 import OSLog
 
@@ -8,7 +8,9 @@ public final class OfflineDiarizerManager {
     private let logger = AppLogger(category: "OfflineDiarizer")
     private let config: OfflineDiarizerConfig
 
-    private var models: OfflineDiarizerModels?
+    // CoreML models are not Sendable but are used read-only after initialization.
+    // We manage the safety ourselves by only writing during initialization.
+    nonisolated(unsafe) private var models: OfflineDiarizerModels?
 
     public init(config: OfflineDiarizerConfig = .default) {
         self.config = config
@@ -130,14 +132,19 @@ public final class OfflineDiarizerManager {
         let chunkStream = streamPair.stream
         let chunkContinuation = streamPair.continuation
 
-        let segmentationTask = Task(priority: .userInitiated) { () throws -> (SegmentationOutput, TimeInterval) in
+        // Capture models for concurrent tasks
+        let capturedModels = models
+        let capturedConfig = config
+
+        let segmentationTask = Task(priority: .userInitiated) {
+            [capturedModels, capturedConfig] () throws -> (SegmentationOutput, TimeInterval) in
             let processor = OfflineSegmentationProcessor()
             let start = Date()
             do {
                 let segmentation = try await processor.process(
                     audioSource: audioSource,
-                    segmentationModel: models.segmentationModel,
-                    config: config,
+                    segmentationModel: capturedModels.segmentationModel,
+                    config: capturedConfig,
                     chunkHandler: { chunk in
                         switch chunkContinuation.yield(chunk) {
                         case .enqueued, .dropped:
@@ -157,12 +164,13 @@ public final class OfflineDiarizerManager {
             }
         }
 
-        let embeddingTask = Task(priority: .userInitiated) { () throws -> ([TimedEmbedding], TimeInterval) in
+        let embeddingTask = Task(priority: .userInitiated) {
+            [capturedModels, capturedConfig] () throws -> ([TimedEmbedding], TimeInterval) in
             let extractor = OfflineEmbeddingExtractor(
-                fbankModel: models.fbankModel,
-                embeddingModel: models.embeddingModel,
-                pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
-                config: config
+                fbankModel: capturedModels.fbankModel,
+                embeddingModel: capturedModels.embeddingModel,
+                pldaTransform: PLDATransform(pldaRhoModel: capturedModels.pldaRhoModel, psi: capturedModels.pldaPsi),
+                config: capturedConfig
             )
             let start = Date()
             let embeddings = try await extractor.extractEmbeddings(
@@ -438,6 +446,15 @@ public final class OfflineDiarizerManager {
     ) -> (centroids: [[Double]], mapping: [Int: Int]) {
         guard let dimension = trainingEmbeddings.first?.count else {
             return ([], [:])
+        }
+
+        // When K-Means was applied due to speaker count constraints,
+        // use the K-Means centroids directly instead of computing from gamma/pi
+        if vbxOutput.wasAdjusted, !vbxOutput.centroids.isEmpty {
+            let mapping = Dictionary(
+                uniqueKeysWithValues: (0..<vbxOutput.centroids.count).map { ($0, $0) }
+            )
+            return (vbxOutput.centroids, mapping)
         }
 
         let epsilon = 1e-7

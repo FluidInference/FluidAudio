@@ -1,9 +1,9 @@
-import CoreML
+@preconcurrency import CoreML
 import FluidAudio
 import Foundation
 import OSLog
 
-public struct TtsModels {
+public struct TtsModels: Sendable {
     private let kokoroModels: [ModelNames.TTS.Variant: MLModel]
 
     private static let logger = AppLogger(category: "TtsModels")
