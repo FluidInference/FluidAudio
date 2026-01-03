@@ -152,6 +152,8 @@ final public class AudioConverter {
 
         // Provide input once, then signal end-of-stream
         let provided = OSAllocatedUnfairLock(initialState: false)
+        // Buffer is only accessed synchronously by AVAudioConverter's input block callback
+        nonisolated(unsafe) let capturedBuffer = buffer
         let inputBlock: AVAudioConverterInputBlock = { _, status in
             let wasProvided = provided.withLock { state -> Bool in
                 if state {
@@ -162,7 +164,7 @@ final public class AudioConverter {
             }
             if !wasProvided {
                 status.pointee = .haveData
-                return buffer
+                return capturedBuffer
             } else {
                 status.pointee = .endOfStream
                 return nil
