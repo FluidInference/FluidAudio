@@ -125,6 +125,9 @@ public struct StreamingAudioSourceFactory {
         let inputComplete = OSAllocatedUnfairLock(initialState: false)
         let readError = OSAllocatedUnfairLock<Error?>(initialState: nil)
 
+        // Buffer is only accessed synchronously by AVAudioConverter's input block callback
+        nonisolated(unsafe) let capturedInputBuffer = inputBuffer
+
         let inputBlock: AVAudioConverterInputBlock = { _, status in
             if inputComplete.withLock({ $0 }) {
                 status.pointee = .endOfStream
@@ -135,23 +138,23 @@ public struct StreamingAudioSourceFactory {
                 let remainingFrames = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
                 let framesToRead = min(inputCapacity, remainingFrames)
                 if framesToRead > 0 {
-                    try audioFile.read(into: inputBuffer, frameCount: framesToRead)
+                    try audioFile.read(into: capturedInputBuffer, frameCount: framesToRead)
                 } else {
-                    inputBuffer.frameLength = 0
+                    capturedInputBuffer.frameLength = 0
                 }
             } catch {
                 readError.withLock { $0 = error }
-                inputBuffer.frameLength = 0
+                capturedInputBuffer.frameLength = 0
             }
 
-            guard inputBuffer.frameLength > 0 else {
+            guard capturedInputBuffer.frameLength > 0 else {
                 inputComplete.withLock { $0 = true }
                 status.pointee = .endOfStream
                 return nil
             }
 
             status.pointee = .haveData
-            return inputBuffer
+            return capturedInputBuffer
         }
 
         while true {
