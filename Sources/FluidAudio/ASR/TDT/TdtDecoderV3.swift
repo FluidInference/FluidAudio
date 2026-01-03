@@ -349,15 +349,6 @@ internal struct TdtDecoderV3 {
 
                 blankMask = (label == blankId)
 
-                // let innerTimeIndex = timeIndices
-                // // Prevent repeated non-blank emissions at the same frame when duration=0.
-                // if !blankMask && duration == 0
-                //     && innerTimeIndex == lastEmissionTimestamp
-                //     && emissionsAtThisTimestamp >= 1
-                // {
-                //     duration = 1
-                // }
-
                 // Same duration=0 fix for inner loop.
                 if blankMask && duration == 0 {
                     duration = 1
