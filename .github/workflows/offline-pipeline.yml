@@ -35,7 +35,7 @@ jobs:
           # Record start time
           BENCHMARK_START=$(date +%s)
 
-          swift run fluidaudio diarization-benchmark --mode offline --auto-download --single-file ES2004a --output offline_results.json
+          swift run fluidaudiocli diarization-benchmark --mode offline --auto-download --single-file ES2004a --output offline_results.json
 
           # Check if results file was generated
           if [ -f offline_results.json ]; then

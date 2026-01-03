@@ -55,7 +55,7 @@ jobs:
           echo "Max files: ${MAX_FILES}"
           echo "========================================="
 
-          if swift run -c release fluidaudio parakeet-eou \
+          if swift run -c release fluidaudiocli parakeet-eou \
             --benchmark --chunk-size "$CHUNK_SIZE" --max-files "$MAX_FILES" \
             --use-cache --output parakeet_eou_results.json > benchmark_log.txt 2>&1; then
             echo "✅ Parakeet EOU benchmark completed successfully"
