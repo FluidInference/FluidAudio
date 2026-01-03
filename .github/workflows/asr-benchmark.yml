@@ -63,7 +63,7 @@ jobs:
             echo "Extra args: $EXTRA_ARGS"
             echo "========================================="
             
-            if swift run fluidaudio asr-benchmark \
+            if swift run fluidaudiocli asr-benchmark \
               --subset "$SUBSET" --max-files "$MAX" \
               --auto-download --output "$OUTPUT" $EXTRA_ARGS > benchmark_log.txt 2>&1; then
               echo "✅ Benchmark $SUBSET completed successfully"
