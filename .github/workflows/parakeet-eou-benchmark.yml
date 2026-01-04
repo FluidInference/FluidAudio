@@ -32,9 +32,9 @@ jobs:
             /opt/homebrew/Cellar/ffmpeg
           key: ${{ runner.os }}-parakeet-eou-${{ hashFiles('Package.resolved', 'Sources/FluidAudio/Frameworks/**', 'Sources/FluidAudio/ModelRegistry.swift', 'Sources/FluidAudio/ModelNames.swift') }}
 
-      - name: Install ffmpeg
+      - name: Install dependencies
         run: |
-          brew install ffmpeg || echo "ffmpeg may already be installed"
+          brew install ffmpeg libsoxr || echo "dependencies may already be installed"
           ffmpeg -version || echo "ffmpeg not available"
 
       - name: Build
