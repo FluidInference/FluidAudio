@@ -1,10 +1,21 @@
 import Accelerate
-import soxr
+#if canImport(CSoxr)
+import CSoxr
+#endif
 import Foundation
 
 /// High-quality audio resampler using libsoxr.
 /// Provides identical output to Python's librosa.resample() for maximum compatibility.
 public final class SoxrResampler {
+    
+    /// Check if libsoxr is available
+    public static var isAvailable: Bool {
+        #if canImport(CSoxr)
+        return true
+        #else
+        return false
+        #endif
+    }
     
     /// Resample audio from one sample rate to another using high-quality soxr algorithm.
     /// - Parameters:
@@ -12,12 +23,17 @@ public final class SoxrResampler {
     ///   - inputRate: Input sample rate (e.g., 48000)
     ///   - outputRate: Output sample rate (e.g., 16000)
     /// - Returns: Resampled audio samples at outputRate
-    /// - Throws: SoxrError if resampling fails
+    /// - Throws: SoxrError if resampling fails or library is not installed
     public static func resample(
         _ input: [Float],
         from inputRate: Double,
         to outputRate: Double
     ) throws -> [Float] {
+        guard isAvailable else {
+            throw SoxrError.libraryNotInstalled
+        }
+
+        #if canImport(CSoxr)
         guard !input.isEmpty else { return [] }
         guard inputRate > 0 && outputRate > 0 else {
             throw SoxrError.invalidSampleRate
@@ -72,6 +88,9 @@ public final class SoxrResampler {
         }
         
         return output
+        #else
+        throw SoxrError.libraryNotInstalled
+        #endif
     }
 }
 
@@ -79,6 +98,7 @@ public final class SoxrResampler {
 public enum SoxrError: LocalizedError {
     case invalidSampleRate
     case resamplingFailed(String)
+    case libraryNotInstalled
     
     public var errorDescription: String? {
         switch self {
@@ -86,6 +106,8 @@ public enum SoxrError: LocalizedError {
             return "Invalid sample rate (must be positive)"
         case .resamplingFailed(let message):
             return "Soxr resampling failed: \(message)"
+        case .libraryNotInstalled:
+            return "libsoxr is not installed. Please install it via 'brew install libsoxr' to use high-quality resampling."
         }
     }
 }
