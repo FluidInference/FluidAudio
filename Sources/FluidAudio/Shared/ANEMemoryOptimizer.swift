@@ -61,7 +61,7 @@ public final class ANEMemoryOptimizer: @unchecked Sendable {
         bufferPool[key] = buffer
         return buffer
     }
-    
+
     /// Initialize a reusable buffer in the pool
     public func initializePooledBuffer(
         key: String,
@@ -168,7 +168,7 @@ public final class ANEMemoryOptimizer: @unchecked Sendable {
                 destIndex += 1
             }
         }
-        
+
         if pad {
             let padStart = offset + count
             let remaining = destination.count - padStart

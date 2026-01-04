@@ -25,8 +25,8 @@ public final class NeMoMelSpectrogram {
     private let fMin: Float = 0.0
     private let fMax: Float = 8000.0  // sample_rate / 2
     private let preemph: Float = 0.97  // NeMo preemphasis coefficient
-    private let logZeroGuard: Float = powf(2, -24) // 5.960464477539063e-08  // NeMo log_zero_guard_value
-    private let logZero: Float = 0 //-16.635532  // log(1e-10) for padding
+    private let logZeroGuard: Float = powf(2, -24)  // 5.960464477539063e-08  // NeMo log_zero_guard_value
+    private let logZero: Float = 0  //-16.635532  // log(1e-10) for padding
 
     // Pre-computed
     private let hannWindow: [Float]
@@ -42,7 +42,7 @@ public final class NeMoMelSpectrogram {
     private var powerSpec: [Float]
     private var imagSq: [Float]
     private var frame: [Float]
-    
+
     public init() {
         // 1. Create symmetric Hann window (matches PyTorch hann_window(periodic=False))
         self.hannWindow = Self.createHannWindow(length: winLength, periodic: false)
@@ -146,23 +146,25 @@ public final class NeMoMelSpectrogram {
     ///   - audio: Audio samples at 16kHz
     ///   - lastAudioSample: The last audio sample that's not in the audio buffer. Used to initialize the preemphasis state
     /// - Returns: (mel, mel_length, numFrames) where mel is flat [nMels * T]
-    public func computeFlat(audio: [Float], lastAudioSample: Float = 0) -> (mel: [Float], melLength: Int, numFrames: Int) {
+    public func computeFlat(
+        audio: [Float], lastAudioSample: Float = 0
+    ) -> (mel: [Float], melLength: Int, numFrames: Int) {
         let audioCount = audio.count
         let numFrames = audioCount / hopLength
-        
+
         guard numFrames > 0 else {
             return (mel: [Float](repeating: 0, count: nMels), melLength: 0, numFrames: 1)
         }
 
         // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
         // This will be copied into an already padded buffer to save time.
-        
+
         let padLength = nFFT / 2
         let paddedCount = audioCount + 2 * padLength
         var paddedAudio = [Float](repeating: 0, count: paddedCount)
-        
+
         paddedAudio[padLength] = audio[0] - preemph * lastAudioSample
-        
+
         // Compute x[n] - preemph * x[n-1] vectorized
         paddedAudio.withUnsafeMutableBufferPointer { dstPtr in
             audio.withUnsafeBufferPointer { srcPtr in
@@ -178,7 +180,7 @@ public final class NeMoMelSpectrogram {
                 )
             }
         }
-        
+
         // Allocate output: [nMels, numFrames] in row-major order
         var mel = [Float](repeating: logZero, count: nMels * numFrames)
         let numFreqBins = nFFT / 2 + 1
@@ -243,29 +245,31 @@ public final class NeMoMelSpectrogram {
 
         return (mel: mel, melLength: numFrames, numFrames: numFrames)
     }
-    
+
     /// Compute mel spectrogram and return as flat array for MLMultiArray compatibility.
     /// - Parameters:
     ///   - audio: Audio samples at 16kHz
     ///   - lastAudioSample: The last audio sample that's not in the audio buffer. Used to initialize the preemphasis state
     /// - Returns: (mel, mel_length, numFrames) where mel is flat [T * nMels]
-    public func computeFlatTransposed(audio: [Float], lastAudioSample: Float = 0) -> (mel: [Float], melLength: Int, numFrames: Int) {
+    public func computeFlatTransposed(
+        audio: [Float], lastAudioSample: Float = 0
+    ) -> (mel: [Float], melLength: Int, numFrames: Int) {
         let audioCount = audio.count
         let numFrames = audioCount / hopLength
-        
+
         guard numFrames > 0 else {
             return (mel: [Float](repeating: 0, count: nMels), melLength: 0, numFrames: 1)
         }
 
         // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
         // This will be copied into an already padded buffer to save time.
-        
+
         let padLength = nFFT / 2
         let paddedCount = audioCount + 2 * padLength
         var paddedAudio = [Float](repeating: 0, count: paddedCount)
-        
+
         paddedAudio[padLength] = audio[0] - preemph * lastAudioSample
-        
+
         // Compute x[n] - preemph * x[n-1] vectorized
         paddedAudio.withUnsafeMutableBufferPointer { dstPtr in
             audio.withUnsafeBufferPointer { srcPtr in

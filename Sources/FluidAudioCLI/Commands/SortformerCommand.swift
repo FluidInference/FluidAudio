@@ -19,7 +19,7 @@ enum SortformerCommand {
         let audioFile = arguments[0]
         var debugMode = false
         var outputFile: String?
-        
+
         // VAD parameters
         var onset: Float?
         var offset: Float?
@@ -88,7 +88,7 @@ enum SortformerCommand {
         var config = SortformerConfig.default
         var postConfig = SortformerPostProcessingConfig.default
         config.debugMode = debugMode
-        
+
         if let v = onset { postConfig.onsetThreshold = v }
         if let v = offset { postConfig.offsetThreshold = v }
         if let v = padOnset { postConfig.onsetPadSeconds = v }
@@ -119,13 +119,22 @@ enum SortformerCommand {
         // Load audio using soxr for high-quality resampling (matches Python's librosa)
         do {
             print("Loading audio...")
-            let audioSamples = try AudioConverter(debug: config.debugMode).resampleAudioFile(path: audioFile, method: .soxr)
+
+            guard
+                let audioSamples = try? AudioConverter(debug: config.debugMode).resampleAudioFile(
+                    path: audioFile, method: .soxr)
+            else {
+                print("Please install soxr through homebrew")
+                exit(1)
+            }
             let duration = Float(audioSamples.count) / 16000.0
             print("Loaded \(audioSamples.count) samples (\(String(format: "%.1f", duration))s)")
-            
+
             // Debug: Save and print first 10 samples for comparison
             if config.debugMode {
-                print("[DEBUG] First 10 audio samples: \((0..<min(10, audioSamples.count)).map { String(format: "%.6f", audioSamples[$0]) }.joined(separator: ", "))")
+                print(
+                    "[DEBUG] First 10 audio samples: \((0..<min(10, audioSamples.count)).map { String(format: "%.6f", audioSamples[$0]) }.joined(separator: ", "))"
+                )
                 let audioData = audioSamples.withUnsafeBytes { Data($0) }
                 try? audioData.write(to: URL(fileURLWithPath: "swift_audio_16k.bin"))
                 print("[DEBUG] Saved \(audioSamples.count) samples to swift_audio_16k.bin")

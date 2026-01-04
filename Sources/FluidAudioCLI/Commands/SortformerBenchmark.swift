@@ -44,12 +44,9 @@ enum SortformerBenchmark {
                 --threshold <value>      Speaker activity threshold (default: 0.5)
                 --preprocessor <path>    Path to SortformerPreprocessor.mlpackage
                 --model <path>           Path to Sortformer.mlpackage
-                --nvidia-config          Use NVIDIA 1.04s latency config (20.57% DER target)
-                --low-latency            Use low-latency config (matches Python test)
+                --nvidia-low-latency     Use NVIDIA 1.04s latency config (20.57% DER target)
+                --nvidia-high-latency            Use NVIDIA 30.4s latency config (20.57% DER target)
                 --gradient-descent       Use Gradient Descent config (downloads from HuggingFace by default)
-                --simple-state           Use simple state update (matches Python test logic)
-                --separate-models        Use separate PreEncoder+Head models (matches Python)
-                --native-preprocessing   Use native Swift mel spectrogram (matches NeMo full-audio)
                 --hf                     Download models from HuggingFace (clears cache first)
                 --local                  Use local models instead of HuggingFace (for --gradient-descent)
                 --output <file>          Output JSON file for results
@@ -148,9 +145,9 @@ enum SortformerBenchmark {
             case "--auto-download":
                 autoDownload = true
             case "--nvidia-high-latency":
-                useNvidiaLowLatency = true
-            case "--nvidia-low-latency":
                 useNvidiaHighLatency = true
+            case "--nvidia-low-latency":
+                useNvidiaLowLatency = true
             case "--gradient-descent":
                 useGradientDescent = true
             case "--hf":
@@ -198,7 +195,7 @@ enum SortformerBenchmark {
         } else {
             modelDir = "Streaming-Sortformer-Conversion/gradient-descent"
         }
-        
+
         let defaultPipeline = "\(modelDir)/Sortformer.mlpackage"
         let pipelineURL = URL(fileURLWithPath: modelPath ?? defaultPipeline)
 
@@ -377,7 +374,7 @@ enum SortformerBenchmark {
         do {
             // Load audio
             let audioLoadStart = Date()
-            let audioSamples = try AudioConverter().resampleAudioFile(path: audioPath)
+            let audioSamples = try AudioConverter().resampleAudioFile(path: audioPath, method: .soxr)
             let audioLoadTime = Date().timeIntervalSince(audioLoadStart)
             let duration = Float(audioSamples.count) / 16000.0
 

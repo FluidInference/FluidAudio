@@ -16,7 +16,7 @@ public struct SortformerModels: Sendable {
 
     /// Time taken to compile/load models
     public let compilationDuration: TimeInterval
-    
+
     /// Cached buffers
     private let memoryOptimizer: ANEMemoryOptimizer
     private let chunkArray: MLMultiArray
@@ -25,7 +25,7 @@ public struct SortformerModels: Sendable {
     private let fifoLengthArray: MLMultiArray
     private let spkcacheArray: MLMultiArray
     private let spkcacheLengthArray: MLMultiArray
-    
+
     public init(
         config: SortformerConfig,
         main: MLModel,
@@ -33,11 +33,14 @@ public struct SortformerModels: Sendable {
     ) throws {
         self.mainModel = main
         self.compilationDuration = compilationDuration
-        
+
         self.memoryOptimizer = .init()
-        self.chunkArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.chunkMelFrames), NSNumber(value: config.melFeatures)], dataType: .float32)
-        self.fifoArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.fifoLen), NSNumber(value: config.preEncoderDims)], dataType: .float32)
-        self.spkcacheArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.spkcacheLen), NSNumber(value: config.preEncoderDims)], dataType: .float32)
+        self.chunkArray = try memoryOptimizer.createAlignedArray(
+            shape: [1, NSNumber(value: config.chunkMelFrames), NSNumber(value: config.melFeatures)], dataType: .float32)
+        self.fifoArray = try memoryOptimizer.createAlignedArray(
+            shape: [1, NSNumber(value: config.fifoLen), NSNumber(value: config.preEncoderDims)], dataType: .float32)
+        self.spkcacheArray = try memoryOptimizer.createAlignedArray(
+            shape: [1, NSNumber(value: config.spkcacheLen), NSNumber(value: config.preEncoderDims)], dataType: .float32)
         self.chunkLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
         self.fifoLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
         self.spkcacheLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
@@ -109,9 +112,9 @@ extension SortformerModels {
         computeUnits: MLComputeUnits = .all
     ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
-        
+
         let startTime = Date()
-        
+
         // Determine cache directory
         let directory: URL
         if let cache = cacheDirectory {
@@ -120,31 +123,31 @@ extension SortformerModels {
             directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("FluidAudio/Models")
         }
-        
+
         // Determine while file to retrieve
         guard let bundle = ModelNames.Sortformer.bundle(for: config) else {
             throw SortformerError.modelLoadFailed("Unsupported Sortformer configuration")
         }
-        
+
         logger.info("Downloading Sortformer models from HuggingFace from bundle: \(bundle)...")
-        
+
         // Download models if needed
-        
+
         let models = try await DownloadUtils.loadModels(
             .sortformer,
             modelNames: [bundle],
             directory: directory,
             computeUnits: computeUnits
         )
-        
+
         guard let sortformer = models[bundle]
         else {
             throw SortformerError.modelLoadFailed("Failed to load Sortformer models from HuggingFace")
         }
-        
+
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Sortformer models loaded from HuggingFace in \(String(format: "%.2f", duration))s")
-        
+
         return try SortformerModels(
             config: config,
             main: sortformer,
@@ -195,27 +198,27 @@ extension SortformerModels {
             to: chunkArray,
             pad: true
         )
-        
+
         // Copy FIFO queue
         memoryOptimizer.optimizedCopy(
             from: fifo,
             to: fifoArray,
             pad: true
         )
-        
+
         // Copy speaker cache
         memoryOptimizer.optimizedCopy(
             from: spkcache,
             to: spkcacheArray,
             pad: true
         )
-        
+
         // Create chunk length input
         chunkLengthArray[0] = NSNumber(value: Int32(chunkLength))
-        
+
         // Create FIFO length input
         fifoLengthArray[0] = NSNumber(value: Int32(fifoLength))
-        
+
         // Create speaker cache length input
         spkcacheLengthArray[0] = NSNumber(value: Int32(spkcacheLength))
 
@@ -233,8 +236,10 @@ extension SortformerModels {
 
         // Extract outputs (names must match CoreML Sortformer model)
         guard let predictions = output.featureValue(for: "speaker_preds")?.shapedArrayValue(of: Float32.self)?.scalars,
-              let chunkEmbeddings = output.featureValue(for: "chunk_pre_encoder_embs")?.shapedArrayValue(of: Float32.self)?.scalars,
-              let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths")?.shapedArrayValue(of: Int32.self)?.scalars.first
+            let chunkEmbeddings = output.featureValue(for: "chunk_pre_encoder_embs")?.shapedArrayValue(
+                of: Float32.self)?.scalars,
+            let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths")?.shapedArrayValue(
+                of: Int32.self)?.scalars.first
         else {
             throw SortformerError.inferenceFailed("Missing model outputs")
         }

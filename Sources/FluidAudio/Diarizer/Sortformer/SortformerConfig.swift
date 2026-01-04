@@ -45,7 +45,7 @@ public struct SortformerConfig: Sendable {
 
     /// Silence frames per speaker in compressed cache
     public var spkcacheSilFramesPerSpk: Int = 3
-    
+
     // MARK: - Debug
 
     /// Enable debug logging
@@ -58,7 +58,7 @@ public struct SortformerConfig: Sendable {
 
     /// Mel spectrogram window size in samples (25ms)
     public let melWindow: Int = 400
-    
+
     /// Mel spectrogram stride in samples (10ms)
     public let melStride: Int = 160
 
@@ -120,7 +120,7 @@ public struct SortformerConfig: Sendable {
     )
 
     /// NVIDIA's 30.4s latency configuration
-    public static let nvidiaHighLatency = SortformerConfig(
+    public static var nvidiaHighLatency = SortformerConfig(
         chunkLen: 340,
         chunkLeftContext: 1,
         chunkRightContext: 40,
@@ -168,81 +168,72 @@ public struct SortformerConfig: Sendable {
         self.strongBoostRate = strongBoostRate
         self.weakBoostRate = weakBoostRate
         self.minPosScoresRate = minPosScoresRate
-        
+
         // The following parameters must meet certain constraints
         self.spkcacheLen = max(spkcacheLen, (1 + self.spkcacheSilFramesPerSpk) * self.numSpeakers)
         self.spkcacheUpdatePeriod = max(min(spkcacheUpdatePeriod, self.fifoLen + self.chunkLen), self.chunkLen)
     }
-    
+
     public func isCompatible(with other: SortformerConfig) -> Bool {
-        // Check if pre-encoder will match
-        if self.chunkMelFrames != other.chunkMelFrames {
-            return false
-        }
-        
-        // Check if head will match
-        if self.fifoLen + self.spkcacheLen != other.fifoLen + other.spkcacheLen {
-            return false
-        }
-        
-        return true
+        return
+            (self.chunkMelFrames == other.chunkMelFrames && self.fifoLen == other.fifoLen
+            && self.spkcacheLen == other.spkcacheLen)
     }
 }
-
 
 /// Configuration for post-processing Sortformer diarizer predictions
 public struct SortformerPostProcessingConfig {
     /// Onset threshold for detecting the beginning and end of a speech
     public var onsetThreshold: Float
-    
+
     /// Offset threshold for detecting the end of a speech
     public var offsetThreshold: Float
-    
+
     /// Adding frames before each speech segment
     public var onsetPadFrames: Int
-    
+
     /// Adding frames after each speech segment
     public var offsetPadFrames: Int
-    
+
     /// Threshold for short speech segment deletion in frames
     public var minFramesOn: Int
-    
+
     /// Threshold for small non-speech deletion in frames
     public var minFramesOff: Int
-    
+
     /// Adding durations before each speech segment
     public var onsetPadSeconds: Float {
         get { Float(onsetPadFrames) * frameDurationSeconds }
         set { onsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
     }
-    
+
     /// Adding durations after each speech segment
     public var offsetPadSeconds: Float {
         get { Float(offsetPadFrames) * frameDurationSeconds }
         set { offsetPadFrames = Int(round(newValue / frameDurationSeconds)) }
     }
-    
+
     /// Threshold for short speech segment deletion (seconds)
     public var minDurationOn: Float {
         get { Float(minFramesOn) * frameDurationSeconds }
         set { minFramesOn = Int(round(newValue / frameDurationSeconds)) }
     }
-    
+
     /// Threshold for small non-speech deletion (seconds)
     public var minDurationOff: Float {
         get { Float(minFramesOff) * frameDurationSeconds }
         set { minFramesOff = Int(round(newValue / frameDurationSeconds)) }
     }
-    
+
     /// Maximum number of predictions to retain
     public var maxStoredFrames: Int? = nil
-    
+
     /// Number of speakers
     public let numSpeakers: Int = 4
-    
+
     /// Number of speakers
     public let frameDurationSeconds: Float = 0.08
-    
+
     /// Default configurations
     public static var `default`: SortformerPostProcessingConfig {
         SortformerPostProcessingConfig(
@@ -254,7 +245,7 @@ public struct SortformerPostProcessingConfig {
             minFramesOff: 0
         )
     }
-    
+
     public init(
         onsetThreshold: Float = 0.5,
         offsetThreshold: Float = 0.5,
@@ -272,7 +263,7 @@ public struct SortformerPostProcessingConfig {
         self.minFramesOff = Int(round(minDurationOff / frameDurationSeconds))
         self.maxStoredFrames = maxStoredFrames
     }
-    
+
     public init(
         onsetThreshold: Float = 0.5,
         offsetThreshold: Float = 0.5,
