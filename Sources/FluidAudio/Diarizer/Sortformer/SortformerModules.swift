@@ -43,7 +43,7 @@ public struct SortformerModules {
         leftContext: Int,
         rightContext: Int
     ) throws -> StreamingUpdateResult {
-        let fcDModel = config.fcDModel
+        let fcDModel = config.preEncoderDims
         let numSpeakers = config.numSpeakers
         let spkcacheCapacity = config.spkcacheLen
         let fifoCapacity = config.fifoLen
@@ -66,7 +66,7 @@ public struct SortformerModules {
         // Use ACTUAL leftContext (varies by chunk position), not fixed config.chunkLeftContext
         let lc = leftContext
         let rc = rightContext
-        let coreFrames = config.chunkLen
+        let coreFrames = (chunk.count / fcDModel) - lc - rc
 
         // Extract core embeddings only (frames lc..<lc+coreFrames)
         let embsStartIdx = lc * fcDModel
@@ -178,7 +178,7 @@ public struct SortformerModules {
         preds: [Float],
         frameCount: Int
     ) {
-        let fcDModel = config.fcDModel
+        let fcDModel = config.preEncoderDims
         let numSpeakers = config.numSpeakers
         let silThreshold = config.silenceThreshold
 
@@ -220,7 +220,7 @@ public struct SortformerModules {
     private func compressSpkcache(state: inout SortformerStreamingState) {
         guard let spkcachePreds = state.spkcachePreds else { return }
 
-        let fcDModel = config.fcDModel
+        let fcDModel = config.preEncoderDims
         let numSpeakers = config.numSpeakers
         let spkcacheCapacity = config.spkcacheLen
         let silFramesPerSpk = config.spkcacheSilFramesPerSpk
