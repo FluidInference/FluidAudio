@@ -1,0 +1,4 @@
+module MachTaskSelfWrapper {
+    header "MachTaskSelf.h"
+    export *
+}

@@ -52,6 +52,7 @@ Pod::Spec.new do |spec|
     mach.source_files = "Sources/MachTaskSelfWrapper/**/*.{c,h}"
     mach.public_header_files = "Sources/MachTaskSelfWrapper/include/MachTaskSelf.h"
     mach.header_mappings_dir = "Sources/MachTaskSelfWrapper"
+    mach.module_map = "Sources/MachTaskSelfWrapper/include/module.modulemap"
   end
 
   spec.subspec "Core" do |core|
