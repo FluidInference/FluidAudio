@@ -89,28 +89,6 @@ public struct VocabularyRescorer {
         public let reason: String
     }
 
-    /// Rescore a transcript using CTC evidence (legacy API - uses heuristic for original word scoring)
-    /// - Parameters:
-    ///   - transcript: Original transcript from TDT decoder
-    ///   - audioSamples: Audio samples for CTC scoring
-    ///   - detections: CTC keyword detections for vocabulary terms
-    /// - Returns: Rescored transcript with replacements only where acoustically justified
-    @available(*, deprecated, message: "Use rescore(transcript:spotResult:) for principled CTC scoring")
-    public func rescore(
-        transcript: String,
-        audioSamples: [Float],
-        detections: [CtcKeywordSpotter.KeywordDetection]
-    ) async throws -> RescoreOutput {
-        // Wrap in SpotKeywordsResult without log-probs (will fall back to heuristic)
-        let spotResult = CtcKeywordSpotter.SpotKeywordsResult(
-            detections: detections,
-            logProbs: [],
-            frameDuration: 0,
-            totalFrames: 0
-        )
-        return rescore(transcript: transcript, spotResult: spotResult)
-    }
-
     /// Rescore a transcript using CTC evidence with principled scoring.
     /// This method computes ACTUAL CTC scores for original words using the cached log-probs,
     /// enabling a fair comparison between vocabulary terms and original transcript words.
