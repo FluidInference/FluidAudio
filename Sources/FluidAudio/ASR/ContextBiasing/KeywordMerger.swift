@@ -1,53 +1,11 @@
 import Foundation
 import OSLog
 
-#if canImport(Metaphone3)
-import Metaphone3
-#endif
-
 /// Merges CTC keyword detections into an existing transcript by replacing similar words
 /// with their canonical forms. This allows using CTC keyword spotting with any ASR system.
 public struct KeywordMerger {
 
     private static let logger = Logger(subsystem: "com.fluidaudio", category: "KeywordMerger")
-
-    // MARK: - Phonetic Encoder Selection
-
-    /// Which phonetic encoder is being used (logged once at first use)
-    private enum PhoneticEncoder {
-        case metaphone3
-        case doubleMetaphone
-
-        var description: String {
-            switch self {
-            case .metaphone3: return "Metaphone3"
-            case .doubleMetaphone: return "DoubleMetaphone"
-            }
-        }
-    }
-
-    /// Track whether we've logged the encoder selection
-    private nonisolated(unsafe) static var hasLoggedEncoderSelection = false
-
-    /// The active phonetic encoder (determined at compile time)
-    private static var activeEncoder: PhoneticEncoder {
-        #if canImport(Metaphone3)
-        return .metaphone3
-        #else
-        return .doubleMetaphone
-        #endif
-    }
-
-    /// Log which encoder is being used (once per session)
-    private static func logEncoderSelectionOnce() {
-        guard !hasLoggedEncoderSelection else { return }
-        hasLoggedEncoderSelection = true
-
-        let debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
-        if debugMode {
-            logger.debug("[KeywordMerger] Using \(activeEncoder.description) for phonetic encoding")
-        }
-    }
 
     /// Result of applying keyword corrections to a transcript
     public struct MergeResult {
@@ -82,14 +40,6 @@ public struct KeywordMerger {
 
         let minSimilarity = vocabulary.minSimilarity
         let minCombinedConfidence = vocabulary.minCombinedConfidence
-
-        var encoder: Any? = nil
-        #if canImport(Metaphone3)
-        let mp = Metaphone3Encoder()
-        mp.encodeVowels = false
-        mp.encodeExact = false
-        encoder = mp
-        #endif
 
         guard !vocabulary.terms.isEmpty else {
             return MergeResult(correctedText: transcript, replacements: [])
@@ -348,14 +298,6 @@ public struct KeywordMerger {
         let minSimilarity = vocabulary.minSimilarity
         let minCombinedConfidence = vocabulary.minCombinedConfidence
 
-        var encoder: Any? = nil
-        #if canImport(Metaphone3)
-        let mp = Metaphone3Encoder()
-        mp.encodeVowels = false
-        mp.encodeExact = false
-        encoder = mp
-        #endif
-
         guard !vocabulary.terms.isEmpty else {
             return MergeResult(correctedText: transcript, replacements: [])
         }
@@ -444,7 +386,7 @@ public struct KeywordMerger {
                         }
 
                         let targetWord = formWords[0]
-                        let similarity = combinedSimilarity(cleanWord, targetWord, encoder: encoder)
+                        let similarity = combinedSimilarity(cleanWord, targetWord)
 
                         if similarity >= minSimilarity {
                             if let existing = bestMatch {
@@ -475,7 +417,7 @@ public struct KeywordMerger {
 
                             let joinedSpan = span.map { $0.trimmingCharacters(in: .punctuationCharacters) }.joined()
 
-                            let similarity = combinedSimilarity(joinedSpan, targetWord, encoder: encoder)
+                            let similarity = combinedSimilarity(joinedSpan, targetWord)
 
                             if similarity >= minSimilarity {
                                 // Prefer longer spans only if similarity is comparable to existing match
@@ -519,9 +461,9 @@ public struct KeywordMerger {
                             logger.debug("[MultiWord] Checking span: \(cleanedSpan) vs \(formWords)")
                         }
 
-                        // Compare word-by-word for better phonetic matching of phrases
+                        // Compare word-by-word for better matching of phrases
                         let similarity = multiWordSimilarity(
-                            cleanedSpan, formWords.map { String($0) }, encoder: encoder)
+                            cleanedSpan, formWords.map { String($0) })
 
                         if similarity >= minSimilarity {
                             if let existing = bestMatch {
@@ -684,98 +626,11 @@ public struct KeywordMerger {
         return MergeResult(correctedText: correctedText, replacements: publicReplacements)
     }
 
-    /// Compute phonetic similarity using the best available encoder
-    /// Uses Metaphone3 if available (better accuracy), otherwise falls back to DoubleMetaphone
-    private static func phoneticSimilarity(_ a: String, _ b: String, encoder: Any? = nil) -> Float {
-        logEncoderSelectionOnce()
-
-        #if canImport(Metaphone3)
-        return metaphone3Similarity(a, b, encoder: encoder)
-        #else
-        return doubleMetaphoneSimilarity(a, b)
-        #endif
-    }
-
-    #if canImport(Metaphone3)
-    /// Compute phonetic similarity using Metaphone3 (more accurate for names)
-    private static func metaphone3Similarity(_ a: String, _ b: String, encoder: Any? = nil) -> Float {
-        // Use passed encoder or fallback
-        let encoderInstance: Metaphone3Encoder
-        if let passed = encoder as? Metaphone3Encoder {
-            encoderInstance = passed
-        } else {
-            encoderInstance = Metaphone3Encoder()
-            encoderInstance.encodeVowels = false
-            encoderInstance.encodeExact = false
-        }
-
-        let resultA = encoderInstance.encode(a)
-        let resultB = encoderInstance.encode(b)
-
-        let aPrimary = resultA.metaph
-        let aAlternate = resultA.alternateMetaph
-        let bPrimary = resultB.metaph
-        let bAlternate = resultB.alternateMetaph
-
-        // Check for exact phonetic match (any combination)
-        if aPrimary == bPrimary {
-            return 1.0
-        }
-        if !aAlternate.isEmpty && aAlternate == bPrimary {
-            return 1.0
-        }
-        if !bAlternate.isEmpty && aPrimary == bAlternate {
-            return 1.0
-        }
-        if !aAlternate.isEmpty && !bAlternate.isEmpty && aAlternate == bAlternate {
-            return 1.0
-        }
-
-        // Compute edit distance on phonetic codes
-        let dist1 = levenshteinDistance(aPrimary, bPrimary)
-        let dist2 =
-            !aAlternate.isEmpty && !bAlternate.isEmpty
-            ? levenshteinDistance(aAlternate, bAlternate) : Int.max
-        let dist = min(dist1, dist2)
-
-        let maxLen = max(aPrimary.count, bPrimary.count)
-        guard maxLen > 0 else { return 0.0 }
-
-        return 1.0 - Float(dist) / Float(maxLen)
-    }
-    #endif
-
-    /// Compute phonetic similarity using Double Metaphone (fallback)
-    private static func doubleMetaphoneSimilarity(_ a: String, _ b: String) -> Float {
-        let (aPrimary, aAlternate) = DoubleMetaphone.encode(a)
-        let (bPrimary, bAlternate) = DoubleMetaphone.encode(b)
-
-        // Check for exact phonetic match
-        if aPrimary == bPrimary || aPrimary == bAlternate || aAlternate == bPrimary
-            || (aAlternate == bAlternate && !aAlternate.isEmpty)
-        {
-            return 1.0
-        }
-
-        // Compute edit distance on phonetic codes
-        let dist1 = levenshteinDistance(aPrimary, bPrimary)
-        let dist2 =
-            !aAlternate.isEmpty && !bAlternate.isEmpty
-            ? levenshteinDistance(aAlternate, bAlternate) : Int.max
-        let dist = min(dist1, dist2)
-
-        let maxLen = max(aPrimary.count, bPrimary.count)
-        guard maxLen > 0 else { return 0.0 }
-
-        return 1.0 - Float(dist) / Float(maxLen)
-    }
-
     /// Compute similarity for multi-word phrases by comparing word-by-word
     /// Returns average similarity across all word pairs
     private static func multiWordSimilarity(
         _ transcriptWords: [String],
-        _ vocabWords: [String],
-        encoder: Any? = nil
+        _ vocabWords: [String]
     ) -> Float {
         guard transcriptWords.count == vocabWords.count, !transcriptWords.isEmpty else {
             return 0.0
@@ -785,7 +640,7 @@ public struct KeywordMerger {
         let debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
 
         for (tWord, vWord) in zip(transcriptWords, vocabWords) {
-            let wordSim = combinedSimilarity(tWord, vWord, encoder: encoder)
+            let wordSim = combinedSimilarity(tWord, vWord)
             totalSimilarity += wordSim
             if debugMode && (vocabWords.first?.lowercased().contains("prevnar") == true) {
                 logger.debug("[MultiWordSim] '\(tWord)' vs '\(vWord)' = \(String(format: "%.3f", wordSim))")
@@ -801,33 +656,17 @@ public struct KeywordMerger {
         return avgSim
     }
 
-    /// Compute combined character + phonetic similarity with multi-factor gating
-    private static func combinedSimilarity(_ a: String, _ b: String, encoder: Any? = nil) -> Float {
+    /// Compute combined similarity using character-level Levenshtein with length gating
+    private static func combinedSimilarity(_ a: String, _ b: String) -> Float {
         let charSim = characterSimilarity(a, b)
         let lenRatio = Float(min(a.count, b.count)) / Float(max(a.count, b.count))
-
-        // For purely numeric strings, use only character similarity
-        // Phonetic encoding doesn't work well for numbers (e.g., "13" vs "20")
-        let aIsNumeric = a.allSatisfy { $0.isNumber }
-        let bIsNumeric = b.allSatisfy { $0.isNumber }
-        if aIsNumeric || bIsNumeric {
-            return charSim
-        }
-
-        let phoneSim = phoneticSimilarity(a, b, encoder: encoder)
 
         // Poor length ratio: heavy penalty
         if lenRatio < 0.6 {
             return charSim * lenRatio
         }
 
-        // If phonetic match is very high, use it
-        if phoneSim >= 0.9 {
-            return max(phoneSim, charSim)
-        }
-
-        // Otherwise blend character and phonetic similarity
-        return (charSim * 0.6) + (phoneSim * 0.4)
+        return charSim
     }
 
     /// Compute character-level Levenshtein similarity
