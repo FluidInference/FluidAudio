@@ -83,18 +83,14 @@ enum SortformerBenchmark {
         var singleFile: String?
         var maxFiles: Int?
         var threshold: Float = 0.5
-        var preprocessorPath: String?
         var modelPath: String?
         var outputFile: String?
         var verbose = false
         var debugMode = false
         var autoDownload = false
-        var useNvidiaConfig = false
-        var useLowLatency = false
+        var useNvidiaLowLatency = false
+        var useNvidiaHighLatency = false
         var useGradientDescent = false
-        var useSimpleState = false
-        var useSeparateModels = false
-        var useNativePreprocessing = false
         var useHuggingFace = false
         var useLocalModels = false
         var progressFile: String = ".sortformer_progress.json"
@@ -128,11 +124,6 @@ enum SortformerBenchmark {
                     threshold = Float(arguments[i + 1]) ?? 0.5
                     i += 1
                 }
-            case "--preprocessor":
-                if i + 1 < arguments.count {
-                    preprocessorPath = arguments[i + 1]
-                    i += 1
-                }
             case "--model":
                 if i + 1 < arguments.count {
                     modelPath = arguments[i + 1]
@@ -156,23 +147,16 @@ enum SortformerBenchmark {
                 debugMode = true
             case "--auto-download":
                 autoDownload = true
-            case "--nvidia-config":
-                useNvidiaConfig = true
-            case "--low-latency":
-                useLowLatency = true
+            case "--nvidia-high-latency":
+                useNvidiaLowLatency = true
+            case "--nvidia-low-latency":
+                useNvidiaHighLatency = true
             case "--gradient-descent":
                 useGradientDescent = true
-            case "--simple-state":
-                useSimpleState = true
-            case "--separate-models":
-                useSeparateModels = true
             case "--hf":
                 useHuggingFace = true
-                useSeparateModels = true  // HuggingFace always uses separate models
             case "--local":
                 useLocalModels = true
-            case "--native-preprocessing":
-                useNativePreprocessing = true
             case "--help":
                 printUsage()
                 return
@@ -187,7 +171,6 @@ enum SortformerBenchmark {
         // Gradient descent uses HuggingFace by default unless --local is specified
         if useGradientDescent && !useLocalModels {
             useHuggingFace = true
-            useSeparateModels = true
         }
 
         print("🚀 Starting Sortformer Benchmark")
@@ -195,63 +178,36 @@ enum SortformerBenchmark {
         print("   Dataset: \(dataset.rawValue)")
         print("   Threshold: \(threshold)")
         let configName =
-            useNvidiaConfig
-            ? "NVIDIA 1.04s" : (useLowLatency ? "Low-latency" : (useGradientDescent ? "Gradient Descent" : "Default"))
+            useNvidiaLowLatency
+            ? "NVIDIA 1.04s" : (useNvidiaHighLatency ? "NVIDIA 30.4s" : "Gradient Descent")
         print("   Config: \(configName)")
-        print("   State Update: \(useSimpleState ? "Simple (Python test)" : "Full NeMo")")
+
         let modeDesc =
             useHuggingFace
-            ? "HuggingFace models" : (useSeparateModels ? "Separate PreEncoder+Head" : "Combined Pipeline")
+            ? "HuggingFace models" : "Combined Pipeline"
         print("   Mode: \(modeDesc)")
-        print("   Preprocessing: \(useNativePreprocessing ? "Native Swift mel spectrogram" : "CoreML chunked")")
+        print("   Preprocessing: Native Swift mel spectrogram")
 
         // Default model paths based on config
         // Different configs need different models with matching input dimensions
         let modelDir: String
-        if useNvidiaConfig {
-            modelDir = "Streaming-Sortformer-Conversion/coreml_models_nvidia"
-        } else if useGradientDescent {
-            modelDir = "Streaming-Sortformer-Conversion/coreml_models_gradient_descent"
+        if useNvidiaHighLatency {
+            modelDir = "Streaming-Sortformer-Conversion/nvidia-high"
+        } else if useNvidiaLowLatency {
+            modelDir = "Streaming-Sortformer-Conversion/nvidia-low"
         } else {
-            modelDir = "Streaming-Sortformer-Conversion/coreml_models"
+            modelDir = "Streaming-Sortformer-Conversion/gradient-descent"
         }
-        let defaultPreprocessor = "\(modelDir)/Pipeline_Preprocessor.mlpackage"
-        let defaultPreEncoder = "\(modelDir)/Pipeline_PreEncoder.mlpackage"
-        let defaultHead = "\(modelDir)/Pipeline_Head_Fixed.mlpackage"
-        let defaultPipeline = "\(modelDir)/SortformerPipeline.mlpackage"
-
-        let preprocessorURL = URL(fileURLWithPath: preprocessorPath ?? defaultPreprocessor)
-        let preEncoderURL = URL(fileURLWithPath: defaultPreEncoder)
-        let headURL = URL(fileURLWithPath: defaultHead)
+        
+        let defaultPipeline = "\(modelDir)/Sortformer.mlpackage"
         let pipelineURL = URL(fileURLWithPath: modelPath ?? defaultPipeline)
 
-        print("   Preprocessor: \(preprocessorURL.path)")
-        if useSeparateModels {
-            print("   PreEncoder: \(preEncoderURL.path)")
-            print("   Head: \(headURL.path)")
-        } else {
-            print("   Pipeline: \(pipelineURL.path)")
-        }
+        print("   Pipeline: \(pipelineURL.path)")
 
         // Check models exist
-        guard FileManager.default.fileExists(atPath: preprocessorURL.path) else {
-            print("ERROR: Preprocessor model not found: \(preprocessorURL.path)")
+        guard FileManager.default.fileExists(atPath: pipelineURL.path) else {
+            print("ERROR: Pipeline model not found: \(pipelineURL.path)")
             return
-        }
-        if useSeparateModels {
-            guard FileManager.default.fileExists(atPath: preEncoderURL.path) else {
-                print("ERROR: PreEncoder model not found: \(preEncoderURL.path)")
-                return
-            }
-            guard FileManager.default.fileExists(atPath: headURL.path) else {
-                print("ERROR: Head model not found: \(headURL.path)")
-                return
-            }
-        } else {
-            guard FileManager.default.fileExists(atPath: pipelineURL.path) else {
-                print("ERROR: Pipeline model not found: \(pipelineURL.path)")
-                return
-            }
         }
 
         // Download dataset if needed
@@ -313,21 +269,15 @@ enum SortformerBenchmark {
         fflush(stdout)
         let modelLoadStart = Date()
         var config: SortformerConfig
-        if useNvidiaConfig {
-            config = SortformerConfig.nvidia
-        } else if useLowLatency {
-            config = SortformerConfig.lowLatency
-        } else if useGradientDescent {
-            config = SortformerConfig.gradientDescent
+        if useNvidiaHighLatency {
+            config = SortformerConfig.nvidiaHighLatency
+        } else if useNvidiaLowLatency {
+            config = SortformerConfig.nvidiaLowLatency
         } else {
             config = SortformerConfig.default
         }
         config.debugMode = debugMode
-        config.useSimpleStateUpdate = useSimpleState
-        // Only override native preprocessing if explicitly set via flag
-        if useNativePreprocessing {
-            config.useNativePreprocessing = true
-        }
+        config.predScoreThreshold = threshold
         let diarizer = SortformerDiarizer(config: config)
 
         do {
@@ -339,17 +289,10 @@ enum SortformerBenchmark {
                 print("   Downloading models from HuggingFace...")
                 fflush(stdout)
 
-                let models = try await SortformerModels.loadFromHuggingFace()
+                let models = try await SortformerModels.loadFromHuggingFace(config: config)
                 diarizer.initialize(models: models)
-            } else if useSeparateModels {
-                try await diarizer.initializeSeparate(
-                    preprocessorPath: preprocessorURL,
-                    preEncoderPath: preEncoderURL,
-                    headPath: headURL
-                )
             } else {
                 try await diarizer.initialize(
-                    preprocessorPath: preprocessorURL,
                     mainModelPath: pipelineURL
                 )
             }
@@ -469,19 +412,25 @@ enum SortformerBenchmark {
             if verbose {
                 print("   Processing time: \(String(format: "%.2f", processingTime))s")
                 print("   RTFx: \(String(format: "%.1f", rtfx))x")
-                print("   Total frames: \(result.totalFrames)")
+                print("   Total frames: \(result.numFrames)")
             }
 
             // Extract segments
-            let segments = result.extractSegments(threshold: threshold)
+            let segments = result.segments
 
             // Print probability statistics
-            let stats = result.probabilityStats()
+            let preds = result.framePredictions
+            let count = preds.count
+            let minVal = preds.min() ?? 0
+            let maxVal = preds.max() ?? 0
+            let meanVal = count > 0 ? preds.reduce(0, +) / Float(count) : 0
+            let above05 = preds.filter { $0 > 0.5 }.count
+
             print(
-                "   Prob stats: min=\(String(format: "%.3f", stats.min)), max=\(String(format: "%.3f", stats.max)), mean=\(String(format: "%.3f", stats.mean))"
+                "   Prob stats: min=\(String(format: "%.3f", minVal)), max=\(String(format: "%.3f", maxVal)), mean=\(String(format: "%.3f", meanVal))"
             )
             print(
-                "   Activity: \(stats.above05)/\(stats.total) frames (\(String(format: "%.1f", Float(stats.above05) / Float(stats.total) * 100))%) above 0.5"
+                "   Activity: \(above05)/\(count) frames (\(String(format: "%.1f", Float(above05) / Float(count) * 100))%) above 0.5"
             )
             print("   Extracted \(segments.count) segments")
             fflush(stdout)
@@ -504,13 +453,13 @@ enum SortformerBenchmark {
             }
 
             // Get filtered predictions for simple DER calculation (matches Python/NeMo)
-            let filteredPredictions = result.applyMedianFilter(kernel: 7, numSpeakers: 4)
+            let filteredPredictions = result.framePredictions
 
             // Calculate DER using simple frame-level approach (matches NeMo evaluation)
             // Frame shift is 0.08s (80ms) to match NeMo's subsampling_factor * window_stride
             let simpleMetrics = calculateSimpleDER(
                 predictions: filteredPredictions,
-                numFrames: result.totalFrames,
+                numFrames: result.numFrames,
                 numSpeakers: 4,
                 groundTruth: groundTruth,
                 threshold: threshold,
@@ -518,7 +467,9 @@ enum SortformerBenchmark {
             )
 
             // Count detected speakers
-            let detectedSpeakers = Set(segments.map { $0.speakerIndex }).count
+            let detectedSpeakers = segments.reduce(into: Set<Int>()) {
+                $0.formUnion($1.map(\.speakerIndex))
+            }.count
 
             // Get ground truth speaker count
             let groundTruthSpeakers: Int
@@ -538,7 +489,7 @@ enum SortformerBenchmark {
                 speakerErrorRate: simpleMetrics.se,
                 rtfx: rtfx,
                 processingTime: processingTime,
-                totalFrames: result.totalFrames,
+                totalFrames: result.numFrames,
                 detectedSpeakers: detectedSpeakers,
                 groundTruthSpeakers: groundTruthSpeakers,
                 modelLoadTime: modelLoadTime,
