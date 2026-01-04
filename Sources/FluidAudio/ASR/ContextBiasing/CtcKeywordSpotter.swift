@@ -20,8 +20,15 @@ public struct CtcKeywordSpotter {
     private let sampleRate: Int = 16_000
     private let maxModelSamples: Int = 240_000
 
+    // Chunking parameters for audio longer than maxModelSamples
+    // 2s overlap at 16kHz = 32,000 samples (matches TDT chunking pattern)
+    private let chunkOverlapSamples: Int = 32_000
+
     // Debug flag controlled by environment variable FLUIDAUDIO_DEBUG_CTC_BOOSTING
     private let debugMode: Bool = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+
+    // Flag to enable/disable chunked CTC processing (USE_CHUNKED_CTC=0 to disable)
+    private let useChunkedCTC: Bool = ProcessInfo.processInfo.environment["USE_CHUNKED_CTC"] != "0"
 
     private struct CtcLogProbResult {
         let logProbs: [[Float]]
@@ -254,39 +261,126 @@ public struct CtcKeywordSpotter {
         var results: [KeywordDetection] = []
 
         for term in customVocabulary.terms {
-            let ids = term.ctcTokenIds ?? term.tokenIds
-            guard let ids, !ids.isEmpty else { continue }
-
-            let (score, start, end) = ctcWordSpot(logProbs: logProbs, keywordTokens: ids)
-
-            // Adjust threshold for multi-token phrases
-            let tokenCount = ids.count
-            let adjustedThreshold: Float? = minScore.map { base in
-                let extraTokens = max(0, tokenCount - 3)
-                return base - Float(extraTokens) * 1.0
-            }
-
-            if let threshold = adjustedThreshold, score <= threshold {
+            // Skip short terms to reduce false positives (per NeMo CTC-WS paper)
+            guard term.text.count >= customVocabulary.minTermLength else {
+                if debugMode {
+                    logger.debug(
+                        "  Skipping '\(term.text)': too short (\(term.text.count) < \(customVocabulary.minTermLength) chars)"
+                    )
+                }
                 continue
             }
 
-            let startTime =
-                ctcResult.frameTimes.flatMap { start < $0.count ? $0[start] : nil }
-                ?? TimeInterval(start) * frameDuration
-            let endTime =
-                ctcResult.frameTimes.flatMap { end < $0.count ? $0[end] : nil }
-                ?? TimeInterval(end) * frameDuration
+            let ids = term.ctcTokenIds ?? term.tokenIds
+            guard let ids, !ids.isEmpty else { continue }
 
-            let detection = KeywordDetection(
-                term: term,
-                score: score,
-                totalFrames: totalFrames,
-                startFrame: start,
-                endFrame: end,
-                startTime: startTime,
-                endTime: endTime
+            // Adjust threshold for multi-token phrases
+            let tokenCount = ids.count
+            let adjustedThreshold: Float =
+                minScore.map { base in
+                    let extraTokens = max(0, tokenCount - 3)
+                    return base - Float(extraTokens) * 1.0
+                } ?? -15.0
+
+            // Find ALL occurrences of this keyword (not just the best one)
+            let multipleDetections = ctcWordSpotMultiple(
+                logProbs: logProbs,
+                keywordTokens: ids,
+                minScore: adjustedThreshold,
+                mergeOverlap: true
             )
-            results.append(detection)
+
+            for (score, start, end) in multipleDetections {
+                let startTime =
+                    ctcResult.frameTimes.flatMap { start < $0.count ? $0[start] : nil }
+                    ?? TimeInterval(start) * frameDuration
+                let endTime =
+                    ctcResult.frameTimes.flatMap { end < $0.count ? $0[end] : nil }
+                    ?? TimeInterval(end) * frameDuration
+
+                let detection = KeywordDetection(
+                    term: term,
+                    score: score,
+                    totalFrames: totalFrames,
+                    startFrame: start,
+                    endFrame: end,
+                    startTime: startTime,
+                    endTime: endTime
+                )
+                results.append(detection)
+            }
+        }
+
+        return SpotKeywordsResult(
+            detections: results,
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            totalFrames: totalFrames
+        )
+    }
+
+    /// Spot keywords using context graph beam search (NeMo CTC-WS algorithm).
+    ///
+    /// This method builds a context graph (Trie) from the vocabulary and performs
+    /// frame-by-frame beam search to detect words with precise timestamps.
+    /// Unlike the DP-based `spotKeywordsWithLogProbs`, this gives tight word boundaries.
+    ///
+    /// - Parameters:
+    ///   - audioSamples: 16kHz mono audio samples.
+    ///   - customVocabulary: Vocabulary context with pre-tokenized terms.
+    ///   - config: Context graph spotter configuration.
+    /// - Returns: SpotKeywordsResult containing detections with precise timestamps and reusable log-probs.
+    public func spotKeywordsWithContextGraph(
+        audioSamples: [Float],
+        customVocabulary: CustomVocabularyContext,
+        config: ContextGraphCTC.SpotterConfig = .default
+    ) async throws -> SpotKeywordsResult {
+        let ctcResult = try await computeLogProbs(for: audioSamples)
+        let logProbs = ctcResult.logProbs
+        guard !logProbs.isEmpty else {
+            return SpotKeywordsResult(detections: [], logProbs: [], frameDuration: 0, totalFrames: 0)
+        }
+
+        let frameDuration = ctcResult.frameDuration
+        let totalFrames = ctcResult.totalFrames
+
+        // Build context graph from vocabulary
+        var graph = ContextGraphCTC(blankId: blankId)
+        graph.addVocabulary(customVocabulary, tokenizer: nil)
+
+        if debugMode {
+            graph.printStats()
+        }
+
+        // Run beam search word spotter
+        let hypotheses = graph.spotWords(
+            logProbs: logProbs,
+            frameDuration: frameDuration,
+            config: config
+        )
+
+        // Convert WSHypothesis to KeywordDetection for compatibility
+        var results: [KeywordDetection] = []
+        for hyp in hypotheses {
+            // Find the vocabulary term matching this word
+            if let term = customVocabulary.terms.first(where: { $0.text == hyp.word }) {
+                let detection = KeywordDetection(
+                    term: term,
+                    score: hyp.score,
+                    totalFrames: totalFrames,
+                    startFrame: hyp.startFrame,
+                    endFrame: hyp.endFrame,
+                    startTime: hyp.startTime,
+                    endTime: hyp.endTime
+                )
+                results.append(detection)
+
+                if debugMode {
+                    logger.debug(
+                        "Context graph detection: '\(hyp.word)' [\(String(format: "%.2f", hyp.startTime))-\(String(format: "%.2f", hyp.endTime))s] score=\(String(format: "%.2f", hyp.score))"
+                    )
+                }
+            }
         }
 
         return SpotKeywordsResult(
@@ -319,8 +413,135 @@ public struct CtcKeywordSpotter {
                 logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
         }
 
-        // Use staged models (mel spectrogram + encoder)
+        // For audio longer than model limit, use chunked processing
+        if useChunkedCTC && audioSamples.count > maxModelSamples {
+            return try await computeLogProbsChunked(audioSamples: audioSamples)
+        }
+
+        // Use staged models (mel spectrogram + encoder) for short audio
         return try await computeWithStagedModels(audioSamples: audioSamples)
+    }
+
+    /// Process long audio in chunks with overlap, concatenating log-probs.
+    ///
+    /// Algorithm:
+    /// 1. Split audio into chunks of maxModelSamples with chunkOverlapSamples overlap
+    /// 2. Run CTC inference on each chunk
+    /// 3. Concatenate log-probs, averaging overlapping frames
+    private func computeLogProbsChunked(audioSamples: [Float]) async throws -> CtcLogProbResult {
+        let totalSamples = audioSamples.count
+        let chunkSize = maxModelSamples
+        let overlap = chunkOverlapSamples
+        let stride = chunkSize - overlap
+
+        // Calculate number of chunks needed
+        var chunks: [(start: Int, end: Int)] = []
+        var start = 0
+        while start < totalSamples {
+            let end = min(start + chunkSize, totalSamples)
+            chunks.append((start: start, end: end))
+            if end >= totalSamples { break }
+            start += stride
+        }
+
+        if debugMode {
+            logger.debug("=== Chunked CTC Processing ===")
+            logger.debug(
+                "Total samples: \(totalSamples) (\(String(format: "%.2f", Double(totalSamples) / Double(sampleRate)))s)"
+            )
+            logger.debug("Chunk size: \(chunkSize), overlap: \(overlap), stride: \(stride)")
+            logger.debug("Number of chunks: \(chunks.count)")
+        }
+
+        // Process each chunk
+        var chunkResults: [CtcLogProbResult] = []
+        for (idx, chunk) in chunks.enumerated() {
+            let chunkAudio = Array(audioSamples[chunk.start..<chunk.end])
+
+            if debugMode {
+                let startTime = Double(chunk.start) / Double(sampleRate)
+                let endTime = Double(chunk.end) / Double(sampleRate)
+                logger.debug(
+                    "  Chunk \(idx + 1)/\(chunks.count): samples [\(chunk.start)-\(chunk.end)] = [\(String(format: "%.2f", startTime))-\(String(format: "%.2f", endTime))s]"
+                )
+            }
+
+            let result = try await computeWithStagedModels(audioSamples: chunkAudio)
+            chunkResults.append(result)
+
+            if debugMode {
+                logger.debug(
+                    "    -> \(result.totalFrames) frames, frameDuration=\(String(format: "%.4f", result.frameDuration))s"
+                )
+            }
+        }
+
+        guard !chunkResults.isEmpty else {
+            return CtcLogProbResult(
+                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
+        }
+
+        // Use frame duration from first chunk (should be consistent)
+        let frameDuration = chunkResults[0].frameDuration
+        guard frameDuration > 0 else {
+            return CtcLogProbResult(
+                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0, frameTimes: nil)
+        }
+
+        // Calculate overlap in frames
+        let overlapFrames = Int(Double(overlap) / Double(sampleRate) / frameDuration)
+
+        // Concatenate log-probs with overlap averaging
+        var concatenatedLogProbs: [[Float]] = []
+
+        for (chunkIdx, result) in chunkResults.enumerated() {
+            let logProbs = result.logProbs
+            guard !logProbs.isEmpty else { continue }
+
+            if chunkIdx == 0 {
+                // First chunk: take all frames
+                concatenatedLogProbs.append(contentsOf: logProbs)
+            } else {
+                // Subsequent chunks: average overlap region, then append non-overlapping part
+                let overlapCount = min(overlapFrames, concatenatedLogProbs.count, logProbs.count)
+
+                if overlapCount > 0 {
+                    // Average the overlapping frames
+                    let existingStart = concatenatedLogProbs.count - overlapCount
+                    for i in 0..<overlapCount {
+                        let existingIdx = existingStart + i
+                        let newFrame = logProbs[i]
+                        let existingFrame = concatenatedLogProbs[existingIdx]
+
+                        // Element-wise average of log-probs
+                        var averaged = [Float](repeating: 0, count: existingFrame.count)
+                        for v in 0..<existingFrame.count {
+                            averaged[v] = (existingFrame[v] + newFrame[v]) / 2.0
+                        }
+                        concatenatedLogProbs[existingIdx] = averaged
+                    }
+                }
+
+                // Append non-overlapping frames from this chunk
+                if overlapCount < logProbs.count {
+                    concatenatedLogProbs.append(contentsOf: logProbs.suffix(from: overlapCount))
+                }
+            }
+        }
+
+        if debugMode {
+            logger.debug("Concatenated: \(concatenatedLogProbs.count) total frames")
+            logger.debug("Overlap frames averaged: \(overlapFrames) per boundary")
+            logger.debug("==============================")
+        }
+
+        return CtcLogProbResult(
+            logProbs: concatenatedLogProbs,
+            frameDuration: frameDuration,
+            totalFrames: concatenatedLogProbs.count,
+            audioSamplesUsed: totalSamples,
+            frameTimes: nil
+        )
     }
 
     private func computeWithFusedModel(
@@ -834,5 +1055,273 @@ public struct CtcKeywordSpotter {
         let normalizedScore = nonWildcardCount > 0 ? bestScore / Float(nonWildcardCount) : bestScore
 
         return (normalizedScore, bestStart, bestEnd)
+    }
+
+    /// Constrained CTC word spotting within a temporal window.
+    ///
+    /// Unlike `ctcWordSpot` which searches the entire audio for the best alignment,
+    /// this method restricts the search to a specific frame range. This is useful when
+    /// you already know approximately where a word should be (e.g., from TDT timestamps)
+    /// and want to verify/refine the detection within that window.
+    ///
+    /// - Parameters:
+    ///   - logProbs: CTC log-probabilities [T, vocab_size]
+    ///   - keywordTokens: Token IDs for the keyword
+    ///   - searchStartFrame: Start of search window (inclusive)
+    ///   - searchEndFrame: End of search window (exclusive)
+    /// - Returns: Tuple `(score, startFrame, endFrame)` in global frame coordinates
+    func ctcWordSpotConstrained(
+        logProbs: [[Float]],
+        keywordTokens: [Int],
+        searchStartFrame: Int,
+        searchEndFrame: Int
+    ) -> (score: Float, startFrame: Int, endFrame: Int) {
+        let T = logProbs.count
+        let N = keywordTokens.count
+
+        // Clamp search window to valid range
+        let clampedStart = max(0, searchStartFrame)
+        let clampedEnd = min(T, searchEndFrame)
+
+        if N == 0 || clampedEnd <= clampedStart {
+            return (-Float.infinity, clampedStart, clampedStart)
+        }
+
+        // Slice logProbs to the search window
+        let windowLogProbs = Array(logProbs[clampedStart..<clampedEnd])
+        let windowT = windowLogProbs.count
+
+        if windowT < N {
+            // Window too small for keyword
+            return (-Float.infinity, clampedStart, clampedStart)
+        }
+
+        // dp[t][n] = best score to match first n tokens by time t (within window)
+        var dp = Array(
+            repeating: Array(repeating: -Float.greatestFiniteMagnitude, count: N + 1),
+            count: windowT + 1
+        )
+        var backtrackTime = Array(
+            repeating: Array(repeating: 0, count: N + 1),
+            count: windowT + 1
+        )
+
+        // Initialize: keyword of length 0 has score 0 at any time
+        for t in 0...windowT {
+            dp[t][0] = 0.0
+        }
+
+        for t in 1...windowT {
+            let frame = windowLogProbs[t - 1]
+
+            for n in 1...N {
+                let tokenId = keywordTokens[n - 1]
+
+                // Wildcard token: matches any symbol at zero cost
+                if tokenId == Self.WILDCARD_TOKEN_ID {
+                    let wildcardSkip = dp[t - 1][n - 1]
+                    let wildcardStay = dp[t - 1][n]
+                    let wildcardScore = max(wildcardSkip, wildcardStay)
+                    dp[t][n] = wildcardScore
+                    backtrackTime[t][n] = wildcardScore == wildcardSkip ? t - 1 : backtrackTime[t - 1][n]
+                    continue
+                }
+
+                if tokenId < 0 || tokenId >= frame.count {
+                    continue
+                }
+
+                let tokenScore = frame[tokenId]
+
+                // Option 1: match this token at this timestep
+                let matchScore = max(
+                    dp[t - 1][n - 1] + tokenScore,
+                    dp[t - 1][n] + tokenScore
+                )
+
+                // Option 2: skip this timestep
+                let skipScore = dp[t - 1][n]
+
+                if matchScore > skipScore {
+                    dp[t][n] = matchScore
+                    backtrackTime[t][n] = t - 1
+                } else {
+                    dp[t][n] = skipScore
+                    backtrackTime[t][n] = backtrackTime[t - 1][n]
+                }
+            }
+        }
+
+        // Find best end position within the window
+        var bestEnd = 0
+        var bestScore = -Float.greatestFiniteMagnitude
+
+        for t in N...windowT {
+            if dp[t][N] > bestScore {
+                bestScore = dp[t][N]
+                bestEnd = t
+            }
+        }
+
+        let bestStart = backtrackTime[bestEnd][N]
+
+        // Normalize score by non-wildcard tokens
+        let nonWildcardCount = keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
+        let normalizedScore = nonWildcardCount > 0 ? bestScore / Float(nonWildcardCount) : bestScore
+
+        // Convert window-relative indices back to global frame coordinates
+        let globalStart = clampedStart + bestStart
+        let globalEnd = clampedStart + bestEnd
+
+        return (normalizedScore, globalStart, globalEnd)
+    }
+
+    /// Find ALL occurrences of a keyword in the audio, not just the best one.
+    /// Returns multiple (score, startFrame, endFrame) tuples for each detection.
+    /// Per NeMo CTC-WS paper: finds all candidates, merges overlapping intervals.
+    ///
+    /// - Parameters:
+    ///   - logProbs: CTC log-probabilities [T, vocab_size]
+    ///   - keywordTokens: Token IDs for the keyword
+    ///   - minScore: Minimum normalized score threshold (default: -15.0)
+    ///   - mergeOverlap: Whether to merge overlapping detections (default: true)
+    /// - Returns: Array of (score, startFrame, endFrame) tuples
+    func ctcWordSpotMultiple(
+        logProbs: [[Float]],
+        keywordTokens: [Int],
+        minScore: Float = -15.0,
+        mergeOverlap: Bool = true
+    ) -> [(score: Float, startFrame: Int, endFrame: Int)] {
+        let T = logProbs.count
+        let N = keywordTokens.count
+
+        if N == 0 || T == 0 {
+            return []
+        }
+
+        // dp[t][n] = best score to match first n tokens by time t
+        var dp = Array(
+            repeating: Array(repeating: -Float.greatestFiniteMagnitude, count: N + 1),
+            count: T + 1
+        )
+        var backtrackTime = Array(
+            repeating: Array(repeating: 0, count: N + 1),
+            count: T + 1
+        )
+
+        // Initialize: keyword of length 0 has score 0 at any time.
+        for t in 0...T {
+            dp[t][0] = 0.0
+        }
+
+        for t in 1...T {
+            let frame = logProbs[t - 1]
+
+            for n in 1...N {
+                let tokenId = keywordTokens[n - 1]
+
+                // Wildcard token: matches any symbol (including blank) at zero cost
+                if tokenId == Self.WILDCARD_TOKEN_ID {
+                    let wildcardSkip = dp[t - 1][n - 1]
+                    let wildcardStay = dp[t - 1][n]
+                    let wildcardScore = max(wildcardSkip, wildcardStay)
+                    dp[t][n] = wildcardScore
+                    backtrackTime[t][n] = wildcardScore == wildcardSkip ? t - 1 : backtrackTime[t - 1][n]
+                    continue
+                }
+
+                if tokenId < 0 || tokenId >= frame.count {
+                    continue
+                }
+
+                let tokenScore = frame[tokenId]
+
+                let matchScore = max(
+                    dp[t - 1][n - 1] + tokenScore,
+                    dp[t - 1][n] + tokenScore
+                )
+                let skipScore = dp[t - 1][n]
+
+                if matchScore > skipScore {
+                    dp[t][n] = matchScore
+                    backtrackTime[t][n] = t - 1
+                } else {
+                    dp[t][n] = skipScore
+                    backtrackTime[t][n] = backtrackTime[t - 1][n]
+                }
+            }
+        }
+
+        // Normalize score factor
+        let nonWildcardCount = keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
+        let normFactor = nonWildcardCount > 0 ? Float(nonWildcardCount) : 1.0
+
+        // Find all positions where the complete keyword has good score
+        // Look for local maxima in the score
+        var candidates: [(score: Float, startFrame: Int, endFrame: Int)] = []
+
+        guard T >= N else { return [] }
+
+        for t in N...T {
+            let rawScore = dp[t][N]
+            let normalizedScore = rawScore / normFactor
+
+            // Check if this is a local maximum (better than neighbors)
+            let prevScore = t > N ? dp[t - 1][N] / normFactor : -Float.greatestFiniteMagnitude
+            let nextScore = t < T ? dp[t + 1][N] / normFactor : -Float.greatestFiniteMagnitude
+
+            let isLocalMax = normalizedScore >= prevScore && normalizedScore > nextScore
+            let meetsThreshold = normalizedScore >= minScore
+
+            if isLocalMax && meetsThreshold {
+                let startFrame = backtrackTime[t][N]
+                candidates.append((score: normalizedScore, startFrame: startFrame, endFrame: t))
+            }
+        }
+
+        // If no local maxima found but there are valid scores, take the global best
+        if candidates.isEmpty {
+            var bestEnd = 0
+            var bestScore = -Float.greatestFiniteMagnitude
+            for t in N...T {
+                let normalizedScore = dp[t][N] / normFactor
+                if normalizedScore > bestScore {
+                    bestScore = normalizedScore
+                    bestEnd = t
+                }
+            }
+            if bestScore >= minScore {
+                let startFrame = backtrackTime[bestEnd][N]
+                candidates.append((score: bestScore, startFrame: startFrame, endFrame: bestEnd))
+            }
+        }
+
+        guard mergeOverlap else { return candidates }
+
+        // Merge overlapping intervals, keeping the best score
+        let sorted = candidates.sorted { $0.startFrame < $1.startFrame }
+        var merged: [(score: Float, startFrame: Int, endFrame: Int)] = []
+
+        for candidate in sorted {
+            if let last = merged.last {
+                // Check for overlap
+                if candidate.startFrame <= last.endFrame {
+                    // Overlapping - keep the one with better score
+                    if candidate.score > last.score {
+                        merged[merged.count - 1] = candidate
+                    }
+                    // Extend end frame if needed
+                    if candidate.endFrame > merged[merged.count - 1].endFrame {
+                        merged[merged.count - 1].endFrame = candidate.endFrame
+                    }
+                } else {
+                    merged.append(candidate)
+                }
+            } else {
+                merged.append(candidate)
+            }
+        }
+
+        return merged
     }
 }

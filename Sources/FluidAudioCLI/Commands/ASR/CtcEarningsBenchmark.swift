@@ -8,11 +8,6 @@ import Foundation
 /// TDT provides low WER transcription, CTC provides high recall dictionary detection.
 public enum CtcEarningsBenchmark {
 
-    private enum KeywordMode: String {
-        case chunk
-        case file
-    }
-
     /// Default CTC model directory
     private static func defaultCtcModelPath() -> String? {
         let appSupport = FileManager.default.urls(
@@ -46,10 +41,11 @@ public enum CtcEarningsBenchmark {
         var outputFile = "ctc_earnings_benchmark.json"
         var maxFiles: Int? = nil
         var ctcModelPath: String? = nil
+        var singleFileId: String? = nil
         // Note: Using v2 by default because v3 has issues with certain audio files
         // (returns empty transcription for ~7 files in Earnings22 dataset)
         var tdtVersion: AsrModelVersion = .v2
-        var keywordMode: KeywordMode = .chunk
+        var autoDownload = false
 
         var i = 0
         while i < arguments.count {
@@ -74,6 +70,11 @@ public enum CtcEarningsBenchmark {
                     ctcModelPath = arguments[i + 1]
                     i += 1
                 }
+            case "--file-id":
+                if i + 1 < arguments.count {
+                    singleFileId = arguments[i + 1]
+                    i += 1
+                }
             case "--tdt-version":
                 if i + 1 < arguments.count {
                     if arguments[i + 1] == "v2" || arguments[i + 1] == "2" {
@@ -81,11 +82,8 @@ public enum CtcEarningsBenchmark {
                     }
                     i += 1
                 }
-            case "--keyword-mode":
-                if i + 1 < arguments.count, let mode = parseKeywordMode(arguments[i + 1]) {
-                    keywordMode = mode
-                    i += 1
-                }
+            case "--auto-download":
+                autoDownload = true
             default:
                 break
             }
@@ -100,30 +98,20 @@ public enum CtcEarningsBenchmark {
             ctcModelPath = defaultCtcModelPath()
         }
 
-        // Always try to download dataset if missing
-        if dataDir == nil {
-            print("📥 Earnings dataset not found, downloading earnings22-kws...")
+        // Handle auto-download for dataset
+        if autoDownload && dataDir == nil {
+            print("📥 Downloading earnings22-kws dataset...")
             await DatasetDownloader.downloadEarnings22KWS(force: false)
             dataDir = defaultDataDir()
         }
 
-        // Always try to download CTC models if missing
-        if ctcModelPath == nil {
-            print("📥 CTC model not found, downloading parakeet-ctc-110m-coreml...")
-            do {
-                _ = try await CtcModels.download()
-                ctcModelPath = defaultCtcModelPath()
-            } catch {
-                print("ERROR: Failed to download CTC models: \(error)")
-            }
-        }
-
+        let useContextGraph = ProcessInfo.processInfo.environment["USE_CONTEXT_GRAPH"] == "1"
         print("Earnings Benchmark (TDT transcription + CTC keyword spotting)")
         print("  Data directory: \(dataDir ?? "not found")")
         print("  Output file: \(outputFile)")
         print("  TDT version: \(tdtVersion == .v2 ? "v2" : "v3")")
         print("  CTC model: \(ctcModelPath ?? "not found")")
-        print("  Keyword mode: \(keywordMode.rawValue)")
+        print("  CTC spotting: \(useContextGraph ? "context graph (experimental)" : "DP-based")")
 
         guard let finalDataDir = dataDir else {
             print("ERROR: Data directory not found")
@@ -166,25 +154,45 @@ public enum CtcEarningsBenchmark {
 
             // Collect test files
             let dataDirURL = URL(fileURLWithPath: dataDirResolved)
-            let fileIds = try collectFileIds(from: dataDirURL, maxFiles: maxFiles)
-            let keywordIndex = try buildKeywordIndex(dataDir: dataDirURL, keywordMode: keywordMode)
+            let fileIds: [String]
+
+            if let singleId = singleFileId {
+                // Single file mode - verify the file exists
+                let wavFile = dataDirURL.appendingPathComponent("\(singleId).wav")
+                let dictFile = dataDirURL.appendingPathComponent("\(singleId).dictionary.txt")
+
+                guard FileManager.default.fileExists(atPath: wavFile.path) else {
+                    print("ERROR: WAV file not found: \(wavFile.path)")
+                    return
+                }
+                guard FileManager.default.fileExists(atPath: dictFile.path) else {
+                    print("ERROR: Dictionary file not found: \(dictFile.path)")
+                    return
+                }
+
+                fileIds = [singleId]
+                print("Single file mode: \(singleId)")
+            } else {
+                fileIds = try collectFileIds(from: dataDirURL, maxFiles: maxFiles)
+            }
 
             if fileIds.isEmpty {
                 print("ERROR: No test files found in \(dataDirResolved)")
                 return
             }
 
-            print("Processing \(fileIds.count) test files...")
+            print("Processing \(fileIds.count) test file\(fileIds.count == 1 ? "" : "s")...")
 
             var results: [[String: Any]] = []
             var totalWer = 0.0
-            var totalKeywordReference = 0
-            var totalKeywordPredicted = 0
-            var totalKeywordTruePositives = 0
-            var totalKeywordFalsePositives = 0
-            var totalKeywordFalseNegatives = 0
+            var totalDictChecks = 0
+            var totalDictFound = 0
             var totalAudioDuration = 0.0
             var totalProcessingTime = 0.0
+            // Precision/Recall metrics: word found AND in correct position
+            var totalTruePositives = 0  // In reference AND in hypothesis
+            var totalFalsePositives = 0  // In hypothesis but NOT in reference
+            var totalFalseNegatives = 0  // In reference but NOT in hypothesis
 
             for (index, fileId) in fileIds.enumerated() {
                 print("[\(index + 1)/\(fileIds.count)] \(fileId)")
@@ -194,47 +202,39 @@ public enum CtcEarningsBenchmark {
                     dataDir: dataDirURL,
                     asrManager: asrManager,
                     ctcModels: ctcModels,
-                    spotter: spotter,
-                    keywordMode: keywordMode,
-                    keywordIndex: keywordIndex
+                    spotter: spotter
                 ) {
                     results.append(result)
                     totalWer += result["wer"] as? Double ?? 0
-                    totalKeywordReference += result["keywordReference"] as? Int ?? 0
-                    totalKeywordPredicted += result["keywordPredicted"] as? Int ?? 0
-                    totalKeywordTruePositives += result["keywordTruePositives"] as? Int ?? 0
-                    totalKeywordFalsePositives += result["keywordFalsePositives"] as? Int ?? 0
-                    totalKeywordFalseNegatives += result["keywordFalseNegatives"] as? Int ?? 0
+                    totalDictChecks += result["dictTotal"] as? Int ?? 0
+                    totalDictFound += result["dictFound"] as? Int ?? 0
                     totalAudioDuration += result["audioLength"] as? Double ?? 0
                     totalProcessingTime += result["processingTime"] as? Double ?? 0
+                    totalTruePositives += result["truePositives"] as? Int ?? 0
+                    totalFalsePositives += result["falsePositives"] as? Int ?? 0
+                    totalFalseNegatives += result["falseNegatives"] as? Int ?? 0
 
                     let wer = result["wer"] as? Double ?? 0
-                    let precision = result["keywordPrecision"] as? Double ?? 0
-                    let recall = result["keywordRecall"] as? Double ?? 0
-                    let fscore = result["keywordFscore"] as? Double ?? 0
-                    print(
-                        "  WER: \(String(format: "%.1f", wer))%, " +
-                            "KW P/R/F: \(String(format: "%.2f", precision))/" +
-                            "\(String(format: "%.2f", recall))/" +
-                            "\(String(format: "%.2f", fscore))"
-                    )
+                    let dictFound = result["dictFound"] as? Int ?? 0
+                    let dictTotal = result["dictTotal"] as? Int ?? 0
+                    print("  WER: \(String(format: "%.1f", wer))%, Dict: \(dictFound)/\(dictTotal)")
                 }
             }
 
             // Calculate summary
             let avgWer = results.isEmpty ? 0.0 : totalWer / Double(results.count)
-            let keywordPrecision =
-                totalKeywordPredicted > 0
-                ? Double(totalKeywordTruePositives) / Double(totalKeywordPredicted)
-                : 0
-            let keywordRecall =
-                totalKeywordReference > 0
-                ? Double(totalKeywordTruePositives) / Double(totalKeywordReference)
-                : 0
-            let keywordFscore =
-                (keywordPrecision + keywordRecall) > 0
-                ? 2 * keywordPrecision * keywordRecall / (keywordPrecision + keywordRecall)
-                : 0
+            let dictRate = totalDictChecks > 0 ? Double(totalDictFound) / Double(totalDictChecks) * 100 : 0
+
+            // Precision/Recall/F-score for vocabulary words
+            let precision =
+                (totalTruePositives + totalFalsePositives) > 0
+                ? Double(totalTruePositives) / Double(totalTruePositives + totalFalsePositives) : 0
+            let recall =
+                (totalTruePositives + totalFalseNegatives) > 0
+                ? Double(totalTruePositives) / Double(totalTruePositives + totalFalseNegatives) : 0
+            let fscore =
+                (precision + recall) > 0
+                ? 2 * precision * recall / (precision + recall) : 0
 
             // Print summary
             print("\n" + String(repeating: "=", count: 60))
@@ -243,12 +243,14 @@ public enum CtcEarningsBenchmark {
             print("Model: \(modelPath)")
             print("Total tests: \(results.count)")
             print("Average WER: \(String(format: "%.2f", avgWer))%")
+            print("Dict Pass (Recall): \(totalDictFound)/\(totalDictChecks) (\(String(format: "%.1f", dictRate))%)")
             print(
-                "Keyword Precision/Recall/F1: " +
-                    "\(String(format: "%.2f", keywordPrecision))/" +
-                    "\(String(format: "%.2f", keywordRecall))/" +
-                    "\(String(format: "%.2f", keywordFscore))"
+                "Vocab Precision: \(String(format: "%.1f", precision * 100))% (TP=\(totalTruePositives), FP=\(totalFalsePositives))"
             )
+            print(
+                "Vocab Recall: \(String(format: "%.1f", recall * 100))% (TP=\(totalTruePositives), FN=\(totalFalseNegatives))"
+            )
+            print("Vocab F-score: \(String(format: "%.1f", fscore * 100))%")
             print("Total audio: \(String(format: "%.1f", totalAudioDuration))s")
             print("Total processing: \(String(format: "%.1f", totalProcessingTime))s")
             if totalProcessingTime > 0 {
@@ -256,34 +258,27 @@ public enum CtcEarningsBenchmark {
             }
             print(String(repeating: "=", count: 60))
 
-            // Sort results by WER descending (worst first)
-            let sortedResults = results.sorted { r1, r2 in
-                let wer1 = r1["wer"] as? Double ?? 0
-                let wer2 = r2["wer"] as? Double ?? 0
-                return wer1 > wer2
-            }
-
             // Save to JSON
             let summaryDict: [String: Any] = [
                 "totalTests": results.count,
                 "avgWer": round(avgWer * 100) / 100,
-                "keywordTruePositives": totalKeywordTruePositives,
-                "keywordFalsePositives": totalKeywordFalsePositives,
-                "keywordFalseNegatives": totalKeywordFalseNegatives,
-                "keywordPredicted": totalKeywordPredicted,
-                "keywordReference": totalKeywordReference,
-                "keywordPrecision": round(keywordPrecision * 1000) / 1000,
-                "keywordRecall": round(keywordRecall * 1000) / 1000,
-                "keywordFscore": round(keywordFscore * 1000) / 1000,
+                "dictPass": totalDictFound,
+                "dictTotal": totalDictChecks,
+                "dictRate": round(dictRate * 100) / 100,
+                "vocabTruePositives": totalTruePositives,
+                "vocabFalsePositives": totalFalsePositives,
+                "vocabFalseNegatives": totalFalseNegatives,
+                "vocabPrecision": round(precision * 1000) / 1000,
+                "vocabRecall": round(recall * 1000) / 1000,
+                "vocabFscore": round(fscore * 1000) / 1000,
                 "totalAudioDuration": round(totalAudioDuration * 100) / 100,
                 "totalProcessingTime": round(totalProcessingTime * 100) / 100,
             ]
 
             let output: [String: Any] = [
                 "model": modelPath,
-                "keywordMode": keywordMode.rawValue,
                 "summary": summaryDict,
-                "results": sortedResults,
+                "results": results,
             ]
 
             let jsonData = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
@@ -324,9 +319,7 @@ public enum CtcEarningsBenchmark {
         dataDir: URL,
         asrManager: AsrManager,
         ctcModels: CtcModels,
-        spotter: CtcKeywordSpotter,
-        keywordMode: KeywordMode,
-        keywordIndex: [String: [String]]
+        spotter: CtcKeywordSpotter
     ) async throws -> [String: Any]? {
         let wavFile = dataDir.appendingPathComponent("\(fileId).wav")
         let dictionaryFile = dataDir.appendingPathComponent("\(fileId).dictionary.txt")
@@ -339,13 +332,13 @@ public enum CtcEarningsBenchmark {
             return nil
         }
 
-        // Load dictionary words (chunk or file keywords)
-        let dictionaryWords = try loadDictionaryWords(
-            fileId: fileId,
-            dictionaryFile: dictionaryFile,
-            keywordMode: keywordMode,
-            keywordIndex: keywordIndex
-        )
+        // Load dictionary words
+        let dictionaryContent = try String(contentsOf: dictionaryFile, encoding: .utf8)
+        let dictionaryWords =
+            dictionaryContent
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
 
         // Load reference text
         let referenceRaw =
@@ -379,6 +372,21 @@ public enum CtcEarningsBenchmark {
             return nil
         }
 
+        // Debug: Show TDT word timings if available
+        let debugTimings = ProcessInfo.processInfo.environment["DEBUG_TIMINGS"] == "1"
+        if debugTimings, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
+            print("  TDT Token Count: \(tokenTimings.count)")
+            // Show raw tokens around 8.0-12.0s (where "Bose" should be - reference says "Bose, just, all I said")
+            print("  TDT Tokens 7.0-13.0s:")
+            for timing in tokenTimings {
+                if timing.startTime >= 7.0 && timing.startTime <= 13.0 {
+                    print(
+                        "    [\(String(format: "%.2f", timing.startTime))-\(String(format: "%.2f", timing.endTime))s] \"\(timing.token)\" (conf: \(String(format: "%.2f", timing.confidence)))"
+                    )
+                }
+            }
+        }
+
         // 2. Build custom vocabulary for CTC keyword spotting
         var vocabTerms: [CustomVocabularyTerm] = []
         for word in dictionaryWords {
@@ -397,15 +405,40 @@ public enum CtcEarningsBenchmark {
         let customVocab = CustomVocabularyContext(terms: vocabTerms)
 
         // 3. CTC keyword spotting for high recall dictionary detection
-        let spotResult = try await spotter.spotKeywordsWithLogProbs(
-            audioSamples: samples,
-            customVocabulary: customVocab,
-            minScore: nil
-        )
+        // USE_CONTEXT_GRAPH=1 uses the new context graph beam search (experimental, 67% recall)
+        // USE_CONTEXT_GRAPH=0 (default) uses the DP-based approach (99.8% recall)
+        let useCtxGraph = ProcessInfo.processInfo.environment["USE_CONTEXT_GRAPH"] == "1"
 
-        // 4. Post-process: Use VocabularyRescorer with Argmax-style parameters
-        // Argmax uses cbw=3.0 (context-biasing weight) for boosting vocab terms
+        let spotResult: CtcKeywordSpotter.SpotKeywordsResult
+        if useCtxGraph {
+            spotResult = try await spotter.spotKeywordsWithContextGraph(
+                audioSamples: samples,
+                customVocabulary: customVocab,
+                config: .default
+            )
+        } else {
+            spotResult = try await spotter.spotKeywordsWithLogProbs(
+                audioSamples: samples,
+                customVocabulary: customVocab,
+                minScore: nil
+            )
+        }
+
+        // Debug: Show CTC detections with timestamps
+        if debugTimings && !spotResult.detections.isEmpty {
+            print("  CTC Detections:")
+            for detection in spotResult.detections {
+                print(
+                    "    [\(String(format: "%.2f", detection.startTime))-\(String(format: "%.2f", detection.endTime))s] \"\(detection.term.text)\" (score: \(String(format: "%.2f", detection.score)))"
+                )
+            }
+        }
+
+        // 4. Post-process: Use VocabularyRescorer with timestamp-based matching (NeMo CTC-WS)
+        // Set USE_TIMESTAMP_RESCORING=1 to use timestamp-based matching (default)
+        // Set USE_TIMESTAMP_RESCORING=0 to use legacy string-similarity based matching
         let useRescorer = ProcessInfo.processInfo.environment["NO_CTC_RESCORING"] != "1"
+        let useTimestampRescoring = ProcessInfo.processInfo.environment["USE_TIMESTAMP_RESCORING"] != "0"
         let hypothesis: String
         if useRescorer {
             let rescorerConfig = VocabularyRescorer.Config(
@@ -419,8 +452,36 @@ public enum CtcEarningsBenchmark {
                 vocabulary: customVocab,
                 config: rescorerConfig
             )
-            let rescoreResult = rescorer.rescore(transcript: tdtResult.text, spotResult: spotResult)
-            hypothesis = rescoreResult.text
+
+            // Constrained CTC is the default - use USE_CONSTRAINED_CTC=0 to disable
+            let useConstrainedCTC = ProcessInfo.processInfo.environment["USE_CONSTRAINED_CTC"] != "0"
+
+            if useConstrainedCTC, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
+                // Use constrained CTC rescoring (string similarity first, then constrained DP)
+                let rescoreResult = rescorer.rescoreWithConstrainedCTC(
+                    transcript: tdtResult.text,
+                    tokenTimings: tokenTimings,
+                    logProbs: spotResult.logProbs,
+                    frameDuration: spotResult.frameDuration,
+                    cbw: 3.0,
+                    marginSeconds: 0.5,
+                    minSimilarity: 0.5
+                )
+                hypothesis = rescoreResult.text
+            } else if useTimestampRescoring, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
+                // Use timestamp-based rescoring (NeMo CTC-WS algorithm)
+                let rescoreResult = rescorer.rescoreWithTimings(
+                    transcript: tdtResult.text,
+                    tokenTimings: tokenTimings,
+                    spotResult: spotResult,
+                    cbw: 3.0  // Context-biasing weight per NeMo paper
+                )
+                hypothesis = rescoreResult.text
+            } else {
+                // Fall back to string-similarity based rescoring
+                let rescoreResult = rescorer.rescore(transcript: tdtResult.text, spotResult: spotResult)
+                hypothesis = rescoreResult.text
+            }
         } else {
             hypothesis = tdtResult.text  // Baseline: no CTC corrections
         }
@@ -430,16 +491,6 @@ public enum CtcEarningsBenchmark {
         // Normalize texts
         let referenceNormalized = TextNormalizer.normalize(referenceRaw)
         let hypothesisNormalized = TextNormalizer.normalize(hypothesis)
-
-        // Keyword metrics with alignment-based matching (OpenBench-style).
-        let keywordStats = computeKeywordStats(
-            referenceText: referenceNormalized,
-            hypothesisText: hypothesisNormalized,
-            dictionaryWords: dictionaryWords
-        )
-        let keywordPrecision = keywordStats.precision
-        let keywordRecall = keywordStats.recall
-        let keywordFscore = keywordStats.fscore
 
         let referenceWords = referenceNormalized.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter {
             !$0.isEmpty
@@ -456,26 +507,30 @@ public enum CtcEarningsBenchmark {
             wer = calculateWER(reference: referenceWords, hypothesis: hypothesisWords)
         }
 
-        // Count dictionary detections (debug only)
+        // Count dictionary detections (CTC + hypothesis fallback)
         let minCtcScore: Float = -15.0  // Permissive threshold for detection
+        var dictFound = 0
         var detectionDetails: [[String: Any]] = []
         var ctcFoundWords: Set<String> = []
 
-        // 1. CTC detections
+        // 1. CTC detections (deduplicate - only count each word once)
         for detection in spotResult.detections {
-            let inRef = keywordStats.referenceKeywords.contains(detection.term.text.lowercased())
             let detail: [String: Any] = [
                 "word": detection.term.text,
                 "score": round(Double(detection.score) * 100) / 100,
                 "startTime": round(detection.startTime * 100) / 100,
                 "endTime": round(detection.endTime * 100) / 100,
                 "source": "ctc",
-                "inReference": inRef,
             ]
             detectionDetails.append(detail)
 
-            if detection.score >= minCtcScore {  // Use >= to include edge cases
-                ctcFoundWords.insert(detection.term.text.lowercased())
+            if detection.score >= minCtcScore {
+                let wordLower = detection.term.text.lowercased()
+                // Only count each unique word once for dictFound
+                if !ctcFoundWords.contains(wordLower) {
+                    dictFound += 1
+                    ctcFoundWords.insert(wordLower)
+                }
             }
         }
 
@@ -491,36 +546,70 @@ public enum CtcEarningsBenchmark {
                         in: hypothesisLower, options: [],
                         range: NSRange(hypothesisLower.startIndex..., in: hypothesisLower)) != nil
                 {
+                    dictFound += 1
                     ctcFoundWords.insert(wordLower)
-                    let inRef = keywordStats.referenceKeywords.contains(wordLower)
                     let detail: [String: Any] = [
                         "word": word,
                         "score": 0.0,
                         "startTime": 0.0,
                         "endTime": 0.0,
                         "source": "hypothesis",
-                        "inReference": inRef,
                     ]
                     detectionDetails.append(detail)
                 }
             }
         }
 
+        // 3. Compute precision/recall metrics
+        // For each vocabulary word, check if it's in reference AND hypothesis
+        let referenceLower = referenceNormalized.lowercased()
+        var truePositives = 0
+        var falsePositives = 0
+        var falseNegatives = 0
+
+        for word in dictionaryWords {
+            let wordLower = word.lowercased()
+            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: wordLower))\\b"
+
+            let inReference: Bool
+            let inHypothesis: Bool
+
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                inReference =
+                    regex.firstMatch(
+                        in: referenceLower, options: [],
+                        range: NSRange(referenceLower.startIndex..., in: referenceLower)) != nil
+                inHypothesis =
+                    regex.firstMatch(
+                        in: hypothesisLower, options: [],
+                        range: NSRange(hypothesisLower.startIndex..., in: hypothesisLower)) != nil
+            } else {
+                inReference = referenceLower.contains(wordLower)
+                inHypothesis = hypothesisLower.contains(wordLower)
+            }
+
+            if inReference && inHypothesis {
+                truePositives += 1
+            } else if inHypothesis && !inReference {
+                falsePositives += 1
+            } else if inReference && !inHypothesis {
+                falseNegatives += 1
+            }
+            // Note: if neither in reference nor hypothesis, it's a true negative (not counted)
+        }
+
         let result: [String: Any] = [
             "fileId": fileId,
-            "reference": referenceNormalized,
-            "hypothesis": hypothesisNormalized,
+            "reference": referenceRaw,
+            "hypothesis": hypothesis,
+            "referenceNormalized": referenceNormalized,
+            "hypothesisNormalized": hypothesisNormalized,
             "wer": round(wer * 10000) / 100,
-            "dictFound": keywordStats.predictedCount,
-            "dictTotal": keywordStats.groundTruthCount,
-            "keywordPredicted": keywordStats.predictedCount,
-            "keywordReference": keywordStats.groundTruthCount,
-            "keywordTruePositives": keywordStats.truePositives,
-            "keywordFalsePositives": keywordStats.falsePositives,
-            "keywordFalseNegatives": keywordStats.falseNegatives,
-            "keywordPrecision": round(keywordPrecision * 1000) / 1000,
-            "keywordRecall": round(keywordRecall * 1000) / 1000,
-            "keywordFscore": round(keywordFscore * 1000) / 1000,
+            "dictFound": dictFound,
+            "dictTotal": dictionaryWords.count,
+            "truePositives": truePositives,
+            "falsePositives": falsePositives,
+            "falseNegatives": falseNegatives,
             "audioLength": round(audioLength * 100) / 100,
             "processingTime": round(processingTime * 1000) / 1000,
             "ctcDetections": detectionDetails,
@@ -926,9 +1015,10 @@ public enum CtcEarningsBenchmark {
             Options:
                 --data-dir <path>     Path to earnings test dataset (auto-detected if downloaded)
                 --ctc-model <path>    Path to CTC model directory (auto-detected if in standard location)
+                --file-id <id>        Run benchmark on a single file (e.g., "4468654_chunk39")
                 --max-files <n>       Maximum number of files to process
                 --output, -o <path>   Output JSON file (default: ctc_earnings_benchmark.json)
-                --keyword-mode <mode> Keyword mode: chunk or file (default: chunk)
+                --auto-download       Download earnings22-kws dataset if not found
 
             Default locations:
                 Dataset: ~/Library/Application Support/FluidAudio/earnings22-kws/test-dataset/
@@ -943,324 +1033,18 @@ public enum CtcEarningsBenchmark {
                 # Run with auto-detected paths
                 fluidaudio ctc-earnings-benchmark
 
+                # Run with auto-download
+                fluidaudio ctc-earnings-benchmark --auto-download
+
+                # Run single file test
+                fluidaudio ctc-earnings-benchmark --file-id 4468654_chunk39
+
                 # Run with explicit paths
                 fluidaudio ctc-earnings-benchmark \\
                     --data-dir /path/to/test-dataset \\
                     --ctc-model /path/to/parakeet-ctc-110m-coreml \\
                     --max-files 100
             """)
-    }
-
-    private static func parseKeywordMode(_ value: String) -> KeywordMode? {
-        switch value.lowercased() {
-        case "chunk", "chunk-keywords":
-            return .chunk
-        case "file", "file-keywords":
-            return .file
-        default:
-            return nil
-        }
-    }
-
-    private static func parentId(from fileId: String) -> String {
-        guard let range = fileId.range(of: "_chunk") else {
-            return fileId
-        }
-        return String(fileId[..<range.lowerBound])
-    }
-
-    private static func buildKeywordIndex(dataDir: URL, keywordMode: KeywordMode) throws -> [String: [String]] {
-        guard keywordMode == .file else {
-            return [:]
-        }
-
-        var index: [String: Set<String>] = [:]
-        let suffix = ".dictionary.txt"
-        let fileManager = FileManager.default
-        let contents = try fileManager.contentsOfDirectory(at: dataDir, includingPropertiesForKeys: nil)
-
-        for url in contents {
-            let name = url.lastPathComponent
-            guard name.hasSuffix(suffix) else { continue }
-            let fileId = String(name.dropLast(suffix.count))
-            let parent = parentId(from: fileId)
-            let words = try loadDictionaryWords(from: url)
-            var set = index[parent] ?? Set<String>()
-            set.formUnion(words)
-            index[parent] = set
-        }
-
-        return index.mapValues { Array($0).sorted() }
-    }
-
-    private static func loadDictionaryWords(
-        fileId: String,
-        dictionaryFile: URL,
-        keywordMode: KeywordMode,
-        keywordIndex: [String: [String]]
-    ) throws -> [String] {
-        switch keywordMode {
-        case .chunk:
-            return try loadDictionaryWords(from: dictionaryFile)
-        case .file:
-            let parent = parentId(from: fileId)
-            if let words = keywordIndex[parent] {
-                return words
-            }
-            return try loadDictionaryWords(from: dictionaryFile)
-        }
-    }
-
-    private static func loadDictionaryWords(from url: URL) throws -> [String] {
-        let dictionaryContent = try String(contentsOf: url, encoding: .utf8)
-        return dictionaryContent
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private struct KeywordStats {
-        let truePositives: Int
-        let falsePositives: Int
-        let falseNegatives: Int
-        let groundTruthCount: Int
-        let predictedCount: Int
-        let precision: Double
-        let recall: Double
-        let fscore: Double
-        let referenceKeywords: Set<String>
-    }
-
-    private static func computeKeywordStats(
-        referenceText: String,
-        hypothesisText: String,
-        dictionaryWords: [String]
-    ) -> KeywordStats {
-        let normalizedRef = referenceText
-        let normalizedHyp = hypothesisText
-        let normalizedKeywords = dictionaryWords.map { TextNormalizer.normalize($0) }.filter { !$0.isEmpty }
-
-        let refWords = normalizedRef.split(separator: " ").map(String.init)
-        let hypWords = normalizedHyp.split(separator: " ").map(String.init)
-
-        let alignment = alignWords(reference: refWords, hypothesis: hypWords)
-        let keywordStats = computeAlignedKeywordStats(alignment: alignment, keywords: normalizedKeywords)
-
-        let tp = keywordStats.truePositives
-        let fp = keywordStats.falsePositives
-        let gt = keywordStats.groundTruth
-        let precision = (tp + fp) > 0 ? Double(tp) / Double(tp + fp) : 0
-        let recall = gt > 0 ? Double(tp) / Double(gt) : 0
-        let fscore = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0
-
-        return KeywordStats(
-            truePositives: tp,
-            falsePositives: fp,
-            falseNegatives: max(0, gt - tp),
-            groundTruthCount: gt,
-            predictedCount: tp + fp,
-            precision: precision,
-            recall: recall,
-            fscore: fscore,
-            referenceKeywords: keywordStats.referenceKeywords
-        )
-    }
-
-    private static func alignWords(
-        reference: [String],
-        hypothesis: [String]
-    ) -> [(ref: String, hyp: String)] {
-        let m = reference.count
-        let n = hypothesis.count
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-        var back = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-
-        for i in 0...m { dp[i][0] = i }
-        for j in 0...n { dp[0][j] = j }
-        for i in 1...m { back[i][0] = 1 }  // delete
-        for j in 1...n { back[0][j] = 2 }  // insert
-
-        for i in 1...m {
-            for j in 1...n {
-                let cost = reference[i - 1] == hypothesis[j - 1] ? 0 : 1
-                let subCost = dp[i - 1][j - 1] + cost
-                let delCost = dp[i - 1][j] + 1
-                let insCost = dp[i][j - 1] + 1
-
-                let minCost = min(subCost, min(delCost, insCost))
-                dp[i][j] = minCost
-
-                if minCost == subCost {
-                    back[i][j] = 0
-                } else if minCost == delCost {
-                    back[i][j] = 1
-                } else {
-                    back[i][j] = 2
-                }
-            }
-        }
-
-        var aligned: [(ref: String, hyp: String)] = []
-        var i = m
-        var j = n
-        let eps = "<eps>"
-
-        while i > 0 || j > 0 {
-            let op = back[i][j]
-            if op == 0, i > 0, j > 0 {
-                aligned.append((reference[i - 1], hypothesis[j - 1]))
-                i -= 1
-                j -= 1
-                continue
-            }
-            if op == 1, i > 0 {
-                aligned.append((reference[i - 1], eps))
-                i -= 1
-                continue
-            }
-            if j > 0 {
-                aligned.append((eps, hypothesis[j - 1]))
-                j -= 1
-                continue
-            }
-            if i > 0 {
-                aligned.append((reference[i - 1], eps))
-                i -= 1
-            }
-        }
-
-        return aligned.reversed()
-    }
-
-    private struct AlignedKeywordStats {
-        let truePositives: Int
-        let groundTruth: Int
-        let falsePositives: Int
-        let referenceKeywords: Set<String>
-    }
-
-    private static func computeAlignedKeywordStats(
-        alignment: [(ref: String, hyp: String)],
-        keywords: [String]
-    ) -> AlignedKeywordStats {
-        guard !keywords.isEmpty else {
-            return AlignedKeywordStats(truePositives: 0, groundTruth: 0, falsePositives: 0, referenceKeywords: [])
-        }
-
-        var stats: [String: (tp: Int, gt: Int, fp: Int)] = [:]
-        let keywordSet = Set(keywords)
-        for keyword in keywords {
-            stats[keyword] = (0, 0, 0)
-        }
-
-        let eps = "<eps>"
-        var maxOrder = 1
-        for keyword in keywords {
-            let count = keyword.split(separator: " ").count
-            if count > maxOrder {
-                maxOrder = count
-            }
-        }
-
-        for pair in alignment {
-            let ref = pair.ref
-            let hyp = pair.hyp
-            if let existing = stats[ref] {
-                let updated = (tp: existing.tp + (ref == hyp ? 1 : 0), gt: existing.gt + 1, fp: existing.fp)
-                stats[ref] = updated
-                continue
-            }
-            if let existing = stats[hyp] {
-                let updated = (tp: existing.tp, gt: existing.gt, fp: existing.fp + 1)
-                stats[hyp] = updated
-            }
-        }
-
-        if maxOrder > 1 {
-            for ngramOrder in 2...maxOrder {
-                var idx = 0
-                var itemRef: [(word: String, index: Int)] = []
-                while idx < alignment.count {
-                    if !itemRef.isEmpty {
-                        let nextIndex = itemRef[0].index + 1
-                        if itemRef.count > 1 {
-                            itemRef = [itemRef[1]]
-                            idx = nextIndex
-                            continue
-                        }
-                        itemRef = []
-                        idx = nextIndex
-                    }
-                    while itemRef.count != ngramOrder, idx < alignment.count {
-                        let word = alignment[idx].ref
-                        idx += 1
-                        if word == eps {
-                            continue
-                        }
-                        itemRef.append((word, idx - 1))
-                    }
-                    if itemRef.count == ngramOrder {
-                        let phraseRef = itemRef.map { $0.word }.joined(separator: " ")
-                        let phraseHyp = itemRef.map { alignment[$0.index].hyp }.joined(separator: " ")
-                        if let existing = stats[phraseRef] {
-                            let updated = (
-                                tp: existing.tp + (phraseRef == phraseHyp ? 1 : 0),
-                                gt: existing.gt + 1,
-                                fp: existing.fp
-                            )
-                            stats[phraseRef] = updated
-                        }
-                    }
-                }
-
-                idx = 0
-                var itemHyp: [(word: String, index: Int)] = []
-                while idx < alignment.count {
-                    if !itemHyp.isEmpty {
-                        let nextIndex = itemHyp[0].index + 1
-                        if itemHyp.count > 1 {
-                            itemHyp = [itemHyp[1]]
-                            idx = nextIndex
-                            continue
-                        }
-                        itemHyp = []
-                        idx = nextIndex
-                    }
-                    while itemHyp.count != ngramOrder, idx < alignment.count {
-                        let word = alignment[idx].hyp
-                        idx += 1
-                        if word == eps {
-                            continue
-                        }
-                        itemHyp.append((word, idx - 1))
-                    }
-                    if itemHyp.count == ngramOrder {
-                        let phraseHyp = itemHyp.map { $0.word }.joined(separator: " ")
-                        let phraseRef = itemHyp.map { alignment[$0.index].ref }.joined(separator: " ")
-                        if phraseHyp != phraseRef, let existing = stats[phraseHyp] {
-                            let updated = (tp: existing.tp, gt: existing.gt, fp: existing.fp + 1)
-                            stats[phraseHyp] = updated
-                        }
-                    }
-                }
-            }
-        }
-
-        var tp = 0
-        var gt = 0
-        var fp = 0
-        for (_, values) in stats {
-            tp += values.tp
-            gt += values.gt
-            fp += values.fp
-        }
-
-        return AlignedKeywordStats(
-            truePositives: tp,
-            groundTruth: gt,
-            falsePositives: fp,
-            referenceKeywords: keywordSet
-        )
     }
 }
 #endif

@@ -259,6 +259,12 @@ public struct VocabularyRescorer {
                     }
                 }
 
+                // Debug: show all similarity calculations for high-similarity matches
+                if debugMode && bestSimilarity >= 0.50 {
+                    let wordClean = words[idx].trimmingCharacters(in: .punctuationCharacters)
+                    print("    [SIM] '\(wordClean)' vs '\(vocabTerm)' = \(String(format: "%.2f", bestSimilarity))")
+                }
+
                 if bestSimilarity >= effectiveMinSimilarity {
                     let originalSpan = words[idx..<idx + matchedSpanLength].joined(separator: " ")
 
@@ -474,6 +480,339 @@ public struct VocabularyRescorer {
         public let wasModified: Bool
     }
 
+    // MARK: - Timestamp-Based Rescoring (NeMo CTC-WS Algorithm)
+
+    /// Word timing information built from TDT token timings
+    public struct WordTiming: Sendable {
+        public let word: String
+        public let startTime: Double
+        public let endTime: Double
+        public let confidence: Float
+        public let wordIndex: Int
+    }
+
+    /// Rescore using timestamp-based matching (NeMo CTC-WS algorithm).
+    /// Instead of string similarity, matches CTC detections to TDT words by overlapping timestamps.
+    ///
+    /// - Parameters:
+    ///   - transcript: Original transcript from TDT decoder
+    ///   - tokenTimings: Token-level timings from TDT decoder
+    ///   - spotResult: CTC keyword spotting result with detections and timestamps
+    ///   - cbw: Context-biasing weight (default 3.0 per NeMo paper)
+    /// - Returns: Rescored transcript with timestamp-based replacements and insertions
+    public func rescoreWithTimings(
+        transcript: String,
+        tokenTimings: [TokenTiming],
+        spotResult: CtcKeywordSpotter.SpotKeywordsResult,
+        cbw: Float = 3.0
+    ) -> RescoreOutput {
+        // Build word-level timings from token timings
+        let wordTimings = buildWordTimings(from: tokenTimings)
+
+        guard !wordTimings.isEmpty else {
+            // Fall back to string-similarity based rescoring
+            return rescore(transcript: transcript, spotResult: spotResult)
+        }
+
+        let detections = spotResult.detections
+        guard !detections.isEmpty else {
+            return RescoreOutput(text: transcript, replacements: [], wasModified: false)
+        }
+
+        if debugMode {
+            print("=== VocabularyRescorer (Timestamp-Based) ===")
+            print("Words: \(wordTimings.count), Detections: \(detections.count)")
+            print("CBW (context-biasing weight): \(cbw)")
+        }
+
+        var replacements: [RescoringResult] = []
+        var modifiedWords: [(word: String, startTime: Double, endTime: Double)] = wordTimings.map {
+            (word: $0.word, startTime: $0.startTime, endTime: $0.endTime)
+        }
+        var insertions: [(word: String, insertAfterIndex: Int, time: Double)] = []
+        var replacedIndices = Set<Int>()
+
+        // Process each CTC detection
+        for detection in detections {
+            let vocabTerm = detection.term.text
+            let vocabScore = detection.score + cbw  // Apply context-biasing weight
+            let detectionStart = detection.startTime
+            let detectionEnd = detection.endTime
+
+            if debugMode {
+                print(
+                    "  Detection: '\(vocabTerm)' [\(String(format: "%.2f", detectionStart))-\(String(format: "%.2f", detectionEnd))s] score=\(String(format: "%.2f", vocabScore))"
+                )
+            }
+
+            // Find overlapping TDT words
+            var overlappingWords: [(index: Int, timing: WordTiming, overlapRatio: Double)] = []
+
+            for (idx, timing) in wordTimings.enumerated() {
+                guard !replacedIndices.contains(idx) else { continue }
+
+                // Calculate overlap
+                let overlapStart = max(detectionStart, timing.startTime)
+                let overlapEnd = min(detectionEnd, timing.endTime)
+                let overlapDuration = max(0, overlapEnd - overlapStart)
+
+                if overlapDuration > 0 {
+                    let detectionDuration = detectionEnd - detectionStart
+                    let overlapRatio = detectionDuration > 0 ? overlapDuration / detectionDuration : 0
+                    overlappingWords.append((index: idx, timing: timing, overlapRatio: overlapRatio))
+                }
+            }
+
+            if !overlappingWords.isEmpty {
+                // Found overlapping words - decide whether to replace
+                // Sort by overlap ratio (highest first)
+                let sorted = overlappingWords.sorted { $0.overlapRatio > $1.overlapRatio }
+                let bestMatch = sorted[0]
+
+                // Convert TDT confidence (0-1) to log-probability scale for comparison
+                // TDT confidence is softmax probability, CTC score is log-probability
+                let tdtLogProb = log(max(bestMatch.timing.confidence, 1e-10))
+
+                let shouldReplace = vocabScore > tdtLogProb
+
+                if debugMode {
+                    print(
+                        "    Overlap with '\(bestMatch.timing.word)' (conf=\(String(format: "%.2f", bestMatch.timing.confidence)), logP=\(String(format: "%.2f", tdtLogProb)))"
+                    )
+                    print(
+                        "    CTC score: \(String(format: "%.2f", vocabScore)) vs TDT: \(String(format: "%.2f", tdtLogProb)) -> \(shouldReplace ? "REPLACE" : "KEEP")"
+                    )
+                }
+
+                if shouldReplace {
+                    modifiedWords[bestMatch.index].word = vocabTerm
+                    replacedIndices.insert(bestMatch.index)
+
+                    replacements.append(
+                        RescoringResult(
+                            originalWord: bestMatch.timing.word,
+                            originalScore: tdtLogProb,
+                            replacementWord: vocabTerm,
+                            replacementScore: vocabScore,
+                            shouldReplace: true,
+                            reason:
+                                "Timestamp overlap, CTC score \(String(format: "%.2f", vocabScore)) > TDT \(String(format: "%.2f", tdtLogProb))"
+                        ))
+                }
+            } else {
+                // No overlapping words - find insertion point (gap detection)
+                var insertAfterIndex = -1
+
+                for (idx, timing) in wordTimings.enumerated() {
+                    if timing.endTime <= detectionStart {
+                        insertAfterIndex = idx
+                    }
+                }
+
+                // Check if there's actually a gap (not overlapping with next word)
+                let nextWordStart: Double
+                if insertAfterIndex + 1 < wordTimings.count {
+                    nextWordStart = wordTimings[insertAfterIndex + 1].startTime
+                } else {
+                    nextWordStart = Double.infinity
+                }
+
+                let gapExists = detectionEnd <= nextWordStart
+
+                if gapExists {
+                    insertions.append((word: vocabTerm, insertAfterIndex: insertAfterIndex, time: detectionStart))
+
+                    if debugMode {
+                        print("    No overlap - INSERT after index \(insertAfterIndex) (gap detected)")
+                    }
+
+                    replacements.append(
+                        RescoringResult(
+                            originalWord: "",
+                            originalScore: 0,
+                            replacementWord: vocabTerm,
+                            replacementScore: vocabScore,
+                            shouldReplace: true,
+                            reason: "Inserted into gap at \(String(format: "%.2f", detectionStart))s"
+                        ))
+                } else if debugMode {
+                    print("    No gap found for insertion (would overlap with existing word)")
+                }
+            }
+        }
+
+        // Build final transcript
+        // First, collect all words with their positions
+        var finalWords: [(word: String, time: Double)] = modifiedWords.map { ($0.word, $0.startTime) }
+
+        // Add insertions
+        for insertion in insertions {
+            finalWords.append((word: insertion.word, time: insertion.time))
+        }
+
+        // Sort by time
+        finalWords.sort { $0.time < $1.time }
+
+        var modifiedText = finalWords.map { $0.word }.joined(separator: " ")
+
+        // HYBRID FALLBACK: If no timestamp-based replacements were made,
+        // try string-similarity matching for detections (especially for "Boz" -> "Bose")
+        if replacements.isEmpty && !detections.isEmpty {
+            if debugMode {
+                print("  No timestamp matches - trying string-similarity fallback")
+            }
+            modifiedText = applyStringSimilarityFallback(
+                text: modifiedText,
+                detections: detections,
+                cbw: cbw
+            )
+        }
+
+        let wasModified = modifiedText != transcript
+
+        if debugMode {
+            print("Final: \(modifiedText)")
+            print("Modified: \(wasModified)")
+            print("===========================================")
+        }
+
+        return RescoreOutput(
+            text: modifiedText,
+            replacements: replacements,
+            wasModified: wasModified
+        )
+    }
+
+    /// Build word-level timings from token timings.
+    /// Tokens starting with space " " or "▁" (SentencePiece) begin new words.
+    private func buildWordTimings(from tokenTimings: [TokenTiming]) -> [WordTiming] {
+        var wordTimings: [WordTiming] = []
+        var currentWord = ""
+        var wordStart: Double = 0
+        var wordEnd: Double = 0
+        var minConfidence: Float = 1.0
+        var wordIndex = 0
+
+        for timing in tokenTimings {
+            let token = timing.token
+
+            // Skip special tokens
+            if token.isEmpty || token == "<blank>" || token == "<pad>" {
+                continue
+            }
+
+            // Check if this starts a new word:
+            // - Has space prefix " " (TDT format)
+            // - Has "▁" prefix (SentencePiece format)
+            // - Is first token
+            let startsNewWord = token.hasPrefix(" ") || token.hasPrefix("▁") || currentWord.isEmpty
+
+            if startsNewWord && !currentWord.isEmpty {
+                // Save previous word (trim any leading/trailing whitespace)
+                let trimmedWord = currentWord.trimmingCharacters(in: .whitespaces)
+                if !trimmedWord.isEmpty {
+                    wordTimings.append(
+                        WordTiming(
+                            word: trimmedWord,
+                            startTime: wordStart,
+                            endTime: wordEnd,
+                            confidence: minConfidence,
+                            wordIndex: wordIndex
+                        ))
+                    wordIndex += 1
+                }
+                minConfidence = 1.0
+                currentWord = ""
+            }
+
+            if startsNewWord {
+                // Remove prefix (space or ▁)
+                if token.hasPrefix(" ") {
+                    currentWord = String(token.dropFirst())
+                } else if token.hasPrefix("▁") {
+                    currentWord = String(token.dropFirst())
+                } else {
+                    currentWord = token
+                }
+                wordStart = timing.startTime
+            } else {
+                currentWord += token
+            }
+            wordEnd = timing.endTime
+            minConfidence = min(minConfidence, timing.confidence)
+        }
+
+        // Save final word
+        let trimmedWord = currentWord.trimmingCharacters(in: .whitespaces)
+        if !trimmedWord.isEmpty {
+            wordTimings.append(
+                WordTiming(
+                    word: trimmedWord,
+                    startTime: wordStart,
+                    endTime: wordEnd,
+                    confidence: minConfidence,
+                    wordIndex: wordIndex
+                ))
+        }
+
+        return wordTimings
+    }
+
+    /// String-similarity fallback for when timestamp-based matching fails.
+    /// Replaces words that are phonetically similar to detected vocabulary terms.
+    private func applyStringSimilarityFallback(
+        text: String,
+        detections: [CtcKeywordSpotter.KeywordDetection],
+        cbw: Float
+    ) -> String {
+        var modifiedText = text
+        let words = text.split(whereSeparator: { $0.isWhitespace }).map { String($0) }
+
+        for detection in detections {
+            let vocabTerm = detection.term.text
+            let vocabTermLower = vocabTerm.lowercased()
+
+            // Find all words similar to the vocabulary term
+            for word in words {
+                let wordClean = word.trimmingCharacters(in: .punctuationCharacters)
+                let similarity = Self.stringSimilarity(wordClean, vocabTerm)
+
+                // Threshold for fallback - replace phonetically similar words
+                // "Boz" vs "Bose" = 0.50, need to catch these cases
+                // Require: same first letter AND similar length to avoid false positives
+                let sameFirstLetter = wordClean.lowercased().first == vocabTermLower.first
+                let lengthDiff = abs(wordClean.count - vocabTerm.count)
+                let lengthMatch = lengthDiff <= 1
+                let shouldReplace =
+                    similarity >= 0.50 && sameFirstLetter && lengthMatch
+                    && wordClean.lowercased() != vocabTermLower
+                if shouldReplace {
+                    // Replace this word with the vocabulary term
+                    let replacement = preserveCapitalization(original: wordClean, replacement: vocabTerm)
+
+                    // Use word boundary regex to avoid partial replacements
+                    let pattern = "\\b\(NSRegularExpression.escapedPattern(for: wordClean))\\b"
+                    if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                        modifiedText = regex.stringByReplacingMatches(
+                            in: modifiedText,
+                            options: [],
+                            range: NSRange(modifiedText.startIndex..., in: modifiedText),
+                            withTemplate: replacement
+                        )
+                    }
+
+                    if debugMode {
+                        print(
+                            "    [FALLBACK] '\(wordClean)' -> '\(replacement)' (sim=\(String(format: "%.2f", similarity)))"
+                        )
+                    }
+                }
+            }
+        }
+
+        return modifiedText
+    }
+
     // MARK: - Private Helpers
 
     /// Estimate the CTC score for the original word based on detection characteristics
@@ -547,5 +886,364 @@ public struct VocabularyRescorer {
             return replacement.prefix(1).uppercased() + replacement.dropFirst()
         }
         return replacement
+    }
+
+    /// Normalize text for similarity checks: lowercase, collapse whitespace,
+    /// and strip punctuation while preserving letters, numbers, apostrophes, and hyphens.
+    private static func normalizeForSimilarity(_ text: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "'-"))
+        var result = ""
+        var lastWasSpace = true
+
+        for scalar in text.lowercased().unicodeScalars {
+            if allowed.contains(scalar) {
+                result.append(Character(scalar))
+                lastWasSpace = false
+            } else if scalar == " " || scalar == "\t" || scalar == "\n" {
+                if !lastWasSpace && !result.isEmpty {
+                    result.append(" ")
+                    lastWasSpace = true
+                }
+            }
+            // Skip other characters (punctuation)
+        }
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Build set of normalized vocabulary terms for guard checks
+    private func buildVocabularyNormalizedSet() -> Set<String> {
+        var normalizedSet = Set<String>()
+        for term in vocabulary.terms {
+            let normalized = Self.normalizeForSimilarity(term.text)
+            if !normalized.isEmpty {
+                normalizedSet.insert(normalized)
+            }
+            // Also add aliases if present
+            if let aliases = term.aliases {
+                for alias in aliases {
+                    let normalizedAlias = Self.normalizeForSimilarity(alias)
+                    if !normalizedAlias.isEmpty {
+                        normalizedSet.insert(normalizedAlias)
+                    }
+                }
+            }
+        }
+        return normalizedSet
+    }
+
+    // MARK: - Constrained CTC Rescoring
+
+    /// Rescore using constrained CTC search around TDT word locations.
+    ///
+    /// This approach fixes the timing mismatch issue where global CTC search finds
+    /// vocabulary terms at completely different locations than TDT transcription.
+    ///
+    /// Algorithm:
+    /// 1. Find TDT words phonetically similar to vocabulary terms (string similarity)
+    /// 2. For each match, run constrained CTC DP within the TDT word's timestamp window
+    /// 3. Compare constrained CTC score with TDT confidence to decide replacement
+    ///
+    /// - Parameters:
+    ///   - transcript: Original transcript from TDT decoder
+    ///   - tokenTimings: Token-level timings from TDT decoder
+    ///   - logProbs: CTC log-probabilities from spotter
+    ///   - frameDuration: Duration of each CTC frame in seconds
+    ///   - cbw: Context-biasing weight (default 3.0 per NeMo paper)
+    ///   - marginSeconds: Temporal margin around TDT word for CTC search (default 0.5s)
+    ///   - minSimilarity: Minimum string similarity to consider a match (default 0.5)
+    /// - Returns: Rescored transcript with constrained CTC replacements
+    public func rescoreWithConstrainedCTC(
+        transcript: String,
+        tokenTimings: [TokenTiming],
+        logProbs: [[Float]],
+        frameDuration: Double,
+        cbw: Float = 3.0,
+        marginSeconds: Double = 0.5,
+        minSimilarity: Float = 0.5
+    ) -> RescoreOutput {
+        // Build word-level timings from token timings
+        let wordTimings = buildWordTimings(from: tokenTimings)
+
+        guard !wordTimings.isEmpty, !logProbs.isEmpty else {
+            return RescoreOutput(text: transcript, replacements: [], wasModified: false)
+        }
+
+        if debugMode {
+            print("=== VocabularyRescorer (Constrained CTC) ===")
+            print("Words: \(wordTimings.count), Frames: \(logProbs.count)")
+            print("Frame duration: \(String(format: "%.4f", frameDuration))s")
+            print("CBW: \(cbw), Margin: \(marginSeconds)s, MinSimilarity: \(minSimilarity)")
+        }
+
+        var replacements: [RescoringResult] = []
+        var modifiedWords: [(word: String, startTime: Double, endTime: Double)] = wordTimings.map {
+            (word: $0.word, startTime: $0.startTime, endTime: $0.endTime)
+        }
+        var replacedIndices = Set<Int>()
+
+        // Build normalized vocabulary set for guard checks
+        let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
+
+        // For each vocabulary term, find similar TDT words and run constrained CTC
+        for term in vocabulary.terms {
+            let vocabTerm = term.text
+
+            // Skip short vocabulary terms (per NeMo CTC-WS paper)
+            guard vocabTerm.count >= vocabulary.minTermLength else {
+                if debugMode {
+                    print(
+                        "  Skipping '\(vocabTerm)': too short (\(vocabTerm.count) < \(vocabulary.minTermLength) chars)")
+                }
+                continue
+            }
+
+            let vocabTokens = term.ctcTokenIds ?? term.tokenIds
+
+            guard let vocabTokens, !vocabTokens.isEmpty else {
+                continue
+            }
+
+            // Check if this is a multi-word vocabulary term
+            let vocabWords = vocabTerm.split(separator: " ").map(String.init)
+            let isMultiWord = vocabWords.count > 1
+
+            // Normalized form of current vocabulary term
+            let normalizedVocab = Self.normalizeForSimilarity(vocabTerm)
+
+            if isMultiWord {
+                // Multi-word phrase matching: look for consecutive TDT words that match the phrase
+                let maxSpan = min(4, vocabWords.count + 1)  // Allow some flexibility
+
+                // Skip if phrase has more words than our max span (e.g., 5+ word phrases)
+                guard vocabWords.count <= maxSpan else { continue }
+
+                for spanLength in vocabWords.count...maxSpan {
+                    for startIdx in 0..<(wordTimings.count - spanLength + 1) {
+                        // Check if any word in the span is already replaced
+                        let spanIndices = Array(startIdx..<(startIdx + spanLength))
+                        guard spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else { continue }
+
+                        // Build concatenated phrase from consecutive TDT words
+                        let spanWords = spanIndices.map { wordTimings[$0].word }
+                        let tdtPhrase = spanWords.joined(separator: " ")
+                        let normalizedPhrase = Self.normalizeForSimilarity(tdtPhrase)
+
+                        // Skip if already exact match (no replacement needed)
+                        if normalizedPhrase == normalizedVocab {
+                            continue
+                        }
+
+                        // Guard: Skip if original phrase matches a DIFFERENT vocabulary term
+                        if vocabularyNormalizedSet.contains(normalizedPhrase) {
+                            if debugMode {
+                                print(
+                                    "  [MULTI] Skipping '\(vocabTerm)': phrase '\(tdtPhrase)' matches another vocab term"
+                                )
+                            }
+                            continue
+                        }
+
+                        // Check string similarity against vocabulary phrase
+                        let similarity = Self.stringSimilarity(tdtPhrase, vocabTerm)
+                        guard similarity >= minSimilarity else { continue }
+
+                        // Get temporal window for the entire span
+                        let spanStartTime = wordTimings[spanIndices.first!].startTime
+                        let spanEndTime = wordTimings[spanIndices.last!].endTime
+
+                        let marginFrames = Int(marginSeconds / frameDuration)
+                        let spanStartFrame = Int(spanStartTime / frameDuration)
+                        let spanEndFrame = Int(spanEndTime / frameDuration)
+
+                        let searchStart = max(0, spanStartFrame - marginFrames)
+                        let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
+
+                        // Score vocabulary phrase using constrained CTC
+                        let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
+                            logProbs: logProbs,
+                            keywordTokens: vocabTokens,
+                            searchStartFrame: searchStart,
+                            searchEndFrame: searchEnd
+                        )
+
+                        // Score original TDT phrase using constrained CTC
+                        var originalCtcScore: Float = -Float.infinity
+                        if let tokenizer = ctcTokenizer {
+                            let originalTokens = tokenizer.encode(tdtPhrase)
+                            if !originalTokens.isEmpty {
+                                let (score, _, _) = spotter.ctcWordSpotConstrained(
+                                    logProbs: logProbs,
+                                    keywordTokens: originalTokens,
+                                    searchStartFrame: searchStart,
+                                    searchEndFrame: searchEnd
+                                )
+                                originalCtcScore = score
+                            }
+                        }
+
+                        let boostedVocabScore = vocabCtcScore + cbw
+                        let shouldReplace = boostedVocabScore > originalCtcScore
+
+                        if debugMode {
+                            print(
+                                "  [MULTI] '\(tdtPhrase)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", similarity)))"
+                            )
+                            print(
+                                "    TDT span: [\(String(format: "%.2f", spanStartTime))-\(String(format: "%.2f", spanEndTime))s] words=\(spanLength)"
+                            )
+                            print(
+                                "    CTC('\(tdtPhrase)'): \(String(format: "%.2f", originalCtcScore))"
+                            )
+                            print(
+                                "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbw) = \(String(format: "%.2f", boostedVocabScore))"
+                            )
+                            print(
+                                "    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(boostedVocabScore > originalCtcScore ? ">" : "<=") original)"
+                            )
+                        }
+
+                        if shouldReplace {
+                            // Replace first word with full phrase, mark rest as empty
+                            modifiedWords[spanIndices.first!].word = vocabTerm
+                            for idx in spanIndices.dropFirst() {
+                                modifiedWords[idx].word = ""  // Will be filtered out
+                            }
+                            // Mark all indices as replaced
+                            for idx in spanIndices {
+                                replacedIndices.insert(idx)
+                            }
+
+                            replacements.append(
+                                RescoringResult(
+                                    originalWord: tdtPhrase,
+                                    originalScore: originalCtcScore,
+                                    replacementWord: vocabTerm,
+                                    replacementScore: boostedVocabScore,
+                                    shouldReplace: true,
+                                    reason:
+                                        "CTC-vs-CTC (multi-word): '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(tdtPhrase)'=\(String(format: "%.2f", originalCtcScore))"
+                                ))
+                            break  // Found a match for this vocab term at this span length
+                        }
+                    }
+                    // If we found a replacement, don't try longer spans
+                    if replacements.last?.replacementWord == vocabTerm { break }
+                }
+            } else {
+                // Single-word matching (existing logic)
+                for (wordIdx, timing) in wordTimings.enumerated() {
+                    guard !replacedIndices.contains(wordIdx) else { continue }
+
+                    let tdtWord = timing.word
+                    let normalizedWord = Self.normalizeForSimilarity(tdtWord)
+
+                    // Skip if already exact match (no replacement needed)
+                    if normalizedWord == normalizedVocab {
+                        continue
+                    }
+
+                    // Guard: Skip if original word matches a DIFFERENT vocabulary term
+                    if vocabularyNormalizedSet.contains(normalizedWord) {
+                        if debugMode {
+                            print("  Skipping '\(vocabTerm)': word '\(tdtWord)' matches another vocab term")
+                        }
+                        continue
+                    }
+
+                    let similarity = Self.stringSimilarity(tdtWord, vocabTerm)
+
+                    guard similarity >= minSimilarity else { continue }
+
+                    // Found a similar word - run constrained CTC within its temporal window
+                    let marginFrames = Int(marginSeconds / frameDuration)
+                    let wordStartFrame = Int(timing.startTime / frameDuration)
+                    let wordEndFrame = Int(timing.endTime / frameDuration)
+
+                    let searchStart = max(0, wordStartFrame - marginFrames)
+                    let searchEnd = min(logProbs.count, wordEndFrame + marginFrames)
+
+                    // Score vocabulary term using constrained CTC
+                    let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
+                        logProbs: logProbs,
+                        keywordTokens: vocabTokens,
+                        searchStartFrame: searchStart,
+                        searchEndFrame: searchEnd
+                    )
+
+                    // Score original TDT word using constrained CTC (same window)
+                    // This gives us apples-to-apples comparison per NeMo paper
+                    var originalCtcScore: Float = -Float.infinity
+                    if let tokenizer = ctcTokenizer {
+                        let originalTokens = tokenizer.encode(tdtWord)
+                        if !originalTokens.isEmpty {
+                            let (score, _, _) = spotter.ctcWordSpotConstrained(
+                                logProbs: logProbs,
+                                keywordTokens: originalTokens,
+                                searchStartFrame: searchStart,
+                                searchEndFrame: searchEnd
+                            )
+                            originalCtcScore = score
+                        }
+                    }
+
+                    // Apply context-biasing weight to vocabulary term (per NeMo paper)
+                    let boostedVocabScore = vocabCtcScore + cbw
+
+                    // CTC-vs-CTC comparison (same scale, per NeMo paper)
+                    let shouldReplace = boostedVocabScore > originalCtcScore
+
+                    if debugMode {
+                        print(
+                            "  '\(tdtWord)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", similarity)))"
+                        )
+                        print(
+                            "    TDT word: [\(String(format: "%.2f", timing.startTime))-\(String(format: "%.2f", timing.endTime))s] conf=\(String(format: "%.2f", timing.confidence))"
+                        )
+                        print(
+                            "    CTC('\(tdtWord)'): \(String(format: "%.2f", originalCtcScore))"
+                        )
+                        print(
+                            "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbw) = \(String(format: "%.2f", boostedVocabScore))"
+                        )
+                        print(
+                            "    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(boostedVocabScore > originalCtcScore ? ">" : "<=") original)"
+                        )
+                    }
+
+                    if shouldReplace {
+                        modifiedWords[wordIdx].word = vocabTerm
+                        replacedIndices.insert(wordIdx)
+
+                        replacements.append(
+                            RescoringResult(
+                                originalWord: tdtWord,
+                                originalScore: originalCtcScore,
+                                replacementWord: vocabTerm,
+                                replacementScore: boostedVocabScore,
+                                shouldReplace: true,
+                                reason:
+                                    "CTC-vs-CTC: '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(tdtWord)'=\(String(format: "%.2f", originalCtcScore))"
+                            ))
+                    }
+                }
+            }
+        }
+
+        // Reconstruct transcript from modified words (filter empty strings from multi-word replacements)
+        let modifiedText = modifiedWords.map { $0.word }.filter { !$0.isEmpty }.joined(separator: " ")
+        let wasModified = !replacements.isEmpty
+
+        if debugMode {
+            print("Final: \(modifiedText)")
+            print("Replacements: \(replacements.count)")
+            print("===========================================")
+        }
+
+        return RescoreOutput(
+            text: modifiedText,
+            replacements: replacements,
+            wasModified: wasModified
+        )
     }
 }

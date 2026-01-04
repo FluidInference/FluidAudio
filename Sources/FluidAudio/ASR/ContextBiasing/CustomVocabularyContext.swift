@@ -48,6 +48,10 @@ public struct CustomVocabularyConfig: Codable, Sendable {
     public let minCtcScore: Float?
     public let minSimilarity: Float?
     public let minCombinedConfidence: Float?
+
+    /// Minimum character length for vocabulary terms (per NeMo CTC-WS paper)
+    /// Terms shorter than this are skipped to reduce false positives (e.g., "or" → "VR")
+    public let minTermLength: Int?
 }
 
 /// Runtime context used by the decoder biasing system.
@@ -63,6 +67,10 @@ public struct CustomVocabularyContext: Sendable {
     public let minSimilarity: Float
     public let minCombinedConfidence: Float
 
+    /// Minimum character length for vocabulary terms (per NeMo CTC-WS paper)
+    /// Terms shorter than this are skipped to reduce false positives (e.g., "or" → "VR")
+    public let minTermLength: Int
+
     public init(
         terms: [CustomVocabularyTerm],
         alpha: Float = 0.5,
@@ -71,7 +79,8 @@ public struct CustomVocabularyContext: Sendable {
         scorePerPhrase: Float = 0.0,
         minCtcScore: Float = -12.0,
         minSimilarity: Float = 0.52,
-        minCombinedConfidence: Float = 0.54
+        minCombinedConfidence: Float = 0.54,
+        minTermLength: Int = 3
     ) {
         self.terms = terms
         self.alpha = alpha
@@ -81,6 +90,7 @@ public struct CustomVocabularyContext: Sendable {
         self.minCtcScore = minCtcScore
         self.minSimilarity = minSimilarity
         self.minCombinedConfidence = minCombinedConfidence
+        self.minTermLength = minTermLength
     }
 
     /// Load a custom vocabulary JSON file produced by the analysis tooling.
@@ -96,6 +106,7 @@ public struct CustomVocabularyContext: Sendable {
         let minCtcScore = config.minCtcScore ?? -12.0
         let minSimilarity = config.minSimilarity ?? 0.52
         let minCombinedConfidence = config.minCombinedConfidence ?? 0.54
+        let minTermLength = config.minTermLength ?? 3
 
         // Validate and normalize vocabulary terms
         var validatedTerms: [CustomVocabularyTerm] = []
@@ -123,7 +134,8 @@ public struct CustomVocabularyContext: Sendable {
             scorePerPhrase: scorePerPhrase,
             minCtcScore: minCtcScore,
             minSimilarity: minSimilarity,
-            minCombinedConfidence: minCombinedConfidence
+            minCombinedConfidence: minCombinedConfidence,
+            minTermLength: minTermLength
         )
     }
 

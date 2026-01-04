@@ -88,7 +88,7 @@ public struct HybridAsrModels: Sendable {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
-        return appSupport.appendingPathComponent("FluidAudio/Models/parakeet-tdt-ctc-110m-hybrid")
+        return appSupport.appendingPathComponent("FluidAudio/Models/parakeet-ctc-110m-coreml")
     }
 
     /// Download and load hybrid models
@@ -98,7 +98,8 @@ public struct HybridAsrModels: Sendable {
             return try await load(from: modelPath)
         }
         throw AsrModelsError.modelNotFound(
-            "parakeet-tdt-ctc-110m-hybrid",
+            //"parakeet-tdt-ctc-110m-hybrid",
+            "parakeet-ctc-110m-coreml",
             modelPath
         )
     }
