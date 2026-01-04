@@ -120,7 +120,7 @@ public struct SortformerConfig: Sendable {
     )
 
     /// NVIDIA's 30.4s latency configuration
-    public static var nvidiaHighLatency = SortformerConfig(
+    public static let nvidiaHighLatency = SortformerConfig(
         chunkLen: 340,
         chunkLeftContext: 1,
         chunkRightContext: 40,

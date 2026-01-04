@@ -217,12 +217,13 @@ final public class AudioConverter {
             throw AudioConverterError.failedToCreateBuffer
         }
 
-        var provided = false
+        nonisolated(unsafe) var provided = false
+        nonisolated(unsafe) let capturedBuffer = buffer
         let inputBlock: AVAudioConverterInputBlock = { _, status in
             if !provided {
                 provided = true
                 status.pointee = .haveData
-                return buffer
+                return capturedBuffer
             } else {
                 status.pointee = .endOfStream
                 return nil
