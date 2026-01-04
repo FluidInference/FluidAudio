@@ -393,7 +393,7 @@ public actor StreamingEouAsrManager {
 
         // NeMoMelSpectrogram returns [nMels, T] row-major (mel bin, then time)
         // CoreML expects [1, 128, T] which is the same layout
-        melPtr.assign(from: melFlat, count: melFlat.count)
+        melPtr.update(from: melFlat, count: melFlat.count)
 
         // Create mel_length: [1] with valid frame count
         let melLen = try MLMultiArray(shape: [1], dataType: .int32)
@@ -504,10 +504,10 @@ extension MLMultiArray {
         let ptr = self.dataPointer.bindMemory(to: Float.self, capacity: count)
         // Assuming Float32 for simplicity, but should check dataType
         if self.dataType == .float32 {
-            ptr.assign(repeating: value.floatValue, count: count)
+            ptr.update(repeating: value.floatValue, count: count)
         } else if self.dataType == .int32 {
             let intPtr = self.dataPointer.bindMemory(to: Int32.self, capacity: count)
-            intPtr.assign(repeating: value.int32Value, count: count)
+            intPtr.update(repeating: value.int32Value, count: count)
         }
     }
 }
