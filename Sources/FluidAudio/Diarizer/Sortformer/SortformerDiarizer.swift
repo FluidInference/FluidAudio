@@ -26,21 +26,21 @@ import OSLog
 public final class SortformerDiarizer: @unchecked Sendable {
     /// Accumulated results
     public private(set) var timeline: SortformerTimeline
-    
+
     /// Check if diarizer is ready for processing.
     public var isAvailable: Bool {
         models != nil
     }
-    
+
     /// Streaming state
     public private(set) var state: SortformerStreamingState
-    
+
     /// Number of frames processed
     public private(set) var numFramesProcessed: Int = 0
 
     /// Configuration
     public let config: SortformerConfig
-    
+
     private let logger = AppLogger(category: "SortformerDiarizer")
     private let modules: SortformerModules
 
@@ -52,7 +52,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
     // Audio buffering
     private var audioBuffer: [Float] = []
     private var lastAudioSample: Float = 0
-    
+
     // Feature buffering
     internal var featureBuffer: [Float] = []
 
@@ -65,7 +65,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
     public init(config: SortformerConfig = .default, postProcessingConfig: SortformerPostProcessingConfig = .default) {
         self.config = config
         self.modules = SortformerModules(config: config)
-        self.state = modules.initStreamingState()
+        self.state = SortformerStreamingState(config: config)
         self.timeline = SortformerTimeline(config: postProcessingConfig)
     }
 
@@ -84,18 +84,18 @@ public final class SortformerDiarizer: @unchecked Sendable {
         )
 
         self.models = loadedModels
-        self.state = modules.initStreamingState()
+        self.state = SortformerStreamingState(config: config)
         self.lastAudioSample = 0
-        
+
         // Reset buffers
         resetBuffers()
         logger.info("Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s")
     }
-    
+
     /// Initialize with pre-loaded models.
     public func initialize(models: SortformerModels) {
         self.models = models
-        self.state = modules.initStreamingState()
+        self.state = SortformerStreamingState(config: config)
         self.lastAudioSample = 0
         resetBuffers()
         logger.info("Sortformer initialized with pre-loaded models")
@@ -103,7 +103,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
     /// Reset all internal state for a new audio stream.
     public func reset() {
-        state = modules.initStreamingState()
+        state = SortformerStreamingState(config: config)
         lastAudioSample = 0
         resetBuffers()
         logger.debug("Sortformer state reset")
@@ -116,7 +116,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
         startFeat = 0
         diarizerChunkIndex = 0
         timeline.reset()
-        
+
         featureBuffer.reserveCapacity((config.chunkMelFrames + config.coreFrames) * config.melFeatures)
     }
 
@@ -164,15 +164,15 @@ public final class SortformerDiarizer: @unchecked Sendable {
                 fifoLength: state.fifoLength,
                 config: config
             )
-            
+
             // Raw predictions are already probabilities (model applies sigmoid internally)
             // DO NOT apply sigmoid again
             let probabilities = output.predictions
-            
+
             // Trim embeddings to actual length
             let embLength = output.chunkLength
             let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.preEncoderDims))
-            
+
             // Update state with correct context values
             let updateResult = try modules.streamingUpdate(
                 state: &state,
@@ -181,13 +181,13 @@ public final class SortformerDiarizer: @unchecked Sendable {
                 leftContext: diarizerChunkIndex > 0 ? config.chunkLeftContext : 0,
                 rightContext: config.chunkRightContext
             )
-            
+
             // Accumulate confirmed results
             newPredictions.append(contentsOf: updateResult.confirmed)
             newTentativePredictions = updateResult.tentative
             newFrameCount += updateResult.confirmed.count / config.numSpeakers
             newTentativeFrameCount = updateResult.tentative.count / config.numSpeakers
-            
+
             diarizerChunkIndex += 1
         }
 
@@ -200,10 +200,10 @@ public final class SortformerDiarizer: @unchecked Sendable {
                 tentativePredictions: newTentativePredictions,
                 tentativeFrameCount: newTentativeFrameCount
             )
-            
+
             numFramesProcessed += newFrameCount
             timeline.addChunk(chunk)
-            
+
             return chunk
         }
 
@@ -271,11 +271,6 @@ public final class SortformerDiarizer: @unchecked Sendable {
             // Compute left/right context for prediction extraction
             let leftContext = (leftOffset + config.subsamplingFactor / 2) / config.subsamplingFactor
             let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor
-            print("chunk \(chunksProcessed+1)/\(featureProvider.numChunks), leftOffset: \(leftOffset), chunkLength: \(chunkLength), rightOffset: \(rightOffset), outputChunkLength: \(output.chunkLength)")
-
-            // Debug first 5 chunks - capture state BEFORE update
-            let debugSpkcacheLen = state.spkcacheLength
-            let debugFifoLen = state.fifoLength
 
             // Update state
             let updateResult = try modules.streamingUpdate(
@@ -285,7 +280,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
                 leftContext: leftContext,
                 rightContext: rightContext
             )
-            
+
             // Accumulate confirmed results (tentative not needed for batch processing)
             predictions.append(contentsOf: updateResult.confirmed)
             lastTentative = updateResult.tentative
@@ -316,90 +311,126 @@ public final class SortformerDiarizer: @unchecked Sendable {
             config: timeline.config,
             isComplete: true
         )
-        
+
         return timeline
     }
 
     // MARK: - Helpers
-    
+
     /// Preprocess audio into mel features and append to feature buffer.
     private func preprocessAudioToFeatures() {
         guard !audioBuffer.isEmpty else { return }
-        
-        let hopLength = config.melStride
-        let winLength = config.melWindow
-        
-        // Track how many frames we've already extracted
-        let existingFrames = featureBuffer.count / config.melFeatures
-        
-        // Compute mel on all accumulated audio
+        if audioBuffer.count < config.melWindow { return }
+
+        // Demand-Driven Optimization:
+        // Calculate exactly how many features we need for the next chunk
+        // needed = (startFeat + core + RC) - currentFeatureCount
+
+        let featLength = featureBuffer.count / config.melFeatures
+        let coreFrames = config.chunkLen * config.subsamplingFactor
+        let rightContextFrames = config.chunkRightContext * config.subsamplingFactor
+
+        // Calculate absolute target position in feature stream
+        // For Chunk 0: startFeat=0. Target=104.
+        // For Chunk 1: startFeat=8. Target=112.
+        let targetEnd = startFeat + coreFrames + rightContextFrames
+
+        let framesNeeded = targetEnd - featLength
+
+        // If we already have enough frames, we don't strictly need to process more right now.
+        // However, to keep the pipeline moving smoothly, we can process if we have a full chunk buffered.
+        // But to strictly prioritize efficiency/latency balance as requested:
+        if framesNeeded <= 0 {
+            // We have enough features for the next chunk!
+            // Check if we have A LOT of audio buffered (buffer pressure)?
+            // If we have > 1 second of audio, maybe process it batch-wise?
+            // For now, lazy approach: don't process.
+            return
+        }
+
+        // Calculate audio samples needed to produce 'framesNeeded'
+        // If we are appending to existing stream (featureBuffer not empty), we need stride * N.
+        // If featureBuffer is empty (start of stream), we need window + (N-1)*stride.
+
+        let samplesNeeded: Int
+        if featureBuffer.isEmpty {
+            samplesNeeded = (framesNeeded - 1) * config.melStride + config.melWindow
+        } else {
+            samplesNeeded = framesNeeded * config.melStride
+        }
+
+        // Wait until we have enough audio to satisfy the demand
+        if audioBuffer.count < samplesNeeded { return }
+
+        // We have enough audio! Process exactly what's needed (or slightly more if convenient?)
+        // Let's process everything we have, since we paid the initialization cost check.
+        // This prevents creating a backlog of unprocessed audio.
+
         let (mel, melLength, _) = melSpectrogram.computeFlatTransposed(
             audio: audioBuffer,
             lastAudioSample: lastAudioSample
         )
-        
-        guard melLength > existingFrames else { return }
-        
-        // Only append NEW frames
-        let startIdx = existingFrames * config.melFeatures
-        let endIdx = melLength * config.melFeatures
-        featureBuffer.append(contentsOf: mel[startIdx..<endIdx])
-        
-        // Remove consumed audio samples to prevent unbounded growth
-        // Keep enough audio for the last frame's right context (for correct finalization)
-        // Frame i corresponds to audio starting at: i * hopLength - padLength (with center padding)
-        // So to recompute frame existingFrames, we need audio from: existingFrames * hopLength - padLength
-        // But we want to keep audio that affects frames we've already extracted (for preemphasis continuity)
-        // Safe approach: remove audio that's fully processed (before the last extracted frame's window)
-        let lastFrameAudioStart = max(0, (melLength - 1) * hopLength)
-        let samplesToKeep = audioBuffer.count - lastFrameAudioStart + winLength
-        let samplesToRemove = max(0, audioBuffer.count - samplesToKeep)
-        
-        if samplesToRemove > 0 {
-            lastAudioSample = audioBuffer[samplesToRemove - 1]
-            audioBuffer.removeFirst(samplesToRemove)
+
+        guard melLength > 0 else { return }
+
+        featureBuffer.append(contentsOf: mel)
+
+        let samplesConsumed = melLength * config.melStride
+
+        if samplesConsumed <= audioBuffer.count {
+            lastAudioSample = audioBuffer[samplesConsumed - 1]
+            audioBuffer.removeFirst(samplesConsumed)
+        } else {
+            lastAudioSample = 0
+            audioBuffer.removeAll()
         }
     }
-    
+
     internal func getNextChunkFeatures() -> (mel: [Float], melLength: Int)? {
-        // Mirror batch SortformerFeatureProvider logic
         let featLength = featureBuffer.count / config.melFeatures
-        let coreFrames = config.chunkLen * config.subsamplingFactor  // 48
-        let leftContextFrames = config.chunkLeftContext * config.subsamplingFactor  // 8
-        let rightContextFrames = config.chunkRightContext * config.subsamplingFactor  // 56
-        
-        // Calculate how far we can go
+        let coreFrames = config.chunkLen * config.subsamplingFactor
+        let leftContextFrames = config.chunkLeftContext * config.subsamplingFactor
+        let rightContextFrames = config.chunkRightContext * config.subsamplingFactor
+
+        // Calculate end of core chunk
         let endFeat = min(startFeat + coreFrames, featLength)
-        
-        // Need at least some core frames
+
+        // Need at least one core frame
         guard endFeat > startFeat else { return nil }
-        
-        // Calculate available context
+
+        // Ensure we have the full chunk context (Core + RC)
+        // This prevents issuing chunks too early with zero right context.
+        // Alignment:
+        // Chunk 0: startFeat=0. Need 48+56=104 frames. (Returns 104 frames). Matches Batch.
+        // Chunk 1: startFeat=8. Need 56+56=112 frames (relative). (Returns 112 frames).
+        guard endFeat + rightContextFrames <= featLength else { return nil }
+
+        // Calculate offsets
         let leftOffset = min(leftContextFrames, startFeat)
-        let rightOffset = min(rightContextFrames, featLength - endFeat)
-        
+        // Since we guarded above, we know we have full right context
+        let rightOffset = rightContextFrames
+
         // Extract chunk with context
         let chunkStartFrame = startFeat - leftOffset
         let chunkEndFrame = endFeat + rightOffset
         let chunkStartIndex = chunkStartFrame * config.melFeatures
         let chunkEndIndex = chunkEndFrame * config.melFeatures
-        
-        guard chunkEndIndex <= featureBuffer.count else { return nil }
-        
+
         let mel = Array(featureBuffer[chunkStartIndex..<chunkEndIndex])
         let chunkLength = chunkEndFrame - chunkStartFrame
-        
+
         // Advance position
         startFeat = endFeat
-        
+
         // Remove consumed frames from buffer (frames before our new startFeat - leftContext)
+        // We keep leftContextFrames history for the next chunk's Left Context
         let newBufferStart = max(0, startFeat - leftContextFrames)
         let framesToRemove = newBufferStart
         if framesToRemove > 0 {
             featureBuffer.removeFirst(framesToRemove * config.melFeatures)
             startFeat -= framesToRemove
         }
-        
+
         return (mel, chunkLength)
     }
 }

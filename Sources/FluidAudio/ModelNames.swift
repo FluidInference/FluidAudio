@@ -180,7 +180,7 @@ public enum ModelNames {
             case gradientDecent
             case nvidiaLowLatency
             case nvidiaHighLatency
-            
+
             public var name: String {
                 switch self {
                 case .gradientDecent:
@@ -191,7 +191,7 @@ public enum ModelNames {
                     return "SortformerNvidiaHigh"
                 }
             }
-            
+
             public var defaultConfiguration: SortformerConfig {
                 switch self {
                 case .gradientDecent:
@@ -202,29 +202,29 @@ public enum ModelNames {
                     return .nvidiaHighLatency
                 }
             }
-            
+
             public var fileName: String {
                 return "\(name).mlmodelc"
             }
-            
+
             public func isCompatible(with config: SortformerConfig) -> Bool {
                 defaultConfiguration.isCompatible(with: config)
             }
         }
-        
+
         /// Lowest latency for streaming
         public static let defaultVariant: Variant = .gradientDecent
-        
+
         /// Bundle name for a specific variant
         public static func bundle(for varient: Variant) -> String {
             return varient.fileName
         }
-        
+
         /// Bundle name for a given configuration
         public static func bundle(for config: SortformerConfig) -> String? {
             return Variant.allCases.first { $0.isCompatible(with: config) }?.fileName
         }
-        
+
         /// Default bundle name
         public static var defaultBundle: String {
             return defaultVariant.fileName

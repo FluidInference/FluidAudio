@@ -15,13 +15,6 @@ public struct SortformerModules {
         self.config = config
     }
 
-    // MARK: - State Initialization
-
-    /// Initialize empty streaming state.
-    public func initStreamingState() -> SortformerStreamingState {
-        return SortformerStreamingState(config: config)
-    }
-
     // MARK: - Streaming Update
 
     /// Update streaming state with new chunk.
@@ -56,7 +49,8 @@ public struct SortformerModules {
             let fifoPredsStart = currentSpkcacheLength * numSpeakers
             let fifoPredsEnd = (currentSpkcacheLength + currentFifoLength) * numSpeakers
             guard fifoPredsEnd <= preds.count else {
-                throw SortformerError.insufficientPredsLength("Not enough predictions for FIFO in streaming update: \(fifoPredsEnd) > \(preds.count)")
+                throw SortformerError.insufficientPredsLength(
+                    "Not enough predictions for FIFO in streaming update: \(fifoPredsEnd) > \(preds.count)")
             }
             state.fifoPreds = Array(preds[fifoPredsStart..<fifoPredsEnd])
         }
@@ -72,7 +66,8 @@ public struct SortformerModules {
         let embsStartIdx = lc * fcDModel
         let embsEndIdx = (lc + coreFrames) * fcDModel
         guard embsEndIdx <= chunk.count else {
-            throw SortformerError.insufficientChunkLength("Not enough chunk embeddings for streaming update: \(embsEndIdx) > \(chunk.count)")
+            throw SortformerError.insufficientChunkLength(
+                "Not enough chunk embeddings for streaming update: \(embsEndIdx) > \(chunk.count)")
         }
         let chunkEmbs = Array(chunk[embsStartIdx..<embsEndIdx])
 
@@ -80,22 +75,25 @@ public struct SortformerModules {
         // This matches Gradient Descent's: preds[0..., chunkStart+lc..<chunkStart+chunkLen+lc, 0...]
         let chunkStart = currentSpkcacheLength + currentFifoLength + lc
         let chunkEnd = chunkStart + coreFrames
-        
+
         let chunkPredsStart = chunkStart * numSpeakers
         let chunkPredsEnd = chunkEnd * numSpeakers
-        
+
         let tentativePredsStart = chunkPredsEnd
         let tentativePredsEnd = (chunkEnd + rc) * numSpeakers
-        
+
         guard tentativePredsEnd <= preds.count else {
             if chunkPredsEnd <= preds.count {
-                throw SortformerError.insufficientPredsLength("Not enough predictions for chunk in streaming update: \(chunkPredsEnd) > \(preds.count)")
+                throw SortformerError.insufficientPredsLength(
+                    "Not enough predictions for chunk in streaming update: \(chunkPredsEnd) > \(preds.count)")
             }
-            throw SortformerError.insufficientPredsLength("Not enough predictions for tentative predictions in streaming update: \(tentativePredsEnd) > \(preds.count)")
+            throw SortformerError.insufficientPredsLength(
+                "Not enough predictions for tentative predictions in streaming update: \(tentativePredsEnd) > \(preds.count)"
+            )
         }
         let chunkPreds: [Float] = Array(preds[chunkPredsStart..<chunkPredsEnd])
         let tentativePreds: [Float] = Array(preds[tentativePredsStart..<tentativePredsEnd])
-        
+
         // Append chunk core to FIFO
         state.fifo.append(contentsOf: chunkEmbs)
         state.fifoLength += coreFrames
@@ -111,7 +109,9 @@ public struct SortformerModules {
         let contextLength = coreFrames + currentFifoLength
         if contextLength > fifoCapacity {
             guard let currentFifoPreds = state.fifoPreds else {
-                logger.error("FIFO predictions are nil immediately after updating them during streaming update. THIS SHOULD NEVER HAPPEN!")
+                logger.error(
+                    "FIFO predictions are nil immediately after updating them during streaming update. THIS SHOULD NEVER HAPPEN!"
+                )
                 return StreamingUpdateResult(confirmed: chunkPreds, tentative: tentativePreds)
             }
 
@@ -163,7 +163,7 @@ public struct SortformerModules {
 
         return StreamingUpdateResult(confirmed: chunkPreds, tentative: tentativePreds)
     }
-    
+
     // MARK: - Silence Profile
 
     /// Update running mean of silence embeddings.
@@ -312,20 +312,20 @@ public struct SortformerModules {
         let numSpeakers = config.numSpeakers
         let threshold = config.predScoreThreshold
         var scores = [Float](repeating: 0.0, count: frameCount * numSpeakers)
-        
+
         var tmp = [Float](repeating: 0, count: preds.count)
         var log1P = [Float](repeating: 0, count: preds.count)
-        
+
         // Scores -> log(p)
         vDSP.clip(preds, to: threshold...Float.greatestFiniteMagnitude, result: &tmp)
         vForce.log(tmp, result: &scores)
-        
+
         // Scores -> log(p) - log(1-p)
-        vDSP.clip(preds, to: 0...(1-threshold), result: &tmp)
+        vDSP.clip(preds, to: 0...(1 - threshold), result: &tmp)
         vDSP.negative(tmp, result: &tmp)
         vForce.log1p(tmp, result: &log1P)
         vDSP.subtract(scores, log1P, result: &scores)
-        
+
         // Scores -> log(p) - log(1-p) - log(0.5)
         vDSP.add(logf(2), scores, result: &scores)
 
@@ -399,7 +399,7 @@ public struct SortformerModules {
         let S = config.numSpeakers
         guard frameCount > 0, S > 0, k > 0 else { return scores }
 
-        let boostDelta: Float = -scaleFactor * logf(0.5) // positive
+        let boostDelta: Float = -scaleFactor * logf(0.5)  // positive
 
         var result = scores
         let kEff = min(k, frameCount)
