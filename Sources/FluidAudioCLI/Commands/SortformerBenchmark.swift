@@ -202,7 +202,7 @@ enum SortformerBenchmark {
         print("   Pipeline: \(pipelineURL.path)")
 
         // Check models exist
-        guard FileManager.default.fileExists(atPath: pipelineURL.path) else {
+        guard useHuggingFace || FileManager.default.fileExists(atPath: pipelineURL.path) else {
             print("ERROR: Pipeline model not found: \(pipelineURL.path)")
             return
         }
