@@ -222,7 +222,9 @@ public class SortformerTimeline {
     public private(set) var numFrames: Int = 0
     
     /// Number of tentative frames (including right context frames from chunk)
-    public private(set) var numTentative: Int = 0
+    public var numTentative: Int {
+        tentativePredictions.count / config.numSpeakers
+    }
     
     /// Finalized segments (completely before the median filter boundary)
     public private(set) var segments: [[SortformerSegment]] = []
@@ -289,8 +291,8 @@ public class SortformerTimeline {
     
     /// Add a new chunk of predictions from the diarizer
     public func addChunk(_ chunk: SortformerChunkResult) {
-        self.framePredictions.append(contentsOf: chunk.speakerPredictions)
-        self.tentativePredictions = chunk.tentativePredictions
+        framePredictions.append(contentsOf: chunk.speakerPredictions)
+        tentativePredictions = chunk.tentativePredictions
         for i in 0..<config.numSpeakers {
             tentativeSegments[i].removeAll(keepingCapacity: true)
         }
@@ -307,7 +309,6 @@ public class SortformerTimeline {
             numFrames: chunk.tentativeFrameCount,
             isFinalized: false
         )
-        numTentative = chunk.tentativeFrameCount
         trimPredictions()
     }
     
@@ -414,7 +415,6 @@ public class SortformerTimeline {
         framePredictions.removeAll()
         tentativePredictions.removeAll()
         numFrames = 0
-        numTentative = 0
         
         activeStarts = Array(repeating: 0, count: config.numSpeakers)
         activeSpeakers = Array(repeating: false, count: config.numSpeakers)
