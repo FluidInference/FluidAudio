@@ -36,8 +36,8 @@ public struct SortformerModels: Sendable {
         
         self.memoryOptimizer = .init()
         self.chunkArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.chunkMelFrames), NSNumber(value: config.melFeatures)], dataType: .float32)
-        self.fifoArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.fifoLen), NSNumber(value: config.fcDModel)], dataType: .float32)
-        self.spkcacheArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.spkcacheLen), NSNumber(value: config.fcDModel)], dataType: .float32)
+        self.fifoArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.fifoLen), NSNumber(value: config.preEncoderDims)], dataType: .float32)
+        self.spkcacheArray = try memoryOptimizer.createAlignedArray(shape: [1, NSNumber(value: config.spkcacheLen), NSNumber(value: config.preEncoderDims)], dataType: .float32)
         self.chunkLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
         self.fifoLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
         self.spkcacheLengthArray = try memoryOptimizer.createAlignedArray(shape: [1], dataType: .int32)
@@ -121,19 +121,23 @@ extension SortformerModels {
                 .appendingPathComponent("FluidAudio/Models")
         }
         
+        // Determine while file to retrieve
+        guard let bundle = ModelNames.Sortformer.bundle(for: config) else {
+            throw SortformerError.modelLoadFailed("Unsupported Sortformer configuration")
+        }
+        
+        logger.info("Downloading Sortformer models from HuggingFace from bundle: \(bundle)...")
+        
         // Download models if needed
-        let modelNames = [
-            ModelNames.Sortformer.sortformerFile,
-        ]
         
         let models = try await DownloadUtils.loadModels(
             .sortformer,
-            modelNames: modelNames,
+            modelNames: [bundle],
             directory: directory,
             computeUnits: computeUnits
         )
         
-        guard let sortformer = models[ModelNames.Sortformer.sortformerFile]
+        guard let sortformer = models[bundle]
         else {
             throw SortformerError.modelLoadFailed("Failed to load Sortformer models from HuggingFace")
         }
@@ -227,7 +231,7 @@ extension SortformerModels {
 
         let output = try mainModel.prediction(from: inputFeatures)
 
-        // Extract outputs (names must match CoreML SortformerPipeline model)
+        // Extract outputs (names must match CoreML Sortformer model)
         guard let predictions = output.featureValue(for: "speaker_preds")?.shapedArrayValue(of: Float32.self)?.scalars,
               let chunkEmbeddings = output.featureValue(for: "chunk_pre_encoder_embs")?.shapedArrayValue(of: Float32.self)?.scalars,
               let chunkEmbeddingsLength = output.featureValue(for: "chunk_pre_encoder_lengths")?.shapedArrayValue(of: Int32.self)?.scalars.first

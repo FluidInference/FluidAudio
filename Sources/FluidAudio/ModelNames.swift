@@ -176,12 +176,64 @@ public enum ModelNames {
 
     /// Sortformer streaming diarization model names
     public enum Sortformer {
-        public static let sortformer = "Sortformer"
-        public static let sortformerFile = sortformer + ".mlmodelc"
+        public enum Variant: CaseIterable, Sendable {
+            case gradientDecent
+            case nvidiaLowLatency
+            case nvidiaHighLatency
+            
+            public var name: String {
+                switch self {
+                case .gradientDecent:
+                    return "Sortformer"
+                case .nvidiaLowLatency:
+                    return "SortformerNvidiaLow"
+                case .nvidiaHighLatency:
+                    return "SortformerNvidiaHigh"
+                }
+            }
+            
+            public var defaultConfiguration: SortformerConfig {
+                switch self {
+                case .gradientDecent:
+                    return .default
+                case .nvidiaLowLatency:
+                    return .nvidiaLowLatency
+                case .nvidiaHighLatency:
+                    return .nvidiaHighLatency
+                }
+            }
+            
+            public var fileName: String {
+                return "\(name).mlmodelc"
+            }
+            
+            public func isCompatible(with config: SortformerConfig) -> Bool {
+                defaultConfiguration.isCompatible(with: config)
+            }
+        }
+        
+        /// Lowest latency for streaming
+        public static let defaultVariant: Variant = .gradientDecent
+        
+        /// Bundle name for a specific variant
+        public static func bundle(for varient: Variant) -> String {
+            return varient.fileName
+        }
+        
+        /// Bundle name for a given configuration
+        public static func bundle(for config: SortformerConfig) -> String? {
+            return Variant.allCases.first { $0.isCompatible(with: config) }?.fileName
+        }
+        
+        /// Default bundle name
+        public static var defaultBundle: String {
+            return defaultVariant.fileName
+        }
 
-        public static let requiredModels: Set<String> = [
-            sortformerFile
-        ]
+        /// All Sortformer bundle models required by the downloader
+        public static var requiredModels: Set<String> {
+            Set(Variant.allCases.map(\.fileName))
+        }
     }
 
     /// TTS model names
@@ -251,5 +303,4 @@ public enum ModelNames {
             return ModelNames.Sortformer.requiredModels
         }
     }
-
 }
