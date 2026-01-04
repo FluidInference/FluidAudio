@@ -301,15 +301,23 @@ public actor StreamingEouAsrManager {
 
         // 2. Process chunks with 50% overlap (NeMo-style)
         // We accumulate encoder outputs and decode at the end
-        while self.audioBuffer.count >= chunkSamples {
-            // Extract chunk (160ms)
-            let chunk = Array(self.audioBuffer.prefix(chunkSamples))
+        while true {
+            // Check buffer size before processing
+            guard self.audioBuffer.count >= chunkSamples else { break }
+
+            // Extract chunk and calculate how many samples we'll shift
+            let chunk = Array(self.audioBuffer.prefix(self.chunkSamples))
+            let samplesToShift = self.shiftSamples
 
             // 3. Run encoder and decode incrementally (NeMo-style)
             try await processChunkAndDecode(chunk)
 
-            // 4. Shift buffer by 80ms (50% overlap)
-            self.audioBuffer.removeFirst(shiftSamples)
+            // 4. Shift buffer by 80ms (50% overlap) - re-check count after await
+            // Another actor method (e.g., reset()) could have modified the buffer during the await
+            let actualShift = min(samplesToShift, self.audioBuffer.count)
+            if actualShift > 0 {
+                self.audioBuffer.removeFirst(actualShift)
+            }
         }
 
         // Return empty - actual transcription happens in finish()
