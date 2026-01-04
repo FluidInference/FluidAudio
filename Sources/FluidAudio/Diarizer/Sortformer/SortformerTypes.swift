@@ -1,5 +1,6 @@
 import Accelerate
 import Foundation
+import OSLog
 
 // MARK: - Streaming State
 
@@ -47,10 +48,10 @@ public struct SortformerStreamingState: Sendable {
         self.fifoPreds = nil
         self.fifoLength = 0
         
-        self.fifo.reserveCapacity((config.fifoLen + config.chunkLen) * config.fcDModel)
-        self.spkcache.reserveCapacity((config.spkcacheLen + config.spkcacheUpdatePeriod) * config.fcDModel)
+        self.fifo.reserveCapacity((config.fifoLen + config.chunkLen) * config.preEncoderDims)
+        self.spkcache.reserveCapacity((config.spkcacheLen + config.spkcacheUpdatePeriod) * config.preEncoderDims)
 
-        self.meanSilenceEmbedding = [Float](repeating: 0.0, count: config.fcDModel)
+        self.meanSilenceEmbedding = [Float](repeating: 0.0, count: config.preEncoderDims)
         self.silenceFrameCount = 0
     }
     
@@ -68,23 +69,35 @@ public struct SortformerStreamingState: Sendable {
 
 // MARK: - Streaming Feature Provider
 
-public struct SortformerStreamingFeatureProvider: Sendable {
-    private let config: SortformerConfig
+/// Feature loader for Sortformer's file processing
+public struct SortformerFeatureLoader: Sendable {
+    public let numChunks: Int
+    
+    private let lc: Int
+    private let rc: Int
+    private let chunkLen: Int
+    private let melFeatures: Int
+    
     private let featSeq: [Float]
     private let featLength: Int
-    private let numChunks: Int
     private let featSeqLength: Int
     
     private var startFeat: Int
     private var endFeat: Int
     
     public init(config: SortformerConfig, audio: [Float]) {
-        self.config = config
+        self.lc = config.chunkLeftContext * config.subsamplingFactor
+        self.rc = config.chunkRightContext * config.subsamplingFactor
+        self.chunkLen = config.chunkLen * config.subsamplingFactor
+        self.melFeatures = config.melFeatures
+        
         self.startFeat = 0
         self.endFeat = 0
-        (self.featSeq, self.featLength, _) = NeMoMelSpectrogram().computeFlatTransposed(audio: audio)
+        (self.featSeq, self.featLength, self.featSeqLength) = NeMoMelSpectrogram().computeFlatTransposed(audio: audio)
+        print("mel features sum:", featSeq.reduce(0, +))
+        
         self.numChunks = (self.featLength - 1) / (config.chunkLen * config.subsamplingFactor) + 1 // ceiling
-        self.featSeqLength = featSeq.count / config.melFeatures
+        print("featSeqLength: \(self.featSeqLength), featLength: \(self.featLength), numComputed: \(featSeq.count / config.melFeatures)")
     }
     
     public mutating func next() -> (chunkFeatures: [Float], chunkLength: Int, leftOffset: Int, rightOffset: Int)? {
@@ -92,16 +105,17 @@ public struct SortformerStreamingFeatureProvider: Sendable {
             return nil
         }
         
-        let leftOffset = min(config.chunkLeftContext * config.subsamplingFactor, startFeat)
-        endFeat = min(startFeat + config.chunkLen * config.subsamplingFactor, featLength)
-        let rightOffset = min(config.chunkRightContext * config.subsamplingFactor, featLength - endFeat)
+        let leftOffset = min(lc, startFeat)
+        endFeat = min(startFeat + chunkLen, featLength)
+        let rightOffset = min(rc, featLength - endFeat)
         
         let chunkStartFrame = startFeat - leftOffset
         let chunkEndFrame = endFeat + rightOffset
-        let chunkStartIndex = chunkStartFrame * config.melFeatures
-        let chunkEndIndex = chunkEndFrame * config.melFeatures
+        let chunkStartIndex = chunkStartFrame * melFeatures
+        let chunkEndIndex = chunkEndFrame * melFeatures
         let chunkFeatures = Array(featSeq[chunkStartIndex..<chunkEndIndex])
         let chunkLength = max(min(featSeqLength - startFeat + leftOffset, chunkEndFrame - chunkStartFrame), 0)
+        print("mel features sum:", chunkFeatures.reduce(0, +))
         
         startFeat = endFeat
         
@@ -143,240 +157,404 @@ public struct StreamingUpdateResult: Sendable {
 /// Result from a single streaming diarization step
 public struct SortformerChunkResult: Sendable {
     /// Speaker probabilities for confirmed frames in this chunk
-    /// Shape: [chunkLen, numSpeakers] (e.g., [4, 4])
-    public let probabilities: [Float]
+    /// Shape: [chunkLen, numSpeakers] (e.g., [6, 4])
+    public let speakerPredictions: [Float]
 
     /// Number of confirmed frames in this result
     public let frameCount: Int
 
-    /// Time offset of first confirmed frame in seconds
-    public let startTimeSeconds: Float
+    /// Frame index of the first confirmed frame
+    public let startFrame: Int
 
     /// Tentative predictions for right context frames (may change with next chunk)
     /// Shape: [rightContext, numSpeakers]. Empty if no right context.
-    public let tentativeProbabilities: [Float]
+    public let tentativePredictions: [Float]
 
     /// Number of tentative frames
     public let tentativeFrameCount: Int
 
-    /// Time offset of first tentative frame in seconds
-    public var tentativeStartTimeSeconds: Float {
-        startTimeSeconds + Float(frameCount) * 0.08  // 80ms per frame
+    /// Frame index of first tentative frame
+    public var tentativeStartFrame: Int {
+        startFrame + frameCount
     }
 
     public init(
-        probabilities: [Float],
+        startFrame: Int,
+        speakerPredictions: [Float],
         frameCount: Int,
-        startTimeSeconds: Float,
-        tentativeProbabilities: [Float] = [],
+        tentativePredictions: [Float] = [],
         tentativeFrameCount: Int = 0
     ) {
-        self.probabilities = probabilities
+        self.speakerPredictions = speakerPredictions
         self.frameCount = frameCount
-        self.startTimeSeconds = startTimeSeconds
-        self.tentativeProbabilities = tentativeProbabilities
+        self.startFrame = startFrame
+        self.tentativePredictions = tentativePredictions
         self.tentativeFrameCount = tentativeFrameCount
     }
 
     /// Get probability for a specific speaker at a specific confirmed frame
-    public func probability(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
+    public func getSpeakerPrediction(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
         guard frame < frameCount, speaker < numSpeakers else { return 0.0 }
-        return probabilities[frame * numSpeakers + speaker]
+        return speakerPredictions[frame * numSpeakers + speaker]
     }
 
     /// Get tentative probability for a specific speaker at a specific tentative frame
-    public func tentativeProbability(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
+    public func getTentativePrediction(speaker: Int, frame: Int, numSpeakers: Int = 4) -> Float {
         guard frame < tentativeFrameCount, speaker < numSpeakers else { return 0.0 }
-        return tentativeProbabilities[frame * numSpeakers + speaker]
+        return tentativePredictions[frame * numSpeakers + speaker]
     }
 }
 
-/// Complete diarization result with speaker segments
-public struct SortformerResult: Sendable {
-    /// All speaker probability frames
-    public let allProbabilities: [Float]
-
-    /// Total number of frames processed
-    public let totalFrames: Int
-
-    /// Frame duration in seconds
-    public let frameDurationSeconds: Float
-
-    /// Derived speaker segments (threshold-based)
-    public var segments: [SortformerSegment] {
-        extractSegments(threshold: 0.5)
+/// Complete diarization timeline managing streaming predictions and segments
+public class SortformerTimeline {
+    /// Post-processing configuration
+    public let config: SortformerPostProcessingConfig
+    
+    /// Finalized frame-wise speaker predictions
+    /// Shape: [numFrames, numSpeakers]
+    public private(set) var framePredictions: [Float] = []
+    
+    /// Tentative predictions
+    /// Shape: [numTentative, numSpeakers]
+    public private(set) var tentativePredictions: [Float] = []
+    
+    /// Total number of finalized median-filtered frames
+    public private(set) var numFrames: Int = 0
+    
+    /// Number of tentative frames (including right context frames from chunk)
+    public private(set) var numTentative: Int = 0
+    
+    /// Finalized segments (completely before the median filter boundary)
+    public private(set) var segments: [[SortformerSegment]] = []
+    
+    /// Tentative segments (may change as more predictions arrive)
+    public private(set) var tentativeSegments: [[SortformerSegment]] = []
+    
+    /// Get total duration of finalized predictions in seconds
+    public var duration: Float {
+        Float(numFrames) * config.frameDurationSeconds
     }
-
-    public init(allProbabilities: [Float], totalFrames: Int, frameDurationSeconds: Float) {
-        self.allProbabilities = allProbabilities
-        self.totalFrames = totalFrames
-        self.frameDurationSeconds = frameDurationSeconds
+    
+    /// Get total duration including tentative predictions in seconds
+    public var tentativeDuration: Float {
+        Float(numFrames + numTentative) * config.frameDurationSeconds
     }
-
-    /// Compute statistics about the probability distribution
-    /// Returns frame-based activity: above05 = frames with at least one speaker > 0.5
-    public func probabilityStats() -> (min: Float, max: Float, mean: Float, above05: Int, total: Int) {
-        guard !allProbabilities.isEmpty else {
-            return (0, 0, 0, 0, 0)
+    
+    /// Active segments being built (one per speaker, nil if speaker not active)
+    private var activeSpeakers: [Bool]
+    private var activeStarts: [Int]
+    private var recentSegments: [(start: Int, end: Int)]
+      
+    /// Logger for warnings
+    private static let logger = Logger(subsystem: "FluidAudio", category: "SortformerTimeline")
+    
+    /// Initialize with configuration for streaming usage
+    /// - Parameters:
+    ///   - config: Sortformer post-processing configuration
+    public init(config: SortformerPostProcessingConfig = .default) {
+        self.config = config
+        self.activeStarts = Array(repeating: 0, count: config.numSpeakers)
+        self.recentSegments = Array(repeating: (0, 0), count: config.numSpeakers)
+        self.activeSpeakers = Array(repeating: false, count: config.numSpeakers)
+        self.segments = Array(repeating: [], count: config.numSpeakers)
+        self.tentativeSegments = Array(repeating: [], count: config.numSpeakers)
+    }
+    
+    /// Initialize with existing probabilities (e.g. from batch processing or restored state)
+    /// - Parameters:
+    ///   - allPredictions: Raw speaker probabilities (flattened)
+    ///   - config: Configuration object
+    ///   - isComplete: If true, treats the provided probabilities as the complete timeline and finalizes everything immediately.
+    ///                 If false, treats them as initial raw predictions that may be extended.
+    public convenience init(
+        allPredictions: [Float],
+        config: SortformerPostProcessingConfig = .default,
+        isComplete: Bool = true
+    ) {
+        self.init(config: config)
+        let numFrames = allPredictions.count / config.numSpeakers
+        self.updateSegments(predictions: allPredictions, numFrames: numFrames, isFinalized: true)
+        print("Initialized with \(numFrames) frames, \(allPredictions.count{$0 > 0.5}) active predictions")
+        self.framePredictions = allPredictions
+        self.numFrames = numFrames
+        trimPredictions()
+        print("Trimmed Predictions")
+        
+        if isComplete {
+            // Finalize everything immediately
+            finalize()
+            print("Finalized Predictions")
         }
-        let numSpeakers = 4
-        var minProb: Float = 1.0
-        var maxProb: Float = 0.0
-        var sum: Float = 0.0
-        var activeFrames = 0
-
-        for frame in 0..<totalFrames {
-            var frameHasActivity = false
-            for spk in 0..<numSpeakers {
-                let idx = frame * numSpeakers + spk
-                guard idx < allProbabilities.count else { continue }
-                let p = allProbabilities[idx]
-                minProb = min(minProb, p)
-                maxProb = max(maxProb, p)
-                sum += p
-                if p > 0.5 {
-                    frameHasActivity = true
-                }
-            }
-            if frameHasActivity {
-                activeFrames += 1
-            }
+    }
+    
+    /// Add a new chunk of predictions from the diarizer
+    public func addChunk(_ chunk: SortformerChunkResult) {
+        self.framePredictions.append(contentsOf: chunk.speakerPredictions)
+        self.tentativePredictions = chunk.tentativePredictions
+        for i in 0..<config.numSpeakers {
+            tentativeSegments[i].removeAll(keepingCapacity: true)
         }
-
-        return (
-            min: minProb, max: maxProb, mean: sum / Float(allProbabilities.count),
-            above05: activeFrames, total: totalFrames
+        
+        updateSegments(
+            predictions: chunk.speakerPredictions,
+            numFrames: chunk.frameCount,
+            isFinalized: true
         )
+        numFrames += chunk.frameCount
+        
+        updateSegments(
+            predictions: chunk.tentativePredictions,
+            numFrames: chunk.tentativeFrameCount,
+            isFinalized: false
+        )
+        numTentative = chunk.tentativeFrameCount
+        trimPredictions()
     }
-
-    /// Extract speaker segments using a probability threshold
-    /// Applies median filtering (kernel=7) matching Python's scipy.ndimage.median_filter
-    public func extractSegments(threshold: Float = 0.5, medianKernel: Int = 7) -> [SortformerSegment] {
-        var segments: [SortformerSegment] = []
-        let numSpeakers = 4
-
-        // Apply median filter per speaker (matches Python's median_filter(probs, size=(7, 1)))
-        let filteredProbs = applyMedianFilter(kernel: medianKernel, numSpeakers: numSpeakers)
-
-        for speaker in 0..<numSpeakers {
-            var isActive = false
-            var startFrame = 0
-
-            for frame in 0..<totalFrames {
-                let prob = filteredProbs[frame * numSpeakers + speaker]
-
-                if prob > threshold && !isActive {
-                    isActive = true
-                    startFrame = frame
-                } else if prob <= threshold && isActive {
-                    let segment = SortformerSegment(
-                        speakerIndex: speaker,
-                        startFrame: startFrame,
-                        endFrame: frame,
-                        frameDurationSeconds: frameDurationSeconds
+    
+    private func updateSegments(
+        predictions: [Float],
+        numFrames: Int,
+        isFinalized: Bool
+    ) {
+        guard numFrames > 0 else { return }
+        
+        let frameOffset = self.numFrames
+        let numSpeakers = config.numSpeakers
+        let onset = config.onsetThreshold
+        let offset = config.offsetThreshold
+        let padOnset = config.onsetPadFrames
+        let padOffset = config.offsetPadFrames
+        let minFramesOn = config.minFramesOn
+        let minFramesOff = config.minFramesOff
+        let tentativeStartFrame = isFinalized ? (frameOffset + numFrames) - (padOnset + minFramesOff) : 0
+        
+        for speakerIndex in 0..<numSpeakers {
+            var start = activeStarts[speakerIndex]
+            var speaking = activeSpeakers[speakerIndex]
+            var lastSegment = recentSegments[speakerIndex]
+            var wasLastSegmentFinal = isFinalized
+            
+            for i in 0..<numFrames {
+                let index = speakerIndex + i * numSpeakers
+                
+                if speaking {
+                    if predictions[index] >= offset {
+                        continue
+                    }
+                    
+                    // Speaking -> not speaking
+                    speaking = false
+                    let end = frameOffset + i + padOffset
+                    
+                    // Ensure segment is long enough
+                    guard end - start > minFramesOn else {
+                        continue
+                    }
+                    
+                    wasLastSegmentFinal = isFinalized && (end < tentativeStartFrame)
+                    
+                    let newSegment = SortformerSegment(
+                        speakerIndex: speakerIndex,
+                        startFrame: start,
+                        endFrame: end,
+                        finalized: wasLastSegmentFinal,
+                        frameDurationSeconds: config.frameDurationSeconds
                     )
-                    segments.append(segment)
-                    isActive = false
+                    
+                    print("Appending New segment")
+                    if wasLastSegmentFinal {
+                        segments[speakerIndex].append(newSegment)
+                    } else {
+                        tentativeSegments[speakerIndex].append(newSegment)
+                    }
+                    lastSegment = (start, end)
+                    
+                } else if predictions[index] > onset {
+                    // Not speaking -> speaking
+                    start = max(0, frameOffset + i - padOnset)
+                    speaking = true
+                    
+                    if start - lastSegment.end <= minFramesOff {
+                        // Merge with last segment to avoid overlap
+                        start = lastSegment.start
+                        
+                        print("Popping last segment")
+                        if wasLastSegmentFinal {
+                            _ = segments[speakerIndex].popLast()
+                        } else {
+                            _ = tentativeSegments.popLast()
+                        }
+                    }
                 }
             }
-
-            // Handle segment that extends to end
-            if isActive {
-                let segment = SortformerSegment(
-                    speakerIndex: speaker,
-                    startFrame: startFrame,
-                    endFrame: totalFrames,
-                    frameDurationSeconds: frameDurationSeconds
+            
+            if isFinalized {
+                activeSpeakers[speakerIndex] = speaking
+                activeStarts[speakerIndex] = start
+                recentSegments[speakerIndex] = lastSegment
+            }
+            
+            // Add last segment
+            let end = frameOffset + numFrames + padOffset
+            if speaking && (end > start) {
+                let newSegment = SortformerSegment(
+                    speakerIndex: speakerIndex,
+                    startFrame: start,
+                    endFrame: end,
+                    finalized: false,
+                    frameDurationSeconds: config.frameDurationSeconds
                 )
-                segments.append(segment)
+                tentativeSegments[speakerIndex].append(newSegment)
             }
         }
-
-        // Sort by start time
-        return segments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
     }
-
-    /// Apply 1D median filter along time axis for each speaker
-    /// Matches Python's scipy.ndimage.median_filter(probs, size=(kernel, 1))
-    public func applyMedianFilter(kernel: Int = 7, numSpeakers: Int = 4) -> [Float] {
-        guard kernel > 1 else { return allProbabilities }
-
-        var filtered = [Float](repeating: 0.0, count: allProbabilities.count)
-        let halfKernel = kernel / 2
-
-        for speaker in 0..<numSpeakers {
-            // Extract time series for this speaker
-            var timeSeries = [Float](repeating: 0.0, count: totalFrames)
-            for frame in 0..<totalFrames {
-                timeSeries[frame] = allProbabilities[frame * numSpeakers + speaker]
-            }
-
-            // Apply median filter
-            for frame in 0..<totalFrames {
-                // Get window bounds (handle edges)
-                let windowStart = max(0, frame - halfKernel)
-                let windowEnd = min(totalFrames, frame + halfKernel + 1)
-
-                // Extract window values and sort to find median
-                var window = [Float]()
-                for i in windowStart..<windowEnd {
-                    window.append(timeSeries[i])
-                }
-                window.sort()
-
-                // Median is middle element
-                let median = window[window.count / 2]
-                filtered[frame * numSpeakers + speaker] = median
+    
+    /// Reset the timeline to initial state
+    public func reset() {
+        framePredictions.removeAll()
+        tentativePredictions.removeAll()
+        numFrames = 0
+        numTentative = 0
+        
+        activeStarts = Array(repeating: 0, count: config.numSpeakers)
+        activeSpeakers = Array(repeating: false, count: config.numSpeakers)
+        recentSegments = Array(repeating: (0, 0), count: config.numSpeakers)
+        segments = Array(repeating: [], count: config.numSpeakers)
+        tentativeSegments = Array(repeating: [], count: config.numSpeakers)
+    }
+    
+    /// Finalize all tentative data at end of recording
+    /// Call this when no more chunks will be added to convert all tentative predictions and segments to finalized
+    public func finalize() {
+        framePredictions.append(contentsOf: self.tentativePredictions)
+        tentativePredictions.removeAll()
+        for i in 0..<config.numSpeakers {
+            segments[i].append(contentsOf: tentativeSegments[i])
+            
+            if let lastSegment = segments[i].last, lastSegment.length < config.minFramesOn {
+                segments[i].removeLast()
             }
         }
-
-        return filtered
+        trimPredictions()
+    }
+    
+    /// Get probability for a specific speaker at a specific finalized frame
+    public func probability(speaker: Int, frame: Int) -> Float {
+        guard frame < numFrames, speaker < config.numSpeakers else { return 0.0 }
+        return framePredictions[frame * config.numSpeakers + speaker]
+    }
+    
+    /// Get tentative probability for a specific speaker at a specific tentative frame
+    public func tentativeProbability(speaker: Int, frame: Int) -> Float {
+        guard frame < numTentative, speaker < config.numSpeakers else { return 0.0 }
+        return tentativePredictions[frame * config.numSpeakers + speaker]
+    }
+    
+    /// Trim predictions to not take up so much space
+    private func trimPredictions() {
+        guard let maxStoredFrames = config.maxStoredFrames else {
+            return
+        }
+        
+        let numToRemove = framePredictions.count - maxStoredFrames * config.numSpeakers
+        
+        if numToRemove > 0 {
+            framePredictions.removeFirst(numToRemove)
+        }
     }
 }
+
 
 /// A single speaker segment from Sortformer
+/// Can be mutated during streaming processing
 public struct SortformerSegment: Sendable, Identifiable {
-    public let id = UUID()
-
-    /// Speaker index (0-3)
-    public let speakerIndex: Int
-
-    /// Start frame index
-    public let startFrame: Int
-
-    /// End frame index (exclusive)
-    public let endFrame: Int
-
-    /// Frame duration in seconds
-    public let frameDurationSeconds: Float
-
+    /// Segment ID
+    public let id: UUID
+    
+    /// Speaker index in Sortformer output
+    public var speakerIndex: Int
+    
+    /// Index of segment start frame
+    public var startFrame: Int
+    
+    /// Index of segment end frame
+    public var endFrame: Int
+    
+    /// Length of the segment in frames
+    public var length: Int { endFrame - startFrame }
+    
+    /// Whether this segment is finalized
+    public var isFinalized: Bool
+    
     /// Start time in seconds
-    public var startTimeSeconds: Float {
-        Float(startFrame) * frameDurationSeconds
-    }
-
+    public var startTime: Float { Float(startFrame) * frameDurationSeconds }
+    
     /// End time in seconds
-    public var endTimeSeconds: Float {
-        Float(endFrame) * frameDurationSeconds
-    }
-
+    public var endTime: Float { Float(endFrame) * frameDurationSeconds }
+    
     /// Duration in seconds
-    public var durationSeconds: Float {
-        endTimeSeconds - startTimeSeconds
-    }
-
-    /// Speaker label (e.g., "Speaker_0")
+    public var duration: Float { Float(endFrame - startFrame) * frameDurationSeconds }
+    
+    /// Duration of one frame in seconds
+    public let frameDurationSeconds: Float
+    
+    /// Speaker label (e.g., "Speaker 0")
     public var speakerLabel: String {
-        "Speaker_\(speakerIndex)"
+        "Speaker \(speakerIndex)"
     }
-
-    public init(speakerIndex: Int, startFrame: Int, endFrame: Int, frameDurationSeconds: Float) {
+    
+    public init(
+        speakerIndex: Int,
+        startFrame: Int,
+        endFrame: Int,
+        finalized: Bool = true,
+        frameDurationSeconds: Float = 0.08
+    ) {
+        self.id = UUID()
         self.speakerIndex = speakerIndex
         self.startFrame = startFrame
         self.endFrame = endFrame
+        self.isFinalized = finalized
         self.frameDurationSeconds = frameDurationSeconds
     }
+    
+    public init(
+        speakerIndex: Int,
+        startTime: Float,
+        endTime: Float,
+        finalized: Bool = true,
+        frameDurationSeconds: Float = 0.08
+    ) {
+        self.id = UUID()
+        self.speakerIndex = speakerIndex
+        self.startFrame = Int(round(startTime / frameDurationSeconds))
+        self.endFrame = Int(round(endTime / frameDurationSeconds))
+        self.isFinalized = finalized
+        self.frameDurationSeconds = frameDurationSeconds
+    }
+    
+    /// Check if this overlaps with another segment
+    public func overlaps(with other: SortformerSegment) -> Bool {
+        return (self.startFrame <= other.endFrame) && (other.startFrame <= self.endFrame)
+    }
+    
+    /// Merge another segment into this one
+    public mutating func absorb(_ other: SortformerSegment) {
+        self.startFrame = min(self.startFrame, other.startFrame)
+        self.endFrame = max(self.endFrame, other.endFrame)
+    }
+    
+    /// Extend the end of this segment
+    public mutating func extendEnd(toFrame endFrame: Int) {
+        self.endFrame = max(self.endFrame, endFrame)
+    }
+    
+    /// Extend the start of this segment
+    public mutating func extendStart(toFrame startFrame: Int) {
+        self.startFrame = min(self.startFrame, startFrame)
+    }
 }
+
 
 // MARK: - Errors
 
@@ -414,3 +592,4 @@ public enum SortformerError: Error, LocalizedError {
         }
     }
 }
+
