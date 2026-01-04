@@ -155,7 +155,6 @@ public enum ModelNames {
         public static let decoder = "decoder"
         public static let joint = "joint_decision"
         public static let vocab = "vocab.json"
-        public static let tokenizer = "tokenizer.model"
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
@@ -168,7 +167,6 @@ public enum ModelNames {
             decoderFile,
             jointFile,
             vocab,
-            tokenizer,
         ]
     }
 
