@@ -10,7 +10,7 @@ import OSLog
 ///
 /// Usage:
 /// ```swift
-/// let diarizer = SortformerDiarizer()
+/// let diarizer = SortformerDiarizerPipeline()
 /// try await diarizer.initialize(preprocessorPath: url1, mainModelPath: url2)
 ///
 /// // Streaming mode
@@ -23,7 +23,7 @@ import OSLog
 /// // Or complete file
 /// let result = try diarizer.processComplete(audioSamples)
 /// ```
-public final class SortformerDiarizer {
+public final class SortformerDiarizerPipeline {
     /// Lock for thread-safe access to mutable state
     private let lock = NSLock()
 
@@ -61,7 +61,7 @@ public final class SortformerDiarizer {
     /// Configuration
     public let config: SortformerConfig
 
-    private let logger = AppLogger(category: "SortformerDiarizer")
+    private let logger = AppLogger(category: "SortformerDiarizerPipeline")
     private let stateUpdater: SortformerStateUpdater
 
     private var _models: SortformerModelInference?

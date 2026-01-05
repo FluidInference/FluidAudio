@@ -95,14 +95,15 @@ enum SortformerCommand {
         if let v = padOffset { postConfig.offsetPadSeconds = v }
         if let v = minDurationOn { postConfig.minDurationOn = v }
         if let v = minDurationOff { postConfig.minDurationOff = v }
-        let diarizer = SortformerDiarizer(config: config, postProcessingConfig: postConfig)
+        let diarizer = SortformerDiarizerPipeline(config: config, postProcessingConfig: postConfig)
 
         do {
             let loadStart = Date()
             let models: SortformerModelInference
             if let modelPath = modelPath {
                 print("Loading models from local path: \(modelPath)")
-                models = try await SortformerModelInference.load(config: config, mainModelPath: URL(fileURLWithPath: modelPath))
+                models = try await SortformerModelInference.load(
+                    config: config, mainModelPath: URL(fileURLWithPath: modelPath))
             } else {
                 print("Loading models from HuggingFace...")
                 models = try await SortformerModelInference.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)

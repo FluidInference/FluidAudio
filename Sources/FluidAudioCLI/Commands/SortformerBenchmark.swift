@@ -275,7 +275,7 @@ enum SortformerBenchmark {
         }
         config.debugMode = debugMode
         config.predScoreThreshold = threshold
-        let diarizer = SortformerDiarizer(config: config)
+        let diarizer = SortformerDiarizerPipeline(config: config)
 
         do {
             if useHuggingFace {
@@ -358,7 +358,7 @@ enum SortformerBenchmark {
     private static func processMeeting(
         meetingName: String,
         dataset: Dataset,
-        diarizer: SortformerDiarizer,
+        diarizer: SortformerDiarizerPipeline,
         modelLoadTime: Double,
         threshold: Float,
         verbose: Bool
