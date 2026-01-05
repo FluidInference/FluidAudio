@@ -5,9 +5,9 @@ import Foundation
 ///
 /// This mirrors NeMo's StateUpdater class, ported from the default implementation.
 /// Reference: NeMo nemo/collections/asr/modules/sortformer_modules.py
-public struct SortformerModules {
+public struct SortformerStateUpdater {
 
-    private let logger = AppLogger(category: "SortformerModules")
+    private let logger = AppLogger(category: "SortformerStateUpdater")
     private let config: SortformerConfig
 
     public init(config: SortformerConfig) {

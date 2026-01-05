@@ -62,7 +62,7 @@ public final class SortformerDiarizer {
     public let config: SortformerConfig
 
     private let logger = AppLogger(category: "SortformerDiarizer")
-    private let modules: SortformerModules
+    private let stateUpdater: SortformerStateUpdater
 
     private var _models: SortformerModels?
 
@@ -84,7 +84,7 @@ public final class SortformerDiarizer {
 
     public init(config: SortformerConfig = .default, postProcessingConfig: SortformerPostProcessingConfig = .default) {
         self.config = config
-        self.modules = SortformerModules(config: config)
+        self.stateUpdater = SortformerStateUpdater(config: config)
         self._state = SortformerStreamingState(config: config)
         self._timeline = SortformerTimeline(config: postProcessingConfig)
     }
@@ -218,7 +218,7 @@ public final class SortformerDiarizer {
             let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.preEncoderDims))
 
             // Update state with correct context values
-            let updateResult = try modules.streamingUpdate(
+            let updateResult = try stateUpdater.streamingUpdate(
                 state: &_state,
                 chunk: chunkEmbs,
                 preds: probabilities,
@@ -295,7 +295,7 @@ public final class SortformerDiarizer {
             let embLength = output.chunkLength
             let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.preEncoderDims))
 
-            let updateResult = try modules.streamingUpdate(
+            let updateResult = try stateUpdater.streamingUpdate(
                 state: &_state,
                 chunk: chunkEmbs,
                 preds: probabilities,
@@ -386,7 +386,7 @@ public final class SortformerDiarizer {
             let rightContext = (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor
 
             // Update state
-            let updateResult = try modules.streamingUpdate(
+            let updateResult = try stateUpdater.streamingUpdate(
                 state: &_state,
                 chunk: chunkEmbs,
                 preds: probabilities,
