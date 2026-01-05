@@ -374,7 +374,7 @@ enum SortformerBenchmark {
         do {
             // Load audio
             let audioLoadStart = Date()
-            let audioSamples = try AudioConverter().resampleAudioFile(path: audioPath, method: .soxr)
+            let audioSamples = try AudioConverter().resampleAudioFile(path: audioPath)
             let audioLoadTime = Date().timeIntervalSince(audioLoadStart)
             let duration = Float(audioSamples.count) / 16000.0
 

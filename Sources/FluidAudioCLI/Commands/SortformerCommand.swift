@@ -116,17 +116,12 @@ enum SortformerCommand {
             exit(1)
         }
 
-        // Load audio using soxr for high-quality resampling (matches Python's librosa)
+        // Load audio
         do {
             print("Loading audio...")
 
-            guard
-                let audioSamples = try? AudioConverter(debug: config.debugMode).resampleAudioFile(
-                    path: audioFile, method: .soxr)
-            else {
-                print("Please install soxr through homebrew")
-                exit(1)
-            }
+            let audioSamples = try AudioConverter(debug: config.debugMode).resampleAudioFile(
+                path: audioFile)
             let duration = Float(audioSamples.count) / 16000.0
             print("Loaded \(audioSamples.count) samples (\(String(format: "%.1f", duration))s)")
 

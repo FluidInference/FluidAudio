@@ -23,22 +23,11 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
-        // Optional soxr system library for high-quality audio resampling
-        // Install via: brew install libsoxr
-        .systemLibrary(
-            name: "CSoxr",
-            path: "Sources/CSoxr",
-            pkgConfig: "soxr",
-            providers: [
-                .brew(["libsoxr"])
-            ]
-        ),
         .target(
             name: "FluidAudio",
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
-                .target(name: "CSoxr", condition: .when(platforms: [.macOS])),
             ],
             path: "Sources/FluidAudio",
             exclude: [

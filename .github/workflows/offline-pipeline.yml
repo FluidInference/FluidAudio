@@ -24,9 +24,6 @@ jobs:
         with:
           swift-version: "6.1"
 
-      - name: Install libsoxr
-        run: brew install libsoxr
-
       - name: Build package
         run: swift build -c release
 

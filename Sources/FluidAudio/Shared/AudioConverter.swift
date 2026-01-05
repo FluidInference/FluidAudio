@@ -5,14 +5,6 @@ import Foundation
 import OSLog
 import os
 
-/// Resampling method for audio conversion
-public enum ResamplingMethod {
-    /// High-quality resampling using libsoxr - matches Python's librosa output
-    case soxr
-    /// System AVAudioConverter resampling - faster but may differ from ML training data
-    case avAudio
-}
-
 /// Converts audio buffers to the format required by ASR (16kHz, mono, Float32).
 ///
 /// Implementation notes:
@@ -50,11 +42,8 @@ final public class AudioConverter {
     /// - Parameters:
     ///   - samples: Input audio samples (mono Float32)
     ///   - inputRate: Input sample rate (e.g., 48000)
-    ///   - method: Resampling method to use (default: .avAudio for speed)
     /// - Returns: Float array resampled to target sample rate
-    public func resample(
-        _ samples: [Float], from inputRate: Double, method: ResamplingMethod = .avAudio
-    ) throws -> [Float] {
+    public func resample(_ samples: [Float], from inputRate: Double) throws -> [Float] {
         guard !samples.isEmpty else { return [] }
 
         let outputRate = targetFormat.sampleRate
@@ -64,42 +53,28 @@ final public class AudioConverter {
             return samples
         }
 
-        switch method {
-        case .soxr:
-            return try SoxrResampler.resample(samples, from: inputRate, to: outputRate)
-        case .avAudio:
-            return try resampleWithAVAudio(samples, from: inputRate, to: outputRate)
-        }
+        return try resampleWithAVAudio(samples, from: inputRate, to: outputRate)
     }
 
     /// Convert a standalone buffer to the target format.
     /// - Parameters:
     ///   - buffer: Input audio buffer (any format)
-    ///   - method: Resampling method to use (default: .avAudio for speed)
     /// - Returns: Float array at target sample rate (default 16kHz) mono
-    public func resampleBuffer(_ buffer: AVAudioPCMBuffer, method: ResamplingMethod = .avAudio) throws -> [Float] {
+    public func resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
         let inputFormat = buffer.format
 
-        switch method {
-        case .soxr:
-            // Extract mono Float32 at original rate, then resample with soxr
-            let monoSamples = try extractMonoFloat32(from: buffer)
-            return try resample(monoSamples, from: inputFormat.sampleRate, method: .avAudio)
-        case .avAudio:
-            // Fast path: if already in target format, just extract samples
-            if isTargetFormat(inputFormat) {
-                return extractFloatArray(from: buffer)
-            }
-            return try convertBuffer(buffer, to: targetFormat)
+        // Fast path: if already in target format, just extract samples
+        if isTargetFormat(inputFormat) {
+            return extractFloatArray(from: buffer)
         }
+        return try convertBuffer(buffer, to: targetFormat)
     }
 
     /// Convert an audio file to target sample rate (default 16kHz) mono Float32 samples.
     /// - Parameters:
     ///   - url: URL of the audio file to read
-    ///   - method: Resampling method to use (default: .avAudio for speed)
     /// - Returns: Float array at target sample rate mono
-    public func resampleAudioFile(_ url: URL, method: ResamplingMethod = .avAudio) throws -> [Float] {
+    public func resampleAudioFile(_ url: URL) throws -> [Float] {
         let audioFile = try AVAudioFile(forReading: url)
         let format = audioFile.processingFormat
         let frameCount = AVAudioFrameCount(audioFile.length)
@@ -109,35 +84,21 @@ final public class AudioConverter {
         }
 
         try audioFile.read(into: buffer)
-
-        switch method {
-        case .soxr:
-            let monoSamples = try extractMonoFloat32(from: buffer)
-            if debug {
-                logger.debug("Input audio: \(monoSamples.count) samples at \(format.sampleRate)Hz")
-                logger.debug(
-                    "First 10 @ \(Int(format.sampleRate))Hz: \((0..<min(10, monoSamples.count)).map { String(format: "%.6f", monoSamples[$0]) }.joined(separator: ", "))"
-                )
-            }
-            return try resample(monoSamples, from: format.sampleRate, method: .soxr)
-        case .avAudio:
-            return try resampleBuffer(buffer, method: .avAudio)
-        }
+        return try resampleBuffer(buffer)
     }
 
     /// Convert an audio file path to target sample rate mono Float32 samples.
     /// - Parameters:
     ///   - path: File path of the audio file to read
-    ///   - method: Resampling method to use (default: .avAudio for speed)
     /// - Returns: Float array at target sample rate mono
-    public func resampleAudioFile(path: String, method: ResamplingMethod = .avAudio) throws -> [Float] {
+    public func resampleAudioFile(path: String) throws -> [Float] {
         let url = URL(fileURLWithPath: path)
-        return try resampleAudioFile(url, method: method)
+        return try resampleAudioFile(url)
     }
 
-    // MARK: - Private Soxr/AVAudio Helpers
+    // MARK: - Private Helpers
 
-    /// Resample using AVAudioConverter (for .avAudio method with raw float arrays)
+    /// Resample using AVAudioConverter with raw float arrays
     private func resampleWithAVAudio(
         _ samples: [Float], from inputRate: Double, to outputRate: Double
     ) throws -> [Float] {

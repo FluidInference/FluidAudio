@@ -21,9 +21,6 @@ jobs:
           swift --version
           xcodebuild -version
 
-      - name: Install libsoxr
-        run: brew install libsoxr
-
       - name: Build package
         run: swift build
 

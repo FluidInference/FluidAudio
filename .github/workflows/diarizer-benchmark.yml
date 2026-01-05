@@ -24,9 +24,6 @@ jobs:
         with:
           swift-version: "6.1"
 
-      - name: Install libsoxr
-        run: brew install libsoxr
-
       - name: Cache Swift packages and build
         uses: actions/cache@v4
         with:

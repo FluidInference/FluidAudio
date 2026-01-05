@@ -14,9 +14,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install libsoxr
-      run: brew install libsoxr
-
     - name: Build FluidAudio (with TTS)
       run: |
         swift build -c release

@@ -1,5 +1,0 @@
-module CSoxr [system] {
-    header "shim.h"
-    link "soxr"
-    export *
-}
