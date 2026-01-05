@@ -102,8 +102,7 @@ enum SortformerCommand {
             let models: SortformerModels
             if let modelPath = modelPath {
                 print("Loading models from local path: \(modelPath)")
-                models = try await SortformerModels.load(
-                    config: config, mainModelPath: URL(fileURLWithPath: modelPath))
+                models = try await SortformerModels.load(config: config, mainModelPath: URL(fileURLWithPath: modelPath))
             } else {
                 print("Loading models from HuggingFace...")
                 models = try await SortformerModels.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)
