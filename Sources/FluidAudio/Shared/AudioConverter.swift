@@ -3,6 +3,7 @@ import Accelerate
 import CoreMedia
 import Foundation
 import OSLog
+import os
 
 /// Converts audio buffers to the format required by ASR (16kHz, mono, Float32).
 ///
@@ -150,18 +151,20 @@ final public class AudioConverter {
         aggregated.reserveCapacity(Int(estimatedOutputFrames))
 
         // Provide input once, then signal end-of-stream
-        // Use a class wrapper to satisfy @Sendable requirement (closure runs synchronously)
-        final class InputState: @unchecked Sendable {
-            var provided = false
-            let buffer: AVAudioPCMBuffer
-            init(buffer: AVAudioPCMBuffer) { self.buffer = buffer }
-        }
-        let state = InputState(buffer: buffer)
+        let provided = OSAllocatedUnfairLock(initialState: false)
+        // Buffer is only accessed synchronously by AVAudioConverter's input block callback
+        nonisolated(unsafe) let capturedBuffer = buffer
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if !state.provided {
-                state.provided = true
+            let wasProvided = provided.withLock { state -> Bool in
+                if state {
+                    return true
+                }
+                state = true
+                return false
+            }
+            if !wasProvided {
                 status.pointee = .haveData
-                return state.buffer
+                return capturedBuffer
             } else {
                 status.pointee = .endOfStream
                 return nil

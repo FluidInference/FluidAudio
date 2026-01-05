@@ -179,25 +179,20 @@ public enum ModelNames {
 
     /// Parakeet EOU streaming model names
     public enum ParakeetEOU {
-        public static let preprocessor = "parakeet_eou_preprocessor"
         public static let encoder = "streaming_encoder"
         public static let decoder = "decoder"
         public static let joint = "joint_decision"
         public static let vocab = "vocab.json"
-        public static let tokenizer = "tokenizer.model"
 
-        public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let encoderFile = encoder + ".mlmodelc"
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
 
         public static let requiredModels: Set<String> = [
-            preprocessorFile,
             encoderFile,
             decoderFile,
             jointFile,
             vocab,
-            tokenizer,
         ]
     }
 

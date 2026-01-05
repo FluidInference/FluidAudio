@@ -17,7 +17,7 @@ let package = Package(
             targets: ["FluidAudioTTS"]
         ),
         .executable(
-            name: "fluidaudio",
+            name: "fluidaudiocli",
             targets: ["FluidAudioCLI"]
         ),
     ],

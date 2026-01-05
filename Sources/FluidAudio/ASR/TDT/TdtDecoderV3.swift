@@ -282,8 +282,16 @@ internal struct TdtDecoderV3 {
             let blankId = config.tdtConfig.blankId  // 8192 for v3 models
             var blankMask = (label == blankId)  // Is this a blank (silence) token?
 
-            // CRITICAL FIX: Prevent infinite loops when blank has duration=0
-            // Always advance at least 1 frame to ensure forward progress
+            let currentTimeIndex = timeIndices
+            // Prevent repeated non-blank emissions at the same frame when duration=0.
+            if !blankMask && duration == 0
+                && currentTimeIndex == lastEmissionTimestamp
+                && emissionsAtThisTimestamp >= 1
+            {
+                duration = 1
+            }
+
+            // Prevent infinite loops when blank has duration=0.
             if blankMask && duration == 0 {
                 duration = 1
             }
@@ -340,7 +348,7 @@ internal struct TdtDecoderV3 {
 
                 blankMask = (label == blankId)
 
-                // Same duration=0 fix for inner loop
+                // Same duration=0 fix for inner loop.
                 if blankMask && duration == 0 {
                     duration = 1
                 }

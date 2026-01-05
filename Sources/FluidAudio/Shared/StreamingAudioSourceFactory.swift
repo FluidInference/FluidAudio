@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import Foundation
 import OSLog
+import os
 
 public struct StreamingAudioSourceFactory {
     private let logger = AppLogger(category: "StreamingAudioSourceFactory")
@@ -121,49 +122,39 @@ public struct StreamingAudioSourceFactory {
         }
 
         var totalSamples = 0
+        let inputComplete = OSAllocatedUnfairLock(initialState: false)
+        let readError = OSAllocatedUnfairLock<Error?>(initialState: nil)
 
-        // Use a class wrapper to satisfy @Sendable requirement (closure runs synchronously)
-        final class InputState: @unchecked Sendable {
-            var inputComplete = false
-            var readError: Error?
-            let inputBuffer: AVAudioPCMBuffer
-            let audioFile: AVAudioFile
-            let inputCapacity: AVAudioFrameCount
-            init(inputBuffer: AVAudioPCMBuffer, audioFile: AVAudioFile, inputCapacity: AVAudioFrameCount) {
-                self.inputBuffer = inputBuffer
-                self.audioFile = audioFile
-                self.inputCapacity = inputCapacity
-            }
-        }
-        let state = InputState(inputBuffer: inputBuffer, audioFile: audioFile, inputCapacity: inputCapacity)
+        // Buffer is only accessed synchronously by AVAudioConverter's input block callback
+        nonisolated(unsafe) let capturedInputBuffer = inputBuffer
 
         let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if state.inputComplete {
+            if inputComplete.withLock({ $0 }) {
                 status.pointee = .endOfStream
                 return nil
             }
 
             do {
-                let remainingFrames = AVAudioFrameCount(state.audioFile.length - state.audioFile.framePosition)
-                let framesToRead = min(state.inputCapacity, remainingFrames)
+                let remainingFrames = AVAudioFrameCount(audioFile.length - audioFile.framePosition)
+                let framesToRead = min(inputCapacity, remainingFrames)
                 if framesToRead > 0 {
-                    try state.audioFile.read(into: state.inputBuffer, frameCount: framesToRead)
+                    try audioFile.read(into: capturedInputBuffer, frameCount: framesToRead)
                 } else {
-                    state.inputBuffer.frameLength = 0
+                    capturedInputBuffer.frameLength = 0
                 }
             } catch {
-                state.readError = error
-                state.inputBuffer.frameLength = 0
+                readError.withLock { $0 = error }
+                capturedInputBuffer.frameLength = 0
             }
 
-            guard state.inputBuffer.frameLength > 0 else {
-                state.inputComplete = true
+            guard capturedInputBuffer.frameLength > 0 else {
+                inputComplete.withLock { $0 = true }
                 status.pointee = .endOfStream
                 return nil
             }
 
             status.pointee = .haveData
-            return state.inputBuffer
+            return capturedInputBuffer
         }
 
         while true {
@@ -181,9 +172,9 @@ public struct StreamingAudioSourceFactory {
                 )
             }
 
-            if let readError = state.readError {
+            if let error = readError.withLock({ $0 }) {
                 throw StreamingAudioError.processingFailed(
-                    "Failed while reading audio: \(readError.localizedDescription)"
+                    "Failed while reading audio: \(error.localizedDescription)"
                 )
             }
 
