@@ -228,14 +228,13 @@ Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 1
 
 Model: [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml)
 
-Hardware: Apple M2, 2022, masOS 26
+Hardware: 2024 MacBook Pro, M4 Pro, 48GB RAM
 
 ### LibriSpeech test-clean (2620 files, 5.40h audio)
 
 | Chunk Size | WER (Avg) | RTFx | Total Time |
 |------------|-----------|------|------------|
-| 320ms      | 4.92%     | 12.48x | 1558s (26m) |
-| 160ms      | 8.29%     | 4.78x  | 4070s (68m) |
+| 320ms      | 4.87%     | 17.89x | 1512s (25m) |
 
 
 ```bash

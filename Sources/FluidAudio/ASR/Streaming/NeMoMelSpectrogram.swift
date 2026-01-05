@@ -15,6 +15,9 @@ import Foundation
 /// - center: True with pad_mode='constant' (zero padding)
 /// - normalize: "NA" (no normalization)
 /// - dither: 0.0 (disabled for determinism)
+///
+/// - Warning: This class is NOT thread-safe. Each thread should use its own instance
+///   due to shared reusable buffers for FFT computation.
 public final class NeMoMelSpectrogram {
     // Config
     private let sampleRate: Int = 16000
@@ -26,7 +29,7 @@ public final class NeMoMelSpectrogram {
     private let fMax: Float = 8000.0  // sample_rate / 2
     private let preemph: Float = 0.97  // NeMo preemphasis coefficient
     private let logZeroGuard: Float = powf(2, -24)  // 5.960464477539063e-08  // NeMo log_zero_guard_value
-    private let logZero: Float = 0  //-16.635532  // log(1e-10) for padding
+    private let logZero: Float = 0  // Padding value (0 works because log(0 + guard) ≈ -16.6)
 
     // Pre-computed
     private let hannWindow: [Float]
@@ -90,9 +93,15 @@ public final class NeMoMelSpectrogram {
     }
 
     /// Compute mel spectrogram from audio samples.
+    /// - Note: This method does NOT apply preemphasis filtering. Use `computeFlat()` for
+    ///   full NeMo-compatible preprocessing including preemphasis.
     /// - Parameter audio: Audio samples at 16kHz
     /// - Returns: (mel, mel_length) where mel is [1, nMels, T] and mel_length is valid frame count
     public func compute(audio: [Float]) -> (mel: [[[Float]]], melLength: Int) {
+        guard !audio.isEmpty else {
+            return (mel: [[[Float]]](), melLength: 0)
+        }
+
         let numFrames = 1 + (audio.count - winLength) / hopLength
 
         guard numFrames > 0 else {
@@ -150,17 +159,19 @@ public final class NeMoMelSpectrogram {
         audio: [Float], lastAudioSample: Float = 0
     ) -> (mel: [Float], melLength: Int, numFrames: Int) {
         let audioCount = audio.count
-        let numFrames = audioCount / hopLength
-
-        guard numFrames > 0 else {
-            return (mel: [Float](repeating: 0, count: nMels), melLength: 0, numFrames: 1)
-        }
 
         // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
         // This will be copied into an already padded buffer to save time.
 
         let padLength = nFFT / 2
         let paddedCount = audioCount + 2 * padLength
+
+        // Calculate number of frames (must match NeMo's center=True padding)
+        let numFrames = 1 + (paddedCount - winLength) / hopLength
+
+        guard numFrames > 0 else {
+            return (mel: [Float](repeating: 0, count: nMels), melLength: 0, numFrames: 1)
+        }
         var paddedAudio = [Float](repeating: 0, count: paddedCount)
 
         paddedAudio[padLength] = audio[0] - preemph * lastAudioSample
@@ -247,10 +258,13 @@ public final class NeMoMelSpectrogram {
     }
 
     /// Compute mel spectrogram and return as flat array for MLMultiArray compatibility.
+    ///
+    /// - Note: Uses frame count formula `audioCount / hopLength` (different from `computeFlat()` which uses
+    ///   NeMo's center=True formula). This matches Sortformer's expected input format.
     /// - Parameters:
     ///   - audio: Audio samples at 16kHz
     ///   - lastAudioSample: The last audio sample that's not in the audio buffer. Used to initialize the preemphasis state
-    /// - Returns: (mel, mel_length, numFrames) where mel is flat [T * nMels]
+    /// - Returns: (mel, mel_length, numFrames) where mel is flat [numFrames * nMels] (transposed layout)
     public func computeFlatTransposed(
         audio: [Float], lastAudioSample: Float = 0
     ) -> (mel: [Float], melLength: Int, numFrames: Int) {
@@ -286,7 +300,7 @@ public final class NeMoMelSpectrogram {
             }
         }
 
-        // Allocate output: [nMels, numFrames] in row-major order
+        // Allocate output: [numFrames, nMels] in row-major order (transposed layout for Sortformer)
         var mel = [Float](repeating: 0, count: nMels * numFrames)
         let numFreqBins = nFFT / 2 + 1
 
@@ -342,7 +356,7 @@ public final class NeMoMelSpectrogram {
                 }
             }
 
-            // Apply log(x + guard_value) and store in output
+            // Apply log(x + guard_value) and store in transposed layout [frameIdx, melIdx]
             for melIdx in 0..<nMels {
                 mel[frameIdx * nMels + melIdx] = log(melFrame[melIdx] + logZeroGuard)
             }
@@ -390,6 +404,9 @@ public final class NeMoMelSpectrogram {
 
     // MARK: - Private Methods
 
+    /// Compute power spectrum with per-call buffer allocation.
+    /// - Note: This method allocates temporary buffers on each call. It's only used by `compute()`
+    ///   which is kept for API compatibility. For performance-critical paths, use `computePowerSpectrumInPlace()`.
     private func computePowerSpectrum(frame: [Float]) -> [Float] {
         guard let setup = fftSetup else {
             return [Float](repeating: 0, count: nFFT / 2 + 1)

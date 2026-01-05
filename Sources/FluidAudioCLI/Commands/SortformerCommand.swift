@@ -84,7 +84,7 @@ enum SortformerCommand {
         print("Sortformer Streaming Diarization")
         print("   Audio: \(audioFile)")
 
-        // Initialize Sortformer with Gradient Descent's config
+        // Initialize Sortformer with default config (NVIDIA low latency: 1.04s)
         var config = SortformerConfig.default
         var postConfig = SortformerPostProcessingConfig.default
         config.debugMode = debugMode
