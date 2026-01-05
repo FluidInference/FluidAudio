@@ -1,0 +1,16 @@
+[
+  {
+    "meeting" : "IS1009b",
+    "missRate" : 10.472444534301758,
+    "audioLoadTime" : 0.1389920711517334,
+    "der" : 16.215974807739258,
+    "falseAlarmRate" : 0.55423945188522339,
+    "speakerErrorRate" : 5.1892905235290527,
+    "rtfx" : 77.88751220703125,
+    "processingTime" : 26.349965929985046,
+    "totalFrames" : 25655,
+    "detectedSpeakers" : 4,
+    "groundTruthSpeakers" : 4,
+    "modelLoadTime" : 363.73245704174042
+  }
+]
