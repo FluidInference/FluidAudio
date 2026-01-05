@@ -831,6 +831,58 @@ public struct VocabularyRescorer {
         return 1.0 - Float(distance) / Float(maxLen)
     }
 
+    /// Represents a normalized form of a vocabulary term (canonical or alias)
+    private struct NormalizedForm: Hashable {
+        let raw: String
+        let normalized: String
+        let wordCount: Int
+    }
+
+    /// Build all normalized forms (canonical + aliases) for a vocabulary term
+    private func buildNormalizedForms(for term: CustomVocabularyTerm) -> [NormalizedForm] {
+        var rawForms: [String] = [term.text]
+        let termLower = term.text.lowercased()
+
+        // Look up canonical term in vocabulary to get ALL aliases
+        for vocabTerm in vocabulary.terms where vocabTerm.text.lowercased() == termLower {
+            if let aliases = vocabTerm.aliases {
+                rawForms.append(contentsOf: aliases)
+            }
+        }
+        // Also add aliases from the term itself
+        if let aliases = term.aliases {
+            rawForms.append(contentsOf: aliases)
+        }
+
+        var seen = Set<String>()
+        var forms: [NormalizedForm] = []
+
+        for raw in rawForms {
+            let normalized = Self.normalizeForSimilarity(raw)
+            guard !normalized.isEmpty else { continue }
+            guard !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+
+            let wordCount = normalized.split(separator: " ").count
+            forms.append(NormalizedForm(raw: raw, normalized: normalized, wordCount: wordCount))
+        }
+
+        return forms
+    }
+
+    /// Determine required similarity threshold based on span length and word length
+    /// Note: Using permissive thresholds to avoid rejecting valid matches
+    private func requiredSimilarity(minSimilarity: Float, spanLength: Int, normalizedText: String) -> Float {
+        // Multi-word spans: slightly higher threshold to avoid false positives
+        if spanLength >= 2 {
+            return max(minSimilarity, 0.55)
+        }
+
+        // Single words: use the configured minimum similarity
+        // Note: The 0.85 threshold for short words was too aggressive (caused regression)
+        return minSimilarity
+    }
+
     /// Levenshtein distance between two strings
     private static func levenshteinDistance(_ a: String, _ b: String) -> Int {
         let aChars = Array(a)
@@ -982,21 +1034,27 @@ public struct VocabularyRescorer {
                 continue
             }
 
-            // Check if this is a multi-word vocabulary term
-            let vocabWords = vocabTerm.split(separator: " ").map(String.init)
-            let isMultiWord = vocabWords.count > 1
+            // Build all normalized forms (canonical + aliases) for this term
+            let normalizedForms = buildNormalizedForms(for: term)
+            guard !normalizedForms.isEmpty else { continue }
 
-            // Normalized form of current vocabulary term
-            let normalizedVocab = Self.normalizeForSimilarity(vocabTerm)
+            let normalizedCanonical = Self.normalizeForSimilarity(vocabTerm)
+            let normalizedCurrentSet = Set(normalizedForms.map { $0.normalized })
 
-            if isMultiWord {
+            // Split forms by word count for appropriate matching
+            let multiWordForms = normalizedForms.filter { $0.wordCount > 1 }
+            let singleWordForms = normalizedForms.filter { $0.wordCount == 1 }
+
+            if !multiWordForms.isEmpty {
                 // Multi-word phrase matching: look for consecutive TDT words that match the phrase
-                let maxSpan = min(4, vocabWords.count + 1)  // Allow some flexibility
+                let maxWordCount = multiWordForms.map { $0.wordCount }.max() ?? 0
+                let minWordCount = multiWordForms.map { $0.wordCount }.min() ?? 0
+                let maxSpan = min(4, maxWordCount + 1)  // Allow some flexibility
+                let minSpan = max(2, minWordCount)
 
-                // Skip if phrase has more words than our max span (e.g., 5+ word phrases)
-                guard vocabWords.count <= maxSpan else { continue }
+                guard minSpan <= maxSpan else { continue }
 
-                for spanLength in vocabWords.count...maxSpan {
+                for spanLength in minSpan...maxSpan {
                     for startIdx in 0..<(wordTimings.count - spanLength + 1) {
                         // Check if any word in the span is already replaced
                         let spanIndices = Array(startIdx..<(startIdx + spanLength))
@@ -1006,14 +1064,24 @@ public struct VocabularyRescorer {
                         let spanWords = spanIndices.map { wordTimings[$0].word }
                         let tdtPhrase = spanWords.joined(separator: " ")
                         let normalizedPhrase = Self.normalizeForSimilarity(tdtPhrase)
+                        guard !normalizedPhrase.isEmpty else { continue }
 
-                        // Skip if already exact match (no replacement needed)
-                        if normalizedPhrase == normalizedVocab {
+                        // Check similarity against ALL forms (canonical + aliases)
+                        var bestSimilarity: Float = 0
+                        for form in multiWordForms {
+                            let similarity = Self.stringSimilarity(normalizedPhrase, form.normalized)
+                            bestSimilarity = max(bestSimilarity, similarity)
+                        }
+
+                        // Skip if already exact match to canonical (no replacement needed)
+                        if normalizedPhrase == normalizedCanonical {
                             continue
                         }
 
                         // Guard: Skip if original phrase matches a DIFFERENT vocabulary term
-                        if vocabularyNormalizedSet.contains(normalizedPhrase) {
+                        if vocabularyNormalizedSet.contains(normalizedPhrase)
+                            && !normalizedCurrentSet.contains(normalizedPhrase)
+                        {
                             if debugMode {
                                 print(
                                     "  [MULTI] Skipping '\(vocabTerm)': phrase '\(tdtPhrase)' matches another vocab term"
@@ -1022,9 +1090,13 @@ public struct VocabularyRescorer {
                             continue
                         }
 
-                        // Check string similarity against vocabulary phrase
-                        let similarity = Self.stringSimilarity(tdtPhrase, vocabTerm)
-                        guard similarity >= minSimilarity else { continue }
+                        // Use adaptive similarity threshold
+                        let minSimilarityForSpan = requiredSimilarity(
+                            minSimilarity: minSimilarity,
+                            spanLength: spanLength,
+                            normalizedText: normalizedPhrase
+                        )
+                        guard bestSimilarity >= minSimilarityForSpan else { continue }
 
                         // Get temporal window for the entire span
                         let spanStartTime = wordTimings[spanIndices.first!].startTime
@@ -1065,7 +1137,7 @@ public struct VocabularyRescorer {
 
                         if debugMode {
                             print(
-                                "  [MULTI] '\(tdtPhrase)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", similarity)))"
+                                "  [MULTI] '\(tdtPhrase)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", bestSimilarity)))"
                             )
                             print(
                                 "    TDT span: [\(String(format: "%.2f", spanStartTime))-\(String(format: "%.2f", spanEndTime))s] words=\(spanLength)"
@@ -1083,7 +1155,11 @@ public struct VocabularyRescorer {
 
                         if shouldReplace {
                             // Replace first word with full phrase, mark rest as empty
-                            modifiedWords[spanIndices.first!].word = vocabTerm
+                            let replacement = preserveCapitalization(
+                                original: spanWords.first ?? tdtPhrase,
+                                replacement: vocabTerm
+                            )
+                            modifiedWords[spanIndices.first!].word = replacement
                             for idx in spanIndices.dropFirst() {
                                 modifiedWords[idx].word = ""  // Will be filtered out
                             }
@@ -1096,42 +1172,55 @@ public struct VocabularyRescorer {
                                 RescoringResult(
                                     originalWord: tdtPhrase,
                                     originalScore: originalCtcScore,
-                                    replacementWord: vocabTerm,
+                                    replacementWord: replacement,
                                     replacementScore: boostedVocabScore,
                                     shouldReplace: true,
                                     reason:
                                         "CTC-vs-CTC (multi-word): '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(tdtPhrase)'=\(String(format: "%.2f", originalCtcScore))"
                                 ))
-                            break  // Found a match for this vocab term at this span length
                         }
                     }
-                    // If we found a replacement, don't try longer spans
-                    if replacements.last?.replacementWord == vocabTerm { break }
                 }
-            } else {
-                // Single-word matching (existing logic)
+            }
+
+            if !singleWordForms.isEmpty {
+                // Single-word matching
                 for (wordIdx, timing) in wordTimings.enumerated() {
                     guard !replacedIndices.contains(wordIdx) else { continue }
 
                     let tdtWord = timing.word
                     let normalizedWord = Self.normalizeForSimilarity(tdtWord)
+                    guard !normalizedWord.isEmpty else { continue }
 
-                    // Skip if already exact match (no replacement needed)
-                    if normalizedWord == normalizedVocab {
+                    // Skip if already exact match to canonical (no replacement needed)
+                    if normalizedWord == normalizedCanonical {
                         continue
                     }
 
                     // Guard: Skip if original word matches a DIFFERENT vocabulary term
-                    if vocabularyNormalizedSet.contains(normalizedWord) {
+                    if vocabularyNormalizedSet.contains(normalizedWord)
+                        && !normalizedCurrentSet.contains(normalizedWord)
+                    {
                         if debugMode {
                             print("  Skipping '\(vocabTerm)': word '\(tdtWord)' matches another vocab term")
                         }
                         continue
                     }
 
-                    let similarity = Self.stringSimilarity(tdtWord, vocabTerm)
+                    // Check similarity against ALL forms
+                    var bestSimilarity: Float = 0
+                    for form in singleWordForms {
+                        let similarity = Self.stringSimilarity(normalizedWord, form.normalized)
+                        bestSimilarity = max(bestSimilarity, similarity)
+                    }
 
-                    guard similarity >= minSimilarity else { continue }
+                    // Use adaptive similarity threshold
+                    let minSimilarityForSpan = requiredSimilarity(
+                        minSimilarity: minSimilarity,
+                        spanLength: 1,
+                        normalizedText: normalizedWord
+                    )
+                    guard bestSimilarity >= minSimilarityForSpan else { continue }
 
                     // Found a similar word - run constrained CTC within its temporal window
                     let marginFrames = Int(marginSeconds / frameDuration)
@@ -1150,7 +1239,6 @@ public struct VocabularyRescorer {
                     )
 
                     // Score original TDT word using constrained CTC (same window)
-                    // This gives us apples-to-apples comparison per NeMo paper
                     var originalCtcScore: Float = -Float.infinity
                     if let tokenizer = ctcTokenizer {
                         let originalTokens = tokenizer.encode(tdtWord)
@@ -1173,7 +1261,7 @@ public struct VocabularyRescorer {
 
                     if debugMode {
                         print(
-                            "  '\(tdtWord)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", similarity)))"
+                            "  '\(tdtWord)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", bestSimilarity)))"
                         )
                         print(
                             "    TDT word: [\(String(format: "%.2f", timing.startTime))-\(String(format: "%.2f", timing.endTime))s] conf=\(String(format: "%.2f", timing.confidence))"
@@ -1190,14 +1278,15 @@ public struct VocabularyRescorer {
                     }
 
                     if shouldReplace {
-                        modifiedWords[wordIdx].word = vocabTerm
+                        let replacement = preserveCapitalization(original: tdtWord, replacement: vocabTerm)
+                        modifiedWords[wordIdx].word = replacement
                         replacedIndices.insert(wordIdx)
 
                         replacements.append(
                             RescoringResult(
                                 originalWord: tdtWord,
                                 originalScore: originalCtcScore,
-                                replacementWord: vocabTerm,
+                                replacementWord: replacement,
                                 replacementScore: boostedVocabScore,
                                 shouldReplace: true,
                                 reason:
