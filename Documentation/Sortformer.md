@@ -1,7 +1,5 @@
 # Sortformer Streaming Speaker Diarization
 
-This document explains the Sortformer implementation in FluidAudio, a Swift port of NVIDIA's streaming speaker diarization model.
-
 ## Overview
 
 Sortformer is an end-to-end neural speaker diarization model that answers "who spoke when" in real-time. Unlike traditional diarization pipelines that require separate VAD, segmentation, and clustering stages, Sortformer directly outputs frame-level speaker probabilities for 4 fixed speaker slots.
@@ -151,11 +149,11 @@ This means you **cannot** change `fifoLen`, `spkcacheLen`, or context values at 
 
 ```
 Sources/FluidAudio/Diarizer/Sortformer/
-├── SortformerConfig.swift      # Configuration parameters
-├── SortformerDiarizer.swift    # Main diarizer class
-├── SortformerModels.swift      # CoreML model loading/inference
-├── SortformerModules.swift     # Streaming update logic
-└── SortformerTypes.swift       # State, results, and segment types
+├── SortformerConfig.swift      # Streaming parameters and model shape configuration
+├── SortformerDiarizer.swift    # Main entry point, audio buffering, inference orchestration
+├── SortformerModels.swift      # CoreML model container and HuggingFace loading
+├── SortformerModules.swift     # Speaker cache compression, FIFO queue, state updates
+└── SortformerTypes.swift       # StreamingState, FeatureLoader, ChunkResult, Timeline, Segment
 ```
 
 ### SortformerConfig.swift
@@ -416,13 +414,6 @@ for (speakerIndex, segments) in timeline.segments.enumerated() {
     }
 }
 ```
-
-## Performance
-
-On Apple Silicon (M4 Pro):
-- Default config: ~120x RTF (real-time factor)
-- High latency config: ~118x RTF
-- Model compilation: ~1-2s (cached after first run)
 
 ## References
 
