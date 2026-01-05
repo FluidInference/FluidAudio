@@ -6,7 +6,6 @@ public enum Repo: String, CaseIterable {
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "alexwengg/parakeet-ctc-110m-coreml"
-    case canaryCtc = "argmaxinc/ctckit-pro"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
@@ -23,8 +22,6 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
             return "parakeet-ctc-110m-coreml"
-        case .canaryCtc:
-            return "canary-1b-v2_474MB"
         case .parakeetEou160:
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
@@ -41,8 +38,6 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .parakeetCtc110m:
             return "alexwengg/parakeet-ctc-110m-coreml"
-        case .canaryCtc:
-            return "argmaxinc/ctckit-pro"
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         default:
@@ -53,8 +48,6 @@ public enum Repo: String, CaseIterable {
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {
-        case .canaryCtc:
-            return "canary-1b-v2_474MB"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
@@ -250,7 +243,7 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
-        case .parakeetCtc110m, .canaryCtc:
+        case .parakeetCtc110m:
             return ModelNames.CTC.requiredModels
         case .parakeetEou160, .parakeetEou320:
             return ModelNames.ParakeetEOU.requiredModels

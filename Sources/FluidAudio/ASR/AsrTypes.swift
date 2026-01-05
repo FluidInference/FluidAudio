@@ -202,6 +202,7 @@ public enum ASRError: Error, LocalizedError {
     case modelLoadFailed
     case processingFailed(String)
     case modelCompilationFailed
+    case unsupportedPlatform(String)
 
     public var errorDescription: String? {
         switch self {
@@ -215,6 +216,8 @@ public enum ASRError: Error, LocalizedError {
             return "ASR processing failed: \(message)"
         case .modelCompilationFailed:
             return "CoreML model compilation failed after recovery attempts."
+        case .unsupportedPlatform(let message):
+            return "Unsupported platform: \(message)"
         }
     }
 }
