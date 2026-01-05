@@ -82,7 +82,7 @@ public struct SortformerModules {
         let tentativePredsEnd = (chunkEnd + rc) * numSpeakers
 
         guard tentativePredsEnd <= preds.count else {
-            if chunkPredsEnd <= preds.count {
+            if chunkPredsEnd > preds.count {
                 throw SortformerError.insufficientPredsLength(
                     "Not enough predictions for chunk in streaming update: \(chunkPredsEnd) > \(preds.count)")
             }
