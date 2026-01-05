@@ -142,15 +142,19 @@ public struct StreamingUpdateResult: Sendable {
     /// May change with next chunk. Empty if rightContext=0.
     public let tentative: [Float]
 
+    /// Number of speakers
+    public let numSpeakers: Int
+
     /// Number of confirmed frames
-    public var confirmedFrameCount: Int { confirmed.count / 4 }  // Assumes 4 speakers
+    public var confirmedFrameCount: Int { confirmed.count / numSpeakers }  // Assumes 4 speakers
 
     /// Number of tentative frames
-    public var tentativeFrameCount: Int { tentative.count / 4 }  // Assumes 4 speakers
+    public var tentativeFrameCount: Int { tentative.count / numSpeakers }  // Assumes 4 speakers
 
-    public init(confirmed: [Float], tentative: [Float]) {
+    public init(confirmed: [Float], tentative: [Float], numSpeakers: Int = 4) {
         self.confirmed = confirmed
         self.tentative = tentative
+        self.numSpeakers = numSpeakers
     }
 }
 
