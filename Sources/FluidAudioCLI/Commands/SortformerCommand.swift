@@ -99,13 +99,13 @@ enum SortformerCommand {
 
         do {
             let loadStart = Date()
-            let models: SortformerModels
+            let models: SortformerModelInference
             if let modelPath = modelPath {
                 print("Loading models from local path: \(modelPath)")
-                models = try await SortformerModels.load(config: config, mainModelPath: URL(fileURLWithPath: modelPath))
+                models = try await SortformerModelInference.load(config: config, mainModelPath: URL(fileURLWithPath: modelPath))
             } else {
                 print("Loading models from HuggingFace...")
-                models = try await SortformerModels.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)
+                models = try await SortformerModelInference.loadFromHuggingFace(config: config, computeUnits: .cpuOnly)
             }
             print("Initializing...")
             diarizer.initialize(models: models)

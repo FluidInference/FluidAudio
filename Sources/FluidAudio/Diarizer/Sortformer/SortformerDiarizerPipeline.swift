@@ -64,7 +64,7 @@ public final class SortformerDiarizer {
     private let logger = AppLogger(category: "SortformerDiarizer")
     private let stateUpdater: SortformerStateUpdater
 
-    private var _models: SortformerModels?
+    private var _models: SortformerModelInference?
 
     // Native mel spectrogram (used when useNativePreprocessing is enabled)
     private let melSpectrogram = NeMoMelSpectrogram()
@@ -98,7 +98,7 @@ public final class SortformerDiarizer {
     ) async throws {
         logger.info("Initializing Sortformer diarizer (combined pipeline mode)")
 
-        let loadedModels = try await SortformerModels.load(
+        let loadedModels = try await SortformerModelInference.load(
             config: config,
             mainModelPath: mainModelPath
         )
@@ -121,7 +121,7 @@ public final class SortformerDiarizer {
     }
 
     /// Initialize with pre-loaded models.
-    public func initialize(models: SortformerModels) {
+    public func initialize(models: SortformerModelInference) {
         lock.lock()
         defer { lock.unlock() }
 
