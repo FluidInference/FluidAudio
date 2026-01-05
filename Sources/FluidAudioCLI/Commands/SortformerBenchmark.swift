@@ -275,7 +275,7 @@ enum SortformerBenchmark {
         }
         config.debugMode = debugMode
         config.predScoreThreshold = threshold
-        let diarizer = SortformerDiarizer(config: config)
+        let diarizer = Pipeline(config: config)
 
         do {
             if useHuggingFace {
@@ -286,7 +286,7 @@ enum SortformerBenchmark {
                 print("   Downloading models from HuggingFace...")
                 fflush(stdout)
 
-                let models = try await SortformerModels.loadFromHuggingFace(config: config)
+                let models = try await DiarizerInference.loadFromHuggingFace(config: config)
                 diarizer.initialize(models: models)
             } else {
                 try await diarizer.initialize(
@@ -358,7 +358,7 @@ enum SortformerBenchmark {
     private static func processMeeting(
         meetingName: String,
         dataset: Dataset,
-        diarizer: SortformerDiarizer,
+        diarizer: Pipeline,
         modelLoadTime: Double,
         threshold: Float,
         verbose: Bool

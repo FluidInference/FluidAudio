@@ -3,11 +3,11 @@ import Foundation
 
 /// Core streaming logic for Sortformer diarization.
 ///
-/// This mirrors NeMo's SortformerModules class, ported from the default implementation.
+/// This mirrors NeMo's StateUpdater class, ported from the default implementation.
 /// Reference: NeMo nemo/collections/asr/modules/sortformer_modules.py
-public struct SortformerModules {
+public struct StateUpdater {
 
-    private let logger = AppLogger(category: "SortformerModules")
+    private let logger = AppLogger(category: "StateUpdater")
     private let config: SortformerConfig
 
     public init(config: SortformerConfig) {

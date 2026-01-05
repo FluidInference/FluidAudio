@@ -23,7 +23,7 @@ Audio (16kHz) → Mel Spectrogram → CoreML Model → Speaker Probabilities
 The pipeline consists of:
 
 1. **Mel Spectrogram** (`NeMoMelSpectrogram`): Converts raw audio to 128-bin mel features
-2. **CoreML Model** (`SortformerModels`): Combined encoder + attention + head
+2. **CoreML Model** (`DiarizerInference`): Combined encoder + attention + head
 3. **Streaming State** (`SortformerStreamingState`): Maintains speaker cache and FIFO queue
 4. **Post-processing** (`SortformerTimeline`): Converts probabilities to speaker segments
 
@@ -150,9 +150,9 @@ This means you **cannot** change `fifoLen`, `spkcacheLen`, or context values at 
 ```
 Sources/FluidAudio/Diarizer/Sortformer/
 ├── SortformerConfig.swift      # Streaming parameters and model shape configuration
-├── SortformerDiarizer.swift    # Main entry point, audio buffering, inference orchestration
-├── SortformerModels.swift      # CoreML model container and HuggingFace loading
-├── SortformerModules.swift     # Speaker cache compression, FIFO queue, state updates
+├── Pipeline.swift    # Main entry point, audio buffering, inference orchestration
+├── DiarizerInference.swift      # CoreML model container and HuggingFace loading
+├── StateUpdater.swift     # Speaker cache compression, FIFO queue, state updates
 └── SortformerTypes.swift       # StreamingState, FeatureLoader, ChunkResult, Timeline, Segment
 ```
 
@@ -182,12 +182,12 @@ SortformerConfig.nvidiaHighLatency
 SortformerConfig.nvidiaLowLatency
 ```
 
-### SortformerDiarizer.swift
+### Pipeline.swift
 
 Main entry point for diarization:
 
 ```swift
-let diarizer = SortformerDiarizer()
+let diarizer = Pipeline()
 
 // Initialize with HuggingFace models
 try await diarizer.initialize(mainModelPath: modelURL)
@@ -214,19 +214,19 @@ let timeline = try diarizer.processComplete(audioSamples)
 - `processSamples(_:)` - Convenience method combining add + process
 - `processComplete(_:)` - Batch process entire audio file
 
-### SortformerModels.swift
+### DiarizerInference.swift
 
 Handles CoreML model loading and inference:
 
 ```swift
 // Load from HuggingFace
-let models = try await SortformerModels.loadFromHuggingFace(
+let models = try await DiarizerInference.loadFromHuggingFace(
     config: .default,
     computeUnits: .all
 )
 
 // Or load from local path
-let models = try await SortformerModels.load(
+let models = try await DiarizerInference.load(
     config: .default,
     mainModelPath: localModelURL
 )
@@ -245,12 +245,12 @@ let models = try await SortformerModels.load(
 - `chunk_pre_encoder_embs`: Embeddings for state update
 - `chunk_pre_encoder_lengths`: Actual embedding count
 
-### SortformerModules.swift
+### StateUpdater.swift
 
 Core streaming logic ported from NeMo:
 
 ```swift
-let modules = SortformerModules(config: config)
+let modules = StateUpdater(config: config)
 
 let result = try modules.streamingUpdate(
     state: &state,
@@ -306,7 +306,7 @@ class SortformerTimeline {
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                     SortformerDiarizer                         │
+│                     Pipeline                         │
 ├────────────────────────────────────────────────────────────────┤
 │                                                                │
 │  1. addAudio(samples)                                          │
@@ -386,7 +386,7 @@ Three CoreML models are available on HuggingFace:
 ### Real-time Streaming
 
 ```swift
-let diarizer = SortformerDiarizer(config: .default)
+let diarizer = Pipeline(config: .default)
 try await diarizer.initialize(mainModelPath: modelURL)
 
 // Process audio in chunks (e.g., from microphone)
@@ -402,7 +402,7 @@ audioEngine.installTap { buffer in
 ### Batch Processing
 
 ```swift
-let diarizer = SortformerDiarizer()
+let diarizer = Pipeline()
 try await diarizer.initialize(mainModelPath: modelURL)
 
 let timeline = try diarizer.processComplete(audioSamples)
