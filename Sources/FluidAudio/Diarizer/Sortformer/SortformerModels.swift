@@ -124,7 +124,7 @@ extension SortformerModels {
                 .appendingPathComponent("FluidAudio/Models")
         }
 
-        // Determine while file to retrieve
+        // Determine which file to retrieve
         guard let bundle = ModelNames.Sortformer.bundle(for: config) else {
             throw SortformerError.modelLoadFailed("Unsupported Sortformer configuration")
         }
