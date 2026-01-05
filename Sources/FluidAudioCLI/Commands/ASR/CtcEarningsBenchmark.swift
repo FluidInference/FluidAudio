@@ -535,7 +535,7 @@ public enum CtcEarningsBenchmark {
         }
 
         // 2. Fallback: check hypothesis for dictionary words not found by CTC
-        let hypothesisLower = hypothesis.lowercased()
+        let hypothesisLower = hypothesisNormalized.lowercased()
         for word in dictionaryWords {
             let wordLower = word.lowercased()
             if !ctcFoundWords.contains(wordLower) {
