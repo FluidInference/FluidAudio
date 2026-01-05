@@ -23,20 +23,40 @@ import OSLog
 /// // Or complete file
 /// let result = try diarizer.processComplete(audioSamples)
 /// ```
-public final class SortformerDiarizer: @unchecked Sendable {
+public final class SortformerDiarizer {
+    /// Lock for thread-safe access to mutable state
+    private let lock = NSLock()
+
     /// Accumulated results
-    public private(set) var timeline: SortformerTimeline
+    public var timeline: SortformerTimeline {
+        lock.lock()
+        defer { lock.unlock() }
+        return _timeline
+    }
+    private var _timeline: SortformerTimeline
 
     /// Check if diarizer is ready for processing.
     public var isAvailable: Bool {
-        models != nil
+        lock.lock()
+        defer { lock.unlock() }
+        return _models != nil
     }
 
     /// Streaming state
-    public private(set) var state: SortformerStreamingState
+    public var state: SortformerStreamingState {
+        lock.lock()
+        defer { lock.unlock() }
+        return _state
+    }
+    private var _state: SortformerStreamingState
 
     /// Number of frames processed
-    public private(set) var numFramesProcessed: Int = 0
+    public var numFramesProcessed: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _numFramesProcessed
+    }
+    private var _numFramesProcessed: Int = 0
 
     /// Configuration
     public let config: SortformerConfig
@@ -44,7 +64,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
     private let logger = AppLogger(category: "SortformerDiarizer")
     private let modules: SortformerModules
 
-    private var models: SortformerModels?
+    private var _models: SortformerModels?
 
     // Native mel spectrogram (used when useNativePreprocessing is enabled)
     private lazy var melSpectrogram: NeMoMelSpectrogram = NeMoMelSpectrogram()
@@ -65,8 +85,8 @@ public final class SortformerDiarizer: @unchecked Sendable {
     public init(config: SortformerConfig = .default, postProcessingConfig: SortformerPostProcessingConfig = .default) {
         self.config = config
         self.modules = SortformerModules(config: config)
-        self.state = SortformerStreamingState(config: config)
-        self.timeline = SortformerTimeline(config: postProcessingConfig)
+        self._state = SortformerStreamingState(config: config)
+        self._timeline = SortformerTimeline(config: postProcessingConfig)
     }
 
     /// Initialize with CoreML models (combined pipeline mode).
@@ -83,48 +103,66 @@ public final class SortformerDiarizer: @unchecked Sendable {
             mainModelPath: mainModelPath
         )
 
-        self.models = loadedModels
-        self.state = SortformerStreamingState(config: config)
-        self.lastAudioSample = 0
-
-        // Reset buffers
-        resetBuffers()
+        // Use withLock helper to avoid direct NSLock usage in async context
+        withLock {
+            self._models = loadedModels
+            self._state = SortformerStreamingState(config: config)
+            self.lastAudioSample = 0
+            self.resetBuffersLocked()
+        }
         logger.info("Sortformer initialized in \(String(format: "%.2f", loadedModels.compilationDuration))s")
+    }
+
+    /// Execute a closure while holding the lock
+    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
     }
 
     /// Initialize with pre-loaded models.
     public func initialize(models: SortformerModels) {
-        self.models = models
-        self.state = SortformerStreamingState(config: config)
+        lock.lock()
+        defer { lock.unlock() }
+
+        self._models = models
+        self._state = SortformerStreamingState(config: config)
         self.lastAudioSample = 0
-        resetBuffers()
+        resetBuffersLocked()
         logger.info("Sortformer initialized with pre-loaded models")
     }
 
     /// Reset all internal state for a new audio stream.
     public func reset() {
-        state = SortformerStreamingState(config: config)
+        lock.lock()
+        defer { lock.unlock() }
+
+        _state = SortformerStreamingState(config: config)
         lastAudioSample = 0
-        resetBuffers()
+        resetBuffersLocked()
         logger.debug("Sortformer state reset")
     }
 
-    private func resetBuffers() {
+    /// Internal reset - caller must hold lock
+    private func resetBuffersLocked() {
         audioBuffer = []
         featureBuffer = []
         lastAudioSample = 0
         startFeat = 0
         diarizerChunkIndex = 0
-        timeline.reset()
+        _timeline.reset()
 
         featureBuffer.reserveCapacity((config.chunkMelFrames + config.coreFrames) * config.melFeatures)
     }
 
     /// Cleanup resources.
     public func cleanup() {
-        models = nil
-        state.cleanup()
-        resetBuffers()
+        lock.lock()
+        defer { lock.unlock() }
+
+        _models = nil
+        _state.cleanup()
+        resetBuffersLocked()
         logger.info("Sortformer resources cleaned up")
     }
 
@@ -134,8 +172,11 @@ public final class SortformerDiarizer: @unchecked Sendable {
     ///
     /// - Parameter samples: Audio samples (16kHz mono)
     public func addAudio<C: Collection>(_ samples: C) where C.Element == Float {
+        lock.lock()
+        defer { lock.unlock() }
+
         audioBuffer.append(contentsOf: samples)
-        preprocessAudioToFeatures()
+        preprocessAudioToFeaturesLocked()
     }
 
     /// Process buffered audio and return any new results.
@@ -144,7 +185,10 @@ public final class SortformerDiarizer: @unchecked Sendable {
     ///
     /// - Returns: New chunk results if enough audio was processed, nil otherwise
     public func process() throws -> SortformerChunkResult? {
-        guard let models = models else {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let models = _models else {
             throw SortformerError.notInitialized
         }
 
@@ -154,14 +198,14 @@ public final class SortformerDiarizer: @unchecked Sendable {
         var newTentativeFrameCount = 0
 
         // Step 1: Run preprocessor on available audio
-        while let (chunkFeatures, chunkLengths) = getNextChunkFeatures() {
+        while let (chunkFeatures, chunkLengths) = getNextChunkFeaturesLocked() {
             let output = try models.runMainModel(
                 chunk: chunkFeatures,
                 chunkLength: chunkLengths,
-                spkcache: state.spkcache,
-                spkcacheLength: state.spkcacheLength,
-                fifo: state.fifo,
-                fifoLength: state.fifoLength,
+                spkcache: _state.spkcache,
+                spkcacheLength: _state.spkcacheLength,
+                fifo: _state.fifo,
+                fifoLength: _state.fifoLength,
                 config: config
             )
 
@@ -175,7 +219,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
             // Update state with correct context values
             let updateResult = try modules.streamingUpdate(
-                state: &state,
+                state: &_state,
                 chunk: chunkEmbs,
                 preds: probabilities,
                 leftContext: diarizerChunkIndex > 0 ? config.chunkLeftContext : 0,
@@ -194,15 +238,15 @@ public final class SortformerDiarizer: @unchecked Sendable {
         // Return new results if any
         if newPredictions.count > 0 {
             let chunk = SortformerChunkResult(
-                startFrame: numFramesProcessed,
+                startFrame: _numFramesProcessed,
                 speakerPredictions: newPredictions,
                 frameCount: newFrameCount,
                 tentativePredictions: newTentativePredictions,
                 tentativeFrameCount: newTentativeFrameCount
             )
 
-            numFramesProcessed += newFrameCount
-            timeline.addChunk(chunk)
+            _numFramesProcessed += newFrameCount
+            _timeline.addChunk(chunk)
 
             return chunk
         }
@@ -217,8 +261,72 @@ public final class SortformerDiarizer: @unchecked Sendable {
     /// - Parameter samples: Audio samples (16kHz mono)
     /// - Returns: New chunk results if enough audio was processed
     public func processSamples(_ samples: [Float]) throws -> SortformerChunkResult? {
-        addAudio(samples)
-        return try process()
+        lock.lock()
+        defer { lock.unlock() }
+
+        audioBuffer.append(contentsOf: samples)
+        preprocessAudioToFeaturesLocked()
+        return try processLocked()
+    }
+
+    /// Internal process - caller must hold lock
+    private func processLocked() throws -> SortformerChunkResult? {
+        guard let models = _models else {
+            throw SortformerError.notInitialized
+        }
+
+        var newPredictions: [Float] = []
+        var newTentativePredictions: [Float] = []
+        var newFrameCount = 0
+        var newTentativeFrameCount = 0
+
+        while let (chunkFeatures, chunkLengths) = getNextChunkFeaturesLocked() {
+            let output = try models.runMainModel(
+                chunk: chunkFeatures,
+                chunkLength: chunkLengths,
+                spkcache: _state.spkcache,
+                spkcacheLength: _state.spkcacheLength,
+                fifo: _state.fifo,
+                fifoLength: _state.fifoLength,
+                config: config
+            )
+
+            let probabilities = output.predictions
+            let embLength = output.chunkLength
+            let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.preEncoderDims))
+
+            let updateResult = try modules.streamingUpdate(
+                state: &_state,
+                chunk: chunkEmbs,
+                preds: probabilities,
+                leftContext: diarizerChunkIndex > 0 ? config.chunkLeftContext : 0,
+                rightContext: config.chunkRightContext
+            )
+
+            newPredictions.append(contentsOf: updateResult.confirmed)
+            newTentativePredictions = updateResult.tentative
+            newFrameCount += updateResult.confirmed.count / config.numSpeakers
+            newTentativeFrameCount = updateResult.tentative.count / config.numSpeakers
+
+            diarizerChunkIndex += 1
+        }
+
+        if newPredictions.count > 0 {
+            let chunk = SortformerChunkResult(
+                startFrame: _numFramesProcessed,
+                speakerPredictions: newPredictions,
+                frameCount: newFrameCount,
+                tentativePredictions: newTentativePredictions,
+                tentativeFrameCount: newTentativeFrameCount
+            )
+
+            _numFramesProcessed += newFrameCount
+            _timeline.addChunk(chunk)
+
+            return chunk
+        }
+
+        return nil
     }
 
     // MARK: - Complete File Processing
@@ -236,12 +344,17 @@ public final class SortformerDiarizer: @unchecked Sendable {
         _ samples: [Float],
         progressCallback: ProgressCallback? = nil
     ) throws -> SortformerTimeline {
-        guard let models = models else {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let models = _models else {
             throw SortformerError.notInitialized
         }
 
         // Reset for fresh processing
-        reset()
+        _state = SortformerStreamingState(config: config)
+        lastAudioSample = 0
+        resetBuffersLocked()
 
         var featureProvider = SortformerFeatureLoader(config: self.config, audio: samples)
         var chunksProcessed = 0
@@ -255,10 +368,10 @@ public final class SortformerDiarizer: @unchecked Sendable {
             let output = try models.runMainModel(
                 chunk: chunkFeatures,
                 chunkLength: chunkLength,
-                spkcache: state.spkcache,
-                spkcacheLength: state.spkcacheLength,
-                fifo: state.fifo,
-                fifoLength: state.fifoLength,
+                spkcache: _state.spkcache,
+                spkcacheLength: _state.spkcacheLength,
+                fifo: _state.fifo,
+                fifoLength: _state.fifoLength,
                 config: config
             )
 
@@ -274,7 +387,7 @@ public final class SortformerDiarizer: @unchecked Sendable {
 
             // Update state
             let updateResult = try modules.streamingUpdate(
-                state: &state,
+                state: &_state,
                 chunk: chunkEmbs,
                 preds: probabilities,
                 leftContext: leftContext,
@@ -297,28 +410,28 @@ public final class SortformerDiarizer: @unchecked Sendable {
         predictions.append(contentsOf: lastTentative)
 
         // Save updated state
-        numFramesProcessed = predictions.count / config.numSpeakers
+        _numFramesProcessed = predictions.count / config.numSpeakers
 
         if config.debugMode {
             print(
-                "[DEBUG] Phase 2 complete: diarizerChunks=\(diarizerChunkIndex), totalProbs=\(predictions.count), totalFrames=\(numFramesProcessed)"
+                "[DEBUG] Phase 2 complete: diarizerChunks=\(diarizerChunkIndex), totalProbs=\(predictions.count), totalFrames=\(_numFramesProcessed)"
             )
             fflush(stdout)
         }
 
-        timeline = SortformerTimeline(
+        _timeline = SortformerTimeline(
             allPredictions: predictions,
-            config: timeline.config,
+            config: _timeline.config,
             isComplete: true
         )
 
-        return timeline
+        return _timeline
     }
 
     // MARK: - Helpers
 
-    /// Preprocess audio into mel features and append to feature buffer.
-    private func preprocessAudioToFeatures() {
+    /// Preprocess audio into mel features - caller must hold lock
+    private func preprocessAudioToFeaturesLocked() {
         guard !audioBuffer.isEmpty else { return }
         if audioBuffer.count < config.melWindow { return }
 
@@ -386,7 +499,15 @@ public final class SortformerDiarizer: @unchecked Sendable {
         }
     }
 
+    /// Get next chunk features (for testing)
     internal func getNextChunkFeatures() -> (mel: [Float], melLength: Int)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return getNextChunkFeaturesLocked()
+    }
+
+    /// Get next chunk features - caller must hold lock
+    private func getNextChunkFeaturesLocked() -> (mel: [Float], melLength: Int)? {
         let featLength = featureBuffer.count / config.melFeatures
         let coreFrames = config.chunkLen * config.subsamplingFactor
         let leftContextFrames = config.chunkLeftContext * config.subsamplingFactor

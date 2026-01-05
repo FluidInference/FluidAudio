@@ -10,7 +10,7 @@ import OSLog
 /// - Preprocessor: Audio → Mel features
 /// - PreEncoder: Mel features + State → Concatenated embeddings
 /// - Head: Concatenated embeddings → Predictions + Chunk embeddings
-public struct SortformerModels: Sendable {
+public struct SortformerModels {
     /// Main Sortformer model for diarization (combined pipeline, deprecated)
     public let mainModel: MLModel
 

@@ -4,7 +4,7 @@ import Foundation
 import Metal
 
 /// ANE-optimized memory management for speaker diarization pipeline
-public final class ANEMemoryOptimizer: @unchecked Sendable {
+public final class ANEMemoryOptimizer {
     // Use shared ANE constants
     public static let aneAlignment = ANEMemoryUtils.aneAlignment
     public static let aneTileSize = ANEMemoryUtils.aneTileSize
