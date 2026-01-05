@@ -10,7 +10,7 @@ import OSLog
 /// - Preprocessor: Audio → Mel features
 /// - PreEncoder: Mel features + State → Concatenated embeddings
 /// - Head: Concatenated embeddings → Predictions + Chunk embeddings
-public struct DiarizerInference {
+public struct SortformerModels {
     /// Main Sortformer model for diarization (combined pipeline, deprecated)
     public let mainModel: MLModel
 
@@ -49,9 +49,9 @@ public struct DiarizerInference {
 
 // MARK: - Model Loading
 
-extension DiarizerInference {
+extension SortformerModels {
 
-    private static let logger = AppLogger(category: "DiarizerInference")
+    private static let logger = AppLogger(category: "SortformerModels")
 
     /// Load models from local file paths (combined pipeline mode).
     ///
@@ -59,12 +59,12 @@ extension DiarizerInference {
     ///   - preprocessorPath: Path to SortformerPreprocessor.mlpackage
     ///   - mainModelPath: Path to Sortformer.mlpackage
     ///   - configuration: Optional MLModel configuration
-    /// - Returns: Loaded DiarizerInference
+    /// - Returns: Loaded SortformerModels
     public static func load(
         config: SortformerConfig,
         mainModelPath: URL,
         configuration: MLModelConfiguration? = nil
-    ) async throws -> DiarizerInference {
+    ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from local paths (combined pipeline mode)")
 
         let startTime = Date()
@@ -82,7 +82,7 @@ extension DiarizerInference {
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Models loaded in \(String(format: "%.2f", duration))s")
 
-        return try DiarizerInference(
+        return try SortformerModels(
             config: config,
             main: mainModel,
             compilationDuration: duration
@@ -105,12 +105,12 @@ extension DiarizerInference {
     /// - Parameters:
     ///   - cacheDirectory: Directory to cache downloaded models (defaults to app support)
     ///   - computeUnits: CoreML compute units to use (default: cpuOnly for consistency)
-    /// - Returns: Loaded DiarizerInference
+    /// - Returns: Loaded SortformerModels
     public static func loadFromHuggingFace(
         config: SortformerConfig,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits = .all
-    ) async throws -> DiarizerInference {
+    ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
 
         let startTime = Date()
@@ -148,7 +148,7 @@ extension DiarizerInference {
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Sortformer models loaded from HuggingFace in \(String(format: "%.2f", duration))s")
 
-        return try DiarizerInference(
+        return try SortformerModels(
             config: config,
             main: sortformer,
             compilationDuration: duration
@@ -158,7 +158,7 @@ extension DiarizerInference {
 
 // MARK: - Main Model Inference
 
-extension DiarizerInference {
+extension SortformerModels {
 
     /// Main model output structure
     public struct MainModelOutput {

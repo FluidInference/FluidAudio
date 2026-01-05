@@ -10,7 +10,7 @@ import OSLog
 ///
 /// Usage:
 /// ```swift
-/// let diarizer = Pipeline()
+/// let diarizer = SortformerDiarizer()
 /// try await diarizer.initialize(preprocessorPath: url1, mainModelPath: url2)
 ///
 /// // Streaming mode
@@ -23,7 +23,7 @@ import OSLog
 /// // Or complete file
 /// let result = try diarizer.processComplete(audioSamples)
 /// ```
-public final class Pipeline {
+public final class SortformerDiarizer {
     /// Lock for thread-safe access to mutable state
     private let lock = NSLock()
 
@@ -61,10 +61,10 @@ public final class Pipeline {
     /// Configuration
     public let config: SortformerConfig
 
-    private let logger = AppLogger(category: "Pipeline")
-    private let modules: StateUpdater
+    private let logger = AppLogger(category: "SortformerDiarizer")
+    private let modules: SortformerModules
 
-    private var _models: DiarizerInference?
+    private var _models: SortformerModels?
 
     // Native mel spectrogram (used when useNativePreprocessing is enabled)
     private let melSpectrogram = NeMoMelSpectrogram()
@@ -84,7 +84,7 @@ public final class Pipeline {
 
     public init(config: SortformerConfig = .default, postProcessingConfig: SortformerPostProcessingConfig = .default) {
         self.config = config
-        self.modules = StateUpdater(config: config)
+        self.modules = SortformerModules(config: config)
         self._state = SortformerStreamingState(config: config)
         self._timeline = SortformerTimeline(config: postProcessingConfig)
     }
@@ -98,7 +98,7 @@ public final class Pipeline {
     ) async throws {
         logger.info("Initializing Sortformer diarizer (combined pipeline mode)")
 
-        let loadedModels = try await DiarizerInference.load(
+        let loadedModels = try await SortformerModels.load(
             config: config,
             mainModelPath: mainModelPath
         )
@@ -121,7 +121,7 @@ public final class Pipeline {
     }
 
     /// Initialize with pre-loaded models.
-    public func initialize(models: DiarizerInference) {
+    public func initialize(models: SortformerModels) {
         lock.lock()
         defer { lock.unlock() }
 

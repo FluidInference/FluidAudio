@@ -24,7 +24,7 @@ final class SortformerTests: XCTestCase {
         }
 
         // 2. Get chunks from Streaming Diarizer
-        let diarizer = Pipeline(config: config)
+        let diarizer = SortformerDiarizer(config: config)
         var streamingChunks: [[Float]] = []
 
         diarizer.addAudio(audio)
