@@ -57,6 +57,7 @@ jobs:
           swift run fluidaudiocli sortformer-benchmark \
             --single-file ES2004a \
             --nvidia-high-latency \
+            --hf \
             --auto-download \
             --output benchmark_results.json
 
