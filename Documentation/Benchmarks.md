@@ -228,7 +228,7 @@ Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 1
 
 Model: [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml)
 
-Hardware: 2024 MacBook Pro, M4 Pro, 48GB RAM
+Hardware: Apple M2, 2022, macOS 26
 
 ### LibriSpeech test-clean (2620 files, 5.40h audio)
 
@@ -387,7 +387,7 @@ AVERAGE          43.0     57.5      5.0      5.6     32.3         -     69.4
 
 NVIDIA's Sortformer model for streaming speaker diarization, converted to CoreML.
 
-Model: [FluidInference/sortformer-4spk-v1](https://huggingface.co/FluidInference/sortformer-4spk-v1)
+Model: [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml)
 
 Hardware: 2024 MacBook Pro, M4 Pro, 48GB RAM
 
