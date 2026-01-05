@@ -67,7 +67,7 @@ public final class SortformerDiarizer {
     private var _models: SortformerModels?
 
     // Native mel spectrogram (used when useNativePreprocessing is enabled)
-    private lazy var melSpectrogram: NeMoMelSpectrogram = NeMoMelSpectrogram()
+    private let melSpectrogram = NeMoMelSpectrogram()
 
     // Audio buffering
     private var audioBuffer: [Float] = []
