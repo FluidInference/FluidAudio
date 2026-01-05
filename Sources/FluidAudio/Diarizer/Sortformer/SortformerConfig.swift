@@ -53,7 +53,7 @@ public struct SortformerConfig: Sendable {
 
     // MARK: - Audio Parameters
 
-    /// Sample rate in Hz}
+    /// Sample rate in Hz
     public let sampleRate: Int = 16000
 
     /// Mel spectrogram window size in samples (25ms)
