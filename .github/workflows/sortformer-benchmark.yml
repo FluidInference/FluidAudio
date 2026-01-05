@@ -84,14 +84,27 @@ jobs:
 
       - name: Extract benchmark metrics
         id: extract
+        if: always()
         run: |
-          DER=$(jq '.[0].der' benchmark_results.json)
-          MISS=$(jq '.[0].missRate' benchmark_results.json)
-          FA=$(jq '.[0].falseAlarmRate' benchmark_results.json)
-          SE=$(jq '.[0].speakerErrorRate' benchmark_results.json)
-          RTF=$(jq '.[0].rtfx' benchmark_results.json)
-          DETECTED=$(jq '.[0].detectedSpeakers' benchmark_results.json)
-          GROUND_TRUTH=$(jq '.[0].groundTruthSpeakers' benchmark_results.json)
+          if [ ! -f benchmark_results.json ]; then
+            echo "❌ benchmark_results.json not found"
+            echo "DER=0" >> $GITHUB_OUTPUT
+            echo "MISS=0" >> $GITHUB_OUTPUT
+            echo "FA=0" >> $GITHUB_OUTPUT
+            echo "SE=0" >> $GITHUB_OUTPUT
+            echo "RTF=0" >> $GITHUB_OUTPUT
+            echo "DETECTED=0" >> $GITHUB_OUTPUT
+            echo "GROUND_TRUTH=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          DER=$(jq '.[0].der // 0' benchmark_results.json)
+          MISS=$(jq '.[0].missRate // 0' benchmark_results.json)
+          FA=$(jq '.[0].falseAlarmRate // 0' benchmark_results.json)
+          SE=$(jq '.[0].speakerErrorRate // 0' benchmark_results.json)
+          RTF=$(jq '.[0].rtfx // 0' benchmark_results.json)
+          DETECTED=$(jq '.[0].detectedSpeakers // 0' benchmark_results.json)
+          GROUND_TRUTH=$(jq '.[0].groundTruthSpeakers // 0' benchmark_results.json)
 
           echo "DER=${DER}" >> $GITHUB_OUTPUT
           echo "MISS=${MISS}" >> $GITHUB_OUTPUT
