@@ -92,17 +92,24 @@ public struct SortformerFeatureLoader: Sendable {
         self.startFeat = 0
         self.endFeat = 0
         (self.featSeq, self.featLength, self.featSeqLength) = NeMoMelSpectrogram().computeFlatTransposed(audio: audio)
-        self.numChunks = (self.featLength - 1) / (config.chunkLen * config.subsamplingFactor) + 1  // ceiling
+        // numChunks accounts for right context requirement: need endFeat + rc <= featLength
+        // Chunk n has endFeat = (n+1) * chunkLen, so valid when (n+1) * chunkLen + rc <= featLength
+        // numChunks = floor((featLength - rc) / chunkLen)
+        self.numChunks = max(0, (self.featLength - self.rc) / self.chunkLen)
     }
 
     public mutating func next() -> (chunkFeatures: [Float], chunkLength: Int, leftOffset: Int, rightOffset: Int)? {
-        guard endFeat < featLength else {
-            return nil
-        }
+        // Calculate end of core chunk
+        endFeat = min(startFeat + chunkLen, featLength)
+
+        // Need at least one core frame
+        guard endFeat > startFeat else { return nil }
+
+        // Require full right context (same as streaming getNextChunkFeatures)
+        guard endFeat + rc <= featLength else { return nil }
 
         let leftOffset = min(lc, startFeat)
-        endFeat = min(startFeat + chunkLen, featLength)
-        let rightOffset = min(rc, featLength - endFeat)
+        let rightOffset = rc
 
         let chunkStartFrame = startFeat - leftOffset
         let chunkEndFrame = endFeat + rightOffset
