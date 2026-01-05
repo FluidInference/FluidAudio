@@ -1,10 +1,9 @@
 import Accelerate
 import Foundation
-import OSLog
 
 /// Core streaming logic for Sortformer diarization.
 ///
-/// This mirrors NeMo's SortformerModules class, ported from Gradient Descent's implementation.
+/// This mirrors NeMo's SortformerModules class, ported from the default implementation.
 /// Reference: NeMo nemo/collections/asr/modules/sortformer_modules.py
 public struct SortformerModules {
 
@@ -20,7 +19,7 @@ public struct SortformerModules {
     /// Update streaming state with new chunk.
     ///
     /// This is the core streaming logic from NeMo's streaming_update(),
-    /// ported from Gradient Descent's MLTensor implementation.
+    /// ported from the default MLTensor implementation.
     ///
     /// - Parameters:
     ///   - state: Current streaming state (mutated in place)
@@ -56,7 +55,7 @@ public struct SortformerModules {
         }
 
         // Extract only CORE frames from chunk embeddings (skip left context, take chunkLen frames)
-        // This matches Gradient Descent's: chunk[0..., lc..<chunkLen+lc, 0...]
+        // This matches the default impl: chunk[0..., lc..<chunkLen+lc, 0...]
         // Use ACTUAL leftContext (varies by chunk position), not fixed config.chunkLeftContext
         let lc = leftContext
         let rc = rightContext
@@ -72,7 +71,7 @@ public struct SortformerModules {
         let chunkEmbs = Array(chunk[embsStartIdx..<embsEndIdx])
 
         // Extract chunk predictions for CORE frames only
-        // This matches Gradient Descent's: preds[0..., chunkStart+lc..<chunkStart+chunkLen+lc, 0...]
+        // This matches the default impl: preds[0..., chunkStart+lc..<chunkStart+chunkLen+lc, 0...]
         let chunkStart = currentSpkcacheLength + currentFifoLength + lc
         let chunkEnd = chunkStart + coreFrames
 
@@ -105,7 +104,7 @@ public struct SortformerModules {
         }
 
         // Update speaker cache if FIFO overflows
-        // Use actualCoreFrames (not full chunk), matching Gradient Descent's: chunkLen + currentFifoLength
+        // Use actualCoreFrames (not full chunk), matching the default impl: chunkLen + currentFifoLength
         let contextLength = coreFrames + currentFifoLength
         if contextLength > fifoCapacity {
             guard let currentFifoPreds = state.fifoPreds else {
@@ -216,7 +215,7 @@ public struct SortformerModules {
     /// Compress speaker cache to keep most important frames.
     ///
     /// This mirrors NeMo's _compress_spkcache() function,
-    /// ported from Gradient Descent's implementation.
+    /// ported from the default implementation.
     private func compressSpkcache(state: inout SortformerStreamingState) {
         guard let spkcachePreds = state.spkcachePreds else { return }
 

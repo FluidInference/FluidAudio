@@ -1,6 +1,4 @@
-import Accelerate
 import Foundation
-import OSLog
 
 // MARK: - Streaming State
 
@@ -243,7 +241,7 @@ public class SortformerTimeline {
     private var recentSegments: [(start: Int, end: Int)]
 
     /// Logger for warnings
-    private static let logger = Logger(subsystem: "FluidAudio", category: "SortformerTimeline")
+    private static let logger = AppLogger(category: "SortformerTimeline")
 
     /// Initialize with configuration for streaming usage
     /// - Parameters:

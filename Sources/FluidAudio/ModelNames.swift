@@ -177,13 +177,13 @@ public enum ModelNames {
     /// Sortformer streaming diarization model names
     public enum Sortformer {
         public enum Variant: CaseIterable, Sendable {
-            case gradientDecent
+            case `default`
             case nvidiaLowLatency
             case nvidiaHighLatency
 
             public var name: String {
                 switch self {
-                case .gradientDecent:
+                case .default:
                     return "Sortformer"
                 case .nvidiaLowLatency:
                     return "SortformerNvidiaLow"
@@ -194,7 +194,7 @@ public enum ModelNames {
 
             public var defaultConfiguration: SortformerConfig {
                 switch self {
-                case .gradientDecent:
+                case .default:
                     return .default
                 case .nvidiaLowLatency:
                     return .nvidiaLowLatency
@@ -213,11 +213,11 @@ public enum ModelNames {
         }
 
         /// Lowest latency for streaming
-        public static let defaultVariant: Variant = .gradientDecent
+        public static let defaultVariant: Variant = .default
 
         /// Bundle name for a specific variant
-        public static func bundle(for varient: Variant) -> String {
-            return varient.fileName
+        public static func bundle(for variant: Variant) -> String {
+            return variant.fileName
         }
 
         /// Bundle name for a given configuration
@@ -280,7 +280,7 @@ public enum ModelNames {
 
         /// All Kokoro model bundles required by the downloader.
         public static var requiredModels: Set<String> {
-            Set(Variant.allCases.map { $0.fileName })
+            Set(Variant.allCases.map(\.fileName))
         }
     }
 
