@@ -111,7 +111,8 @@ public struct SortformerModules {
                 logger.error(
                     "FIFO predictions are nil immediately after updating them during streaming update. THIS SHOULD NEVER HAPPEN!"
                 )
-                return StreamingUpdateResult(confirmed: chunkPreds, tentative: tentativePreds, numSpeakers: config.numSpeakers)
+                return StreamingUpdateResult(
+                    confirmed: chunkPreds, tentative: tentativePreds, numSpeakers: config.numSpeakers)
             }
 
             // Calculate how many frames to pop
