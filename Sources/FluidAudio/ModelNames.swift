@@ -9,7 +9,7 @@ public enum Repo: String, CaseIterable {
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
-    case sortformer = "alexwengg/diar-streaming-sortformer-coreml"
+    case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -39,7 +39,7 @@ public enum Repo: String, CaseIterable {
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
-            return "alexwengg/diar-streaming-sortformer-coreml"
+            return "FluidInference/diar-streaming-sortformer-coreml"
         default:
             return "FluidInference/\(name)"
         }

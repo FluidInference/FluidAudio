@@ -100,7 +100,7 @@ extension SortformerModels {
 
     /// Load Sortformer models from HuggingFace.
     ///
-    /// Downloads models from alexwengg/diar-streaming-sortformer-coreml if not cached.
+    /// Downloads models from FluidInference/diar-streaming-sortformer-coreml if not cached.
     ///
     /// - Parameters:
     ///   - cacheDirectory: Directory to cache downloaded models (defaults to app support)
