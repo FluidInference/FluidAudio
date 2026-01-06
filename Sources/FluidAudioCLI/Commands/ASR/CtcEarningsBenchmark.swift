@@ -105,13 +105,11 @@ public enum CtcEarningsBenchmark {
             dataDir = defaultDataDir()
         }
 
-        let useContextGraph = ProcessInfo.processInfo.environment["USE_CONTEXT_GRAPH"] == "1"
         print("Earnings Benchmark (TDT transcription + CTC keyword spotting)")
         print("  Data directory: \(dataDir ?? "not found")")
         print("  Output file: \(outputFile)")
         print("  TDT version: \(tdtVersion == .v2 ? "v2" : "v3")")
         print("  CTC model: \(ctcModelPath ?? "not found")")
-        print("  CTC spotting: \(useContextGraph ? "context graph (experimental)" : "DP-based")")
 
         guard let finalDataDir = dataDir else {
             print("ERROR: Data directory not found")
@@ -405,24 +403,11 @@ public enum CtcEarningsBenchmark {
         let customVocab = CustomVocabularyContext(terms: vocabTerms)
 
         // 3. CTC keyword spotting for high recall dictionary detection
-        // USE_CONTEXT_GRAPH=1 uses the new context graph beam search (experimental, 67% recall)
-        // USE_CONTEXT_GRAPH=0 (default) uses the DP-based approach (99.8% recall)
-        let useCtxGraph = ProcessInfo.processInfo.environment["USE_CONTEXT_GRAPH"] == "1"
-
-        let spotResult: CtcKeywordSpotter.SpotKeywordsResult
-        if useCtxGraph {
-            spotResult = try await spotter.spotKeywordsWithContextGraph(
-                audioSamples: samples,
-                customVocabulary: customVocab,
-                config: .default
-            )
-        } else {
-            spotResult = try await spotter.spotKeywordsWithLogProbs(
-                audioSamples: samples,
-                customVocabulary: customVocab,
-                minScore: nil
-            )
-        }
+        let spotResult = try await spotter.spotKeywordsWithLogProbs(
+            audioSamples: samples,
+            customVocabulary: customVocab,
+            minScore: nil
+        )
 
         // Debug: Show CTC detections with timestamps
         if debugTimings && !spotResult.detections.isEmpty {
