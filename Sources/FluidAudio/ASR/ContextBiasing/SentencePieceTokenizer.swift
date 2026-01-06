@@ -10,21 +10,27 @@ public class SentencePieceCtcTokenizer {
     private let processor: SentencePieceProcessor?
 
     public init() throws {
-        // Get the CTC model directory
-        let modelDir = Self.getCtcModelDirectory()
-
-        // Check for SentencePiece model files in order of preference
-        let modelCandidates = [
-            "tokenizer.model",  // Standard HuggingFace name
-            "ctc_tokenizer.model",
-            "spm.model",
-        ]
+        // First, check for bundled resource
         var spModelPath: URL?
-        for candidate in modelCandidates {
-            let path = modelDir.appendingPathComponent(candidate)
-            if FileManager.default.fileExists(atPath: path.path) {
-                spModelPath = path
-                break
+        if let bundledPath = Bundle.module.url(forResource: "sentencepiece.bpe", withExtension: "model") {
+            spModelPath = bundledPath
+        }
+
+        // If not in bundle, check CTC model directory
+        if spModelPath == nil {
+            let modelDir = Self.getCtcModelDirectory()
+            let modelCandidates = [
+                "tokenizer.model",  // Standard HuggingFace name
+                "ctc_tokenizer.model",
+                "spm.model",
+                "sentencepiece.bpe.model",
+            ]
+            for candidate in modelCandidates {
+                let path = modelDir.appendingPathComponent(candidate)
+                if FileManager.default.fileExists(atPath: path.path) {
+                    spModelPath = path
+                    break
+                }
             }
         }
 
@@ -42,6 +48,7 @@ public class SentencePieceCtcTokenizer {
             }
         } else {
             // No SentencePiece model, will use fallback
+            let modelDir = Self.getCtcModelDirectory()
             self.modelPath = modelDir
             self.processor = nil
             logger.info("No SentencePiece model found, using fallback tokenizer")

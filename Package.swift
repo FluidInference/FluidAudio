@@ -31,7 +31,7 @@ let package = Package(
             ],
             path: "Sources/FluidAudio",
             exclude: [
-                "Frameworks",
+                "Frameworks"
             ]
         ),
         .target(
