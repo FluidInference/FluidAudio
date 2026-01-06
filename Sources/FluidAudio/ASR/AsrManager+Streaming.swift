@@ -45,7 +45,7 @@ extension AsrManager {
         // Transcribe chunk with carried-forward decoder state
         var decoderStateCopy = state.decoderState
         let (hypothesis, _) = try await executeMLInferenceWithTimings(
-            padAudioIfNeeded(audioChunk, targetLength: 240_000),
+            padAudioIfNeeded(audioChunk, targetLength: ASRConstants.maxModelSamples),
             originalLength: audioChunk.count,
             actualAudioFrames: ASRConstants.calculateEncoderFrames(from: audioChunk.count),
             decoderState: &decoderStateCopy,

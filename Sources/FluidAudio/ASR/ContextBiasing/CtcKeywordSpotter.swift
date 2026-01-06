@@ -16,9 +16,8 @@ public struct CtcKeywordSpotter {
     private let blankId: Int
     private let predictionOptions: MLPredictionOptions
 
-    // Parakeet CTC 110M expects up to 240_000 samples (≈15s at 16kHz).
-    private let sampleRate: Int = 16_000
-    private let maxModelSamples: Int = 240_000
+    private let sampleRate: Int = ASRConstants.sampleRate
+    private let maxModelSamples: Int = ASRConstants.maxModelSamples
 
     // Chunking parameters for audio longer than maxModelSamples
     // 2s overlap at 16kHz = 32,000 samples (matches TDT chunking pattern)

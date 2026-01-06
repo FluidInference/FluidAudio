@@ -20,7 +20,7 @@ struct ChunkProcessor {
     private let sampleRate: Int = 16000
     private let overlapSeconds: Double = 2.0
 
-    private var maxModelSamples: Int { 240_000 }  // CoreML encoder capacity (15 seconds)
+    private var maxModelSamples: Int { ASRConstants.maxModelSamples }
     private var chunkSamples: Int {
         // Match CoreML reference chunk length (239,840 samples ≈ 14.99s)
         let raw = max(maxModelSamples - ASRConstants.melHopSize, ASRConstants.samplesPerEncoderFrame)

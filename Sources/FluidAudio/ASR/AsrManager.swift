@@ -53,7 +53,7 @@ public final class AsrManager {
         // Pre-warm caches if possible
         Task {
             await sharedMLArrayCache.prewarm(shapes: [
-                ([NSNumber(value: 1), NSNumber(value: 240_000)], .float32),
+                ([NSNumber(value: 1), NSNumber(value: ASRConstants.maxModelSamples)], .float32),
                 ([NSNumber(value: 1)], .int32),
                 (
                     [
@@ -71,7 +71,7 @@ public final class AsrManager {
         }
     }
 
-    /// Returns the current transcription progress stream for offline long audio (>\(240_000) samples).
+    /// Returns the current transcription progress stream for offline long audio (>240,000 samples / ~15s).
     /// Only one session is supported at a time.
     public var transcriptionProgressStream: AsyncThrowingStream<Double, Error> {
         get async {
@@ -323,7 +323,7 @@ public final class AsrManager {
     /// - Parameters:
     ///   - audioSamples: Array of 16-bit audio samples at 16kHz
     ///   - source: The audio source type (microphone or system audio)
-    /// - Note: Progress stream is emitted only when `audioSamples.count > 240_000` (~15s).
+    /// - Note: Progress stream is emitted only when `audioSamples.count > ASRConstants.maxModelSamples` (~15s).
     ///         Use `transcriptionProgressStream` before calling this method to observe progress.
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails or models are not initialized
@@ -331,7 +331,7 @@ public final class AsrManager {
         _ audioSamples: [Float],
         source: AudioSource = .microphone
     ) async throws -> ASRResult {
-        let shouldEmitProgress = audioSamples.count > 240_000
+        let shouldEmitProgress = audioSamples.count > ASRConstants.maxModelSamples
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
         }
