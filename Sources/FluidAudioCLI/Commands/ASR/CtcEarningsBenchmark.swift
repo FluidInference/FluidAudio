@@ -193,8 +193,6 @@ public enum CtcEarningsBenchmark {
             var totalFalseNegatives = 0  // In reference but NOT in hypothesis
 
             for (index, fileId) in fileIds.enumerated() {
-                print("[\(index + 1)/\(fileIds.count)] \(fileId)")
-
                 if let result = try await processFile(
                     fileId: fileId,
                     dataDir: dataDirURL,
@@ -215,7 +213,11 @@ public enum CtcEarningsBenchmark {
                     let wer = result["wer"] as? Double ?? 0
                     let dictFound = result["dictFound"] as? Int ?? 0
                     let dictTotal = result["dictTotal"] as? Int ?? 0
-                    print("  WER: \(String(format: "%.1f", wer))%, Dict: \(dictFound)/\(dictTotal)")
+                    let indexStr = String(format: "[%3d/%d]", index + 1, fileIds.count)
+                    let paddedId = fileId.padding(toLength: 25, withPad: " ", startingAt: 0)
+                    print(
+                        "\(indexStr) \(paddedId) WER: \(String(format: "%5.1f", wer))%  Dict: \(dictFound)/\(dictTotal)"
+                    )
                 }
             }
 
