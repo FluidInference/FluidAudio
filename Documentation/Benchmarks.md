@@ -7,7 +7,7 @@
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml 
 
 ```bash
-swift run fluidaudio fleurs-benchmark --languages all --samples all
+swift run fluidaudiocli fleurs-benchmark --languages all --samples all
 ```
 
 ```text
@@ -51,7 +51,7 @@ Median RTFx: 139.6x
 Overall RTFx: 155.6x (19452.5s / 125.0s)
 ```
 
-`swift run fluidaudio asr-benchmark --max-files all --model-version v2`
+`swift run fluidaudiocli asr-benchmark --max-files all --model-version v2`
 
 Use v2 if you only need English, it is a bit more accurate
 
@@ -86,10 +86,10 @@ CTC-based custom vocabulary boosting system, which enables accurate recognition 
 
 ```bash
 # Download the dataset
-swift run fluidaudio ctc-earnings-benchmark --auto-download
+swift run fluidaudiocli ctc-earnings-benchmark --auto-download
 
 # Run the benchmark
-swift run fluidaudio ctc-earnings-benchmark
+swift run fluidaudiocli ctc-earnings-benchmark
 
 Earnings Benchmark (TDT transcription + CTC keyword spotting)
   Data directory: /Users/<user>/Library/Application Support/FluidAudio/earnings22-kws/test-dataset
@@ -216,7 +216,7 @@ Total  -        461.650      19.401       23.796x    3.37
 Note that it does take `~15s` to compile the model on the first run, subsequent runs are shorter, we expect ~2s to load. 
 
 ```bash
-> swift run fluidaudio tts --benchmark
+> swift run fluidaudiocli tts --benchmark
 ...
 FluidAudio TTS benchmark for voice af_heart (warm-up took an extra 2.348s)
 Test   Chars    Ouput (s)    Inf(s)       RTFx
@@ -246,7 +246,7 @@ Model is nearly identical to the base model in terms of quality, perforamnce wis
 Dataset: https://github.com/Lab41/VOiCES-subset
 
 ```text
-swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.85
+swift run fluidaudiocli vad-benchmark --dataset voices-subset --all-files --threshold 0.85
 ...
 Timing Statistics:
 [18:56:31.208] [INFO] [VAD]    Total processing time: 0.29s
@@ -270,7 +270,7 @@ VAD Benchmark Results:
 ```
 
 ```text
-swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --threshold 0.8
+swift run fluidaudiocli vad-benchmark --dataset musan-full --num-files all --threshold 0.8
 ...
 [23:02:35.539] [INFO] [VAD] Total processing time: 322.31s
 [23:02:35.539] [INFO] [VAD] Timing Statistics:
@@ -311,10 +311,10 @@ Hardware: Apple M2, 2022, masOS 26
 
 ```bash
 # Run 320ms benchmark
-swift run -c release fluidaudio parakeet-eou --benchmark --chunk-size 320 --use-cache
+swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 320 --use-cache
 
 # Run 160ms benchmark
-swift run -c release fluidaudio parakeet-eou --benchmark --chunk-size 160 --use-cache
+swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 160 --use-cache
 ```
 
 ## Speaker Diarization
@@ -350,7 +350,7 @@ This is more tricky and honestly a lot more fragile to clustering. Expect +10-15
 
 Running a near real-time diarization benchmark for 3s chunks, 1s overlap, and 0.85 clustering threshold:
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm \
     --threshold 0.85 \
     --auto-download \
@@ -377,7 +377,7 @@ AVERAGE          49.7     65.0      5.5      5.6     38.6         -     51.4
 
 Diarization benchmark with 10s chunks, 0s overlap, and 0.7 clustering threshold:
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm
     --threshold 0.7
     --auto-download
@@ -404,7 +404,7 @@ AVERAGE          33.3     45.1      8.4      3.5     21.5         -    392.4
 
 Diarization benchmark with 5s chunks, 0s overlap, and 0.8 clustering threshold (best configuration found):
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm
     --threshold 0.8
     --auto-download
@@ -431,7 +431,7 @@ AVERAGE          26.2     36.1      9.2      3.9     13.1         -    223.1
 
 Diarization benchmark with 5s chunks, 2s overlap, and 0.8 clustering threshold:
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm
     --threshold 0.8
     --auto-download
