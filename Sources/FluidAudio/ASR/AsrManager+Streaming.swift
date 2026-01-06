@@ -1,4 +1,3 @@
-import CoreML
 import Foundation
 
 extension AsrManager {
@@ -87,7 +86,7 @@ extension AsrManager {
         nextState.provisionalTokens = provisional
 
         // Force-confirm provisional tokens if too many accumulate (prevent latency growth)
-        let maxProvisional = config.maxProvisionalFrames
+        let maxProvisional = config.maxProvisionalTokens
         if nextState.provisionalTokens.count > maxProvisional {
             let forceConfirmCount = nextState.provisionalTokens.count - maxProvisional
             let toConfirm = Array(nextState.provisionalTokens.prefix(forceConfirmCount))
