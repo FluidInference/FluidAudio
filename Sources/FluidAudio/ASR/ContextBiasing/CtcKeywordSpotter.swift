@@ -471,83 +471,6 @@ public struct CtcKeywordSpotter {
         )
     }
 
-    private func computeWithFusedModel(
-        _ model: MLModel,
-        audioSamples: [Float]
-    ) async throws -> CtcLogProbResult {
-        let clampedCount = min(audioSamples.count, maxModelSamples)
-        let audioArray = try MLMultiArray(shape: [1, NSNumber(value: clampedCount)], dataType: .float32)
-
-        for i in 0..<clampedCount {
-            audioArray[i] = NSNumber(value: audioSamples[i])
-        }
-
-        let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
-        lengthArray[0] = NSNumber(value: clampedCount)
-
-        let dict: [String: MLFeatureValue] = [
-            "audio_signal": MLFeatureValue(multiArray: audioArray),
-            "audio_length": MLFeatureValue(multiArray: lengthArray),
-        ]
-        let inputProvider = try MLDictionaryFeatureProvider(dictionary: dict)
-
-        let output = try await model.compatPrediction(
-            from: inputProvider,
-            options: predictionOptions
-        )
-
-        guard let logProbsArray = output.featureValue(for: "log_probs")?.multiArrayValue else {
-            throw ASRError.processingFailed("Missing log_probs output from fused CTC model")
-        }
-        guard let encoderLengthArray = output.featureValue(for: "encoder_length")?.multiArrayValue else {
-            throw ASRError.processingFailed("Missing encoder_length output from fused CTC model")
-        }
-        let frameTimesArray = output.featureValue(for: "frame_times")?.multiArrayValue
-
-        let encoderFrames = encoderLengthArray[0].intValue
-        let allLogProbs = try makeLogProbs(from: logProbsArray, applyLogSoftmax: false)
-        let frameCount = max(0, min(encoderFrames, allLogProbs.count))
-        let trimmed = frameCount > 0 ? Array(allLogProbs.prefix(frameCount)) : []
-
-        var frameDuration: Double = 0
-        var frameTimes: [Double]? = nil
-        if let frameTimesArray {
-            var times: [Double] = []
-            times.reserveCapacity(frameTimesArray.count)
-            for i in 0..<frameTimesArray.count {
-                times.append(frameTimesArray[i].doubleValue)
-            }
-            if frameCount > 0 {
-                times = Array(times.prefix(frameCount))
-            }
-            frameTimes = times
-            if times.count > 1 {
-                frameDuration = max(0, times[1] - times[0])
-            }
-        }
-        if frameDuration == 0 {
-            frameDuration =
-                frameCount > 0
-                ? Double(clampedCount) / Double(frameCount) / Double(sampleRate)
-                : 0
-        }
-
-        if debugMode {
-            let fusedSummary =
-                "Fused CTC log-probs: frames=\(trimmed.count)/\(allLogProbs.count), encoder_length=\(encoderFrames)"
-            let vocabSummary = "  vocab size \(trimmed.first?.count ?? 0)"
-            logger.debug("\(fusedSummary),\(vocabSummary)")
-        }
-
-        return CtcLogProbResult(
-            logProbs: trimmed,
-            frameDuration: frameDuration,
-            totalFrames: frameCount,
-            audioSamplesUsed: clampedCount,
-            frameTimes: frameTimes
-        )
-    }
-
     private func computeWithStagedModels(audioSamples: [Float]) async throws -> CtcLogProbResult {
         // Prepare fixed-length audio input expected by MelSpectrogram.
         let (audioInput, clampedCount) = try prepareAudioArray(audioSamples)
@@ -843,19 +766,17 @@ public struct CtcKeywordSpotter {
 
         let maxLogit = logits.max() ?? 0
         var sumExp: Float = 0
-        var shifted: [Float] = Array(repeating: 0, count: logits.count)
 
         for i in 0..<logits.count {
-            let v = expf(logits[i] - maxLogit)
-            shifted[i] = v
-            sumExp += v
+            sumExp += expf(logits[i] - maxLogit)
         }
 
         let logSumExp = logf(sumExp)
         var result: [Float] = Array(repeating: 0, count: logits.count)
 
+        // log_softmax(x_i) = (x_i - max) - log(sum(exp(x_j - max)))
         for i in 0..<logits.count {
-            result[i] = logf(shifted[i]) - logSumExp
+            result[i] = (logits[i] - maxLogit) - logSumExp
         }
 
         return result
@@ -893,28 +814,33 @@ public struct CtcKeywordSpotter {
     // Wildcard token ID: -1 represents "*" that matches anything at zero cost
     private static let WILDCARD_TOKEN_ID = -1
 
-    func ctcWordSpot(
+    /// Core DP table construction shared by all CTC word spotting variants.
+    /// Returns filled DP and backtrack arrays for downstream interpretation.
+    ///
+    /// - Parameters:
+    ///   - logProbs: CTC log-probabilities [T, vocab_size]
+    ///   - keywordTokens: Token IDs for the keyword (may include WILDCARD_TOKEN_ID)
+    /// - Returns: Tuple of (dp, backtrack) where:
+    ///   - dp[t][n] = best score to match first n tokens by time t
+    ///   - backtrack[t][n] = start frame for the best alignment ending at t with n tokens matched
+    private func fillDPTable(
         logProbs: [[Float]],
         keywordTokens: [Int]
-    ) -> (score: Float, startFrame: Int, endFrame: Int) {
+    ) -> (dp: [[Float]], backtrack: [[Int]]) {
         let T = logProbs.count
         let N = keywordTokens.count
-
-        if N == 0 || T == 0 {
-            return (-Float.infinity, 0, 0)
-        }
 
         // dp[t][n] = best score to match first n tokens by time t
         var dp = Array(
             repeating: Array(repeating: -Float.greatestFiniteMagnitude, count: N + 1),
             count: T + 1
         )
-        var backtrackTime = Array(
+        var backtrack = Array(
             repeating: Array(repeating: 0, count: N + 1),
             count: T + 1
         )
 
-        // Initialize: keyword of length 0 has score 0 at any time.
+        // Initialize: keyword of length 0 has score 0 at any time
         for t in 0...T {
             dp[t][0] = 0.0
         }
@@ -927,13 +853,11 @@ public struct CtcKeywordSpotter {
 
                 // Wildcard token: matches any symbol (including blank) at zero cost
                 if tokenId == Self.WILDCARD_TOKEN_ID {
-                    // Wildcard can skip this frame at zero cost
                     let wildcardSkip = dp[t - 1][n - 1]  // Move to next token
                     let wildcardStay = dp[t - 1][n]  // Stay on wildcard
-
                     let wildcardScore = max(wildcardSkip, wildcardStay)
                     dp[t][n] = wildcardScore
-                    backtrackTime[t][n] = wildcardScore == wildcardSkip ? t - 1 : backtrackTime[t - 1][n]
+                    backtrack[t][n] = wildcardScore == wildcardSkip ? t - 1 : backtrack[t - 1][n]
                     continue
                 }
 
@@ -943,26 +867,47 @@ public struct CtcKeywordSpotter {
 
                 let tokenScore = frame[tokenId]
 
-                // Option 1: match this token at this timestep (new token or repeat).
+                // Option 1: match this token at this timestep (new token or repeat)
                 let matchScore = max(
                     dp[t - 1][n - 1] + tokenScore,
                     dp[t - 1][n] + tokenScore
                 )
 
-                // Option 2: skip this timestep (blank or other token).
+                // Option 2: skip this timestep (blank or other token)
                 let skipScore = dp[t - 1][n]
 
                 if matchScore > skipScore {
                     dp[t][n] = matchScore
-                    backtrackTime[t][n] = t - 1
+                    backtrack[t][n] = t - 1
                 } else {
                     dp[t][n] = skipScore
-                    backtrackTime[t][n] = backtrackTime[t - 1][n]
+                    backtrack[t][n] = backtrack[t - 1][n]
                 }
             }
         }
 
-        // Find best end position for the full keyword.
+        return (dp, backtrack)
+    }
+
+    /// Count non-wildcard tokens for score normalization.
+    private func nonWildcardCount(_ keywordTokens: [Int]) -> Int {
+        keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
+    }
+
+    func ctcWordSpot(
+        logProbs: [[Float]],
+        keywordTokens: [Int]
+    ) -> (score: Float, startFrame: Int, endFrame: Int) {
+        let T = logProbs.count
+        let N = keywordTokens.count
+
+        if N == 0 || T == 0 {
+            return (-Float.infinity, 0, 0)
+        }
+
+        let (dp, backtrack) = fillDPTable(logProbs: logProbs, keywordTokens: keywordTokens)
+
+        // Find best end position for the full keyword
         var bestEnd = 0
         var bestScore = -Float.greatestFiniteMagnitude
 
@@ -975,11 +920,11 @@ public struct CtcKeywordSpotter {
             }
         }
 
-        let bestStart = backtrackTime[bestEnd][N]
+        let bestStart = backtrack[bestEnd][N]
 
-        // Normalize score only by non-wildcard tokens
-        let nonWildcardCount = keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
-        let normalizedScore = nonWildcardCount > 0 ? bestScore / Float(nonWildcardCount) : bestScore
+        // Normalize score by non-wildcard tokens
+        let normFactor = nonWildcardCount(keywordTokens)
+        let normalizedScore = normFactor > 0 ? bestScore / Float(normFactor) : bestScore
 
         return (normalizedScore, bestStart, bestEnd)
     }
@@ -1023,61 +968,7 @@ public struct CtcKeywordSpotter {
             return (-Float.infinity, clampedStart, clampedStart)
         }
 
-        // dp[t][n] = best score to match first n tokens by time t (within window)
-        var dp = Array(
-            repeating: Array(repeating: -Float.greatestFiniteMagnitude, count: N + 1),
-            count: windowT + 1
-        )
-        var backtrackTime = Array(
-            repeating: Array(repeating: 0, count: N + 1),
-            count: windowT + 1
-        )
-
-        // Initialize: keyword of length 0 has score 0 at any time
-        for t in 0...windowT {
-            dp[t][0] = 0.0
-        }
-
-        for t in 1...windowT {
-            let frame = windowLogProbs[t - 1]
-
-            for n in 1...N {
-                let tokenId = keywordTokens[n - 1]
-
-                // Wildcard token: matches any symbol at zero cost
-                if tokenId == Self.WILDCARD_TOKEN_ID {
-                    let wildcardSkip = dp[t - 1][n - 1]
-                    let wildcardStay = dp[t - 1][n]
-                    let wildcardScore = max(wildcardSkip, wildcardStay)
-                    dp[t][n] = wildcardScore
-                    backtrackTime[t][n] = wildcardScore == wildcardSkip ? t - 1 : backtrackTime[t - 1][n]
-                    continue
-                }
-
-                if tokenId < 0 || tokenId >= frame.count {
-                    continue
-                }
-
-                let tokenScore = frame[tokenId]
-
-                // Option 1: match this token at this timestep
-                let matchScore = max(
-                    dp[t - 1][n - 1] + tokenScore,
-                    dp[t - 1][n] + tokenScore
-                )
-
-                // Option 2: skip this timestep
-                let skipScore = dp[t - 1][n]
-
-                if matchScore > skipScore {
-                    dp[t][n] = matchScore
-                    backtrackTime[t][n] = t - 1
-                } else {
-                    dp[t][n] = skipScore
-                    backtrackTime[t][n] = backtrackTime[t - 1][n]
-                }
-            }
-        }
+        let (dp, backtrack) = fillDPTable(logProbs: windowLogProbs, keywordTokens: keywordTokens)
 
         // Find best end position within the window
         var bestEnd = 0
@@ -1090,11 +981,11 @@ public struct CtcKeywordSpotter {
             }
         }
 
-        let bestStart = backtrackTime[bestEnd][N]
+        let bestStart = backtrack[bestEnd][N]
 
         // Normalize score by non-wildcard tokens
-        let nonWildcardCount = keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
-        let normalizedScore = nonWildcardCount > 0 ? bestScore / Float(nonWildcardCount) : bestScore
+        let normFactor = nonWildcardCount(keywordTokens)
+        let normalizedScore = normFactor > 0 ? bestScore / Float(normFactor) : bestScore
 
         // Convert window-relative indices back to global frame coordinates
         let globalStart = clampedStart + bestStart
@@ -1126,62 +1017,11 @@ public struct CtcKeywordSpotter {
             return []
         }
 
-        // dp[t][n] = best score to match first n tokens by time t
-        var dp = Array(
-            repeating: Array(repeating: -Float.greatestFiniteMagnitude, count: N + 1),
-            count: T + 1
-        )
-        var backtrackTime = Array(
-            repeating: Array(repeating: 0, count: N + 1),
-            count: T + 1
-        )
-
-        // Initialize: keyword of length 0 has score 0 at any time.
-        for t in 0...T {
-            dp[t][0] = 0.0
-        }
-
-        for t in 1...T {
-            let frame = logProbs[t - 1]
-
-            for n in 1...N {
-                let tokenId = keywordTokens[n - 1]
-
-                // Wildcard token: matches any symbol (including blank) at zero cost
-                if tokenId == Self.WILDCARD_TOKEN_ID {
-                    let wildcardSkip = dp[t - 1][n - 1]
-                    let wildcardStay = dp[t - 1][n]
-                    let wildcardScore = max(wildcardSkip, wildcardStay)
-                    dp[t][n] = wildcardScore
-                    backtrackTime[t][n] = wildcardScore == wildcardSkip ? t - 1 : backtrackTime[t - 1][n]
-                    continue
-                }
-
-                if tokenId < 0 || tokenId >= frame.count {
-                    continue
-                }
-
-                let tokenScore = frame[tokenId]
-
-                let matchScore = max(
-                    dp[t - 1][n - 1] + tokenScore,
-                    dp[t - 1][n] + tokenScore
-                )
-                let skipScore = dp[t - 1][n]
-
-                if matchScore > skipScore {
-                    dp[t][n] = matchScore
-                    backtrackTime[t][n] = t - 1
-                } else {
-                    dp[t][n] = skipScore
-                    backtrackTime[t][n] = backtrackTime[t - 1][n]
-                }
-            }
-        }
+        let (dp, backtrack) = fillDPTable(logProbs: logProbs, keywordTokens: keywordTokens)
 
         // Normalize score factor
-        let nonWildcardCount = keywordTokens.filter { $0 != Self.WILDCARD_TOKEN_ID }.count
-        let normFactor = nonWildcardCount > 0 ? Float(nonWildcardCount) : 1.0
+        let wildcardFreeCount = nonWildcardCount(keywordTokens)
+        let normFactor = wildcardFreeCount > 0 ? Float(wildcardFreeCount) : 1.0
 
         // Find all positions where the complete keyword has good score
         // Look for local maxima in the score
@@ -1201,7 +1041,7 @@ public struct CtcKeywordSpotter {
             let meetsThreshold = normalizedScore >= minScore
 
             if isLocalMax && meetsThreshold {
-                let startFrame = backtrackTime[t][N]
+                let startFrame = backtrack[t][N]
                 candidates.append((score: normalizedScore, startFrame: startFrame, endFrame: t))
             }
         }
@@ -1218,7 +1058,7 @@ public struct CtcKeywordSpotter {
                 }
             }
             if bestScore >= minScore {
-                let startFrame = backtrackTime[bestEnd][N]
+                let startFrame = backtrack[bestEnd][N]
                 candidates.append((score: bestScore, startFrame: startFrame, endFrame: bestEnd))
             }
         }
