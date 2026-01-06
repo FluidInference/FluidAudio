@@ -8,8 +8,6 @@ enum DownloadCommand {
     static func run(arguments: [String]) async {
         var dataset = "all"
         var forceDownload = false
-        var outputDirectory: String?
-        var maxFiles: Int?
 
         // Parse arguments
         var i = 0
@@ -20,18 +18,8 @@ enum DownloadCommand {
                     dataset = arguments[i + 1]
                     i += 1
                 }
-            case "--output-dir":
-                if i + 1 < arguments.count {
-                    outputDirectory = arguments[i + 1]
-                    i += 1
-                }
             case "--force":
                 forceDownload = true
-            case "--max-files":
-                if i + 1 < arguments.count {
-                    maxFiles = Int(arguments[i + 1])
-                    i += 1
-                }
             default:
                 logger.warning("Unknown option: \(arguments[i])")
             }
@@ -101,9 +89,7 @@ enum DownloadCommand {
 
             Options:
                 --dataset <name>    Dataset to download (default: all)
-                --force            Force re-download even if exists
-                --output-dir <path> Output directory for supported datasets
-                --max-files <n>    Limit downloads (supported datasets)
+                --force             Force re-download even if exists
 
             Available datasets:
                 ami-sdm                     AMI SDM subset
