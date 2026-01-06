@@ -4,13 +4,12 @@ import OSLog
 /// CTC tokenizer wrapper for automatic vocabulary tokenization
 public class CtcTokenizer {
     private let logger = Logger(subsystem: "com.fluidaudio", category: "CtcTokenizer")
-    private let vocabPath: URL
-    private let vocabulary: [Int: String]
+    private let tokenToId: [String: Int]
 
     public init() throws {
         // Get the CTC model directory
         let modelDir = Self.getCtcModelDirectory()
-        self.vocabPath = modelDir.appendingPathComponent("vocab.json")
+        let vocabPath = modelDir.appendingPathComponent("vocab.json")
 
         // Load vocabulary for tokenization
         guard FileManager.default.fileExists(atPath: vocabPath.path) else {
@@ -20,15 +19,15 @@ public class CtcTokenizer {
         let data = try Data(contentsOf: vocabPath)
         let vocabDict = try JSONDecoder().decode([String: String].self, from: data)
 
-        // Convert string keys to Int
-        var vocab: [Int: String] = [:]
+        // Build token-to-id lookup
+        var lookup: [String: Int] = [:]
         for (key, value) in vocabDict {
             if let intKey = Int(key) {
-                vocab[intKey] = value
+                lookup[value] = intKey
             }
         }
-        self.vocabulary = vocab
-        logger.info("Loaded CTC vocabulary with \(vocab.count) tokens")
+        self.tokenToId = lookup
+        logger.info("Loaded CTC vocabulary with \(lookup.count) tokens")
     }
 
     /// Tokenize text into CTC token IDs
@@ -84,14 +83,9 @@ public class CtcTokenizer {
         return result
     }
 
-    /// Find token ID for a given string in the vocabulary
+    /// Find token ID for a given string in the vocabulary (O(1) hashmap lookup)
     private func findTokenId(for token: String) -> Int? {
-        for (id, vocabToken) in vocabulary {
-            if vocabToken == token {
-                return id
-            }
-        }
-        return nil
+        tokenToId[token]
     }
 
     /// Get the CTC model directory path
