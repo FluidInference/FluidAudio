@@ -1,4 +1,3 @@
-﻿#if os(macOS)
 //
 //  AsrBenchmarkTypes.swift
 //  FluidAudio
@@ -6,8 +5,8 @@
 //  Copyright © 2025 Brandon Weng. All rights reserved.
 //
 
-import Foundation
 import FluidAudio
+import Foundation
 
 /// ASR evaluation metrics
 public struct ASRMetrics: Sendable {
@@ -160,4 +159,3 @@ public struct LibriSpeechFile {
     public let audioPath: URL
     public let transcript: String
 }
-#endif

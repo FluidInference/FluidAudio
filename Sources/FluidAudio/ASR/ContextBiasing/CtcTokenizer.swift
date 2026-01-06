@@ -104,14 +104,11 @@ public class CtcTokenizer {
 /// Errors for CTC tokenizer
 public enum CtcTokenizerError: Error {
     case vocabNotFound(String)
-    case encodingFailed(String)
 
     public var localizedDescription: String {
         switch self {
         case .vocabNotFound(let path):
             return "CTC vocabulary not found at: \(path)"
-        case .encodingFailed(let reason):
-            return "Tokenization failed: \(reason)"
         }
     }
 }

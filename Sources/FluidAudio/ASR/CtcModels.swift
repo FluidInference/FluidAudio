@@ -90,7 +90,7 @@ extension CtcModels {
         logger.info("CTC models loaded with computeUnits: \(computeUnitsStr)")
 
         // Load vocabulary
-        let vocab = try loadVocabularyDirect(from: directory)
+        let vocab = try loadVocabulary(from: directory)
 
         logger.info("Successfully loaded CTC models directly (\(vocab.count) vocab tokens)")
 
@@ -100,27 +100,6 @@ extension CtcModels {
             configuration: config,
             vocabulary: vocab
         )
-    }
-
-    /// Load vocabulary from vocab.json in the given directory.
-    private static func loadVocabularyDirect(from directory: URL) throws -> [Int: String] {
-        let vocabPath = directory.appendingPathComponent("vocab.json")
-        guard FileManager.default.fileExists(atPath: vocabPath.path) else {
-            throw AsrModelsError.modelNotFound("vocab.json", vocabPath)
-        }
-
-        let data = try Data(contentsOf: vocabPath)
-        let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
-
-        var vocabulary: [Int: String] = [:]
-        for (key, value) in jsonDict {
-            if let tokenId = Int(key) {
-                vocabulary[tokenId] = value
-            }
-        }
-
-        logger.info("Loaded vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
-        return vocabulary
     }
 
     /// Load CTC models from a directory.
@@ -171,8 +150,7 @@ extension CtcModels {
     @discardableResult
     public static func download(
         to directory: URL? = nil,
-        force: Bool = false,
-        progress: ((Double) -> Void)? = nil
+        force: Bool = false
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory()
         logger.info("Preparing CTC models at: \(targetDir.path)")
@@ -191,27 +169,17 @@ extension CtcModels {
             }
         }
 
-        // Weights for progress
-        let weights: [String: Double] = [
-            ModelNames.CTC.audioEncoderPath: 0.95
-        ]
-        let defaultWeight = 0.05
-        var accumulatedProgress = 0.0
-
         let modelNames = [
             ModelNames.CTC.melSpectrogramPath,
             ModelNames.CTC.audioEncoderPath,
         ]
 
         for name in modelNames {
-            let weight = weights[name] ?? defaultWeight
-
             _ = try await DownloadUtils.loadModels(
                 .parakeetCtc110m,
                 modelNames: [name],
                 directory: parentDir
             )
-            accumulatedProgress += weight
         }
 
         logger.info("Successfully downloaded CTC models")
@@ -220,10 +188,9 @@ extension CtcModels {
 
     /// Convenience helper that downloads (if needed) and loads the CTC models.
     public static func downloadAndLoad(
-        to directory: URL? = nil,
-        progress: ((Double) -> Void)? = nil
+        to directory: URL? = nil
     ) async throws -> CtcModels {
-        let targetDir = try await download(to: directory, progress: progress)
+        let targetDir = try await download(to: directory)
         return try await load(from: targetDir)
     }
 
@@ -264,33 +231,24 @@ extension CtcModels {
             .appendingPathComponent(Repo.parakeetCtc110m.folderName, isDirectory: true)
     }
 
+    /// Load vocabulary from vocab.json in the given directory.
     private static func loadVocabulary(from directory: URL) throws -> [Int: String] {
-        let vocabPath = directory.appendingPathComponent(ModelNames.CTC.vocabularyPath)
-        if !FileManager.default.fileExists(atPath: vocabPath.path) {
-            logger.warning(
-                "CTC vocabulary file not found at \(vocabPath.path). Ensure the vocab file is downloaded with the models."
-            )
-            throw AsrModelsError.modelNotFound("CTC vocabulary", vocabPath)
+        let vocabPath = directory.appendingPathComponent("vocab.json")
+        guard FileManager.default.fileExists(atPath: vocabPath.path) else {
+            throw AsrModelsError.modelNotFound("vocab.json", vocabPath)
         }
 
-        do {
-            let data = try Data(contentsOf: vocabPath)
-            let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
+        let data = try Data(contentsOf: vocabPath)
+        let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: String] ?? [:]
 
-            var vocabulary: [Int: String] = [:]
-            for (key, value) in jsonDict {
-                if let tokenId = Int(key) {
-                    vocabulary[tokenId] = value
-                }
+        var vocabulary: [Int: String] = [:]
+        for (key, value) in jsonDict {
+            if let tokenId = Int(key) {
+                vocabulary[tokenId] = value
             }
-
-            logger.info("Loaded CTC vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
-            return vocabulary
-        } catch {
-            logger.error(
-                "Failed to load or parse CTC vocabulary at \(vocabPath.path): \(error.localizedDescription)"
-            )
-            throw AsrModelsError.loadingFailed("CTC vocabulary parsing failed")
         }
+
+        logger.info("Loaded CTC vocabulary with \(vocabulary.count) tokens from \(vocabPath.path)")
+        return vocabulary
     }
 }
