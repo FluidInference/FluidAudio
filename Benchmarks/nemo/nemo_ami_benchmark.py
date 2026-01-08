@@ -1,379 +1,664 @@
 #!/usr/bin/env python3
 """
-NeMo Sortformer AMI SDM Benchmark (Streaming Mode)
+NeMo Sortformer Benchmark
 
-Runs NVIDIA's Sortformer model in STREAMING mode on the AMI SDM dataset
-for comparison with the Swift/CoreML implementation.
+Benchmarks the NeMo streaming Sortformer model on the same files as:
+- SortformerBenchmark.swift
+- single_file.py
 
-Uses the same high-latency config as Swift: 30.4s chunks
-
-Usage:
-    python nemo_ami_benchmark.py [--output results.json]
-
-Requirements:
-    pip install nemo_toolkit[asr] pyannote.metrics
+Uses streaming parameters:
+- chunk_len = 340
+- left_context = 1  
+- right_context = 40
+- fifo_len = 40
+- spkcache_len = 188
+- spkcache_update_period = 300
 """
-
-import argparse
-import json
 import os
-import time
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
+import json
+import time
+import argparse
+import urllib.request
+from pathlib import Path
+from itertools import permutations
 import numpy as np
 import torch
-import torchaudio
 from nemo.collections.asr.models import SortformerEncLabelModel
-from pyannote.core import Annotation, Segment
-from pyannote.metrics.diarization import DiarizationErrorRate
 
 
-# AMI SDM test meetings (same as Swift benchmark)
-AMI_MEETINGS = [
-    "EN2002a", "EN2002b", "EN2002c", "EN2002d",
-    "ES2004a", "ES2004b", "ES2004c", "ES2004d",
-    "IS1009a", "IS1009b", "IS1009c", "IS1009d",
-    "TS3003a", "TS3003b", "TS3003c", "TS3003d",
-]
+# ============================================================
+# AMI RTTM Download
+# ============================================================
+# pyannote AMI-diarization-setup repository
+AMI_RTTM_URL = "https://raw.githubusercontent.com/pyannote/AMI-diarization-setup/main/only_words/rttms/test"
 
-# Default paths
-DEFAULT_AMI_AUDIO_DIR = os.path.expanduser("~/FluidAudioDatasets/ami_official/sdm")
-DEFAULT_AMI_RTTM_DIR = os.path.expanduser("~/FluidAudioDatasets/ami_official/rttm")
+def download_ami_rttm(meeting_name: str, output_dir: Path) -> str:
+    """Download AMI RTTM file from pyannote AMI-diarization-setup repository."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{meeting_name}.rttm"
+    
+    if output_path.exists():
+        return str(output_path)
+    
+    # Files in pyannote repo are named {meeting}.rttm (not {meeting}.Mix-Headset.rttm)
+    url = f"{AMI_RTTM_URL}/{meeting_name}.rttm"
+    try:
+        print(f"   Downloading RTTM from {url}...")
+        urllib.request.urlretrieve(url, output_path)
+        return str(output_path)
+    except Exception as e:
+        print(f"   Failed to download RTTM: {e}")
+        return None
 
-# NVIDIA High-Latency Streaming Config (matches Swift)
-# 30.4s total context = 380 encoder frames
+# ============================================================
+# Benchmark Configuration
+# ============================================================
+STREAMING_CONFIG = {
+    'chunk_len': 340,
+    'chunk_left_context': 1,
+    'chunk_right_context': 40,
+    'fifo_len': 40,
+    'spkcache_len': 188,
+    'spkcache_update_period': 300,
+}
+
+FRAME_SHIFT = 0.08  # 80ms per frame (matches Swift)
 SAMPLE_RATE = 16000
-FRAME_DURATION = 0.08  # 80ms per frame
 NUM_SPEAKERS = 4
 
-# High-latency config parameters (from Swift SortformerConfig.nvidiaHighLatency)
-CHUNK_LEN = 48  # Core chunk length in encoder frames
-CHUNK_LEFT_CONTEXT = 56  # Left context in encoder frames
-CHUNK_RIGHT_CONTEXT = 56  # Right context in encoder frames
-SUBSAMPLING_FACTOR = 8  # Mel frames per encoder frame
+
+# ============================================================
+# Data Paths (matches SortformerBenchmark.swift)
+# ============================================================
+def get_home_dir():
+    return Path.home()
 
 
-@dataclass
-class BenchmarkResult:
-    meeting: str
-    der: float
-    miss_rate: float
-    false_alarm_rate: float
-    speaker_error_rate: float
-    detected_speakers: int
-    ground_truth_speakers: int
-    rtfx: float
-    processing_time: float
-    audio_duration: float
+def get_audio_path(meeting_name: str, dataset: str) -> str:
+    """Get audio file path for a meeting."""
+    home = get_home_dir()
+    
+    if dataset == "ami":
+        return str(home / f"FluidAudioDatasets/ami_official/sdm/{meeting_name}.Mix-Headset.wav")
+    elif dataset == "voxconverse":
+        return str(home / f"FluidAudioDatasets/voxconverse/voxconverse_test_wav/{meeting_name}.wav")
+    elif dataset == "callhome":
+        return str(home / f"FluidAudioDatasets/callhome_eng/{meeting_name}.wav")
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}")
 
 
-def load_rttm(rttm_path: str) -> Annotation:
-    """Load RTTM file into pyannote Annotation."""
-    annotation = Annotation()
+def get_rttm_path(meeting_name: str, dataset: str, auto_download: bool = True) -> str:
+    """Get RTTM ground truth path for a meeting."""
+    home = get_home_dir()
+    script_dir = Path(__file__).parent
+    
+    if dataset == "ami":
+        # First try local RTTMs in cache
+        cache_dir = script_dir / "rttm_cache" / "ami"
+        cached_rttm = cache_dir / f"{meeting_name}.rttm"
+        if cached_rttm.exists():
+            return str(cached_rttm)
+        
+        # Try local project RTTM
+        local_rttm = script_dir / f"Streaming-Sortformer-Conversion/{meeting_name}.rttm"
+        if local_rttm.exists():
+            return str(local_rttm)
+        
+        # Try dataset RTTM
+        dataset_rttm = home / f"FluidAudioDatasets/ami_official/rttm/{meeting_name}.rttm"
+        if dataset_rttm.exists():
+            return str(dataset_rttm)
+        
+        # Auto-download if enabled
+        if auto_download:
+            downloaded = download_ami_rttm(meeting_name, cache_dir)
+            if downloaded:
+                return downloaded
+        
+        return str(cached_rttm)  # Return path even if not downloaded (will fail later)
+        
+    elif dataset == "voxconverse":
+        return str(home / f"FluidAudioDatasets/voxconverse/rttm_repo/test/{meeting_name}.rttm")
+    elif dataset == "callhome":
+        return str(home / f"FluidAudioDatasets/callhome_eng/rttm/{meeting_name}.rttm")
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}")
+
+
+def get_ami_files(max_files: int = None) -> list:
+    """Get list of AMI test set meetings (matches Swift benchmark)."""
+    # Official AMI SDM test set (16 meetings) - matches NeMo evaluation
+    all_meetings = [
+        "EN2002a", "EN2002b", "EN2002c", "EN2002d",
+        "ES2004a", "ES2004b", "ES2004c", "ES2004d",
+        "IS1009a", "IS1009b", "IS1009c", "IS1009d",
+        "TS3003a", "TS3003b", "TS3003c", "TS3003d",
+    ]
+    
+    available = []
+    for meeting in all_meetings:
+        if Path(get_audio_path(meeting, "ami")).exists():
+            available.append(meeting)
+    
+    if max_files:
+        return available[:max_files]
+    return available
+
+
+def get_voxconverse_files(max_files: int = None) -> list:
+    """Get list of VoxConverse test files."""
+    home = get_home_dir()
+    vox_dir = home / "FluidAudioDatasets/voxconverse/voxconverse_test_wav"
+    
+    if not vox_dir.exists():
+        return []
+    
+    available = []
+    for wav_file in sorted(vox_dir.glob("*.wav")):
+        name = wav_file.stem
+        rttm_path = home / f"FluidAudioDatasets/voxconverse/rttm_repo/test/{name}.rttm"
+        if rttm_path.exists():
+            available.append(name)
+    
+    if max_files:
+        return available[:max_files]
+    return available
+
+
+def get_callhome_files(max_files: int = None) -> list:
+    """Get list of CALLHOME files."""
+    home = get_home_dir()
+    callhome_dir = home / "FluidAudioDatasets/callhome_eng"
+    
+    if not callhome_dir.exists():
+        return []
+    
+    available = []
+    for wav_file in sorted(callhome_dir.glob("*.wav")):
+        name = wav_file.stem
+        rttm_path = callhome_dir / f"rttm/{name}.rttm"
+        if rttm_path.exists():
+            available.append(name)
+    
+    if max_files:
+        return available[:max_files]
+    return available
+
+
+# ============================================================
+# RTTM Ground Truth Loading
+# ============================================================
+def load_rttm(rttm_path: str) -> list:
+    """
+    Load RTTM file and return list of segments.
+    Format: SPEAKER <file> 1 <start> <duration> <NA> <NA> <speaker_id> <NA> <NA>
+    """
+    if not Path(rttm_path).exists():
+        return []
+    
+    segments = []
     with open(rttm_path, 'r') as f:
         for line in f:
             parts = line.strip().split()
-            if len(parts) >= 8 and parts[0] == 'SPEAKER':
-                start = float(parts[3])
+            if len(parts) < 8 or parts[0] != "SPEAKER":
+                continue
+            
+            try:
+                start_time = float(parts[3])
                 duration = float(parts[4])
-                speaker = parts[7]
-                annotation[Segment(start, start + duration)] = speaker
-    return annotation
+                speaker_id = parts[7]
+                end_time = start_time + duration
+                
+                segments.append({
+                    'speaker_id': speaker_id,
+                    'start': start_time,
+                    'end': end_time,
+                })
+            except (ValueError, IndexError):
+                continue
+    
+    speakers = set(s['speaker_id'] for s in segments)
+    print(f"   [RTTM] Loaded {len(segments)} segments, speakers: {sorted(speakers)}")
+    return segments
 
 
-def predictions_to_annotation(
-    predictions: np.ndarray,
-    frame_duration: float = FRAME_DURATION,
-    threshold: float = 0.5
-) -> Annotation:
-    """Convert frame-level predictions to pyannote Annotation.
-
+# ============================================================
+# DER Calculation (matches Swift implementation)
+# ============================================================
+def calculate_der(predictions: np.ndarray, ground_truth: list, 
+                  threshold: float = 0.5, frame_shift: float = 0.08) -> dict:
+    """
+    Calculate DER using simple frame-level binary comparison.
+    This matches the NeMo/Swift evaluation approach.
+    
     Args:
-        predictions: [num_frames, num_speakers] array of probabilities
-        frame_duration: Duration of each frame in seconds
-        threshold: Threshold for speaker activity
+        predictions: [num_frames, num_speakers] probability array
+        ground_truth: List of RTTM segments with 'speaker_id', 'start', 'end'
+        threshold: Speaker activity threshold
+        frame_shift: Time per frame in seconds
+    
+    Returns:
+        dict with 'der', 'miss', 'fa', 'se' percentages
     """
-    annotation = Annotation()
-    num_frames, num_speakers = predictions.shape
-
-    for spk in range(num_speakers):
-        in_segment = False
-        segment_start = 0.0
-
+    num_frames = predictions.shape[0]
+    num_speakers = predictions.shape[1]
+    
+    # Create reference binary matrix [num_frames, num_speakers]
+    ref_binary = np.zeros((num_frames, num_speakers), dtype=np.float32)
+    
+    # Map ground truth speakers to indices
+    speaker_labels = sorted(set(s['speaker_id'] for s in ground_truth))
+    speaker_map = {label: idx for idx, label in enumerate(speaker_labels) if idx < num_speakers}
+    
+    # Fill reference binary from ground truth segments
+    for segment in ground_truth:
+        spk_id = segment['speaker_id']
+        if spk_id not in speaker_map:
+            continue
+        spk_idx = speaker_map[spk_id]
+        start_frame = max(0, min(int(segment['start'] / frame_shift), num_frames))
+        end_frame = max(0, min(int(segment['end'] / frame_shift), num_frames))
+        ref_binary[start_frame:end_frame, spk_idx] = 1.0
+    
+    # Create prediction binary matrix
+    pred_binary = (predictions > threshold).astype(np.float32)
+    
+    # Try all permutations to find best DER
+    best_der = float('inf')
+    best_miss = 0
+    best_fa = 0
+    best_se = 0
+    
+    for perm in permutations(range(num_speakers)):
+        miss_frames = 0
+        fa_frames = 0
+        se_frames = 0
+        total_ref_speech = 0
+        
         for frame in range(num_frames):
-            prob = predictions[frame, spk]
-            time_sec = frame * frame_duration
+            ref_speech = ref_binary[frame].any()
+            pred_speech_permuted = any(pred_binary[frame, perm[spk]] > 0 for spk in range(num_speakers))
+            
+            if ref_speech:
+                total_ref_speech += 1
+            
+            if ref_speech and not pred_speech_permuted:
+                miss_frames += 1
+            elif not ref_speech and pred_speech_permuted:
+                fa_frames += 1
+            elif ref_speech and pred_speech_permuted:
+                # Calculate speaker error
+                ref_spks = set(spk for spk in range(num_speakers) if ref_binary[frame, spk] > 0)
+                pred_spks = set(spk for spk in range(num_speakers) if pred_binary[frame, perm[spk]] > 0)
+                sym_diff = ref_spks.symmetric_difference(pred_spks)
+                se_frames += len(sym_diff) / 2.0
+        
+        if total_ref_speech > 0:
+            der = (miss_frames + fa_frames + se_frames) / total_ref_speech * 100
+            if der < best_der:
+                best_der = der
+                best_miss = miss_frames / total_ref_speech * 100
+                best_fa = fa_frames / total_ref_speech * 100
+                best_se = se_frames / total_ref_speech * 100
+    
+    return {
+        'der': best_der,
+        'miss': best_miss,
+        'fa': best_fa,
+        'se': best_se,
+    }
 
-            if prob >= threshold and not in_segment:
-                in_segment = True
-                segment_start = time_sec
-            elif prob < threshold and in_segment:
-                in_segment = False
-                if time_sec - segment_start > 0.0:
-                    annotation[Segment(segment_start, time_sec)] = f"speaker_{spk}"
 
-        # Handle segment that extends to end
-        if in_segment:
-            end_time = num_frames * frame_duration
-            if end_time - segment_start > 0.0:
-                annotation[Segment(segment_start, end_time)] = f"speaker_{spk}"
-
-    return annotation
-
-
-def run_batch_inference(
-    model: SortformerEncLabelModel,
-    audio_path: str,
-    device: str = "cpu"
-) -> np.ndarray:
-    """Run Sortformer in batch mode (full file at once).
-
-    Note: This runs the entire file through the model, which is what NeMo's
-    Sortformer is designed for. The Swift implementation does streaming
-    chunking on top of this.
+# ============================================================
+# NeMo Sortformer Inference
+# ============================================================
+def run_inference(model, audio_path: str) -> tuple:
     """
-    # Load audio
-    waveform, sr = torchaudio.load(audio_path)
-    if sr != SAMPLE_RATE:
-        resampler = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
-        waveform = resampler(waveform)
-
-    # Convert to mono if stereo
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-
-    waveform = waveform.to(device)
-    length = torch.tensor([waveform.shape[1]]).to(device)
-
-    with torch.no_grad():
-        outputs = model.forward(
-            audio_signal=waveform,
-            audio_signal_length=length
-        )
-
-        if isinstance(outputs, tuple):
-            preds = outputs[0]
-        else:
-            preds = outputs
-
-        if preds.min() < 0 or preds.max() > 1:
-            preds = torch.sigmoid(preds)
-
-        predictions = preds.squeeze(0).cpu().numpy()
-
-    return predictions
+    Run NeMo Sortformer streaming inference on an audio file.
+    
+    Returns:
+        (predictions, duration, processing_time)
+        - predictions: [num_frames, num_speakers] probability array
+        - duration: Audio duration in seconds
+        - processing_time: Inference time in seconds
+    """
+    start_time = time.time()
+    
+    # Run inference
+    predicted_segments, predicted_probs = model.diarize(
+        audio=audio_path,
+        batch_size=1,
+        include_tensor_outputs=True
+    )
+    
+    processing_time = time.time() - start_time
+    
+    # Process output probabilities
+    probs = predicted_probs[0].squeeze().cpu().numpy()  # [num_frames, num_speakers]
+    
+    # Calculate duration from number of frames
+    num_frames = probs.shape[0]
+    duration = num_frames * FRAME_SHIFT
+    
+    return probs, duration, processing_time
 
 
-def run_benchmark(
-    audio_dir: str,
-    rttm_dir: str,
-    meetings: list[str],
-    output_path: Optional[str] = None,
-    device: str = "cpu",
-    streaming: bool = True,
-    model_path: Optional[str] = None
-) -> list[BenchmarkResult]:
-    """Run NeMo Sortformer benchmark on AMI meetings."""
+def process_audio_file(model, audio_path: str, threshold: float, verbose: bool) -> dict:
+    """Process a single audio file without ground truth (inference only)."""
+    if not Path(audio_path).exists():
+        print(f"❌ Audio file not found: {audio_path}")
+        return None
+    
+    try:
+        print(f"   Running inference on {audio_path}...")
+        probs, duration, processing_time = run_inference(model, audio_path)
+        
+        rtfx = duration / processing_time
+        
+        # Print probability statistics
+        min_val = probs.min()
+        max_val = probs.max()
+        mean_val = probs.mean()
+        above_05 = (probs > 0.5).sum()
+        total_vals = probs.size
+        
+        print(f"   Audio duration: {duration:.2f}s")
+        print(f"   Processing time: {processing_time:.2f}s")
+        print(f"   RTFx: {rtfx:.1f}x")
+        print(f"   Prob stats: min={min_val:.3f}, max={max_val:.3f}, mean={mean_val:.3f}")
+        print(f"   Activity: {above_05}/{total_vals} values ({above_05/total_vals*100:.1f}%) above 0.5")
+        
+        # Count detected speakers
+        detected_speakers = sum(1 for spk in range(probs.shape[1]) if (probs[:, spk] > threshold).any())
+        print(f"   Detected speakers: {detected_speakers}")
+        
+        return {
+            'file': audio_path,
+            'duration': duration,
+            'processing_time': processing_time,
+            'rtfx': rtfx,
+            'num_frames': probs.shape[0],
+            'detected_speakers': detected_speakers,
+            'prob_min': float(min_val),
+            'prob_max': float(max_val),
+            'prob_mean': float(mean_val),
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"❌ Error processing {audio_path}: {e}")
+        traceback.print_exc()
+        return None
 
-    print("=" * 80)
-    print("NEMO SORTFORMER AMI BENCHMARK")
-    print("=" * 80)
-    print(f"Device: {device}")
-    print(f"Mode: {'Streaming (30.4s chunks)' if streaming else 'Batch'}")
-    print(f"Audio dir: {audio_dir}")
-    print(f"RTTM dir: {rttm_dir}")
-    print(f"Meetings: {len(meetings)}")
-    print()
 
-    # Load model
-    print("Loading Sortformer model...")
-    model_start = time.time()
-    if model_path:
-        print(f"Loading from local path: {model_path}")
-        model = SortformerEncLabelModel.restore_from(model_path)
-    else:
-        print("Downloading from HuggingFace (requires authentication for gated model)")
-        model = SortformerEncLabelModel.from_pretrained("nvidia/diar_sortformer_4spk-v1")
-    model = model.to(device)
-    model.eval()
-    model_time = time.time() - model_start
-    print(f"Model loaded in {model_time:.2f}s")
-    print()
-
-    results = []
-
-    print("-" * 70)
-    print(f"{'Meeting':<12} {'DER %':>8} {'Miss %':>8} {'FA %':>8} {'SE %':>8} {'Speakers':>10} {'RTFx':>8}")
-    print("-" * 70)
-
-    for meeting in meetings:
-        # Find audio file
-        audio_path = os.path.join(audio_dir, f"{meeting}.wav")
-        if not os.path.exists(audio_path):
-            audio_path = os.path.join(audio_dir, f"{meeting}.Mix-Headset.wav")
-        if not os.path.exists(audio_path):
-            print(f"Audio not found for {meeting}, skipping...")
-            continue
-
-        # Find RTTM file
-        rttm_path = os.path.join(rttm_dir, f"{meeting}.rttm")
-        if not os.path.exists(rttm_path):
-            print(f"RTTM not found for {meeting}, skipping...")
-            continue
-
-        # Load ground truth
-        reference = load_rttm(rttm_path)
-        gt_speakers = len(set(reference.labels()))
-
-        # Get audio duration
-        waveform, sample_rate = torchaudio.load(audio_path)
-        audio_duration = waveform.shape[1] / sample_rate
-
+def process_meeting(model, meeting_name: str, dataset: str, threshold: float, verbose: bool) -> dict:
+    """Process a single meeting and return benchmark results."""
+    audio_path = get_audio_path(meeting_name, dataset)
+    rttm_path = get_rttm_path(meeting_name, dataset, auto_download=True)
+    
+    if not Path(audio_path).exists():
+        print(f"❌ Audio file not found: {audio_path}")
+        return None
+    
+    try:
         # Run inference
-        start_time = time.time()
+        print(f"   Running inference on {audio_path}...")
+        probs, duration, processing_time = run_inference(model, audio_path)
+        
+        rtfx = duration / processing_time
+        
+        # Print probability statistics
+        min_val = probs.min()
+        max_val = probs.max()
+        mean_val = probs.mean()
+        above_05 = (probs > 0.5).sum()
+        total_vals = probs.size
+        
+        print(f"   Prob stats: min={min_val:.3f}, max={max_val:.3f}, mean={mean_val:.3f}")
+        print(f"   Activity: {above_05}/{total_vals} values ({above_05/total_vals*100:.1f}%) above 0.5")
+        
+        # Load ground truth
+        ground_truth = load_rttm(rttm_path)
+        if not ground_truth:
+            print(f"⚠️ No ground truth found for {meeting_name}")
+            return None
+        
+        # Calculate DER
+        metrics = calculate_der(probs, ground_truth, threshold=threshold, frame_shift=FRAME_SHIFT)
+        
+        # Count speakers
+        detected_speakers = sum(1 for spk in range(probs.shape[1]) if (probs[:, spk] > threshold).any())
+        gt_speakers = len(set(s['speaker_id'] for s in ground_truth))
+        
+        return {
+            'meeting': meeting_name,
+            'der': metrics['der'],
+            'miss': metrics['miss'],
+            'fa': metrics['fa'],
+            'se': metrics['se'],
+            'rtfx': rtfx,
+            'processing_time': processing_time,
+            'duration': duration,
+            'num_frames': probs.shape[0],
+            'detected_speakers': detected_speakers,
+            'gt_speakers': gt_speakers,
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"❌ Error processing {meeting_name}: {e}")
+        traceback.print_exc()
+        return None
 
-        if streaming:
-            # Note: NeMo Sortformer doesn't support true streaming internally.
-            # We use batch inference which is what Swift's streaming builds on top of.
-            predictions = run_batch_inference(model, audio_path, device)
+
+# ============================================================
+# Main Benchmark
+# ============================================================
+def run_benchmark(args):
+    """Run the full benchmark."""
+    print("🚀 Starting NeMo Sortformer Benchmark")
+    print(f"   Dataset: {args.dataset}")
+    print(f"   Threshold: {args.threshold}")
+    print(f"   Device: {args.device}")
+    print()
+    
+    # Load model
+    print("🔧 Loading NeMo Sortformer model...")
+    model_load_start = time.time()
+    
+    device = torch.device(args.device)
+    model = SortformerEncLabelModel.from_pretrained(
+        "nvidia/diar_streaming_sortformer_4spk-v2.1",
+        map_location=device
+    )
+    model.eval()
+    model.to(device)
+    
+    # Apply streaming configuration
+    modules = model.sortformer_modules
+    modules.chunk_len = STREAMING_CONFIG['chunk_len']
+    modules.chunk_left_context = STREAMING_CONFIG['chunk_left_context']
+    modules.chunk_right_context = STREAMING_CONFIG['chunk_right_context']
+    modules.fifo_len = STREAMING_CONFIG['fifo_len']
+    modules.spkcache_len = STREAMING_CONFIG['spkcache_len']
+    modules.spkcache_update_period = STREAMING_CONFIG['spkcache_update_period']
+    
+    # Validate streaming parameters
+    modules._check_streaming_parameters()
+    
+    model_load_time = time.time() - model_load_start
+    print(f"✅ Model loaded in {model_load_time:.2f}s")
+    print(f"   chunk_len={modules.chunk_len}, left_ctx={modules.chunk_left_context}, right_ctx={modules.chunk_right_context}")
+    print(f"   fifo_len={modules.fifo_len}, spkcache_len={modules.spkcache_len}, update_period={modules.spkcache_update_period}")
+    print()
+    
+    # Get files to process
+    if args.single_file:
+        files_to_process = [args.single_file]
+    else:
+        if args.dataset == "ami":
+            files_to_process = get_ami_files(args.max_files)
+        elif args.dataset == "voxconverse":
+            files_to_process = get_voxconverse_files(args.max_files)
+        elif args.dataset == "callhome":
+            files_to_process = get_callhome_files(args.max_files)
         else:
-            # Batch mode
-            with torch.no_grad():
-                if waveform.shape[0] > 1:
-                    waveform = waveform.mean(dim=0, keepdim=True)
-                waveform = waveform.to(device)
-                length = torch.tensor([waveform.shape[1]]).to(device)
-
-                outputs = model.forward(audio_signal=waveform, audio_signal_length=length)
-                if isinstance(outputs, tuple):
-                    preds = outputs[0]
-                else:
-                    preds = outputs
-                if preds.min() < 0 or preds.max() > 1:
-                    preds = torch.sigmoid(preds)
-                predictions = preds.squeeze(0).cpu().numpy()
-
-        processing_time = time.time() - start_time
-        rtfx = audio_duration / processing_time if processing_time > 0 else 0
-
-        # Convert predictions to annotation
-        hypothesis = predictions_to_annotation(predictions, FRAME_DURATION, threshold=0.5)
-        detected_speakers = len(set(hypothesis.labels()))
-
-        # Compute DER components
-        der_metric = DiarizationErrorRate()
-        detail = der_metric(reference, hypothesis, detailed=True)
-
-        total = detail.get('total', 1)
-        der = detail.get('diarization error rate', 0) * 100
-        miss = detail.get('missed detection', 0) / total * 100 if total > 0 else 0
-        fa = detail.get('false alarm', 0) / total * 100 if total > 0 else 0
-        se = detail.get('confusion', 0) / total * 100 if total > 0 else 0
-
-        result = BenchmarkResult(
-            meeting=meeting,
-            der=der,
-            miss_rate=miss,
-            false_alarm_rate=fa,
-            speaker_error_rate=se,
-            detected_speakers=detected_speakers,
-            ground_truth_speakers=gt_speakers,
-            rtfx=rtfx,
-            processing_time=processing_time,
-            audio_duration=audio_duration,
-        )
-        results.append(result)
-
-        print(f"{meeting:<12} {der:>7.1f}% {miss:>7.1f}% {fa:>7.1f}% {se:>7.1f}% {detected_speakers}/{gt_speakers:>8} {rtfx:>7.1f}x")
-
-    print("-" * 70)
-
-    # Compute averages
-    if results:
-        avg_der = sum(r.der for r in results) / len(results)
-        avg_miss = sum(r.miss_rate for r in results) / len(results)
-        avg_fa = sum(r.false_alarm_rate for r in results) / len(results)
-        avg_se = sum(r.speaker_error_rate for r in results) / len(results)
-        avg_rtfx = sum(r.rtfx for r in results) / len(results)
-
-        print(f"{'AVERAGE':<12} {avg_der:>7.1f}% {avg_miss:>7.1f}% {avg_fa:>7.1f}% {avg_se:>7.1f}% {'-':>10} {avg_rtfx:>7.1f}x")
-
-    print("=" * 70)
-
+            print(f"❌ Unknown dataset: {args.dataset}")
+            return
+    
+    if not files_to_process:
+        print("❌ No files found to process")
+        return
+    
+    print(f"📂 Processing {len(files_to_process)} file(s)")
+    print()
+    
+    # Process each file
+    all_results = []
+    
+    for i, meeting in enumerate(files_to_process):
+        print("=" * 60)
+        print(f"[{i+1}/{len(files_to_process)}] Processing: {meeting}")
+        print("=" * 60)
+        
+        result = process_meeting(model, meeting, args.dataset, args.threshold, args.verbose)
+        
+        if result:
+            all_results.append(result)
+            print(f"📊 Results for {meeting}:")
+            print(f"   DER: {result['der']:.1f}%")
+            print(f"   RTFx: {result['rtfx']:.1f}x")
+            print(f"   Speakers: {result['detected_speakers']} detected / {result['gt_speakers']} truth")
+        print()
+    
+    # Print final summary
+    if all_results:
+        print_summary(all_results)
+    
     # Save results
-    if output_path:
-        output_data = [
-            {
-                "meeting": r.meeting,
-                "der": r.der,
-                "missRate": r.miss_rate,
-                "falseAlarmRate": r.false_alarm_rate,
-                "speakerErrorRate": r.speaker_error_rate,
-                "detectedSpeakers": r.detected_speakers,
-                "groundTruthSpeakers": r.ground_truth_speakers,
-                "rtfx": r.rtfx,
-                "processingTime": r.processing_time,
-                "audioDuration": r.audio_duration,
-            }
-            for r in results
-        ]
-        with open(output_path, 'w') as f:
-            json.dump(output_data, f, indent=2)
-        print(f"Results saved to {output_path}")
+    if args.output:
+        with open(args.output, 'w') as f:
+            json.dump(all_results, f, indent=2)
+        print(f"💾 Results saved to: {args.output}")
 
-    return results
+
+def print_summary(results: list):
+    """Print benchmark summary."""
+    print()
+    print("=" * 80)
+    print("NEMO SORTFORMER BENCHMARK SUMMARY")
+    print("=" * 80)
+    
+    print("📋 Results Sorted by DER:")
+    print("-" * 70)
+    print(f"{'Meeting':<14} {'DER %':>8} {'Miss %':>8} {'FA %':>8} {'SE %':>8} {'Speakers':>10} {'RTFx':>8}")
+    print("-" * 70)
+    
+    for result in sorted(results, key=lambda x: x['der']):
+        speaker_info = f"{result['detected_speakers']}/{result['gt_speakers']}"
+        print(f"{result['meeting']:<14} {result['der']:>8.1f} {result['miss']:>8.1f} {result['fa']:>8.1f} {result['se']:>8.1f} {speaker_info:>10} {result['rtfx']:>8.1f}")
+    
+    print("-" * 70)
+    
+    # Calculate averages
+    n = len(results)
+    avg_der = sum(r['der'] for r in results) / n
+    avg_miss = sum(r['miss'] for r in results) / n
+    avg_fa = sum(r['fa'] for r in results) / n
+    avg_se = sum(r['se'] for r in results) / n
+    avg_rtfx = sum(r['rtfx'] for r in results) / n
+    
+    print(f"{'AVERAGE':<14} {avg_der:>8.1f} {avg_miss:>8.1f} {avg_fa:>8.1f} {avg_se:>8.1f} {'-':>10} {avg_rtfx:>8.1f}")
+    print("=" * 70)
+    
+    print()
+    print("✅ Target Check:")
+    if avg_der < 15:
+        print(f"   ✅ DER < 15% (achieved: {avg_der:.1f}%)")
+    elif avg_der < 20:
+        print(f"   🟡 DER < 20% (achieved: {avg_der:.1f}%)")
+    else:
+        print(f"   ❌ DER > 20% (achieved: {avg_der:.1f}%)")
+    
+    if avg_rtfx > 1:
+        print(f"   ✅ RTFx > 1x (achieved: {avg_rtfx:.1f}x)")
+    else:
+        print(f"   ❌ RTFx < 1x (achieved: {avg_rtfx:.1f}x)")
+
+
+def run_single_audio(args):
+    """Run inference on a single audio file without ground truth."""
+    print("🚀 Starting NeMo Sortformer Inference")
+    print(f"   Audio: {args.audio}")
+    print(f"   Threshold: {args.threshold}")
+    print(f"   Device: {args.device}")
+    print()
+    
+    # Load model
+    print("🔧 Loading NeMo Sortformer model...")
+    model_load_start = time.time()
+    
+    device = torch.device(args.device)
+    model = SortformerEncLabelModel.from_pretrained(
+        "nvidia/diar_streaming_sortformer_4spk-v2.1",
+        map_location=device
+    )
+    model.eval()
+    model.to(device)
+    
+    # Apply streaming configuration
+    modules = model.sortformer_modules
+    modules.chunk_len = STREAMING_CONFIG['chunk_len']
+    modules.chunk_left_context = STREAMING_CONFIG['chunk_left_context']
+    modules.chunk_right_context = STREAMING_CONFIG['chunk_right_context']
+    modules.fifo_len = STREAMING_CONFIG['fifo_len']
+    modules.spkcache_len = STREAMING_CONFIG['spkcache_len']
+    modules.spkcache_update_period = STREAMING_CONFIG['spkcache_update_period']
+    modules._check_streaming_parameters()
+    
+    model_load_time = time.time() - model_load_start
+    print(f"✅ Model loaded in {model_load_time:.2f}s")
+    print(f"   chunk_len={modules.chunk_len}, left_ctx={modules.chunk_left_context}, right_ctx={modules.chunk_right_context}")
+    print()
+    
+    print("=" * 60)
+    result = process_audio_file(model, args.audio, args.threshold, args.verbose)
+    print("=" * 60)
+    
+    if result and args.output:
+        with open(args.output, 'w') as f:
+            json.dump(result, f, indent=2)
+        print(f"💾 Results saved to: {args.output}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NeMo Sortformer AMI Benchmark")
-    parser.add_argument(
-        "--audio-dir",
-        default=DEFAULT_AMI_AUDIO_DIR,
-        help="Path to AMI audio files"
-    )
-    parser.add_argument(
-        "--rttm-dir",
-        default=DEFAULT_AMI_RTTM_DIR,
-        help="Path to AMI RTTM files"
-    )
-    parser.add_argument(
-        "--output", "-o",
-        help="Output JSON file path"
-    )
-    parser.add_argument(
-        "--single-file",
-        help="Run on single meeting (e.g., ES2004a)"
-    )
-    parser.add_argument(
-        "--device",
-        default="mps" if torch.backends.mps.is_available() else "cpu",
-        help="Device to use (cpu, cuda, mps)"
-    )
-    parser.add_argument(
-        "--batch",
-        action="store_true",
-        help="Use batch mode instead of streaming"
-    )
-    parser.add_argument(
-        "--model-path",
-        help="Path to local .nemo model file (optional, downloads from HF if not provided)"
-    )
-
+    parser = argparse.ArgumentParser(description="NeMo Sortformer Benchmark")
+    parser.add_argument("--dataset", choices=["ami", "voxconverse", "callhome"], 
+                        default="ami", help="Dataset to benchmark on")
+    parser.add_argument("--single-file", type=str, default=None,
+                        help="Process a specific meeting (e.g., ES2004a)")
+    parser.add_argument("--audio", type=str, default=None,
+                        help="Process a single audio file (no ground truth, inference only)")
+    parser.add_argument("--max-files", type=int, default=None,
+                        help="Maximum number of files to process")
+    parser.add_argument("--threshold", type=float, default=0.5,
+                        help="Speaker activity threshold")
+    parser.add_argument("--device", type=str, default="cpu",
+                        help="Device to run on (cpu, cuda, mps)")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Output JSON file for results")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable verbose output")
+    
     args = parser.parse_args()
-
-    meetings = [args.single_file] if args.single_file else AMI_MEETINGS
-
-    run_benchmark(
-        audio_dir=args.audio_dir,
-        rttm_dir=args.rttm_dir,
-        meetings=meetings,
-        output_path=args.output,
-        device=args.device,
-        streaming=not args.batch,
-        model_path=args.model_path,
-    )
+    
+    if args.audio:
+        run_single_audio(args)
+    else:
+        run_benchmark(args)
 
 
 if __name__ == "__main__":
