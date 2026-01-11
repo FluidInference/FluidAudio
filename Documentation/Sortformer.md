@@ -187,7 +187,7 @@ Defines streaming parameters that must match the CoreML model's static shapes:
 **Pre-defined Configurations:**
 
 ```swift
-// Default (~1.12s latency, lowest latency)
+// Default (~1.04s latency, lowest latency)
 SortformerConfig.default
 
 // NVIDIA High Latency (30.4s latency, best quality)
