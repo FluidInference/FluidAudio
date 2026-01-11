@@ -95,7 +95,7 @@ enum SortformerCommand {
         if let v = padOffset { postConfig.offsetPadSeconds = v }
         if let v = minDurationOn { postConfig.minDurationOn = v }
         if let v = minDurationOff { postConfig.minDurationOff = v }
-        let diarizer = SortformerDiarizerPipeline(config: config, postProcessingConfig: postConfig)
+        let diarizer = SortformerDiarizer(config: config, postProcessingConfig: postConfig)
 
         do {
             let loadStart = Date()
