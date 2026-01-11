@@ -7,7 +7,7 @@
 https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml 
 
 ```bash
-swift run fluidaudio fleurs-benchmark --languages all --samples all
+swift run fluidaudiocli fleurs-benchmark --languages all --samples all
 ```
 
 ```text
@@ -51,7 +51,7 @@ Median RTFx: 139.6x
 Overall RTFx: 155.6x (19452.5s / 125.0s)
 ```
 
-`swift run fluidaudio asr-benchmark --max-files all --model-version v2`
+`swift run fluidaudiocli asr-benchmark --max-files all --model-version v2`
 
 Use v2 if you only need English, it is a bit more accurate
 
@@ -80,9 +80,80 @@ iPhone 16 Pro Max run, and only for models that were reloaded during the session
 | Decoder       |                       88.49 |                        8.11 |              146.01 | MLComputeUnits(rawValue: 1) |
 | JointDecision |                       48.46 |                        7.97 |               71.85 | MLComputeUnits(rawValue: 1) |
 
+## Transcription with Keyword Boosting
+
+CTC-based custom vocabulary boosting system, which enables accurate recognition of domain-specific terms (company names, technical jargon, proper nouns) without retraining the ASR model.
+
+```bash
+# Download the dataset
+swift run fluidaudiocli ctc-earnings-benchmark --auto-download
+
+# Run the benchmark
+swift run fluidaudiocli ctc-earnings-benchmark
+
+Earnings Benchmark (TDT transcription + CTC keyword spotting)
+  Data directory: /Users/<user>/Library/Application Support/FluidAudio/earnings22-kws/test-dataset
+  Output file: ctc_earnings_benchmark.json
+  TDT version: v2
+  CTC model: /Users/<user>/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml
+Loading TDT models (v2) for transcription...
+TDT models loaded successfully
+Loading CTC models from: /Users/<user>/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml
+Loaded CTC vocabulary with 1024 tokens
+Created CTC spotter with blankId=1024
+Processing 773 test files...
+[  1/772] 4329526_chunk0            WER:  10.3%  Dict: 1/1
+[  2/772] 4329526_chunk109          WER:   9.8%  Dict: 2/2
+[  3/772] 4329526_chunk118          WER:   3.1%  Dict: 3/3
+[  4/772] 4329526_chunk132          WER:  15.0%  Dict: 1/1
+[  5/772] 4329526_chunk135          WER:  40.5%  Dict: 1/1
+[  6/772] 4329526_chunk16           WER:   8.6%  Dict: 1/1
+...
+[766/772] 4485206_chunk_85          WER:   5.0%  Dict: 1/1
+[767/772] 4485206_chunk_86          WER:   5.0%  Dict: 2/2
+[768/772] 4485206_chunk_88          WER:   8.3%  Dict: 2/2
+[769/772] 4485206_chunk_92          WER:   7.9%  Dict: 4/4
+[770/772] 4485206_chunk_97          WER:  32.2%  Dict: 1/1
+[771/772] 4485206_chunk_98          WER:  16.3%  Dict: 4/4
+[772/772] 4485206_chunk_99          WER:  24.2%  Dict: 1/1
+
+============================================================
+EARNINGS22 BENCHMARK (TDT + CTC)
+============================================================
+Model: /Users/<user>/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml
+Total tests: 771
+Average WER: 14.76%
+Dict Pass (Recall): 1299/1308 (99.3%)
+Vocab Precision: 99.4% (TP=1079, FP=7)
+Vocab Recall: 85.9% (TP=1079, FN=177)
+Vocab F-score: 92.1%
+Total audio: 11564.5s
+Total processing: 169.0s
+RTFx: 68.44x
+============================================================
+```
+
+In context of vocabulary/keyword detection:
+
+```text
+| Metric              | Definition                                                      |
+|---------------------|-----------------------------------------------------------------|
+| TP (True Positive)  | Word is in reference AND in hypothesis (correctly detected)     |
+| FP (False Positive) | Word is in hypothesis but NOT in reference (hallucinated/wrong) |
+| FN (False Negative) | Word is in reference but NOT in hypothesis (missed)             |
+
+Derived metrics:
+
+| Metric    | Formula             | Meaning                                              |
+|-----------|---------------------|------------------------------------------------------|
+| Precision | TP / (TP + FP)      | "Of words we output, how many were correct?"         |
+| Recall    | TP / (TP + FN)      | "Of words that should appear, how many did we find?" |
+| F-Score   | 2 × P × R / (P + R) | Harmonic mean of precision and recall                |
+```
+
 ## Text-to-Speech
 
-We generated the same strings with to gerneate audio between 1s to ~300s in order to test the speed across a range of varying inputs on Pytorch CPU, MPS, and MLX pipeline, and compared it against the native Swift version with Core ML models.
+We generated the same strings with to generate audio between 1s to ~300s in order to test the speed across a range of varying inputs on Pytorch CPU, MPS, and MLX pipeline, and compared it against the native Swift version with Core ML models.
 
 Each pipeline warmed up the models by running through it once with pesudo inputs, and then comparing the raw inference time with the model already loaded. You can see that for the Core ML model, we traded lower memory and very slightly faster inference for longer initial warm-up.
 
@@ -145,7 +216,7 @@ Total  -        461.650      19.401       23.796x    3.37
 Note that it does take `~15s` to compile the model on the first run, subsequent runs are shorter, we expect ~2s to load. 
 
 ```bash
-> swift run fluidaudio tts --benchmark
+> swift run fluidaudiocli tts --benchmark
 ...
 FluidAudio TTS benchmark for voice af_heart (warm-up took an extra 2.348s)
 Test   Chars    Ouput (s)    Inf(s)       RTFx
@@ -175,7 +246,7 @@ Model is nearly identical to the base model in terms of quality, perforamnce wis
 Dataset: https://github.com/Lab41/VOiCES-subset
 
 ```text
-swift run fluidaudio vad-benchmark --dataset voices-subset --all-files --threshold 0.85
+swift run fluidaudiocli vad-benchmark --dataset voices-subset --all-files --threshold 0.85
 ...
 Timing Statistics:
 [18:56:31.208] [INFO] [VAD]    Total processing time: 0.29s
@@ -199,7 +270,7 @@ VAD Benchmark Results:
 ```
 
 ```text
-swift run fluidaudio vad-benchmark --dataset musan-full --num-files all --threshold 0.8
+swift run fluidaudiocli vad-benchmark --dataset musan-full --num-files all --threshold 0.8
 ...
 [23:02:35.539] [INFO] [VAD] Total processing time: 322.31s
 [23:02:35.539] [INFO] [VAD] Timing Statistics:
@@ -240,10 +311,10 @@ Hardware: Apple M2, 2022, masOS 26
 
 ```bash
 # Run 320ms benchmark
-swift run -c release fluidaudio parakeet-eou --benchmark --chunk-size 320 --use-cache
+swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 320 --use-cache
 
 # Run 160ms benchmark
-swift run -c release fluidaudio parakeet-eou --benchmark --chunk-size 160 --use-cache
+swift run -c release fluidaudiocli parakeet-eou --benchmark --chunk-size 160 --use-cache
 ```
 
 ## Speaker Diarization
@@ -279,7 +350,7 @@ This is more tricky and honestly a lot more fragile to clustering. Expect +10-15
 
 Running a near real-time diarization benchmark for 3s chunks, 1s overlap, and 0.85 clustering threshold:
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm \
     --threshold 0.85 \
     --auto-download \
@@ -306,7 +377,7 @@ AVERAGE          49.7     65.0      5.5      5.6     38.6         -     51.4
 
 Diarization benchmark with 10s chunks, 0s overlap, and 0.7 clustering threshold:
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm
     --threshold 0.7
     --auto-download
@@ -333,7 +404,7 @@ AVERAGE          33.3     45.1      8.4      3.5     21.5         -    392.4
 
 Diarization benchmark with 5s chunks, 0s overlap, and 0.8 clustering threshold (best configuration found):
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm
     --threshold 0.8
     --auto-download
@@ -360,7 +431,7 @@ AVERAGE          26.2     36.1      9.2      3.9     13.1         -    223.1
 
 Diarization benchmark with 5s chunks, 2s overlap, and 0.8 clustering threshold:
 ```bash
-swift run fluidaudio diarization-benchmark --mode streaming \
+swift run fluidaudiocli diarization-benchmark --mode streaming \
     --dataset ami-sdm
     --threshold 0.8
     --auto-download
