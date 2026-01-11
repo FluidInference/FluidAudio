@@ -1184,7 +1184,7 @@ public struct VocabularyRescorer {
             }
 
             if !singleWordForms.isEmpty {
-                // Single-word matching
+                // Single-word matching (includes compound word detection)
                 for (wordIdx, timing) in wordTimings.enumerated() {
                     guard !replacedIndices.contains(wordIdx) else { continue }
 
@@ -1207,28 +1207,85 @@ public struct VocabularyRescorer {
                         continue
                     }
 
-                    // Check similarity against ALL forms
+                    // Check similarity against ALL forms (single word)
                     var bestSimilarity: Float = 0
+                    var matchedSpanLength = 1
+                    var matchedConcatenation = normalizedWord
                     for form in singleWordForms {
                         let similarity = Self.stringSimilarity(normalizedWord, form.normalized)
                         bestSimilarity = max(bestSimilarity, similarity)
                     }
 
-                    // Use adaptive similarity threshold
+                    // COMPOUND WORD MATCHING: For single-word vocabulary terms, also try
+                    // matching against concatenated adjacent TDT words.
+                    // This handles cases like "Livmarli" being transcribed as "Liv Mali".
+                    // Minimum vocab length of 4 for 2-word matching to avoid false positives on short words.
+                    let minLengthFor2Word = 4
+                    let minLengthFor3Word = 8
+
+                    // Pre-compute normalized adjacent words (only if needed)
+                    let normalized2: String? =
+                        (wordIdx + 1 < wordTimings.count && !replacedIndices.contains(wordIdx + 1))
+                        ? Self.normalizeForSimilarity(wordTimings[wordIdx + 1].word)
+                        : nil
+                    let normalized3: String? =
+                        (wordIdx + 2 < wordTimings.count && !replacedIndices.contains(wordIdx + 2))
+                        ? Self.normalizeForSimilarity(wordTimings[wordIdx + 2].word)
+                        : nil
+
+                    // 2-word compound matching
+                    if let norm2 = normalized2, !norm2.isEmpty, vocabTerm.count >= minLengthFor2Word {
+                        let concatenated = normalizedWord + norm2  // No space
+                        for form in singleWordForms {
+                            let concatSimilarity = Self.stringSimilarity(concatenated, form.normalized)
+                            if concatSimilarity > bestSimilarity {
+                                bestSimilarity = concatSimilarity
+                                matchedSpanLength = 2
+                                matchedConcatenation = concatenated
+                            }
+                        }
+                    }
+
+                    // 3-word compound matching (for longer vocabulary terms only)
+                    if let norm2 = normalized2, let norm3 = normalized3,
+                        !norm2.isEmpty, !norm3.isEmpty, vocabTerm.count >= minLengthFor3Word
+                    {
+                        let concatenated = normalizedWord + norm2 + norm3
+                        for form in singleWordForms {
+                            let concatSimilarity = Self.stringSimilarity(concatenated, form.normalized)
+                            if concatSimilarity > bestSimilarity {
+                                bestSimilarity = concatSimilarity
+                                matchedSpanLength = 3
+                                matchedConcatenation = concatenated
+                            }
+                        }
+                    }
+
+                    // Use adaptive similarity threshold (use concatenated text for multi-word spans)
                     let minSimilarityForSpan = requiredSimilarity(
                         minSimilarity: minSimilarity,
-                        spanLength: 1,
-                        normalizedText: normalizedWord
+                        spanLength: matchedSpanLength,
+                        normalizedText: matchedConcatenation
                     )
                     guard bestSimilarity >= minSimilarityForSpan else { continue }
 
-                    // Found a similar word - run constrained CTC within its temporal window
-                    let marginFrames = Int(marginSeconds / frameDuration)
-                    let wordStartFrame = Int(timing.startTime / frameDuration)
-                    let wordEndFrame = Int(timing.endTime / frameDuration)
+                    // Build the original phrase (single word or concatenated span)
+                    let spanIndices = Array(wordIdx..<(wordIdx + matchedSpanLength))
+                    let originalPhrase =
+                        matchedSpanLength == 1
+                        ? tdtWord
+                        : spanIndices.map { wordTimings[$0].word }.joined(separator: " ")
 
-                    let searchStart = max(0, wordStartFrame - marginFrames)
-                    let searchEnd = min(logProbs.count, wordEndFrame + marginFrames)
+                    // Get temporal window for the span (use direct indexing to avoid force unwraps)
+                    let spanStartTime = wordTimings[wordIdx].startTime
+                    let spanEndTime = wordTimings[wordIdx + matchedSpanLength - 1].endTime
+
+                    let marginFrames = Int(marginSeconds / frameDuration)
+                    let spanStartFrame = Int(spanStartTime / frameDuration)
+                    let spanEndFrame = Int(spanEndTime / frameDuration)
+
+                    let searchStart = max(0, spanStartFrame - marginFrames)
+                    let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
 
                     // Score vocabulary term using constrained CTC
                     let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
@@ -1238,10 +1295,10 @@ public struct VocabularyRescorer {
                         searchEndFrame: searchEnd
                     )
 
-                    // Score original TDT word using constrained CTC (same window)
+                    // Score original phrase using constrained CTC (same window)
                     var originalCtcScore: Float = -Float.infinity
                     if let tokenizer = ctcTokenizer {
-                        let originalTokens = tokenizer.encode(tdtWord)
+                        let originalTokens = tokenizer.encode(originalPhrase)
                         if !originalTokens.isEmpty {
                             let (score, _, _) = spotter.ctcWordSpotConstrained(
                                 logProbs: logProbs,
@@ -1261,13 +1318,13 @@ public struct VocabularyRescorer {
 
                     if debugMode {
                         print(
-                            "  '\(tdtWord)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", bestSimilarity)))"
+                            "  '\(originalPhrase)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", bestSimilarity)), span=\(matchedSpanLength))"
                         )
                         print(
-                            "    TDT word: [\(String(format: "%.2f", timing.startTime))-\(String(format: "%.2f", timing.endTime))s] conf=\(String(format: "%.2f", timing.confidence))"
+                            "    TDT span: [\(String(format: "%.2f", spanStartTime))-\(String(format: "%.2f", spanEndTime))s]"
                         )
                         print(
-                            "    CTC('\(tdtWord)'): \(String(format: "%.2f", originalCtcScore))"
+                            "    CTC('\(originalPhrase)'): \(String(format: "%.2f", originalCtcScore))"
                         )
                         print(
                             "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbw) = \(String(format: "%.2f", boostedVocabScore))"
@@ -1280,17 +1337,24 @@ public struct VocabularyRescorer {
                     if shouldReplace {
                         let replacement = preserveCapitalization(original: tdtWord, replacement: vocabTerm)
                         modifiedWords[wordIdx].word = replacement
-                        replacedIndices.insert(wordIdx)
+                        // Mark additional words in span as empty (will be filtered out)
+                        for idx in spanIndices.dropFirst() {
+                            modifiedWords[idx].word = ""
+                        }
+                        // Mark all indices as replaced
+                        for idx in spanIndices {
+                            replacedIndices.insert(idx)
+                        }
 
                         replacements.append(
                             RescoringResult(
-                                originalWord: tdtWord,
+                                originalWord: originalPhrase,
                                 originalScore: originalCtcScore,
                                 replacementWord: replacement,
                                 replacementScore: boostedVocabScore,
                                 shouldReplace: true,
                                 reason:
-                                    "CTC-vs-CTC: '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(tdtWord)'=\(String(format: "%.2f", originalCtcScore))"
+                                    "CTC-vs-CTC: '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(originalPhrase)'=\(String(format: "%.2f", originalCtcScore))"
                             ))
                     }
                 }
