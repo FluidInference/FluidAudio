@@ -12,16 +12,18 @@ Sortformer is an end-to-end neural speaker diarization model that answers "who s
 
 ## Sortformer vs DiarizerManager (Pyannote-based)
 
-**Sortformer** handles noisy environments and overlapping speakers well, but limited to 4 speakers and isn't as good as pyannote in clean environments.
+**Sortformer** handles noisy environments and overlapping speakers well, but is limited to 4 speakers (for now). It also misses quiet speech as it's trained to ignore background conversations. The most common source of error is missed speech.
 
-**DiarizerManager** works better in clean rooms and detects multi-room speech, but struggles with background noise.
+**DiarizerManager** works better when you have more than 4 speakers, but struggles with background noise, background conversations, and similar-sounding speakers. The most common source of error is incorrect labeling.
 
 | Environment | Sortformer | DiarizerManager |
 |-------------|:----------:|:---------------:|
-| Clean/silent room | Good | Best |
+| Clean/silent room | Best | Good |
 | Background noise | Best | Poor |
 | Speech from another room | Poor | Good |
+| High overlap | Best | Good |
 | More than 4 speakers | No | Yes |
+| Remembering speakers across meetings | No | Yes |
 
 ## Architecture
 
@@ -36,7 +38,7 @@ Audio (16kHz) → Mel Spectrogram → CoreML Model → Speaker Probabilities
 The pipeline consists of:
 
 1. **Mel Spectrogram** (`NeMoMelSpectrogram`): Converts raw audio to 128-bin mel features
-2. **CoreML Model** (`SortformerModelInference`): Combined encoder + attention + head
+2. **CoreML Model** (`DiarizerInference`): Combined encoder + attention + head
 3. **Streaming State** (`SortformerStreamingState`): Maintains speaker cache and FIFO queue
 4. **Post-processing** (`SortformerTimeline`): Converts probabilities to speaker segments
 
@@ -46,10 +48,10 @@ Sortformer maintains two key buffers for streaming:
 
 ```
 ┌─────────────────┐  ┌──────────────┐  ┌─────────────┐
-│   Speaker Cache │  │  FIFO Queue  │  │ New Chunk   │
+│  Speaker Cache  │  │  FIFO Queue  │  │  New Chunk  │
 │   (historical)  │  │   (recent)   │  │  (current)  │
 └─────────────────┘  └──────────────┘  └─────────────┘
-     188 frames         40 frames        6-340 frames
+     188 frames      40 or 188 frames  6 or 340 frames
 ```
 
 - **Speaker Cache** (`spkcache`): Compressed historical embeddings representing long-term speaker context
@@ -107,21 +109,21 @@ Chunk with Context:
 
 **Why Right Context Matters:**
 
-More right context = more future information = better predictions, but higher latency.
+More right context = more future information = better predictions, but higher latency. You can get the predictions from the right context as tentative predictions.
 
 ```
 Without right context (RC=0):
   Speaker A: "Hello, I am—"
   Model sees: "Hello, I am—" → Must predict NOW (may miss speaker change)
 
-With right context (RC=7):
+With the right context (RC=7):
   Speaker A: "Hello, I am—" [Speaker B: "Hi!"]
   Model sees: "Hello, I am— Hi!" → Can predict speaker change accurately
 ```
 
 #### Left Context (`chunkLeftContext`)
 
-Left context provides past frames for continuity between chunks. Unlike right context, it doesn't add latency since these frames were already processed.
+Left context provides past frames for continuity between chunks. Unlike the right context, it doesn't add latency since these frames were already processed.
 
 | Config | `leftContext` | Purpose |
 |--------|---------------|---------|
@@ -162,11 +164,11 @@ This means you **cannot** change `fifoLen`, `spkcacheLen`, or context values at 
 
 ```
 Sources/FluidAudio/Diarizer/Sortformer/
-├── SortformerDiarizerPipeline.swift  # Main entry point, audio buffering, inference orchestration
-├── SortformerModelInference.swift    # CoreML model container and HuggingFace loading
-├── SortformerStateUpdater.swift      # Speaker cache compression, FIFO queue, state updates
-├── SortformerTimeline.swift          # Accumulated results and segment extraction
-└── SortformerTypes.swift             # StreamingState, FeatureLoader, Config, Segment
+├── SortformerConfig.swift      # Streaming parameters and model shape configuration
+├── Pipeline.swift    # Main entry point, audio buffering, inference orchestration
+├── DiarizerInference.swift      # CoreML model container and HuggingFace loading
+├── StateUpdater.swift     # Speaker cache compression, FIFO queue, state updates
+└── SortformerTypes.swift       # StreamingState, FeatureLoader, ChunkResult, Timeline, Segment
 ```
 
 ### SortformerConfig.swift
@@ -195,15 +197,15 @@ SortformerConfig.nvidiaHighLatency
 SortformerConfig.nvidiaLowLatency
 ```
 
-### SortformerDiarizerPipeline.swift
+### Pipeline.swift
 
 Main entry point for diarization:
 
 ```swift
-let diarizer = SortformerDiarizerPipeline()
+let diarizer = Pipeline()
 
 // Initialize with HuggingFace models
-try await diarizer.initialize()
+try await diarizer.initialize(mainModelPath: modelURL)
 
 // Streaming mode
 for audioChunk in audioStream {
@@ -227,19 +229,19 @@ let timeline = try diarizer.processComplete(audioSamples)
 - `processSamples(_:)` - Convenience method combining add + process
 - `processComplete(_:)` - Batch process entire audio file
 
-### SortformerModelInference.swift
+### DiarizerInference.swift
 
 Handles CoreML model loading and inference:
 
 ```swift
 // Load from HuggingFace
-let models = try await SortformerModelInference.loadFromHuggingFace(
+let models = try await DiarizerInference.loadFromHuggingFace(
     config: .default,
     computeUnits: .all
 )
 
 // Or load from local path
-let models = try await SortformerModelInference.load(
+let models = try await DiarizerInference.load(
     config: .default,
     mainModelPath: localModelURL
 )
@@ -258,14 +260,14 @@ let models = try await SortformerModelInference.load(
 - `chunk_pre_encoder_embs`: Embeddings for state update
 - `chunk_pre_encoder_lengths`: Actual embedding count
 
-### SortformerStateUpdater.swift
+### StateUpdater.swift
 
 Core streaming logic ported from NeMo:
 
 ```swift
-let stateUpdater = SortformerStateUpdater(config: config)
+let modules = StateUpdater(config: config)
 
-let result = try stateUpdater.streamingUpdate(
+let result = try modules.streamingUpdate(
     state: &state,
     chunk: chunkEmbeddings,
     preds: predictions,
@@ -299,19 +301,43 @@ struct SortformerStreamingState {
 **SortformerChunkResult** - Output from each chunk:
 ```swift
 struct SortformerChunkResult {
-    let speakerPredictions: [Float]  // [frameCount * 4]
-    let frameCount: Int
+    let speakerPredictions: [Float]  // [frameCount, 4] flattened
+    let frameCount: Int // Number of frames with predictions
     let startFrame: Int
-    let tentativePredictions: [Float]  // May change
+    let tentativePredictions: [Float]  // Volatile predictions from frames in the right context.
+    let tentativeFrameCount: Int // Number of tentative frames
+    private(set) var tentativeStartFrame: Int // Frame index of first tentative frame
 }
 ```
 
 **SortformerTimeline** - Accumulated results with segments:
 ```swift
-class SortformerTimeline {
-    var segments: [[SortformerSegment]]  // Per-speaker segments
-    var framePredictions: [Float]        // All predictions
-    var numFrames: Int
+struct SortformerTimeline {
+    let config: SortformerPostProcessingConfig                  // Post-processing configuration
+    private(set) var framePredictions: [Float]                  // Finalized frame-wise speaker predictions [numFrames, numSpeakers]
+    private(set) var tentativePredictions: [Float]              // Tentative predictions [numTentative, numSpeakers]
+    private(set) var numFrames: Int                             // Total number of finalized median-filtered frames
+    private(set) numTentative: Int                              // Number of tentative frames (including right context frames from chunk)
+    private(set) var segments: [[SortformerSegment]]            // Finalized segments (completely before the median filter boundary)
+    private(set) var tentativeSegments: [[SortformerSegment]]   // Tentative segments (may change as more predictions arrive)
+    private(set) duration: Float                                // Get total duration of finalized predictions in seconds
+    private(set) var tentativeDuration: Float                   // Get total duration including tentative predictions in seconds
+}
+```
+
+**SortformerSegment** - Timeline Segment
+```swift
+public struct SortformerSegment {
+    let id: UUID /// Segment ID
+    var speakerIndex: Int // Speaker index in Sortformer output
+    var startFrame: Int // Index of segment start frame
+    var endFrame: Int // Index of segment end frame
+    var isFinalized: Bool // Whether this segment is finalized
+    private(set) var length: Int // Length of the segment in frames
+    private(set) var startTime: Float // Start time in seconds
+    private(set) var endTime: Float // End time in seconds
+    private(set) var duration: Float // Duration in seconds
+    private(set) var speakerLabel: String // Speaker label (e.g., "Speaker 0")
 }
 ```
 
@@ -350,8 +376,8 @@ class SortformerTimeline {
 
 | Config | Chunk Size | Latency | Quality |
 |--------|------------|---------|---------|
-| `default` | 6 frames | ~1.12s | Good |
-| `nvidiaLowLatency` | 6 frames | ~1.04s | Good |
+| `default` | 6 frames | ~1.04s | Good |
+| `nvidiaLowLatency` | 6 frames | ~1.04s | Better |
 | `nvidiaHighLatency` | 340 frames | ~30.4s | Best |
 
 Latency is determined by:
@@ -399,8 +425,9 @@ Three CoreML models are available on HuggingFace:
 ### Real-time Streaming
 
 ```swift
-let diarizer = SortformerDiarizerPipeline(config: .default)
-try await diarizer.initialize(mainModelPath: modelURL)
+let diarizer = SortformerDiarizer(config: .default)
+let models = try await SortformerModels.loadFromHuggingFace(config: .default)
+try await diarizer.initialize(models: models)
 
 // Process audio in chunks (e.g., from microphone)
 audioEngine.installTap { buffer in
@@ -408,6 +435,9 @@ audioEngine.installTap { buffer in
     if let result = try? diarizer.processSamples(Array(samples)) {
         // Update UI with speaker probabilities
         updateSpeakerDisplay(result)
+
+        // OR update UI with updated timeline
+        updateSpeakerDisplay(diarizer.timeline)
     }
 }
 ```
@@ -415,8 +445,9 @@ audioEngine.installTap { buffer in
 ### Batch Processing
 
 ```swift
-let diarizer = SortformerDiarizerPipeline()
-try await diarizer.initialize()
+let diarizer = SortformerDiarizer(config: .nvidiaHighLatency)
+let models = try await SortformerModels.loadFromHuggingFace(config: .default)
+try await diarizer.initialize(models: models)
 
 let timeline = try diarizer.processComplete(audioSamples)
 
