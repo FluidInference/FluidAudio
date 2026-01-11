@@ -62,6 +62,18 @@ public final class ANEMemoryOptimizer {
         return buffer
     }
 
+    /// Initialize a reusable buffer in the pool
+    public func initializePooledBuffer(
+        key: String,
+        shape: [NSNumber],
+        dataType: MLMultiArrayDataType
+    ) throws {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        // Create new buffer
+        bufferPool[key] = try createAlignedArray(shape: shape, dataType: dataType)
+    }
+
     /// Clear buffer pool to free memory
     public func clearBufferPool() {
         bufferLock.lock()
@@ -104,7 +116,8 @@ public final class ANEMemoryOptimizer {
     public func optimizedCopy<C>(
         from source: C,
         to destination: MLMultiArray,
-        offset: Int = 0
+        offset: Int = 0,
+        pad: Bool = false
     ) where C: Collection, C.Element == Float {
         guard destination.dataType == .float32 else { return }
 
@@ -153,6 +166,14 @@ public final class ANEMemoryOptimizer {
             for element in source.prefix(count) {
                 destPtr[destIndex] = element
                 destIndex += 1
+            }
+        }
+
+        if pad {
+            let padStart = offset + count
+            let remaining = destination.count - padStart
+            if remaining > 0 {
+                vDSP_vclr(destPtr.advanced(by: padStart), 1, vDSP_Length(remaining))
             }
         }
     }

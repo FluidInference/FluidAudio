@@ -97,6 +97,11 @@ public class DownloadUtils {
         }
     }
 
+    public static func clearModelCache(forRepo repo: Repo, directory: URL) {
+        let repoPath = directory.appendingPathComponent(repo.folderName)
+        try? FileManager.default.removeItem(at: repoPath)
+    }
+
     private static func loadModelsOnce(
         _ repo: Repo,
         modelNames: [String],

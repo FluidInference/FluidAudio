@@ -36,21 +36,44 @@ final public class AudioConverter {
         }
     }
 
-    /// Convert a standalone buffer to the target format.
-    /// - Parameter buffer: Input audio buffer (any format)
-    /// - Returns: Float array at 16kHz mono
-    public func resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
-        // Fast path: if already in target format, just extract samples
-        if isTargetFormat(buffer.format) {
-            return extractFloatArray(from: buffer)
+    // MARK: - Public Resampling Methods
+
+    /// Resample a float array from one sample rate to the target sample rate.
+    /// - Parameters:
+    ///   - samples: Input audio samples (mono Float32)
+    ///   - inputRate: Input sample rate (e.g., 48000)
+    /// - Returns: Float array resampled to target sample rate
+    public func resample(_ samples: [Float], from inputRate: Double) throws -> [Float] {
+        guard !samples.isEmpty else { return [] }
+
+        let outputRate = targetFormat.sampleRate
+
+        // If already at target rate, return as-is
+        if inputRate == outputRate {
+            return samples
         }
 
+        return try resampleWithAVAudio(samples, from: inputRate, to: outputRate)
+    }
+
+    /// Convert a standalone buffer to the target format.
+    /// - Parameters:
+    ///   - buffer: Input audio buffer (any format)
+    /// - Returns: Float array at target sample rate (default 16kHz) mono
+    public func resampleBuffer(_ buffer: AVAudioPCMBuffer) throws -> [Float] {
+        let inputFormat = buffer.format
+
+        // Fast path: if already in target format, just extract samples
+        if isTargetFormat(inputFormat) {
+            return extractFloatArray(from: buffer)
+        }
         return try convertBuffer(buffer, to: targetFormat)
     }
 
-    /// Convert an audio file to 16kHz mono Float32 samples
-    /// - Parameter url: URL of the audio file to read
-    /// - Returns: Float array at 16kHz mono
+    /// Convert an audio file to target sample rate (default 16kHz) mono Float32 samples.
+    /// - Parameters:
+    ///   - url: URL of the audio file to read
+    /// - Returns: Float array at target sample rate mono
     public func resampleAudioFile(_ url: URL) throws -> [Float] {
         let audioFile = try AVAudioFile(forReading: url)
         let format = audioFile.processingFormat
@@ -64,12 +87,118 @@ final public class AudioConverter {
         return try resampleBuffer(buffer)
     }
 
-    /// Convert an audio file path to 16kHz mono Float32 samples
-    /// - Parameter path: File path of the audio file to read
-    /// - Returns: Float array at 16kHz mono
+    /// Convert an audio file path to target sample rate mono Float32 samples.
+    /// - Parameters:
+    ///   - path: File path of the audio file to read
+    /// - Returns: Float array at target sample rate mono
     public func resampleAudioFile(path: String) throws -> [Float] {
         let url = URL(fileURLWithPath: path)
         return try resampleAudioFile(url)
+    }
+
+    // MARK: - Private Helpers
+
+    /// Resample using AVAudioConverter with raw float arrays
+    private func resampleWithAVAudio(
+        _ samples: [Float], from inputRate: Double, to outputRate: Double
+    ) throws -> [Float] {
+        // Create input format and buffer
+        guard
+            let inputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: inputRate,
+                channels: 1,
+                interleaved: false
+            )
+        else {
+            throw AudioConverterError.failedToCreateSourceFormat
+        }
+
+        guard
+            let inputBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(samples.count))
+        else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+        inputBuffer.frameLength = AVAudioFrameCount(samples.count)
+
+        // Copy samples into buffer
+        if let channelData = inputBuffer.floatChannelData {
+            samples.withUnsafeBufferPointer { src in
+                memcpy(channelData[0], src.baseAddress!, samples.count * MemoryLayout<Float>.stride)
+            }
+        }
+
+        // Create output format
+        guard
+            let outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: outputRate,
+                channels: 1,
+                interleaved: false
+            )
+        else {
+            throw AudioConverterError.failedToCreateSourceFormat
+        }
+
+        return try convertBuffer(inputBuffer, to: outputFormat)
+    }
+
+    /// Extract mono Float32 samples from a buffer (mixing channels if needed)
+    private func extractMonoFloat32(from buffer: AVAudioPCMBuffer) throws -> [Float] {
+        let format = buffer.format
+        let frameCount = Int(buffer.frameLength)
+
+        guard frameCount > 0 else { return [] }
+
+        // If already mono Float32 non-interleaved, fast path
+        if format.channelCount == 1 && format.commonFormat == .pcmFormatFloat32 && !format.isInterleaved {
+            guard let channelData = buffer.floatChannelData else { return [] }
+            return Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
+        }
+
+        // Need to convert to mono Float32
+        // Create intermediate format (mono Float32 at original sample rate)
+        guard
+            let monoFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: format.sampleRate,
+                channels: 1,
+                interleaved: false
+            )
+        else {
+            throw AudioConverterError.failedToCreateSourceFormat
+        }
+
+        // Use AVAudioConverter for channel mixing and format conversion
+        guard let converter = AVAudioConverter(from: format, to: monoFormat) else {
+            throw AudioConverterError.failedToCreateConverter
+        }
+
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameCapacity) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+
+        nonisolated(unsafe) var provided = false
+        nonisolated(unsafe) let capturedBuffer = buffer
+        let inputBlock: AVAudioConverterInputBlock = { _, status in
+            if !provided {
+                provided = true
+                status.pointee = .haveData
+                return capturedBuffer
+            } else {
+                status.pointee = .endOfStream
+                return nil
+            }
+        }
+
+        var error: NSError?
+        let status = converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
+        guard status != .error else {
+            throw AudioConverterError.conversionFailed(error)
+        }
+
+        guard let channelData = outputBuffer.floatChannelData else { return [] }
+        return Array(UnsafeBufferPointer(start: channelData[0], count: Int(outputBuffer.frameLength)))
     }
 
     /// Convert a CMSampleBuffer to the target format

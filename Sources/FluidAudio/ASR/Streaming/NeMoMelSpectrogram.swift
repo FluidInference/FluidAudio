@@ -15,6 +15,9 @@ import Foundation
 /// - center: True with pad_mode='constant' (zero padding)
 /// - normalize: "NA" (no normalization)
 /// - dither: 0.0 (disabled for determinism)
+///
+/// - Warning: This class is NOT thread-safe. Each thread should use its own instance
+///   due to shared reusable buffers for FFT computation.
 public final class NeMoMelSpectrogram {
     // Config
     private let sampleRate: Int = 16000
@@ -25,8 +28,8 @@ public final class NeMoMelSpectrogram {
     private let fMin: Float = 0.0
     private let fMax: Float = 8000.0  // sample_rate / 2
     private let preemph: Float = 0.97  // NeMo preemphasis coefficient
-    private let logZeroGuard: Float = 5.960464477539063e-08  // NeMo log_zero_guard_value
-    private let logZero: Float = -16.635532  // log(1e-10) for padding
+    private let logZeroGuard: Float = powf(2, -24)  // 5.960464477539063e-08  // NeMo log_zero_guard_value
+    private let logZero: Float = 0  // Padding value (0 works because log(0 + guard) ≈ -16.6)
 
     // Pre-computed
     private let hannWindow: [Float]
@@ -90,9 +93,15 @@ public final class NeMoMelSpectrogram {
     }
 
     /// Compute mel spectrogram from audio samples.
+    /// - Note: This method does NOT apply preemphasis filtering. Use `computeFlat()` for
+    ///   full NeMo-compatible preprocessing including preemphasis.
     /// - Parameter audio: Audio samples at 16kHz
     /// - Returns: (mel, mel_length) where mel is [1, nMels, T] and mel_length is valid frame count
     public func compute(audio: [Float]) -> (mel: [[[Float]]], melLength: Int) {
+        guard !audio.isEmpty else {
+            return (mel: [[[Float]]](), melLength: 0)
+        }
+
         let numFrames = 1 + (audio.count - winLength) / hopLength
 
         guard numFrames > 0 else {
@@ -142,43 +151,45 @@ public final class NeMoMelSpectrogram {
     }
 
     /// Compute mel spectrogram and return as flat array for MLMultiArray compatibility.
-    /// - Parameter audio: Audio samples at 16kHz
+    /// - Parameters:
+    ///   - audio: Audio samples at 16kHz
+    ///   - lastAudioSample: The last audio sample that's not in the audio buffer. Used to initialize the preemphasis state
     /// - Returns: (mel, mel_length, numFrames) where mel is flat [nMels * T]
-    public func computeFlat(audio: [Float]) -> (mel: [Float], melLength: Int, numFrames: Int) {
-        guard !audio.isEmpty else {
-            return (mel: [Float](repeating: logZero, count: nMels), melLength: 0, numFrames: 1)
-        }
-
+    public func computeFlat(
+        audio: [Float], lastAudioSample: Float = 0
+    ) -> (mel: [Float], melLength: Int, numFrames: Int) {
         let audioCount = audio.count
 
         // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
-        var preemphAudio = [Float](repeating: 0, count: audioCount)
-        preemphAudio[0] = audio[0]
-        if audioCount > 1 {
-            // Compute x[n] - preemph * x[n-1] vectorized
-            var negPreemph = -preemph
-            vDSP_vsma(
-                audio, 1, &negPreemph, audio[1...].withUnsafeBufferPointer { $0.baseAddress! }, 1, &preemphAudio[1], 1,
-                vDSP_Length(audioCount - 1))
-        }
+        // This will be copied into an already padded buffer to save time.
 
-        // Step 2: Apply center padding with CONSTANT (zeros)
         let padLength = nFFT / 2
         let paddedCount = audioCount + 2 * padLength
-        var paddedAudio = [Float](repeating: 0, count: paddedCount)
 
-        // Copy preemph audio to center using memcpy
-        preemphAudio.withUnsafeBufferPointer { src in
-            paddedAudio.withUnsafeMutableBufferPointer { dst in
-                memcpy(dst.baseAddress! + padLength, src.baseAddress!, audioCount * MemoryLayout<Float>.size)
-            }
-        }
-
-        // Calculate number of frames
+        // Calculate number of frames (must match NeMo's center=True padding)
         let numFrames = 1 + (paddedCount - winLength) / hopLength
 
         guard numFrames > 0 else {
-            return (mel: [Float](repeating: logZero, count: nMels), melLength: 0, numFrames: 1)
+            return (mel: [Float](repeating: 0, count: nMels), melLength: 0, numFrames: 1)
+        }
+        var paddedAudio = [Float](repeating: 0, count: paddedCount)
+
+        paddedAudio[padLength] = audio[0] - preemph * lastAudioSample
+
+        // Compute x[n] - preemph * x[n-1] vectorized
+        paddedAudio.withUnsafeMutableBufferPointer { dstPtr in
+            audio.withUnsafeBufferPointer { srcPtr in
+                let src = srcPtr.baseAddress!
+                let dst = dstPtr.baseAddress! + padLength + 1
+                var negPreemph = -preemph
+                vDSP_vsma(
+                    src, 1,
+                    &negPreemph,
+                    src + 1, 1,
+                    dst, 1,
+                    vDSP_Length(audioCount - 1)
+                )
+            }
         }
 
         // Allocate output: [nMels, numFrames] in row-major order
@@ -246,6 +257,114 @@ public final class NeMoMelSpectrogram {
         return (mel: mel, melLength: numFrames, numFrames: numFrames)
     }
 
+    /// Compute mel spectrogram and return as flat array for MLMultiArray compatibility.
+    ///
+    /// - Note: Uses frame count formula `audioCount / hopLength` (different from `computeFlat()` which uses
+    ///   NeMo's center=True formula). This matches Sortformer's expected input format.
+    /// - Parameters:
+    ///   - audio: Audio samples at 16kHz
+    ///   - lastAudioSample: The last audio sample that's not in the audio buffer. Used to initialize the preemphasis state
+    /// - Returns: (mel, mel_length, numFrames) where mel is flat [numFrames * nMels] (transposed layout)
+    public func computeFlatTransposed(
+        audio: [Float], lastAudioSample: Float = 0
+    ) -> (mel: [Float], melLength: Int, numFrames: Int) {
+        let audioCount = audio.count
+        let numFrames = audioCount / hopLength
+
+        guard numFrames > 0 else {
+            return (mel: [Float](repeating: 0, count: nMels), melLength: 0, numFrames: 1)
+        }
+
+        // Step 1: Apply preemphasis filter using vDSP (y[n] = x[n] - preemph * x[n-1])
+        // This will be copied into an already padded buffer to save time.
+
+        let padLength = nFFT / 2
+        let paddedCount = audioCount + 2 * padLength
+        var paddedAudio = [Float](repeating: 0, count: paddedCount)
+
+        paddedAudio[padLength] = audio[0] - preemph * lastAudioSample
+
+        // Compute x[n] - preemph * x[n-1] vectorized
+        paddedAudio.withUnsafeMutableBufferPointer { dstPtr in
+            audio.withUnsafeBufferPointer { srcPtr in
+                let src = srcPtr.baseAddress!
+                let dst = dstPtr.baseAddress! + padLength + 1
+                var negPreemph = -preemph
+                vDSP_vsma(
+                    src, 1,
+                    &negPreemph,
+                    src + 1, 1,
+                    dst, 1,
+                    vDSP_Length(audioCount - 1)
+                )
+            }
+        }
+
+        // Allocate output: [numFrames, nMels] in row-major order (transposed layout for Sortformer)
+        var mel = [Float](repeating: 0, count: nMels * numFrames)
+        let numFreqBins = nFFT / 2 + 1
+
+        // Window centering offset
+        let windowOffset = (nFFT - winLength) / 2
+
+        // Temporary buffer for mel values of current frame
+        var melFrame = [Float](repeating: 0, count: nMels)
+
+        // Process each frame
+        for frameIdx in 0..<numFrames {
+            let startIdx = frameIdx * hopLength
+
+            // Clear frame buffer
+            vDSP_vclr(&frame, 1, vDSP_Length(nFFT))
+
+            // Extract and window using vDSP_vmul
+            let audioStart = startIdx + windowOffset
+            let availableSamples = min(winLength, paddedCount - audioStart)
+
+            if availableSamples > 0 {
+                paddedAudio.withUnsafeBufferPointer { paddedPtr in
+                    hannWindow.withUnsafeBufferPointer { windowPtr in
+                        frame.withUnsafeMutableBufferPointer { framePtr in
+                            vDSP_vmul(
+                                paddedPtr.baseAddress! + audioStart, 1,
+                                windowPtr.baseAddress!, 1,
+                                framePtr.baseAddress! + windowOffset, 1,
+                                vDSP_Length(availableSamples)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Compute power spectrum using reusable buffers
+            computePowerSpectrumInPlace()
+
+            // Apply mel filterbank using vDSP matrix-vector multiply
+            // melFrame = melFilterbankFlat * powerSpec (matrix [nMels x numFreqBins] * vector [numFreqBins])
+            melFilterbankFlat.withUnsafeBufferPointer { filterPtr in
+                powerSpec.withUnsafeBufferPointer { specPtr in
+                    melFrame.withUnsafeMutableBufferPointer { outPtr in
+                        vDSP_mmul(
+                            filterPtr.baseAddress!, 1,
+                            specPtr.baseAddress!, 1,
+                            outPtr.baseAddress!, 1,
+                            vDSP_Length(nMels),
+                            vDSP_Length(1),
+                            vDSP_Length(numFreqBins)
+                        )
+                    }
+                }
+            }
+
+            // Apply log(x + guard_value) and store in transposed layout [frameIdx, melIdx]
+            for melIdx in 0..<nMels {
+                mel[frameIdx * nMels + melIdx] = log(melFrame[melIdx] + logZeroGuard)
+            }
+        }
+
+        return (mel: mel, melLength: numFrames, numFrames: numFrames)
+    }
+
     /// Compute power spectrum in-place using pre-allocated buffers
     private func computePowerSpectrumInPlace() {
         guard let setup = fftSetup else { return }
@@ -253,7 +372,7 @@ public final class NeMoMelSpectrogram {
         // Copy frame to real input and clear imaginary
         frame.withUnsafeBufferPointer { src in
             realIn.withUnsafeMutableBufferPointer { dst in
-                memcpy(dst.baseAddress!, src.baseAddress!, nFFT * MemoryLayout<Float>.size)
+                _ = memcpy(dst.baseAddress!, src.baseAddress!, nFFT * MemoryLayout<Float>.size)
             }
         }
         vDSP_vclr(&imagIn, 1, vDSP_Length(nFFT))
@@ -285,6 +404,9 @@ public final class NeMoMelSpectrogram {
 
     // MARK: - Private Methods
 
+    /// Compute power spectrum with per-call buffer allocation.
+    /// - Note: This method allocates temporary buffers on each call. It's only used by `compute()`
+    ///   which is kept for API compatibility. For performance-critical paths, use `computePowerSpectrumInPlace()`.
     private func computePowerSpectrum(frame: [Float]) -> [Float] {
         guard let setup = fftSetup else {
             return [Float](repeating: 0, count: nFFT / 2 + 1)
@@ -292,7 +414,7 @@ public final class NeMoMelSpectrogram {
 
         // Split into real and imaginary parts for vDSP
         var realIn = [Float](repeating: 0, count: nFFT)
-        var imagIn = [Float](repeating: 0, count: nFFT)
+        let imagIn = [Float](repeating: 0, count: nFFT)
         var realOut = [Float](repeating: 0, count: nFFT)
         var imagOut = [Float](repeating: 0, count: nFFT)
 
