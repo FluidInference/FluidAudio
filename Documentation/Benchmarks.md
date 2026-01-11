@@ -298,13 +298,13 @@ Real-time streaming ASR with End-of-Utterance detection using the Parakeet EOU 1
 
 Model: [FluidInference/parakeet-realtime-eou-120m-coreml](https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml)
 
-Hardware: Apple M2, 2022, masOS 26
+Hardware: Apple M2, 2022, macOS 26
 
 ### LibriSpeech test-clean (2620 files, 5.40h audio)
 
 | Chunk Size | WER (Avg) | RTFx | Total Time |
 |------------|-----------|------|------------|
-| 320ms      | 4.92%     | 12.48x | 1558s (26m) |
+| 320ms      | 4.87%     | 12.48x | 1558s (26m) |
 | 160ms      | 8.29%     | 4.78x  | 4070s (68m) |
 
 
@@ -452,4 +452,47 @@ IS1001a          79.0     86.8      7.0      5.0     66.9 10/4           64.5
 ------------------------------------------------------------------------------------------
 AVERAGE          43.0     57.5      5.0      5.6     32.3         -     69.4
 ==========================================================================================
+```
+
+## Sortformer Streaming Diarization
+
+NVIDIA's Sortformer model for streaming speaker diarization, converted to CoreML.
+
+Model: [FluidInference/diar-streaming-sortformer-coreml](https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml)
+
+Hardware: 2024 MacBook Pro, M4 Pro, 48GB RAM
+
+### AMI SDM Dataset (NVIDIA High-Latency Config - 30.4s chunks)
+
+```bash
+swift run fluidaudio sortformer-benchmark --nvidia-high-latency --hf --auto-download
+```
+
+```text
+================================================================================
+SORTFORMER BENCHMARK SUMMARY
+================================================================================
+Results Sorted by DER:
+----------------------------------------------------------------------
+Meeting        DER %    Miss %     FA %     SE %   Speakers     RTFx
+----------------------------------------------------------------------
+IS1009b          16.2     10.5      0.5      5.2 4/4           127.7
+IS1009d          22.7     15.3      1.1      6.3 4/4           126.5
+ES2004b          23.8     18.7      0.2      5.0 4/4           126.6
+ES2004c          23.9     17.9      0.3      5.7 4/4           126.7
+IS1009a          26.9     15.9      1.6      9.4 4/4           125.7
+ES2004d          28.9     19.5      0.3      9.1 4/4           125.2
+TS3003b          31.1     27.2      0.6      3.3 4/4           124.6
+EN2002c          31.3     20.0      0.2     11.1 4/3           125.8
+ES2004a          33.6     24.5      0.2      8.9 4/4           123.2
+EN2002b          33.8     20.4      0.6     12.9 4/4           126.6
+TS3003c          34.6     31.1      0.3      3.1 4/4           124.0
+EN2002a          35.8     20.3      0.4     15.0 4/4           122.1
+EN2002d          37.0     20.1      0.4     16.5 4/4           126.5
+IS1009c          37.3     12.7      0.9     23.7 4/4           125.1
+TS3003d          38.4     31.9      0.2      6.3 4/4           124.1
+TS3003a          41.8     36.8      0.6      4.4 4/4           123.7
+----------------------------------------------------------------------
+AVERAGE          31.1     21.4      0.5      9.1         -    125.3
+======================================================================
 ```

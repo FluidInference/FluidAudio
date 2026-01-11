@@ -52,6 +52,10 @@ struct FluidAudioCLI {
             await ParakeetEouCommand.main(Array(arguments.dropFirst(2)))
         case "ctc-earnings-benchmark":
             await CtcEarningsBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
+        case "sortformer":
+            await SortformerCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "sortformer-benchmark":
+            await SortformerBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -80,6 +84,8 @@ struct FluidAudioCLI {
                 tts                     Synthesize speech from text using Kokoro TTS
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
                 ctc-earnings-benchmark  Run CTC keyword spotting benchmark on Earnings22
+                sortformer              Run Sortformer streaming diarization
+                sortformer-benchmark    Run Sortformer benchmark on AMI dataset
                 download                Download evaluation datasets
                 help                    Show this help message
 

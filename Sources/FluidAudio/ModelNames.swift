@@ -11,6 +11,7 @@ public enum Repo: String, CaseIterable {
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
+    case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
 
     /// Repository slug (without owner)
     public var name: String {
@@ -33,6 +34,8 @@ public enum Repo: String, CaseIterable {
             return "speaker-diarization-coreml"
         case .kokoro:
             return "kokoro-82m-coreml"
+        case .sortformer:
+            return "diar-streaming-sortformer-coreml"
         }
     }
 
@@ -45,6 +48,8 @@ public enum Repo: String, CaseIterable {
             return "alexwengg/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
+        case .sortformer:
+            return "FluidInference/diar-streaming-sortformer-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -71,6 +76,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
             return "parakeet-eou-streaming/320ms"
+        case .sortformer:
+            return "sortformer"
         default:
             return name
         }
@@ -194,6 +201,68 @@ public enum ModelNames {
         ]
     }
 
+    /// Sortformer streaming diarization model names
+    public enum Sortformer {
+        public enum Variant: CaseIterable, Sendable {
+            case `default`
+            case nvidiaLowLatency
+            case nvidiaHighLatency
+
+            public var name: String {
+                switch self {
+                case .default:
+                    return "Sortformer"
+                case .nvidiaLowLatency:
+                    return "SortformerNvidiaLow"
+                case .nvidiaHighLatency:
+                    return "SortformerNvidiaHigh"
+                }
+            }
+
+            public var defaultConfiguration: SortformerConfig {
+                switch self {
+                case .default:
+                    return .default
+                case .nvidiaLowLatency:
+                    return .nvidiaLowLatency
+                case .nvidiaHighLatency:
+                    return .nvidiaHighLatency
+                }
+            }
+
+            public var fileName: String {
+                return "\(name).mlmodelc"
+            }
+
+            public func isCompatible(with config: SortformerConfig) -> Bool {
+                defaultConfiguration.isCompatible(with: config)
+            }
+        }
+
+        /// Lowest latency for streaming
+        public static let defaultVariant: Variant = .default
+
+        /// Bundle name for a specific variant
+        public static func bundle(for variant: Variant) -> String {
+            return variant.fileName
+        }
+
+        /// Bundle name for a given configuration
+        public static func bundle(for config: SortformerConfig) -> String? {
+            return Variant.allCases.first { $0.isCompatible(with: config) }?.fileName
+        }
+
+        /// Default bundle name
+        public static var defaultBundle: String {
+            return defaultVariant.fileName
+        }
+
+        /// All Sortformer bundle models required by the downloader
+        public static var requiredModels: Set<String> {
+            Set(Variant.allCases.map(\.fileName))
+        }
+    }
+
     /// TTS model names
     public enum TTS {
 
@@ -238,7 +307,7 @@ public enum ModelNames {
 
         /// All Kokoro model bundles required by the downloader.
         public static var requiredModels: Set<String> {
-            Set(Variant.allCases.map { $0.fileName })
+            Set(Variant.allCases.map(\.fileName))
         }
     }
 
@@ -259,7 +328,8 @@ public enum ModelNames {
             return ModelNames.Diarizer.requiredModels
         case .kokoro:
             return ModelNames.TTS.requiredModels
+        case .sortformer:
+            return ModelNames.Sortformer.requiredModels
         }
     }
-
 }
