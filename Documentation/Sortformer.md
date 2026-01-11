@@ -10,6 +10,19 @@ Sortformer is an end-to-end neural speaker diarization model that answers "who s
 - ~80ms frame resolution (8x subsampling of 10ms mel frames)
 - CoreML-optimized for Apple Silicon
 
+## Sortformer vs DiarizerManager (Pyannote-based)
+
+**Sortformer** handles noisy environments and overlapping speakers well, but limited to 4 speakers and isn't as good as pyannote in clean environments.
+
+**DiarizerManager** works better in clean rooms and detects multi-room speech, but struggles with background noise.
+
+| Environment | Sortformer | DiarizerManager |
+|-------------|:----------:|:---------------:|
+| Clean/silent room | Good | Best |
+| Background noise | Best | Poor |
+| Speech from another room | Poor | Good |
+| More than 4 speakers | No | Yes |
+
 ## Architecture
 
 ### Processing Pipeline
