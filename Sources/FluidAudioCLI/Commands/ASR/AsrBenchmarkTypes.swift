@@ -5,6 +5,7 @@
 //  Copyright © 2025 Brandon Weng. All rights reserved.
 //
 
+#if os(macOS)
 import FluidAudio
 import Foundation
 
@@ -159,3 +160,4 @@ public struct LibriSpeechFile {
     public let audioPath: URL
     public let transcript: String
 }
+#endif
