@@ -23,7 +23,7 @@ import OSLog
 /// // Or complete file
 /// let result = try diarizer.processComplete(audioSamples)
 /// ```
-public final class SortformerDiarizerPipeline {
+public final class SortformerDiarizer {
     /// Lock for thread-safe access to mutable state
     private let lock = NSLock()
 
