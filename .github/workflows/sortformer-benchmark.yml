@@ -1,0 +1,174 @@
+name: Sortformer High-Latency Benchmark
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Sortformer High-Latency ES2004a
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Cache Swift packages and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-sortformer-${{ hashFiles('Package.swift') }}
+
+      - name: Cache Sortformer models
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/FluidAudio/Models/diar-streaming-sortformer-coreml
+          key: ${{ runner.os }}-sortformer-models-high-latency
+
+      - name: Cache AMI dataset
+        uses: actions/cache@v4
+        with:
+          path: ~/FluidAudioDatasets/ami_official
+          key: ${{ runner.os }}-ami-dataset
+
+      - name: Build package
+        run: swift build -c release
+
+      - name: Run Sortformer High-Latency Benchmark
+        id: benchmark
+        run: |
+          echo "🚀 Running Sortformer high-latency benchmark on ES2004a..."
+
+          BENCHMARK_START=$(date +%s)
+
+          swift run fluidaudiocli sortformer-benchmark \
+            --single-file ES2004a \
+            --nvidia-high-latency \
+            --hf \
+            --auto-download \
+            --output benchmark_results.json
+
+          if [ -f benchmark_results.json ]; then
+            echo "SUCCESS=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Benchmark failed - no results file generated"
+            echo "SUCCESS=false" >> $GITHUB_OUTPUT
+          fi
+
+          BENCHMARK_END=$(date +%s)
+          EXECUTION_TIME=$((BENCHMARK_END - BENCHMARK_START))
+          EXECUTION_MINS=$((EXECUTION_TIME / 60))
+          EXECUTION_SECS=$((EXECUTION_TIME % 60))
+
+          echo "EXECUTION_TIME=${EXECUTION_MINS}m ${EXECUTION_SECS}s" >> $GITHUB_OUTPUT
+        timeout-minutes: 15
+
+      - name: Show benchmark_results.json
+        if: always()
+        run: |
+          echo "--- benchmark_results.json ---"
+          cat benchmark_results.json || echo "benchmark_results.json not found"
+          echo "-----------------------------"
+
+      - name: Extract benchmark metrics
+        id: extract
+        if: always()
+        run: |
+          if [ ! -f benchmark_results.json ]; then
+            echo "❌ benchmark_results.json not found"
+            echo "DER=0" >> $GITHUB_OUTPUT
+            echo "MISS=0" >> $GITHUB_OUTPUT
+            echo "FA=0" >> $GITHUB_OUTPUT
+            echo "SE=0" >> $GITHUB_OUTPUT
+            echo "RTF=0" >> $GITHUB_OUTPUT
+            echo "DETECTED=0" >> $GITHUB_OUTPUT
+            echo "GROUND_TRUTH=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          DER=$(jq '.[0].der // 0' benchmark_results.json)
+          MISS=$(jq '.[0].missRate // 0' benchmark_results.json)
+          FA=$(jq '.[0].falseAlarmRate // 0' benchmark_results.json)
+          SE=$(jq '.[0].speakerErrorRate // 0' benchmark_results.json)
+          RTF=$(jq '.[0].rtfx // 0' benchmark_results.json)
+          DETECTED=$(jq '.[0].detectedSpeakers // 0' benchmark_results.json)
+          GROUND_TRUTH=$(jq '.[0].groundTruthSpeakers // 0' benchmark_results.json)
+
+          echo "DER=${DER}" >> $GITHUB_OUTPUT
+          echo "MISS=${MISS}" >> $GITHUB_OUTPUT
+          echo "FA=${FA}" >> $GITHUB_OUTPUT
+          echo "SE=${SE}" >> $GITHUB_OUTPUT
+          echo "RTF=${RTF}" >> $GITHUB_OUTPUT
+          echo "DETECTED=${DETECTED}" >> $GITHUB_OUTPUT
+          echo "GROUND_TRUTH=${GROUND_TRUTH}" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with Benchmark Results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const der = parseFloat('${{ steps.extract.outputs.DER }}');
+            const miss = parseFloat('${{ steps.extract.outputs.MISS }}');
+            const fa = parseFloat('${{ steps.extract.outputs.FA }}');
+            const se = parseFloat('${{ steps.extract.outputs.SE }}');
+            const rtf = parseFloat('${{ steps.extract.outputs.RTF }}');
+            const detected = '${{ steps.extract.outputs.DETECTED }}';
+            const groundTruth = '${{ steps.extract.outputs.GROUND_TRUTH }}';
+            const executionTime = '${{ steps.benchmark.outputs.EXECUTION_TIME }}' || 'N/A';
+
+            let comment = '## Sortformer High-Latency Benchmark Results\n\n';
+            comment += '### ES2004a Performance (30.4s latency config)\n\n';
+            comment += '| Metric | Value | Target | Status |\n';
+            comment += '|--------|-------|--------|--------|\n';
+            comment += `| **DER** | **${der.toFixed(1)}%** | <35% | ${der < 35 ? '✅' : '⚠️'} |\n`;
+            comment += `| Miss Rate | ${miss.toFixed(1)}% | - | - |\n`;
+            comment += `| False Alarm | ${fa.toFixed(1)}% | - | - |\n`;
+            comment += `| Speaker Error | ${se.toFixed(1)}% | - | - |\n`;
+            comment += `| **RTFx** | **${rtf.toFixed(1)}x** | >1.0x | ${rtf > 1.0 ? '✅' : '⚠️'} |\n`;
+            comment += `| Speakers | ${detected}/${groundTruth} | - | - |\n\n`;
+
+            comment += `<sub>Sortformer High-Latency • ES2004a • Runtime: ${executionTime} • ${new Date().toISOString()}</sub>\n\n`;
+            comment += '<!-- sortformer-benchmark-high-latency -->';
+
+            try {
+              const comments = await github.rest.issues.listComments({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              });
+
+              const existingComment = comments.data.find(c =>
+                c.body.includes('<!-- sortformer-benchmark-high-latency -->')
+              );
+
+              if (existingComment) {
+                await github.rest.issues.updateComment({
+                  comment_id: existingComment.id,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              }
+            } catch (error) {
+              console.error('Failed to post comment:', error.message);
+            }

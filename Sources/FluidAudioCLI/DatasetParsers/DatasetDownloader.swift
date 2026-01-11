@@ -51,23 +51,20 @@ struct DatasetDownloader {
         // Download AMI annotations first (required for proper benchmarking)
         await downloadAMIAnnotations(force: force)
 
-        // Core AMI test set - smaller subset for initial benchmarking
+        // Official AMI SDM test set (16 meetings) - matches NeMo evaluation
         let commonMeetings: [String]
         if let singleFile = singleFile {
             commonMeetings = [singleFile]
             logger.info("📋 Downloading single file: \(singleFile)")
         } else {
             commonMeetings = [
-                "ES2002a",
-                "ES2003a",
-                "ES2004a",
-                "ES2005a",
-                "IS1000a",
-                "IS1001a",
-                "IS1002b",
-                "TS3003a",
-                "TS3004a",
+                // Full 16-meeting AMI SDM test set
+                "EN2002a", "EN2002b", "EN2002c", "EN2002d",
+                "ES2004a", "ES2004b", "ES2004c", "ES2004d",
+                "IS1009a", "IS1009b", "IS1009c", "IS1009d",
+                "TS3003a", "TS3003b", "TS3003c", "TS3003d",
             ]
+            logger.info("📋 Downloading official AMI SDM test set (16 meetings)")
         }
 
         var downloadedFiles = 0
