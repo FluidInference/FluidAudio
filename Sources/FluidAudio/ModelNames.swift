@@ -7,6 +7,7 @@ public enum Repo: String, CaseIterable {
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
+    case nemotronStreaming = "alexwengg/nemotron-speech-streaming-en-0.6b-coreml"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
@@ -24,6 +25,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
             return "parakeet-realtime-eou-120m-coreml/320ms"
+        case .nemotronStreaming:
+            return "nemotron-speech-streaming-en-0.6b-coreml"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -38,6 +41,8 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
+        case .nemotronStreaming:
+            return "alexwengg/nemotron-speech-streaming-en-0.6b-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
         default:
@@ -52,6 +57,8 @@ public enum Repo: String, CaseIterable {
             return "160ms"
         case .parakeetEou320:
             return "320ms"
+        case .nemotronStreaming:
+            return "models"
         default:
             return nil
         }
@@ -66,6 +73,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
             return "parakeet-eou-streaming/320ms"
+        case .nemotronStreaming:
+            return "nemotron-streaming"
         case .sortformer:
             return "sortformer"
         default:
@@ -171,6 +180,31 @@ public enum ModelNames {
             decoderFile,
             jointFile,
             vocab,
+        ]
+    }
+
+    /// Nemotron Speech Streaming 0.6B model names
+    /// NVIDIA's streaming FastConformer RNNT with encoder cache
+    public enum NemotronStreaming {
+        public static let preprocessor = "preprocessor"
+        public static let encoder = "encoder"
+        public static let decoder = "decoder"
+        public static let joint = "joint"
+        public static let tokenizer = "tokenizer.json"
+        public static let metadata = "metadata.json"
+
+        public static let preprocessorFile = preprocessor + ".mlmodelc"
+        public static let encoderFile = encoder + ".mlmodelc"
+        public static let decoderFile = decoder + ".mlmodelc"
+        public static let jointFile = joint + ".mlmodelc"
+
+        public static let requiredModels: Set<String> = [
+            preprocessorFile,
+            encoderFile,
+            decoderFile,
+            jointFile,
+            tokenizer,
+            metadata,
         ]
     }
 
@@ -292,6 +326,8 @@ public enum ModelNames {
             return ModelNames.ASR.requiredModels
         case .parakeetEou160, .parakeetEou320:
             return ModelNames.ParakeetEOU.requiredModels
+        case .nemotronStreaming:
+            return ModelNames.NemotronStreaming.requiredModels
         case .diarizer:
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels
