@@ -3,7 +3,8 @@ import Foundation
 import OSLog
 
 struct ChunkProcessor {
-    let audioSamples: [Float]
+    let sampleSource: StreamingAudioSampleSource
+    let totalSamples: Int
 
     private let logger = AppLogger(category: "ChunkProcessor")
     private typealias TokenWindow = (token: Int, timestamp: Int, confidence: Float)
@@ -36,6 +37,17 @@ struct ChunkProcessor {
         return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
 
+    /// Initialize with a streaming audio sample source for memory-efficient processing.
+    init(sampleSource: StreamingAudioSampleSource) {
+        self.sampleSource = sampleSource
+        self.totalSamples = sampleSource.sampleCount
+    }
+
+    /// Convenience initializer for in-memory audio samples.
+    init(audioSamples: [Float]) {
+        self.init(sampleSource: ArrayAudioSampleSource(samples: audioSamples))
+    }
+
     func process(
         using manager: AsrManager,
         startTime: Date,
@@ -44,25 +56,24 @@ struct ChunkProcessor {
         var chunkOutputs: [[TokenWindow]] = []
 
         var chunkStart = 0
-        var chunkIndex = 0
         var chunkDecoderState = TdtDecoderState.make()
 
-        while chunkStart < audioSamples.count {
+        while chunkStart < totalSamples {
             let candidateEnd = chunkStart + chunkSamples
-            let isLastChunk = candidateEnd >= audioSamples.count
-            let chunkEnd = isLastChunk ? audioSamples.count : candidateEnd
+            let isLastChunk = candidateEnd >= totalSamples
+            let chunkEnd = isLastChunk ? totalSamples : candidateEnd
+            let chunkLength = chunkEnd - chunkStart
 
-            if chunkEnd <= chunkStart {
+            if chunkLength <= 0 {
                 break
             }
 
             chunkDecoderState.reset()
 
-            let chunkRange = chunkStart..<chunkEnd
-            let chunkSamplesSlice = Array(audioSamples[chunkRange])
+            let chunkSamplesArray = try readSamples(offset: chunkStart, count: chunkLength)
 
             let (windowTokens, windowTimestamps, windowConfidences) = try await transcribeChunk(
-                samples: chunkSamplesSlice,
+                samples: chunkSamplesArray,
                 chunkStart: chunkStart,
                 isLastChunk: isLastChunk,
                 using: manager,
@@ -79,15 +90,12 @@ struct ChunkProcessor {
             }
             chunkOutputs.append(windowData)
 
-            chunkIndex += 1
-
             if isLastChunk {
                 break
             }
 
             if let progressHandler {
-                let progress = min(
-                    1.0, max(0.0, Double(chunkEnd) / Double(audioSamples.count)))
+                let progress = min(1.0, max(0.0, Double(chunkEnd) / Double(totalSamples)))
                 await progressHandler(progress)
             }
 
@@ -100,7 +108,7 @@ struct ChunkProcessor {
                 timestamps: [],
                 confidences: [],
                 encoderSequenceLength: 0,
-                audioSamples: audioSamples,
+                audioSamples: [],
                 processingTime: Date().timeIntervalSince(startTime)
             )
         }
@@ -124,9 +132,17 @@ struct ChunkProcessor {
             timestamps: allTimestamps,
             confidences: allConfidences,
             encoderSequenceLength: 0,  // Not relevant for chunk processing
-            audioSamples: audioSamples,
+            audioSamples: [],
             processingTime: Date().timeIntervalSince(startTime)
         )
+    }
+
+    private func readSamples(offset: Int, count: Int) throws -> [Float] {
+        var buffer = [Float](repeating: 0, count: count)
+        try buffer.withUnsafeMutableBufferPointer { pointer in
+            try sampleSource.copySamples(into: pointer.baseAddress!, offset: offset, count: count)
+        }
+        return buffer
     }
 
     private func transcribeChunk(

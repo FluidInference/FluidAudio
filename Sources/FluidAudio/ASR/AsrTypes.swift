@@ -6,14 +6,28 @@ public struct ASRConfig: Sendable {
     public let sampleRate: Int
     public let tdtConfig: TdtConfig
 
+    /// Enable streaming mode for large files to reduce memory usage.
+    /// When enabled, files larger than `streamingThreshold` samples will be processed
+    /// using streaming to maintain constant memory usage.
+    public let streamingEnabled: Bool
+
+    /// File size threshold in samples for enabling streaming.
+    /// Files with more samples than this threshold will use streaming mode.
+    /// Default: 480,000 samples (~30 seconds at 16kHz)
+    public let streamingThreshold: Int
+
     public static let `default` = ASRConfig()
 
     public init(
         sampleRate: Int = 16000,
-        tdtConfig: TdtConfig = .default
+        tdtConfig: TdtConfig = .default,
+        streamingEnabled: Bool = true,
+        streamingThreshold: Int = 480_000
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
+        self.streamingEnabled = streamingEnabled
+        self.streamingThreshold = streamingThreshold
     }
 }
 
@@ -80,6 +94,8 @@ public enum ASRError: Error, LocalizedError {
     case processingFailed(String)
     case modelCompilationFailed
     case unsupportedPlatform(String)
+    case streamingConversionFailed(Error)
+    case fileAccessFailed(URL, Error)
 
     public var errorDescription: String? {
         switch self {
@@ -94,7 +110,11 @@ public enum ASRError: Error, LocalizedError {
         case .modelCompilationFailed:
             return "CoreML model compilation failed after recovery attempts."
         case .unsupportedPlatform(let message):
-            return "Unsupported platform: \(message)"
+            return message
+        case .streamingConversionFailed(let error):
+            return "Streaming audio conversion failed: \(error.localizedDescription)"
+        case .fileAccessFailed(let url, let error):
+            return "Failed to access audio file at \(url.path): \(error.localizedDescription)"
         }
     }
 }

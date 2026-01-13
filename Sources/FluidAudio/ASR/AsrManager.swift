@@ -301,17 +301,91 @@ public final class AsrManager {
     /// Performs speech-to-text transcription on the audio file at the provided URL. The decoder state is
     /// automatically reset after transcription completes, ensuring each transcription call is independent.
     ///
+    /// For large files (exceeding `config.streamingThreshold`), automatically uses streaming mode
+    /// to maintain constant memory usage regardless of file size.
+    ///
     /// - Parameters:
     ///   - url: The URL to the audio file
     ///   - source: The audio source type (defaults to .system)
     /// - Returns: An ASRResult containing the transcribed text and token timings
     /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
     public func transcribe(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+        // Check file size to decide streaming vs memory loading
+        if config.streamingEnabled {
+            let audioFile = try AVAudioFile(forReading: url)
+            let inputFormat = audioFile.processingFormat
+            let sampleRateRatio = Double(config.sampleRate) / inputFormat.sampleRate
+            let estimatedSamples = Int((Double(audioFile.length) * sampleRateRatio).rounded(.up))
+
+            if estimatedSamples > config.streamingThreshold {
+                return try await transcribeStreaming(url, source: source)
+            }
+        }
+
         let audioFloatArray = try audioConverter.resampleAudioFile(url)
-
         let result = try await transcribe(audioFloatArray, source: source)
-
         return result
+    }
+
+    /// Transcribe audio from a file URL using streaming mode.
+    ///
+    /// Memory-efficient transcription that processes audio in chunks, maintaining constant
+    /// memory usage (~1.2MB) regardless of file size. Ideal for long audio files.
+    ///
+    /// - Parameters:
+    ///   - url: The URL to the audio file
+    ///   - source: The audio source type (defaults to .system)
+    /// - Returns: An ASRResult containing the transcribed text and token timings
+    /// - Throws: ASRError if transcription fails, models are not initialized, or the file cannot be read
+    public func transcribeStreaming(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
+        guard isAvailable else { throw ASRError.notInitialized }
+
+        let startTime = Date()
+
+        // Create a disk-backed source for memory-efficient access
+        let factory = StreamingAudioSourceFactory()
+        let (sampleSource, _) = try factory.makeDiskBackedSource(
+            from: url,
+            targetSampleRate: config.sampleRate
+        )
+
+        let totalSamples = sampleSource.sampleCount
+        guard totalSamples >= 16_000 else {
+            sampleSource.cleanup()
+            throw ASRError.invalidAudioData
+        }
+
+        let shouldEmitProgress = totalSamples > 240_000
+        if shouldEmitProgress {
+            _ = await progressEmitter.ensureSession()
+        }
+
+        do {
+            let processor = ChunkProcessor(sampleSource: sampleSource)
+            let result = try await processor.process(
+                using: self,
+                startTime: startTime,
+                progressHandler: { [weak self] progress in
+                    guard let self else { return }
+                    await self.progressEmitter.report(progress: progress)
+                }
+            )
+
+            sampleSource.cleanup()
+
+            try await self.resetDecoderState()
+            if shouldEmitProgress {
+                await progressEmitter.finishSession()
+            }
+
+            return result
+        } catch {
+            sampleSource.cleanup()
+            if shouldEmitProgress {
+                await progressEmitter.failSession(error)
+            }
+            throw error
+        }
     }
 
     /// Transcribe audio from raw float samples.
