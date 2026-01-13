@@ -361,10 +361,8 @@ public final class AsrManager {
         }
 
         do {
-            let processor = StreamingChunkProcessor()
+            let processor = ChunkProcessor(sampleSource: sampleSource)
             let result = try await processor.process(
-                from: sampleSource,
-                totalSamples: totalSamples,
                 using: self,
                 startTime: startTime,
                 progressHandler: { [weak self] progress in
