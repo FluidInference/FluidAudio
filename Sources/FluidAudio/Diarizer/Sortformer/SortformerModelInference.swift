@@ -49,9 +49,9 @@ public struct SortformerModels {
 
 // MARK: - Model Loading
 
-extension SortformerModelInference {
+extension SortformerModels {
 
-    private static let logger = AppLogger(category: "SortformerModelInference")
+    private static let logger = AppLogger(category: "SortformerModels")
 
     /// Load models from local file paths (combined pipeline mode).
     ///
@@ -59,12 +59,12 @@ extension SortformerModelInference {
     ///   - preprocessorPath: Path to SortformerPreprocessor.mlpackage
     ///   - mainModelPath: Path to Sortformer.mlpackage
     ///   - configuration: Optional MLModel configuration
-    /// - Returns: Loaded SortformerModelInference
+    /// - Returns: Loaded SortformerModels
     public static func load(
         config: SortformerConfig,
         mainModelPath: URL,
         configuration: MLModelConfiguration? = nil
-    ) async throws -> SortformerModelInference {
+    ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from local paths (combined pipeline mode)")
 
         let startTime = Date()
@@ -82,7 +82,7 @@ extension SortformerModelInference {
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Models loaded in \(String(format: "%.2f", duration))s")
 
-        return try SortformerModelInference(
+        return try SortformerModels(
             config: config,
             main: mainModel,
             compilationDuration: duration
@@ -105,12 +105,12 @@ extension SortformerModelInference {
     /// - Parameters:
     ///   - cacheDirectory: Directory to cache downloaded models (defaults to app support)
     ///   - computeUnits: CoreML compute units to use (default: cpuOnly for consistency)
-    /// - Returns: Loaded SortformerModelInference
+    /// - Returns: Loaded SortformerModels
     public static func loadFromHuggingFace(
         config: SortformerConfig,
         cacheDirectory: URL? = nil,
         computeUnits: MLComputeUnits = .all
-    ) async throws -> SortformerModelInference {
+    ) async throws -> SortformerModels {
         logger.info("Loading Sortformer models from HuggingFace...")
 
         let startTime = Date()
@@ -148,7 +148,7 @@ extension SortformerModelInference {
         let duration = Date().timeIntervalSince(startTime)
         logger.info("Sortformer models loaded from HuggingFace in \(String(format: "%.2f", duration))s")
 
-        return try SortformerModelInference(
+        return try SortformerModels(
             config: config,
             main: sortformer,
             compilationDuration: duration
@@ -158,7 +158,7 @@ extension SortformerModelInference {
 
 // MARK: - Main Model Inference
 
-extension SortformerModelInference {
+extension SortformerModels {
 
     /// Main model output structure
     public struct MainModelOutput {
