@@ -11,6 +11,9 @@ struct FluidAudioCLI {
     static let cliLogger = AppLogger(category: "Main")
 
     static func main() async {
+        // Enable console logging for CLI (visible in release builds)
+        AppLogger.alwaysLogToConsole = true
+
         let arguments = CommandLine.arguments
 
         guard arguments.count > 1 else {

@@ -247,14 +247,14 @@ public actor NemotronStreamingAsrManager {
     /// Process a single audio chunk through the full pipeline
     private func processChunk(_ samples: [Float]) async throws {
         guard let preprocessor = preprocessor,
-              let encoder = encoder,
-              let decoder = decoder,
-              let joint = joint,
-              let cacheChannel = cacheChannel,
-              let cacheTime = cacheTime,
-              let cacheLen = cacheLen,
-              var currentH = hState,
-              var currentC = cState
+            let encoder = encoder,
+            let decoder = decoder,
+            let joint = joint,
+            let cacheChannel = cacheChannel,
+            let cacheTime = cacheTime,
+            let cacheLen = cacheLen,
+            var currentH = hState,
+            var currentC = cState
         else {
             throw ASRError.notInitialized
         }
@@ -334,8 +334,8 @@ public actor NemotronStreamingAsrManager {
                 let decoderOutput = try await decoder.prediction(from: decoderInput)
 
                 guard let decoderOut = decoderOutput.featureValue(for: "decoder_out")?.multiArrayValue,
-                      let hOut = decoderOutput.featureValue(for: "h_out")?.multiArrayValue,
-                      let cOut = decoderOutput.featureValue(for: "c_out")?.multiArrayValue
+                    let hOut = decoderOutput.featureValue(for: "h_out")?.multiArrayValue,
+                    let cOut = decoderOutput.featureValue(for: "c_out")?.multiArrayValue
                 else {
                     throw ASRError.processingFailed("Decoder failed")
                 }

@@ -138,7 +138,8 @@ public class NemotronBenchmark {
             var totalProcessingTime: Double = 0
 
             for (index, file) in filesToProcess.enumerated() {
-                let result = try await processFile(manager: manager, file: file, index: index + 1, total: filesToProcess.count)
+                let result = try await processFile(
+                    manager: manager, file: file, index: index + 1, total: filesToProcess.count)
 
                 totalErrors += result.errors
                 totalWords += result.words
@@ -148,11 +149,15 @@ public class NemotronBenchmark {
                 let runningWer = totalWords > 0 ? Double(totalErrors) / Double(totalWords) * 100.0 : 0.0
 
                 if result.errors > 0 {
-                    logger.info("  [\(index + 1)/\(filesToProcess.count)] \(file.fileName) -> \(result.errors) errs, WER: \(String(format: "%.2f", runningWer))%")
+                    logger.info(
+                        "  [\(index + 1)/\(filesToProcess.count)] \(file.fileName) -> \(result.errors) errs, WER: \(String(format: "%.2f", runningWer))%"
+                    )
                     logger.info("       REF: \(file.transcript.prefix(70))...")
                     logger.info("       HYP: \(result.hypothesis.prefix(70))...")
                 } else {
-                    logger.info("  [\(index + 1)/\(filesToProcess.count)] \(file.fileName) -> 0 errs, WER: \(String(format: "%.2f", runningWer))%")
+                    logger.info(
+                        "  [\(index + 1)/\(filesToProcess.count)] \(file.fileName) -> 0 errs, WER: \(String(format: "%.2f", runningWer))%"
+                    )
                 }
 
                 // Reset manager for next file
@@ -189,7 +194,9 @@ public class NemotronBenchmark {
         let processingTime: Double
     }
 
-    private func processFile(manager: NemotronStreamingAsrManager, file: LibriSpeechFile, index: Int, total: Int) async throws -> FileResult {
+    private func processFile(
+        manager: NemotronStreamingAsrManager, file: LibriSpeechFile, index: Int, total: Int
+    ) async throws -> FileResult {
         // Load audio
         let audioFile = try AVAudioFile(forReading: file.audioPath)
         let buffer = AVAudioPCMBuffer(
@@ -284,9 +291,11 @@ public class NemotronBenchmark {
         let downloadURL: String
         switch subset {
         case "test-clean":
-            downloadURL = try ModelRegistry.resolveDataset("FluidInference/librispeech", "test-clean.tar.gz").absoluteString
+            downloadURL = try ModelRegistry.resolveDataset("FluidInference/librispeech", "test-clean.tar.gz")
+                .absoluteString
         case "test-other":
-            downloadURL = try ModelRegistry.resolveDataset("FluidInference/librispeech", "test-other.tar.gz").absoluteString
+            downloadURL = try ModelRegistry.resolveDataset("FluidInference/librispeech", "test-other.tar.gz")
+                .absoluteString
         default:
             throw ASRError.processingFailed("Unsupported LibriSpeech subset: \(subset)")
         }
@@ -306,20 +315,22 @@ public class NemotronBenchmark {
         }
 
         // Check default cache location
-        let cacheDir = FileManager.default.homeDirectoryForCurrentUser
+        // Note: downloadRepo appends repo.folderName internally, so we use the parent dir
+        let modelsBaseDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/fluidaudio/models")
-            .appendingPathComponent(Repo.nemotronStreaming.folderName)
+        let cacheDir = modelsBaseDir.appendingPathComponent(Repo.nemotronStreaming.folderName)
 
-        let encoderPath = cacheDir.appendingPathComponent(ModelNames.NemotronStreaming.encoderFile)
+        // Check for encoder in subdirectory (new structure)
+        let encoderPath = cacheDir.appendingPathComponent("encoder/encoder_int8.mlmodelc")
 
         if FileManager.default.fileExists(atPath: encoderPath.path) {
             logger.info("Using cached Nemotron models at \(cacheDir.path)")
             return cacheDir
         }
 
-        // Download models
+        // Download models (downloadRepo appends folderName internally)
         logger.info("Downloading Nemotron models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.nemotronStreaming, to: cacheDir)
+        try await DownloadUtils.downloadRepo(.nemotronStreaming, to: modelsBaseDir)
 
         return cacheDir
     }
@@ -348,11 +359,12 @@ public class NemotronBenchmark {
             if url.pathExtension == "flac" {
                 let fileId = url.deletingPathExtension().lastPathComponent
                 if let transcript = transcripts[fileId] {
-                    files.append(LibriSpeechFile(
-                        fileName: url.lastPathComponent,
-                        audioPath: url,
-                        transcript: transcript
-                    ))
+                    files.append(
+                        LibriSpeechFile(
+                            fileName: url.lastPathComponent,
+                            audioPath: url,
+                            transcript: transcript
+                        ))
                 }
             }
         }
