@@ -96,23 +96,6 @@ final public class AudioConverter {
         return try resampleAudioFile(url)
     }
 
-    /// Stream audio samples from a file in fixed-size chunks.
-    /// Memory-efficient alternative to `resampleAudioFile` for large files.
-    /// - Parameters:
-    ///   - url: URL of the audio file
-    ///   - bufferSize: Size of each buffer in samples (default: 32,768 samples, ~2 seconds at 16kHz)
-    /// - Returns: Streaming reader that yields (samples, offset) tuples on-demand
-    /// - Throws: StreamingAudioError if file cannot be opened
-    public func streamAudioFile(
-        _ url: URL,
-        bufferSize: Int = 32_768
-    ) throws -> StreamingAudioFileReader {
-        return try StreamingAudioFileReader(
-            url: url,
-            targetSampleRate: Int(targetFormat.sampleRate)
-        )
-    }
-
     // MARK: - Private Helpers
 
     /// Resample using AVAudioConverter with raw float arrays

@@ -340,30 +340,31 @@ public final class AsrManager {
     public func transcribeStreaming(_ url: URL, source: AudioSource = .system) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
 
-        let streamingReader = try audioConverter.streamAudioFile(url)
-        let totalSamples = streamingReader.totalSampleCount
-
-        guard totalSamples >= 16_000 else { throw ASRError.invalidAudioData }
-
         let startTime = Date()
-        let shouldEmitProgress = totalSamples > 240_000
 
+        // Create a disk-backed source for memory-efficient access
+        let factory = StreamingAudioSourceFactory()
+        let (sampleSource, _) = try factory.makeDiskBackedSource(
+            from: url,
+            targetSampleRate: config.sampleRate
+        )
+
+        let totalSamples = sampleSource.sampleCount
+        guard totalSamples >= 16_000 else {
+            sampleSource.cleanup()
+            throw ASRError.invalidAudioData
+        }
+
+        let shouldEmitProgress = totalSamples > 240_000
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
         }
 
         do {
-            // Create a disk-backed source for memory-efficient access
-            let factory = StreamingAudioSourceFactory()
-            let (sampleSource, _) = try factory.makeDiskBackedSource(
-                from: url,
-                targetSampleRate: config.sampleRate
-            )
-
             let processor = StreamingChunkProcessor()
             let result = try await processor.process(
                 from: sampleSource,
-                totalSamples: sampleSource.sampleCount,
+                totalSamples: totalSamples,
                 using: self,
                 startTime: startTime,
                 progressHandler: { [weak self] progress in
@@ -372,7 +373,6 @@ public final class AsrManager {
                 }
             )
 
-            // Clean up temp file
             sampleSource.cleanup()
 
             try await self.resetDecoderState()
@@ -382,6 +382,7 @@ public final class AsrManager {
 
             return result
         } catch {
+            sampleSource.cleanup()
             if shouldEmitProgress {
                 await progressEmitter.failSession(error)
             }
