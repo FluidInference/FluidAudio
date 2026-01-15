@@ -219,14 +219,12 @@ public enum ModelNames {
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
 
-        // Encoder variants in subdirectory
+        // Encoder in subdirectory (int8 quantized only)
         public static let encoderInt8File = "encoder/encoder_int8.mlmodelc"
-        public static let encoderFloat32File = "encoder/encoder_float32.mlmodelc"
 
         public static let requiredModels: Set<String> = [
             preprocessorFile,
-            encoderInt8File,  // Encoder is in subdirectory with variants
-            encoderFloat32File,
+            encoderInt8File,
             decoderFile,
             jointFile,
             tokenizer,
