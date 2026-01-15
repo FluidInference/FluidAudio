@@ -11,7 +11,6 @@ public class NemotronBenchmark {
         var maxFiles: Int?
         var subset: String = "test-clean"
         var modelDir: URL?
-        var encoderVariant: NemotronEncoderVariant = .int8
         var chunkSize: NemotronChunkSize = .ms1120
 
         public init() {}
@@ -50,15 +49,6 @@ public class NemotronBenchmark {
                 if i < arguments.count {
                     config.modelDir = URL(fileURLWithPath: arguments[i])
                 }
-            case "--encoder", "-e":
-                i += 1
-                if i < arguments.count {
-                    if arguments[i] == "float32" {
-                        config.encoderVariant = .float32
-                    } else {
-                        config.encoderVariant = .int8
-                    }
-                }
             case "--chunk", "-c":
                 i += 1
                 if i < arguments.count, let ms = Int(arguments[i]) {
@@ -95,7 +85,6 @@ public class NemotronBenchmark {
                 --max-files, -n <count>   Maximum files to process (default: all)
                 --subset, -s <name>       LibriSpeech subset (default: test-clean)
                 --model-dir, -m <path>    Path to Nemotron CoreML models
-                --encoder, -e <variant>   Encoder variant: int8 or float32 (default: int8)
                 --chunk, -c <ms>          Chunk size: 1120, 560, 160, or 80 (default: 1120)
                 --help, -h                Show this help
 
@@ -136,9 +125,9 @@ public class NemotronBenchmark {
             let modelDir = try await getOrDownloadModels()
 
             // 3. Load models
-            logger.info("Loading Nemotron models with \(config.encoderVariant.rawValue) encoder...")
+            logger.info("Loading Nemotron models...")
             let manager = NemotronStreamingAsrManager()
-            try await manager.loadModels(modelDir: modelDir, encoderVariant: config.encoderVariant)
+            try await manager.loadModels(modelDir: modelDir)
             logger.info("Models loaded successfully")
 
             // 4. Get audio files
