@@ -115,6 +115,15 @@ FluidAudio provides two library products:
 
 > **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
+### Platform Wrappers
+
+Building with a different framework? Use one of our official wrappers:
+
+| Platform | Package | Install |
+|----------|---------|---------|
+| **React Native / Expo** | [@fluidinference/react-native-fluidaudio](https://github.com/FluidInference/react-native-fluidaudio) | `npm install @fluidinference/react-native-fluidaudio` |
+| **Rust / Tauri** | [fluidaudio-rs](https://github.com/FluidInference/fluidaudio-rs) | `cargo add fluidaudio-rs` |
+
 ## Configuration
 
 ### Quick Reference
