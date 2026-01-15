@@ -7,7 +7,10 @@ public enum Repo: String, CaseIterable {
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
-    case nemotronStreaming = "alexwengg/nemotron-speech-streaming-en-0.6b-coreml"
+    case nemotronStreaming1120 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/1120ms"
+    case nemotronStreaming560 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/560ms"
+    case nemotronStreaming160 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/160ms"
+    case nemotronStreaming80 = "FluidInference/nemotron-speech-streaming-en-0.6b-coreml/80ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
     case kokoro = "FluidInference/kokoro-82m-coreml"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
@@ -25,8 +28,14 @@ public enum Repo: String, CaseIterable {
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
             return "parakeet-realtime-eou-120m-coreml/320ms"
-        case .nemotronStreaming:
-            return "nemotron-speech-streaming-en-0.6b-coreml"
+        case .nemotronStreaming1120:
+            return "nemotron-speech-streaming-en-0.6b-coreml/1120ms"
+        case .nemotronStreaming560:
+            return "nemotron-speech-streaming-en-0.6b-coreml/560ms"
+        case .nemotronStreaming160:
+            return "nemotron-speech-streaming-en-0.6b-coreml/160ms"
+        case .nemotronStreaming80:
+            return "nemotron-speech-streaming-en-0.6b-coreml/80ms"
         case .diarizer:
             return "speaker-diarization-coreml"
         case .kokoro:
@@ -41,8 +50,8 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
-        case .nemotronStreaming:
-            return "alexwengg/nemotron-speech-streaming-en-0.6b-coreml"
+        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
+            return "FluidInference/nemotron-speech-streaming-en-0.6b-coreml"
         case .sortformer:
             return "FluidInference/diar-streaming-sortformer-coreml"
         default:
@@ -57,8 +66,14 @@ public enum Repo: String, CaseIterable {
             return "160ms"
         case .parakeetEou320:
             return "320ms"
-        case .nemotronStreaming:
-            return "models"
+        case .nemotronStreaming1120:
+            return "nemotron_coreml_1120ms"
+        case .nemotronStreaming560:
+            return "nemotron_coreml_560ms"
+        case .nemotronStreaming160:
+            return "nemotron_coreml_160ms"
+        case .nemotronStreaming80:
+            return "nemotron_coreml_80ms"
         default:
             return nil
         }
@@ -73,8 +88,14 @@ public enum Repo: String, CaseIterable {
             return "parakeet-eou-streaming/160ms"
         case .parakeetEou320:
             return "parakeet-eou-streaming/320ms"
-        case .nemotronStreaming:
-            return "nemotron-streaming"
+        case .nemotronStreaming1120:
+            return "nemotron-streaming/1120ms"
+        case .nemotronStreaming560:
+            return "nemotron-streaming/560ms"
+        case .nemotronStreaming160:
+            return "nemotron-streaming/160ms"
+        case .nemotronStreaming80:
+            return "nemotron-streaming/80ms"
         case .sortformer:
             return "sortformer"
         default:
@@ -331,7 +352,7 @@ public enum ModelNames {
             return ModelNames.ASR.requiredModels
         case .parakeetEou160, .parakeetEou320:
             return ModelNames.ParakeetEOU.requiredModels
-        case .nemotronStreaming:
+        case .nemotronStreaming1120, .nemotronStreaming560, .nemotronStreaming160, .nemotronStreaming80:
             return ModelNames.NemotronStreaming.requiredModels
         case .diarizer:
             if variant == "offline" {

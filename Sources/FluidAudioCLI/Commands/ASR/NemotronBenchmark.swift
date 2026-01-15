@@ -12,6 +12,7 @@ public class NemotronBenchmark {
         var subset: String = "test-clean"
         var modelDir: URL?
         var encoderVariant: NemotronEncoderVariant = .int8
+        var chunkSize: NemotronChunkSize = .ms1120
 
         public init() {}
     }
@@ -58,6 +59,18 @@ public class NemotronBenchmark {
                         config.encoderVariant = .int8
                     }
                 }
+            case "--chunk", "-c":
+                i += 1
+                if i < arguments.count, let ms = Int(arguments[i]) {
+                    switch ms {
+                    case 1120: config.chunkSize = .ms1120
+                    case 560: config.chunkSize = .ms560
+                    case 160: config.chunkSize = .ms160
+                    case 80: config.chunkSize = .ms80
+                    default:
+                        logger.warning("Invalid chunk size: \(ms)ms. Using default 1120ms.")
+                    }
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -83,12 +96,19 @@ public class NemotronBenchmark {
                 --subset, -s <name>       LibriSpeech subset (default: test-clean)
                 --model-dir, -m <path>    Path to Nemotron CoreML models
                 --encoder, -e <variant>   Encoder variant: int8 or float32 (default: int8)
+                --chunk, -c <ms>          Chunk size: 1120, 560, 160, or 80 (default: 1120)
                 --help, -h                Show this help
+
+            Chunk Sizes:
+                1120ms  Original chunk size (1.12s) - best accuracy
+                560ms   Half chunk size (0.56s) - lower latency
+                160ms   Small chunks (0.16s) - very low latency
+                80ms    Minimal chunks (0.08s) - ultra-low latency
 
             Examples:
                 fluidaudio nemotron-benchmark --max-files 100
-                fluidaudio nemotron-benchmark --subset test-other --max-files 50
-                fluidaudio nemotron-benchmark --encoder float32 --max-files 10
+                fluidaudio nemotron-benchmark --chunk 560 --max-files 50
+                fluidaudio nemotron-benchmark --chunk 160 --subset test-other
             """
         )
     }
@@ -96,7 +116,7 @@ public class NemotronBenchmark {
     /// Run the benchmark
     public func run() async {
         logger.info(String(repeating: "=", count: 70))
-        logger.info("NEMOTRON SPEECH STREAMING 0.6B BENCHMARK")
+        logger.info("NEMOTRON SPEECH STREAMING 0.6B BENCHMARK (\(config.chunkSize.rawValue)ms chunks)")
         logger.info(String(repeating: "=", count: 70))
 
         #if DEBUG
@@ -173,6 +193,7 @@ public class NemotronBenchmark {
             logger.info(String(repeating: "=", count: 70))
             logger.info("SUMMARY")
             logger.info(String(repeating: "=", count: 70))
+            logger.info("Chunk size:         \(config.chunkSize.rawValue)ms")
             logger.info("Files processed:    \(filesToProcess.count)")
             logger.info("Total words:        \(totalWords)")
             logger.info("Total errors:       \(totalErrors)")
@@ -314,23 +335,28 @@ public class NemotronBenchmark {
             return modelDir
         }
 
+        let repo = config.chunkSize.repo
+
         // Check default cache location
         // Note: downloadRepo appends repo.folderName internally, so we use the parent dir
         let modelsBaseDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/fluidaudio/models")
-        let cacheDir = modelsBaseDir.appendingPathComponent(Repo.nemotronStreaming.folderName)
+        let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
 
-        // Check for encoder in subdirectory (new structure)
-        let encoderPath = cacheDir.appendingPathComponent("encoder/encoder_int8.mlmodelc")
+        // Check for encoder in subdirectory (supports both compiled and package formats)
+        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/encoder_int8.mlmodelc")
+        let encoderStandardPath = cacheDir.appendingPathComponent("encoder/encoder.mlpackage")
 
-        if FileManager.default.fileExists(atPath: encoderPath.path) {
+        if FileManager.default.fileExists(atPath: encoderInt8Path.path)
+            || FileManager.default.fileExists(atPath: encoderStandardPath.path)
+        {
             logger.info("Using cached Nemotron models at \(cacheDir.path)")
             return cacheDir
         }
 
         // Download models (downloadRepo appends folderName internally)
-        logger.info("Downloading Nemotron models from HuggingFace...")
-        try await DownloadUtils.downloadRepo(.nemotronStreaming, to: modelsBaseDir)
+        logger.info("Downloading Nemotron \(config.chunkSize.rawValue)ms models from HuggingFace...")
+        try await DownloadUtils.downloadRepo(repo, to: modelsBaseDir)
 
         return cacheDir
     }
