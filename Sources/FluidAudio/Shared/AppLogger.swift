@@ -9,6 +9,10 @@ public struct AppLogger: Sendable {
     /// Note: Set this before creating any logger instances.
     nonisolated(unsafe) public static var defaultSubsystem: String = "com.fluidinference"
 
+    /// When true, all log levels (including info) print to console in release builds.
+    /// Set this to true in CLI tools before any logging occurs.
+    nonisolated(unsafe) public static var alwaysLogToConsole: Bool = false
+
     public enum Level: Int, Sendable {
         case debug = 0
         case info
@@ -65,6 +69,7 @@ public struct AppLogger: Sendable {
         #if DEBUG
         logToConsole(level, message)
         #else
+        // In release mode, also log to OSLog
         switch level {
         case .debug:
             osLogger.debug("\(message)")
@@ -74,13 +79,15 @@ public struct AppLogger: Sendable {
             osLogger.notice("\(message)")
         case .warning:
             osLogger.warning("\(message)")
-            logToConsole(level, message)  // Also log warnings to console in release
         case .error:
             osLogger.error("\(message)")
-            logToConsole(level, message)  // Also log errors to console in release
         case .fault:
             osLogger.fault("\(message)")
-            logToConsole(level, message)  // Also log faults to console in release
+        }
+
+        // Log to console if alwaysLogToConsole is enabled or if level >= warning
+        if AppLogger.alwaysLogToConsole || level.rawValue >= Level.warning.rawValue {
+            logToConsole(level, message)
         }
         #endif
     }

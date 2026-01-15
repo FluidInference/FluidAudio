@@ -11,6 +11,9 @@ struct FluidAudioCLI {
     static let cliLogger = AppLogger(category: "Main")
 
     static func main() async {
+        // Enable console logging for CLI (visible in release builds)
+        AppLogger.alwaysLogToConsole = true
+
         let arguments = CommandLine.arguments
 
         guard arguments.count > 1 else {
@@ -54,6 +57,8 @@ struct FluidAudioCLI {
             await SortformerCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "sortformer-benchmark":
             await SortformerBenchmark.run(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron-benchmark":
+            await NemotronBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "help", "--help", "-h":
             printUsage()
         default:
@@ -83,6 +88,7 @@ struct FluidAudioCLI {
                 parakeet-eou            Run Parakeet EOU Streaming ASR on a single file
                 sortformer              Run Sortformer streaming diarization
                 sortformer-benchmark    Run Sortformer benchmark on AMI dataset
+                nemotron-benchmark      Run Nemotron 0.6B streaming ASR benchmark
                 download                Download evaluation datasets
                 help                    Show this help message
 
