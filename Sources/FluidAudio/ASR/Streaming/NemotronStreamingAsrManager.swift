@@ -2,45 +2,105 @@ import AVFoundation
 @preconcurrency import CoreML
 import Foundation
 
+/// Chunk size variant for Nemotron streaming
+public enum NemotronChunkSize: Int, Sendable, CaseIterable {
+    case ms1120 = 1120  // 1.12s - original
+    case ms560 = 560    // 0.56s
+    case ms160 = 160    // 0.16s
+    case ms80 = 80      // 0.08s
+
+    public var repo: Repo {
+        switch self {
+        case .ms1120: return .nemotronStreaming1120
+        case .ms560: return .nemotronStreaming560
+        case .ms160: return .nemotronStreaming160
+        case .ms80: return .nemotronStreaming80
+        }
+    }
+
+    public var folderName: String {
+        "nemotron_coreml_\(rawValue)ms"
+    }
+}
+
 /// Encoder variant for Nemotron streaming
 public enum NemotronEncoderVariant: String, Sendable {
     case int8 = "encoder_int8"
     case float32 = "encoder_float32"
+    case standard = "encoder"  // For chunk sizes without quantized variants
 
     public var fileName: String { rawValue + ".mlmodelc" }
+    public var packageName: String { rawValue + ".mlpackage" }
 }
 
 /// Configuration for Nemotron Speech Streaming 0.6B
-/// Based on nvidia/nemotron-speech-streaming-en-0.6b with 1.12s chunks
+/// Loaded from metadata.json for each chunk size variant
 public struct NemotronStreamingConfig: Sendable {
     /// Sample rate in Hz
-    public let sampleRate: Int = 16000
+    public let sampleRate: Int
     /// Number of mel spectrogram features
-    public let melFeatures: Int = 128
-    /// Mel frames per chunk (1.12s = 112 frames at 10ms stride)
-    public let chunkMelFrames: Int = 112
+    public let melFeatures: Int
+    /// Mel frames per chunk
+    public let chunkMelFrames: Int
+    /// Chunk duration in milliseconds
+    public let chunkMs: Int
     /// Pre-encode cache size in mel frames (for encoder context)
-    public let preEncodeCache: Int = 9
+    public let preEncodeCache: Int
     /// Total mel frames for encoder input (cache + chunk)
-    public let totalMelFrames: Int = 121
+    public let totalMelFrames: Int
     /// Vocabulary size
-    public let vocabSize: Int = 1024
+    public let vocabSize: Int
     /// Blank token index (== vocab_size)
-    public let blankIdx: Int = 1024
+    public let blankIdx: Int
     /// Encoder output dimension
-    public let encoderDim: Int = 1024
+    public let encoderDim: Int
     /// Decoder hidden size
-    public let decoderHidden: Int = 640
+    public let decoderHidden: Int
     /// Number of decoder LSTM layers
-    public let decoderLayers: Int = 2
+    public let decoderLayers: Int
     /// Encoder cache shapes
-    public let cacheChannelShape: [Int] = [1, 24, 70, 1024]
-    public let cacheTimeShape: [Int] = [1, 24, 1024, 8]
+    public let cacheChannelShape: [Int]
+    public let cacheTimeShape: [Int]
 
-    /// Audio samples per chunk (1.12s at 16kHz)
-    public var chunkSamples: Int { chunkMelFrames * 160 }  // 17920 samples
+    /// Audio samples per chunk
+    public var chunkSamples: Int { chunkMelFrames * 160 }
 
-    public init() {}
+    /// Default config for 1120ms chunks (backward compatibility)
+    public init() {
+        self.sampleRate = 16000
+        self.melFeatures = 128
+        self.chunkMelFrames = 112
+        self.chunkMs = 1120
+        self.preEncodeCache = 9
+        self.totalMelFrames = 121
+        self.vocabSize = 1024
+        self.blankIdx = 1024
+        self.encoderDim = 1024
+        self.decoderHidden = 640
+        self.decoderLayers = 2
+        self.cacheChannelShape = [1, 24, 70, 1024]
+        self.cacheTimeShape = [1, 24, 1024, 8]
+    }
+
+    /// Load config from metadata.json
+    public init(from metadataURL: URL) throws {
+        let data = try Data(contentsOf: metadataURL)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        self.sampleRate = json["sample_rate"] as? Int ?? 16000
+        self.melFeatures = json["mel_features"] as? Int ?? 128
+        self.chunkMelFrames = json["chunk_mel_frames"] as? Int ?? 112
+        self.chunkMs = json["chunk_ms"] as? Int ?? 1120
+        self.preEncodeCache = json["pre_encode_cache"] as? Int ?? 9
+        self.totalMelFrames = json["total_mel_frames"] as? Int ?? 121
+        self.vocabSize = json["vocab_size"] as? Int ?? 1024
+        self.blankIdx = json["blank_idx"] as? Int ?? 1024
+        self.encoderDim = json["encoder_dim"] as? Int ?? 1024
+        self.decoderHidden = json["decoder_hidden"] as? Int ?? 640
+        self.decoderLayers = json["decoder_layers"] as? Int ?? 2
+        self.cacheChannelShape = json["cache_channel_shape"] as? [Int] ?? [1, 24, 70, 1024]
+        self.cacheTimeShape = json["cache_time_shape"] as? [Int] ?? [1, 24, 1024, 8]
+    }
 }
 
 /// Callback invoked when new tokens are decoded (for live transcription updates)
@@ -61,8 +121,8 @@ public actor NemotronStreamingAsrManager {
     private let audioConverter = AudioConverter()
     private var tokenizer: Tokenizer?
 
-    // Configuration
-    public let config: NemotronStreamingConfig
+    // Configuration (loaded from metadata.json)
+    public private(set) var config: NemotronStreamingConfig
 
     // Audio Buffer
     private var audioBuffer: [Float] = []
@@ -105,40 +165,37 @@ public actor NemotronStreamingAsrManager {
     /// Load models from a directory containing preprocessor, encoder, decoder, joint, and tokenizer
     /// - Parameters:
     ///   - modelDir: Directory containing the model files
-    ///   - encoderVariant: Which encoder variant to use (int8 or float32), defaults to int8
+    ///   - encoderVariant: Which encoder variant to use (int8, float32, or standard), defaults to int8
     public func loadModels(modelDir: URL, encoderVariant: NemotronEncoderVariant = .int8) async throws {
         logger.info("Loading Nemotron CoreML models from \(modelDir.path) with \(encoderVariant.rawValue) encoder...")
 
-        self.preprocessor = try await MLModel.load(
-            contentsOf: modelDir.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile),
-            configuration: mlConfiguration
-        )
-
-        // Encoder is in a subdirectory with variants
-        let encoderDir = modelDir.appendingPathComponent("encoder")
-        let encoderPath = encoderDir.appendingPathComponent(encoderVariant.fileName)
-
-        // Check if encoder is in subdirectory (new structure) or flat (legacy)
-        if FileManager.default.fileExists(atPath: encoderPath.path) {
-            self.encoder = try await MLModel.load(
-                contentsOf: encoderPath,
-                configuration: mlConfiguration
-            )
-        } else {
-            // Fallback to flat structure (encoder.mlmodelc in modelDir)
-            self.encoder = try await MLModel.load(
-                contentsOf: modelDir.appendingPathComponent(ModelNames.NemotronStreaming.encoderFile),
-                configuration: mlConfiguration
-            )
+        // Load config from metadata.json
+        let metadataPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.metadata)
+        if FileManager.default.fileExists(atPath: metadataPath.path) {
+            self.config = try NemotronStreamingConfig(from: metadataPath)
+            logger.info("Loaded config: \(config.chunkMs)ms chunks, \(config.chunkMelFrames) mel frames")
         }
 
-        self.decoder = try await MLModel.load(
-            contentsOf: modelDir.appendingPathComponent(ModelNames.NemotronStreaming.decoderFile),
-            configuration: mlConfiguration
+        // Load preprocessor (.mlmodelc or .mlpackage)
+        self.preprocessor = try await loadModel(
+            from: modelDir,
+            baseName: ModelNames.NemotronStreaming.preprocessor
         )
-        self.joint = try await MLModel.load(
-            contentsOf: modelDir.appendingPathComponent(ModelNames.NemotronStreaming.jointFile),
-            configuration: mlConfiguration
+
+        // Load encoder from subdirectory
+        let encoderDir = modelDir.appendingPathComponent("encoder")
+        self.encoder = try await loadEncoderModel(from: encoderDir, variant: encoderVariant)
+
+        // Load decoder (.mlmodelc or .mlpackage)
+        self.decoder = try await loadModel(
+            from: modelDir,
+            baseName: ModelNames.NemotronStreaming.decoder
+        )
+
+        // Load joint (.mlmodelc or .mlpackage)
+        self.joint = try await loadModel(
+            from: modelDir,
+            baseName: ModelNames.NemotronStreaming.joint
         )
 
         // Load tokenizer
@@ -148,7 +205,48 @@ public actor NemotronStreamingAsrManager {
         // Initialize states
         try resetStates()
 
-        logger.info("Nemotron models loaded successfully.")
+        logger.info("Nemotron models loaded successfully (\(config.chunkMs)ms chunks).")
+    }
+
+    /// Load a model, trying .mlmodelc first, then .mlpackage
+    private func loadModel(from dir: URL, baseName: String) async throws -> MLModel {
+        let mlmodelcPath = dir.appendingPathComponent(baseName + ".mlmodelc")
+        let mlpackagePath = dir.appendingPathComponent(baseName + ".mlpackage")
+
+        if FileManager.default.fileExists(atPath: mlmodelcPath.path) {
+            return try await MLModel.load(contentsOf: mlmodelcPath, configuration: mlConfiguration)
+        } else if FileManager.default.fileExists(atPath: mlpackagePath.path) {
+            return try await MLModel.load(contentsOf: mlpackagePath, configuration: mlConfiguration)
+        } else {
+            throw ASRError.processingFailed("Model not found: \(baseName) in \(dir.path)")
+        }
+    }
+
+    /// Load encoder model with variant support
+    private func loadEncoderModel(from encoderDir: URL, variant: NemotronEncoderVariant) async throws -> MLModel {
+        // Try variant-specific paths first (int8, float32)
+        let variantMlmodelc = encoderDir.appendingPathComponent(variant.fileName)
+        let variantMlpackage = encoderDir.appendingPathComponent(variant.packageName)
+
+        if FileManager.default.fileExists(atPath: variantMlmodelc.path) {
+            return try await MLModel.load(contentsOf: variantMlmodelc, configuration: mlConfiguration)
+        } else if FileManager.default.fileExists(atPath: variantMlpackage.path) {
+            return try await MLModel.load(contentsOf: variantMlpackage, configuration: mlConfiguration)
+        }
+
+        // Fallback to standard encoder (for chunk sizes without variants)
+        let standardMlmodelc = encoderDir.appendingPathComponent("encoder.mlmodelc")
+        let standardMlpackage = encoderDir.appendingPathComponent("encoder.mlpackage")
+
+        if FileManager.default.fileExists(atPath: standardMlmodelc.path) {
+            logger.info("Using standard encoder (no \(variant.rawValue) variant available)")
+            return try await MLModel.load(contentsOf: standardMlmodelc, configuration: mlConfiguration)
+        } else if FileManager.default.fileExists(atPath: standardMlpackage.path) {
+            logger.info("Using standard encoder .mlpackage (no \(variant.rawValue) variant available)")
+            return try await MLModel.load(contentsOf: standardMlpackage, configuration: mlConfiguration)
+        }
+
+        throw ASRError.processingFailed("Encoder not found in \(encoderDir.path)")
     }
 
     /// Reset all states for a new transcription session
