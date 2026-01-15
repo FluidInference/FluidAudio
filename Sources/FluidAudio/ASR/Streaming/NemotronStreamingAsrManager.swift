@@ -23,14 +23,9 @@ public enum NemotronChunkSize: Int, Sendable, CaseIterable {
     }
 }
 
-/// Encoder variant for Nemotron streaming
-public enum NemotronEncoderVariant: String, Sendable {
-    case int8 = "encoder_int8"
-    case float32 = "encoder_float32"
-    case standard = "encoder"  // For chunk sizes without quantized variants
-
-    public var fileName: String { rawValue + ".mlmodelc" }
-    public var packageName: String { rawValue + ".mlpackage" }
+/// Encoder file name for Nemotron streaming (int8 quantized only)
+public enum NemotronEncoder {
+    static let fileName = "encoder_int8.mlmodelc"
 }
 
 /// Configuration for Nemotron Speech Streaming 0.6B
@@ -165,9 +160,8 @@ public actor NemotronStreamingAsrManager {
     /// Load models from a directory containing preprocessor, encoder, decoder, joint, and tokenizer
     /// - Parameters:
     ///   - modelDir: Directory containing the model files
-    ///   - encoderVariant: Which encoder variant to use (int8, float32, or standard), defaults to int8
-    public func loadModels(modelDir: URL, encoderVariant: NemotronEncoderVariant = .int8) async throws {
-        logger.info("Loading Nemotron CoreML models from \(modelDir.path) with \(encoderVariant.rawValue) encoder...")
+    public func loadModels(modelDir: URL) async throws {
+        logger.info("Loading Nemotron CoreML models from \(modelDir.path)...")
 
         // Load config from metadata.json
         let metadataPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.metadata)
@@ -176,27 +170,21 @@ public actor NemotronStreamingAsrManager {
             logger.info("Loaded config: \(config.chunkMs)ms chunks, \(config.chunkMelFrames) mel frames")
         }
 
-        // Load preprocessor (.mlmodelc or .mlpackage)
-        self.preprocessor = try await loadModel(
-            from: modelDir,
-            baseName: ModelNames.NemotronStreaming.preprocessor
-        )
+        // Load preprocessor
+        let preprocessorPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.preprocessorFile)
+        self.preprocessor = try await MLModel.load(contentsOf: preprocessorPath, configuration: mlConfiguration)
 
-        // Load encoder from subdirectory
-        let encoderDir = modelDir.appendingPathComponent("encoder")
-        self.encoder = try await loadEncoderModel(from: encoderDir, variant: encoderVariant)
+        // Load encoder (int8 quantized)
+        let encoderPath = modelDir.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
+        self.encoder = try await MLModel.load(contentsOf: encoderPath, configuration: mlConfiguration)
 
-        // Load decoder (.mlmodelc or .mlpackage)
-        self.decoder = try await loadModel(
-            from: modelDir,
-            baseName: ModelNames.NemotronStreaming.decoder
-        )
+        // Load decoder
+        let decoderPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.decoderFile)
+        self.decoder = try await MLModel.load(contentsOf: decoderPath, configuration: mlConfiguration)
 
-        // Load joint (.mlmodelc or .mlpackage)
-        self.joint = try await loadModel(
-            from: modelDir,
-            baseName: ModelNames.NemotronStreaming.joint
-        )
+        // Load joint
+        let jointPath = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.jointFile)
+        self.joint = try await MLModel.load(contentsOf: jointPath, configuration: mlConfiguration)
 
         // Load tokenizer
         let tokenizerUrl = modelDir.appendingPathComponent(ModelNames.NemotronStreaming.tokenizer)
@@ -206,47 +194,6 @@ public actor NemotronStreamingAsrManager {
         try resetStates()
 
         logger.info("Nemotron models loaded successfully (\(config.chunkMs)ms chunks).")
-    }
-
-    /// Load a model, trying .mlmodelc first, then .mlpackage
-    private func loadModel(from dir: URL, baseName: String) async throws -> MLModel {
-        let mlmodelcPath = dir.appendingPathComponent(baseName + ".mlmodelc")
-        let mlpackagePath = dir.appendingPathComponent(baseName + ".mlpackage")
-
-        if FileManager.default.fileExists(atPath: mlmodelcPath.path) {
-            return try await MLModel.load(contentsOf: mlmodelcPath, configuration: mlConfiguration)
-        } else if FileManager.default.fileExists(atPath: mlpackagePath.path) {
-            return try await MLModel.load(contentsOf: mlpackagePath, configuration: mlConfiguration)
-        } else {
-            throw ASRError.processingFailed("Model not found: \(baseName) in \(dir.path)")
-        }
-    }
-
-    /// Load encoder model with variant support
-    private func loadEncoderModel(from encoderDir: URL, variant: NemotronEncoderVariant) async throws -> MLModel {
-        // Try variant-specific paths first (int8, float32)
-        let variantMlmodelc = encoderDir.appendingPathComponent(variant.fileName)
-        let variantMlpackage = encoderDir.appendingPathComponent(variant.packageName)
-
-        if FileManager.default.fileExists(atPath: variantMlmodelc.path) {
-            return try await MLModel.load(contentsOf: variantMlmodelc, configuration: mlConfiguration)
-        } else if FileManager.default.fileExists(atPath: variantMlpackage.path) {
-            return try await MLModel.load(contentsOf: variantMlpackage, configuration: mlConfiguration)
-        }
-
-        // Fallback to standard encoder (for chunk sizes without variants)
-        let standardMlmodelc = encoderDir.appendingPathComponent("encoder.mlmodelc")
-        let standardMlpackage = encoderDir.appendingPathComponent("encoder.mlpackage")
-
-        if FileManager.default.fileExists(atPath: standardMlmodelc.path) {
-            logger.info("Using standard encoder (no \(variant.rawValue) variant available)")
-            return try await MLModel.load(contentsOf: standardMlmodelc, configuration: mlConfiguration)
-        } else if FileManager.default.fileExists(atPath: standardMlpackage.path) {
-            logger.info("Using standard encoder .mlpackage (no \(variant.rawValue) variant available)")
-            return try await MLModel.load(contentsOf: standardMlpackage, configuration: mlConfiguration)
-        }
-
-        throw ASRError.processingFailed("Encoder not found in \(encoderDir.path)")
     }
 
     /// Reset all states for a new transcription session
