@@ -169,37 +169,3 @@ swift run -c release fluidaudiocli nemotron-benchmark --chunk 560 --max-files 10
 swift run -c release fluidaudiocli nemotron-benchmark --subset test-other --max-files 50
 ```
 
-### CLI Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--max-files, -n` | Maximum files to process | All |
-| `--subset, -s` | LibriSpeech subset | test-clean |
-| `--model-dir, -m` | Path to models | Auto-download |
-| `--chunk, -c` | Chunk size (1120, 560, 160, 80) | 1120 |
-
-## Model Source
-
-- **HuggingFace:** [FluidInference/nemotron-speech-streaming-en-0.6b-coreml](https://huggingface.co/FluidInference/nemotron-speech-streaming-en-0.6b-coreml)
-- **Original Model:** [nvidia/nemotron-speech-streaming-en-0.6b](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b)
-
-## Comparison with Parakeet
-
-| Feature | Nemotron Streaming | Parakeet TDT |
-|---------|-------------------|--------------|
-| Architecture | FastConformer RNNT | FastConformer TDT |
-| Streaming | Native | Chunked |
-| Languages | English only | 25 European |
-| Chunk sizes | 80-1120ms | Fixed ~15s |
-| Best WER | 1.99% | ~2.5% |
-| RTFx | 6-10x | ~200x |
-
-**When to use Nemotron:**
-- Real-time streaming with low latency requirements
-- English-only applications
-- Live transcription, voice assistants
-
-**When to use Parakeet:**
-- Batch/offline transcription
-- Multilingual support needed
-- Maximum throughput priority
