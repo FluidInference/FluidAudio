@@ -14,19 +14,14 @@ Nemotron Speech Streaming 0.6B is a FastConformer RNNT model optimized for strea
 
 Tested on Apple M2 with LibriSpeech test-clean:
 
-| Chunk Size | WER | RTFx | Files | Latency | Status |
-|------------|-----|------|-------|---------|--------|
-| **1120ms** | **1.99%** | 9.6x | 100 | High | Production ready |
-| **560ms** | 2.12% | 8.5x | 100 | Medium | Production ready |
-| **160ms** | ~10%* | 3.5x | 20 | Low | Limited testing |
-| **80ms** | ~60%* | 1.9x | 20 | Ultra-low | Not recommended |
+| Chunk Size | WER | RTFx | Files |
+|------------|-----|------|-------|
+| 1120ms | 1.99% | 9.6x | 100 |
+| 560ms | 2.12% | 8.5x | 100 |
+| 160ms | ~10% | 3.5x | 20 |
+| 80ms | ~60% | 1.9x | 20 |
 
-*160ms and 80ms were only tested on 20 files. Accuracy degrades significantly with smaller chunks due to insufficient context.
-
-**Notes:**
-- RTFx = Real-Time Factor (higher is better, >1x means faster than real-time)
-- 1120ms offers best accuracy; 560ms provides lower latency with minimal accuracy loss
-- 160ms/80ms are experimental - use only if ultra-low latency is critical
+160ms and 80ms were only tested on 20 files.
 
 ## Quick Start
 
