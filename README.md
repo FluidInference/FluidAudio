@@ -115,7 +115,7 @@ FluidAudio provides two library products:
 
 > **Note:** The Kokoro TTS tooling currently ships arm64-only dependencies. See the [arm64 build requirements](Documentation/TTS/README.md#arm64-only-builds) guide if you hit linker errors targeting x86_64.
 
-### Platform Wrappers
+### Other Frameworks
 
 Building with a different framework? Use one of our official wrappers:
 
