@@ -21,13 +21,16 @@ let package = Package(
             targets: ["FluidAudioCLI"]
         ),
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.1.6")
+    ],
     targets: [
         .target(
             name: "FluidAudio",
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
+                .product(name: "Tokenizers", package: "swift-transformers"),
             ],
             path: "Sources/FluidAudio",
             exclude: [

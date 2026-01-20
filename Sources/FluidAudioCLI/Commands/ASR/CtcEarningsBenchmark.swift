@@ -8,12 +8,20 @@ import Foundation
 /// TDT provides low WER transcription, CTC provides high recall dictionary detection.
 public enum CtcEarningsBenchmark {
 
-    /// Default CTC model directory
-    private static func defaultCtcModelPath() -> String? {
+    /// Keywords mode for vocabulary selection
+    /// - chunk: Use dictionary.txt (chunk-level keywords) for both vocabulary and scoring
+    /// - file: Use keywords.txt (file-level keywords) for vocabulary, dictionary.txt for scoring
+    public enum KeywordsMode: String {
+        case chunk = "chunk"
+        case file = "file"
+    }
+
+    /// Default CTC model directory for a given variant
+    private static func defaultCtcModelPath(for variant: CtcModelVariant) -> String? {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
-        let modelPath = appSupport.appendingPathComponent("FluidAudio/Models/parakeet-ctc-110m-coreml")
+        let modelPath = appSupport.appendingPathComponent("FluidAudio/Models/\(variant.repo.folderName)")
         if FileManager.default.fileExists(atPath: modelPath.path) {
             return modelPath.path
         }
@@ -46,6 +54,11 @@ public enum CtcEarningsBenchmark {
         // (returns empty transcription for ~7 files in Earnings22 dataset)
         var tdtVersion: AsrModelVersion = .v2
         var autoDownload = false
+        var keywordsMode: KeywordsMode = .chunk
+        // CTC model variant: 110m (hybrid, blank-dominant) or 06b (pure CTC, better for greedy)
+        // Can also be set via CTC_VARIANT environment variable
+        var ctcVariant: CtcModelVariant =
+            ProcessInfo.processInfo.environment["CTC_VARIANT"] == "06b" ? .ctc06b : .ctc110m
 
         var i = 0
         while i < arguments.count {
@@ -84,6 +97,27 @@ public enum CtcEarningsBenchmark {
                 }
             case "--auto-download":
                 autoDownload = true
+            case "--keywords":
+                if i + 1 < arguments.count {
+                    if let mode = KeywordsMode(rawValue: arguments[i + 1].lowercased()) {
+                        keywordsMode = mode
+                    } else {
+                        print("WARNING: Invalid keywords mode '\(arguments[i + 1])'. Using 'chunk'.")
+                    }
+                    i += 1
+                }
+            case "--ctc-variant":
+                if i + 1 < arguments.count {
+                    let variant = arguments[i + 1].lowercased()
+                    if variant == "06b" || variant == "0.6b" {
+                        ctcVariant = .ctc06b
+                    } else if variant == "110m" {
+                        ctcVariant = .ctc110m
+                    } else {
+                        print("WARNING: Invalid CTC variant '\(arguments[i + 1])'. Using '110m'.")
+                    }
+                    i += 1
+                }
             default:
                 break
             }
@@ -95,7 +129,7 @@ public enum CtcEarningsBenchmark {
             dataDir = defaultDataDir()
         }
         if ctcModelPath == nil {
-            ctcModelPath = defaultCtcModelPath()
+            ctcModelPath = defaultCtcModelPath(for: ctcVariant)
         }
 
         // Handle auto-download for dataset
@@ -109,7 +143,9 @@ public enum CtcEarningsBenchmark {
         print("  Data directory: \(dataDir ?? "not found")")
         print("  Output file: \(outputFile)")
         print("  TDT version: \(tdtVersion == .v2 ? "v2" : "v3")")
+        print("  CTC variant: \(ctcVariant.displayName)")
         print("  CTC model: \(ctcModelPath ?? "not found")")
+        print("  Keywords mode: \(keywordsMode.rawValue)")
 
         guard let finalDataDir = dataDir else {
             print("ERROR: Data directory not found")
@@ -121,9 +157,10 @@ public enum CtcEarningsBenchmark {
 
         guard let modelPath = ctcModelPath else {
             print("ERROR: CTC model not found")
-            print("💡 Download parakeet-ctc-110m-coreml model to:")
-            print("   ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml/")
+            print("💡 Download \(ctcVariant.repo.folderName) model to:")
+            print("   ~/Library/Application Support/FluidAudio/Models/\(ctcVariant.repo.folderName)/")
             print("   Or specify: --ctc-model <path>")
+            print("   Or use different variant: --ctc-variant 110m|06b")
             printUsage()
             return
         }
@@ -141,8 +178,10 @@ public enum CtcEarningsBenchmark {
             // Load CTC models for keyword spotting
             print("Loading CTC models from: \(modelPath)")
             let modelDir = URL(fileURLWithPath: modelPath)
-            let ctcModels = try await CtcModels.loadDirect(from: modelDir)
-            print("Loaded CTC vocabulary with \(ctcModels.vocabulary.count) tokens")
+            let ctcModels = try await CtcModels.loadDirect(from: modelDir, variant: ctcVariant)
+            print(
+                "Loaded CTC vocabulary with \(ctcModels.vocabulary.count) tokens, variant: \(ctcModels.variant.displayName)"
+            )
 
             // Create keyword spotter
             let vocabSize = ctcModels.vocabulary.count
@@ -198,7 +237,8 @@ public enum CtcEarningsBenchmark {
                     dataDir: dataDirURL,
                     asrManager: asrManager,
                     ctcModels: ctcModels,
-                    spotter: spotter
+                    spotter: spotter,
+                    keywordsMode: keywordsMode
                 ) {
                     results.append(result)
                     totalWer += result["wer"] as? Double ?? 0
@@ -277,6 +317,7 @@ public enum CtcEarningsBenchmark {
 
             let output: [String: Any] = [
                 "model": modelPath,
+                "keywordsMode": keywordsMode.rawValue,
                 "summary": summaryDict,
                 "results": results,
             ]
@@ -319,10 +360,13 @@ public enum CtcEarningsBenchmark {
         dataDir: URL,
         asrManager: AsrManager,
         ctcModels: CtcModels,
-        spotter: CtcKeywordSpotter
+        spotter: CtcKeywordSpotter,
+        keywordsMode: KeywordsMode
     ) async throws -> [String: Any]? {
         let wavFile = dataDir.appendingPathComponent("\(fileId).wav")
         let dictionaryFile = dataDir.appendingPathComponent("\(fileId).dictionary.txt")
+        let keywordsFile = dataDir.appendingPathComponent("\(fileId).keywords.txt")
+        let checkFile = dataDir.appendingPathComponent("\(fileId).check.txt")
         let textFile = dataDir.appendingPathComponent("\(fileId).text.txt")
 
         let fm = FileManager.default
@@ -332,13 +376,46 @@ public enum CtcEarningsBenchmark {
             return nil
         }
 
-        // Load dictionary words
+        // Load dictionary words (chunk-level keywords that actually appear in this chunk)
         let dictionaryContent = try String(contentsOf: dictionaryFile, encoding: .utf8)
         let dictionaryWords =
             dictionaryContent
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+
+        // Determine vocabulary words based on keywords mode
+        // - chunk: Use dictionary.txt (chunk-level keywords)
+        // - file: Use keywords.txt (file-level keywords, all keywords for entire file)
+        let vocabularyWords: [String]
+        if keywordsMode == .file, fm.fileExists(atPath: keywordsFile.path),
+            let keywordsContent = try? String(contentsOf: keywordsFile, encoding: .utf8)
+        {
+            let words =
+                keywordsContent
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            vocabularyWords = words.isEmpty ? dictionaryWords : words
+        } else {
+            vocabularyWords = dictionaryWords
+        }
+
+        // Load check words for scoring
+        // Always use dictionary words for scoring since those are the ones that actually appear in this chunk
+        let checkWords: [String]
+        if fm.fileExists(atPath: checkFile.path),
+            let checkContent = try? String(contentsOf: checkFile, encoding: .utf8)
+        {
+            let words =
+                checkContent
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            checkWords = words.isEmpty ? dictionaryWords : words
+        } else {
+            checkWords = dictionaryWords
+        }
 
         // Load reference text
         let referenceRaw =
@@ -388,18 +465,31 @@ public enum CtcEarningsBenchmark {
         }
 
         // 2. Build custom vocabulary for CTC keyword spotting
+        // Load using simple format which supports aliases: "word: alias1, alias2, ..."
+        // Then post-process to add CTC token IDs
+        let vocabFileURL: URL
+        if keywordsMode == .file, fm.fileExists(atPath: keywordsFile.path) {
+            vocabFileURL = keywordsFile
+        } else {
+            vocabFileURL = dictionaryFile
+        }
+
+        // Load vocabulary with alias support
+        let loadedVocab = try CustomVocabularyContext.loadFromSimpleFormat(from: vocabFileURL)
+
+        // Post-process: add CTC token IDs for each term
         var vocabTerms: [CustomVocabularyTerm] = []
-        for word in dictionaryWords {
-            let tokenIds = tokenize(word, vocabulary: ctcModels.vocabulary)
+        for term in loadedVocab.terms {
+            let tokenIds = tokenize(term.text, vocabulary: ctcModels.vocabulary)
             if !tokenIds.isEmpty {
-                let term = CustomVocabularyTerm(
-                    text: word,
-                    weight: nil,
-                    aliases: nil,
+                let termWithTokens = CustomVocabularyTerm(
+                    text: term.text,
+                    weight: term.weight,
+                    aliases: term.aliases,
                     tokenIds: nil,
                     ctcTokenIds: tokenIds
                 )
-                vocabTerms.append(term)
+                vocabTerms.append(termWithTokens)
             }
         }
         let customVocab = CustomVocabularyContext(terms: vocabTerms)
@@ -428,20 +518,49 @@ public enum CtcEarningsBenchmark {
         let useTimestampRescoring = ProcessInfo.processInfo.environment["USE_TIMESTAMP_RESCORING"] != "0"
         let hypothesis: String
         if useRescorer {
+            // Vocabulary-size-aware thresholds
+            // File mode (larger vocabulary) needs more conservative settings to avoid false positives
+            // but not so conservative that we miss too many keywords
+            let vocabSize = vocabularyWords.count
+            let isLargeVocab = vocabSize > 10  // File mode typically has 15-25 keywords
+
+            // Balanced rescoring config - conservative enough to avoid WER degradation
+            // but permissive enough to maintain good recall
             let rescorerConfig = VocabularyRescorer.Config(
-                minScoreAdvantage: 1.0,  // Lower threshold - rely more on CTC scoring
-                minVocabScore: -15.0,  // Permissive to include more detections
-                maxOriginalScoreForReplacement: -2.0,  // Don't replace very confident words
-                vocabBoostWeight: 3.0  // Argmax cbw=3.0
+                minScoreAdvantage: isLargeVocab ? 1.5 : 1.0,  // Moderate increase for large vocab
+                minVocabScore: isLargeVocab ? -14.0 : -15.0,  // Slightly stricter for large vocab
+                maxOriginalScoreForReplacement: isLargeVocab ? -2.5 : -2.0,  // Moderate protection
+                vocabBoostWeight: isLargeVocab ? 2.5 : 3.0  // Moderate reduction for large vocab
             )
+
+            let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
             let rescorer = VocabularyRescorer(
                 spotter: spotter,
                 vocabulary: customVocab,
-                config: rescorerConfig
+                config: rescorerConfig,
+                ctcModelDirectory: ctcModelDir
             )
 
             // Constrained CTC is the default - use USE_CONSTRAINED_CTC=0 to disable
             let useConstrainedCTC = ProcessInfo.processInfo.environment["USE_CONSTRAINED_CTC"] != "0"
+
+            // Adjust similarity threshold based on vocabulary size
+            // Key insight: minSimilarity is the main lever for WER vs Recall trade-off
+            // 0.50 = too permissive (WER 24.75%, Recall 81.5%)
+            // 0.70 = too conservative (WER 16.69%, Recall 74.5%)
+            // 0.60 = balanced target
+            //
+            // Environment variable overrides for tuning experiments:
+            // MIN_SIMILARITY=0.55 CBW=2.8 fluidaudiocli ctc-earnings-benchmark ...
+            let defaultMinSimilarity: Float = isLargeVocab ? 0.60 : 0.50
+            let defaultCbw: Float = isLargeVocab ? 2.5 : 3.0
+
+            let minSimilarity: Float =
+                ProcessInfo.processInfo.environment["MIN_SIMILARITY"]
+                .flatMap { Float($0) } ?? defaultMinSimilarity
+            let cbw: Float =
+                ProcessInfo.processInfo.environment["CBW"]
+                .flatMap { Float($0) } ?? defaultCbw
 
             if useConstrainedCTC, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
                 // Use constrained CTC rescoring (string similarity first, then constrained DP)
@@ -450,9 +569,9 @@ public enum CtcEarningsBenchmark {
                     tokenTimings: tokenTimings,
                     logProbs: spotResult.logProbs,
                     frameDuration: spotResult.frameDuration,
-                    cbw: 3.0,
+                    cbw: cbw,
                     marginSeconds: 0.5,
-                    minSimilarity: 0.5
+                    minSimilarity: minSimilarity
                 )
                 hypothesis = rescoreResult.text
             } else if useTimestampRescoring, let tokenTimings = tdtResult.tokenTimings, !tokenTimings.isEmpty {
@@ -461,7 +580,7 @@ public enum CtcEarningsBenchmark {
                     transcript: tdtResult.text,
                     tokenTimings: tokenTimings,
                     spotResult: spotResult,
-                    cbw: 3.0  // Context-biasing weight per NeMo paper
+                    cbw: cbw  // Vocabulary-size-aware CBW
                 )
                 hypothesis = rescoreResult.text
             } else {
@@ -495,12 +614,14 @@ public enum CtcEarningsBenchmark {
         }
 
         // Count dictionary detections (CTC + hypothesis fallback)
+        // Use checkWords for scoring (subset of dictionary if .check.txt exists)
         let minCtcScore: Float = -15.0  // Permissive threshold for detection
         var dictFound = 0
         var detectionDetails: [[String: Any]] = []
         var ctcFoundWords: Set<String> = []
+        let checkWordsLowerSet = Set(checkWords.map { $0.lowercased() })
 
-        // 1. CTC detections (deduplicate - only count each word once)
+        // 1. CTC detections (deduplicate - only count each word once, only if in checkWords)
         for detection in spotResult.detections {
             let detail: [String: Any] = [
                 "word": detection.term.text,
@@ -513,17 +634,17 @@ public enum CtcEarningsBenchmark {
 
             if detection.score >= minCtcScore {
                 let wordLower = detection.term.text.lowercased()
-                // Only count each unique word once for dictFound
-                if !ctcFoundWords.contains(wordLower) {
+                // Only count if word is in checkWords and not already counted
+                if checkWordsLowerSet.contains(wordLower) && !ctcFoundWords.contains(wordLower) {
                     dictFound += 1
                     ctcFoundWords.insert(wordLower)
                 }
             }
         }
 
-        // 2. Fallback: check hypothesis for dictionary words not found by CTC
+        // 2. Fallback: check hypothesis for check words not found by CTC
         let hypothesisLower = hypothesisNormalized.lowercased()
-        for word in dictionaryWords {
+        for word in checkWords {
             let wordLower = word.lowercased()
             if !ctcFoundWords.contains(wordLower) {
                 // Check if word appears as whole word in hypothesis (avoid substring false positives)
@@ -548,13 +669,13 @@ public enum CtcEarningsBenchmark {
         }
 
         // 3. Compute precision/recall metrics
-        // For each vocabulary word, check if it's in reference AND hypothesis
+        // For each check word, check if it's in reference AND hypothesis
         let referenceLower = referenceNormalized.lowercased()
         var truePositives = 0
         var falsePositives = 0
         var falseNegatives = 0
 
-        for word in dictionaryWords {
+        for word in checkWords {
             let wordLower = word.lowercased()
             let pattern = "\\b\(NSRegularExpression.escapedPattern(for: wordLower))\\b"
 
@@ -593,7 +714,7 @@ public enum CtcEarningsBenchmark {
             "hypothesisNormalized": hypothesisNormalized,
             "wer": round(wer * 10000) / 100,
             "dictFound": dictFound,
-            "dictTotal": dictionaryWords.count,
+            "dictTotal": checkWords.count,
             "truePositives": truePositives,
             "falsePositives": falsePositives,
             "falseNegatives": falseNegatives,
@@ -1002,14 +1123,23 @@ public enum CtcEarningsBenchmark {
             Options:
                 --data-dir <path>     Path to earnings test dataset (auto-detected if downloaded)
                 --ctc-model <path>    Path to CTC model directory (auto-detected if in standard location)
+                --ctc-variant <var>   CTC model variant: '110m' (default) or '06b'
+                                      - 110m: Parakeet CTC 110M (hybrid TDT+CTC, blank-dominant)
+                                      - 06b: Parakeet CTC 0.6B (pure CTC, better for greedy decoding)
+                                      Can also be set via CTC_VARIANT=06b environment variable
                 --file-id <id>        Run benchmark on a single file (e.g., "4468654_chunk39")
                 --max-files <n>       Maximum number of files to process
                 --output, -o <path>   Output JSON file (default: ctc_earnings_benchmark.json)
                 --auto-download       Download earnings22-kws dataset if not found
+                --keywords <mode>     Keywords mode: 'chunk' or 'file' (default: chunk)
+                                      - chunk: Use dictionary.txt (chunk-level keywords) for vocabulary
+                                      - file: Use keywords.txt (file-level keywords) for vocabulary
+                                      Scoring always uses dictionary.txt (words actually in chunk)
 
             Default locations:
                 Dataset: ~/Library/Application Support/FluidAudio/earnings22-kws/test-dataset/
-                CTC Model: ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml/
+                CTC Model (110m): ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml/
+                CTC Model (06b): ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-0.6b-coreml/
 
             Setup:
                 1. Download dataset: fluidaudio download --dataset earnings22-kws
@@ -1017,14 +1147,20 @@ public enum CtcEarningsBenchmark {
                 3. Run: fluidaudio ctc-earnings-benchmark
 
             Examples:
-                # Run with auto-detected paths
+                # Run with auto-detected paths (110m model)
                 fluidaudio ctc-earnings-benchmark
+
+                # Run with 0.6B pure CTC model
+                fluidaudio ctc-earnings-benchmark --ctc-variant 06b
 
                 # Run with auto-download
                 fluidaudio ctc-earnings-benchmark --auto-download
 
                 # Run single file test
                 fluidaudio ctc-earnings-benchmark --file-id 4468654_chunk39
+
+                # Run with file-level keywords (larger vocabulary)
+                fluidaudio ctc-earnings-benchmark --keywords file
 
                 # Run with explicit paths
                 fluidaudio ctc-earnings-benchmark \\

@@ -6,6 +6,7 @@ public enum Repo: String, CaseIterable {
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "alexwengg/parakeet-ctc-110m-coreml"
+    case parakeetCtc06b = "alexwengg/parakeet-ctc-0.6b-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
@@ -22,6 +23,8 @@ public enum Repo: String, CaseIterable {
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
             return "parakeet-ctc-110m-coreml"
+        case .parakeetCtc06b:
+            return "parakeet-ctc-0.6b-coreml"
         case .parakeetEou160:
             return "parakeet-realtime-eou-120m-coreml/160ms"
         case .parakeetEou320:
@@ -38,6 +41,8 @@ public enum Repo: String, CaseIterable {
         switch self {
         case .parakeetCtc110m:
             return "alexwengg/parakeet-ctc-110m-coreml"
+        case .parakeetCtc06b:
+            return "alexwengg/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         default:
@@ -243,7 +248,7 @@ public enum ModelNames {
             return ModelNames.VAD.requiredModels
         case .parakeet, .parakeetV2:
             return ModelNames.ASR.requiredModels
-        case .parakeetCtc110m:
+        case .parakeetCtc110m, .parakeetCtc06b:
             return ModelNames.CTC.requiredModels
         case .parakeetEou160, .parakeetEou320:
             return ModelNames.ParakeetEOU.requiredModels

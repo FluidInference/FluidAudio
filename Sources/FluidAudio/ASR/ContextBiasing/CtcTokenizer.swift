@@ -1,91 +1,116 @@
 import Foundation
 import OSLog
+import Tokenizers
 
-/// CTC tokenizer wrapper for automatic vocabulary tokenization
-public class CtcTokenizer {
+/// Type alias to disambiguate from local Tokenizer class
+private typealias HFTokenizerProtocol = Tokenizers.Tokenizer
+
+// MARK: - CTC Tokenizer
+
+/// CTC tokenizer using HuggingFace tokenizer.json for accurate BPE tokenization.
+/// This provides tokenization matching the original model training.
+public final class CtcTokenizer {
     private let logger = Logger(subsystem: "com.fluidaudio", category: "CtcTokenizer")
-    private let tokenToId: [String: Int]
+    private let hfTokenizer: HFTokenizer
 
-    public init() throws {
-        // Get the CTC model directory
-        let modelDir = Self.getCtcModelDirectory()
-        let vocabPath = modelDir.appendingPathComponent("vocab.json")
+    /// Errors that can occur during tokenizer initialization
+    public enum Error: Swift.Error, LocalizedError {
+        case tokenizerNotFound(URL)
+        case missingFile(String, URL)
+        case initializationFailed(Swift.Error)
 
-        // Load vocabulary for tokenization
-        guard FileManager.default.fileExists(atPath: vocabPath.path) else {
-            throw CtcTokenizerError.vocabNotFound(vocabPath.path)
-        }
-
-        let data = try Data(contentsOf: vocabPath)
-        let vocabDict = try JSONDecoder().decode([String: String].self, from: data)
-
-        // Build token-to-id lookup
-        var lookup: [String: Int] = [:]
-        for (key, value) in vocabDict {
-            if let intKey = Int(key) {
-                lookup[value] = intKey
+        public var errorDescription: String? {
+            switch self {
+            case .tokenizerNotFound(let url):
+                return "tokenizer.json not found at \(url.path)"
+            case .missingFile(let filename, let folder):
+                return "Missing required file '\(filename)' in \(folder.path)"
+            case .initializationFailed(let error):
+                return "Failed to initialize HuggingFace tokenizer: \(error.localizedDescription)"
             }
         }
-        self.tokenToId = lookup
-        logger.info("Loaded CTC vocabulary with \(lookup.count) tokens")
     }
 
-    /// Tokenize text into CTC token IDs
-    /// This is a simplified tokenizer that matches subwords/characters from the vocabulary
+    /// Initialize the CTC tokenizer from a specific model directory.
+    /// Loads tokenizer.json from the specified directory.
+    ///
+    /// - Parameter modelDirectory: Directory containing tokenizer.json
+    /// - Throws: `CtcTokenizer.Error` if tokenizer files cannot be loaded
+    public init(modelDirectory: URL) throws {
+        let tokenizerPath = modelDirectory.appendingPathComponent("tokenizer.json")
+
+        guard FileManager.default.fileExists(atPath: tokenizerPath.path) else {
+            throw Error.tokenizerNotFound(modelDirectory)
+        }
+
+        // Load HFTokenizer synchronously by blocking on the async call
+        // Use a Sendable box to safely transfer result across concurrency boundary
+        let resultBox = ResultBox()
+        let semaphore = DispatchSemaphore(value: 0)
+
+        Task { @Sendable in
+            do {
+                let tokenizer = try await HFTokenizer(modelFolder: modelDirectory)
+                resultBox.set(.success(tokenizer))
+            } catch {
+                resultBox.set(.failure(error))
+            }
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+
+        switch resultBox.result {
+        case .success(let tokenizer):
+            self.hfTokenizer = tokenizer
+            logger.info("Loaded HuggingFace tokenizer from \(modelDirectory.path)")
+        case .failure(let error):
+            throw Error.initializationFailed(error)
+        case .none:
+            throw Error.initializationFailed(
+                NSError(
+                    domain: "CtcTokenizer", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Async initialization did not complete"])
+            )
+        }
+    }
+
+    /// Initialize the CTC tokenizer using the default 110m model directory.
+    /// Convenience initializer for backward compatibility.
+    ///
+    /// - Throws: `CtcTokenizer.Error` if tokenizer files cannot be loaded
+    public convenience init() throws {
+        try self.init(modelDirectory: Self.getCtcModelDirectory())
+    }
+
+    /// Tokenize text into CTC token IDs.
+    ///
+    /// - Parameter text: Text to encode
+    /// - Returns: Array of token IDs
     public func encode(_ text: String) -> [Int] {
-        // Normalize text to lowercase (CTC models typically use lowercase)
-        let normalizedText = text.lowercased()
-        var result: [Int] = []
-        var position = normalizedText.startIndex
-
-        while position < normalizedText.endIndex {
-            var matched = false
-            var matchLength = min(20, normalizedText.distance(from: position, to: normalizedText.endIndex))
-
-            // Try to match longest possible subword first
-            while matchLength > 0 {
-                let endPos = normalizedText.index(position, offsetBy: matchLength)
-                let substring = String(normalizedText[position..<endPos])
-
-                // Check with space prefix (SentencePiece style)
-                let withSpace = position == normalizedText.startIndex ? "▁" + substring : substring
-
-                // Find token ID for this substring
-                if let tokenId = findTokenId(for: withSpace) {
-                    result.append(tokenId)
-                    position = endPos
-                    matched = true
-                    break
-                } else if let tokenId = findTokenId(for: substring) {
-                    result.append(tokenId)
-                    position = endPos
-                    matched = true
-                    break
-                }
-
-                matchLength -= 1
-            }
-
-            // If no match found, try single character
-            if !matched {
-                let char = String(normalizedText[position])
-                if let tokenId = findTokenId(for: char) {
-                    result.append(tokenId)
-                } else {
-                    // Unknown character, use <unk> token (typically 0)
-                    result.append(0)
-                    logger.debug("Unknown character '\(char)' in text '\(text)'")
-                }
-                position = normalizedText.index(after: position)
-            }
-        }
-
-        return result
+        hfTokenizer.encode(text)
     }
 
-    /// Find token ID for a given string in the vocabulary (O(1) hashmap lookup)
-    private func findTokenId(for token: String) -> Int? {
-        tokenToId[token]
+    /// Decode token IDs back to text.
+    ///
+    /// - Parameter ids: Array of token IDs
+    /// - Returns: Decoded text
+    public func decode(_ ids: [Int]) -> String {
+        hfTokenizer.decode(ids)
+    }
+
+    /// Get the token string for a single token ID.
+    ///
+    /// - Parameter id: Token ID
+    /// - Returns: Token string or nil if invalid
+    public func idToPiece(_ id: Int) -> String? {
+        hfTokenizer.idToToken(id)
+    }
+
+    /// Get vocabulary size.
+    /// Returns 0 if vocabulary size cannot be determined.
+    public func vocabSize() -> Int {
+        hfTokenizer.vocabularySize ?? 0
     }
 
     /// Get the CTC model directory path
@@ -97,59 +122,164 @@ public class CtcTokenizer {
             applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
-            .appendingPathComponent(Repo.parakeetCtc110m.folderName, isDirectory: true)
+            .appendingPathComponent("parakeet-ctc-110m-coreml", isDirectory: true)
     }
 }
 
-/// Errors for CTC tokenizer
-public enum CtcTokenizerError: Error {
-    case vocabNotFound(String)
+// MARK: - HuggingFace Tokenizer (Private Implementation)
 
-    public var localizedDescription: String {
-        switch self {
-        case .vocabNotFound(let path):
-            return "CTC vocabulary not found at: \(path)"
+/// HuggingFace tokenizer that loads tokenizer.json directly using swift-transformers.
+/// This provides accurate BPE tokenization matching the original model training.
+private final class HFTokenizer {
+    private let logger = Logger(subsystem: "com.fluidaudio", category: "HFTokenizer")
+    private let tokenizer: any HFTokenizerProtocol
+
+    /// Load tokenizer from a local model folder containing tokenizer.json
+    ///
+    /// Required files in folder:
+    /// - tokenizer.json (main tokenizer data)
+    /// - tokenizer_config.json (tokenizer settings)
+    ///
+    /// - Parameter modelFolder: URL to folder containing tokenizer files
+    init(modelFolder: URL) async throws {
+        // Verify required files exist
+        let tokenizerJsonPath = modelFolder.appendingPathComponent("tokenizer.json")
+        let tokenizerConfigPath = modelFolder.appendingPathComponent("tokenizer_config.json")
+
+        guard FileManager.default.fileExists(atPath: tokenizerJsonPath.path) else {
+            throw CtcTokenizer.Error.missingFile("tokenizer.json", modelFolder)
+        }
+        guard FileManager.default.fileExists(atPath: tokenizerConfigPath.path) else {
+            throw CtcTokenizer.Error.missingFile("tokenizer_config.json", modelFolder)
+        }
+
+        do {
+            self.tokenizer = try await AutoTokenizer.from(modelFolder: modelFolder)
+            logger.info("Loaded HuggingFace tokenizer from \(modelFolder.path)")
+        } catch {
+            logger.error("Failed to load tokenizer: \(error.localizedDescription)")
+            throw CtcTokenizer.Error.initializationFailed(error)
         }
     }
+
+    // MARK: - Encoding
+
+    /// Encode text to token IDs without special tokens.
+    func encode(_ text: String) -> [Int] {
+        tokenizer.encode(text: text, addSpecialTokens: false)
+    }
+
+    // MARK: - Decoding
+
+    /// Decode token IDs to text, skipping special tokens.
+    func decode(_ ids: [Int]) -> String {
+        tokenizer.decode(tokens: ids, skipSpecialTokens: true)
+    }
+
+    /// Get the token string for a single token ID.
+    func idToToken(_ id: Int) -> String? {
+        let decoded = tokenizer.decode(tokens: [id], skipSpecialTokens: false)
+        return decoded.isEmpty ? nil : decoded
+    }
+
+    // MARK: - Vocabulary Info
+
+    /// Get vocabulary size if available
+    var vocabularySize: Int? {
+        // swift-transformers doesn't expose vocab size directly
+        nil
+    }
 }
 
-/// Extension to CustomVocabularyContext to add automatic CTC tokenization
-extension CustomVocabularyContext {
-    /// Load vocabulary with automatic CTC tokenization
-    public static func loadWithCtcTokenization(from url: URL) throws -> CustomVocabularyContext {
-        // First load normally
-        let context = try Self.load(from: url)
+// MARK: - Sendable Result Box
 
-        // Initialize CTC tokenizer
+/// Thread-safe box for passing results across concurrency boundaries.
+/// Uses a lock to ensure safe access from multiple threads.
+private final class ResultBox: @unchecked Sendable {
+    private var _result: Result<HFTokenizer, Swift.Error>?
+    private let lock = NSLock()
+
+    var result: Result<HFTokenizer, Swift.Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _result
+    }
+
+    func set(_ value: Result<HFTokenizer, Swift.Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        _result = value
+    }
+}
+
+// MARK: - CustomVocabularyContext Extension
+
+extension CustomVocabularyContext {
+    /// Load vocabulary with CTC tokenization (JSON format)
+    public static func loadWithSentencePieceTokenization(from url: URL) throws -> CustomVocabularyContext {
+        let context = try Self.load(from: url)
+        return try tokenizeContext(context)
+    }
+
+    /// Load vocabulary from simple text format with CTC tokenization.
+    /// Format: one word per line, optionally "word: alias1, alias2, ..."
+    public static func loadFromSimpleFormatWithTokenization(from url: URL) throws -> CustomVocabularyContext {
+        let context = try loadFromSimpleFormat(from: url)
+        return try tokenizeContext(context)
+    }
+
+    /// Add CTC token IDs to terms using the tokenizer.
+    /// Also expands aliases into separate CTC detection entries.
+    private static func tokenizeContext(_ context: CustomVocabularyContext) throws -> CustomVocabularyContext {
         let tokenizer = try CtcTokenizer()
         let logger = Logger(subsystem: "com.fluidaudio", category: "CustomVocabulary")
 
-        // Tokenize terms that don't have ctcTokenIds
-        var updatedTerms: [CustomVocabularyTerm] = []
-        for term in context.terms {
-            if term.ctcTokenIds == nil || term.ctcTokenIds?.isEmpty == true {
-                // Tokenize the text
-                let tokenIds = tokenizer.encode(term.text)
-                logger.debug("Auto-tokenized '\(term.text)': \(tokenIds)")
+        var expandedTerms: [CustomVocabularyTerm] = []
+        var tokenizedCount = 0
+        var aliasExpansionCount = 0
 
-                // Create updated term with ctcTokenIds
-                let updatedTerm = CustomVocabularyTerm(
-                    text: term.text,
-                    weight: term.weight,
-                    aliases: term.aliases,
-                    tokenIds: term.tokenIds,
-                    ctcTokenIds: tokenIds
-                )
-                updatedTerms.append(updatedTerm)
-            } else {
-                // Keep existing term with pre-computed ctcTokenIds
-                updatedTerms.append(term)
+        for term in context.terms {
+            // 1. Add the canonical term with its own CTC tokens
+            let canonicalTokenIds = term.ctcTokenIds ?? tokenizer.encode(term.text)
+            let canonicalTerm = CustomVocabularyTerm(
+                text: term.text,
+                weight: term.weight,
+                aliases: term.aliases,
+                tokenIds: term.tokenIds,
+                ctcTokenIds: canonicalTokenIds
+            )
+            expandedTerms.append(canonicalTerm)
+
+            if term.ctcTokenIds == nil {
+                tokenizedCount += 1
+                logger.debug("Tokenized '\(term.text)': \(canonicalTokenIds)")
+            }
+
+            // 2. Expand aliases: create additional CTC detection entries
+            if let aliases = term.aliases {
+                for alias in aliases {
+                    let aliasTokenIds = tokenizer.encode(alias)
+                    let aliasTerm = CustomVocabularyTerm(
+                        text: term.text,  // Canonical form for replacement
+                        weight: term.weight,
+                        aliases: term.aliases,
+                        tokenIds: term.tokenIds,
+                        ctcTokenIds: aliasTokenIds
+                    )
+                    expandedTerms.append(aliasTerm)
+                    aliasExpansionCount += 1
+                    logger.debug("Tokenized alias '\(alias)' -> '\(term.text)': \(aliasTokenIds)")
+                }
             }
         }
 
-        // Return updated context with tokenized terms
+        if tokenizedCount > 0 || aliasExpansionCount > 0 {
+            logger.info(
+                "Auto-tokenized \(tokenizedCount) vocabulary terms, expanded \(aliasExpansionCount) aliases")
+        }
+
         return CustomVocabularyContext(
-            terms: updatedTerms,
+            terms: expandedTerms,
             minCtcScore: context.minCtcScore,
             minSimilarity: context.minSimilarity,
             minCombinedConfidence: context.minCombinedConfidence

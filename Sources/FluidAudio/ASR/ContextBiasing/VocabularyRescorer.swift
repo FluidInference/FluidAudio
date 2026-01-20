@@ -16,8 +16,27 @@ public struct VocabularyRescorer {
     private let spotter: CtcKeywordSpotter
     private let vocabulary: CustomVocabularyContext
     private let trie: VocabularyTrie
-    private let ctcTokenizer: SentencePieceCtcTokenizer?
+    private let ctcTokenizer: CtcTokenizer?
+    private let ctcModelDirectory: URL?
     private let debugMode: Bool
+
+    // CTC token presence candidate detection (USE_CTC_TOKEN_PRESENCE=1 to enable)
+    // This is an acoustic-based alternative to string similarity for candidate filtering.
+    // Instead of comparing spelling, we check if vocabulary term tokens are acoustically present.
+    private let useTokenPresence: Bool =
+        ProcessInfo.processInfo.environment["USE_CTC_TOKEN_PRESENCE"] == "1"
+
+    // Token presence only mode (TOKEN_PRESENCE_ONLY=1 to enable)
+    // When enabled, ONLY uses token presence for candidate detection (no string similarity).
+    // This is a pure acoustic approach aligned with NeMo CTC-WS philosophy.
+    private let tokenPresenceOnly: Bool =
+        ProcessInfo.processInfo.environment["TOKEN_PRESENCE_ONLY"] == "1"
+
+    // Minimum token presence score to consider as candidate (CTC_PRESENCE_THRESHOLD env var)
+    // Higher (closer to 0) = more strict. Default -8.0 is permissive.
+    private let tokenPresenceThreshold: Float =
+        ProcessInfo.processInfo.environment["CTC_PRESENCE_THRESHOLD"]
+        .flatMap { Float($0) } ?? -8.0
 
     /// Configuration for rescoring behavior
     public struct Config: Sendable {
@@ -35,43 +54,123 @@ public struct VocabularyRescorer {
         /// Weight for vocabulary term boost (added to CTC score)
         public let vocabBoostWeight: Float
 
+        /// Enable adaptive thresholds based on token count
+        /// When true, thresholds are adjusted for longer vocabulary terms
+        public let useAdaptiveThresholds: Bool
+
+        /// Reference token count for adaptive scaling (tokens beyond this get adjusted thresholds)
+        public let referenceTokenCount: Int
+
         public static let `default` = Config(
             minScoreAdvantage: 2.0,  // Vocab term must score 2.0 better than original
             minVocabScore: -12.0,  // Vocab term must have reasonable CTC score (lowered for alias support)
             maxOriginalScoreForReplacement: -4.0,  // Don't replace very confident words
-            vocabBoostWeight: 1.5  // Boost for vocabulary terms
+            vocabBoostWeight: 1.5,  // Boost for vocabulary terms
+            useAdaptiveThresholds: true,  // Enable adaptive thresholds by default
+            referenceTokenCount: 3  // Tokens beyond 3 get adjusted thresholds
         )
 
         public init(
             minScoreAdvantage: Float = 2.0,
             minVocabScore: Float = -8.0,
             maxOriginalScoreForReplacement: Float = -4.0,
-            vocabBoostWeight: Float = 1.5
+            vocabBoostWeight: Float = 1.5,
+            useAdaptiveThresholds: Bool = true,
+            referenceTokenCount: Int = 3
         ) {
             self.minScoreAdvantage = minScoreAdvantage
             self.minVocabScore = minVocabScore
             self.maxOriginalScoreForReplacement = maxOriginalScoreForReplacement
             self.vocabBoostWeight = vocabBoostWeight
+            self.useAdaptiveThresholds = useAdaptiveThresholds
+            self.referenceTokenCount = referenceTokenCount
+        }
+
+        // MARK: - Adaptive Threshold Functions
+
+        /// Compute adaptive minimum vocabulary score based on token count.
+        /// Longer keywords naturally have lower CTC scores, so we relax the threshold.
+        ///
+        /// Formula: `minVocabScore - (extraTokens * 1.0)`
+        /// - 3 tokens: no adjustment (reference)
+        /// - 5 tokens: threshold lowered by 2.0
+        /// - 8 tokens: threshold lowered by 5.0
+        ///
+        /// - Parameters:
+        ///   - tokenCount: Number of tokens in the vocabulary term
+        /// - Returns: Adjusted minimum vocabulary score threshold
+        public func adaptiveMinVocabScore(tokenCount: Int) -> Float {
+            guard useAdaptiveThresholds else { return minVocabScore }
+            let extraTokens = max(0, tokenCount - referenceTokenCount)
+            return minVocabScore - Float(extraTokens) * 1.0
+        }
+
+        /// Compute adaptive context-biasing weight based on token count.
+        /// Longer keywords need more boost to compensate for accumulated scoring error.
+        ///
+        /// Formula: `cbw * (1 + log2(tokenCount / referenceTokenCount) * 0.3)`
+        /// - 3 tokens: cbw * 1.0 (reference)
+        /// - 6 tokens: cbw * 1.3
+        /// - 12 tokens: cbw * 1.6
+        ///
+        /// - Parameters:
+        ///   - baseCbw: Base context-biasing weight
+        ///   - tokenCount: Number of tokens in the vocabulary term
+        /// - Returns: Adjusted context-biasing weight
+        public func adaptiveCbw(baseCbw: Float, tokenCount: Int) -> Float {
+            guard useAdaptiveThresholds, tokenCount > referenceTokenCount else { return baseCbw }
+            let ratio = Float(tokenCount) / Float(referenceTokenCount)
+            let scaleFactor = 1.0 + log2(ratio) * 0.3
+            return baseCbw * scaleFactor
+        }
+
+        /// Compute adaptive minimum score advantage based on token count.
+        /// Longer keywords may need less advantage since they're more distinctive.
+        ///
+        /// Formula: `minScoreAdvantage / sqrt(tokenCount / referenceTokenCount)`
+        /// - 3 tokens: no adjustment (reference)
+        /// - 6 tokens: advantage reduced to ~70%
+        /// - 12 tokens: advantage reduced to ~50%
+        ///
+        /// - Parameters:
+        ///   - tokenCount: Number of tokens in the vocabulary term
+        /// - Returns: Adjusted minimum score advantage threshold
+        public func adaptiveMinScoreAdvantage(tokenCount: Int) -> Float {
+            guard useAdaptiveThresholds, tokenCount > referenceTokenCount else { return minScoreAdvantage }
+            let ratio = Float(tokenCount) / Float(referenceTokenCount)
+            return minScoreAdvantage / sqrt(ratio)
         }
     }
 
     private let config: Config
 
     /// Initialize rescorer with CTC spotter and vocabulary
+    ///
+    /// - Parameters:
+    ///   - spotter: CTC keyword spotter for generating log probabilities
+    ///   - vocabulary: Custom vocabulary context with terms to detect
+    ///   - config: Rescoring configuration (default: .default)
+    ///   - ctcModelDirectory: Directory containing tokenizer.json (default: nil uses 110m model)
     public init(
         spotter: CtcKeywordSpotter,
         vocabulary: CustomVocabularyContext,
-        config: Config = .default
+        config: Config = .default,
+        ctcModelDirectory: URL? = nil
     ) {
         self.spotter = spotter
         self.vocabulary = vocabulary
         self.trie = VocabularyTrie(vocabulary: vocabulary)
         self.config = config
+        self.ctcModelDirectory = ctcModelDirectory
         self.debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
 
         // Initialize CTC tokenizer for scoring original words
         do {
-            self.ctcTokenizer = try SentencePieceCtcTokenizer()
+            if let modelDir = ctcModelDirectory {
+                self.ctcTokenizer = try CtcTokenizer(modelDirectory: modelDir)
+            } else {
+                self.ctcTokenizer = try CtcTokenizer()
+            }
         } catch {
             self.ctcTokenizer = nil
             let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
@@ -134,11 +233,22 @@ public struct VocabularyRescorer {
             let vocabTerm = detection.term.text
             let vocabScore = detection.score
 
+            // Get token count for adaptive threshold calculation
+            let vocabTokenCount = detection.term.ctcTokenIds?.count ?? detection.term.tokenIds?.count ?? 3
+
+            // Compute adaptive minimum vocab score based on token count
+            let adaptiveMinScore = config.adaptiveMinVocabScore(tokenCount: vocabTokenCount)
+
             // Skip if vocab term doesn't meet minimum score
-            guard vocabScore >= config.minVocabScore else {
+            guard vocabScore >= adaptiveMinScore else {
                 if debugMode {
+                    let baseScore = config.minVocabScore
+                    let thresholdInfo =
+                        config.useAdaptiveThresholds
+                        ? "adaptive=\(String(format: "%.2f", adaptiveMinScore)) (base=\(String(format: "%.2f", baseScore)), tokens=\(vocabTokenCount))"
+                        : String(format: "%.2f", baseScore)
                     logger.debug(
-                        "Skipping '\(vocabTerm)': CTC score \(String(format: "%.2f", vocabScore)) < min \(String(format: "%.2f", config.minVocabScore))"
+                        "Skipping '\(vocabTerm)': CTC score \(String(format: "%.2f", vocabScore)) < min \(thresholdInfo)"
                     )
                 }
                 continue
@@ -243,7 +353,27 @@ public struct VocabularyRescorer {
                     print("    [SIM] '\(wordClean)' vs '\(vocabTerm)' = \(String(format: "%.2f", bestSimilarity))")
                 }
 
-                if bestSimilarity >= effectiveMinSimilarity {
+                // LENGTH RATIO CHECK: Prevent short common words from matching longer vocab terms
+                // e.g., "and" (3 chars) should not match "Andre" (5 chars) even with ~60% similarity
+                let originalWord = words[idx].trimmingCharacters(in: .punctuationCharacters).lowercased()
+                let vocabTermLower = vocabTerm.lowercased()
+                let lengthRatio = Float(originalWord.count) / Float(vocabTermLower.count)
+
+                // If original word is much shorter than vocab term, require higher similarity
+                // Ratio < 0.75 means original is 25%+ shorter (e.g., "and"=3 / "andre"=5 = 0.6)
+                var adjustedMinSimilarity = effectiveMinSimilarity
+                if lengthRatio < 0.75 && originalWord.count <= 4 {
+                    // For short words with low length ratio, require much higher similarity
+                    adjustedMinSimilarity = max(effectiveMinSimilarity, 0.80)
+                    if debugMode && bestSimilarity >= effectiveMinSimilarity {
+                        print(
+                            "    [LENGTH] '\(originalWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
+                                + "raising threshold to \(String(format: "%.2f", adjustedMinSimilarity))"
+                        )
+                    }
+                }
+
+                if bestSimilarity >= adjustedMinSimilarity {
                     let originalSpan = words[idx..<idx + matchedSpanLength].joined(separator: " ")
 
                     if let existing = bestCandidate {
@@ -370,51 +500,64 @@ public struct VocabularyRescorer {
                     replacedIndices.insert(candidate.wordIndex + i)
                 }
 
-            } else if scoreAdvantage >= config.minScoreAdvantage
-                && originalScore <= config.maxOriginalScoreForReplacement
-            {
-                // Similarity threshold depends on span length and word length:
-                // - Multi-word (span≥2): higher threshold (0.80) - prevents "want to"→"Santoro", "and I"→"Audi"
-                // - Single word, short (≤3 chars): very high threshold (0.85) - prevents "you"→"Yu"
-                // - Single word, longer (>3 chars): lower threshold (0.55) - allows "NECI"→"Nequi"
-                let minSimilarityForSpan: Float
-                if candidate.spanLength >= 2 {
-                    minSimilarityForSpan = 0.80
-                } else if candidate.originalWord.count <= 3 {
-                    // Short words are often common English words - require very high similarity
-                    minSimilarityForSpan = 0.85
-                } else {
-                    minSimilarityForSpan = 0.55
-                }
+            } else {
+                // Compute adaptive score advantage threshold based on token count
+                let adaptiveMinAdvantage = config.adaptiveMinScoreAdvantage(tokenCount: vocabTokenCount)
 
-                if candidate.similarity >= minSimilarityForSpan {
-                    // Standard CTC-based replacement
-                    shouldReplace = true
-                    reason =
-                        "Vocab score advantage: \(String(format: "%.2f", scoreAdvantage)), sim=\(String(format: "%.2f", candidate.similarity))"
-
-                    modifiedWords[candidate.wordIndex] = preserveCapitalization(
-                        original: candidate.originalWord,
-                        replacement: vocabTerm
-                    )
-                    for i in 1..<candidate.spanLength {
-                        modifiedWords[candidate.wordIndex + i] = ""
+                if scoreAdvantage >= adaptiveMinAdvantage
+                    && originalScore <= config.maxOriginalScoreForReplacement
+                {
+                    // Similarity threshold depends on span length and word length:
+                    // - Multi-word (span≥2): higher threshold (0.80) - prevents "want to"→"Santoro", "and I"→"Audi"
+                    // - Single word, short (≤3 chars): very high threshold (0.85) - prevents "you"→"Yu"
+                    // - Single word, longer (>3 chars): lower threshold (0.55) - allows "NECI"→"Nequi"
+                    let minSimilarityForSpan: Float
+                    if candidate.spanLength >= 2 {
+                        minSimilarityForSpan = 0.80
+                    } else if candidate.originalWord.count <= 3 {
+                        // Short words are often common English words - require very high similarity
+                        minSimilarityForSpan = 0.85
+                    } else {
+                        minSimilarityForSpan = 0.55
                     }
 
-                    for i in 0..<candidate.spanLength {
-                        replacedIndices.insert(candidate.wordIndex + i)
+                    if candidate.similarity >= minSimilarityForSpan {
+                        // Standard CTC-based replacement
+                        shouldReplace = true
+                        let thresholdInfo =
+                            config.useAdaptiveThresholds
+                            ? "adaptive=\(String(format: "%.2f", adaptiveMinAdvantage)) (base=\(String(format: "%.2f", config.minScoreAdvantage)), tokens=\(vocabTokenCount))"
+                            : String(format: "%.2f", config.minScoreAdvantage)
+                        reason =
+                            "Vocab score advantage: \(String(format: "%.2f", scoreAdvantage)) >= \(thresholdInfo), sim=\(String(format: "%.2f", candidate.similarity))"
+
+                        modifiedWords[candidate.wordIndex] = preserveCapitalization(
+                            original: candidate.originalWord,
+                            replacement: vocabTerm
+                        )
+                        for i in 1..<candidate.spanLength {
+                            modifiedWords[candidate.wordIndex + i] = ""
+                        }
+
+                        for i in 0..<candidate.spanLength {
+                            replacedIndices.insert(candidate.wordIndex + i)
+                        }
+                    } else {
+                        shouldReplace = false
+                        reason =
+                            "Similarity too low for span \(candidate.spanLength): \(String(format: "%.2f", candidate.similarity)) < \(String(format: "%.2f", minSimilarityForSpan))"
                     }
+                } else if originalScore > config.maxOriginalScoreForReplacement {
+                    shouldReplace = false
+                    reason = "Original word too confident: \(String(format: "%.2f", originalScore))"
                 } else {
                     shouldReplace = false
-                    reason =
-                        "Similarity too low for span \(candidate.spanLength): \(String(format: "%.2f", candidate.similarity)) < \(String(format: "%.2f", minSimilarityForSpan))"
+                    let thresholdInfo =
+                        config.useAdaptiveThresholds
+                        ? "adaptive=\(String(format: "%.2f", adaptiveMinAdvantage)) (base=\(String(format: "%.2f", config.minScoreAdvantage)), tokens=\(vocabTokenCount))"
+                        : String(format: "%.2f", config.minScoreAdvantage)
+                    reason = "Score advantage too low: \(String(format: "%.2f", scoreAdvantage)) < \(thresholdInfo)"
                 }
-            } else if originalScore > config.maxOriginalScoreForReplacement {
-                shouldReplace = false
-                reason = "Original word too confident: \(String(format: "%.2f", originalScore))"
-            } else {
-                shouldReplace = false
-                reason = "Score advantage too low: \(String(format: "%.2f", scoreAdvantage))"
             }
 
             replacements.append(
@@ -831,6 +974,58 @@ public struct VocabularyRescorer {
         return 1.0 - Float(distance) / Float(maxLen)
     }
 
+    /// Compute CTC token presence score for a vocabulary term in a frame range.
+    ///
+    /// This is an acoustic-based alternative to string similarity. Instead of comparing
+    /// orthographic representations, we check if the vocabulary term's tokens are
+    /// acoustically present in the CTC log-probabilities.
+    ///
+    /// For each token in the term, we find the maximum log-probability across the
+    /// frame window. The average of these max values is the presence score.
+    /// Higher scores (closer to 0) indicate stronger acoustic evidence.
+    ///
+    /// - Parameters:
+    ///   - text: The vocabulary term text to check
+    ///   - logProbs: CTC log-probabilities [T, vocab_size]
+    ///   - startFrame: Start of frame range to search
+    ///   - endFrame: End of frame range to search (exclusive)
+    /// - Returns: Presence score (average max log-prob per token), or nil if tokenization fails
+    func ctcTokenPresence(
+        text: String,
+        logProbs: [[Float]],
+        startFrame: Int,
+        endFrame: Int
+    ) -> Float? {
+        guard let tokenizer = ctcTokenizer else { return nil }
+        guard startFrame < endFrame, startFrame >= 0, endFrame <= logProbs.count else { return nil }
+
+        // Tokenize the vocabulary term
+        let tokenIds = tokenizer.encode(text)
+        guard !tokenIds.isEmpty else { return nil }
+
+        // For each token, find the max log-prob in the frame window
+        var maxLogProbs: [Float] = []
+
+        for tokenId in tokenIds {
+            guard tokenId >= 0, tokenId < logProbs[0].count else { continue }
+
+            var maxLogProb: Float = -Float.infinity
+            for frame in startFrame..<endFrame {
+                let logProb = logProbs[frame][tokenId]
+                if logProb > maxLogProb {
+                    maxLogProb = logProb
+                }
+            }
+            maxLogProbs.append(maxLogProb)
+        }
+
+        guard !maxLogProbs.isEmpty else { return nil }
+
+        // Return average max log-prob across tokens
+        let sum = maxLogProbs.reduce(0, +)
+        return sum / Float(maxLogProbs.count)
+    }
+
     /// Represents a normalized form of a vocabulary term (canonical or alias)
     private struct NormalizedForm: Hashable {
         let raw: String
@@ -960,6 +1155,40 @@ public struct VocabularyRescorer {
             }
         }
         return normalizedSet
+    }
+
+    /// Calculate phonetic similarity between two strings using Levenshtein distance.
+    /// Returns a value between 0.0 (completely different) and 1.0 (identical).
+    private func phoneticSimilarity(_ s1: String, _ s2: String) -> Double {
+        let len1 = s1.count
+        let len2 = s2.count
+
+        if len1 == 0 && len2 == 0 { return 1.0 }
+        if len1 == 0 || len2 == 0 { return 0.0 }
+
+        let arr1 = Array(s1)
+        let arr2 = Array(s2)
+
+        // Levenshtein distance DP
+        var prev = Array(0...len2)
+        var curr = Array(repeating: 0, count: len2 + 1)
+
+        for i in 1...len1 {
+            curr[0] = i
+            for j in 1...len2 {
+                let cost = arr1[i - 1] == arr2[j - 1] ? 0 : 1
+                curr[j] = min(
+                    prev[j] + 1,  // deletion
+                    curr[j - 1] + 1,  // insertion
+                    prev[j - 1] + cost  // substitution
+                )
+            }
+            swap(&prev, &curr)
+        }
+
+        let distance = prev[len2]
+        let maxLen = max(len1, len2)
+        return 1.0 - Double(distance) / Double(maxLen)
     }
 
     // MARK: - Constrained CTC Rescoring
@@ -1132,7 +1361,9 @@ public struct VocabularyRescorer {
                             }
                         }
 
-                        let boostedVocabScore = vocabCtcScore + cbw
+                        // Compute adaptive CBW based on vocabulary token count
+                        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokens.count)
+                        let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
                         let shouldReplace = boostedVocabScore > originalCtcScore
 
                         if debugMode {
@@ -1145,8 +1376,12 @@ public struct VocabularyRescorer {
                             print(
                                 "    CTC('\(tdtPhrase)'): \(String(format: "%.2f", originalCtcScore))"
                             )
+                            let cbwInfo =
+                                config.useAdaptiveThresholds
+                                ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokens.count))"
+                                : String(format: "%.2f", cbw)
                             print(
-                                "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbw) = \(String(format: "%.2f", boostedVocabScore))"
+                                "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) = \(String(format: "%.2f", boostedVocabScore))"
                             )
                             print(
                                 "    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(boostedVocabScore > originalCtcScore ? ">" : "<=") original)"
@@ -1262,11 +1497,83 @@ public struct VocabularyRescorer {
                     }
 
                     // Use adaptive similarity threshold (use concatenated text for multi-word spans)
-                    let minSimilarityForSpan = requiredSimilarity(
+                    var minSimilarityForSpan = requiredSimilarity(
                         minSimilarity: minSimilarity,
                         spanLength: matchedSpanLength,
                         normalizedText: matchedConcatenation
                     )
+
+                    // LENGTH RATIO CHECK: Prevent short common words from matching longer vocab terms
+                    // e.g., "and" (3 chars) should not match "Andre" (5 chars) even with ~60% similarity
+                    if matchedSpanLength == 1 {
+                        let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
+                        if lengthRatio < 0.75 && normalizedWord.count <= 4 {
+                            // For short words with low length ratio, require much higher similarity
+                            minSimilarityForSpan = max(minSimilarityForSpan, 0.80)
+                            if debugMode && bestSimilarity >= minSimilarity {
+                                print(
+                                    "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
+                                        + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
+                                )
+                            }
+                        }
+                    }
+
+                    // STOPWORD CHECK: Prevent common words from being replaced
+                    // Single stopwords defined once and reused
+                    let stopwords: Set<String> = [
+                        // Articles and determiners
+                        "a", "an", "the", "some", "any", "no", "every", "each", "all",
+                        // Conjunctions
+                        "and", "or", "but", "so", "if", "then", "than", "as",
+                        // Prepositions
+                        "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "down",
+                        "out", "about", "into", "over", "after", "before", "between", "under",
+                        // Be verbs
+                        "is", "are", "was", "were", "be", "been", "being", "am",
+                        // Common verbs
+                        "have", "has", "had", "do", "does", "did", "will", "would", "can", "could",
+                        "go", "goes", "went", "come", "comes", "came", "get", "got", "take", "took",
+                        "make", "made", "say", "said", "see", "saw", "know", "knew", "think", "thought",
+                        // Pronouns
+                        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+                        "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
+                        "who", "what", "which", "where", "when", "how", "why",
+                        // Common short words
+                        "just", "also", "only", "even", "still", "now", "here", "there", "very",
+                        "well", "back", "way", "own", "new", "old", "good", "great", "first", "last",
+                    ]
+
+                    // For single-word matches, skip entirely if the TDT word is a stopword
+                    // This prevents "and" → "Jane", "comes" → "James", etc.
+                    if matchedSpanLength == 1 && stopwords.contains(normalizedWord) {
+                        if debugMode {
+                            print(
+                                "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'"
+                            )
+                        }
+                        continue
+                    }
+
+                    // For multi-word spans, check if any word is a stopword
+                    // This prevents "and we" → "Andre", "at this" → "Matthew", etc.
+                    if matchedSpanLength >= 2 {
+                        let spanWords = (0..<matchedSpanLength).map {
+                            Self.normalizeForSimilarity(wordTimings[wordIdx + $0].word)
+                        }
+                        let containsStopword = spanWords.contains { stopwords.contains($0) }
+                        if containsStopword {
+                            // Require very high similarity when span contains stopwords
+                            minSimilarityForSpan = max(minSimilarityForSpan, 0.85)
+                            if debugMode && bestSimilarity >= minSimilarity {
+                                print(
+                                    "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
+                                        + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
+                                )
+                            }
+                        }
+                    }
+
                     guard bestSimilarity >= minSimilarityForSpan else { continue }
 
                     // Build the original phrase (single word or concatenated span)
@@ -1310,8 +1617,9 @@ public struct VocabularyRescorer {
                         }
                     }
 
-                    // Apply context-biasing weight to vocabulary term (per NeMo paper)
-                    let boostedVocabScore = vocabCtcScore + cbw
+                    // Apply adaptive context-biasing weight based on vocabulary token count
+                    let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokens.count)
+                    let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
 
                     // CTC-vs-CTC comparison (same scale, per NeMo paper)
                     let shouldReplace = boostedVocabScore > originalCtcScore
@@ -1326,8 +1634,12 @@ public struct VocabularyRescorer {
                         print(
                             "    CTC('\(originalPhrase)'): \(String(format: "%.2f", originalCtcScore))"
                         )
+                        let cbwInfo =
+                            config.useAdaptiveThresholds
+                            ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokens.count))"
+                            : String(format: "%.2f", cbw)
                         print(
-                            "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbw) = \(String(format: "%.2f", boostedVocabScore))"
+                            "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) = \(String(format: "%.2f", boostedVocabScore))"
                         )
                         print(
                             "    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(boostedVocabScore > originalCtcScore ? ">" : "<=") original)"
