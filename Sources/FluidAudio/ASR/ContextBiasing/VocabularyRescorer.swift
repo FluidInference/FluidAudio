@@ -949,7 +949,7 @@ public struct VocabularyRescorer {
         let aLower = a.lowercased()
         let bLower = b.lowercased()
 
-        let distance = levenshteinDistance(aLower, bLower)
+        let distance = StringUtils.levenshteinDistance(aLower, bLower)
         let maxLen = max(aLower.count, bLower.count)
 
         guard maxLen > 0 else { return 1.0 }
@@ -1058,31 +1058,6 @@ public struct VocabularyRescorer {
         // Single words: use the configured minimum similarity
         // Note: The 0.85 threshold for short words was too aggressive (caused regression)
         return minSimilarity
-    }
-
-    /// Levenshtein distance between two strings
-    private static func levenshteinDistance(_ a: String, _ b: String) -> Int {
-        let aChars = Array(a)
-        let bChars = Array(b)
-        let m = aChars.count
-        let n = bChars.count
-
-        guard m > 0 else { return n }
-        guard n > 0 else { return m }
-
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-
-        for i in 0...m { dp[i][0] = i }
-        for j in 0...n { dp[0][j] = j }
-
-        for i in 1...m {
-            for j in 1...n {
-                let cost = aChars[i - 1] == bChars[j - 1] ? 0 : 1
-                dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
-            }
-        }
-
-        return dp[m][n]
     }
 
     /// Preserve capitalization from original word in replacement
