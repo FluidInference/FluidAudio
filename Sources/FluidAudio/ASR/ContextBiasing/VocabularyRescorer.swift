@@ -20,24 +20,6 @@ public struct VocabularyRescorer {
     private let ctcModelDirectory: URL?
     private let debugMode: Bool
 
-    // CTC token presence candidate detection (USE_CTC_TOKEN_PRESENCE=1 to enable)
-    // This is an acoustic-based alternative to string similarity for candidate filtering.
-    // Instead of comparing spelling, we check if vocabulary term tokens are acoustically present.
-    private let useTokenPresence: Bool =
-        ProcessInfo.processInfo.environment["USE_CTC_TOKEN_PRESENCE"] == "1"
-
-    // Token presence only mode (TOKEN_PRESENCE_ONLY=1 to enable)
-    // When enabled, ONLY uses token presence for candidate detection (no string similarity).
-    // This is a pure acoustic approach aligned with NeMo CTC-WS philosophy.
-    private let tokenPresenceOnly: Bool =
-        ProcessInfo.processInfo.environment["TOKEN_PRESENCE_ONLY"] == "1"
-
-    // Minimum token presence score to consider as candidate (CTC_PRESENCE_THRESHOLD env var)
-    // Higher (closer to 0) = more strict. Default -8.0 is permissive.
-    private let tokenPresenceThreshold: Float =
-        ProcessInfo.processInfo.environment["CTC_PRESENCE_THRESHOLD"]
-        .flatMap { Float($0) } ?? -8.0
-
     /// Configuration for rescoring behavior
     public struct Config: Sendable {
         /// Minimum CTC score advantage needed to replace original word
