@@ -25,7 +25,7 @@ pip install nemo_toolkit[asr] pyannote.metrics
 The NVIDIA Sortformer model is gated and requires HuggingFace authentication:
 
 1. Create an account at [huggingface.co](https://huggingface.co)
-2. Accept the model license at [nvidia/diar_sortformer_4spk-v1](https://huggingface.co/nvidia/diar_sortformer_4spk-v1)
+2. Accept the model license at [nvidia/diar_sortformer_4spk-v2.1](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1)
 3. Create an access token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 
 ### AMI Dataset
