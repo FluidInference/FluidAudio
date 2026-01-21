@@ -15,10 +15,16 @@ public struct VocabularyRescorer {
     private let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
     private let spotter: CtcKeywordSpotter
     private let vocabulary: CustomVocabularyContext
-    private let trie: VocabularyTrie
     private let ctcTokenizer: CtcTokenizer?
     private let ctcModelDirectory: URL?
     private let debugMode: Bool
+
+    // BK-tree for efficient approximate string matching (USE_BK_TREE=1 to enable)
+    // When enabled, uses BK-tree to find candidate vocabulary terms within edit distance
+    // instead of iterating all terms. Provides O(log n) vs O(n) for large vocabularies.
+    private let useBKTree: Bool
+    private let bkTree: BKTree?
+    private let bkTreeMaxDistance: Int
 
     /// Configuration for rescoring behavior
     public struct Config: Sendable {
@@ -141,10 +147,24 @@ public struct VocabularyRescorer {
     ) {
         self.spotter = spotter
         self.vocabulary = vocabulary
-        self.trie = VocabularyTrie(vocabulary: vocabulary)
         self.config = config
         self.ctcModelDirectory = ctcModelDirectory
         self.debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+
+        // Initialize BK-tree for efficient approximate string matching (optional)
+        self.useBKTree = ProcessInfo.processInfo.environment["USE_BK_TREE"] == "1"
+        self.bkTreeMaxDistance =
+            ProcessInfo.processInfo.environment["BK_TREE_MAX_DISTANCE"]
+            .flatMap { Int($0) } ?? 3
+        if useBKTree {
+            self.bkTree = BKTree(terms: vocabulary.terms)
+            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
+                print(
+                    "[BK-TREE] Initialized with \(vocabulary.terms.count) terms, maxDistance=\(self.bkTreeMaxDistance)")
+            }
+        } else {
+            self.bkTree = nil
+        }
 
         // Initialize CTC tokenizer for scoring original words
         do {
@@ -918,6 +938,50 @@ public struct VocabularyRescorer {
 
     // MARK: - Private Helpers
 
+    /// Find vocabulary terms similar to the given word using BK-tree (if enabled) or linear scan.
+    ///
+    /// When USE_BK_TREE=1, uses BK-tree for O(log n) approximate string matching.
+    /// Otherwise falls back to returning all vocabulary terms for O(n) comparison.
+    ///
+    /// - Parameters:
+    ///   - word: The word to find similar vocabulary terms for
+    ///   - minSimilarity: Minimum similarity threshold (0.0-1.0)
+    /// - Returns: Array of (term, similarity) tuples sorted by descending similarity
+    private func findSimilarTerms(
+        for word: String, minSimilarity: Float
+    ) -> [(term: CustomVocabularyTerm, similarity: Float)] {
+        let normalizedWord = Self.normalizeForSimilarity(word)
+        guard !normalizedWord.isEmpty else { return [] }
+
+        if useBKTree, let tree = bkTree {
+            // Use BK-tree for efficient approximate matching
+            // Convert similarity threshold to max edit distance
+            // similarity = 1 - (distance / maxLen), so distance = (1 - similarity) * maxLen
+            let maxLen = max(normalizedWord.count, 3)  // Assume min word length of 3
+            let maxDistance = min(bkTreeMaxDistance, Int((1.0 - minSimilarity) * Float(maxLen)))
+
+            let results = tree.search(query: normalizedWord, maxDistance: maxDistance)
+
+            if debugMode && !results.isEmpty {
+                print("  [BK-TREE] Found \(results.count) candidates for '\(word)' within distance \(maxDistance)")
+            }
+
+            return results.compactMap { result in
+                let similarity = Self.stringSimilarity(normalizedWord, result.normalizedText)
+                guard similarity >= minSimilarity else { return nil }
+                return (result.term, similarity)
+            }.sorted { $0.similarity > $1.similarity }
+        } else {
+            // Linear scan fallback
+            return vocabulary.terms.compactMap { term in
+                let termNormalized = Self.normalizeForSimilarity(term.text)
+                let similarity = Self.stringSimilarity(normalizedWord, termNormalized)
+                guard similarity >= minSimilarity else { return nil }
+                return (term, similarity)
+            }.sorted { $0.similarity > $1.similarity }
+        }
+    }
+
     /// Estimate the CTC score for the original word based on detection characteristics
     /// This is a heuristic - ideally we'd run full CTC DP on the original word's tokens
     private func estimateOriginalWordScore(
@@ -1383,6 +1447,16 @@ public struct VocabularyRescorer {
                     let tdtWord = timing.word
                     let normalizedWord = Self.normalizeForSimilarity(tdtWord)
                     guard !normalizedWord.isEmpty else { continue }
+
+                    // BK-tree validation: show candidates found for this word
+                    if debugMode && useBKTree, let tree = bkTree {
+                        let bkResults = tree.search(query: normalizedWord, maxDistance: bkTreeMaxDistance)
+                        if !bkResults.isEmpty {
+                            let matchingTerms = bkResults.map { "\($0.term.text)(d=\($0.distance))" }.joined(
+                                separator: ", ")
+                            print("  [BK-TREE] '\(tdtWord)' -> candidates: \(matchingTerms)")
+                        }
+                    }
 
                     // Skip if already exact match to canonical (no replacement needed)
                     if normalizedWord == normalizedCanonical {
