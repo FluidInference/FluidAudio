@@ -263,9 +263,9 @@ public struct VocabularyRescorer {
             // Look up the canonical term in the vocabulary to get ALL aliases
             // (since detections may come from entries without alias info)
             var allForms = [vocabTerm]
-            let vocabTermLower = vocabTerm.lowercased()
+            let vocabTermLower = detection.term.textLowercased
             for term in vocabulary.terms {
-                if term.text.lowercased() == vocabTermLower {
+                if term.textLowercased == vocabTermLower {
                     if let aliases = term.aliases {
                         allForms.append(contentsOf: aliases)
                     }
@@ -358,8 +358,7 @@ public struct VocabularyRescorer {
                 // LENGTH RATIO CHECK: Prevent short common words from matching longer vocab terms
                 // e.g., "and" (3 chars) should not match "Andre" (5 chars) even with ~60% similarity
                 let originalWord = words[idx].trimmingCharacters(in: .punctuationCharacters).lowercased()
-                let vocabTermLower = vocabTerm.lowercased()
-                let lengthRatio = Float(originalWord.count) / Float(vocabTermLower.count)
+                let lengthRatio = Float(originalWord.count) / Float(detection.term.textLowercased.count)
 
                 // If original word is much shorter than vocab term, require higher similarity
                 // Ratio < 0.75 means original is 25%+ shorter (e.g., "and"=3 / "andre"=5 = 0.6)
@@ -893,7 +892,7 @@ public struct VocabularyRescorer {
 
         for detection in detections {
             let vocabTerm = detection.term.text
-            let vocabTermLower = vocabTerm.lowercased()
+            let vocabTermLower = detection.term.textLowercased
 
             // Find all words similar to the vocabulary term
             for word in words {
@@ -903,12 +902,13 @@ public struct VocabularyRescorer {
                 // Threshold for fallback - replace phonetically similar words
                 // "Boz" vs "Bose" = 0.50, need to catch these cases
                 // Require: same first letter AND similar length to avoid false positives
-                let sameFirstLetter = wordClean.lowercased().first == vocabTermLower.first
+                let wordCleanLower = wordClean.lowercased()
+                let sameFirstLetter = wordCleanLower.first == vocabTermLower.first
                 let lengthDiff = abs(wordClean.count - vocabTerm.count)
                 let lengthMatch = lengthDiff <= 1
                 let shouldReplace =
                     similarity >= 0.50 && sameFirstLetter && lengthMatch
-                    && wordClean.lowercased() != vocabTermLower
+                    && wordCleanLower != vocabTermLower
                 if shouldReplace {
                     // Replace this word with the vocabulary term
                     let replacement = preserveCapitalization(original: wordClean, replacement: vocabTerm)
@@ -1295,10 +1295,10 @@ public struct VocabularyRescorer {
     /// Build all normalized forms (canonical + aliases) for a vocabulary term
     private func buildNormalizedForms(for term: CustomVocabularyTerm) -> [NormalizedForm] {
         var rawForms: [String] = [term.text]
-        let termLower = term.text.lowercased()
+        let termLower = term.textLowercased
 
         // Look up canonical term in vocabulary to get ALL aliases
-        for vocabTerm in vocabulary.terms where vocabTerm.text.lowercased() == termLower {
+        for vocabTerm in vocabulary.terms where vocabTerm.textLowercased == termLower {
             if let aliases = vocabTerm.aliases {
                 rawForms.append(contentsOf: aliases)
             }

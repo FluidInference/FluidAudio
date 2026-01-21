@@ -42,8 +42,8 @@ public struct BKTree: Sendable {
     public init(terms: [CustomVocabularyTerm]) {
         self.termCount = terms.count
 
-        // Build the tree using immutable nodes
-        let normalizedTerms = terms.map { ($0, $0.text.lowercased()) }
+        // Build the tree using immutable nodes (use cached lowercased text)
+        let normalizedTerms = terms.map { ($0, $0.textLowercased) }
         self.root = Self.buildTree(from: normalizedTerms)
     }
 

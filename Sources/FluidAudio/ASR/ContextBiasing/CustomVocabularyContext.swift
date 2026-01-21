@@ -14,6 +14,14 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     /// the Parakeet TDT token IDs above.
     public let ctcTokenIds: [Int]?
 
+    /// Pre-computed lowercased text for efficient comparison (not serialized).
+    public let textLowercased: String
+
+    // Only encode/decode the original properties, not the cached ones
+    private enum CodingKeys: String, CodingKey {
+        case text, weight, aliases, tokenIds, ctcTokenIds
+    }
+
     /// Create a custom vocabulary term.
     /// - Parameters:
     ///   - text: The word or phrase to boost
@@ -33,6 +41,17 @@ public struct CustomVocabularyTerm: Codable, Sendable {
         self.aliases = aliases
         self.tokenIds = tokenIds
         self.ctcTokenIds = ctcTokenIds
+        self.textLowercased = text.lowercased()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        weight = try container.decodeIfPresent(Float.self, forKey: .weight)
+        aliases = try container.decodeIfPresent([String].self, forKey: .aliases)
+        tokenIds = try container.decodeIfPresent([Int].self, forKey: .tokenIds)
+        ctcTokenIds = try container.decodeIfPresent([Int].self, forKey: .ctcTokenIds)
+        textLowercased = text.lowercased()
     }
 }
 
