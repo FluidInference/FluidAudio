@@ -21,15 +21,12 @@ extension VocabularyRescorer {
 
     // MARK: - Debug Logging
 
-    /// Logger for debug output (lazy initialization)
-    private static let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer.CTC")
-
     /// Log debug message only when debug mode is enabled.
     /// Uses closure to avoid string evaluation when debug is off.
     @inline(__always)
     private func debugLog(_ message: @escaping @autoclosure () -> String) {
         guard debugMode else { return }
-        Self.logger.debug("\(message(), privacy: .public)")
+        logger.debug("\(message(), privacy: .public)")
     }
 
     // MARK: - Stopwords (Shared)

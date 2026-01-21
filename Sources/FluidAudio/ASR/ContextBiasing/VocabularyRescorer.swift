@@ -12,7 +12,7 @@ import OSLog
 /// enabling a fair comparison rather than relying on heuristics.
 public struct VocabularyRescorer {
 
-    private let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
+    let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
 
     /// Log debug message with lazy evaluation (only formats string when debugMode is true)
     @inline(__always)
@@ -140,23 +140,51 @@ public struct VocabularyRescorer {
 
     let config: Config
 
-    /// Initialize rescorer with CTC spotter and vocabulary
+    // MARK: - Async Factory
+
+    /// Create rescorer asynchronously with CTC spotter and vocabulary.
+    /// This is the recommended API as it avoids blocking during tokenizer initialization.
     ///
     /// - Parameters:
     ///   - spotter: CTC keyword spotter for generating log probabilities
     ///   - vocabulary: Custom vocabulary context with terms to detect
     ///   - config: Rescoring configuration (default: .default)
     ///   - ctcModelDirectory: Directory containing tokenizer.json (default: nil uses 110m model)
-    public init(
+    /// - Returns: Initialized VocabularyRescorer
+    /// - Throws: `CtcTokenizer.Error` if tokenizer files cannot be loaded
+    public static func create(
         spotter: CtcKeywordSpotter,
         vocabulary: CustomVocabularyContext,
         config: Config = .default,
         ctcModelDirectory: URL? = nil
+    ) async throws -> VocabularyRescorer {
+        let tokenizer: CtcTokenizer
+        if let modelDir = ctcModelDirectory {
+            tokenizer = try await CtcTokenizer.load(from: modelDir)
+        } else {
+            tokenizer = try await CtcTokenizer.load()
+        }
+
+        return VocabularyRescorer(
+            spotter: spotter,
+            vocabulary: vocabulary,
+            config: config,
+            ctcTokenizer: tokenizer
+        )
+    }
+
+    /// Private initializer for async factory
+    private init(
+        spotter: CtcKeywordSpotter,
+        vocabulary: CustomVocabularyContext,
+        config: Config,
+        ctcTokenizer: CtcTokenizer
     ) {
         self.spotter = spotter
         self.vocabulary = vocabulary
         self.config = config
-        self.ctcModelDirectory = ctcModelDirectory
+        self.ctcModelDirectory = nil
+        self.ctcTokenizer = ctcTokenizer
         self.debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
 
         // Initialize BK-tree for efficient approximate string matching (optional)
@@ -174,19 +202,6 @@ public struct VocabularyRescorer {
             }
         } else {
             self.bkTree = nil
-        }
-
-        // Initialize CTC tokenizer for scoring original words
-        do {
-            if let modelDir = ctcModelDirectory {
-                self.ctcTokenizer = try CtcTokenizer(modelDirectory: modelDir)
-            } else {
-                self.ctcTokenizer = try CtcTokenizer()
-            }
-        } catch {
-            self.ctcTokenizer = nil
-            let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
-            logger.warning("Failed to initialize CTC tokenizer: \(error). Will fall back to heuristic scoring.")
         }
     }
 
@@ -924,50 +939,6 @@ public struct VocabularyRescorer {
 
     // MARK: - Private Helpers
 
-    /// Find vocabulary terms similar to the given word using BK-tree (if enabled) or linear scan.
-    ///
-    /// When USE_BK_TREE=1, uses BK-tree for O(log n) approximate string matching.
-    /// Otherwise falls back to returning all vocabulary terms for O(n) comparison.
-    ///
-    /// - Parameters:
-    ///   - word: The word to find similar vocabulary terms for
-    ///   - minSimilarity: Minimum similarity threshold (0.0-1.0)
-    /// - Returns: Array of (term, similarity) tuples sorted by descending similarity
-    private func findSimilarTerms(
-        for word: String, minSimilarity: Float
-    ) -> [(term: CustomVocabularyTerm, similarity: Float)] {
-        let normalizedWord = Self.normalizeForSimilarity(word)
-        guard !normalizedWord.isEmpty else { return [] }
-
-        if useBKTree, let tree = bkTree {
-            // Use BK-tree for efficient approximate matching
-            // Convert similarity threshold to max edit distance
-            // similarity = 1 - (distance / maxLen), so distance = (1 - similarity) * maxLen
-            let maxLen = max(normalizedWord.count, 3)  // Assume min word length of 3
-            let maxDistance = min(bkTreeMaxDistance, Int((1.0 - minSimilarity) * Float(maxLen)))
-
-            let results = tree.search(query: normalizedWord, maxDistance: maxDistance)
-
-            if !results.isEmpty {
-                debugLog("  [BK-TREE] Found \(results.count) candidates for '\(word)' within distance \(maxDistance)")
-            }
-
-            return results.compactMap { result in
-                let similarity = Self.stringSimilarity(normalizedWord, result.normalizedText)
-                guard similarity >= minSimilarity else { return nil }
-                return (result.term, similarity)
-            }.sorted { $0.similarity > $1.similarity }
-        } else {
-            // Linear scan fallback
-            return vocabulary.terms.compactMap { term in
-                let termNormalized = Self.normalizeForSimilarity(term.text)
-                let similarity = Self.stringSimilarity(normalizedWord, termNormalized)
-                guard similarity >= minSimilarity else { return nil }
-                return (term, similarity)
-            }.sorted { $0.similarity > $1.similarity }
-        }
-    }
-
     /// Candidate vocabulary term match with span information
     struct CandidateMatch {
         let term: CustomVocabularyTerm
@@ -1219,58 +1190,6 @@ public struct VocabularyRescorer {
         return 1.0 - Float(distance) / Float(maxLen)
     }
 
-    /// Compute CTC token presence score for a vocabulary term in a frame range.
-    ///
-    /// This is an acoustic-based alternative to string similarity. Instead of comparing
-    /// orthographic representations, we check if the vocabulary term's tokens are
-    /// acoustically present in the CTC log-probabilities.
-    ///
-    /// For each token in the term, we find the maximum log-probability across the
-    /// frame window. The average of these max values is the presence score.
-    /// Higher scores (closer to 0) indicate stronger acoustic evidence.
-    ///
-    /// - Parameters:
-    ///   - text: The vocabulary term text to check
-    ///   - logProbs: CTC log-probabilities [T, vocab_size]
-    ///   - startFrame: Start of frame range to search
-    ///   - endFrame: End of frame range to search (exclusive)
-    /// - Returns: Presence score (average max log-prob per token), or nil if tokenization fails
-    func ctcTokenPresence(
-        text: String,
-        logProbs: [[Float]],
-        startFrame: Int,
-        endFrame: Int
-    ) -> Float? {
-        guard let tokenizer = ctcTokenizer else { return nil }
-        guard startFrame < endFrame, startFrame >= 0, endFrame <= logProbs.count else { return nil }
-
-        // Tokenize the vocabulary term
-        let tokenIds = tokenizer.encode(text)
-        guard !tokenIds.isEmpty else { return nil }
-
-        // For each token, find the max log-prob in the frame window
-        var maxLogProbs: [Float] = []
-
-        for tokenId in tokenIds {
-            guard tokenId >= 0, tokenId < logProbs[0].count else { continue }
-
-            var maxLogProb: Float = -Float.infinity
-            for frame in startFrame..<endFrame {
-                let logProb = logProbs[frame][tokenId]
-                if logProb > maxLogProb {
-                    maxLogProb = logProb
-                }
-            }
-            maxLogProbs.append(maxLogProb)
-        }
-
-        guard !maxLogProbs.isEmpty else { return nil }
-
-        // Return average max log-prob across tokens
-        let sum = maxLogProbs.reduce(0, +)
-        return sum / Float(maxLogProbs.count)
-    }
-
     /// Represents a normalized form of a vocabulary term (canonical or alias)
     struct NormalizedForm: Hashable {
         let raw: String
@@ -1377,37 +1296,4 @@ public struct VocabularyRescorer {
         return normalizedSet
     }
 
-    /// Calculate phonetic similarity between two strings using Levenshtein distance.
-    /// Returns a value between 0.0 (completely different) and 1.0 (identical).
-    private func phoneticSimilarity(_ s1: String, _ s2: String) -> Double {
-        let len1 = s1.count
-        let len2 = s2.count
-
-        if len1 == 0 && len2 == 0 { return 1.0 }
-        if len1 == 0 || len2 == 0 { return 0.0 }
-
-        let arr1 = Array(s1)
-        let arr2 = Array(s2)
-
-        // Levenshtein distance DP
-        var prev = Array(0...len2)
-        var curr = Array(repeating: 0, count: len2 + 1)
-
-        for i in 1...len1 {
-            curr[0] = i
-            for j in 1...len2 {
-                let cost = arr1[i - 1] == arr2[j - 1] ? 0 : 1
-                curr[j] = min(
-                    prev[j] + 1,  // deletion
-                    curr[j - 1] + 1,  // insertion
-                    prev[j - 1] + cost  // substitution
-                )
-            }
-            swap(&prev, &curr)
-        }
-
-        let distance = prev[len2]
-        let maxLen = max(len1, len2)
-        return 1.0 - Double(distance) / Double(maxLen)
-    }
 }
