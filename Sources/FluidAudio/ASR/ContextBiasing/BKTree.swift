@@ -77,7 +77,7 @@ public struct BKTree: Sendable {
     /// - Parameters:
     ///   - query: The search string
     ///   - maxDistance: Maximum Levenshtein distance (inclusive)
-    /// - Returns: All terms within the specified distance, sorted by distance
+    /// - Returns: All terms within the specified distance
     /// - Complexity: O(log n) average for small maxDistance, O(n) worst case
     public func search(query: String, maxDistance: Int) -> [SearchResult] {
         guard let root = root else { return [] }
@@ -110,7 +110,7 @@ public struct BKTree: Sendable {
             }
         }
 
-        return results.sorted { $0.distance < $1.distance }
+        return results
     }
 
     /// Check if the tree is empty.

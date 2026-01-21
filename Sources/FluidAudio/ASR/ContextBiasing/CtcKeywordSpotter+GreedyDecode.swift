@@ -81,7 +81,7 @@ extension CtcKeywordSpotter {
         blankBiasCorrection: Float = 0.0
     ) -> GreedyCtcResult {
         let T = logProbs.count
-        guard T > 0 else {
+        guard T > 0, frameDuration > 0 else {
             return GreedyCtcResult(words: [], text: "", frameDuration: frameDuration, totalFrames: 0)
         }
 
@@ -95,6 +95,7 @@ extension CtcKeywordSpotter {
         var nonBlankCount = 0
         for t in 0..<T {
             let frame = logProbs[t]
+            guard frame.count > blankId else { continue }
             let blankLogProb = frame[blankId]
 
             // Find best non-blank token
@@ -132,23 +133,24 @@ extension CtcKeywordSpotter {
             let score: Float  // sum of log-probs across frames
         }
 
+        let blankTokenId = ContextBiasingConstants.blankSilentTokenId
         var collapsedTokens: [CollapsedToken] = []
-        var currentTokenId: Int = -1  // -1 means "blank/silent"
+        var currentTokenId: Int = blankTokenId
         var currentStartFrame: Int = 0
         var currentScore: Float = 0
 
         for (t, (tokenId, logProb, blankDominant)) in frameTokens.enumerated() {
-            // Treat blank-dominant frames as blank (tokenId = -1)
-            let effectiveTokenId = blankDominant ? -1 : tokenId
+            // Treat blank-dominant frames as blank
+            let effectiveTokenId = blankDominant ? blankTokenId : tokenId
 
             if effectiveTokenId == currentTokenId {
                 // Same token (or still blank), accumulate score
-                if effectiveTokenId != -1 {
+                if effectiveTokenId != blankTokenId {
                     currentScore += logProb
                 }
             } else {
                 // New token, save previous if it was a real token (not blank)
-                if currentTokenId != -1 {
+                if currentTokenId != blankTokenId {
                     collapsedTokens.append(
                         CollapsedToken(
                             tokenId: currentTokenId,
@@ -159,11 +161,11 @@ extension CtcKeywordSpotter {
                 }
                 currentTokenId = effectiveTokenId
                 currentStartFrame = t
-                currentScore = effectiveTokenId != -1 ? logProb : 0
+                currentScore = effectiveTokenId != blankTokenId ? logProb : 0
             }
         }
         // Don't forget the last token
-        if currentTokenId != -1 {
+        if currentTokenId != blankTokenId {
             collapsedTokens.append(
                 CollapsedToken(
                     tokenId: currentTokenId,

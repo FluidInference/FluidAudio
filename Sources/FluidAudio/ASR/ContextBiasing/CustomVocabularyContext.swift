@@ -92,13 +92,13 @@ public struct CustomVocabularyContext: Sendable {
 
     public init(
         terms: [CustomVocabularyTerm],
-        alpha: Float = 0.5,
+        alpha: Float = ContextBiasingConstants.defaultAlpha,
         contextScore: Float = 1.2,
         depthScaling: Float = 2.0,
         scorePerPhrase: Float = 0.0,
-        minCtcScore: Float = -12.0,
-        minSimilarity: Float = 0.52,
-        minCombinedConfidence: Float = 0.54,
+        minCtcScore: Float = ContextBiasingConstants.defaultMinVocabCtcScore,
+        minSimilarity: Float = ContextBiasingConstants.defaultMinSimilarity,
+        minCombinedConfidence: Float = ContextBiasingConstants.defaultMinCombinedConfidence,
         minTermLength: Int = 3
     ) {
         self.terms = terms
@@ -118,13 +118,13 @@ public struct CustomVocabularyContext: Sendable {
         let data = try Data(contentsOf: url)
         let config = try JSONDecoder().decode(CustomVocabularyConfig.self, from: data)
 
-        let alpha = config.alpha ?? 0.5
+        let alpha = config.alpha ?? ContextBiasingConstants.defaultAlpha
         let contextScore = config.contextScore ?? 1.2
         let depthScaling = config.depthScaling ?? 2.0
         let scorePerPhrase = config.scorePerPhrase ?? 0.0
-        let minCtcScore = config.minCtcScore ?? -12.0
-        let minSimilarity = config.minSimilarity ?? 0.52
-        let minCombinedConfidence = config.minCombinedConfidence ?? 0.54
+        let minCtcScore = config.minCtcScore ?? ContextBiasingConstants.defaultMinVocabCtcScore
+        let minSimilarity = config.minSimilarity ?? ContextBiasingConstants.defaultMinSimilarity
+        let minCombinedConfidence = config.minCombinedConfidence ?? ContextBiasingConstants.defaultMinCombinedConfidence
         let minTermLength = config.minTermLength ?? 3
 
         // Validate and normalize vocabulary terms

@@ -185,21 +185,18 @@ public struct VocabularyRescorer {
         self.config = config
         self.ctcModelDirectory = nil
         self.ctcTokenizer = ctcTokenizer
-        self.debugMode = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+        #if DEBUG
+        self.debugMode = false  // Set to true locally for verbose logging
+        #else
+        self.debugMode = false
+        #endif
 
-        // Initialize BK-tree for efficient approximate string matching (optional)
-        self.useBKTree = ProcessInfo.processInfo.environment["USE_BK_TREE"] == "1"
-        self.bkTreeMaxDistance =
-            ProcessInfo.processInfo.environment["BK_TREE_MAX_DISTANCE"]
-            .flatMap { Int($0) } ?? 3
+        // BK-tree for efficient approximate string matching (disabled by default)
+        // Enable for large vocabularies (>100 terms) where O(log V) lookup helps
+        self.useBKTree = ContextBiasingConstants.useBkTree
+        self.bkTreeMaxDistance = ContextBiasingConstants.bkTreeMaxDistance
         if useBKTree {
             self.bkTree = BKTree(terms: vocabulary.terms)
-            if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                let initLogger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
-                let termCount = vocabulary.terms.count
-                let maxDist = bkTreeMaxDistance
-                initLogger.debug("[BK-TREE] Initialized with \(termCount) terms, maxDistance=\(maxDist)")
-            }
         } else {
             self.bkTree = nil
         }
@@ -335,8 +332,8 @@ public struct VocabularyRescorer {
                             bestSimilarity = similarity
                             matchedSpanLength = spanLength
                         }
-                        // High confidence if similarity >= 0.65 and matching an alias
-                        if similarity >= 0.65 && form != vocabTerm {
+                        // High confidence if similarity meets threshold and matching an alias
+                        if similarity >= ContextBiasingConstants.highConfidenceAliasSimilarity && form != vocabTerm {
                             isHighConfidenceAliasMatch = true
                         }
                     }
@@ -375,7 +372,7 @@ public struct VocabularyRescorer {
                 }
 
                 // Debug: show all similarity calculations for high-similarity matches
-                if bestSimilarity >= 0.50 {
+                if bestSimilarity >= ContextBiasingConstants.minSimilarityFloor {
                     let wordClean = words[idx].trimmingCharacters(in: .punctuationCharacters)
                     debugLog("    [SIM] '\(wordClean)' vs '\(vocabTerm)' = \(String(format: "%.2f", bestSimilarity))")
                 }
@@ -480,7 +477,9 @@ public struct VocabularyRescorer {
             let shouldReplace: Bool
             let reason: String
 
-            if candidate.isHighConfidenceAlias && candidate.similarity >= 0.65 {
+            if candidate.isHighConfidenceAlias
+                && candidate.similarity >= ContextBiasingConstants.highConfidenceAliasSimilarity
+            {
                 // User explicitly defined this alias mapping - trust it with moderate similarity
                 shouldReplace = true
                 reason = "High-confidence alias match (sim: \(String(format: "%.2f", candidate.similarity)))"
@@ -501,7 +500,10 @@ public struct VocabularyRescorer {
                     replacedIndices.insert(candidate.wordIndex + i)
                 }
 
-            } else if candidate.spanLength >= 2 && candidate.similarity >= 0.80 && scoreAdvantage >= 0.5 {
+            } else if candidate.spanLength >= 2
+                && candidate.similarity >= ContextBiasingConstants.multiWordSpanSimilarity
+                && scoreAdvantage >= ContextBiasingConstants.scoreAdvantageThreshold
+            {
                 // COMPOUND WORD MATCH: For multi-word spans (e.g., "new res" -> "Newrez"),
                 // high string similarity (>=0.80) is strong evidence even with lower CTC advantage.
                 // Threshold raised from 0.75 to 0.80 to avoid false positives like "and I" -> "Audi" (sim=0.75)
@@ -529,17 +531,17 @@ public struct VocabularyRescorer {
                     && originalScore <= config.maxOriginalScoreForReplacement
                 {
                     // Similarity threshold depends on span length and word length:
-                    // - Multi-word (span≥2): higher threshold (0.80) - prevents "want to"→"Santoro", "and I"→"Audi"
-                    // - Single word, short (≤3 chars): very high threshold (0.85) - prevents "you"→"Yu"
-                    // - Single word, longer (>3 chars): lower threshold (0.55) - allows "NECI"→"Nequi"
+                    // - Multi-word (span≥2): higher threshold - prevents "want to"→"Santoro", "and I"→"Audi"
+                    // - Single word, short (≤3 chars): very high threshold - prevents "you"→"Yu"
+                    // - Single word, longer (>3 chars): lower threshold - allows "NECI"→"Nequi"
                     let minSimilarityForSpan: Float
                     if candidate.spanLength >= 2 {
-                        minSimilarityForSpan = 0.80
+                        minSimilarityForSpan = ContextBiasingConstants.multiWordSpanSimilarity
                     } else if candidate.originalWord.count <= 3 {
                         // Short words are often common English words - require very high similarity
-                        minSimilarityForSpan = 0.85
+                        minSimilarityForSpan = ContextBiasingConstants.stopwordSpanSimilarity
                     } else {
-                        minSimilarityForSpan = 0.55
+                        minSimilarityForSpan = ContextBiasingConstants.singleWordSpanSimilarity
                     }
 
                     if candidate.similarity >= minSimilarityForSpan {
@@ -642,7 +644,7 @@ public struct VocabularyRescorer {
         transcript: String,
         tokenTimings: [TokenTiming],
         spotResult: CtcKeywordSpotter.SpotKeywordsResult,
-        cbw: Float = 3.0
+        cbw: Float = ContextBiasingConstants.defaultCbw
     ) -> RescoreOutput {
         // Build word-level timings from token timings
         let wordTimings = buildWordTimings(from: tokenTimings)
@@ -910,7 +912,7 @@ public struct VocabularyRescorer {
                 let lengthDiff = abs(wordClean.count - vocabTerm.count)
                 let lengthMatch = lengthDiff <= 1
                 let shouldReplace =
-                    similarity >= 0.50 && sameFirstLetter && lengthMatch
+                    similarity >= ContextBiasingConstants.minSimilarityFloor && sameFirstLetter && lengthMatch
                     && wordCleanLower != vocabTermLower
                 if shouldReplace {
                     // Replace this word with the vocabulary term

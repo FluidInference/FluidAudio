@@ -5,20 +5,6 @@ import OSLog
 
 extension VocabularyRescorer {
 
-    // MARK: - Constants
-
-    /// Similarity threshold constants to avoid magic numbers.
-    private enum SimilarityThresholds {
-        /// Threshold for spans containing stopwords (high confidence required)
-        static let stopwordSpan: Float = 0.85
-        /// Threshold for short words with low length ratio
-        static let shortWordLengthRatio: Float = 0.80
-        /// Length ratio below which short word threshold applies
-        static let lengthRatioThreshold: Float = 0.75
-        /// Maximum character count for "short word" classification
-        static let shortWordMaxLength: Int = 4
-    }
-
     // MARK: - Debug Logging
 
     /// Log debug message only when debug mode is enabled.
@@ -100,9 +86,9 @@ extension VocabularyRescorer {
         tokenTimings: [TokenTiming],
         logProbs: [[Float]],
         frameDuration: Double,
-        cbw: Float = 3.0,
-        marginSeconds: Double = 0.5,
-        minSimilarity: Float = 0.5
+        cbw: Float = ContextBiasingConstants.defaultCbw,
+        marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
+        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
         if useBKTree {
             return rescoreWithConstrainedCTCWordCentric(
@@ -140,9 +126,9 @@ extension VocabularyRescorer {
         tokenTimings: [TokenTiming],
         logProbs: [[Float]],
         frameDuration: Double,
-        cbw: Float = 3.0,
-        marginSeconds: Double = 0.5,
-        minSimilarity: Float = 0.5
+        cbw: Float = ContextBiasingConstants.defaultCbw,
+        marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
+        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
         // Build word-level timings from token timings
         let wordTimings = buildWordTimings(from: tokenTimings)
@@ -269,10 +255,10 @@ extension VocabularyRescorer {
                 // LENGTH RATIO CHECK for single words
                 if spanLength == 1 {
                     let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-                    if lengthRatio < SimilarityThresholds.lengthRatioThreshold
-                        && normalizedWord.count <= SimilarityThresholds.shortWordMaxLength
+                    if lengthRatio < ContextBiasingConstants.lengthRatioThreshold
+                        && normalizedWord.count <= ContextBiasingConstants.shortWordMaxLength
                     {
-                        minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.shortWordLengthRatio)
+                        minSimilarityForSpan = max(minSimilarityForSpan, ContextBiasingConstants.shortWordSimilarity)
                         if similarity >= minSimilarity {
                             debugLog(
                                 "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
@@ -293,7 +279,7 @@ extension VocabularyRescorer {
                     let spanWords = spanIndices.map { normalizedWords[$0] }
                     let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
                     if containsStopword {
-                        minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.stopwordSpan)
+                        minSimilarityForSpan = max(minSimilarityForSpan, ContextBiasingConstants.stopwordSpanSimilarity)
                         if similarity >= minSimilarity {
                             debugLog(
                                 "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
@@ -373,9 +359,9 @@ extension VocabularyRescorer {
         tokenTimings: [TokenTiming],
         logProbs: [[Float]],
         frameDuration: Double,
-        cbw: Float = 3.0,
-        marginSeconds: Double = 0.5,
-        minSimilarity: Float = 0.5
+        cbw: Float = ContextBiasingConstants.defaultCbw,
+        marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
+        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
         // Build word-level timings from token timings
         let wordTimings = buildWordTimings(from: tokenTimings)
@@ -600,11 +586,12 @@ extension VocabularyRescorer {
                     // e.g., "and" (3 chars) should not match "Andre" (5 chars) even with ~60% similarity
                     if matchedSpanLength == 1 {
                         let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-                        if lengthRatio < SimilarityThresholds.lengthRatioThreshold
-                            && normalizedWord.count <= SimilarityThresholds.shortWordMaxLength
+                        if lengthRatio < ContextBiasingConstants.lengthRatioThreshold
+                            && normalizedWord.count <= ContextBiasingConstants.shortWordMaxLength
                         {
                             // For short words with low length ratio, require much higher similarity
-                            minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.shortWordLengthRatio)
+                            minSimilarityForSpan = max(
+                                minSimilarityForSpan, ContextBiasingConstants.shortWordSimilarity)
                             if bestSimilarity >= minSimilarity {
                                 debugLog(
                                     "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
@@ -633,7 +620,8 @@ extension VocabularyRescorer {
                         let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
                         if containsStopword {
                             // Require very high similarity when span contains stopwords
-                            minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.stopwordSpan)
+                            minSimilarityForSpan = max(
+                                minSimilarityForSpan, ContextBiasingConstants.stopwordSpanSimilarity)
                             if bestSimilarity >= minSimilarity {
                                 debugLog(
                                     "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
@@ -873,7 +861,7 @@ extension VocabularyRescorer {
         if spanLength >= 2 {
             let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
             if containsStopword {
-                minSimilarity = max(minSimilarity, SimilarityThresholds.stopwordSpan)
+                minSimilarity = max(minSimilarity, ContextBiasingConstants.stopwordSpanSimilarity)
                 debugLog(
                     "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
                         + "raising threshold to \(String(format: "%.2f", minSimilarity))"
@@ -899,10 +887,10 @@ extension VocabularyRescorer {
         minSimilarity: Float
     ) -> Float {
         let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-        if lengthRatio < SimilarityThresholds.lengthRatioThreshold
-            && normalizedWord.count <= SimilarityThresholds.shortWordMaxLength
+        if lengthRatio < ContextBiasingConstants.lengthRatioThreshold
+            && normalizedWord.count <= ContextBiasingConstants.shortWordMaxLength
         {
-            let adjusted = max(minSimilarity, SimilarityThresholds.shortWordLengthRatio)
+            let adjusted = max(minSimilarity, ContextBiasingConstants.shortWordSimilarity)
             if currentSimilarity >= minSimilarity {
                 debugLog(
                     "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "

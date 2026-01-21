@@ -23,26 +23,23 @@ public struct CtcKeywordSpotter {
     // 2s overlap at 16kHz = 32,000 samples (matches TDT chunking pattern)
     private let chunkOverlapSamples: Int = 32_000
 
-    // Debug flag controlled by environment variable FLUIDAUDIO_DEBUG_CTC_BOOSTING
-    let debugMode: Bool = ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1"
+    // Debug flag - enabled only in DEBUG builds
+    #if DEBUG
+    let debugMode: Bool = false  // Set to true locally for verbose logging
+    #else
+    let debugMode: Bool = false
+    #endif
 
-    // Flag to enable/disable chunked CTC processing (USE_CHUNKED_CTC=0 to disable)
-    private let useChunkedCTC: Bool = ProcessInfo.processInfo.environment["USE_CHUNKED_CTC"] != "0"
+    // Flag to enable/disable chunked CTC processing
+    private let useChunkedCTC: Bool = true
 
-    // Temperature for CTC softmax (CTC_TEMPERATURE env var, default 1.0)
-    // Higher values spread probability mass more evenly (softer distribution)
-    // Lower values make distribution more peaked
-    private let temperature: Float =
-        ProcessInfo.processInfo.environment["CTC_TEMPERATURE"]
-        .flatMap { Float($0) } ?? 1.0
+    // Temperature for CTC softmax (higher = softer distribution, lower = more peaked)
+    private let temperature: Float = ContextBiasingConstants.ctcTemperature
 
-    // Blank bias applied to log probabilities (BLANK_BIAS env var, default 0.0)
-    // Positive values penalize blank token, making non-blank tokens more likely
-    private let blankBias: Float =
-        ProcessInfo.processInfo.environment["BLANK_BIAS"]
-        .flatMap { Float($0) } ?? 0.0
+    // Blank bias applied to log probabilities (positive values penalize blank token)
+    private let blankBias: Float = ContextBiasingConstants.blankBias
 
-    struct CtcLogProbResult {
+    struct CtcLogProbResult: Sendable {
         let logProbs: [[Float]]
         let frameDuration: Double
         let totalFrames: Int
@@ -92,7 +89,7 @@ public struct CtcKeywordSpotter {
         }
     }
 
-    public init(models: CtcModels, blankId: Int = 1024) {
+    public init(models: CtcModels, blankId: Int = ContextBiasingConstants.defaultBlankId) {
         self.models = models
         self.blankId = blankId
         self.predictionOptions = AsrModels.optimizedPredictionOptions()
@@ -100,7 +97,9 @@ public struct CtcKeywordSpotter {
     }
 
     /// Convenience helper to create a spotter using the default cache location.
-    public static func makeDefault(blankId: Int = 1024) async throws -> CtcKeywordSpotter {
+    public static func makeDefault(
+        blankId: Int = ContextBiasingConstants.defaultBlankId
+    ) async throws -> CtcKeywordSpotter {
         let models = try await CtcModels.downloadAndLoad()
         return CtcKeywordSpotter(models: models, blankId: blankId)
     }
@@ -850,8 +849,8 @@ public struct CtcKeywordSpotter {
 
     /// Dynamic programming keyword alignment, ported from
     /// `NeMo/scripts/asr_context_biasing/ctc_word_spotter.py:ctc_word_spot`.
-    // Wildcard token ID: -1 represents "*" that matches anything at zero cost
-    private static let WILDCARD_TOKEN_ID = -1
+    // Wildcard token ID: represents "*" that matches anything at zero cost
+    private static let WILDCARD_TOKEN_ID = ContextBiasingConstants.wildcardTokenId
 
     /// Core DP table construction shared by all CTC word spotting variants.
     /// Returns filled DP, backtrack, and lastMatch arrays for downstream interpretation.
