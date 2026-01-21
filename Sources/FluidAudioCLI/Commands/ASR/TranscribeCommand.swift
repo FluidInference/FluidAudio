@@ -211,6 +211,7 @@ enum TranscribeCommand {
         var wordTimestamps = false
         var outputJsonPath: String?
         var modelVersion: AsrModelVersion = .v2  // Default to v2 (v3 has issues with some files)
+        var customVocabPath: String?
 
         // Parse options
         var i = 1
@@ -243,6 +244,11 @@ enum TranscribeCommand {
                     }
                     i += 1
                 }
+            case "--custom-vocab":
+                if i + 1 < arguments.count {
+                    customVocabPath = arguments[i + 1]
+                    i += 1
+                }
             default:
                 logger.warning("Warning: Unknown option: \(arguments[i])")
             }
@@ -253,6 +259,9 @@ enum TranscribeCommand {
             logger.info(
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
+            if customVocabPath != nil {
+                logger.warning("Custom vocabulary is not yet supported in streaming mode, ignoring --custom-vocab")
+            }
             await testStreamingTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
                 outputJsonPath: outputJsonPath, modelVersion: modelVersion)
@@ -260,14 +269,14 @@ enum TranscribeCommand {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion, customVocabPath: customVocabPath)
         }
     }
 
     /// Test batch transcription using AsrManager directly
     private static func testBatchTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
-        modelVersion: AsrModelVersion
+        modelVersion: AsrModelVersion, customVocabPath: String?
     ) async {
         do {
             // Initialize ASR models
@@ -299,8 +308,105 @@ enum TranscribeCommand {
             // Process with ASR Manager
             logger.info("Transcribing file: \(audioFileURL) ...")
             let startTime = Date()
-            let result = try await asrManager.transcribe(audioFileURL)
+            var result = try await asrManager.transcribe(audioFileURL)
             let processingTime = Date().timeIntervalSince(startTime)
+
+            // Apply vocabulary rescoring if custom vocab is provided
+            if let vocabPath = customVocabPath {
+                logger.info("Applying vocabulary boosting from: \(vocabPath)")
+
+                // Load CTC models
+                let ctcModels = try await CtcModels.downloadAndLoad(variant: .ctc110m)
+                let blankId = ctcModels.vocabulary.count
+                let spotter = CtcKeywordSpotter(models: ctcModels, blankId: blankId)
+
+                // Load vocabulary
+                let vocabURL = URL(fileURLWithPath: vocabPath)
+                let loadedVocab = try CustomVocabularyContext.loadFromSimpleFormat(from: vocabURL)
+
+                // Tokenize vocabulary terms with CTC tokens
+                let ctcTokenizer = try await CtcTokenizer.load(
+                    from: CtcModels.defaultCacheDirectory(for: .ctc110m)
+                )
+                var vocabTerms: [CustomVocabularyTerm] = []
+                for term in loadedVocab.terms {
+                    let tokenIds = ctcTokenizer.encode(term.text)
+                    if !tokenIds.isEmpty {
+                        let termWithTokens = CustomVocabularyTerm(
+                            text: term.text,
+                            weight: term.weight,
+                            aliases: term.aliases,
+                            tokenIds: nil,
+                            ctcTokenIds: tokenIds
+                        )
+                        vocabTerms.append(termWithTokens)
+                    }
+                }
+                let customVocab = CustomVocabularyContext(terms: vocabTerms)
+                logger.info("Loaded \(customVocab.terms.count) vocabulary terms")
+
+                // Run CTC keyword spotting to get log probabilities
+                let spotResult = try await spotter.spotKeywordsWithLogProbs(
+                    audioSamples: samples,
+                    customVocabulary: customVocab,
+                    minScore: nil
+                )
+
+                // Create rescorer and apply constrained CTC rescoring
+                let logProbs = spotResult.logProbs
+                if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty, !logProbs.isEmpty {
+                    let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
+
+                    // Use vocabulary-size-aware config (matching CtcEarningsBenchmark)
+                    let vocabSize = customVocab.terms.count
+                    let isLargeVocab = vocabSize > 10
+                    let rescorerConfig = VocabularyRescorer.Config(
+                        minScoreAdvantage: isLargeVocab ? 1.5 : 1.0,
+                        minVocabScore: isLargeVocab ? -14.0 : -15.0,
+                        maxOriginalScoreForReplacement: isLargeVocab ? -2.5 : -2.0,
+                        vocabBoostWeight: isLargeVocab ? 2.5 : 3.0
+                    )
+
+                    let rescorer = try await VocabularyRescorer.create(
+                        spotter: spotter,
+                        vocabulary: customVocab,
+                        config: rescorerConfig,
+                        ctcModelDirectory: ctcModelDir
+                    )
+
+                    // Use vocabulary-size-aware parameters
+                    let minSimilarity: Float = isLargeVocab ? 0.60 : 0.50
+                    let cbw: Float = isLargeVocab ? 2.5 : 3.0
+
+                    let rescoreOutput = rescorer.rescoreWithConstrainedCTC(
+                        transcript: result.text,
+                        tokenTimings: tokenTimings,
+                        logProbs: logProbs,
+                        frameDuration: spotResult.frameDuration,
+                        cbw: cbw,
+                        marginSeconds: 0.5,
+                        minSimilarity: minSimilarity
+                    )
+
+                    if rescoreOutput.wasModified {
+                        logger.info("Vocabulary boosting applied \(rescoreOutput.replacements.count) replacement(s)")
+                        for replacement in rescoreOutput.replacements where replacement.shouldReplace {
+                            logger.info(
+                                "  '\(replacement.originalWord)' → '\(replacement.replacementWord ?? "")' (score: \(String(format: "%.2f", replacement.replacementScore ?? 0)))"
+                            )
+                        }
+                        result = ASRResult(
+                            text: rescoreOutput.text,
+                            confidence: result.confidence,
+                            duration: result.duration,
+                            processingTime: result.processingTime,
+                            tokenTimings: result.tokenTimings
+                        )
+                    } else {
+                        logger.info("No vocabulary replacements made")
+                    }
+                }
+            }
 
             // Print results
             logger.info("" + String(repeating: "=", count: 50))
@@ -644,7 +750,8 @@ enum TranscribeCommand {
                 --metadata         Show confidence, start time, and end time in results
                 --word-timestamps  Show word-level timestamps for each word in the transcription
                 --output-json <file>  Save full transcription result to JSON (includes word timings)
-                --model-version <version>  ASR model version to use: v2 or v3 (default: v3)
+                --model-version <version>  ASR model version to use: v2 or v3 (default: v2)
+                --custom-vocab <file>  Apply vocabulary boosting using terms from file (batch mode only)
 
             Examples:
                 fluidaudio transcribe audio.wav                    # Batch mode (default)
@@ -653,6 +760,7 @@ enum TranscribeCommand {
                 fluidaudio transcribe audio.wav --word-timestamps  # Batch mode with word timestamps
                 fluidaudio transcribe audio.wav --streaming --metadata # Streaming mode with metadata
                 fluidaudio transcribe audio.wav --output-json results.json
+                fluidaudio transcribe audio.wav --custom-vocab vocab.txt  # With vocabulary boosting
 
             Batch mode (default):
             - Direct processing using AsrManager for fastest results
@@ -678,6 +786,12 @@ enum TranscribeCommand {
             Output JSON option:
             - Saves transcription output and timings to the specified JSON file
             - Includes merged word-level timings
+
+            Custom vocabulary option:
+            - Boosts recognition of domain-specific terms (company names, jargon, proper nouns)
+            - File format: one term per line (e.g., "NVIDIA", "PyTorch", "TensorRT")
+            - Uses CTC-based constrained decoding for accurate replacement
+            - Only available in batch mode (not streaming)
             """
         )
     }
