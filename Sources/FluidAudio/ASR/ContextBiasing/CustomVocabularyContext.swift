@@ -222,4 +222,49 @@ public struct CustomVocabularyContext: Sendable {
 
         return (result, warnings)
     }
+
+    // MARK: - CTC Tokenization
+
+    /// Load vocabulary from file and tokenize with CTC tokenizer.
+    ///
+    /// This is a convenience method that combines loading vocabulary from a simple text file
+    /// and tokenizing each term with the CTC tokenizer for use with vocabulary boosting.
+    ///
+    /// - Parameters:
+    ///   - path: Path to the vocabulary file (one term per line)
+    ///   - ctcVariant: CTC model variant to use for tokenization (default: .ctc110m)
+    /// - Returns: Tuple of tokenized vocabulary context and loaded CTC models
+    /// - Throws: Error if vocabulary file cannot be read or CTC models fail to load
+    public static func loadWithCtcTokens(
+        from path: String,
+        ctcVariant: CtcModelVariant = .ctc110m
+    ) async throws -> (vocab: CustomVocabularyContext, models: CtcModels) {
+        // Load CTC models
+        let ctcModels = try await CtcModels.downloadAndLoad(variant: ctcVariant)
+
+        // Load vocabulary from file
+        let vocabURL = URL(fileURLWithPath: path)
+        let loadedVocab = try loadFromSimpleFormat(from: vocabURL)
+
+        // Load CTC tokenizer
+        let ctcTokenizer = try await CtcTokenizer.load(
+            from: CtcModels.defaultCacheDirectory(for: ctcVariant)
+        )
+
+        // Tokenize each term with CTC tokenizer
+        let tokenizedTerms = loadedVocab.terms.compactMap { term -> CustomVocabularyTerm? in
+            let tokenIds = ctcTokenizer.encode(term.text)
+            guard !tokenIds.isEmpty else { return nil }
+            return CustomVocabularyTerm(
+                text: term.text,
+                weight: term.weight,
+                aliases: term.aliases,
+                tokenIds: nil,
+                ctcTokenIds: tokenIds
+            )
+        }
+
+        let tokenizedVocab = CustomVocabularyContext(terms: tokenizedTerms)
+        return (tokenizedVocab, ctcModels)
+    }
 }

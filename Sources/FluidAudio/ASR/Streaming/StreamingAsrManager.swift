@@ -46,6 +46,16 @@ public actor StreamingAsrManager {
     private var startTime: Date?
     private var processedChunks: Int = 0
 
+    // Vocabulary boosting
+    // These are initialized via configureVocabularyBoosting() before start()
+    // CtcKeywordSpotter and VocabularyRescorer contain CoreML models which are not Sendable.
+    // We manage the safety ourselves by only accessing them from within the actor.
+    private var customVocabulary: CustomVocabularyContext?
+    nonisolated(unsafe) private var ctcSpotter: CtcKeywordSpotter?
+    nonisolated(unsafe) private var vocabularyRescorer: VocabularyRescorer?
+    private var rescorerConfig: VocabularyRescorer.Config?
+    private var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
+
     /// Initialize the streaming ASR manager
     /// - Parameter config: Configuration for streaming behavior
     public init(config: StreamingAsrConfig = .default) {
@@ -58,6 +68,54 @@ public actor StreamingAsrManager {
 
         logger.info(
             "Initialized StreamingAsrManager with config: chunk=\(config.chunkSeconds)s left=\(config.leftContextSeconds)s right=\(config.rightContextSeconds)s"
+        )
+    }
+
+    /// Configure vocabulary boosting for streaming transcription
+    ///
+    /// When configured, vocabulary terms will be rescored when text is confirmed during streaming.
+    /// This provides real-time vocabulary corrections visible in confirmed updates.
+    ///
+    /// - Parameters:
+    ///   - vocabulary: Custom vocabulary context with terms to detect
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - config: Optional rescorer configuration (default: vocabulary-size-aware config)
+    /// - Throws: Error if rescorer initialization fails
+    public func configureVocabularyBoosting(
+        vocabulary: CustomVocabularyContext,
+        ctcModels: CtcModels,
+        config: VocabularyRescorer.Config? = nil
+    ) async throws {
+        self.customVocabulary = vocabulary
+
+        // Create CTC spotter
+        let blankId = ctcModels.vocabulary.count
+        self.ctcSpotter = CtcKeywordSpotter(models: ctcModels, blankId: blankId)
+
+        // Use vocabulary-size-aware config (matching batch mode behavior)
+        let vocabSize = vocabulary.terms.count
+        let isLargeVocab = vocabSize > 10
+        let effectiveConfig =
+            config
+            ?? VocabularyRescorer.Config(
+                minScoreAdvantage: isLargeVocab ? 1.5 : 1.0,
+                minVocabScore: isLargeVocab ? -14.0 : -15.0,
+                maxOriginalScoreForReplacement: isLargeVocab ? -2.5 : -2.0,
+                vocabBoostWeight: isLargeVocab ? 2.5 : 3.0
+            )
+        self.rescorerConfig = effectiveConfig
+
+        // Create rescorer
+        let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
+        self.vocabularyRescorer = try await VocabularyRescorer.create(
+            spotter: ctcSpotter!,
+            vocabulary: vocabulary,
+            config: effectiveConfig,
+            ctcModelDirectory: ctcModelDir
+        )
+
+        logger.info(
+            "Vocabulary boosting configured with \(vocabSize) terms (isLargeVocab: \(isLargeVocab))"
         )
     }
 
@@ -360,13 +418,39 @@ public actor StreamingAsrManager {
             let isHighConfidence = Double(interim.confidence) >= config.confirmationThreshold
             let shouldConfirm = isHighConfidence && hasMinimumContext
 
+            // Apply vocabulary rescoring when confirming (Option 3: Hybrid Rescoring)
+            // Note: We need to use chunk-local timings for rescoring since CTC logProbs are chunk-local
+            var finalText = interim.text
+            let finalTokenTimings = interim.tokenTimings ?? []
+            if shouldConfirm && vocabBoostingEnabled {
+                // Create chunk-local token timings for rescoring (CTC logProbs are chunk-local)
+                let chunkLocalTimings =
+                    asrManager.processTranscriptionResult(
+                        tokenIds: tokens,
+                        timestamps: timestamps,  // Original chunk-local timestamps (not adjusted)
+                        confidences: confidences,
+                        encoderSequenceLength: 0,
+                        audioSamples: windowSamples,
+                        processingTime: processingTime
+                    ).tokenTimings ?? []
+
+                if let rescored = await applyVocabularyRescoring(
+                    text: interim.text,
+                    tokenTimings: chunkLocalTimings,
+                    windowSamples: windowSamples
+                ) {
+                    finalText = rescored.text
+                    // Keep original timings since rescoring only changes text
+                }
+            }
+
             let update = StreamingTranscriptionUpdate(
-                text: interim.text,
+                text: finalText,
                 isConfirmed: shouldConfirm,
                 confidence: interim.confidence,
                 timestamp: Date(),
                 tokenIds: tokens,
-                tokenTimings: interim.tokenTimings ?? []
+                tokenTimings: finalTokenTimings
             )
 
             updateContinuation?.yield(update)
@@ -412,6 +496,79 @@ public actor StreamingAsrManager {
                 !hasMinimumContext
                 ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
             logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
+        }
+    }
+
+    /// Apply vocabulary rescoring to confirmed text using CTC-based constrained decoding.
+    ///
+    /// This runs CTC inference on the chunk audio and applies vocabulary rescoring
+    /// to replace misrecognized words with vocabulary terms when acoustic evidence supports it.
+    ///
+    /// - Parameters:
+    ///   - text: Original transcript text from ASR
+    ///   - tokenTimings: Token-level timing information
+    ///   - windowSamples: Audio samples for the current window
+    /// - Returns: Rescored output if modifications were made, nil otherwise
+    private func applyVocabularyRescoring(
+        text: String,
+        tokenTimings: [TokenTiming],
+        windowSamples: [Float]
+    ) async -> VocabularyRescorer.RescoreOutput? {
+        guard let spotter = ctcSpotter,
+            let rescorer = vocabularyRescorer,
+            let vocab = customVocabulary,
+            !tokenTimings.isEmpty
+        else {
+            return nil
+        }
+
+        do {
+            // Run CTC inference on the chunk audio to get log probabilities
+            let spotResult = try await spotter.spotKeywordsWithLogProbs(
+                audioSamples: windowSamples,
+                customVocabulary: vocab,
+                minScore: nil
+            )
+
+            let logProbs = spotResult.logProbs
+            guard !logProbs.isEmpty else {
+                logger.debug("Vocabulary rescoring skipped: no log probs from CTC")
+                return nil
+            }
+
+            // Determine rescoring parameters based on vocabulary size
+            let vocabSize = vocab.terms.count
+            let isLargeVocab = vocabSize > 10
+            let minSimilarity: Float = isLargeVocab ? 0.60 : 0.50
+            let cbw: Float = isLargeVocab ? 2.5 : 3.0
+
+            // Apply constrained CTC rescoring
+            let rescoreOutput = rescorer.rescoreWithConstrainedCTC(
+                transcript: text,
+                tokenTimings: tokenTimings,
+                logProbs: logProbs,
+                frameDuration: spotResult.frameDuration,
+                cbw: cbw,
+                marginSeconds: 0.5,
+                minSimilarity: minSimilarity
+            )
+
+            if rescoreOutput.wasModified {
+                logger.info(
+                    "Vocabulary rescoring applied \(rescoreOutput.replacements.count) replacement(s) in streaming chunk"
+                )
+                for replacement in rescoreOutput.replacements where replacement.shouldReplace {
+                    logger.debug(
+                        "  '\(replacement.originalWord)' → '\(replacement.replacementWord ?? "")'"
+                    )
+                }
+                return rescoreOutput
+            }
+
+            return nil
+        } catch {
+            logger.warning("Vocabulary rescoring failed: \(error.localizedDescription)")
+            return nil
         }
     }
 

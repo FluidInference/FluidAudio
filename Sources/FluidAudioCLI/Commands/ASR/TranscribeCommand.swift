@@ -259,12 +259,9 @@ enum TranscribeCommand {
             logger.info(
                 "Streaming mode enabled: simulating real-time audio with 1-second chunks.\n"
             )
-            if customVocabPath != nil {
-                logger.warning("Custom vocabulary is not yet supported in streaming mode, ignoring --custom-vocab")
-            }
             await testStreamingTranscription(
                 audioFile: audioFile, showMetadata: showMetadata, wordTimestamps: wordTimestamps,
-                outputJsonPath: outputJsonPath, modelVersion: modelVersion)
+                outputJsonPath: outputJsonPath, modelVersion: modelVersion, customVocabPath: customVocabPath)
         } else {
             logger.info("Using batch mode with direct processing\n")
             await testBatchTranscription(
@@ -315,35 +312,13 @@ enum TranscribeCommand {
             if let vocabPath = customVocabPath {
                 logger.info("Applying vocabulary boosting from: \(vocabPath)")
 
-                // Load CTC models
-                let ctcModels = try await CtcModels.downloadAndLoad(variant: .ctc110m)
+                // Load vocabulary with CTC tokenization
+                let (customVocab, ctcModels) = try await CustomVocabularyContext.loadWithCtcTokens(from: vocabPath)
+                logger.info("Loaded \(customVocab.terms.count) vocabulary terms")
+
+                // Create CTC spotter
                 let blankId = ctcModels.vocabulary.count
                 let spotter = CtcKeywordSpotter(models: ctcModels, blankId: blankId)
-
-                // Load vocabulary
-                let vocabURL = URL(fileURLWithPath: vocabPath)
-                let loadedVocab = try CustomVocabularyContext.loadFromSimpleFormat(from: vocabURL)
-
-                // Tokenize vocabulary terms with CTC tokens
-                let ctcTokenizer = try await CtcTokenizer.load(
-                    from: CtcModels.defaultCacheDirectory(for: .ctc110m)
-                )
-                var vocabTerms: [CustomVocabularyTerm] = []
-                for term in loadedVocab.terms {
-                    let tokenIds = ctcTokenizer.encode(term.text)
-                    if !tokenIds.isEmpty {
-                        let termWithTokens = CustomVocabularyTerm(
-                            text: term.text,
-                            weight: term.weight,
-                            aliases: term.aliases,
-                            tokenIds: nil,
-                            ctcTokenIds: tokenIds
-                        )
-                        vocabTerms.append(termWithTokens)
-                    }
-                }
-                let customVocab = CustomVocabularyContext(terms: vocabTerms)
-                logger.info("Loaded \(customVocab.terms.count) vocabulary terms")
 
                 // Run CTC keyword spotting to get log probabilities
                 let spotResult = try await spotter.spotKeywordsWithLogProbs(
@@ -503,7 +478,7 @@ enum TranscribeCommand {
     /// Test streaming transcription
     private static func testStreamingTranscription(
         audioFile: String, showMetadata: Bool, wordTimestamps: Bool, outputJsonPath: String?,
-        modelVersion: AsrModelVersion
+        modelVersion: AsrModelVersion, customVocabPath: String?
     ) async {
         // Use optimized streaming configuration
         let config = StreamingAsrConfig.streaming
@@ -514,6 +489,21 @@ enum TranscribeCommand {
         do {
             // Initialize ASR models
             let models = try await AsrModels.downloadAndLoad(version: modelVersion)
+
+            // Configure vocabulary boosting if custom vocab is provided (Option 3: Hybrid Rescoring)
+            if let vocabPath = customVocabPath {
+                logger.info("Configuring vocabulary boosting for streaming mode from: \(vocabPath)")
+
+                // Load vocabulary with CTC tokenization
+                let (customVocab, ctcModels) = try await CustomVocabularyContext.loadWithCtcTokens(from: vocabPath)
+                logger.info("Loaded \(customVocab.terms.count) vocabulary terms for streaming")
+
+                // Configure vocabulary boosting on the streaming manager
+                try await streamingAsr.configureVocabularyBoosting(
+                    vocabulary: customVocab,
+                    ctcModels: ctcModels
+                )
+            }
 
             // Start the engine with the models
             try await streamingAsr.start(models: models)
@@ -791,7 +781,8 @@ enum TranscribeCommand {
             - Boosts recognition of domain-specific terms (company names, jargon, proper nouns)
             - File format: one term per line (e.g., "NVIDIA", "PyTorch", "TensorRT")
             - Uses CTC-based constrained decoding for accurate replacement
-            - Only available in batch mode (not streaming)
+            - Works in both batch and streaming modes
+            - In streaming mode, corrections appear when text is confirmed (hybrid rescoring)
             """
         )
     }
