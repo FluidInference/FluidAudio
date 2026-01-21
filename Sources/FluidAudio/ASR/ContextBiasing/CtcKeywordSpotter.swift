@@ -701,7 +701,7 @@ public struct CtcKeywordSpotter {
         let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
         lengthArray[0] = NSNumber(value: lengthValue)
 
-        let dict: NSMutableDictionary = [
+        var dict: [String: MLFeatureValue] = [
             "melspectrogram_features": MLFeatureValue(multiArray: melFeatures),
             "mel_length": MLFeatureValue(multiArray: lengthArray),
         ]
@@ -712,7 +712,7 @@ public struct CtcKeywordSpotter {
             dict["input_1"] = MLFeatureValue(multiArray: input1)
         }
 
-        return try MLDictionaryFeatureProvider(dictionary: dict as! [String: MLFeatureValue])
+        return try MLDictionaryFeatureProvider(dictionary: dict)
     }
 
     private func makeLogProbs(

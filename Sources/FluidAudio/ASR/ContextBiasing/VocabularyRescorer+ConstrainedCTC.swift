@@ -31,6 +31,29 @@ extension VocabularyRescorer {
         "well", "back", "way", "own", "new", "old", "good", "great", "first", "last",
     ]
 
+    // MARK: - CTC Match Types
+
+    /// Parameters for evaluating a CTC match candidate.
+    private struct CTCMatchCandidate {
+        let originalPhrase: String
+        let vocabTerm: String
+        let vocabTokens: [Int]
+        let similarity: Float
+        let spanLength: Int
+        let spanIndices: [Int]
+        let spanStartTime: Double
+        let spanEndTime: Double
+    }
+
+    /// Result of CTC match evaluation.
+    private struct CTCMatchResult {
+        let shouldReplace: Bool
+        let originalScore: Float
+        let boostedVocabScore: Float
+        let replacement: String
+        let reason: String
+    }
+
     // MARK: - Public API
 
     /// Rescore using constrained CTC search around TDT word locations.
@@ -269,87 +292,34 @@ extension VocabularyRescorer {
                 let spanStartTime = wordTimings[wordIdx].startTime
                 let spanEndTime = wordTimings[wordIdx + spanLength - 1].endTime
 
-                let marginFrames = Int(marginSeconds / frameDuration)
-                let spanStartFrame = Int(spanStartTime / frameDuration)
-                let spanEndFrame = Int(spanEndTime / frameDuration)
-
-                let searchStart = max(0, spanStartFrame - marginFrames)
-                let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
-
-                // Score vocabulary term using constrained CTC
-                let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
-                    logProbs: logProbs,
-                    keywordTokens: vocabTokens,
-                    searchStartFrame: searchStart,
-                    searchEndFrame: searchEnd
+                // Evaluate CTC match using shared helper
+                let candidate = CTCMatchCandidate(
+                    originalPhrase: originalPhrase,
+                    vocabTerm: vocabTerm,
+                    vocabTokens: vocabTokens,
+                    similarity: similarity,
+                    spanLength: spanLength,
+                    spanIndices: spanIndices,
+                    spanStartTime: spanStartTime,
+                    spanEndTime: spanEndTime
                 )
 
-                // Score original phrase using constrained CTC (same window)
-                var originalCtcScore: Float = -Float.infinity
-                if let tokenizer = ctcTokenizer {
-                    let originalTokens = tokenizer.encode(originalPhrase)
-                    if !originalTokens.isEmpty {
-                        let (score, _, _) = spotter.ctcWordSpotConstrained(
-                            logProbs: logProbs,
-                            keywordTokens: originalTokens,
-                            searchStartFrame: searchStart,
-                            searchEndFrame: searchEnd
-                        )
-                        originalCtcScore = score
-                    }
-                }
+                let result = evaluateCTCMatch(
+                    candidate: candidate,
+                    logProbs: logProbs,
+                    frameDuration: frameDuration,
+                    cbw: cbw,
+                    marginSeconds: marginSeconds
+                )
 
-                // Apply adaptive context-biasing weight based on vocabulary token count
-                let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokens.count)
-                let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
-
-                // CTC-vs-CTC comparison (same scale, per NeMo paper)
-                let shouldReplace = boostedVocabScore > originalCtcScore
-
-                if debugMode {
-                    print(
-                        "  '\(originalPhrase)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", similarity)), span=\(spanLength))"
+                if result.shouldReplace {
+                    applyReplacement(
+                        result: result,
+                        candidate: candidate,
+                        modifiedWords: &modifiedWords,
+                        replacedIndices: &replacedIndices,
+                        replacements: &replacements
                     )
-                    print(
-                        "    TDT span: [\(String(format: "%.2f", spanStartTime))-\(String(format: "%.2f", spanEndTime))s]"
-                    )
-                    print(
-                        "    CTC('\(originalPhrase)'): \(String(format: "%.2f", originalCtcScore))"
-                    )
-                    let cbwInfo =
-                        config.useAdaptiveThresholds
-                        ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokens.count))"
-                        : String(format: "%.2f", cbw)
-                    print(
-                        "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) = \(String(format: "%.2f", boostedVocabScore))"
-                    )
-                    print(
-                        "    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(boostedVocabScore > originalCtcScore ? ">" : "<=") original)"
-                    )
-                }
-
-                if shouldReplace {
-                    let replacement = preserveCapitalization(original: tdtWord, replacement: vocabTerm)
-                    modifiedWords[wordIdx].word = replacement
-                    // Mark additional words in span as empty (will be filtered out)
-                    for idx in spanIndices.dropFirst() {
-                        modifiedWords[idx].word = ""
-                    }
-                    // Mark all indices as replaced
-                    for idx in spanIndices {
-                        replacedIndices.insert(idx)
-                    }
-
-                    replacements.append(
-                        RescoringResult(
-                            originalWord: originalPhrase,
-                            originalScore: originalCtcScore,
-                            replacementWord: replacement,
-                            replacementScore: boostedVocabScore,
-                            shouldReplace: true,
-                            reason:
-                                "CTC-vs-CTC: '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(originalPhrase)'=\(String(format: "%.2f", originalCtcScore))"
-                        ))
 
                     // Break out of candidate loop - this word is now replaced
                     break
@@ -501,88 +471,34 @@ extension VocabularyRescorer {
                         let spanStartTime = wordTimings[spanIndices.first!].startTime
                         let spanEndTime = wordTimings[spanIndices.last!].endTime
 
-                        let marginFrames = Int(marginSeconds / frameDuration)
-                        let spanStartFrame = Int(spanStartTime / frameDuration)
-                        let spanEndFrame = Int(spanEndTime / frameDuration)
-
-                        let searchStart = max(0, spanStartFrame - marginFrames)
-                        let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
-
-                        // Score vocabulary phrase using constrained CTC
-                        let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
-                            logProbs: logProbs,
-                            keywordTokens: vocabTokens,
-                            searchStartFrame: searchStart,
-                            searchEndFrame: searchEnd
+                        // Evaluate CTC match using shared helper
+                        let candidate = CTCMatchCandidate(
+                            originalPhrase: tdtPhrase,
+                            vocabTerm: vocabTerm,
+                            vocabTokens: vocabTokens,
+                            similarity: bestSimilarity,
+                            spanLength: spanLength,
+                            spanIndices: spanIndices,
+                            spanStartTime: spanStartTime,
+                            spanEndTime: spanEndTime
                         )
 
-                        // Score original TDT phrase using constrained CTC
-                        var originalCtcScore: Float = -Float.infinity
-                        if let tokenizer = ctcTokenizer {
-                            let originalTokens = tokenizer.encode(tdtPhrase)
-                            if !originalTokens.isEmpty {
-                                let (score, _, _) = spotter.ctcWordSpotConstrained(
-                                    logProbs: logProbs,
-                                    keywordTokens: originalTokens,
-                                    searchStartFrame: searchStart,
-                                    searchEndFrame: searchEnd
-                                )
-                                originalCtcScore = score
-                            }
-                        }
+                        let result = evaluateCTCMatch(
+                            candidate: candidate,
+                            logProbs: logProbs,
+                            frameDuration: frameDuration,
+                            cbw: cbw,
+                            marginSeconds: marginSeconds
+                        )
 
-                        // Compute adaptive CBW based on vocabulary token count
-                        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokens.count)
-                        let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
-                        let shouldReplace = boostedVocabScore > originalCtcScore
-
-                        if debugMode {
-                            print(
-                                "  [MULTI] '\(tdtPhrase)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", bestSimilarity)))"
+                        if result.shouldReplace {
+                            applyReplacement(
+                                result: result,
+                                candidate: candidate,
+                                modifiedWords: &modifiedWords,
+                                replacedIndices: &replacedIndices,
+                                replacements: &replacements
                             )
-                            print(
-                                "    TDT span: [\(String(format: "%.2f", spanStartTime))-\(String(format: "%.2f", spanEndTime))s] words=\(spanLength)"
-                            )
-                            print(
-                                "    CTC('\(tdtPhrase)'): \(String(format: "%.2f", originalCtcScore))"
-                            )
-                            let cbwInfo =
-                                config.useAdaptiveThresholds
-                                ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokens.count))"
-                                : String(format: "%.2f", cbw)
-                            print(
-                                "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) = \(String(format: "%.2f", boostedVocabScore))"
-                            )
-                            print(
-                                "    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(boostedVocabScore > originalCtcScore ? ">" : "<=") original)"
-                            )
-                        }
-
-                        if shouldReplace {
-                            // Replace first word with full phrase, mark rest as empty
-                            let replacement = preserveCapitalization(
-                                original: spanWords.first ?? tdtPhrase,
-                                replacement: vocabTerm
-                            )
-                            modifiedWords[spanIndices.first!].word = replacement
-                            for idx in spanIndices.dropFirst() {
-                                modifiedWords[idx].word = ""  // Will be filtered out
-                            }
-                            // Mark all indices as replaced
-                            for idx in spanIndices {
-                                replacedIndices.insert(idx)
-                            }
-
-                            replacements.append(
-                                RescoringResult(
-                                    originalWord: tdtPhrase,
-                                    originalScore: originalCtcScore,
-                                    replacementWord: replacement,
-                                    replacementScore: boostedVocabScore,
-                                    shouldReplace: true,
-                                    reason:
-                                        "CTC-vs-CTC (multi-word): '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(tdtPhrase)'=\(String(format: "%.2f", originalCtcScore))"
-                                ))
                         }
                     }
                 }
@@ -729,91 +645,38 @@ extension VocabularyRescorer {
                         ? tdtWord
                         : spanIndices.map { wordTimings[$0].word }.joined(separator: " ")
 
-                    // Get temporal window for the span (use direct indexing to avoid force unwraps)
+                    // Get temporal window for the span
                     let spanStartTime = wordTimings[wordIdx].startTime
                     let spanEndTime = wordTimings[wordIdx + matchedSpanLength - 1].endTime
 
-                    let marginFrames = Int(marginSeconds / frameDuration)
-                    let spanStartFrame = Int(spanStartTime / frameDuration)
-                    let spanEndFrame = Int(spanEndTime / frameDuration)
-
-                    let searchStart = max(0, spanStartFrame - marginFrames)
-                    let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
-
-                    // Score vocabulary term using constrained CTC
-                    let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
-                        logProbs: logProbs,
-                        keywordTokens: vocabTokens,
-                        searchStartFrame: searchStart,
-                        searchEndFrame: searchEnd
+                    // Evaluate CTC match using shared helper
+                    let candidate = CTCMatchCandidate(
+                        originalPhrase: originalPhrase,
+                        vocabTerm: vocabTerm,
+                        vocabTokens: vocabTokens,
+                        similarity: bestSimilarity,
+                        spanLength: matchedSpanLength,
+                        spanIndices: spanIndices,
+                        spanStartTime: spanStartTime,
+                        spanEndTime: spanEndTime
                     )
 
-                    // Score original phrase using constrained CTC (same window)
-                    var originalCtcScore: Float = -Float.infinity
-                    if let tokenizer = ctcTokenizer {
-                        let originalTokens = tokenizer.encode(originalPhrase)
-                        if !originalTokens.isEmpty {
-                            let (score, _, _) = spotter.ctcWordSpotConstrained(
-                                logProbs: logProbs,
-                                keywordTokens: originalTokens,
-                                searchStartFrame: searchStart,
-                                searchEndFrame: searchEnd
-                            )
-                            originalCtcScore = score
-                        }
-                    }
+                    let result = evaluateCTCMatch(
+                        candidate: candidate,
+                        logProbs: logProbs,
+                        frameDuration: frameDuration,
+                        cbw: cbw,
+                        marginSeconds: marginSeconds
+                    )
 
-                    // Apply adaptive context-biasing weight based on vocabulary token count
-                    let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokens.count)
-                    let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
-
-                    // CTC-vs-CTC comparison (same scale, per NeMo paper)
-                    let shouldReplace = boostedVocabScore > originalCtcScore
-
-                    if debugMode {
-                        print(
-                            "  '\(originalPhrase)' vs '\(vocabTerm)' (sim=\(String(format: "%.2f", bestSimilarity)), span=\(matchedSpanLength))"
+                    if result.shouldReplace {
+                        applyReplacement(
+                            result: result,
+                            candidate: candidate,
+                            modifiedWords: &modifiedWords,
+                            replacedIndices: &replacedIndices,
+                            replacements: &replacements
                         )
-                        print(
-                            "    TDT span: [\(String(format: "%.2f", spanStartTime))-\(String(format: "%.2f", spanEndTime))s]"
-                        )
-                        print(
-                            "    CTC('\(originalPhrase)'): \(String(format: "%.2f", originalCtcScore))"
-                        )
-                        let cbwInfo =
-                            config.useAdaptiveThresholds
-                            ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokens.count))"
-                            : String(format: "%.2f", cbw)
-                        print(
-                            "    CTC('\(vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) = \(String(format: "%.2f", boostedVocabScore))"
-                        )
-                        print(
-                            "    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(boostedVocabScore > originalCtcScore ? ">" : "<=") original)"
-                        )
-                    }
-
-                    if shouldReplace {
-                        let replacement = preserveCapitalization(original: tdtWord, replacement: vocabTerm)
-                        modifiedWords[wordIdx].word = replacement
-                        // Mark additional words in span as empty (will be filtered out)
-                        for idx in spanIndices.dropFirst() {
-                            modifiedWords[idx].word = ""
-                        }
-                        // Mark all indices as replaced
-                        for idx in spanIndices {
-                            replacedIndices.insert(idx)
-                        }
-
-                        replacements.append(
-                            RescoringResult(
-                                originalWord: originalPhrase,
-                                originalScore: originalCtcScore,
-                                replacementWord: replacement,
-                                replacementScore: boostedVocabScore,
-                                shouldReplace: true,
-                                reason:
-                                    "CTC-vs-CTC: '\(vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) > '\(originalPhrase)'=\(String(format: "%.2f", originalCtcScore))"
-                            ))
                     }
                 }
             }
@@ -834,5 +697,219 @@ extension VocabularyRescorer {
             replacements: replacements,
             wasModified: wasModified
         )
+    }
+
+    // MARK: - CTC Evaluation Helpers
+
+    /// Evaluate a CTC match candidate and determine if replacement should occur.
+    ///
+    /// This method encapsulates the core CTC scoring logic shared between word-centric
+    /// and term-centric algorithms.
+    ///
+    /// - Parameters:
+    ///   - candidate: The match candidate to evaluate
+    ///   - logProbs: CTC log-probabilities
+    ///   - frameDuration: Duration of each CTC frame in seconds
+    ///   - cbw: Context-biasing weight
+    ///   - marginSeconds: Temporal margin around word for CTC search
+    /// - Returns: Evaluation result with replacement decision
+    private func evaluateCTCMatch(
+        candidate: CTCMatchCandidate,
+        logProbs: [[Float]],
+        frameDuration: Double,
+        cbw: Float,
+        marginSeconds: Double
+    ) -> CTCMatchResult {
+        // Calculate frame window
+        let marginFrames = Int(marginSeconds / frameDuration)
+        let spanStartFrame = Int(candidate.spanStartTime / frameDuration)
+        let spanEndFrame = Int(candidate.spanEndTime / frameDuration)
+
+        let searchStart = max(0, spanStartFrame - marginFrames)
+        let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
+
+        // Score vocabulary term using constrained CTC
+        let (vocabCtcScore, _, _) = spotter.ctcWordSpotConstrained(
+            logProbs: logProbs,
+            keywordTokens: candidate.vocabTokens,
+            searchStartFrame: searchStart,
+            searchEndFrame: searchEnd
+        )
+
+        // Score original phrase using constrained CTC
+        var originalCtcScore: Float = -Float.infinity
+        if let tokenizer = ctcTokenizer {
+            let originalTokens = tokenizer.encode(candidate.originalPhrase)
+            if !originalTokens.isEmpty {
+                let (score, _, _) = spotter.ctcWordSpotConstrained(
+                    logProbs: logProbs,
+                    keywordTokens: originalTokens,
+                    searchStartFrame: searchStart,
+                    searchEndFrame: searchEnd
+                )
+                originalCtcScore = score
+            }
+        }
+
+        // Apply adaptive context-biasing weight
+        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: candidate.vocabTokens.count)
+        let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
+
+        // CTC-vs-CTC comparison
+        let shouldReplace = boostedVocabScore > originalCtcScore
+
+        // Debug output
+        if debugMode {
+            let label = candidate.spanLength > 1 ? "[MULTI] " : ""
+            print(
+                "  \(label)'\(candidate.originalPhrase)' vs '\(candidate.vocabTerm)' "
+                    + "(sim=\(String(format: "%.2f", candidate.similarity)), span=\(candidate.spanLength))"
+            )
+            print(
+                "    TDT span: [\(String(format: "%.2f", candidate.spanStartTime))-"
+                    + "\(String(format: "%.2f", candidate.spanEndTime))s]"
+            )
+            print("    CTC('\(candidate.originalPhrase)'): \(String(format: "%.2f", originalCtcScore))")
+            let cbwInfo =
+                config.useAdaptiveThresholds
+                ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(candidate.vocabTokens.count))"
+                : String(format: "%.2f", cbw)
+            print(
+                "    CTC('\(candidate.vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) "
+                    + "= \(String(format: "%.2f", boostedVocabScore))"
+            )
+            print("    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(shouldReplace ? ">" : "<=") original)")
+        }
+
+        // Preserve capitalization from original
+        let firstOriginalWord =
+            candidate.originalPhrase.split(separator: " ").first.map(String.init)
+            ?? candidate.originalPhrase
+        let replacement = preserveCapitalization(original: firstOriginalWord, replacement: candidate.vocabTerm)
+
+        let reasonPrefix = candidate.spanLength > 1 ? "CTC-vs-CTC (multi-word)" : "CTC-vs-CTC"
+        let reason =
+            "\(reasonPrefix): '\(candidate.vocabTerm)'=\(String(format: "%.2f", boostedVocabScore)) "
+            + "> '\(candidate.originalPhrase)'=\(String(format: "%.2f", originalCtcScore))"
+
+        return CTCMatchResult(
+            shouldReplace: shouldReplace,
+            originalScore: originalCtcScore,
+            boostedVocabScore: boostedVocabScore,
+            replacement: replacement,
+            reason: reason
+        )
+    }
+
+    /// Apply a replacement to the modified words array and update tracking sets.
+    ///
+    /// - Parameters:
+    ///   - result: The CTC match result
+    ///   - candidate: The original match candidate
+    ///   - modifiedWords: Array of words being modified (mutated)
+    ///   - replacedIndices: Set of already-replaced indices (mutated)
+    ///   - replacements: Array of replacement results (mutated)
+    private func applyReplacement(
+        result: CTCMatchResult,
+        candidate: CTCMatchCandidate,
+        modifiedWords: inout [(word: String, startTime: Double, endTime: Double)],
+        replacedIndices: inout Set<Int>,
+        replacements: inout [RescoringResult]
+    ) {
+        guard let firstIdx = candidate.spanIndices.first else { return }
+
+        // Replace first word with the replacement, mark rest as empty
+        modifiedWords[firstIdx].word = result.replacement
+        for idx in candidate.spanIndices.dropFirst() {
+            modifiedWords[idx].word = ""  // Will be filtered out
+        }
+
+        // Mark all indices as replaced
+        for idx in candidate.spanIndices {
+            replacedIndices.insert(idx)
+        }
+
+        // Record the replacement
+        replacements.append(
+            RescoringResult(
+                originalWord: candidate.originalPhrase,
+                originalScore: result.originalScore,
+                replacementWord: result.replacement,
+                replacementScore: result.boostedVocabScore,
+                shouldReplace: true,
+                reason: result.reason
+            )
+        )
+    }
+
+    /// Check if a word or span should skip replacement due to stopword rules.
+    ///
+    /// - Parameters:
+    ///   - normalizedWord: The normalized single word
+    ///   - spanLength: Length of the span (1 for single word)
+    ///   - spanWords: All normalized words in the span (for multi-word checks)
+    ///   - vocabTerm: The vocabulary term being considered
+    ///   - currentSimilarity: Current similarity threshold
+    /// - Returns: Tuple of (shouldSkip, adjustedMinSimilarity)
+    private func checkStopwordRules(
+        normalizedWord: String,
+        spanLength: Int,
+        spanWords: [String],
+        vocabTerm: String,
+        currentSimilarity: Float
+    ) -> (shouldSkip: Bool, adjustedMinSimilarity: Float) {
+        var minSimilarity = currentSimilarity
+
+        // Single-word stopword check - skip entirely
+        if spanLength == 1 && Self.stopwords.contains(normalizedWord) {
+            if debugMode {
+                print("    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'")
+            }
+            return (shouldSkip: true, adjustedMinSimilarity: minSimilarity)
+        }
+
+        // Multi-word span stopword check - raise threshold
+        if spanLength >= 2 {
+            let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
+            if containsStopword {
+                minSimilarity = max(minSimilarity, 0.85)
+                if debugMode {
+                    print(
+                        "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
+                            + "raising threshold to \(String(format: "%.2f", minSimilarity))"
+                    )
+                }
+            }
+        }
+
+        return (shouldSkip: false, adjustedMinSimilarity: minSimilarity)
+    }
+
+    /// Check length ratio rules for single-word matches.
+    ///
+    /// - Parameters:
+    ///   - normalizedWord: The normalized word
+    ///   - vocabTerm: The vocabulary term
+    ///   - currentSimilarity: Current similarity
+    ///   - minSimilarity: Base minimum similarity
+    /// - Returns: Adjusted minimum similarity threshold
+    private func checkLengthRatioRules(
+        normalizedWord: String,
+        vocabTerm: String,
+        currentSimilarity: Float,
+        minSimilarity: Float
+    ) -> Float {
+        let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
+        if lengthRatio < 0.75 && normalizedWord.count <= 4 {
+            let adjusted = max(minSimilarity, 0.80)
+            if debugMode && currentSimilarity >= minSimilarity {
+                print(
+                    "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
+                        + "raising threshold to \(String(format: "%.2f", adjusted))"
+                )
+            }
+            return adjusted
+        }
+        return minSimilarity
     }
 }
