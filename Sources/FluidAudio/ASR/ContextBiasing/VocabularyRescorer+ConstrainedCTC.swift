@@ -4,6 +4,35 @@ import Foundation
 
 extension VocabularyRescorer {
 
+    // MARK: - Stopwords (Shared)
+
+    /// Common stopwords that should not be replaced by vocabulary terms.
+    /// Defined once as a static constant to avoid recreation in hot loops.
+    private static let stopwords: Set<String> = [
+        // Articles and determiners
+        "a", "an", "the", "some", "any", "no", "every", "each", "all",
+        // Conjunctions
+        "and", "or", "but", "so", "if", "then", "than", "as",
+        // Prepositions
+        "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "down",
+        "out", "about", "into", "over", "after", "before", "between", "under",
+        // Be verbs
+        "is", "are", "was", "were", "be", "been", "being", "am",
+        // Common verbs
+        "have", "has", "had", "do", "does", "did", "will", "would", "can", "could",
+        "go", "goes", "went", "come", "comes", "came", "get", "got", "take", "took",
+        "make", "made", "say", "said", "see", "saw", "know", "knew", "think", "thought",
+        // Pronouns
+        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
+        "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
+        "who", "what", "which", "where", "when", "how", "why",
+        // Common short words
+        "just", "also", "only", "even", "still", "now", "here", "there", "very",
+        "well", "back", "way", "own", "new", "old", "good", "great", "first", "last",
+    ]
+
+    // MARK: - Public API
+
     /// Rescore using constrained CTC search around TDT word locations.
     ///
     /// Dispatches to either word-centric (USE_BK_TREE=1) or term-centric (default) algorithm.
@@ -91,30 +120,6 @@ extension VocabularyRescorer {
         // Build normalized vocabulary set for guard checks
         let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
 
-        // Stopwords defined once outside the loop for efficiency
-        let stopwords: Set<String> = [
-            // Articles and determiners
-            "a", "an", "the", "some", "any", "no", "every", "each", "all",
-            // Conjunctions
-            "and", "or", "but", "so", "if", "then", "than", "as",
-            // Prepositions
-            "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "down",
-            "out", "about", "into", "over", "after", "before", "between", "under",
-            // Be verbs
-            "is", "are", "was", "were", "be", "been", "being", "am",
-            // Common verbs
-            "have", "has", "had", "do", "does", "did", "will", "would", "can", "could",
-            "go", "goes", "went", "come", "comes", "came", "get", "got", "take", "took",
-            "make", "made", "say", "said", "see", "saw", "know", "knew", "think", "thought",
-            // Pronouns
-            "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
-            "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
-            "who", "what", "which", "where", "when", "how", "why",
-            // Common short words
-            "just", "also", "only", "even", "still", "now", "here", "there", "very",
-            "well", "back", "way", "own", "new", "old", "good", "great", "first", "last",
-        ]
-
         // Pre-compute normalized words for all timings
         let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
 
@@ -127,7 +132,7 @@ extension VocabularyRescorer {
             guard !normalizedWord.isEmpty else { continue }
 
             // Skip stopwords for single-word matching (checked again for compounds later)
-            if stopwords.contains(normalizedWord) {
+            if Self.stopwords.contains(normalizedWord) {
                 if debugMode {
                     print("  [STOPWORD] Skipping '\(normalizedWord)' (single word)")
                 }
@@ -234,7 +239,7 @@ extension VocabularyRescorer {
                 }
 
                 // STOPWORD CHECKS
-                if spanLength == 1 && stopwords.contains(normalizedWord) {
+                if spanLength == 1 && Self.stopwords.contains(normalizedWord) {
                     if debugMode {
                         print(
                             "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'"
@@ -245,7 +250,7 @@ extension VocabularyRescorer {
 
                 if spanLength >= 2 {
                     let spanWords = spanIndices.map { normalizedWords[$0] }
-                    let containsStopword = spanWords.contains { stopwords.contains($0) }
+                    let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
                     if containsStopword {
                         minSimilarityForSpan = max(minSimilarityForSpan, 0.85)
                         if debugMode && similarity >= minSimilarity {
@@ -685,32 +690,9 @@ extension VocabularyRescorer {
                     }
 
                     // STOPWORD CHECK: Prevent common words from being replaced
-                    let stopwords: Set<String> = [
-                        // Articles and determiners
-                        "a", "an", "the", "some", "any", "no", "every", "each", "all",
-                        // Conjunctions
-                        "and", "or", "but", "so", "if", "then", "than", "as",
-                        // Prepositions
-                        "in", "on", "at", "to", "for", "of", "with", "by", "from", "up", "down",
-                        "out", "about", "into", "over", "after", "before", "between", "under",
-                        // Be verbs
-                        "is", "are", "was", "were", "be", "been", "being", "am",
-                        // Common verbs
-                        "have", "has", "had", "do", "does", "did", "will", "would", "can", "could",
-                        "go", "goes", "went", "come", "comes", "came", "get", "got", "take", "took",
-                        "make", "made", "say", "said", "see", "saw", "know", "knew", "think", "thought",
-                        // Pronouns
-                        "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them",
-                        "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
-                        "who", "what", "which", "where", "when", "how", "why",
-                        // Common short words
-                        "just", "also", "only", "even", "still", "now", "here", "there", "very",
-                        "well", "back", "way", "own", "new", "old", "good", "great", "first", "last",
-                    ]
-
                     // For single-word matches, skip entirely if the TDT word is a stopword
                     // This prevents "and" → "Jane", "comes" → "James", etc.
-                    if matchedSpanLength == 1 && stopwords.contains(normalizedWord) {
+                    if matchedSpanLength == 1 && Self.stopwords.contains(normalizedWord) {
                         if debugMode {
                             print(
                                 "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'"
@@ -725,7 +707,7 @@ extension VocabularyRescorer {
                         let spanWords = (0..<matchedSpanLength).map {
                             Self.normalizeForSimilarity(wordTimings[wordIdx + $0].word)
                         }
-                        let containsStopword = spanWords.contains { stopwords.contains($0) }
+                        let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
                         if containsStopword {
                             // Require very high similarity when span contains stopwords
                             minSimilarityForSpan = max(minSimilarityForSpan, 0.85)

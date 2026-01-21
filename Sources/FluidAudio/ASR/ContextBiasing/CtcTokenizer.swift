@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
-import Tokenizers
+@preconcurrency import Tokenizers
+import os
 
 /// Type alias to disambiguate from local Tokenizer class
 private typealias HFTokenizerProtocol = Tokenizers.Tokenizer
@@ -9,8 +10,7 @@ private typealias HFTokenizerProtocol = Tokenizers.Tokenizer
 
 /// CTC tokenizer using HuggingFace tokenizer.json for accurate BPE tokenization.
 /// This provides tokenization matching the original model training.
-public final class CtcTokenizer {
-    private let logger = Logger(subsystem: "com.fluidaudio", category: "CtcTokenizer")
+public final class CtcTokenizer: Sendable {
     private let hfTokenizer: HFTokenizer
 
     /// Errors that can occur during tokenizer initialization
@@ -18,6 +18,7 @@ public final class CtcTokenizer {
         case tokenizerNotFound(URL)
         case missingFile(String, URL)
         case initializationFailed(Swift.Error)
+        case applicationSupportNotFound
 
         public var errorDescription: String? {
             switch self {
@@ -27,13 +28,52 @@ public final class CtcTokenizer {
                 return "Missing required file '\(filename)' in \(folder.path)"
             case .initializationFailed(let error):
                 return "Failed to initialize HuggingFace tokenizer: \(error.localizedDescription)"
+            case .applicationSupportNotFound:
+                return "Application Support directory not found"
             }
         }
     }
 
+    // MARK: - Async Factory (Recommended)
+
+    /// Load the CTC tokenizer asynchronously from a specific model directory.
+    /// This is the recommended API as it avoids blocking.
+    ///
+    /// - Parameter modelDirectory: Directory containing tokenizer.json
+    /// - Returns: Initialized CtcTokenizer
+    /// - Throws: `CtcTokenizer.Error` if tokenizer files cannot be loaded
+    public static func load(from modelDirectory: URL) async throws -> CtcTokenizer {
+        let tokenizerPath = modelDirectory.appendingPathComponent("tokenizer.json")
+
+        guard FileManager.default.fileExists(atPath: tokenizerPath.path) else {
+            throw Error.tokenizerNotFound(modelDirectory)
+        }
+
+        let hfTokenizer = try await HFTokenizer(modelFolder: modelDirectory)
+        return CtcTokenizer(hfTokenizer: hfTokenizer)
+    }
+
+    /// Load the CTC tokenizer asynchronously using the default 110m model directory.
+    ///
+    /// - Returns: Initialized CtcTokenizer
+    /// - Throws: `CtcTokenizer.Error` if tokenizer files cannot be loaded
+    public static func load() async throws -> CtcTokenizer {
+        try await load(from: getCtcModelDirectory())
+    }
+
+    // MARK: - Private Init
+
+    /// Private initializer used by async factory method
+    private init(hfTokenizer: HFTokenizer) {
+        self.hfTokenizer = hfTokenizer
+    }
+
+    // MARK: - Sync Init (Legacy)
+
     /// Initialize the CTC tokenizer from a specific model directory.
     /// Loads tokenizer.json from the specified directory.
     ///
+    /// - Note: This blocks the calling thread. Prefer `load(from:)` async factory when possible.
     /// - Parameter modelDirectory: Directory containing tokenizer.json
     /// - Throws: `CtcTokenizer.Error` if tokenizer files cannot be loaded
     public init(modelDirectory: URL) throws {
@@ -43,27 +83,27 @@ public final class CtcTokenizer {
             throw Error.tokenizerNotFound(modelDirectory)
         }
 
-        // Load HFTokenizer synchronously by blocking on the async call
-        // Use a Sendable box to safely transfer result across concurrency boundary
-        let resultBox = ResultBox()
+        // Use OSAllocatedUnfairLock for thread-safe async bridging (properly Sendable)
+        let resultLock = OSAllocatedUnfairLock<Result<HFTokenizer, Swift.Error>?>(initialState: nil)
         let semaphore = DispatchSemaphore(value: 0)
 
-        Task { @Sendable in
+        Task {
             do {
                 let tokenizer = try await HFTokenizer(modelFolder: modelDirectory)
-                resultBox.set(.success(tokenizer))
+                resultLock.withLock { $0 = .success(tokenizer) }
             } catch {
-                resultBox.set(.failure(error))
+                resultLock.withLock { $0 = .failure(error) }
             }
             semaphore.signal()
         }
 
         semaphore.wait()
 
-        switch resultBox.result {
+        let result = resultLock.withLock { $0 }
+
+        switch result {
         case .success(let tokenizer):
             self.hfTokenizer = tokenizer
-            logger.info("Loaded HuggingFace tokenizer from \(modelDirectory.path)")
         case .failure(let error):
             throw Error.initializationFailed(error)
         case .none:
@@ -78,6 +118,7 @@ public final class CtcTokenizer {
     /// Initialize the CTC tokenizer using the default 110m model directory.
     /// Convenience initializer for backward compatibility.
     ///
+    /// - Note: This blocks the calling thread. Prefer `load()` async factory when possible.
     /// - Throws: `CtcTokenizer.Error` if tokenizer files cannot be loaded
     public convenience init() throws {
         try self.init(modelDirectory: Self.getCtcModelDirectory())
@@ -114,10 +155,14 @@ public final class CtcTokenizer {
     }
 
     /// Get the CTC model directory path
-    private static func getCtcModelDirectory() -> URL {
-        let applicationSupportURL = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
+    private static func getCtcModelDirectory() throws -> URL {
+        guard
+            let applicationSupportURL = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first
+        else {
+            throw Error.applicationSupportNotFound
+        }
         return
             applicationSupportURL
             .appendingPathComponent("FluidAudio", isDirectory: true)
@@ -130,8 +175,8 @@ public final class CtcTokenizer {
 
 /// HuggingFace tokenizer that loads tokenizer.json directly using swift-transformers.
 /// This provides accurate BPE tokenization matching the original model training.
-private final class HFTokenizer {
-    private let logger = Logger(subsystem: "com.fluidaudio", category: "HFTokenizer")
+/// Marked Sendable because it's immutable after initialization.
+private final class HFTokenizer: Sendable {
     private let tokenizer: any HFTokenizerProtocol
 
     /// Load tokenizer from a local model folder containing tokenizer.json
@@ -155,9 +200,7 @@ private final class HFTokenizer {
 
         do {
             self.tokenizer = try await AutoTokenizer.from(modelFolder: modelFolder)
-            logger.info("Loaded HuggingFace tokenizer from \(modelFolder.path)")
         } catch {
-            logger.error("Failed to load tokenizer: \(error.localizedDescription)")
             throw CtcTokenizer.Error.initializationFailed(error)
         }
     }
@@ -188,27 +231,6 @@ private final class HFTokenizer {
     var vocabularySize: Int? {
         // swift-transformers doesn't expose vocab size directly
         nil
-    }
-}
-
-// MARK: - Sendable Result Box
-
-/// Thread-safe box for passing results across concurrency boundaries.
-/// Uses a lock to ensure safe access from multiple threads.
-private final class ResultBox: @unchecked Sendable {
-    private var _result: Result<HFTokenizer, Swift.Error>?
-    private let lock = NSLock()
-
-    var result: Result<HFTokenizer, Swift.Error>? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _result
-    }
-
-    func set(_ value: Result<HFTokenizer, Swift.Error>) {
-        lock.lock()
-        defer { lock.unlock() }
-        _result = value
     }
 }
 
