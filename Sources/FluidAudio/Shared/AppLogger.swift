@@ -118,7 +118,11 @@ public struct AppLogger: Sendable {
         case .fault: levelLabel = "FAULT"
         }
         let line = "[\(timestamp)] [\(levelLabel)] [FluidAudio.\(category)] \(message)\n"
-        FileHandle.standardError.write(Data(line.utf8))
+        do {
+            try FileHandle.standardError.write(contentsOf: Data(line.utf8))
+        } catch {
+            print("Failed to write to stderr: \(error.localizedDescription)")
+        }
     }
 }
 

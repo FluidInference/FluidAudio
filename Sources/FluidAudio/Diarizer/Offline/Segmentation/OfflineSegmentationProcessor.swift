@@ -565,10 +565,16 @@ extension OfflineSegmentationProcessor {
         return secondsMs + attosecondsMs
     }
 
+    private static let profilingLogger = AppLogger(category: "OfflineSegmentation")
+
     fileprivate static func emitProfileLog(_ message: String) {
         let line = "[Profiling] \(message)\n"
         if let data = line.data(using: .utf8) {
-            FileHandle.standardError.write(data)
+            do {
+                try FileHandle.standardError.write(contentsOf: data)
+            } catch {
+                profilingLogger.warning("Failed to write profiling log: \(error.localizedDescription)")
+            }
         }
     }
 }
