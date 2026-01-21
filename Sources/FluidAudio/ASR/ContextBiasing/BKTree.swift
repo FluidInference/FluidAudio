@@ -6,24 +6,23 @@ import Foundation
 /// Instead of comparing against all N strings (O(N)), a BK-tree query typically
 /// examines only O(log N) strings for small distance thresholds.
 ///
+/// This implementation uses immutable nodes for thread safety, making the tree
+/// fully Sendable without requiring `@unchecked`.
+///
 /// Usage:
 /// ```swift
 /// let tree = BKTree(terms: vocabulary.terms)
 /// let matches = tree.search(query: "nvidia", maxDistance: 2)
 /// // Returns terms within edit distance 2 of "nvidia"
 /// ```
-public final class BKTree: @unchecked Sendable {
+public struct BKTree: Sendable {
 
-    /// A node in the BK-tree
-    private final class Node {
+    /// An immutable node in the BK-tree.
+    /// Children are set at creation time and never modified.
+    private struct Node: Sendable {
         let term: CustomVocabularyTerm
         let normalizedText: String
-        var children: [Int: Node] = [:]  // distance -> child node
-
-        init(term: CustomVocabularyTerm, normalizedText: String) {
-            self.term = term
-            self.normalizedText = normalizedText
-        }
+        let children: [Int: Node]  // distance -> child node (immutable after creation)
     }
 
     /// Result of a BK-tree search
@@ -33,7 +32,7 @@ public final class BKTree: @unchecked Sendable {
         public let distance: Int
     }
 
-    private var root: Node?
+    private let root: Node?
     private let termCount: Int
 
     /// Initialize a BK-tree from vocabulary terms.
@@ -43,32 +42,34 @@ public final class BKTree: @unchecked Sendable {
     public init(terms: [CustomVocabularyTerm]) {
         self.termCount = terms.count
 
-        for term in terms {
-            let normalized = term.text.lowercased()
-            insert(term: term, normalizedText: normalized)
-        }
+        // Build the tree using immutable nodes
+        let normalizedTerms = terms.map { ($0, $0.text.lowercased()) }
+        self.root = Self.buildTree(from: normalizedTerms)
     }
 
-    /// Insert a term into the tree.
-    private func insert(term: CustomVocabularyTerm, normalizedText: String) {
-        let newNode = Node(term: term, normalizedText: normalizedText)
+    /// Build an immutable tree recursively.
+    ///
+    /// This approach creates all nodes with their children set at creation time,
+    /// ensuring the entire tree structure is immutable after construction.
+    private static func buildTree(from terms: [(CustomVocabularyTerm, String)]) -> Node? {
+        guard let first = terms.first else { return nil }
 
-        guard let root = root else {
-            self.root = newNode
-            return
+        // Group remaining terms by their distance from the first term
+        var groups: [Int: [(CustomVocabularyTerm, String)]] = [:]
+        for item in terms.dropFirst() {
+            let dist = StringUtils.levenshteinDistance(item.1, first.1)
+            groups[dist, default: []].append(item)
         }
 
-        var current = root
-        while true {
-            let distance = StringUtils.levenshteinDistance(normalizedText, current.normalizedText)
-
-            if let child = current.children[distance] {
-                current = child
-            } else {
-                current.children[distance] = newNode
-                break
+        // Recursively build children (each group becomes a subtree)
+        var children: [Int: Node] = [:]
+        for (dist, group) in groups {
+            if let child = buildTree(from: group) {
+                children[dist] = child
             }
         }
+
+        return Node(term: first.0, normalizedText: first.1, children: children)
     }
 
     /// Search for terms within a maximum edit distance of the query.
