@@ -99,43 +99,43 @@ Earnings Benchmark (TDT transcription + CTC keyword spotting)
 Loading TDT models (v2) for transcription...
 TDT models loaded successfully
 Loading CTC models from: /Users/<user>/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml
-Loaded CTC vocabulary with 1024 tokens
+Loaded CTC vocabulary with 1024 tokens, variant: Parakeet CTC 110M (hybrid)
 Created CTC spotter with blankId=1024
 Processing 773 test files...
 [  1/772] 4329526_chunk0            WER:  10.3%  Dict: 1/1
-[  2/772] 4329526_chunk109          WER:   9.8%  Dict: 2/2
+[  2/772] 4329526_chunk109          WER:  12.5%  Dict: 2/2
 [  3/772] 4329526_chunk118          WER:   3.1%  Dict: 3/3
-[  4/772] 4329526_chunk132          WER:  15.0%  Dict: 1/1
-[  5/772] 4329526_chunk135          WER:  40.5%  Dict: 1/1
+[  4/772] 4329526_chunk132          WER:   8.1%  Dict: 1/1
+[  5/772] 4329526_chunk135          WER:  25.7%  Dict: 1/1
 [  6/772] 4329526_chunk16           WER:   8.6%  Dict: 1/1
 ...
-[766/772] 4485206_chunk_85          WER:   5.0%  Dict: 1/1
 [767/772] 4485206_chunk_86          WER:   5.0%  Dict: 2/2
 [768/772] 4485206_chunk_88          WER:   8.3%  Dict: 2/2
-[769/772] 4485206_chunk_92          WER:   7.9%  Dict: 4/4
-[770/772] 4485206_chunk_97          WER:  32.2%  Dict: 1/1
-[771/772] 4485206_chunk_98          WER:  16.3%  Dict: 4/4
-[772/772] 4485206_chunk_99          WER:  24.2%  Dict: 1/1
+[769/772] 4485206_chunk_92          WER:  14.7%  Dict: 4/4
+[770/772] 4485206_chunk_97          WER:  30.5%  Dict: 1/1
+[771/772] 4485206_chunk_98          WER:  18.6%  Dict: 4/4
+[772/772] 4485206_chunk_99          WER:  22.0%  Dict: 1/1
 
 ============================================================
 EARNINGS22 BENCHMARK (TDT + CTC)
 ============================================================
 Model: /Users/<user>/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml
 Total tests: 771
-Average WER: 14.76%
+Average WER: 15.00%
 Dict Pass (Recall): 1299/1308 (99.3%)
-Vocab Precision: 99.4% (TP=1079, FP=7)
-Vocab Recall: 85.9% (TP=1079, FN=177)
-Vocab F-score: 92.1%
+Vocab Precision: 99.3% (TP=1068, FP=8)
+Vocab Recall: 85.2% (TP=1068, FN=185)
+Vocab F-score: 91.7%
 Total audio: 11564.5s
-Total processing: 169.0s
-RTFx: 68.44x
+Total processing: 182.5s
+RTFx: 63.36x
 ============================================================
+
+Results written to: ctc_earnings_benchmark.json
 ```
 
 In context of vocabulary/keyword detection:
 
-```text
 | Metric              | Definition                                                      |
 |---------------------|-----------------------------------------------------------------|
 | TP (True Positive)  | Word is in reference AND in hypothesis (correctly detected)     |
@@ -149,7 +149,6 @@ Derived metrics:
 | Precision | TP / (TP + FP)      | "Of words we output, how many were correct?"         |
 | Recall    | TP / (TP + FN)      | "Of words that should appear, how many did we find?" |
 | F-Score   | 2 × P × R / (P + R) | Harmonic mean of precision and recall                |
-```
 
 ## Text-to-Speech
 

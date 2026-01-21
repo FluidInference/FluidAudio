@@ -90,13 +90,13 @@ CTC Frames: [0] [1] [2] ... [374] (375 frames @ 40ms)
 
 ## Pipeline Components
 
-### 1. SentencePieceTokenizer (`SentencePieceTokenizer.swift`)
+### 1. CtcTokenizer (`CtcTokenizer.swift`)
 
-Converts vocabulary terms to CTC token ID sequences using the same tokenization as the CTC model.
+Converts vocabulary terms to CTC token ID sequences using the HuggingFace tokenizer (loaded from `tokenizer.json`).
 
 ```swift
 // Example: tokenizing a vocabulary term
-let tokenizer = try SentencePieceCtcTokenizer()
+let tokenizer = try await CtcTokenizer.load()
 let tokenIds = tokenizer.encode("NVIDIA")
 // Result: [42, 156, 89, 23] (subword token IDs)
 ```
@@ -240,9 +240,8 @@ let result = try await asrManager.transcribe(
 |------|---------|
 | `CtcModels.swift` | CTC model loading (MelSpectrogram + AudioEncoder) |
 | `CtcKeywordSpotter.swift` | NeMo CTC word spotting algorithm with DP helpers |
-| `CtcTokenizer.swift` | Vocabulary term tokenization (O(1) hashmap lookup) |
-| `VocabularyRescorer.swift` | CTC-vs-CTC score comparison |
-| `SentencePieceTokenizer.swift` | SentencePiece-based tokenization |
+| `CtcTokenizer.swift` | Vocabulary term tokenization (HuggingFace tokenizer) |
+| `VocabularyRescorer.swift` | CTC-vs-CTC score comparison (async factory API) |
 | `CustomVocabularyContext.swift` | Vocabulary definition structures |
 
 ## References
@@ -250,4 +249,4 @@ let result = try await asrManager.transcribe(
 1. **NeMo CTC Word Spotter**: arXiv:2406.07096 - "Fast Context-Biasing for CTC and Transducer ASR with CTC-based Word Spotter"
 2. **Parakeet TDT**: NVIDIA NeMo Parakeet TDT 0.6B - Token Duration Transducer
 3. **Parakeet CTC**: NVIDIA NeMo Parakeet CTC 110M - CTC-based encoder
-4. **SentencePiece**: Google SentencePiece tokenizer for subword segmentation
+4. **HuggingFace Tokenizers**: swift-transformers for BPE tokenization
