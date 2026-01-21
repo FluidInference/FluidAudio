@@ -1,8 +1,36 @@
 import Foundation
+import OSLog
 
 // MARK: - Constrained CTC Rescoring
 
 extension VocabularyRescorer {
+
+    // MARK: - Constants
+
+    /// Similarity threshold constants to avoid magic numbers.
+    private enum SimilarityThresholds {
+        /// Threshold for spans containing stopwords (high confidence required)
+        static let stopwordSpan: Float = 0.85
+        /// Threshold for short words with low length ratio
+        static let shortWordLengthRatio: Float = 0.80
+        /// Length ratio below which short word threshold applies
+        static let lengthRatioThreshold: Float = 0.75
+        /// Maximum character count for "short word" classification
+        static let shortWordMaxLength: Int = 4
+    }
+
+    // MARK: - Debug Logging
+
+    /// Logger for debug output (lazy initialization)
+    private static let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer.CTC")
+
+    /// Log debug message only when debug mode is enabled.
+    /// Uses closure to avoid string evaluation when debug is off.
+    @inline(__always)
+    private func debugLog(_ message: @escaping @autoclosure () -> String) {
+        guard debugMode else { return }
+        Self.logger.debug("\(message(), privacy: .public)")
+    }
 
     // MARK: - Stopwords (Shared)
 
@@ -126,13 +154,11 @@ extension VocabularyRescorer {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
 
-        if debugMode {
-            print("=== VocabularyRescorer (Constrained CTC - Word-Centric) ===")
-            print("Words: \(wordTimings.count), Frames: \(logProbs.count), Vocab: \(vocabulary.terms.count)")
-            print("Frame duration: \(String(format: "%.4f", frameDuration))s")
-            print("CBW: \(cbw), Margin: \(marginSeconds)s, MinSimilarity: \(minSimilarity)")
-            print("Mode: \(useBKTree ? "BK-tree O(W × log V)" : "Linear scan O(W × V)")")
-        }
+        debugLog("=== VocabularyRescorer (Constrained CTC - Word-Centric) ===")
+        debugLog("Words: \(wordTimings.count), Frames: \(logProbs.count), Vocab: \(vocabulary.terms.count)")
+        debugLog("Frame duration: \(String(format: "%.4f", frameDuration))s")
+        debugLog("CBW: \(cbw), Margin: \(marginSeconds)s, MinSimilarity: \(minSimilarity)")
+        debugLog("Mode: \(useBKTree ? "BK-tree O(W × log V)" : "Linear scan O(W × V)")")
 
         var replacements: [RescoringResult] = []
         var modifiedWords: [(word: String, startTime: Double, endTime: Double)] = wordTimings.map {
@@ -156,9 +182,7 @@ extension VocabularyRescorer {
 
             // Skip stopwords for single-word matching (checked again for compounds later)
             if Self.stopwords.contains(normalizedWord) {
-                if debugMode {
-                    print("  [STOPWORD] Skipping '\(normalizedWord)' (single word)")
-                }
+                debugLog("  [STOPWORD] Skipping '\(normalizedWord)' (single word)")
                 // Don't skip entirely - still check compound matches starting from this word
             }
 
@@ -185,11 +209,11 @@ extension VocabularyRescorer {
                 minSimilarity: minSimilarity
             )
 
-            if debugMode && !candidates.isEmpty {
+            if !candidates.isEmpty {
                 let candidateInfo = candidates.prefix(5).map {
                     "\($0.term.text)(sim=\(String(format: "%.2f", $0.similarity)), span=\($0.spanLength))"
                 }.joined(separator: ", ")
-                print("  '\(tdtWord)' -> \(candidates.count) candidates: \(candidateInfo)")
+                debugLog("  '\(tdtWord)' -> \(candidates.count) candidates: \(candidateInfo)")
             }
 
             // Process each candidate
@@ -234,9 +258,7 @@ extension VocabularyRescorer {
                 if vocabularyNormalizedSet.contains(normalizedPhrase)
                     && !normalizedCurrentSet.contains(normalizedPhrase)
                 {
-                    if debugMode {
-                        print("  Skipping '\(vocabTerm)': phrase '\(originalPhrase)' matches another vocab term")
-                    }
+                    debugLog("  Skipping '\(vocabTerm)': phrase '\(originalPhrase)' matches another vocab term")
                     continue
                 }
 
@@ -250,10 +272,12 @@ extension VocabularyRescorer {
                 // LENGTH RATIO CHECK for single words
                 if spanLength == 1 {
                     let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-                    if lengthRatio < 0.75 && normalizedWord.count <= 4 {
-                        minSimilarityForSpan = max(minSimilarityForSpan, 0.80)
-                        if debugMode && similarity >= minSimilarity {
-                            print(
+                    if lengthRatio < SimilarityThresholds.lengthRatioThreshold
+                        && normalizedWord.count <= SimilarityThresholds.shortWordMaxLength
+                    {
+                        minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.shortWordLengthRatio)
+                        if similarity >= minSimilarity {
+                            debugLog(
                                 "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
                                     + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
                             )
@@ -263,11 +287,8 @@ extension VocabularyRescorer {
 
                 // STOPWORD CHECKS
                 if spanLength == 1 && Self.stopwords.contains(normalizedWord) {
-                    if debugMode {
-                        print(
-                            "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'"
-                        )
-                    }
+                    debugLog(
+                        "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'")
                     continue
                 }
 
@@ -275,9 +296,9 @@ extension VocabularyRescorer {
                     let spanWords = spanIndices.map { normalizedWords[$0] }
                     let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
                     if containsStopword {
-                        minSimilarityForSpan = max(minSimilarityForSpan, 0.85)
-                        if debugMode && similarity >= minSimilarity {
-                            print(
+                        minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.stopwordSpan)
+                        if similarity >= minSimilarity {
+                            debugLog(
                                 "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
                                     + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
                             )
@@ -331,11 +352,9 @@ extension VocabularyRescorer {
         let modifiedText = modifiedWords.map { $0.word }.filter { !$0.isEmpty }.joined(separator: " ")
         let wasModified = !replacements.isEmpty
 
-        if debugMode {
-            print("Final: \(modifiedText)")
-            print("Replacements: \(replacements.count)")
-            print("===========================================")
-        }
+        debugLog("Final: \(modifiedText)")
+        debugLog("Replacements: \(replacements.count)")
+        debugLog("===========================================")
 
         return RescoreOutput(
             text: modifiedText,
@@ -368,12 +387,10 @@ extension VocabularyRescorer {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
 
-        if debugMode {
-            print("=== VocabularyRescorer (Constrained CTC - Term-Centric) ===")
-            print("Words: \(wordTimings.count), Frames: \(logProbs.count)")
-            print("Frame duration: \(String(format: "%.4f", frameDuration))s")
-            print("CBW: \(cbw), Margin: \(marginSeconds)s, MinSimilarity: \(minSimilarity)")
-        }
+        debugLog("=== VocabularyRescorer (Constrained CTC - Term-Centric) ===")
+        debugLog("Words: \(wordTimings.count), Frames: \(logProbs.count)")
+        debugLog("Frame duration: \(String(format: "%.4f", frameDuration))s")
+        debugLog("CBW: \(cbw), Margin: \(marginSeconds)s, MinSimilarity: \(minSimilarity)")
 
         var replacements: [RescoringResult] = []
         var modifiedWords: [(word: String, startTime: Double, endTime: Double)] = wordTimings.map {
@@ -390,10 +407,8 @@ extension VocabularyRescorer {
 
             // Skip short vocabulary terms (per NeMo CTC-WS paper)
             guard vocabTerm.count >= vocabulary.minTermLength else {
-                if debugMode {
-                    print(
-                        "  Skipping '\(vocabTerm)': too short (\(vocabTerm.count) < \(vocabulary.minTermLength) chars)")
-                }
+                debugLog(
+                    "  Skipping '\(vocabTerm)': too short (\(vocabTerm.count) < \(vocabulary.minTermLength) chars)")
                 continue
             }
 
@@ -451,11 +466,8 @@ extension VocabularyRescorer {
                         if vocabularyNormalizedSet.contains(normalizedPhrase)
                             && !normalizedCurrentSet.contains(normalizedPhrase)
                         {
-                            if debugMode {
-                                print(
-                                    "  [MULTI] Skipping '\(vocabTerm)': phrase '\(tdtPhrase)' matches another vocab term"
-                                )
-                            }
+                            debugLog(
+                                "  [MULTI] Skipping '\(vocabTerm)': phrase '\(tdtPhrase)' matches another vocab term")
                             continue
                         }
 
@@ -522,9 +534,7 @@ extension VocabularyRescorer {
                     if vocabularyNormalizedSet.contains(normalizedWord)
                         && !normalizedCurrentSet.contains(normalizedWord)
                     {
-                        if debugMode {
-                            print("  Skipping '\(vocabTerm)': word '\(tdtWord)' matches another vocab term")
-                        }
+                        debugLog("  Skipping '\(vocabTerm)': word '\(tdtWord)' matches another vocab term")
                         continue
                     }
 
@@ -593,11 +603,13 @@ extension VocabularyRescorer {
                     // e.g., "and" (3 chars) should not match "Andre" (5 chars) even with ~60% similarity
                     if matchedSpanLength == 1 {
                         let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-                        if lengthRatio < 0.75 && normalizedWord.count <= 4 {
+                        if lengthRatio < SimilarityThresholds.lengthRatioThreshold
+                            && normalizedWord.count <= SimilarityThresholds.shortWordMaxLength
+                        {
                             // For short words with low length ratio, require much higher similarity
-                            minSimilarityForSpan = max(minSimilarityForSpan, 0.80)
-                            if debugMode && bestSimilarity >= minSimilarity {
-                                print(
+                            minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.shortWordLengthRatio)
+                            if bestSimilarity >= minSimilarity {
+                                debugLog(
                                     "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
                                         + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
                                 )
@@ -609,11 +621,9 @@ extension VocabularyRescorer {
                     // For single-word matches, skip entirely if the TDT word is a stopword
                     // This prevents "and" → "Jane", "comes" → "James", etc.
                     if matchedSpanLength == 1 && Self.stopwords.contains(normalizedWord) {
-                        if debugMode {
-                            print(
-                                "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'"
-                            )
-                        }
+                        debugLog(
+                            "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'"
+                        )
                         continue
                     }
 
@@ -626,9 +636,9 @@ extension VocabularyRescorer {
                         let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
                         if containsStopword {
                             // Require very high similarity when span contains stopwords
-                            minSimilarityForSpan = max(minSimilarityForSpan, 0.85)
-                            if debugMode && bestSimilarity >= minSimilarity {
-                                print(
+                            minSimilarityForSpan = max(minSimilarityForSpan, SimilarityThresholds.stopwordSpan)
+                            if bestSimilarity >= minSimilarity {
+                                debugLog(
                                     "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
                                         + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
                                 )
@@ -686,11 +696,9 @@ extension VocabularyRescorer {
         let modifiedText = modifiedWords.map { $0.word }.filter { !$0.isEmpty }.joined(separator: " ")
         let wasModified = !replacements.isEmpty
 
-        if debugMode {
-            print("Final: \(modifiedText)")
-            print("Replacements: \(replacements.count)")
-            print("===========================================")
-        }
+        debugLog("Final: \(modifiedText)")
+        debugLog("Replacements: \(replacements.count)")
+        debugLog("===========================================")
 
         return RescoreOutput(
             text: modifiedText,
@@ -759,27 +767,25 @@ extension VocabularyRescorer {
         let shouldReplace = boostedVocabScore > originalCtcScore
 
         // Debug output
-        if debugMode {
-            let label = candidate.spanLength > 1 ? "[MULTI] " : ""
-            print(
-                "  \(label)'\(candidate.originalPhrase)' vs '\(candidate.vocabTerm)' "
-                    + "(sim=\(String(format: "%.2f", candidate.similarity)), span=\(candidate.spanLength))"
-            )
-            print(
-                "    TDT span: [\(String(format: "%.2f", candidate.spanStartTime))-"
-                    + "\(String(format: "%.2f", candidate.spanEndTime))s]"
-            )
-            print("    CTC('\(candidate.originalPhrase)'): \(String(format: "%.2f", originalCtcScore))")
-            let cbwInfo =
-                config.useAdaptiveThresholds
-                ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(candidate.vocabTokens.count))"
-                : String(format: "%.2f", cbw)
-            print(
-                "    CTC('\(candidate.vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) "
-                    + "= \(String(format: "%.2f", boostedVocabScore))"
-            )
-            print("    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(shouldReplace ? ">" : "<=") original)")
-        }
+        let label = candidate.spanLength > 1 ? "[MULTI] " : ""
+        debugLog(
+            "  \(label)'\(candidate.originalPhrase)' vs '\(candidate.vocabTerm)' "
+                + "(sim=\(String(format: "%.2f", candidate.similarity)), span=\(candidate.spanLength))"
+        )
+        debugLog(
+            "    TDT span: [\(String(format: "%.2f", candidate.spanStartTime))-"
+                + "\(String(format: "%.2f", candidate.spanEndTime))s]"
+        )
+        debugLog("    CTC('\(candidate.originalPhrase)'): \(String(format: "%.2f", originalCtcScore))")
+        let cbwInfo =
+            config.useAdaptiveThresholds
+            ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(candidate.vocabTokens.count))"
+            : String(format: "%.2f", cbw)
+        debugLog(
+            "    CTC('\(candidate.vocabTerm)'): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) "
+                + "= \(String(format: "%.2f", boostedVocabScore))"
+        )
+        debugLog("    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(shouldReplace ? ">" : "<=") original)")
 
         // Preserve capitalization from original
         let firstOriginalWord =
@@ -862,9 +868,7 @@ extension VocabularyRescorer {
 
         // Single-word stopword check - skip entirely
         if spanLength == 1 && Self.stopwords.contains(normalizedWord) {
-            if debugMode {
-                print("    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'")
-            }
+            debugLog("    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'")
             return (shouldSkip: true, adjustedMinSimilarity: minSimilarity)
         }
 
@@ -872,13 +876,11 @@ extension VocabularyRescorer {
         if spanLength >= 2 {
             let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
             if containsStopword {
-                minSimilarity = max(minSimilarity, 0.85)
-                if debugMode {
-                    print(
-                        "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
-                            + "raising threshold to \(String(format: "%.2f", minSimilarity))"
-                    )
-                }
+                minSimilarity = max(minSimilarity, SimilarityThresholds.stopwordSpan)
+                debugLog(
+                    "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
+                        + "raising threshold to \(String(format: "%.2f", minSimilarity))"
+                )
             }
         }
 
@@ -900,10 +902,12 @@ extension VocabularyRescorer {
         minSimilarity: Float
     ) -> Float {
         let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-        if lengthRatio < 0.75 && normalizedWord.count <= 4 {
-            let adjusted = max(minSimilarity, 0.80)
-            if debugMode && currentSimilarity >= minSimilarity {
-                print(
+        if lengthRatio < SimilarityThresholds.lengthRatioThreshold
+            && normalizedWord.count <= SimilarityThresholds.shortWordMaxLength
+        {
+            let adjusted = max(minSimilarity, SimilarityThresholds.shortWordLengthRatio)
+            if currentSimilarity >= minSimilarity {
+                debugLog(
                     "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
                         + "raising threshold to \(String(format: "%.2f", adjusted))"
                 )

@@ -13,6 +13,14 @@ import OSLog
 public struct VocabularyRescorer {
 
     private let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
+
+    /// Log debug message with lazy evaluation (only formats string when debugMode is true)
+    @inline(__always)
+    private func debugLog(_ message: @escaping @autoclosure () -> String) {
+        guard debugMode else { return }
+        logger.debug("\(message(), privacy: .public)")
+    }
+
     let spotter: CtcKeywordSpotter
     let vocabulary: CustomVocabularyContext
     let ctcTokenizer: CtcTokenizer?
@@ -159,8 +167,10 @@ public struct VocabularyRescorer {
         if useBKTree {
             self.bkTree = BKTree(terms: vocabulary.terms)
             if ProcessInfo.processInfo.environment["FLUIDAUDIO_DEBUG_CTC_BOOSTING"] == "1" {
-                print(
-                    "[BK-TREE] Initialized with \(vocabulary.terms.count) terms, maxDistance=\(self.bkTreeMaxDistance)")
+                let initLogger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
+                let termCount = vocabulary.terms.count
+                let maxDist = bkTreeMaxDistance
+                initLogger.debug("[BK-TREE] Initialized with \(termCount) terms, maxDistance=\(maxDist)")
             }
         } else {
             self.bkTree = nil
@@ -350,9 +360,9 @@ public struct VocabularyRescorer {
                 }
 
                 // Debug: show all similarity calculations for high-similarity matches
-                if debugMode && bestSimilarity >= 0.50 {
+                if bestSimilarity >= 0.50 {
                     let wordClean = words[idx].trimmingCharacters(in: .punctuationCharacters)
-                    print("    [SIM] '\(wordClean)' vs '\(vocabTerm)' = \(String(format: "%.2f", bestSimilarity))")
+                    debugLog("    [SIM] '\(wordClean)' vs '\(vocabTerm)' = \(String(format: "%.2f", bestSimilarity))")
                 }
 
                 // LENGTH RATIO CHECK: Prevent short common words from matching longer vocab terms
@@ -366,8 +376,8 @@ public struct VocabularyRescorer {
                 if lengthRatio < 0.75 && originalWord.count <= 4 {
                     // For short words with low length ratio, require much higher similarity
                     adjustedMinSimilarity = max(effectiveMinSimilarity, 0.80)
-                    if debugMode && bestSimilarity >= effectiveMinSimilarity {
-                        print(
+                    if bestSimilarity >= effectiveMinSimilarity {
+                        debugLog(
                             "    [LENGTH] '\(originalWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
                                 + "raising threshold to \(String(format: "%.2f", adjustedMinSimilarity))"
                         )
@@ -395,11 +405,9 @@ public struct VocabularyRescorer {
                 continue
             }
 
-            if debugMode {
-                print(
-                    "  [CANDIDATE] '\(candidate.originalWord)' -> '\(vocabTerm)' (sim=\(String(format: "%.2f", candidate.similarity)), isHighConfAlias=\(candidate.isHighConfidenceAlias), span=\(candidate.spanLength))"
-                )
-            }
+            debugLog(
+                "  [CANDIDATE] '\(candidate.originalWord)' -> '\(vocabTerm)' (sim=\(String(format: "%.2f", candidate.similarity)), isHighConfAlias=\(candidate.isHighConfidenceAlias), span=\(candidate.spanLength))"
+            )
 
             // Now the key decision: Should we replace?
             // We need to compare CTC score for the vocabulary term vs the original word
@@ -447,12 +455,9 @@ public struct VocabularyRescorer {
 
             let scoreAdvantage = vocabCtcScore - originalScore
 
-            if debugMode {
-                print(
-                    """
-                      Vocab CTC: \(String(format: "%.2f", vocabCtcScore)), Original (\(scoringMethod)): \(String(format: "%.2f", originalScore)), Advantage: \(String(format: "%.2f", scoreAdvantage))
-                    """)
-            }
+            debugLog(
+                "  Vocab CTC: \(String(format: "%.2f", vocabCtcScore)), Original (\(scoringMethod)): \(String(format: "%.2f", originalScore)), Advantage: \(String(format: "%.2f", scoreAdvantage))"
+            )
 
             // Decision criteria:
             // 1. HIGH CONFIDENCE ALIAS: If similarity >= 0.85 to a user-defined alias, trust the mapping
@@ -571,10 +576,8 @@ public struct VocabularyRescorer {
                     reason: reason
                 ))
 
-            if debugMode {
-                let action = shouldReplace ? "REPLACE" : "KEEP"
-                print("  [\(action)] '\(candidate.originalWord)' -> '\(vocabTerm)': \(reason)")
-            }
+            let action = shouldReplace ? "REPLACE" : "KEEP"
+            debugLog("  [\(action)] '\(candidate.originalWord)' -> '\(vocabTerm)': \(reason)")
         }
 
         // Remove empty words (cleared spans)
@@ -582,11 +585,9 @@ public struct VocabularyRescorer {
         let modifiedText = finalWords.joined(separator: " ")
         let wasModified = modifiedText != transcript
 
-        if debugMode {
-            logger.info("Final: \(modifiedText)")
-            logger.info("Modified: \(wasModified)")
-            logger.info("===========================")
-        }
+        debugLog("Final: \(modifiedText)")
+        debugLog("Modified: \(wasModified)")
+        debugLog("===========================")
 
         return RescoreOutput(
             text: modifiedText,
@@ -641,11 +642,9 @@ public struct VocabularyRescorer {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
 
-        if debugMode {
-            print("=== VocabularyRescorer (Timestamp-Based) ===")
-            print("Words: \(wordTimings.count), Detections: \(detections.count)")
-            print("CBW (context-biasing weight): \(cbw)")
-        }
+        debugLog("=== VocabularyRescorer (Timestamp-Based) ===")
+        debugLog("Words: \(wordTimings.count), Detections: \(detections.count)")
+        debugLog("CBW (context-biasing weight): \(cbw)")
 
         var replacements: [RescoringResult] = []
         var modifiedWords: [(word: String, startTime: Double, endTime: Double)] = wordTimings.map {
@@ -661,11 +660,9 @@ public struct VocabularyRescorer {
             let detectionStart = detection.startTime
             let detectionEnd = detection.endTime
 
-            if debugMode {
-                print(
-                    "  Detection: '\(vocabTerm)' [\(String(format: "%.2f", detectionStart))-\(String(format: "%.2f", detectionEnd))s] score=\(String(format: "%.2f", vocabScore))"
-                )
-            }
+            debugLog(
+                "  Detection: '\(vocabTerm)' [\(String(format: "%.2f", detectionStart))-\(String(format: "%.2f", detectionEnd))s] score=\(String(format: "%.2f", vocabScore))"
+            )
 
             // Find overlapping TDT words
             var overlappingWords: [(index: Int, timing: WordTiming, overlapRatio: Double)] = []
@@ -697,14 +694,12 @@ public struct VocabularyRescorer {
 
                 let shouldReplace = vocabScore > tdtLogProb
 
-                if debugMode {
-                    print(
-                        "    Overlap with '\(bestMatch.timing.word)' (conf=\(String(format: "%.2f", bestMatch.timing.confidence)), logP=\(String(format: "%.2f", tdtLogProb)))"
-                    )
-                    print(
-                        "    CTC score: \(String(format: "%.2f", vocabScore)) vs TDT: \(String(format: "%.2f", tdtLogProb)) -> \(shouldReplace ? "REPLACE" : "KEEP")"
-                    )
-                }
+                debugLog(
+                    "    Overlap with '\(bestMatch.timing.word)' (conf=\(String(format: "%.2f", bestMatch.timing.confidence)), logP=\(String(format: "%.2f", tdtLogProb)))"
+                )
+                debugLog(
+                    "    CTC score: \(String(format: "%.2f", vocabScore)) vs TDT: \(String(format: "%.2f", tdtLogProb)) -> \(shouldReplace ? "REPLACE" : "KEEP")"
+                )
 
                 if shouldReplace {
                     modifiedWords[bestMatch.index].word = vocabTerm
@@ -743,10 +738,7 @@ public struct VocabularyRescorer {
 
                 if gapExists {
                     insertions.append((word: vocabTerm, insertAfterIndex: insertAfterIndex, time: detectionStart))
-
-                    if debugMode {
-                        print("    No overlap - INSERT after index \(insertAfterIndex) (gap detected)")
-                    }
+                    debugLog("    No overlap - INSERT after index \(insertAfterIndex) (gap detected)")
 
                     replacements.append(
                         RescoringResult(
@@ -757,8 +749,8 @@ public struct VocabularyRescorer {
                             shouldReplace: true,
                             reason: "Inserted into gap at \(String(format: "%.2f", detectionStart))s"
                         ))
-                } else if debugMode {
-                    print("    No gap found for insertion (would overlap with existing word)")
+                } else {
+                    debugLog("    No gap found for insertion (would overlap with existing word)")
                 }
             }
         }
@@ -780,9 +772,7 @@ public struct VocabularyRescorer {
         // HYBRID FALLBACK: If no timestamp-based replacements were made,
         // try string-similarity matching for detections (especially for "Boz" -> "Bose")
         if replacements.isEmpty && !detections.isEmpty {
-            if debugMode {
-                print("  No timestamp matches - trying string-similarity fallback")
-            }
+            debugLog("  No timestamp matches - trying string-similarity fallback")
             modifiedText = applyStringSimilarityFallback(
                 text: modifiedText,
                 detections: detections,
@@ -792,11 +782,9 @@ public struct VocabularyRescorer {
 
         let wasModified = modifiedText != transcript
 
-        if debugMode {
-            print("Final: \(modifiedText)")
-            print("Modified: \(wasModified)")
-            print("===========================================")
-        }
+        debugLog("Final: \(modifiedText)")
+        debugLog("Modified: \(wasModified)")
+        debugLog("===========================================")
 
         return RescoreOutput(
             text: modifiedText,
@@ -924,11 +912,9 @@ public struct VocabularyRescorer {
                         )
                     }
 
-                    if debugMode {
-                        print(
-                            "    [FALLBACK] '\(wordClean)' -> '\(replacement)' (sim=\(String(format: "%.2f", similarity)))"
-                        )
-                    }
+                    debugLog(
+                        "    [FALLBACK] '\(wordClean)' -> '\(replacement)' (sim=\(String(format: "%.2f", similarity)))"
+                    )
                 }
             }
         }
@@ -962,8 +948,8 @@ public struct VocabularyRescorer {
 
             let results = tree.search(query: normalizedWord, maxDistance: maxDistance)
 
-            if debugMode && !results.isEmpty {
-                print("  [BK-TREE] Found \(results.count) candidates for '\(word)' within distance \(maxDistance)")
+            if !results.isEmpty {
+                debugLog("  [BK-TREE] Found \(results.count) candidates for '\(word)' within distance \(maxDistance)")
             }
 
             return results.compactMap { result in

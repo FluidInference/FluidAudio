@@ -148,12 +148,6 @@ public final class CtcTokenizer: Sendable {
         hfTokenizer.idToToken(id)
     }
 
-    /// Get vocabulary size.
-    /// Returns 0 if vocabulary size cannot be determined.
-    public func vocabSize() -> Int {
-        hfTokenizer.vocabularySize ?? 0
-    }
-
     /// Get the CTC model directory path
     private static func getCtcModelDirectory() throws -> URL {
         guard
@@ -223,14 +217,6 @@ private final class HFTokenizer: Sendable {
     func idToToken(_ id: Int) -> String? {
         let decoded = tokenizer.decode(tokens: [id], skipSpecialTokens: false)
         return decoded.isEmpty ? nil : decoded
-    }
-
-    // MARK: - Vocabulary Info
-
-    /// Get vocabulary size if available
-    var vocabularySize: Int? {
-        // swift-transformers doesn't expose vocab size directly
-        nil
     }
 }
 
