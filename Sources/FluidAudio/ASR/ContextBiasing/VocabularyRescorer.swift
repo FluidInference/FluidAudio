@@ -828,11 +828,8 @@ public struct VocabularyRescorer {
                 continue
             }
 
-            // Check if this starts a new word:
-            // - Has space prefix " " (TDT format)
-            // - Has "▁" prefix (SentencePiece format)
-            // - Is first token
-            let startsNewWord = token.hasPrefix(" ") || token.hasPrefix("▁") || currentWord.isEmpty
+            // Check if this starts a new word (space or ▁ prefix, or first token)
+            let startsNewWord = isWordBoundary(token) || currentWord.isEmpty
 
             if startsNewWord && !currentWord.isEmpty {
                 // Save previous word (trim any leading/trailing whitespace)
@@ -853,14 +850,7 @@ public struct VocabularyRescorer {
             }
 
             if startsNewWord {
-                // Remove prefix (space or ▁)
-                if token.hasPrefix(" ") {
-                    currentWord = String(token.dropFirst())
-                } else if token.hasPrefix("▁") {
-                    currentWord = String(token.dropFirst())
-                } else {
-                    currentWord = token
-                }
+                currentWord = stripWordBoundaryPrefix(token)
                 wordStart = timing.startTime
             } else {
                 currentWord += token

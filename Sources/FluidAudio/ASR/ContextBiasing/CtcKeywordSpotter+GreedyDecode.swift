@@ -186,8 +186,8 @@ extension CtcKeywordSpotter {
         for collapsed in collapsedTokens {
             let piece = tokenizer.idToPiece(collapsed.tokenId) ?? ""
 
-            // Check if this token starts a new word (has "▁" prefix)
-            let startsNewWord = piece.hasPrefix("▁") || piece.hasPrefix(" ")
+            // Check if this token starts a new word (has "▁" or space prefix)
+            let startsNewWord = isWordBoundary(piece)
 
             if startsNewWord && !currentWordTokens.isEmpty {
                 // Finish current word
@@ -263,14 +263,7 @@ extension CtcKeywordSpotter {
         var text = ""
         for tokenId in tokenIds {
             if let piece = tokenizer.idToPiece(tokenId) {
-                // Strip "▁" prefix (SentencePiece word boundary marker)
-                if piece.hasPrefix("▁") {
-                    text += String(piece.dropFirst())
-                } else if piece.hasPrefix(" ") {
-                    text += String(piece.dropFirst())
-                } else {
-                    text += piece
-                }
+                text += stripWordBoundaryPrefix(piece)
             }
         }
         return text.trimmingCharacters(in: .whitespaces)

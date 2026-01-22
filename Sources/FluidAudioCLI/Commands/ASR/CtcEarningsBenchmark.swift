@@ -918,8 +918,8 @@ public enum CtcEarningsBenchmark {
                 continue
             }
 
-            // Check if this starts a new word (has ▁ prefix or is first token)
-            let startsNewWord = token.hasPrefix("▁") || currentWord.isEmpty
+            // Check if this starts a new word (has ▁ or space prefix, or is first token)
+            let startsNewWord = isWordBoundary(token) || currentWord.isEmpty
 
             if startsNewWord && !currentWord.isEmpty {
                 // Save previous word
@@ -928,7 +928,7 @@ public enum CtcEarningsBenchmark {
             }
 
             if startsNewWord {
-                currentWord = token.hasPrefix("▁") ? String(token.dropFirst()) : token
+                currentWord = stripWordBoundaryPrefix(token)
                 wordStart = timing.startTime
             } else {
                 currentWord += token
