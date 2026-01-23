@@ -21,10 +21,17 @@ struct ChunkProcessor {
     private let sampleRate: Int = 16000
     private let overlapSeconds: Double = 2.0
 
+    /// Context samples prepended from previous chunk for mel spectrogram stability (80ms = 1 encoder frame).
+    /// The FastConformer encoder's depthwise convolutions need left context for stable output.
+    /// Without this, the first frames of a chunk may produce features that cause all-blank predictions.
+    private let melContextSamples: Int = ASRConstants.samplesPerEncoderFrame  // 1280 samples = 80ms
+
     private var maxModelSamples: Int { 240_000 }  // CoreML encoder capacity (15 seconds)
     private var chunkSamples: Int {
-        // Match CoreML reference chunk length (239,840 samples ≈ 14.99s)
-        let raw = max(maxModelSamples - ASRConstants.melHopSize, ASRConstants.samplesPerEncoderFrame)
+        // Reserve space for context samples that will be prepended to non-first chunks.
+        // This ensures chunkSamples + melContextSamples <= maxModelSamples.
+        let maxActualChunk = maxModelSamples - melContextSamples  // 240000 - 1280 = 238720
+        let raw = max(maxActualChunk - ASRConstants.melHopSize, ASRConstants.samplesPerEncoderFrame)
         return raw / ASRConstants.samplesPerEncoderFrame * ASRConstants.samplesPerEncoderFrame
     }
     private var overlapSamples: Int {
@@ -56,24 +63,30 @@ struct ChunkProcessor {
         var chunkOutputs: [[TokenWindow]] = []
 
         var chunkStart = 0
+        var chunkIndex = 0
         var chunkDecoderState = TdtDecoderState.make()
 
         while chunkStart < totalSamples {
             let candidateEnd = chunkStart + chunkSamples
             let isLastChunk = candidateEnd >= totalSamples
             let chunkEnd = isLastChunk ? totalSamples : candidateEnd
-            let chunkLength = chunkEnd - chunkStart
 
-            if chunkLength <= 0 {
+            if chunkEnd <= chunkStart {
                 break
             }
 
             chunkDecoderState.reset()
 
-            let chunkSamplesArray = try readSamples(offset: chunkStart, count: chunkLength)
+            // For chunks after the first, prepend context samples from the overlap region.
+            // This provides left context for the mel spectrogram STFT window and encoder convolutions.
+            let contextSamples = chunkIndex > 0 ? melContextSamples : 0
+            let contextStart = chunkStart - contextSamples
+            let chunkLengthWithContext = chunkEnd - contextStart
+            let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
 
             let (windowTokens, windowTimestamps, windowConfidences) = try await transcribeChunk(
                 samples: chunkSamplesArray,
+                contextSamples: contextSamples,
                 chunkStart: chunkStart,
                 isLastChunk: isLastChunk,
                 using: manager,
@@ -89,6 +102,8 @@ struct ChunkProcessor {
                 (token: $0.0.0, timestamp: $0.0.1, confidence: $0.1)
             }
             chunkOutputs.append(windowData)
+
+            chunkIndex += 1
 
             if isLastChunk {
                 break
@@ -147,6 +162,7 @@ struct ChunkProcessor {
 
     private func transcribeChunk(
         samples: [Float],
+        contextSamples: Int,
         chunkStart: Int,
         isLastChunk: Bool,
         using manager: AsrManager,
@@ -155,15 +171,23 @@ struct ChunkProcessor {
         guard !samples.isEmpty else { return ([], [], []) }
 
         let paddedChunk = manager.padAudioIfNeeded(samples, targetLength: maxModelSamples)
-        let actualFrameCount = ASRConstants.calculateEncoderFrames(from: samples.count)
+
+        // Calculate frame count for the ACTUAL audio (excluding prepended context)
+        let actualAudioSamples = samples.count - contextSamples
+        let actualFrameCount = ASRConstants.calculateEncoderFrames(from: actualAudioSamples)
+
+        // Global frame offset is based on original chunkStart (not context-adjusted start)
         let globalFrameOffset = chunkStart / ASRConstants.samplesPerEncoderFrame
+
+        // Context frame adjustment tells decoder to skip the prepended context frames
+        let contextFrames = contextSamples / ASRConstants.samplesPerEncoderFrame
 
         let (hypothesis, encoderSequenceLength) = try await manager.executeMLInferenceWithTimings(
             paddedChunk,
-            originalLength: samples.count,
-            actualAudioFrames: actualFrameCount,
+            originalLength: samples.count,  // Full length including context
+            actualAudioFrames: actualFrameCount,  // Only actual audio frames (excluding context)
             decoderState: &decoderState,
-            contextFrameAdjustment: 0,
+            contextFrameAdjustment: contextFrames,  // Skip context frames in decoder
             isLastChunk: isLastChunk,
             globalFrameOffset: globalFrameOffset
         )
