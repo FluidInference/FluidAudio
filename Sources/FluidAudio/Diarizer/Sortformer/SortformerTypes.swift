@@ -16,9 +16,6 @@ public struct SortformerConfig: Sendable {
     /// Pre-encoder embedding dimension
     public let preEncoderDims: Int = 512
 
-    /// NEST encoder embedding dimension
-    public let nestEncoderDims: Int = 192
-
     /// Subsampling factor (8:1 downsampling in encoder)
     public let subsamplingFactor: Int = 8
 

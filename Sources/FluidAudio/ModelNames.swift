@@ -211,11 +211,11 @@ public enum ModelNames {
             public var name: String {
                 switch self {
                 case .default:
-                    return "Sortformer"
+                    return "SortformerV2"
                 case .nvidiaLowLatency:
-                    return "SortformerNvidiaLow"
+                    return "SortformerNvidiaLowV2"
                 case .nvidiaHighLatency:
-                    return "SortformerNvidiaHigh"
+                    return "SortformerNvidiaHighV2"
                 }
             }
 
