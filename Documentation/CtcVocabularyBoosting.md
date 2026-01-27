@@ -88,6 +88,22 @@ CTC Frames: [0] [1] [2] ... [374] (375 frames @ 40ms)
             Aligned timestamps
 ```
 
+### Memory Usage
+
+Running two encoders in parallel increases peak memory consumption:
+
+| Configuration | Peak RAM | Notes |
+|---------------|----------|-------|
+| TDT encoder only | ~66 MB | Standard transcription |
+| TDT + CTC encoders | ~130 MB | With vocabulary boosting |
+
+*Measured on iPhone 17 Pro. Memory settles after initial model loading.*
+
+The additional ~64 MB overhead comes from the CTC encoder (Parakeet 110M) being loaded alongside the primary TDT encoder. For memory-constrained scenarios, consider:
+- Loading the CTC encoder on-demand rather than at startup
+- Unloading the CTC encoder after transcription completes
+- Using vocabulary boosting only for files where domain terms are expected
+
 ## Pipeline Components
 
 ### 1. CtcTokenizer (`CtcTokenizer.swift`)
@@ -255,6 +271,29 @@ let result = try await asrManager.transcribe(
 // result.ctcDetectedTerms: ["NVIDIA", "TensorRT"]
 // result.ctcAppliedTerms: ["NVIDIA", "TensorRT"]
 ```
+
+## Streaming Mode Limitations
+
+> **Note**: Vocabulary boosting with streaming mode (`--streaming`) has limitations.
+
+When using `--custom-vocab` with `--streaming`, be aware of the following constraints:
+
+| Feature | File Mode | Streaming Mode |
+|---------|-----------|----------------|
+| Multi-word compounds | Fully supported | Limited |
+| Cross-chunk detection | N/A | Not supported |
+| Rescoring accuracy | Optimal | Reduced |
+
+**Why streaming is limited**:
+- Vocabulary rescoring requires the complete CTC log-probability matrix for accurate scoring
+- In streaming mode, audio is processed in small chunks (~1-2 seconds)
+- Keywords that span chunk boundaries may not be detected
+- The rescorer cannot look ahead to future frames for optimal alignment
+
+**Recommendations**:
+- For maximum vocabulary boosting accuracy, use file-based transcription
+- If streaming is required, prefer single-word vocabulary terms over multi-word phrases
+- Consider post-processing the streaming transcript with vocabulary boosting on the complete audio
 
 ## Vocabulary Size Guidelines
 
