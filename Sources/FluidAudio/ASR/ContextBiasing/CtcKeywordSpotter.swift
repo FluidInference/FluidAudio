@@ -14,7 +14,12 @@ public struct CtcKeywordSpotter: Sendable {
     let logger = AppLogger(category: "CtcKeywordSpotter")
     private let models: CtcModels
     public let blankId: Int
-    nonisolated(unsafe) private let predictionOptions: MLPredictionOptions
+
+    /// Computed property to avoid storing non-Sendable MLPredictionOptions.
+    /// Creating on demand is cheap (just init + empty dict).
+    private var predictionOptions: MLPredictionOptions {
+        AsrModels.optimizedPredictionOptions()
+    }
 
     private let sampleRate: Int = ASRConstants.sampleRate
     private let maxModelSamples: Int = ASRConstants.maxModelSamples
@@ -25,13 +30,10 @@ public struct CtcKeywordSpotter: Sendable {
 
     // Debug flag - enabled only in DEBUG builds
     #if DEBUG
-    let debugMode: Bool = false  // Set to true locally for verbose logging
+    let debugMode: Bool = true  // Set to true locally for verbose logging
     #else
     let debugMode: Bool = false
     #endif
-
-    // Flag to enable/disable chunked CTC processing
-    private let useChunkedCTC: Bool = true
 
     // Temperature for CTC softmax (higher = softer distribution, lower = more peaked)
     private let temperature: Float = ContextBiasingConstants.ctcTemperature
@@ -92,8 +94,7 @@ public struct CtcKeywordSpotter: Sendable {
     public init(models: CtcModels, blankId: Int = ContextBiasingConstants.defaultBlankId) {
         self.models = models
         self.blankId = blankId
-        self.predictionOptions = AsrModels.optimizedPredictionOptions()
-        // Input is fixed-size (240k samples padded), so ANE/GPU should work fine.
+        // predictionOptions is now a computed property - no assignment needed
     }
 
     /// Convenience helper to create a spotter using the default cache location.
@@ -353,7 +354,7 @@ public struct CtcKeywordSpotter: Sendable {
         }
 
         // For audio longer than model limit, use chunked processing
-        if useChunkedCTC && audioSamples.count > maxModelSamples {
+        if audioSamples.count > maxModelSamples {
             return try await computeLogProbsChunked(audioSamples: audioSamples)
         }
 

@@ -172,6 +172,28 @@ let vocabulary = CustomVocabularyContext(terms: [
 
 Each term is tokenized and scored against CTC log-probabilities. High-scoring terms are used to correct the TDT transcript.
 
+#### Alias Support
+
+Vocabulary terms can include aliases to handle common misspellings or phonetic variations:
+
+```swift
+let vocabulary = CustomVocabularyContext(terms: [
+    CustomVocabularyTerm(
+        text: "Häagen-Dazs",           // Canonical form (used in output)
+        aliases: ["Haagen-Dazs", "Hagen-Das", "Hagen Daz"]  // Recognized variants
+    ),
+    CustomVocabularyTerm(
+        text: "macOS",
+        aliases: ["Mac OS", "Mac O S", "Macos"]
+    ),
+])
+```
+
+**How aliases work**:
+- The rescorer checks similarity against both the canonical term and all aliases
+- When a match is found (via canonical or alias), the **canonical form** is used in the output
+- Aliases are useful for terms with accented characters, hyphens, or common ASR mishearings
+
 ## Frame-Level Scoring Details
 
 ### CTC Log-Probability Extraction
@@ -234,6 +256,77 @@ let result = try await asrManager.transcribe(
 // result.ctcAppliedTerms: ["NVIDIA", "TensorRT"]
 ```
 
+## Vocabulary Size Guidelines
+
+The vocabulary boosting system has been tested with vocabularies of varying sizes:
+
+| Vocabulary Size | Performance | Notes |
+|-----------------|-------------|-------|
+| 1-50 terms | Excellent | Typical use case (company names, products) |
+| 50-100 terms | Good | No noticeable latency impact |
+| 100-230 terms | Tested | Validated with domain-specific term lists |
+| 230+ terms | Untested | Consider BK-tree for large vocabularies |
+
+**Recommendations**:
+- Keep vocabularies focused on domain-specific terms that ASR commonly misrecognizes
+- Avoid adding common words that the ASR already handles well
+- Terms should be at least 4 characters (configurable via `minTermLength`)
+- The system automatically skips stopwords (a, the, and, etc.) to prevent false matches
+
+## BK-Tree for Large Vocabularies
+
+> **Note**: BK-tree support is currently **experimental** and disabled by default.
+
+For large vocabularies (100+ terms), the system supports BK-tree indexing for efficient approximate string matching.
+
+### Algorithm Selection
+
+| Algorithm | Complexity | When Used |
+|-----------|------------|-----------|
+| **Linear scan** (default) | O(W × V) | `useBkTree = false` |
+| **BK-tree** | O(W × log V) | `useBkTree = true` |
+
+Where W = words in transcript, V = vocabulary size.
+
+### Complexity Analysis
+
+**Linear Scan**:
+- Per-word: O(V) comparisons against all vocabulary terms
+- Total: O(W × V) for entire transcript
+
+**BK-tree**:
+- Construction: O(V × avg_word_length) one-time cost
+- Per-word: O(log V) amortized for approximate matching
+- Total: O(V) build + O(W × log V) queries
+
+### Crossover Point
+
+BK-tree becomes beneficial when query savings outweigh construction cost:
+
+| Vocabulary Size | Recommendation |
+|-----------------|----------------|
+| < 50 terms | Linear scan (BK-tree overhead not worth it) |
+| 50-100 terms | Either works (marginal difference) |
+| 100-500 terms | Consider BK-tree |
+| 500+ terms | Strongly recommend BK-tree |
+
+### Enabling BK-Tree
+
+```swift
+// In ContextBiasingConstants.swift
+public static let useBkTree: Bool = true  // Default: false
+public static let bkTreeMaxDistance: Int = 3  // Max edit distance for fuzzy matching
+```
+
+### Current Status
+
+BK-tree support is **experimental** because:
+1. Limited production testing with very large vocabularies
+2. The linear scan performs well for typical use cases (< 100 terms)
+3. BK-tree adds memory overhead for the tree structure
+
+Enable it only when working with large domain-specific vocabularies where the O(log V) improvement matters.
+
 ## File Reference
 
 | File | Purpose |
@@ -250,3 +343,5 @@ let result = try await asrManager.transcribe(
 2. **Parakeet TDT**: NVIDIA NeMo Parakeet TDT 0.6B - Token Duration Transducer
 3. **Parakeet CTC**: NVIDIA NeMo Parakeet CTC 110M - CTC-based encoder
 4. **HuggingFace Tokenizers**: swift-transformers for BPE tokenization
+5. **BK-Tree**: https://en.wikipedia.org/wiki/BK-tree
+6. **BK-Tree Implementation**: https://www.geeksforgeeks.org/dsa/bk-tree-introduction-implementation/

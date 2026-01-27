@@ -12,7 +12,7 @@ import OSLog
 /// enabling a fair comparison rather than relying on heuristics.
 public struct VocabularyRescorer: Sendable {
 
-    nonisolated(unsafe) let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
+    let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
 
     /// Log debug message with lazy evaluation (only formats string when debugMode is true)
     @inline(__always)
@@ -186,7 +186,7 @@ public struct VocabularyRescorer: Sendable {
         self.ctcModelDirectory = nil
         self.ctcTokenizer = ctcTokenizer
         #if DEBUG
-        self.debugMode = false  // Set to true locally for verbose logging
+        self.debugMode = true  // Set to true locally for verbose logging
         #else
         self.debugMode = false
         #endif

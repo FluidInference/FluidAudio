@@ -14,17 +14,8 @@ public enum ContextBiasingConstants {
 
     // MARK: - Token IDs
 
-    /// Sentinel value representing blank/silent token in CTC decoding.
-    ///
-    /// In CTC (Connectionist Temporal Classification), frames can output either a vocabulary
-    /// token or a "blank" indicating no speech. This sentinel value (-1) marks frames where
-    /// the blank token dominates, used during greedy decode collapse.
-    ///
-    /// - Value: `-1` (invalid token ID, distinct from all valid vocabulary indices)
-    /// - Used in: `CtcKeywordSpotter+GreedyDecode.swift` for frame collapsing
-    public static let blankSilentTokenId: Int = -1
-
-    /// Wildcard token ID for pattern matching in CTC dynamic programming paths.
+    /// Sentinel value representing wildcard token ID for pattern matching in
+    /// CTC dynamic programming paths.
     ///
     /// Represents "*" in keyword patterns that matches any token at zero cost.
     /// Used in the DP alignment algorithm ported from NeMo's `ctc_word_spotter.py`.
@@ -64,17 +55,6 @@ public enum ContextBiasingConstants {
     /// - Value: `-12.0` (log-probability, ~6e-6 probability)
     /// - Used in: `CustomVocabularyContext.init()` as default
     public static let defaultMinVocabCtcScore: Float = -12.0
-
-    /// Threshold for blank dominance in greedy CTC decode.
-    ///
-    /// During greedy decoding, if (blank_logprob - best_nonblank_logprob) exceeds this
-    /// threshold, the frame is treated as silence. Higher values are more conservative
-    /// (may miss quiet speech), lower values are more aggressive (may include noise).
-    ///
-    /// - Value: `10.0` (log-probability difference)
-    /// - Tuning: 6.0 (aggressive) → 10.0 (balanced) → 15.0 (conservative)
-    /// - Used in: `CtcKeywordSpotter+GreedyDecode.greedyCtcDecode()`
-    public static let defaultBlankDominanceThreshold: Float = 10.0
 
     /// CTC temperature for softmax probability distribution.
     ///
@@ -264,7 +244,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `false` (linear scan)
     /// - Used in: `VocabularyRescorer.swift` initialization
-    public static let useBkTree: Bool = false
+    public static let useBkTree: Bool = true
 
     /// Maximum edit distance for BK-tree fuzzy search.
     ///
