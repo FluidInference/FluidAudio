@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// CTC-based vocabulary rescoring for principled vocabulary integration.
 ///
@@ -12,19 +11,18 @@ import OSLog
 /// enabling a fair comparison rather than relying on heuristics.
 public struct VocabularyRescorer: Sendable {
 
-    let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
+    let logger = AppLogger(category: "VocabularyRescorer")
 
     /// Log debug message with lazy evaluation (only formats string when debugMode is true)
     @inline(__always)
     private func debugLog(_ message: @escaping @autoclosure () -> String) {
         guard debugMode else { return }
-        logger.debug("\(message(), privacy: .public)")
+        logger.debug(message())
     }
 
     let spotter: CtcKeywordSpotter
     let vocabulary: CustomVocabularyContext
     let ctcTokenizer: CtcTokenizer?
-    private let ctcModelDirectory: URL?
     let debugMode: Bool
 
     // BK-tree for efficient approximate string matching (USE_BK_TREE=1 to enable)
@@ -33,6 +31,9 @@ public struct VocabularyRescorer: Sendable {
     let useBKTree: Bool
     private let bkTree: BKTree?
     private let bkTreeMaxDistance: Int
+
+    // Pre-computed alias lookup: lowercased term text -> aliases (O(1) lookup vs O(V) scan)
+    private let aliasesByTermLower: [String: [String]]
 
     /// Configuration for rescoring behavior
     public struct Config: Sendable {
@@ -58,21 +59,21 @@ public struct VocabularyRescorer: Sendable {
         public let referenceTokenCount: Int
 
         public static let `default` = Config(
-            minScoreAdvantage: 2.0,  // Vocab term must score 2.0 better than original
-            minVocabScore: -12.0,  // Vocab term must have reasonable CTC score (lowered for alias support)
-            maxOriginalScoreForReplacement: -4.0,  // Don't replace very confident words
-            vocabBoostWeight: 1.5,  // Boost for vocabulary terms
-            useAdaptiveThresholds: true,  // Enable adaptive thresholds by default
-            referenceTokenCount: 3  // Tokens beyond 3 get adjusted thresholds
+            minScoreAdvantage: ContextBiasingConstants.defaultMinScoreAdvantage,
+            minVocabScore: ContextBiasingConstants.defaultMinVocabScore,
+            maxOriginalScoreForReplacement: ContextBiasingConstants.defaultMaxOriginalScoreForReplacement,
+            vocabBoostWeight: ContextBiasingConstants.defaultVocabBoostWeight,
+            useAdaptiveThresholds: ContextBiasingConstants.defaultUseAdaptiveThresholds,
+            referenceTokenCount: ContextBiasingConstants.defaultReferenceTokenCount
         )
 
         public init(
-            minScoreAdvantage: Float = 2.0,
-            minVocabScore: Float = -8.0,
-            maxOriginalScoreForReplacement: Float = -4.0,
-            vocabBoostWeight: Float = 1.5,
-            useAdaptiveThresholds: Bool = true,
-            referenceTokenCount: Int = 3
+            minScoreAdvantage: Float = ContextBiasingConstants.defaultMinScoreAdvantage,
+            minVocabScore: Float = ContextBiasingConstants.defaultMinVocabScore,
+            maxOriginalScoreForReplacement: Float = ContextBiasingConstants.defaultMaxOriginalScoreForReplacement,
+            vocabBoostWeight: Float = ContextBiasingConstants.defaultVocabBoostWeight,
+            useAdaptiveThresholds: Bool = ContextBiasingConstants.defaultUseAdaptiveThresholds,
+            referenceTokenCount: Int = ContextBiasingConstants.defaultReferenceTokenCount
         ) {
             self.minScoreAdvantage = minScoreAdvantage
             self.minVocabScore = minVocabScore
@@ -183,10 +184,9 @@ public struct VocabularyRescorer: Sendable {
         self.spotter = spotter
         self.vocabulary = vocabulary
         self.config = config
-        self.ctcModelDirectory = nil
         self.ctcTokenizer = ctcTokenizer
         #if DEBUG
-        self.debugMode = true  // Set to true locally for verbose logging
+        self.debugMode = true  // Verbose logging in DEBUG builds
         #else
         self.debugMode = false
         #endif
@@ -200,6 +200,15 @@ public struct VocabularyRescorer: Sendable {
         } else {
             self.bkTree = nil
         }
+
+        // Pre-compute alias lookup for O(1) access
+        var aliasDict: [String: [String]] = [:]
+        for term in vocabulary.terms {
+            if let aliases = term.aliases, !aliases.isEmpty {
+                aliasDict[term.textLowercased] = aliases
+            }
+        }
+        self.aliasesByTermLower = aliasDict
     }
 
     /// Result of rescoring a word
@@ -282,16 +291,10 @@ public struct VocabularyRescorer: Sendable {
                 (wordIndex: Int, originalWord: String, similarity: Float, isHighConfidenceAlias: Bool, spanLength: Int)?
 
             // Build list of all forms to check (canonical + aliases)
-            // Look up the canonical term in the vocabulary to get ALL aliases
-            // (since detections may come from entries without alias info)
+            // Use pre-computed dictionary for O(1) lookup instead of O(V) scan
             var allForms = [vocabTerm]
-            let vocabTermLower = detection.term.textLowercased
-            for term in vocabulary.terms {
-                if term.textLowercased == vocabTermLower {
-                    if let aliases = term.aliases {
-                        allForms.append(contentsOf: aliases)
-                    }
-                }
+            if let aliases = aliasesByTermLower[detection.term.textLowercased] {
+                allForms.append(contentsOf: aliases)
             }
             // Also add aliases from the detection itself (in case it has unique ones)
             if let aliases = detection.term.aliases {
@@ -356,7 +359,7 @@ public struct VocabularyRescorer: Sendable {
                         }
 
                         // Try concatenating 3 adjacent words for longer compound words
-                        if idx + 3 <= words.count && form.count >= 8 {
+                        if idx + 3 <= words.count && form.count >= ContextBiasingConstants.minLengthForThreeWordSpan {
                             let word1 = words[idx].trimmingCharacters(in: .punctuationCharacters)
                             let word2 = words[idx + 1].trimmingCharacters(in: .punctuationCharacters)
                             let word3 = words[idx + 2].trimmingCharacters(in: .punctuationCharacters)
@@ -701,9 +704,10 @@ public struct VocabularyRescorer: Sendable {
 
             if !overlappingWords.isEmpty {
                 // Found overlapping words - decide whether to replace
-                // Sort by overlap ratio (highest first)
-                let sorted = overlappingWords.sorted { $0.overlapRatio > $1.overlapRatio }
-                let bestMatch = sorted[0]
+                // Get best match by overlap ratio
+                guard let bestMatch = overlappingWords.max(by: { $0.overlapRatio < $1.overlapRatio }) else {
+                    continue
+                }
 
                 // Convert TDT confidence (0-1) to log-probability scale for comparison
                 // TDT confidence is softmax probability, CTC score is log-probability

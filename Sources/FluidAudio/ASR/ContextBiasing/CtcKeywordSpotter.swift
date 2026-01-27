@@ -292,7 +292,7 @@ public struct CtcKeywordSpotter: Sendable {
                 minScore.map { base in
                     let extraTokens = max(0, tokenCount - 3)
                     return base - Float(extraTokens) * 1.0
-                } ?? -15.0
+                } ?? ContextBiasingConstants.defaultMinSpotterScore
 
             // Find ALL occurrences of this keyword (not just the best one)
             let multipleDetections = ctcWordSpotMultiple(
@@ -487,7 +487,7 @@ public struct CtcKeywordSpotter: Sendable {
     private func computeWithStagedModels(audioSamples: [Float]) async throws -> CtcLogProbResult {
         // Prepare fixed-length audio input expected by MelSpectrogram.
         let (audioInput, clampedCount) = try prepareAudioArray(audioSamples)
-        let melInput = try makeFeatureProvider(name: "audio", array: audioInput, length: clampedCount)
+        let melInput = try makeAudioFeatureProvider(array: audioInput, length: clampedCount)
 
         let melModel = models.melSpectrogram
         let encoderModel = models.encoder
@@ -641,16 +641,9 @@ public struct CtcKeywordSpotter: Sendable {
             array = try MLMultiArray(shape: [NSNumber(value: maxModelSamples)], dataType: dataType)
         }
 
-        // Copy actual samples.
+        // Copy actual samples (MLMultiArray is zero-initialized, so padding is implicit).
         for i in 0..<clampedCount {
             array[i] = NSNumber(value: audioSamples[i])
-        }
-
-        // Remaining positions are left as zero (default) to represent padding.
-        if clampedCount < maxModelSamples {
-            for i in clampedCount..<maxModelSamples {
-                array[i] = 0
-            }
         }
 
         if debugMode {
@@ -671,21 +664,13 @@ public struct CtcKeywordSpotter: Sendable {
         return (array, clampedCount)
     }
 
-    private func makeFeatureProvider(
-        name: String, array: MLMultiArray, length: Int? = nil
-    ) throws
-        -> MLFeatureProvider
-    {
-        var dict: [String: MLFeatureValue] = [
-            name: MLFeatureValue(multiArray: array)
-        ]
-
-        if let length, name == "audio" {
-            let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
-            lengthArray[0] = NSNumber(value: length)
-            dict["audio_length"] = MLFeatureValue(multiArray: lengthArray)
-        }
-        return try MLDictionaryFeatureProvider(dictionary: dict)
+    private func makeAudioFeatureProvider(array: MLMultiArray, length: Int) throws -> MLFeatureProvider {
+        let lengthArray = try MLMultiArray(shape: [1], dataType: .int32)
+        lengthArray[0] = NSNumber(value: length)
+        return try MLDictionaryFeatureProvider(dictionary: [
+            "audio": MLFeatureValue(multiArray: array),
+            "audio_length": MLFeatureValue(multiArray: lengthArray),
+        ])
     }
 
     private func makeEncoderInput(melFeatures: MLMultiArray, melLength: Int?) throws -> MLFeatureProvider {
@@ -762,8 +747,6 @@ public struct CtcKeywordSpotter: Sendable {
 
             // Show detailed logit analysis for sample frames
             if debugMode && (t == 0 || t == timeSteps / 4 || t == timeSteps / 2 || t == 3 * timeSteps / 4) {
-                let maxLogit = logits.max() ?? 0
-                let minLogit = logits.min() ?? 0
                 let blankLogit = logits.indices.contains(blankId) ? logits[blankId] : 0
 
                 // Show top 5 non-blank tokens
@@ -1065,7 +1048,7 @@ public struct CtcKeywordSpotter: Sendable {
     func ctcWordSpotMultiple(
         logProbs: [[Float]],
         keywordTokens: [Int],
-        minScore: Float = -15.0,
+        minScore: Float = ContextBiasingConstants.defaultMinSpotterScore,
         mergeOverlap: Bool = true
     ) -> [(score: Float, startFrame: Int, endFrame: Int)] {
         let T = logProbs.count

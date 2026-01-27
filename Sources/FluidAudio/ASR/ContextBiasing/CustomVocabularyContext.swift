@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// A single custom vocabulary entry.
 public struct CustomVocabularyTerm: Codable, Sendable {
@@ -55,31 +54,25 @@ public struct CustomVocabularyTerm: Codable, Sendable {
     }
 }
 
-/// Raw JSON model for on‑disk config.
-public struct CustomVocabularyConfig: Codable, Sendable {
-    public let alpha: Float?
-    public let contextScore: Float?
-    public let depthScaling: Float?
-    public let scorePerPhrase: Float?
-    public let terms: [CustomVocabularyTerm]
+/// Raw JSON model for on‑disk config (internal DTO for JSON decoding).
+struct CustomVocabularyConfig: Codable, Sendable {
+    let alpha: Float?
+    let terms: [CustomVocabularyTerm]
 
     // CTC keyword boosting confidence thresholds
-    public let minCtcScore: Float?
-    public let minSimilarity: Float?
-    public let minCombinedConfidence: Float?
+    let minCtcScore: Float?
+    let minSimilarity: Float?
+    let minCombinedConfidence: Float?
 
     /// Minimum character length for vocabulary terms (per NeMo CTC-WS paper)
     /// Terms shorter than this are skipped to reduce false positives (e.g., "or" → "VR")
-    public let minTermLength: Int?
+    let minTermLength: Int?
 }
 
 /// Runtime context used by the decoder biasing system.
 public struct CustomVocabularyContext: Sendable {
     public let terms: [CustomVocabularyTerm]
     public let alpha: Float
-    public let contextScore: Float
-    public let depthScaling: Float
-    public let scorePerPhrase: Float
 
     // CTC keyword boosting confidence thresholds
     public let minCtcScore: Float
@@ -93,9 +86,6 @@ public struct CustomVocabularyContext: Sendable {
     public init(
         terms: [CustomVocabularyTerm],
         alpha: Float = ContextBiasingConstants.defaultAlpha,
-        contextScore: Float = 1.2,
-        depthScaling: Float = 2.0,
-        scorePerPhrase: Float = 0.0,
         minCtcScore: Float = ContextBiasingConstants.defaultMinVocabCtcScore,
         minSimilarity: Float = ContextBiasingConstants.defaultMinSimilarity,
         minCombinedConfidence: Float = ContextBiasingConstants.defaultMinCombinedConfidence,
@@ -103,9 +93,6 @@ public struct CustomVocabularyContext: Sendable {
     ) {
         self.terms = terms
         self.alpha = alpha
-        self.contextScore = contextScore
-        self.depthScaling = depthScaling
-        self.scorePerPhrase = scorePerPhrase
         self.minCtcScore = minCtcScore
         self.minSimilarity = minSimilarity
         self.minCombinedConfidence = minCombinedConfidence
@@ -114,14 +101,11 @@ public struct CustomVocabularyContext: Sendable {
 
     /// Load a custom vocabulary JSON file produced by the analysis tooling.
     public static func load(from url: URL) throws -> CustomVocabularyContext {
-        let logger = Logger(subsystem: "com.fluidaudio", category: "CustomVocabulary")
+        let logger = AppLogger(category: "CustomVocabulary")
         let data = try Data(contentsOf: url)
         let config = try JSONDecoder().decode(CustomVocabularyConfig.self, from: data)
 
         let alpha = config.alpha ?? ContextBiasingConstants.defaultAlpha
-        let contextScore = config.contextScore ?? 1.2
-        let depthScaling = config.depthScaling ?? 2.0
-        let scorePerPhrase = config.scorePerPhrase ?? 0.0
         let minCtcScore = config.minCtcScore ?? ContextBiasingConstants.defaultMinVocabCtcScore
         let minSimilarity = config.minSimilarity ?? ContextBiasingConstants.defaultMinSimilarity
         let minCombinedConfidence = config.minCombinedConfidence ?? ContextBiasingConstants.defaultMinCombinedConfidence
@@ -142,15 +126,26 @@ public struct CustomVocabularyContext: Sendable {
                 continue
             }
 
-            validatedTerms.append(term)
+            // Sanitize aliases too (remove control characters, skip empty)
+            let sanitizedAliases = term.aliases?.compactMap { alias -> String? in
+                let (sanitizedAlias, _) = sanitizeVocabularyTerm(alias)
+                return sanitizedAlias.isEmpty ? nil : sanitizedAlias
+            }
+
+            // Use sanitized text and aliases
+            let sanitizedTerm = CustomVocabularyTerm(
+                text: sanitized,
+                weight: term.weight,
+                aliases: sanitizedAliases?.isEmpty == true ? nil : sanitizedAliases,
+                tokenIds: term.tokenIds,
+                ctcTokenIds: term.ctcTokenIds
+            )
+            validatedTerms.append(sanitizedTerm)
         }
 
         return CustomVocabularyContext(
             terms: validatedTerms,
             alpha: alpha,
-            contextScore: contextScore,
-            depthScaling: depthScaling,
-            scorePerPhrase: scorePerPhrase,
             minCtcScore: minCtcScore,
             minSimilarity: minSimilarity,
             minCombinedConfidence: minCombinedConfidence,
@@ -172,18 +167,30 @@ public struct CustomVocabularyContext: Sendable {
             if let colonIndex = trimmed.firstIndex(of: ":") {
                 let word = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespaces)
                 let aliasesPart = String(trimmed[trimmed.index(after: colonIndex)...])
-                let aliases = aliasesPart.split(separator: ",").map {
+                let rawAliases = aliasesPart.split(separator: ",").map {
                     String($0).trimmingCharacters(in: .whitespaces)
                 }.filter { !$0.isEmpty }
 
+                // Sanitize term and aliases
+                let (sanitizedWord, _) = sanitizeVocabularyTerm(word)
+                guard !sanitizedWord.isEmpty else { continue }
+
+                let sanitizedAliases = rawAliases.compactMap { alias -> String? in
+                    let (sanitized, _) = sanitizeVocabularyTerm(alias)
+                    return sanitized.isEmpty ? nil : sanitized
+                }
+
                 terms.append(
                     CustomVocabularyTerm(
-                        text: word,
+                        text: sanitizedWord,
                         weight: 10.0,  // Aggressive default weight for text list
-                        aliases: aliases.isEmpty ? nil : aliases
+                        aliases: sanitizedAliases.isEmpty ? nil : sanitizedAliases
                     ))
             } else {
-                terms.append(CustomVocabularyTerm(text: trimmed, weight: 10.0))  // Aggressive default weight
+                // Sanitize term
+                let (sanitizedWord, _) = sanitizeVocabularyTerm(trimmed)
+                guard !sanitizedWord.isEmpty else { continue }
+                terms.append(CustomVocabularyTerm(text: sanitizedWord, weight: 10.0))
             }
         }
 

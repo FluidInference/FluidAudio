@@ -221,6 +221,56 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer.swift` compound word decision
     public static let scoreAdvantageThreshold: Float = 0.5
 
+    // MARK: - Rescorer Config Defaults
+
+    /// Default minimum score advantage for vocabulary replacement.
+    ///
+    /// Vocabulary term must score at least this much better than the original
+    /// transcript word to trigger replacement. Higher values are more conservative.
+    ///
+    /// - Value: `2.0` (vocab term needs 2.0 score advantage)
+    /// - Used in: `VocabularyRescorer.Config.default` and init
+    public static let defaultMinScoreAdvantage: Float = 2.0
+
+    /// Default minimum vocabulary term CTC score for replacement.
+    ///
+    /// Vocabulary terms with CTC scores below this are rejected as low-confidence.
+    /// Lowered from -8.0 to -12.0 to support alias matching which may have weaker
+    /// acoustic evidence.
+    ///
+    /// - Value: `-12.0` (log-probability threshold)
+    /// - Used in: `VocabularyRescorer.Config.default` and init
+    public static let defaultMinVocabScore: Float = -12.0
+
+    /// Default maximum original word score for replacement.
+    ///
+    /// If the original transcript word has a CTC score better (less negative) than
+    /// this threshold, it's considered high-confidence and won't be replaced.
+    /// Prevents replacing words the model is very confident about.
+    ///
+    /// - Value: `-4.0` (don't replace confident words)
+    /// - Used in: `VocabularyRescorer.Config.default` and init
+    public static let defaultMaxOriginalScoreForReplacement: Float = -4.0
+
+    /// Default reference token count for adaptive threshold scaling.
+    ///
+    /// When adaptive thresholds are enabled, tokens beyond this count get
+    /// adjusted similarity requirements. Longer vocabulary terms are allowed
+    /// slightly lower per-character similarity.
+    ///
+    /// - Value: `3` tokens
+    /// - Used in: `VocabularyRescorer.Config.default` and init
+    public static let defaultReferenceTokenCount: Int = 3
+
+    /// Default setting for adaptive thresholds.
+    ///
+    /// When enabled, similarity thresholds scale based on token count,
+    /// allowing longer terms slightly more lenient matching.
+    ///
+    /// - Value: `true` (enabled by default)
+    /// - Used in: `VocabularyRescorer.Config.default` and init
+    public static let defaultUseAdaptiveThresholds: Bool = true
+
     // MARK: - Word Length Thresholds
 
     /// Maximum character count for "short word" classification.
@@ -234,6 +284,16 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer+ConstrainedCTC.swift` length checks
     public static let shortWordMaxLength: Int = 4
 
+    /// Minimum vocabulary term length to attempt 3-word span matching.
+    ///
+    /// Terms shorter than this only match 1-2 word spans to prevent
+    /// short vocabulary terms from over-consuming transcript words.
+    ///
+    /// - Value: `8` characters
+    /// - Example: "Ramirez-Santos" (14 chars) can match 3 words, "NVIDIA" (6) cannot
+    /// - Used in: `VocabularyRescorer.swift` compound word matching
+    public static let minLengthForThreeWordSpan: Int = 8
+
     // MARK: - BK-Tree Configuration
 
     /// Whether to use BK-tree for fuzzy string matching.
@@ -244,7 +304,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `false` (linear scan)
     /// - Used in: `VocabularyRescorer.swift` initialization
-    public static let useBkTree: Bool = true
+    public static let useBkTree: Bool = false
 
     /// Maximum edit distance for BK-tree fuzzy search.
     ///

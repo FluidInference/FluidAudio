@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 // MARK: - Constrained CTC Rescoring
 
@@ -12,7 +11,7 @@ extension VocabularyRescorer {
     @inline(__always)
     private func debugLog(_ message: @escaping @autoclosure () -> String) {
         guard debugMode else { return }
-        logger.debug("\(message(), privacy: .public)")
+        logger.debug(message())
     }
 
     // MARK: - Stopwords (Shared)
@@ -71,6 +70,60 @@ extension VocabularyRescorer {
         let candidate: CTCMatchCandidate
         let result: CTCMatchResult
         let similarity: Float  // String similarity for sorting
+    }
+
+    // MARK: - Shared Finalization
+
+    /// Finalize replacements: sort by span length, apply greedily, reconstruct transcript.
+    ///
+    /// This shared helper handles Pass 2 & 3 of the two-pass algorithm, used by both
+    /// word-centric and term-centric approaches.
+    private func finalizeReplacements(
+        pendingReplacements: [PendingReplacement],
+        modifiedWords: inout [(word: String, startTime: Double, endTime: Double)],
+        replacedIndices: inout Set<Int>,
+        replacements: inout [RescoringResult]
+    ) -> RescoreOutput {
+        // PASS 2: Sort by span length (ascending) then by similarity (descending)
+        // This ensures shorter spans are preferred when multiple matches overlap
+        let sortedReplacements = pendingReplacements.sorted { a, b in
+            if a.candidate.spanLength != b.candidate.spanLength {
+                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans
+            }
+            // For same span length, prefer higher similarity
+            return a.similarity > b.similarity
+        }
+
+        // PASS 3: Greedily apply non-overlapping replacements
+        for pending in sortedReplacements {
+            // Check if any index in this span is already replaced
+            guard pending.candidate.spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else {
+                continue  // Skip - overlaps with already-accepted replacement
+            }
+
+            applyReplacement(
+                result: pending.result,
+                candidate: pending.candidate,
+                modifiedWords: &modifiedWords,
+                replacedIndices: &replacedIndices,
+                replacements: &replacements
+            )
+        }
+
+        // Reconstruct transcript from modified words (filter empty strings from multi-word replacements)
+        let modifiedText = modifiedWords.map { $0.word }.filter { !$0.isEmpty }.joined(separator: " ")
+        let wasModified = !replacements.isEmpty
+        let replacementCount = replacements.count  // Capture before debugLog (inout can't be captured in @escaping)
+
+        debugLog("Final: \(modifiedText)")
+        debugLog("Replacements: \(replacementCount)")
+        debugLog("===========================================")
+
+        return RescoreOutput(
+            text: modifiedText,
+            replacements: replacements,
+            wasModified: wasModified
+        )
     }
 
     // MARK: - Public API
@@ -263,40 +316,25 @@ extension VocabularyRescorer {
 
                 // LENGTH RATIO CHECK for single words
                 if spanLength == 1 {
-                    let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-                    if lengthRatio < ContextBiasingConstants.lengthRatioThreshold
-                        && normalizedWord.count <= ContextBiasingConstants.shortWordMaxLength
-                    {
-                        minSimilarityForSpan = max(minSimilarityForSpan, ContextBiasingConstants.shortWordSimilarity)
-                        if similarity >= minSimilarity {
-                            debugLog(
-                                "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
-                                    + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
-                            )
-                        }
-                    }
+                    minSimilarityForSpan = checkLengthRatioRules(
+                        normalizedWord: normalizedWord,
+                        vocabTerm: vocabTerm,
+                        currentSimilarity: similarity,
+                        minSimilarity: minSimilarityForSpan
+                    )
                 }
 
                 // STOPWORD CHECKS
-                if spanLength == 1 && Self.stopwords.contains(normalizedWord) {
-                    debugLog(
-                        "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'")
-                    continue
-                }
-
-                if spanLength >= 2 {
-                    let spanWords = spanIndices.map { normalizedWords[$0] }
-                    let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
-                    if containsStopword {
-                        minSimilarityForSpan = max(minSimilarityForSpan, ContextBiasingConstants.stopwordSpanSimilarity)
-                        if similarity >= minSimilarity {
-                            debugLog(
-                                "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
-                                    + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
-                            )
-                        }
-                    }
-                }
+                let spanWords = spanLength >= 2 ? spanIndices.map { normalizedWords[$0] } : []
+                let (shouldSkipStopword, adjustedSimilarity) = checkStopwordRules(
+                    normalizedWord: normalizedWord,
+                    spanLength: spanLength,
+                    spanWords: spanWords,
+                    vocabTerm: vocabTerm,
+                    currentSimilarity: minSimilarityForSpan
+                )
+                if shouldSkipStopword { continue }
+                minSimilarityForSpan = adjustedSimilarity
 
                 // Check if similarity meets threshold after all adjustments
                 guard similarity >= minSimilarityForSpan else { continue }
@@ -338,44 +376,12 @@ extension VocabularyRescorer {
             }
         }
 
-        // PASS 2: Sort by span length (ascending) then by score (descending)
-        // This ensures shorter spans are preferred when multiple matches overlap
-        let sortedReplacements = pendingReplacements.sorted { a, b in
-            if a.candidate.spanLength != b.candidate.spanLength {
-                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans
-            }
-            // For same span length, prefer higher similarity
-            return a.similarity > b.similarity
-        }
-
-        // PASS 3: Greedily apply non-overlapping replacements
-        for pending in sortedReplacements {
-            // Check if any index in this span is already replaced
-            guard pending.candidate.spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else {
-                continue  // Skip - overlaps with already-accepted replacement
-            }
-
-            applyReplacement(
-                result: pending.result,
-                candidate: pending.candidate,
-                modifiedWords: &modifiedWords,
-                replacedIndices: &replacedIndices,
-                replacements: &replacements
-            )
-        }
-
-        // Reconstruct transcript from modified words (filter empty strings from multi-word replacements)
-        let modifiedText = modifiedWords.map { $0.word }.filter { !$0.isEmpty }.joined(separator: " ")
-        let wasModified = !replacements.isEmpty
-
-        debugLog("Final: \(modifiedText)")
-        debugLog("Replacements: \(replacements.count)")
-        debugLog("===========================================")
-
-        return RescoreOutput(
-            text: modifiedText,
-            replacements: replacements,
-            wasModified: wasModified
+        // PASS 2 & 3: Sort, apply, and reconstruct (shared logic)
+        return finalizeReplacements(
+            pendingReplacements: pendingReplacements,
+            modifiedWords: &modifiedWords,
+            replacedIndices: &replacedIndices,
+            replacements: &replacements
         )
     }
 
@@ -497,8 +503,9 @@ extension VocabularyRescorer {
                         guard bestSimilarity >= minSimilarityForSpan else { continue }
 
                         // Get temporal window for the entire span
-                        let spanStartTime = wordTimings[spanIndices.first!].startTime
-                        let spanEndTime = wordTimings[spanIndices.last!].endTime
+                        guard let firstIdx = spanIndices.first, let lastIdx = spanIndices.last else { continue }
+                        let spanStartTime = wordTimings[firstIdx].startTime
+                        let spanEndTime = wordTimings[lastIdx].endTime
 
                         // Evaluate CTC match using shared helper
                         let candidate = CTCMatchCandidate(
@@ -630,54 +637,30 @@ extension VocabularyRescorer {
                         normalizedText: matchedConcatenation
                     )
 
-                    // LENGTH RATIO CHECK: Prevent short common words from matching longer vocab terms
-                    // e.g., "and" (3 chars) should not match "Andre" (5 chars) even with ~60% similarity
+                    // LENGTH RATIO CHECK for single words
                     if matchedSpanLength == 1 {
-                        let lengthRatio = Float(normalizedWord.count) / Float(vocabTerm.count)
-                        if lengthRatio < ContextBiasingConstants.lengthRatioThreshold
-                            && normalizedWord.count <= ContextBiasingConstants.shortWordMaxLength
-                        {
-                            // For short words with low length ratio, require much higher similarity
-                            minSimilarityForSpan = max(
-                                minSimilarityForSpan, ContextBiasingConstants.shortWordSimilarity)
-                            if bestSimilarity >= minSimilarity {
-                                debugLog(
-                                    "    [LENGTH] '\(normalizedWord)' too short (ratio=\(String(format: "%.2f", lengthRatio))), "
-                                        + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
-                                )
-                            }
-                        }
-                    }
-
-                    // STOPWORD CHECK: Prevent common words from being replaced
-                    // For single-word matches, skip entirely if the TDT word is a stopword
-                    // This prevents "and" → "Jane", "comes" → "James", etc.
-                    if matchedSpanLength == 1 && Self.stopwords.contains(normalizedWord) {
-                        debugLog(
-                            "    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'"
+                        minSimilarityForSpan = checkLengthRatioRules(
+                            normalizedWord: normalizedWord,
+                            vocabTerm: vocabTerm,
+                            currentSimilarity: bestSimilarity,
+                            minSimilarity: minSimilarityForSpan
                         )
-                        continue
                     }
 
-                    // For multi-word spans, check if any word is a stopword
-                    // This prevents "and we" → "Andre", "at this" → "Matthew", etc.
-                    if matchedSpanLength >= 2 {
-                        let spanWords = (0..<matchedSpanLength).map {
-                            Self.normalizeForSimilarity(wordTimings[wordIdx + $0].word)
-                        }
-                        let containsStopword = spanWords.contains { Self.stopwords.contains($0) }
-                        if containsStopword {
-                            // Require very high similarity when span contains stopwords
-                            minSimilarityForSpan = max(
-                                minSimilarityForSpan, ContextBiasingConstants.stopwordSpanSimilarity)
-                            if bestSimilarity >= minSimilarity {
-                                debugLog(
-                                    "    [STOPWORD] span '\(spanWords.joined(separator: " "))' contains stopword, "
-                                        + "raising threshold to \(String(format: "%.2f", minSimilarityForSpan))"
-                                )
-                            }
-                        }
-                    }
+                    // STOPWORD CHECKS
+                    let spanWords =
+                        matchedSpanLength >= 2
+                        ? (0..<matchedSpanLength).map { Self.normalizeForSimilarity(wordTimings[wordIdx + $0].word) }
+                        : []
+                    let (shouldSkipStopword, adjustedSimilarity) = checkStopwordRules(
+                        normalizedWord: normalizedWord,
+                        spanLength: matchedSpanLength,
+                        spanWords: spanWords,
+                        vocabTerm: vocabTerm,
+                        currentSimilarity: minSimilarityForSpan
+                    )
+                    if shouldSkipStopword { continue }
+                    minSimilarityForSpan = adjustedSimilarity
 
                     guard bestSimilarity >= minSimilarityForSpan else { continue }
 
@@ -726,44 +709,12 @@ extension VocabularyRescorer {
             }
         }
 
-        // PASS 2: Sort by span length (ascending) then by similarity (descending)
-        // This ensures shorter spans are preferred when multiple matches overlap
-        let sortedReplacements = pendingReplacements.sorted { a, b in
-            if a.candidate.spanLength != b.candidate.spanLength {
-                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans
-            }
-            // For same span length, prefer higher similarity
-            return a.similarity > b.similarity
-        }
-
-        // PASS 3: Greedily apply non-overlapping replacements
-        for pending in sortedReplacements {
-            // Check if any index in this span is already replaced
-            guard pending.candidate.spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else {
-                continue  // Skip - overlaps with already-accepted replacement
-            }
-
-            applyReplacement(
-                result: pending.result,
-                candidate: pending.candidate,
-                modifiedWords: &modifiedWords,
-                replacedIndices: &replacedIndices,
-                replacements: &replacements
-            )
-        }
-
-        // Reconstruct transcript from modified words (filter empty strings from multi-word replacements)
-        let modifiedText = modifiedWords.map { $0.word }.filter { !$0.isEmpty }.joined(separator: " ")
-        let wasModified = !replacements.isEmpty
-
-        debugLog("Final: \(modifiedText)")
-        debugLog("Replacements: \(replacements.count)")
-        debugLog("===========================================")
-
-        return RescoreOutput(
-            text: modifiedText,
-            replacements: replacements,
-            wasModified: wasModified
+        // PASS 2 & 3: Sort, apply, and reconstruct (shared logic)
+        return finalizeReplacements(
+            pendingReplacements: pendingReplacements,
+            modifiedWords: &modifiedWords,
+            replacedIndices: &replacedIndices,
+            replacements: &replacements
         )
     }
 
@@ -805,19 +756,35 @@ extension VocabularyRescorer {
         )
 
         // Score original phrase using constrained CTC
-        var originalCtcScore: Float = -Float.infinity
-        if let tokenizer = ctcTokenizer {
-            let originalTokens = tokenizer.encode(candidate.originalPhrase)
-            if !originalTokens.isEmpty {
-                let (score, _, _) = spotter.ctcWordSpotConstrained(
-                    logProbs: logProbs,
-                    keywordTokens: originalTokens,
-                    searchStartFrame: searchStart,
-                    searchEndFrame: searchEnd
-                )
-                originalCtcScore = score
-            }
+        guard let tokenizer = ctcTokenizer else {
+            debugLog("  [WARN] No tokenizer - skipping CTC comparison for '\(candidate.originalPhrase)'")
+            return CTCMatchResult(
+                shouldReplace: false,
+                originalScore: -Float.infinity,
+                boostedVocabScore: vocabCtcScore,
+                replacement: candidate.vocabTerm,
+                reason: "No tokenizer available"
+            )
         }
+
+        let originalTokens = tokenizer.encode(candidate.originalPhrase)
+        guard !originalTokens.isEmpty else {
+            debugLog("  [WARN] Empty tokens for '\(candidate.originalPhrase)' - skipping")
+            return CTCMatchResult(
+                shouldReplace: false,
+                originalScore: -Float.infinity,
+                boostedVocabScore: vocabCtcScore,
+                replacement: candidate.vocabTerm,
+                reason: "Empty tokens for original phrase"
+            )
+        }
+
+        let (originalCtcScore, _, _) = spotter.ctcWordSpotConstrained(
+            logProbs: logProbs,
+            keywordTokens: originalTokens,
+            searchStartFrame: searchStart,
+            searchEndFrame: searchEnd
+        )
 
         // Apply adaptive context-biasing weight
         let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: candidate.vocabTokens.count)
