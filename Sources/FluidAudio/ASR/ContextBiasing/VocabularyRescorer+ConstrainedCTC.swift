@@ -65,6 +65,14 @@ extension VocabularyRescorer {
         let reason: String
     }
 
+    /// Pending replacement candidate for two-pass selection.
+    /// Stores all info needed to apply the replacement later.
+    private struct PendingReplacement {
+        let candidate: CTCMatchCandidate
+        let result: CTCMatchResult
+        let similarity: Float  // String similarity for sorting
+    }
+
     // MARK: - Public API
 
     /// Rescore using constrained CTC search around TDT word locations.
@@ -148,6 +156,7 @@ extension VocabularyRescorer {
             (word: $0.word, startTime: $0.startTime, endTime: $0.endTime)
         }
         var replacedIndices = Set<Int>()
+        var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
 
         // Build normalized vocabulary set for guard checks
         let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
@@ -317,18 +326,42 @@ extension VocabularyRescorer {
                 )
 
                 if result.shouldReplace {
-                    applyReplacement(
-                        result: result,
-                        candidate: candidate,
-                        modifiedWords: &modifiedWords,
-                        replacedIndices: &replacedIndices,
-                        replacements: &replacements
+                    // Collect candidate instead of applying immediately
+                    pendingReplacements.append(
+                        PendingReplacement(
+                            candidate: candidate,
+                            result: result,
+                            similarity: similarity
+                        )
                     )
-
-                    // Break out of candidate loop - this word is now replaced
-                    break
                 }
             }
+        }
+
+        // PASS 2: Sort by span length (ascending) then by score (descending)
+        // This ensures shorter spans are preferred when multiple matches overlap
+        let sortedReplacements = pendingReplacements.sorted { a, b in
+            if a.candidate.spanLength != b.candidate.spanLength {
+                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans
+            }
+            // For same span length, prefer higher similarity
+            return a.similarity > b.similarity
+        }
+
+        // PASS 3: Greedily apply non-overlapping replacements
+        for pending in sortedReplacements {
+            // Check if any index in this span is already replaced
+            guard pending.candidate.spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else {
+                continue  // Skip - overlaps with already-accepted replacement
+            }
+
+            applyReplacement(
+                result: pending.result,
+                candidate: pending.candidate,
+                modifiedWords: &modifiedWords,
+                replacedIndices: &replacedIndices,
+                replacements: &replacements
+            )
         }
 
         // Reconstruct transcript from modified words (filter empty strings from multi-word replacements)
@@ -380,6 +413,7 @@ extension VocabularyRescorer {
             (word: $0.word, startTime: $0.startTime, endTime: $0.endTime)
         }
         var replacedIndices = Set<Int>()
+        var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
 
         // Build normalized vocabulary set for guard checks
         let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
@@ -487,12 +521,13 @@ extension VocabularyRescorer {
                         )
 
                         if result.shouldReplace {
-                            applyReplacement(
-                                result: result,
-                                candidate: candidate,
-                                modifiedWords: &modifiedWords,
-                                replacedIndices: &replacedIndices,
-                                replacements: &replacements
+                            // Collect candidate instead of applying immediately
+                            pendingReplacements.append(
+                                PendingReplacement(
+                                    candidate: candidate,
+                                    result: result,
+                                    similarity: bestSimilarity
+                                )
                             )
                         }
                     }
@@ -548,29 +583,42 @@ extension VocabularyRescorer {
                         : nil
 
                     // 2-word compound matching
+                    // Skip if the second word already matches the vocab term well on its own
                     if let norm2 = normalized2, !norm2.isEmpty, vocabTerm.count >= minLengthFor2Word {
-                        let concatenated = normalizedWord + norm2  // No space
-                        for form in singleWordForms {
-                            let concatSimilarity = Self.stringSimilarity(concatenated, form.normalized)
-                            if concatSimilarity > bestSimilarity {
-                                bestSimilarity = concatSimilarity
-                                matchedSpanLength = 2
-                                matchedConcatenation = concatenated
+                        let norm2MatchesVocab = singleWordForms.contains {
+                            Self.stringSimilarity(norm2, $0.normalized) >= 0.9
+                        }
+                        if !norm2MatchesVocab {
+                            let concatenated = normalizedWord + norm2  // No space
+                            for form in singleWordForms {
+                                let concatSimilarity = Self.stringSimilarity(concatenated, form.normalized)
+                                if concatSimilarity > bestSimilarity {
+                                    bestSimilarity = concatSimilarity
+                                    matchedSpanLength = 2
+                                    matchedConcatenation = concatenated
+                                }
                             }
                         }
                     }
 
                     // 3-word compound matching (for longer vocabulary terms only)
+                    // Skip if any of the later words already matches the vocab term well
                     if let norm2 = normalized2, let norm3 = normalized3,
                         !norm2.isEmpty, !norm3.isEmpty, vocabTerm.count >= minLengthFor3Word
                     {
-                        let concatenated = normalizedWord + norm2 + norm3
-                        for form in singleWordForms {
-                            let concatSimilarity = Self.stringSimilarity(concatenated, form.normalized)
-                            if concatSimilarity > bestSimilarity {
-                                bestSimilarity = concatSimilarity
-                                matchedSpanLength = 3
-                                matchedConcatenation = concatenated
+                        let laterWordMatchesVocab = singleWordForms.contains {
+                            Self.stringSimilarity(norm2, $0.normalized) >= 0.9
+                                || Self.stringSimilarity(norm3, $0.normalized) >= 0.9
+                        }
+                        if !laterWordMatchesVocab {
+                            let concatenated = normalizedWord + norm2 + norm3
+                            for form in singleWordForms {
+                                let concatSimilarity = Self.stringSimilarity(concatenated, form.normalized)
+                                if concatSimilarity > bestSimilarity {
+                                    bestSimilarity = concatSimilarity
+                                    matchedSpanLength = 3
+                                    matchedConcatenation = concatenated
+                                }
                             }
                         }
                     }
@@ -665,16 +713,43 @@ extension VocabularyRescorer {
                     )
 
                     if result.shouldReplace {
-                        applyReplacement(
-                            result: result,
-                            candidate: candidate,
-                            modifiedWords: &modifiedWords,
-                            replacedIndices: &replacedIndices,
-                            replacements: &replacements
+                        // Collect candidate instead of applying immediately
+                        pendingReplacements.append(
+                            PendingReplacement(
+                                candidate: candidate,
+                                result: result,
+                                similarity: bestSimilarity
+                            )
                         )
                     }
                 }
             }
+        }
+
+        // PASS 2: Sort by span length (ascending) then by similarity (descending)
+        // This ensures shorter spans are preferred when multiple matches overlap
+        let sortedReplacements = pendingReplacements.sorted { a, b in
+            if a.candidate.spanLength != b.candidate.spanLength {
+                return a.candidate.spanLength < b.candidate.spanLength  // Prefer shorter spans
+            }
+            // For same span length, prefer higher similarity
+            return a.similarity > b.similarity
+        }
+
+        // PASS 3: Greedily apply non-overlapping replacements
+        for pending in sortedReplacements {
+            // Check if any index in this span is already replaced
+            guard pending.candidate.spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else {
+                continue  // Skip - overlaps with already-accepted replacement
+            }
+
+            applyReplacement(
+                result: pending.result,
+                candidate: pending.candidate,
+                modifiedWords: &modifiedWords,
+                replacedIndices: &replacedIndices,
+                replacements: &replacements
+            )
         }
 
         // Reconstruct transcript from modified words (filter empty strings from multi-word replacements)

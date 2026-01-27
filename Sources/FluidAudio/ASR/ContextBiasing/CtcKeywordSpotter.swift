@@ -9,12 +9,12 @@ import OSLog
 /// - Runs the MelSpectrogram + AudioEncoder CoreML models from `CtcModels`.
 /// - Extracts CTC logits and converts them to log‑probabilities over time.
 /// - Applies DP to score each keyword independently (no beam search competition).
-public struct CtcKeywordSpotter {
+public struct CtcKeywordSpotter: Sendable {
 
     let logger = AppLogger(category: "CtcKeywordSpotter")
     private let models: CtcModels
     public let blankId: Int
-    private let predictionOptions: MLPredictionOptions
+    nonisolated(unsafe) private let predictionOptions: MLPredictionOptions
 
     private let sampleRate: Int = ASRConstants.sampleRate
     private let maxModelSamples: Int = ASRConstants.maxModelSamples

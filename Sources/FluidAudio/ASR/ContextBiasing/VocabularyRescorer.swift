@@ -10,9 +10,9 @@ import OSLog
 /// This implements "shallow fusion" or "CTC rescoring" - a standard technique in ASR.
 /// The rescorer computes ACTUAL CTC scores for both vocabulary terms AND original words,
 /// enabling a fair comparison rather than relying on heuristics.
-public struct VocabularyRescorer {
+public struct VocabularyRescorer: Sendable {
 
-    let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
+    nonisolated(unsafe) let logger = Logger(subsystem: "com.fluidaudio", category: "VocabularyRescorer")
 
     /// Log debug message with lazy evaluation (only formats string when debugMode is true)
     @inline(__always)
@@ -989,7 +989,8 @@ public struct VocabularyRescorer {
                 let results2 = tree.search(query: compound2, maxDistance: maxDist2)
 
                 for result in results2 {
-                    let similarity = Self.stringSimilarity(compound2, result.normalizedText)
+                    // Use length-penalized similarity to prevent prefix/suffix mismatches
+                    let similarity = Self.lengthPenalizedSimilarity(compound2, result.normalizedText)
                     if similarity >= minSimilarity {
                         candidates.append(
                             CandidateMatch(
@@ -1015,7 +1016,8 @@ public struct VocabularyRescorer {
                     let results3 = tree.search(query: compound3, maxDistance: maxDist3)
 
                     for result in results3 {
-                        let similarity = Self.stringSimilarity(compound3, result.normalizedText)
+                        // Use length-penalized similarity to prevent prefix/suffix mismatches
+                        let similarity = Self.lengthPenalizedSimilarity(compound3, result.normalizedText)
                         if similarity >= minSimilarity {
                             candidates.append(
                                 CandidateMatch(
@@ -1080,7 +1082,8 @@ public struct VocabularyRescorer {
                     // Check 2-word compound
                     if !adjacentNormalized.isEmpty, let word2 = adjacentNormalized.first, !word2.isEmpty {
                         let compound2 = normalizedWord + word2
-                        let similarity2 = Self.stringSimilarity(compound2, termNormalized)
+                        // Use length-penalized similarity to prevent prefix/suffix mismatches
+                        let similarity2 = Self.lengthPenalizedSimilarity(compound2, termNormalized)
                         if similarity2 >= minSimilarity {
                             candidates.append(
                                 CandidateMatch(
@@ -1099,7 +1102,8 @@ public struct VocabularyRescorer {
                         if !word2.isEmpty && !word3.isEmpty {
                             let compound3 = normalizedWord + word2 + word3
                             if compound3.count >= 6 {
-                                let similarity3 = Self.stringSimilarity(compound3, termNormalized)
+                                // Use length-penalized similarity to prevent prefix/suffix mismatches
+                                let similarity3 = Self.lengthPenalizedSimilarity(compound3, termNormalized)
                                 if similarity3 >= minSimilarity {
                                     candidates.append(
                                         CandidateMatch(
@@ -1180,6 +1184,20 @@ public struct VocabularyRescorer {
 
         guard maxLen > 0 else { return 1.0 }
         return 1.0 - Float(distance) / Float(maxLen)
+    }
+
+    /// Compute string similarity with length penalty for compound matches.
+    /// Penalizes when compound length differs significantly from vocab term length.
+    static func lengthPenalizedSimilarity(_ compound: String, _ vocabTerm: String) -> Float {
+        let baseSimilarity = stringSimilarity(compound, vocabTerm)
+
+        // Length ratio: how well do the lengths match?
+        let compoundLen = Float(compound.count)
+        let vocabLen = Float(vocabTerm.count)
+        let lengthRatio = min(compoundLen, vocabLen) / max(compoundLen, vocabLen)
+
+        // Apply square root to soften the penalty
+        return baseSimilarity * sqrt(lengthRatio)
     }
 
     /// Represents a normalized form of a vocabulary term (canonical or alias)
