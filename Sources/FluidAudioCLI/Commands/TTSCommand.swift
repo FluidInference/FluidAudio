@@ -133,6 +133,7 @@ public struct TTS {
         var lexiconPath: String? = nil
         var text: String? = nil
         var benchmarkMode = false
+        var deEss = true
 
         var i = 0
         while i < arguments.count {
@@ -184,6 +185,8 @@ public struct TTS {
                 ()
             case "--benchmark":
                 benchmarkMode = true
+            case "--no-deess":
+                deEss = false
             default:
                 if text == nil {
                     text = argument
@@ -235,7 +238,8 @@ public struct TTS {
             let detailed = try await manager.synthesizeDetailed(
                 text: text,
                 voice: voiceOverride,
-                variantPreference: variantPreference
+                variantPreference: variantPreference,
+                deEss: deEss
             )
             let wav = detailed.audio
             let tSynth1 = Date()
@@ -458,6 +462,7 @@ public struct TTS {
               --variant            Force Kokoro 5s or 15s model (values: 5s,15s)
               --metrics            Write timing metrics to a JSON file (also runs ASR for evaluation)
               --chunk-dir          Directory where individual chunk WAVs will be written
+              --no-deess           Disable de-essing (sibilance reduction, enabled by default)
               (models/dictionary auto-download is always on in CLI)
               --help, -h           Show this help
 
