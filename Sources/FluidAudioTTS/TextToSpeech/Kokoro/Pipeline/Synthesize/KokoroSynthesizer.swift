@@ -421,7 +421,8 @@ public struct KokoroSynthesizer {
         voice: String = TtsConstants.recommendedVoice,
         voiceSpeed: Float = 1.0,
         variantPreference: ModelNames.TTS.Variant? = nil,
-        phoneticOverrides: [TtsPhoneticOverride] = []
+        phoneticOverrides: [TtsPhoneticOverride] = [],
+        deEss: Bool = true
     ) async throws -> Data {
         let startTime = Date()
         let result = try await synthesizeDetailed(
@@ -429,7 +430,8 @@ public struct KokoroSynthesizer {
             voice: voice,
             voiceSpeed: voiceSpeed,
             variantPreference: variantPreference,
-            phoneticOverrides: phoneticOverrides
+            phoneticOverrides: phoneticOverrides,
+            deEss: deEss
         )
         let totalTime = Date().timeIntervalSince(startTime)
         Self.logger.info("Total synthesis time: \(String(format: "%.3f", totalTime))s for \(text.count) characters")
@@ -442,7 +444,8 @@ public struct KokoroSynthesizer {
         voice: String = TtsConstants.recommendedVoice,
         voiceSpeed: Float = 1.0,
         variantPreference: ModelNames.TTS.Variant? = nil,
-        phoneticOverrides: [TtsPhoneticOverride] = []
+        phoneticOverrides: [TtsPhoneticOverride] = [],
+        deEss: Bool = true
     ) async throws -> SynthesisResult {
 
         logger.info("Starting synthesis: '\(text)'")
@@ -689,6 +692,24 @@ public struct KokoroSynthesizer {
                     var chunkDivisor = maxMagnitude
                     vDSP_vsdiv(destBase, 1, &chunkDivisor, destBase, 1, vDSP_Length(destination.count))
                 }
+            }
+        }
+
+        // Apply de-essing to reduce sibilant harshness (optional, on by default)
+        if deEss {
+            AudioPostProcessor.applyTtsPostProcessing(
+                &allSamples,
+                sampleRate: Float(TtsConstants.audioSampleRate),
+                deEssAmount: -3.0,
+                smoothing: false
+            )
+            for index in chunkSampleBuffers.indices {
+                AudioPostProcessor.applyTtsPostProcessing(
+                    &chunkSampleBuffers[index],
+                    sampleRate: Float(TtsConstants.audioSampleRate),
+                    deEssAmount: -3.0,
+                    smoothing: false
+                )
             }
         }
 

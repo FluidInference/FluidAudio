@@ -43,8 +43,8 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 | **[Spokenly Real-time ASR](https://www.youtube.com/watch?v=9fXKKkyL8JE)** | Video demonstration of FluidAudio's transcription accuracy and speed |
 | **[Senko Integration](https://x.com/hamza_q_/status/1970228971657928995)** | Python Speaker diarization on Mac using FluidAudio's segmentation model |
 | **[Mobile TTS](https://x.com/sach1n/status/1977817056507793521)** | Voice on mobile video using FluidAudio's Kokoro and Silero models |
-| **[Parakeet Realtime EOU](https://x.com/sach1n/status/2003210626659680762)** | FluidAudio CoreML: NVIDIA's Parakeet streaming ASR with end-of-utterance detection |
-| **[Sortformer Diarization](https://x.com/Alex_tra_memory/status/2010530705667661843)** | FluidAudio CoreML: NVIDIA Sortformer for speaker diarization with overlapping speech |
+| **[Parakeet Realtime EOU](https://x.com/sach1n/status/2003210626659680762)** | NVIDIA's Parakeet streaming ASR with end-of-utterance detection |
+| **[Sortformer Diarization](https://x.com/Alex_tra_memory/status/2010530705667661843)** | NVIDIA Sortformer for speaker diarization with overlapping speech |
 
 ## Showcase
 
@@ -67,6 +67,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Speakmac](https://speakmac.app)** | Mac app that lets you type anywhere on your Mac using your voice. Fully local, private dictation built on FluidAudio. |
 | **[SamScribe](https://github.com/Steven-Weng/SamScribe)** | An open-source macOS app that captures and transcribes audio from your microphone and meeting applications (Zoom, Teams, Chrome) in real-time, with cross-session speaker recognition. |
 | **[WhisKey](https://whiskey.asktobuild.app/)** | Privacy-first voice dictation keyboard for iOS and macOS. On-device transcription with 12+ languages, AI meeting summaries, and mindmap generation. Great for daily use and vibe-coding. Uses speaker diarization. |
+| **[hongbomiao.com](https://github.com/hongbo-miao/hongbomiao.com)** | A personal R&D lab that facilitates knowledge sharing. Uses Parakeet ASR. |
+| **[Hex](https://github.com/kitlangton/Hex)** | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
 
 ## Installation
 
