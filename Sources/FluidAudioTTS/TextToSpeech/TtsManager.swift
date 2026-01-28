@@ -93,14 +93,16 @@ public final class TtSManager {
         voice: String? = nil,
         voiceSpeed: Float = 1.0,
         speakerId: Int = 0,
-        variantPreference: ModelNames.TTS.Variant? = nil
+        variantPreference: ModelNames.TTS.Variant? = nil,
+        deEss: Bool = true
     ) async throws -> Data {
         let detailed = try await synthesizeDetailed(
             text: text,
             voice: voice,
             voiceSpeed: voiceSpeed,
             speakerId: speakerId,
-            variantPreference: variantPreference
+            variantPreference: variantPreference,
+            deEss: deEss
         )
         return detailed.audio
     }
@@ -110,7 +112,8 @@ public final class TtSManager {
         voice: String? = nil,
         voiceSpeed: Float = 1.0,
         speakerId: Int = 0,
-        variantPreference: ModelNames.TTS.Variant? = nil
+        variantPreference: ModelNames.TTS.Variant? = nil,
+        deEss: Bool = true
     ) async throws -> KokoroSynthesizer.SynthesisResult {
         guard isInitialized else {
             throw TTSError.modelNotFound("Kokoro model not initialized")
@@ -131,7 +134,8 @@ public final class TtSManager {
                         voice: selectedVoice,
                         voiceSpeed: voiceSpeed,
                         variantPreference: variantPreference,
-                        phoneticOverrides: preprocessing.phoneticOverrides
+                        phoneticOverrides: preprocessing.phoneticOverrides,
+                        deEss: deEss
                     )
                 }
             }
@@ -144,7 +148,8 @@ public final class TtSManager {
         voice: String? = nil,
         voiceSpeed: Float = 1.0,
         speakerId: Int = 0,
-        variantPreference: ModelNames.TTS.Variant? = nil
+        variantPreference: ModelNames.TTS.Variant? = nil,
+        deEss: Bool = true
     ) async throws {
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try FileManager.default.removeItem(at: outputURL)
@@ -155,7 +160,8 @@ public final class TtSManager {
             voice: voice,
             voiceSpeed: voiceSpeed,
             speakerId: speakerId,
-            variantPreference: variantPreference
+            variantPreference: variantPreference,
+            deEss: deEss
         )
 
         try audioData.write(to: outputURL)
