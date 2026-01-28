@@ -5,7 +5,7 @@ public enum Repo: String, CaseIterable {
     case vad = "FluidInference/silero-vad-coreml"
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
-    case parakeetCtc110m = "alexwengg/parakeet-ctc-110m-coreml"
+    case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "alexwengg/parakeet-ctc-0.6b-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
@@ -43,7 +43,7 @@ public enum Repo: String, CaseIterable {
     public var remotePath: String {
         switch self {
         case .parakeetCtc110m:
-            return "alexwengg/parakeet-ctc-110m-coreml"
+            return "FluidInference/parakeet-ctc-110m-coreml"
         case .parakeetCtc06b:
             return "alexwengg/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320:
