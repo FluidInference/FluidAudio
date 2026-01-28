@@ -6,7 +6,7 @@ public enum Repo: String, CaseIterable {
     case parakeet = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
-    case parakeetCtc06b = "alexwengg/parakeet-ctc-0.6b-coreml"
+    case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
     case parakeetEou160 = "FluidInference/parakeet-realtime-eou-120m-coreml/160ms"
     case parakeetEou320 = "FluidInference/parakeet-realtime-eou-120m-coreml/320ms"
     case diarizer = "FluidInference/speaker-diarization-coreml"
@@ -45,7 +45,7 @@ public enum Repo: String, CaseIterable {
         case .parakeetCtc110m:
             return "FluidInference/parakeet-ctc-110m-coreml"
         case .parakeetCtc06b:
-            return "alexwengg/parakeet-ctc-0.6b-coreml"
+            return "FluidInference/parakeet-ctc-0.6b-coreml"
         case .parakeetEou160, .parakeetEou320:
             return "FluidInference/parakeet-realtime-eou-120m-coreml"
         case .sortformer:
@@ -58,6 +58,8 @@ public enum Repo: String, CaseIterable {
     /// Subdirectory within repo (for repos with multiple model variants)
     public var subPath: String? {
         switch self {
+        case .parakeetCtc110m:
+            return "parakeet-ctc-110m-coreml"
         case .parakeetEou160:
             return "160ms"
         case .parakeetEou320:
