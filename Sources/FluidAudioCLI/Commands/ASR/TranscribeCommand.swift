@@ -210,7 +210,7 @@ enum TranscribeCommand {
         var showMetadata = false
         var wordTimestamps = false
         var outputJsonPath: String?
-        var modelVersion: AsrModelVersion = .v2  // Default to v2 (v3 has issues with some files)
+        var modelVersion: AsrModelVersion = .v3  // Default to v3
         var customVocabPath: String?
 
         // Parse options
