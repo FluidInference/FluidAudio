@@ -109,3 +109,6 @@ fluidaudio_cli/*
 .vscode/
 
 .mobius/
+
+# Continuous Claude cache (local only)
+.claude/cache/

@@ -1241,13 +1241,13 @@ extension FLEURSBenchmark {
             // Word-level
             let hypWords = normalizedHyp.split(separator: " ").map(String.init)
             let refWords = normalizedRef.split(separator: " ").map(String.init)
-            let wordDistance = levenshteinDistance(hypWords, refWords)
+            let wordDistance = StringUtils.levenshteinDistance(hypWords, refWords)
             wer = refWords.isEmpty ? 0.0 : Double(wordDistance) / Double(refWords.count)
 
             // Character-level
             let hypChars = Array(normalizedHyp.replacingOccurrences(of: " ", with: ""))
             let refChars = Array(normalizedRef.replacingOccurrences(of: " ", with: ""))
-            let charDistance = levenshteinDistance(hypChars.map(String.init), refChars.map(String.init))
+            let charDistance = StringUtils.levenshteinDistance(hypChars, refChars)
             cer = refChars.isEmpty ? 0.0 : Double(charDistance) / Double(refChars.count)
 
             // Track high WER case for analysis
@@ -1283,32 +1283,6 @@ extension FLEURSBenchmark {
         )
 
         return (languageResult, highWERCase)
-    }
-
-    private static func levenshteinDistance(_ s1: [String], _ s2: [String]) -> Int {
-        let m = s1.count
-        let n = s2.count
-
-        if m == 0 { return n }
-        if n == 0 { return m }
-
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-
-        for i in 0...m { dp[i][0] = i }
-        for j in 0...n { dp[0][j] = j }
-
-        for i in 1...m {
-            for j in 1...n {
-                let cost = s1[i - 1] == s2[j - 1] ? 0 : 1
-                dp[i][j] = min(
-                    dp[i - 1][j] + 1,  // deletion
-                    dp[i][j - 1] + 1,  // insertion
-                    dp[i - 1][j - 1] + cost  // substitution
-                )
-            }
-        }
-
-        return dp[m][n]
     }
 
     private static func extractLanguageFromFileName(_ fileName: String) -> String? {

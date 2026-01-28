@@ -1,4 +1,4 @@
-/// Hypothesis for TDT beam search decoding
+/// Hypothesis for TDT greedy decoding
 /// Note: Not Sendable because TdtDecoderState contains CoreML MLMultiArray which isn't Sendable.
 struct TdtHypothesis {
     var score: Float = 0.0
