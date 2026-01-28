@@ -523,18 +523,14 @@ public enum CtcEarningsBenchmark {
         let hypothesis: String
         if useRescorer {
             // Vocabulary-size-aware thresholds
-            // File mode (larger vocabulary) needs more conservative settings to avoid false positives
-            // but not so conservative that we miss too many keywords
             let vocabSize = vocabularyWords.count
-            let isLargeVocab = vocabSize > 10  // File mode typically has 15-25 keywords
+            let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
 
-            // Balanced rescoring config - conservative enough to avoid WER degradation
-            // but permissive enough to maintain good recall
             let rescorerConfig = VocabularyRescorer.Config(
-                minScoreAdvantage: isLargeVocab ? 1.5 : 1.0,  // Moderate increase for large vocab
-                minVocabScore: isLargeVocab ? -14.0 : -15.0,  // Slightly stricter for large vocab
-                maxOriginalScoreForReplacement: isLargeVocab ? -2.5 : -2.0,  // Moderate protection
-                vocabBoostWeight: isLargeVocab ? 2.5 : 3.0  // Moderate reduction for large vocab
+                minScoreAdvantage: vocabConfig.minScoreAdvantage,
+                minVocabScore: vocabConfig.minVocabScore,
+                maxOriginalScoreForReplacement: vocabConfig.maxOriginalScoreForReplacement,
+                vocabBoostWeight: vocabConfig.vocabBoostWeight
             )
 
             let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
@@ -553,8 +549,8 @@ public enum CtcEarningsBenchmark {
             //
             // Environment variable overrides for tuning experiments:
             // MIN_SIMILARITY=0.55 CBW=2.8 fluidaudiocli ctc-earnings-benchmark ...
-            let defaultMinSimilarity: Float = isLargeVocab ? 0.60 : 0.50
-            let defaultCbw: Float = isLargeVocab ? 2.5 : 3.0
+            let defaultMinSimilarity: Float = vocabConfig.minSimilarity
+            let defaultCbw: Float = vocabConfig.cbw
 
             let minSimilarity: Float =
                 ProcessInfo.processInfo.environment["MIN_SIMILARITY"]

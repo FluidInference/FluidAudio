@@ -53,7 +53,7 @@ public actor StreamingAsrManager {
     private var customVocabulary: CustomVocabularyContext?
     nonisolated(unsafe) private var ctcSpotter: CtcKeywordSpotter?
     nonisolated(unsafe) private var vocabularyRescorer: VocabularyRescorer?
-    private var isLargeVocab: Bool = false
+    private var vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig?
     private var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
 
     /// Initialize the streaming ASR manager
@@ -94,14 +94,15 @@ public actor StreamingAsrManager {
 
         // Use vocabulary-size-aware config (matching batch mode behavior)
         let vocabSize = vocabulary.terms.count
-        self.isLargeVocab = vocabSize > 10
+        let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
+        self.vocabSizeConfig = vocabConfig
         let effectiveConfig =
             config
             ?? VocabularyRescorer.Config(
-                minScoreAdvantage: isLargeVocab ? 1.5 : 1.0,
-                minVocabScore: isLargeVocab ? -14.0 : -15.0,
-                maxOriginalScoreForReplacement: isLargeVocab ? -2.5 : -2.0,
-                vocabBoostWeight: isLargeVocab ? 2.5 : 3.0
+                minScoreAdvantage: vocabConfig.minScoreAdvantage,
+                minVocabScore: vocabConfig.minVocabScore,
+                maxOriginalScoreForReplacement: vocabConfig.maxOriginalScoreForReplacement,
+                vocabBoostWeight: vocabConfig.vocabBoostWeight
             )
 
         // Create rescorer
@@ -113,6 +114,7 @@ public actor StreamingAsrManager {
             ctcModelDirectory: ctcModelDir
         )
 
+        let isLargeVocab = vocabSize > ContextBiasingConstants.largeVocabThreshold
         logger.info(
             "Vocabulary boosting configured with \(vocabSize) terms (isLargeVocab: \(isLargeVocab))"
         )
@@ -536,8 +538,9 @@ public actor StreamingAsrManager {
             }
 
             // Determine rescoring parameters based on vocabulary size
-            let minSimilarity: Float = isLargeVocab ? 0.60 : 0.50
-            let cbw: Float = isLargeVocab ? 2.5 : 3.0
+            let vocabConfig = vocabSizeConfig ?? ContextBiasingConstants.rescorerConfig(forVocabSize: 0)
+            let minSimilarity = vocabConfig.minSimilarity
+            let cbw = vocabConfig.cbw
 
             // Apply constrained CTC rescoring
             let rescoreOutput = rescorer.rescoreWithConstrainedCTC(

@@ -221,6 +221,47 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer.swift` compound word decision
     public static let scoreAdvantageThreshold: Float = 0.5
 
+    // MARK: - Vocabulary Size
+
+    /// Threshold for classifying vocabulary as "large".
+    ///
+    /// Vocabularies with more terms than this threshold use tighter rescorer
+    /// parameters to reduce false positives. File-mode vocabularies typically
+    /// have 15-25 keywords (large), while chunk-mode may have fewer.
+    ///
+    /// - Value: `10` terms
+    /// - Used in: `rescorerConfig(forVocabSize:)` and call sites
+    public static let largeVocabThreshold: Int = 10
+
+    /// Vocabulary-size-aware rescorer parameters.
+    ///
+    /// Large vocabularies (>10 terms) use tighter thresholds to reduce false
+    /// positives from the larger candidate set.
+    public struct VocabSizeConfig: Sendable {
+        public let minScoreAdvantage: Float
+        public let minVocabScore: Float
+        public let maxOriginalScoreForReplacement: Float
+        public let vocabBoostWeight: Float
+        public let minSimilarity: Float
+        public let cbw: Float
+    }
+
+    /// Returns rescorer configuration tuned for the given vocabulary size.
+    ///
+    /// - Parameter size: Number of vocabulary terms.
+    /// - Returns: `VocabSizeConfig` with appropriate thresholds.
+    public static func rescorerConfig(forVocabSize size: Int) -> VocabSizeConfig {
+        let isLarge = size > largeVocabThreshold
+        return VocabSizeConfig(
+            minScoreAdvantage: isLarge ? 1.5 : 1.0,
+            minVocabScore: isLarge ? -14.0 : -15.0,
+            maxOriginalScoreForReplacement: isLarge ? -2.5 : -2.0,
+            vocabBoostWeight: isLarge ? 2.5 : 3.0,
+            minSimilarity: isLarge ? 0.60 : 0.50,
+            cbw: isLarge ? 2.5 : 3.0
+        )
+    }
+
     // MARK: - Rescorer Config Defaults
 
     /// Default minimum score advantage for vocabulary replacement.

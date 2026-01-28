@@ -332,14 +332,14 @@ enum TranscribeCommand {
                 if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty, !logProbs.isEmpty {
                     let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
 
-                    // Use vocabulary-size-aware config (matching CtcEarningsBenchmark)
+                    // Use vocabulary-size-aware config
                     let vocabSize = customVocab.terms.count
-                    let isLargeVocab = vocabSize > 10
+                    let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: vocabSize)
                     let rescorerConfig = VocabularyRescorer.Config(
-                        minScoreAdvantage: isLargeVocab ? 1.5 : 1.0,
-                        minVocabScore: isLargeVocab ? -14.0 : -15.0,
-                        maxOriginalScoreForReplacement: isLargeVocab ? -2.5 : -2.0,
-                        vocabBoostWeight: isLargeVocab ? 2.5 : 3.0
+                        minScoreAdvantage: vocabConfig.minScoreAdvantage,
+                        minVocabScore: vocabConfig.minVocabScore,
+                        maxOriginalScoreForReplacement: vocabConfig.maxOriginalScoreForReplacement,
+                        vocabBoostWeight: vocabConfig.vocabBoostWeight
                     )
 
                     let rescorer = try await VocabularyRescorer.create(
@@ -350,8 +350,8 @@ enum TranscribeCommand {
                     )
 
                     // Use vocabulary-size-aware parameters
-                    let minSimilarity: Float = isLargeVocab ? 0.60 : 0.50
-                    let cbw: Float = isLargeVocab ? 2.5 : 3.0
+                    let minSimilarity = vocabConfig.minSimilarity
+                    let cbw = vocabConfig.cbw
 
                     let rescoreOutput = rescorer.rescoreWithConstrainedCTC(
                         transcript: result.text,
