@@ -201,8 +201,8 @@ public struct CtcKeywordSpotter: Sendable {
             // Each additional token beyond 3 relaxes the threshold by 1.0
             let tokenCount = ids.count
             let adjustedThreshold: Float? = minScore.map { base in
-                let extraTokens = max(0, tokenCount - 3)
-                return base - Float(extraTokens) * 1.0
+                let extraTokens = max(0, tokenCount - 3)  // 3 tokens
+                return base - Float(extraTokens) * 1.0  // 1.0 threshold
             }
 
             if let threshold = adjustedThreshold, score <= threshold {
@@ -1118,14 +1118,10 @@ public struct CtcKeywordSpotter: Sendable {
             if let last = merged.last {
                 // Check for overlap
                 if candidate.startFrame <= last.endFrame {
-                    // Overlapping - keep the one with better score
-                    if candidate.score > last.score {
-                        merged[merged.count - 1] = candidate
-                    }
-                    // Extend end frame if needed
-                    if candidate.endFrame > merged[merged.count - 1].endFrame {
-                        merged[merged.count - 1].endFrame = candidate.endFrame
-                    }
+                    // Overlapping - keep the best score and extend to cover both
+                    var best = candidate.score > last.score ? candidate : last
+                    best.endFrame = max(last.endFrame, candidate.endFrame)
+                    merged[merged.count - 1] = best
                 } else {
                     merged.append(candidate)
                 }
