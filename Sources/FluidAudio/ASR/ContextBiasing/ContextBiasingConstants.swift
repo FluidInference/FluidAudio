@@ -242,6 +242,29 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer.Config.default` and init
     public static let defaultMinVocabScore: Float = -12.0
 
+    /// Baseline token count for multi-token phrase threshold adjustment.
+    ///
+    /// Phrases with more tokens than this baseline get relaxed score thresholds,
+    /// since longer phrases naturally accumulate lower per-token scores in CTC.
+    /// Each token beyond this count relaxes the threshold by `thresholdRelaxationPerToken`.
+    ///
+    /// - Value: `3` tokens
+    /// - Formula: `extraTokens = max(0, tokenCount - baselineTokenCountForThreshold)`
+    /// - Used in: `CtcKeywordSpotter.spotKeywords()` threshold adjustment
+    public static let baselineTokenCountForThreshold: Int = 3
+
+    /// Threshold relaxation amount per extra token beyond baseline.
+    ///
+    /// For multi-token phrases, the minimum score threshold is relaxed by this
+    /// amount for each token beyond `baselineTokenCountForThreshold`. This accounts
+    /// for the fact that longer phrases naturally have lower average per-token scores.
+    ///
+    /// - Value: `1.0` (log-probability units)
+    /// - Formula: `adjustedThreshold = baseThreshold - extraTokens * thresholdRelaxationPerToken`
+    /// - Example: 5-token phrase with -12.0 base → -12.0 - (5-3)*1.0 = -14.0
+    /// - Used in: `CtcKeywordSpotter.spotKeywords()` threshold adjustment
+    public static let thresholdRelaxationPerToken: Float = 1.0
+
     /// Default maximum original word score for replacement.
     ///
     /// If the original transcript word has a CTC score better (less negative) than

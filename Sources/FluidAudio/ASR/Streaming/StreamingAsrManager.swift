@@ -53,7 +53,7 @@ public actor StreamingAsrManager {
     private var customVocabulary: CustomVocabularyContext?
     nonisolated(unsafe) private var ctcSpotter: CtcKeywordSpotter?
     nonisolated(unsafe) private var vocabularyRescorer: VocabularyRescorer?
-    private var rescorerConfig: VocabularyRescorer.Config?
+    private var isLargeVocab: Bool = false
     private var vocabBoostingEnabled: Bool { customVocabulary != nil && vocabularyRescorer != nil }
 
     /// Initialize the streaming ASR manager
@@ -94,7 +94,7 @@ public actor StreamingAsrManager {
 
         // Use vocabulary-size-aware config (matching batch mode behavior)
         let vocabSize = vocabulary.terms.count
-        let isLargeVocab = vocabSize > 10
+        self.isLargeVocab = vocabSize > 10
         let effectiveConfig =
             config
             ?? VocabularyRescorer.Config(
@@ -103,7 +103,6 @@ public actor StreamingAsrManager {
                 maxOriginalScoreForReplacement: isLargeVocab ? -2.5 : -2.0,
                 vocabBoostWeight: isLargeVocab ? 2.5 : 3.0
             )
-        self.rescorerConfig = effectiveConfig
 
         // Create rescorer
         let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
@@ -537,8 +536,6 @@ public actor StreamingAsrManager {
             }
 
             // Determine rescoring parameters based on vocabulary size
-            let vocabSize = vocab.terms.count
-            let isLargeVocab = vocabSize > 10
             let minSimilarity: Float = isLargeVocab ? 0.60 : 0.50
             let cbw: Float = isLargeVocab ? 2.5 : 3.0
 

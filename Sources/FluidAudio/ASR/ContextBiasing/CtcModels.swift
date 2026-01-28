@@ -1,6 +1,5 @@
 @preconcurrency import CoreML
 import Foundation
-import OSLog
 
 /// Available CTC model variants
 ///

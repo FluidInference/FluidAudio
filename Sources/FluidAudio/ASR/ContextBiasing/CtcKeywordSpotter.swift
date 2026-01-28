@@ -1,6 +1,5 @@
 import CoreML
 import Foundation
-import OSLog
 
 /// Swift implementation of CTC keyword spotting for Parakeet-TDT CTC 110M,
 /// mirroring the NeMo `ctc_word_spot` dynamic programming algorithm.
@@ -167,42 +166,16 @@ public struct CtcKeywordSpotter: Sendable {
                 let scoreText = String(format: "%.4f", score)
                 let startText = String(format: "%.3f", TimeInterval(start) * frameDuration)
                 let endText = String(format: "%.3f", TimeInterval(end) * frameDuration)
-                let detectionSummary =
+                logger.debug(
                     "  '\(term.text)': score=\(scoreText), frames=[\(start), \(end)], time=[\(startText)s, \(endText)s]"
-                logger.debug("\(detectionSummary)")
-                logger.debug("    CTC token IDs: \(ids)")
-
-                // Sample log-probs for this term's tokens at the detected window
-                if start < logProbs.count && end <= logProbs.count {
-                    let windowSize = min(5, end - start)
-                    for frameIdx in start..<min(start + windowSize, end) {
-                        let frame = logProbs[frameIdx]
-                        var tokenLogProbs: [String] = []
-                        for tokenId in ids {
-                            if tokenId < frame.count {
-                                let logProb = frame[tokenId]
-                                tokenLogProbs.append("id\(tokenId)=\(String(format: "%.4f", logProb))")
-                            }
-                        }
-                        logger.debug("      frame[\(frameIdx)]: \(tokenLogProbs.joined(separator: ", "))")
-
-                        // Show top 10 most likely tokens at this frame
-                        let topK = 10
-                        let sortedIndices = frame.enumerated()
-                            .sorted { $0.element > $1.element }
-                            .prefix(topK)
-                        let topTokens = sortedIndices.map { "id\($0.offset)=\(String(format: "%.4f", $0.element))" }
-                        logger.debug("      top-\(topK) tokens: \(topTokens.joined(separator: ", "))")
-                    }
-                }
+                )
             }
 
             // Adjust threshold for multi-token phrases (they naturally have lower scores)
-            // Each additional token beyond 3 relaxes the threshold by 1.0
             let tokenCount = ids.count
             let adjustedThreshold: Float? = minScore.map { base in
-                let extraTokens = max(0, tokenCount - 3)  // 3 tokens
-                return base - Float(extraTokens) * 1.0  // 1.0 threshold
+                let extraTokens = max(0, tokenCount - ContextBiasingConstants.baselineTokenCountForThreshold)
+                return base - Float(extraTokens) * ContextBiasingConstants.thresholdRelaxationPerToken
             }
 
             if let threshold = adjustedThreshold, score <= threshold {
@@ -290,8 +263,8 @@ public struct CtcKeywordSpotter: Sendable {
             let tokenCount = ids.count
             let adjustedThreshold: Float =
                 minScore.map { base in
-                    let extraTokens = max(0, tokenCount - 3)
-                    return base - Float(extraTokens) * 1.0
+                    let extraTokens = max(0, tokenCount - ContextBiasingConstants.baselineTokenCountForThreshold)
+                    return base - Float(extraTokens) * ContextBiasingConstants.thresholdRelaxationPerToken
                 } ?? ContextBiasingConstants.defaultMinSpotterScore
 
             // Find ALL occurrences of this keyword (not just the best one)
@@ -510,39 +483,8 @@ public struct CtcKeywordSpotter: Sendable {
         }
 
         if debugMode {
-            logger.debug("Mel features shape: \(melFeatures.shape)")
-            let lengthText = melLengthValue.map(String.init) ?? "nil"
-            logger.debug("mel_length: \(lengthText)")
-
-            // Print mel feature statistics to compare with Python NeMo
-            let melCount = melFeatures.count
-            var melMin: Float = Float.infinity
-            var melMax: Float = -Float.infinity
-            var melSum: Float = 0
-
-            for i in 0..<melCount {
-                let val = melFeatures[i].floatValue
-                melMin = min(melMin, val)
-                melMax = max(melMax, val)
-                melSum += val
-            }
-            let melMean = melSum / Float(melCount)
-
-            let statsSummary =
-                String(format: "Mel features stats: min=%.4f, max=%.4f, mean=%.4f", melMin, melMax, melMean)
-            logger.debug("\(statsSummary)")
-
-            // Print first frame (first 10 features) for comparison
-            if melFeatures.shape.count >= 4 {
-                logger.debug("First mel frame (first 10 features):")
-                var firstFrameVals: [String] = []
-                for i in 0..<min(10, melFeatures.shape[3].intValue) {
-                    let idx = [0, 0, 0, i] as [NSNumber]
-                    let val = melFeatures[idx].floatValue
-                    firstFrameVals.append(String(format: "%.4f", val))
-                }
-                logger.debug("  [\(firstFrameVals.joined(separator: ", "))]")
-            }
+            logger.debug(
+                "Mel features shape: \(melFeatures.shape), mel_length: \(melLengthValue.map(String.init) ?? "nil")")
         }
 
         // Build encoder input (mel features + length placeholder).
@@ -588,21 +530,8 @@ public struct CtcKeywordSpotter: Sendable {
 
         if debugMode {
             logger.debug(
-                "Log-probs computed: \(trimmed.count) frames (total: \(allLogProbs.count)), vocab size: \(trimmed.first?.count ?? 0)"
+                "Log-probs: \(trimmed.count) frames (total: \(allLogProbs.count)), vocab size: \(trimmed.first?.count ?? 0)"
             )
-            // Sample a few frames to check log-prob distribution
-            if trimmed.count > 0 {
-                let sampleFrameIndices = [0, trimmed.count / 2, trimmed.count - 1]
-                for idx in sampleFrameIndices where idx < trimmed.count {
-                    let frame = trimmed[idx]
-                    let maxLogProb = frame.max() ?? -Float.infinity
-                    let maxIdx = frame.firstIndex(of: maxLogProb) ?? -1
-                    let blankLogProb = blankId < frame.count ? frame[blankId] : -Float.infinity
-                    let maxText = String(format: "%.4f", maxLogProb)
-                    let blankText = String(format: "%.4f", blankLogProb)
-                    logger.debug("  frame[\(idx)]: max_logprob=\(maxText) at idx=\(maxIdx), blank_logprob=\(blankText)")
-                }
-            }
         }
 
         let frameDuration =
@@ -743,26 +672,6 @@ public struct CtcKeywordSpotter: Sendable {
 
             for v in 0..<vocabSize {
                 logits[v] = ctcOutput[indexBuilder(t, v)].floatValue
-            }
-
-            // Show detailed logit analysis for sample frames
-            if debugMode && (t == 0 || t == timeSteps / 4 || t == timeSteps / 2 || t == 3 * timeSteps / 4) {
-                let blankLogit = logits.indices.contains(blankId) ? logits[blankId] : 0
-
-                // Show top 5 non-blank tokens
-                var nonBlankLogits: [(id: Int, logit: Float)] = []
-                for v in 0..<blankId {
-                    nonBlankLogits.append((id: v, logit: logits[v]))
-                }
-                nonBlankLogits.sort { $0.logit > $1.logit }
-                let bestNonBlank = nonBlankLogits.first?.logit ?? 0
-                let gap = blankLogit - bestNonBlank
-                let top3 = nonBlankLogits.prefix(3)
-                    .map { "id=\($0.id):\(String(format: "%.1f", $0.logit))" }
-                    .joined(separator: ", ")
-                logger.debug(
-                    "  frame[\(t)]: blank=\(String(format: "%.1f", blankLogit)), gap=\(String(format: "%.1f", gap)), top3=[\(top3)]"
-                )
             }
 
             var row = applyLogSoftmax ? logSoftmax(logits, temperature: temperature) : logits

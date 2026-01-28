@@ -56,9 +56,9 @@ public enum CtcEarningsBenchmark {
         var autoDownload = false
         var keywordsMode: KeywordsMode = .chunk
         // CTC model variant: 110m (hybrid, blank-dominant) or 06b (pure CTC, better for greedy)
-        // Can also be set via CTC_VARIANT environment variable
-        var ctcVariant: CtcModelVariant =
-            ProcessInfo.processInfo.environment["CTC_VARIANT"] == "06b" ? .ctc06b : .ctc110m
+        var ctcVariant: CtcModelVariant = .ctc110m
+        // Constrained CTC rescoring is enabled by default
+        var useConstrainedCTC = true
 
         var i = 0
         while i < arguments.count {
@@ -118,6 +118,8 @@ public enum CtcEarningsBenchmark {
                     }
                     i += 1
                 }
+            case "--no-constrained-ctc":
+                useConstrainedCTC = false
             default:
                 break
             }
@@ -238,7 +240,8 @@ public enum CtcEarningsBenchmark {
                     asrManager: asrManager,
                     ctcModels: ctcModels,
                     spotter: spotter,
-                    keywordsMode: keywordsMode
+                    keywordsMode: keywordsMode,
+                    useConstrainedCTC: useConstrainedCTC
                 ) {
                     results.append(result)
                     totalWer += result["wer"] as? Double ?? 0
@@ -361,7 +364,8 @@ public enum CtcEarningsBenchmark {
         asrManager: AsrManager,
         ctcModels: CtcModels,
         spotter: CtcKeywordSpotter,
-        keywordsMode: KeywordsMode
+        keywordsMode: KeywordsMode,
+        useConstrainedCTC: Bool
     ) async throws -> [String: Any]? {
         let wavFile = dataDir.appendingPathComponent("\(fileId).wav")
         let dictionaryFile = dataDir.appendingPathComponent("\(fileId).dictionary.txt")
@@ -540,9 +544,6 @@ public enum CtcEarningsBenchmark {
                 config: rescorerConfig,
                 ctcModelDirectory: ctcModelDir
             )
-
-            // Constrained CTC is the default - use USE_CONSTRAINED_CTC=0 to disable
-            let useConstrainedCTC = ProcessInfo.processInfo.environment["USE_CONSTRAINED_CTC"] != "0"
 
             // Adjust similarity threshold based on vocabulary size
             // Key insight: minSimilarity is the main lever for WER vs Recall trade-off
@@ -1126,7 +1127,7 @@ public enum CtcEarningsBenchmark {
                 --ctc-variant <var>   CTC model variant: '110m' (default) or '06b'
                                       - 110m: Parakeet CTC 110M (hybrid TDT+CTC, blank-dominant)
                                       - 06b: Parakeet CTC 0.6B (pure CTC, better for greedy decoding)
-                                      Can also be set via CTC_VARIANT=06b environment variable
+                --no-constrained-ctc  Disable constrained CTC rescoring (enabled by default)
                 --file-id <id>        Run benchmark on a single file (e.g., "4468654_chunk39")
                 --max-files <n>       Maximum number of files to process
                 --output, -o <path>   Output JSON file (default: ctc_earnings_benchmark.json)
