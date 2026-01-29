@@ -76,22 +76,6 @@ public final class CtcTokenizer: Sendable {
         hfTokenizer.encode(text)
     }
 
-    /// Decode token IDs back to text.
-    ///
-    /// - Parameter ids: Array of token IDs
-    /// - Returns: Decoded text
-    public func decode(_ ids: [Int]) -> String {
-        hfTokenizer.decode(ids)
-    }
-
-    /// Get the token string for a single token ID.
-    ///
-    /// - Parameter id: Token ID
-    /// - Returns: Token string or nil if invalid
-    public func idToPiece(_ id: Int) -> String? {
-        hfTokenizer.idToToken(id)
-    }
-
     /// Get the CTC model directory path
     private static func getCtcModelDirectory() throws -> URL {
         guard
@@ -150,16 +134,4 @@ private final class HFTokenizer: Sendable {
         tokenizer.encode(text: text, addSpecialTokens: false)
     }
 
-    // MARK: - Decoding
-
-    /// Decode token IDs to text, skipping special tokens.
-    func decode(_ ids: [Int]) -> String {
-        tokenizer.decode(tokens: ids, skipSpecialTokens: true)
-    }
-
-    /// Get the token string for a single token ID.
-    func idToToken(_ id: Int) -> String? {
-        let decoded = tokenizer.decode(tokens: [id], skipSpecialTokens: false)
-        return decoded.isEmpty ? nil : decoded
-    }
 }

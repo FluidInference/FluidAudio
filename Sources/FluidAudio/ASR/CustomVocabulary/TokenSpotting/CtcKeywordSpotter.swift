@@ -98,114 +98,7 @@ public struct CtcKeywordSpotter: Sendable {
         // predictionOptions is now a computed property - no assignment needed
     }
 
-    /// Convenience helper to create a spotter using the default cache location.
-    public static func makeDefault(
-        blankId: Int = ContextBiasingConstants.defaultBlankId
-    ) async throws -> CtcKeywordSpotter {
-        let models = try await CtcModels.downloadAndLoad()
-        return CtcKeywordSpotter(models: models, blankId: blankId)
-    }
-
     // MARK: - Public API
-
-    /// Spot all keywords defined in a `CustomVocabularyContext` that provide `tokenIds`.
-    ///
-    /// This is Phase 1 support: phrases must be pre-tokenized offline so that
-    /// CTC keyword spotting can operate directly on vocabulary IDs.
-    public func spotKeywords(
-        audioSamples: [Float],
-        customVocabulary: CustomVocabularyContext,
-        minScore: Float? = nil
-    ) async throws -> [KeywordDetection] {
-        let ctcResult = try await computeLogProbs(for: audioSamples)
-        let logProbs = ctcResult.logProbs
-        guard !logProbs.isEmpty else { return [] }
-
-        if debugMode {
-            logger.debug("=== CTC Keyword Spotter Debug ===")
-            logger.debug("Audio samples: \(audioSamples.count), frames: \(logProbs.count)")
-            logger.debug("Vocab size: \(logProbs[0].count), blank ID: \(blankId)")
-            logger.debug("Terms to spot: \(customVocabulary.terms.count)")
-        }
-
-        // Each CTC frame spans a fixed slice of the original audio.
-        // Derive frame duration from the trimmed logProbs and original sample count.
-        let frameDuration = ctcResult.frameDuration
-        let totalFrames = ctcResult.totalFrames
-
-        var results: [KeywordDetection] = []
-
-        for term in customVocabulary.terms {
-            // Prefer CTC-specific token IDs when present; fall back to the shared
-            // tokenIds only if ctcTokenIds is not provided. This keeps the RNNT/TDT
-            // and CTC vocabularies logically separated.
-            let ids = term.ctcTokenIds ?? term.tokenIds
-            guard let ids, !ids.isEmpty else {
-                if debugMode {
-                    logger.debug("  Skipping '\(term.text)': no CTC token IDs")
-                }
-                continue
-            }
-
-            let (score, start, end) = ctcWordSpot(logProbs: logProbs, keywordTokens: ids)
-
-            if debugMode {
-                let scoreText = String(format: "%.4f", score)
-                let startText = String(format: "%.3f", TimeInterval(start) * frameDuration)
-                let endText = String(format: "%.3f", TimeInterval(end) * frameDuration)
-                logger.debug(
-                    "  '\(term.text)': score=\(scoreText), frames=[\(start), \(end)], time=[\(startText)s, \(endText)s]"
-                )
-            }
-
-            // Adjust threshold for multi-token phrases (they naturally have lower scores)
-            let tokenCount = ids.count
-            let adjustedThreshold: Float? = minScore.map { base in
-                let extraTokens = max(0, tokenCount - ContextBiasingConstants.baselineTokenCountForThreshold)
-                return base - Float(extraTokens) * ContextBiasingConstants.thresholdRelaxationPerToken
-            }
-
-            if let threshold = adjustedThreshold, score <= threshold {
-                if debugMode {
-                    let thresholdText = String(format: "%.4f", threshold)
-                    let baseText = minScore.map { String(format: "%.4f", $0) } ?? "nil"
-                    logger.debug(
-                        "    REJECTED: score \(String(format: "%.4f", score)) <= threshold \(thresholdText) (base: \(baseText), tokens: \(tokenCount))"
-                    )
-                }
-                continue
-            }
-
-            let startTime =
-                ctcResult.frameTimes.flatMap { start < $0.count ? $0[start] : nil }
-                ?? TimeInterval(start) * frameDuration
-            let endTime =
-                ctcResult.frameTimes.flatMap { end < $0.count ? $0[end] : nil }
-                ?? TimeInterval(end) * frameDuration
-
-            let detection = KeywordDetection(
-                term: term,
-                score: score,
-                totalFrames: totalFrames,
-                startFrame: start,
-                endFrame: end,
-                startTime: startTime,
-                endTime: endTime
-            )
-            results.append(detection)
-
-            if debugMode {
-                logger.debug("    ACCEPTED: adding detection")
-            }
-        }
-
-        if debugMode {
-            logger.debug("Total detections: \(results.count)")
-            logger.debug("=================================")
-        }
-
-        return results
-    }
 
     /// Spot keywords and return both detections and cached log-probabilities.
     /// The log-probs can be reused for scoring additional words (e.g., original transcript words)
@@ -291,28 +184,7 @@ public struct CtcKeywordSpotter: Sendable {
         )
     }
 
-    /// Score a single word against cached CTC log-probabilities.
-    /// This allows scoring arbitrary words (e.g., original transcript words) without re-running the CTC model.
-    ///
-    /// - Parameters:
-    ///   - logProbs: Cached CTC log-probabilities from spotKeywordsWithLogProbs.
-    ///   - keywordTokens: Token IDs for the word to score.
-    /// - Returns: Tuple (score, startFrame, endFrame) where score is average log-prob per token.
-    public func scoreWord(
-        logProbs: [[Float]],
-        keywordTokens: [Int]
-    ) -> (score: Float, startFrame: Int, endFrame: Int) {
-        return ctcWordSpot(logProbs: logProbs, keywordTokens: keywordTokens)
-    }
-
     // MARK: - NeMo-compatible DP (delegated to CtcDPAlgorithm)
-
-    func ctcWordSpot(
-        logProbs: [[Float]],
-        keywordTokens: [Int]
-    ) -> (score: Float, startFrame: Int, endFrame: Int) {
-        CtcDPAlgorithm.ctcWordSpot(logProbs: logProbs, keywordTokens: keywordTokens)
-    }
 
     func ctcWordSpotConstrained(
         logProbs: [[Float]],

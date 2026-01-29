@@ -44,7 +44,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `-15.0` (log-probability, ~3e-7 probability)
     /// - Range: Typically -20.0 (very lenient) to -5.0 (strict)
-    /// - Used in: `CtcKeywordSpotter.spotKeywords()` for initial filtering
+    /// - Used in: `CtcKeywordSpotter.spotKeywordsWithLogProbs()` for initial filtering
     public static let defaultMinSpotterScore: Float = -15.0
 
     /// Default minimum CTC score for vocabulary context matching.
@@ -291,7 +291,7 @@ public enum ContextBiasingConstants {
     ///
     /// - Value: `3` tokens
     /// - Formula: `extraTokens = max(0, tokenCount - baselineTokenCountForThreshold)`
-    /// - Used in: `CtcKeywordSpotter.spotKeywords()` threshold adjustment
+    /// - Used in: `CtcKeywordSpotter.spotKeywordsWithLogProbs()` threshold adjustment
     public static let baselineTokenCountForThreshold: Int = 3
 
     /// Threshold relaxation amount per extra token beyond baseline.
@@ -303,7 +303,7 @@ public enum ContextBiasingConstants {
     /// - Value: `1.0` (log-probability units)
     /// - Formula: `adjustedThreshold = baseThreshold - extraTokens * thresholdRelaxationPerToken`
     /// - Example: 5-token phrase with -12.0 base → -12.0 - (5-3)*1.0 = -14.0
-    /// - Used in: `CtcKeywordSpotter.spotKeywords()` threshold adjustment
+    /// - Used in: `CtcKeywordSpotter.spotKeywordsWithLogProbs()` threshold adjustment
     public static let thresholdRelaxationPerToken: Float = 1.0
 
     /// Default maximum original word score for replacement.
