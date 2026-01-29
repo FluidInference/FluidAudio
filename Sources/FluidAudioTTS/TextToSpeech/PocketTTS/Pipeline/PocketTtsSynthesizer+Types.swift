@@ -52,6 +52,9 @@ extension PocketTtsSynthesizer {
     }
 
     /// Mimi decoder streaming state key mappings (input name → output name).
+    ///
+    /// 23 state tensors (26 original minus 3 zero-length tensors that were removed
+    /// from the model to fix iOS Espresso crash with zero-element blobs).
     static let mimiStateMapping: [(input: String, output: String)] = [
         ("upsample_partial", "y_end_1"),
         ("attn0_cache", "new_cache_1_internal_tensor_assign_2"),
@@ -65,17 +68,14 @@ extension PocketTtsSynthesizer {
         ("convtr0_partial", "var_1048"),
         ("res0_conv0_prev", "var_1105"),
         ("res0_conv0_first", "var_1113"),
-        ("res0_conv1_prev", "cast_13"),
         ("res0_conv1_first", "var_1134"),
         ("convtr1_partial", "var_1178"),
         ("res1_conv0_prev", "var_1235"),
         ("res1_conv0_first", "var_1243"),
-        ("res1_conv1_prev", "cast_18"),
         ("res1_conv1_first", "var_1264"),
         ("convtr2_partial", "var_1308"),
         ("res2_conv0_prev", "var_1365"),
         ("res2_conv0_first", "var_1373"),
-        ("res2_conv1_prev", "cast_23"),
         ("res2_conv1_first", "var_1394"),
         ("conv_final_prev", "var_1450"),
         ("conv_final_first", "var_1458"),

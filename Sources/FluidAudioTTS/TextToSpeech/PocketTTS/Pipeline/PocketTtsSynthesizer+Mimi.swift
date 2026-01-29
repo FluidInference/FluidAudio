@@ -6,7 +6,7 @@ extension PocketTtsSynthesizer {
 
     /// Mutable streaming state for the Mimi audio decoder.
     ///
-    /// Contains 26 tensors that track convolutional history,
+    /// Contains 23 tensors that track convolutional history,
     /// attention caches, and partial upsampling buffers.
     struct MimiState {
         var tensors: [String: MLMultiArray]
@@ -39,6 +39,12 @@ extension PocketTtsSynthesizer {
                 continue
             }
 
+            // Skip zero-length state tensors (removed from model to fix iOS Espresso crash
+            // with zero-element blobs)
+            guard !shapeArray.contains(0) else {
+                continue
+            }
+
             let shape = shapeArray.map { NSNumber(value: $0) }
             let array = try MLMultiArray(shape: shape, dataType: .float32)
 
@@ -51,8 +57,6 @@ extension PocketTtsSynthesizer {
                     let srcPtr = rawBuffer.bindMemory(to: Float.self)
                     dstPtr.update(from: srcPtr.baseAddress!, count: floatCount)
                 }
-            } else {
-                // Zero-byte tensors — already initialized to zero by MLMultiArray
             }
 
             tensors[name] = array
@@ -94,7 +98,7 @@ extension PocketTtsSynthesizer {
     ///
     /// - Parameters:
     ///   - quantized: The quantized latent vector, shape [512].
-    ///   - state: The streaming state (26 tensors), modified in place.
+    ///   - state: The streaming state (23 tensors), modified in place.
     ///   - model: The Mimi CoreML model.
     /// - Returns: Audio samples for this frame (1920 samples = 80ms at 24kHz).
     static func runMimiDecoder(
