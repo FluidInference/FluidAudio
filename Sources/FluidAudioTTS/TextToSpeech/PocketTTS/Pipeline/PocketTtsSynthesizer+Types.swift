@@ -25,14 +25,14 @@ extension PocketTtsSynthesizer {
             "new_cache_internal_tensor_assign_2",
         ]
         static let positionKeys: [String] = [
-            "var_430", "var_834", "var_1238", "var_1642", "var_2046", "var_2290",
+            "var_445", "var_864", "var_1283", "var_1702", "var_2121", "var_2365",
         ]
     }
 
     /// CoreML output key names for the generation step model.
     enum FlowLMStepKeys {
         static let transformerOut = "input"
-        static let eosLogit = "var_2492"
+        static let eosLogit = "var_2582"
         static let cacheKeys: [String] = [
             "new_cache_1_internal_tensor_assign_2",
             "new_cache_3_internal_tensor_assign_2",
@@ -42,7 +42,7 @@ extension PocketTtsSynthesizer {
             "new_cache_internal_tensor_assign_2",
         ]
         static let positionKeys: [String] = [
-            "var_443", "var_847", "var_1251", "var_1655", "var_2059", "var_2463",
+            "var_458", "var_877", "var_1296", "var_1715", "var_2134", "var_2553",
         ]
     }
 

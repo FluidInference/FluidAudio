@@ -247,8 +247,8 @@ public enum ModelNames {
     public enum PocketTTS {
         public static let condStep = "cond_step"
         public static let flowlmStep = "flowlm_step"
-        public static let flowDecoder = "flow_decoder_v2"
-        public static let mimiDecoder = "mimi_decoder_v2"
+        public static let flowDecoder = "flow_decoder"
+        public static let mimiDecoder = "mimi_decoder"
 
         public static let condStepFile = condStep + ".mlpackage"
         public static let flowlmStepFile = flowlmStep + ".mlpackage"
