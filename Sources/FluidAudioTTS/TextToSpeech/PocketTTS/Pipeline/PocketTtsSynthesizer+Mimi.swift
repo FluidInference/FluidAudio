@@ -39,8 +39,8 @@ extension PocketTtsSynthesizer {
                 continue
             }
 
-            // Skip zero-length state tensors (removed from model to fix iOS Espresso crash
-            // with zero-element blobs)
+            // Skip zero-length state tensors (removed from model to fix
+            // CoreML Espresso crash with zero-element blobs)
             guard !shapeArray.contains(0) else {
                 continue
             }

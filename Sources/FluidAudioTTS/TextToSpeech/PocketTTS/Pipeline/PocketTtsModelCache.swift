@@ -33,9 +33,15 @@ public actor PocketTtsModelCache {
 
         logger.info("Loading PocketTTS CoreML models...")
 
+        // Use CPU+GPU for all models to avoid ANE float16 precision loss.
+        // The ANE processes in native float16, which causes audible artifacts
+        // in the Mimi decoder's streaming state feedback loop and may degrade
+        // quality in the other models. CPU/GPU compute in float32 matches the
+        // Python reference implementation.
         let config = MLModelConfiguration()
-        config.computeUnits = .all
-        config.allowLowPrecisionAccumulationOnGPU = true
+        config.computeUnits = .cpuAndGPU
+
+        let loadStart = Date()
 
         let modelFiles = [
             ModelNames.PocketTTS.condStepFile,
@@ -43,8 +49,6 @@ public actor PocketTtsModelCache {
             ModelNames.PocketTTS.flowDecoderFile,
             ModelNames.PocketTTS.mimiDecoderFile,
         ]
-
-        let loadStart = Date()
 
         var loadedModels: [MLModel] = []
         for file in modelFiles {
