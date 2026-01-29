@@ -250,13 +250,19 @@ extension SortformerModels {
             .scalars
         {
             chunkEmbeddings = fp32
-        } else if #available(macOS 15.0, iOS 18.0, *),
-            let fp16 = output.featureValue(for: "chunk_pre_encoder_embs_out")?.shapedArrayValue(of: Float16.self)?
-                .scalars
-        {
-            chunkEmbeddings = fp16.map { Float($0) }
         } else {
+            #if arch(arm64)
+            if #available(macOS 15.0, iOS 18.0, *),
+                let fp16 = output.featureValue(for: "chunk_pre_encoder_embs_out")?.shapedArrayValue(of: Float16.self)?
+                    .scalars
+            {
+                chunkEmbeddings = fp16.map { Float($0) }
+            } else {
+                throw SortformerError.inferenceFailed("Missing chunk_pre_encoder_embs_out")
+            }
+            #else
             throw SortformerError.inferenceFailed("Missing chunk_pre_encoder_embs_out")
+            #endif
         }
 
         return MainModelOutput(
